@@ -491,14 +491,27 @@ Because derivation sits on the fleet-render path, the inventory is performance-s
 
 Adopting an `orphaned` candidate creates a durable record only after exact user confirmation and a fresh daemon/workspace/terminal tag check. This is recovery of an exactly tagged tmux object belonging to this same daemon identity, never adoption of an OS process from a persisted PID or PGID. Terminating one requires the same confirmation.
 
-The tmux backend has one unusually valuable acceptance requirement: shell portability. `overnight attach WORKSPACE_ID` runs locally on the host, claims external writer leases for that workspace's terminals, attaches to the host session, and selects the workspace's last active window. The raw recovery command `tmux -L overnight-<install-id> attach -t overnight` exposes the flat list of every managed terminal on the host. Therefore a user on an unsupported **client** operating system needs only an ordinary SSH or Mosh client:
+The tmux backend has one unusually valuable acceptance requirement: shell portability. `overnight attach WORKSPACE_ID` runs locally on the host, attaches to the host session, and selects the workspace's last active window. The raw recovery command `tmux -L overnight-<install-id> attach -t overnight` exposes the flat list of every managed terminal on the host. Therefore a user on an unsupported **client** operating system needs only an ordinary SSH or Mosh client:
 
 ```text
 ssh user@host overnight attach WORKSPACE_ID
 mosh user@host -- overnight attach WORKSPACE_ID
 ```
 
-Exiting releases the external leases; an explicit takeover from Overnight detaches that tmux client before granting a new writer. A raw attachment can navigate across workspaces and bypass daemon writer-lease enforcement. The CLI labels it as a recovery interface, and this is acceptable because a user with same-account access to the private socket already has equivalent command-execution authority. This escape hatch does not claim that the daemon itself runs on unsupported host operating systems.
+**`overnight attach` acquires no writer lease and is outside lease enforcement entirely.** It is a tmux client, and a tmux client can switch to any window in the session and deliver keystrokes there, so a lease scoped to anything narrower than the whole session would be false. Rather than claim an enforcement it cannot deliver, Overnight documents the escape hatch as a bypass with the same standing as raw `tmux attach`.
+
+The consequence is stated rather than softened: while an external client is attached, two writers can reach the same terminal, and their keystrokes interleave into one shell. This can produce a command neither person typed. The design accepts it here because a user with same-account access to the private socket already has equivalent command-execution authority, and because the alternative was a coarse lock that would have blocked a whole workspace to read one agent's output.
+
+What the escape hatch does provide is visibility, which costs nothing and is not enforcement:
+
+- Attach and detach are audited with the OS user, client PID, and workspace.
+- The daemon emits a terminal event marking the workspace as having an external client attached, so every app shows a clear "an external shell is attached" indicator next to the writer badge instead of implying sole ownership.
+- The CLI prints, before entering tmux, which terminals in that workspace currently have a protocol writer, naming the client. It is a warning, not a refusal.
+- The CLI labels itself a recovery interface on entry.
+
+Terminal sizing stays coherent because the managed session sets tmux's `window-size latest`, which sizes a window to the most recently active client. An external attach therefore participates in the same latest-active-viewer rule the protocol clients follow rather than shrinking windows for everyone, and `overnight attach` forwards its TTY size and `SIGWINCH` changes on the same basis.
+
+This escape hatch does not claim that the daemon itself runs on unsupported host operating systems.
 
 ##### CLI launch environments and exact session restoration
 
@@ -551,7 +564,7 @@ The MVP guarantee is precise:
 - With the native PTY backend, host reboot, daemon crash, forced daemon termination, or disk exhaustion may end sessions; a recovered daemon marks those terminals **lost** rather than pretending to resume them.
 - With the private tmux backend, a daemon restart may reattach to the host session and panes proven to belong to the same daemon identity and tmux socket. Host reboot or tmux-server loss still marks them **lost**. Reconciliation never adopts a session or pane from names, indexes, or PID values alone.
 - Ordinary daemon upgrades are blocked while native PTYs run. A tmux-backed upgrade may proceed only after an acceptance test proves reattachment across the exact old/new version pair; otherwise the user can defer or explicitly accept termination.
-- One client holds the writer lease for a terminal; all other attached clients are read-only.
+- One protocol client holds the writer lease for a terminal; all other attached protocol clients are read-only. The lease binds clients speaking the Overnight protocol. It does not bind `overnight attach` or raw tmux, which are same-user shells outside enforcement.
 - A writer can release the lease or another client can explicitly take over. The old writer is revoked before the new lease becomes active.
 - A disconnected writer lease expires after 30 seconds. Clients display writer ownership at all times.
 - Terminal sizing follows tmux's “latest active viewer” model and is independent of the writer lease. The most recently active control-scoped client displaying that terminal controls its canonical columns and rows; other viewers adapt until they become active.
@@ -847,7 +860,7 @@ SSH support must include known-host verification with first-use fingerprints, ch
 - Resize requests do not require the writer lease, but they require `control` scope and a foreground, visible, selected terminal surface. They include terminal columns, rows, and a monotonic per-client `view_activity_id`.
 - The daemon accepts the most recently received valid resize from an active viewer, clamps it to 20–500 columns and 5–200 rows, updates `size_controller_client_id`, and applies it to the exact tmux window with `resize-window`. First-party clients coalesce resize traffic to at most 10 updates per second.
 - Hidden, backgrounded, disconnected, stale-activity, and read-scoped clients cannot change terminal size. When no active viewer remains, the last dimensions persist. Taking or losing the writer lease does not itself resize the terminal.
-- The control-mode client never calls `refresh-client -C`, so its own pseudo-terminal dimensions cannot affect managed windows. `overnight attach` forwards the attached TTY's initial size and `SIGWINCH` changes as active-view resize requests; raw tmux recovery access may bypass this policy just as it bypasses writer leases.
+- The control-mode client never calls `refresh-client -C`, so its own pseudo-terminal dimensions cannot affect managed windows. The managed session sets `window-size latest`, so tmux sizes a window to its most recently active client, which is the same rule the protocol uses. `overnight attach` forwards the attached TTY's initial size and `SIGWINCH` changes on that basis, and raw tmux access participates in the same tmux-level rule while remaining outside writer-lease enforcement.
 
 `overnight protocol inspect` can decode a captured length-delimited stream or individual protobuf envelope into redacted protobuf JSON for debugging. It hides terminal input/output and path-bearing fields unless the user passes an explicit local reveal flag.
 
@@ -1036,7 +1049,7 @@ The MVP succeeds when all of the following are demonstrated:
 13. A replay-buffer overflow test clears the client terminal model, produces an explicit `Gap` marker carrying an exact `lost_bytes` count that matches the fixture, and replays only the retained tail.
 14. Revoking a client removes its enrolled key, closes its live connections, and blocks its next request within one second, without affecting other enrolled clients or any entry in `~/.ssh/authorized_keys` that Overnight did not write.
 15. The same workspace is reachable through an SSH route over the tailnet and an SSH route through a bastion without changing its ID or process state; switching routes before new input is accepted causes no duplicate input.
-16. From a machine with no Overnight GUI, `ssh user@host overnight attach WORKSPACE_ID` and `mosh user@host -- overnight attach WORKSPACE_ID` reach the existing terminal session and release the external writer lease on exit. If Gate 1 selects tmux, both reach the same private tmux-backed session.
+16. From a machine with no Overnight GUI, `ssh user@host overnight attach WORKSPACE_ID` and `mosh user@host -- overnight attach WORKSPACE_ID` reach the existing terminal session, warn about current protocol writers before entering, raise the external-client-attached indicator in other clients for the duration, and audit attach and detach. If Gate 1 selects tmux, both reach the same private tmux-backed session.
 17. After an iPhone is suspended for five minutes, a Mac client attaches using only daemon state, takes the writer lease, and continues the same workspace; returning to iPhone reconciles without treating stale cached UI as authoritative.
 18. **Conditional on paid Apple enrollment:** a hard-fact daemon event reaches an enrolled iPhone through APNs, deep-links to the correct workspace, updates the fleet Live Activity/Dynamic Island presentation, contains no terminal content or path, and is superseded by the next foreground daemon snapshot.
 19. A service-lifetime matrix passes on both platforms: a macOS host in agent mode stops on logout and returns on login; the same host in unattended mode survives logout, fast user switching, and a non-FileVault reboot, runs as the enrolling user rather than root, and reports a named login-keychain condition until the user logs in once; a FileVault reboot produces no daemon in either mode and the client says so specifically; a Linux host with lingering enabled survives logout and reboot, and with lingering disabled does not.
@@ -1216,6 +1229,6 @@ The SSH/Mosh/tmux and Apple-platform changes were added after the three-round re
 
 16. **Partly resolved in engineering review:** the control plane is now SSH-only, so there is one adapter rather than two competing identity models. The conformance suite must still prove identical identity, authorization, event ordering, replay, cancellation, and uncertain-input behavior across the in-memory adapter, the local Unix socket, a direct SSH route, and an SSH route through a bastion.
 17. The tmux/native PTY spike needs a scored decision matrix covering control-mode stability, raw-byte fidelity, scrollback, process groups, daemon upgrades, tmux-server loss, resource use, and packaging on macOS/Linux/WSL2.
-18. External `overnight attach` sessions need exact lease acquisition, takeover, detach, audit, resize, and abandoned-client semantics; raw same-user access to the private tmux socket must be documented as outside the application trust boundary.
+18. **Resolved in engineering review:** `overnight attach` acquires no lease and is documented as a bypass with the same standing as raw `tmux attach`, because a tmux client can reach every window in the session and any narrower claim would be false. The accepted consequence, interleaved input from two writers into one shell, is stated plainly. The path provides visibility instead of enforcement: audited attach and detach, an external-client-attached indicator in every app, and a pre-entry warning naming current protocol writers. `window-size latest` keeps external attach inside the same latest-active-viewer sizing rule. Abandoned clients need no lease expiry because no lease is taken.
 19. The Apple Developer Program enrollment deadline must be chosen before Milestone 3. CI and release criteria need separate capability matrices for Personal Team, paid-development, TestFlight, and App Store builds.
 20. If APNs ships, the relay protocol, data retention, capability rotation, abuse limits, privacy copy, operational ownership, and self-hosting compatibility require a dedicated threat model.
