@@ -517,15 +517,23 @@ The host session is tagged with `@overnight_daemon_id` and `@overnight_schema_ve
 
 Runtime state is derived per request from durable intent plus a fresh tmux inventory:
 
+`intent` is a protobuf enum with exactly three values, and it is the only durable half of the pair:
+
+- `RUNNING` — the user wants this terminal alive.
+- `STOPPED` — a deliberate stop or an observed exit. `exit_status` carries the code or signal when one was observed.
+- `FAILED` — creation never established a live runtime.
+
 | Durable intent | Live exactly-tagged pane | Derived state |
 |---|---|---|
-| Intended running | Exactly one | `running` |
-| Intended running | None | `lost` |
-| Intended running | More than one | `lost`, and every claimant pane becomes an orphaned candidate |
-| Stopped, with a recorded exit code or signal | Any | `exited` |
-| Creation failed before a live runtime existed | Any | `error` |
+| `RUNNING` | Exactly one | `running` |
+| `RUNNING` | None | `lost` |
+| `RUNNING` | More than one | `lost`, and every claimant pane becomes an orphaned candidate |
+| `STOPPED` | Any | `exited` |
+| `FAILED` | Any | `error` |
 | No durable record | Tags name this daemon identity | Not a terminal; an `orphaned` recovery candidate |
 | No durable record | Untagged or another daemon identity | Ignored completely |
+
+Clients receive `intent` for diagnostics, support conversations, and `overnight protocol inspect`, where knowing that a `lost` terminal was intended to run is the useful fact. They must render the daemon's derived `state` and must never compute state themselves. A client that re-derives can disagree with the daemon and with other clients about the same terminal, which is the exact failure this design has removed everywhere else.
 
 There is no `conflict` state, because there is no longer a comparison to arbitrate. Duplicate claimant panes are simply not proof of identity, so the terminal derives as `lost` and the panes become candidates the user can adopt or kill.
 
@@ -865,6 +873,10 @@ The protocol includes:
 - Stable opaque IDs rather than filesystem paths as client identifiers.
 - Capability negotiation so older clients degrade safely when a daemon gains features.
 - Stable error codes including `AUTH_REQUIRED`, `SCOPE_DENIED`, `VERSION_INCOMPATIBLE`, `HOST_OFFLINE`, `REPOSITORY_LOCKED`, `BRANCH_EXISTS`, `WORKTREE_EXISTS`, `DIRTY_WORKTREE`, `RUNNING_PROCESSES`, `OUTPUT_GAP`, `CLIENT_TOO_SLOW`, and `OPERATION_FAILED`.
+
+`core` owns one domain error enum, and every subsystem converts into it at its boundary. A single exhaustive match maps each variant to its wire code, its `retryable` flag, and a redacted message. **There is no catch-all arm**, so adding a variant without mapping it fails the build rather than shipping a generic error to a phone at the moment the user needs a specific one. `retryable` is decided once per variant beside its code, never guessed at a call site, because clients act on it automatically and a wrong value means retrying something that can never succeed.
+
+This is what makes the failure UX table checkable rather than aspirational: every reason a client can display traces back to a named variant. Round-trip tests assert that each variant produces its stable code, and that no message carries a filesystem path, terminal content, command text, or vendor session ID.
 
 ##### Transport adapters
 
