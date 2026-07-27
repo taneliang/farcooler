@@ -161,7 +161,7 @@ The first implementation slice proves workspace and terminal-control correctness
 - A dedicated tmux server namespace such as `tmux -L overnight-<install-id> -f /dev/null`. Overnight never mixes managed sessions into the user's default tmux server or depends on the user's tmux configuration.
 - The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy, controls, and terminal surface.
 - `overnight attach WORKSPACE_ID` remains mandatory and attaches an ordinary shell client to the managed session. The equivalent raw tmux command is shown for transparency and recovery.
-- SQLite persists the daemon's product metadata; tmux persists terminal sessions. Neither is treated as the other's source of truth.
+- SQLite is canonical for desired Overnight product state and stable IDs. tmux supplies observed terminal/runtime state. Restart reconciliation compares them; it never treats an untagged or unmatched tmux session as an Overnight workspace automatically.
 - No Tailscale-direct listener, SSH application transport, embedded Mosh transport, React Native iOS app, APNs relay, Live Activity, Linux/WSL2 support, or native PTY fallback in this slice.
 
 This is an engineering validation slice, not validation of the mobile product thesis. After local workspace creation, five-way parallelism, daemon restart reconciliation, shell attachment, and Mac UI control pass their acceptance tests, the next slice exposes the same daemon protocol through SSH and builds the React Native iOS client. Failure of tmux control mode against the terminal acceptance suite triggers the native PTY fallback decision before remote work begins.
@@ -324,6 +324,30 @@ Overnight's conceptual model is “tmux for the GUI and coding-agent era”: the
 The terminal backend is an internal interface selected after Gate 1 rather than assumed in advance. The tmux candidate launches a private tmux server under a daemon-specific socket and minimal configuration rather than attaching to or mutating the user's ordinary tmux server. A workspace maps to a tmux session; terminal tabs map to windows or panes using stable Overnight IDs stored alongside tmux identifiers. The daemon uses supported tmux commands/control mode for create, attach, resize, input, output, exit, and reconciliation. The native candidate implements the same interface with daemon-owned PTYs. Users may opt to expose or import an existing tmux session later, but MVP never assumes ownership of an arbitrary user session.
 
 The tmux backend must pass the same ordering, writer-lease, process-group, resize, scrollback, upgrade, and crash tests as the native PTY backend. If tmux cannot provide an invariant without parsing unstable screen output or weakening isolation, the daemon keeps that invariant in its own metadata/protocol layer. tmux is a session engine, not the product database or authorization boundary.
+
+##### SQLite/tmux reconciliation
+
+SQLite stores desired workspaces, terminals, lifecycle state, operation history, and stable Overnight IDs. Every private tmux session/window/pane is tagged with tmux user options for `@overnight_daemon_id`, `@overnight_workspace_id`, `@overnight_terminal_id`, and `@overnight_schema_version`. Names and PID values are display or diagnostic data only and never establish identity.
+
+Workspace/terminal creation is a recoverable saga rather than a false cross-system transaction:
+
+1. Commit a SQLite `Operation` and desired terminal record in `creating`.
+2. Create and tag the private tmux session/window/pane.
+3. Verify the exact tags and live pane through a fresh tmux query.
+4. Commit the observed tmux IDs and transition the terminal to `running`.
+5. If any step fails, preserve enough operation evidence for deterministic reconciliation. Do not erase a possibly live session merely to make the database look clean.
+
+On daemon startup, hold a reconciliation lock, open SQLite, and inventory the private tmux server before accepting mutating requests:
+
+| SQLite desired record | Tagged tmux runtime | Result |
+|---|---|---|
+| Exact daemon/workspace/terminal ID match | Live pane exists | Reattach control mode; update observed fields; `running` |
+| Terminal expected to run | No exact pane | Mark `lost`; retain history and offer restart/dismiss |
+| No SQLite record | Tags name this daemon identity | Create an `orphaned` recovery candidate; never auto-adopt or kill |
+| Exact IDs disagree, duplicate, or schema is unsupported | Ambiguous runtime | Quarantine as `conflict`; block mutation and show recovery instructions |
+| No SQLite record | Untagged or different daemon identity | Ignore completely |
+
+Adopting an `orphaned` candidate creates a new SQLite record only after exact user confirmation and a fresh tag/identity check. Terminating one requires the same confirmation. Reconciliation is idempotent, bounded by a startup deadline, and leaves the daemon read-only with a visible degraded state if the private tmux server cannot be inventoried safely.
 
 The tmux candidate has one unusually valuable acceptance requirement: shell portability. `overnight attach WORKSPACE_ID` runs locally on the host, claims an external writer lease, and execs the correct private tmux attachment. Therefore a user on an unsupported **client** operating system needs only an ordinary SSH or Mosh client:
 
