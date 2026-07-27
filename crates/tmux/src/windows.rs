@@ -30,28 +30,57 @@ impl TmuxServer {
         worktree: &str,
         command: &str,
     ) -> Result<ManagedWindow> {
-        self.ensure_session().await?;
+        // The first terminal creates the session. There is no sentinel window,
+        // so nothing squats the base index.
+        let session_exists = self.is_running().await;
+        let target = format!("{SESSION_NAME}:");
 
-        let out = self
-            .run(&[
+        let out = if session_exists {
+            self.run(&[
                 "new-window",
                 "-d",
+                "-a", // next free index, never reuse a live one
                 "-P",
                 "-F",
                 "#{window_id} #{pane_id}",
                 "-t",
-                SESSION_NAME,
+                &target,
                 "-n",
                 title,
                 "-c",
                 worktree,
                 command,
             ])
-            .await?;
+            .await?
+        } else {
+            self.run(&[
+                "new-session",
+                "-d",
+                "-s",
+                SESSION_NAME,
+                "-x",
+                "120",
+                "-y",
+                "40",
+                "-P",
+                "-F",
+                "#{window_id} #{pane_id}",
+                "-n",
+                title,
+                "-c",
+                worktree,
+                command,
+            ])
+            .await?
+        };
 
         if !out.ok() {
-            tracing::warn!(stderr = %out.stderr, "new-window failed");
+            tracing::warn!(stderr = %out.stderr, "failed to create managed window");
             return Err(DomainError::TmuxUnavailable);
+        }
+
+        if !session_exists {
+            self.tag_session().await?;
         }
 
         let line = out.stdout.trim();
@@ -80,9 +109,6 @@ impl TmuxServer {
             }
         }
 
-        // Drop the bootstrap window once a real terminal exists.
-        let _ = self.run(&["kill-window", "-t", &format!("{SESSION_NAME}:overnight-bootstrap")]).await;
-
         Ok(win)
     }
 
@@ -92,7 +118,7 @@ impl TmuxServer {
     /// sits on the fleet-render path.
     pub async fn list_tagged_panes(&self) -> Result<Vec<TaggedPane>> {
         let fmt = format!(
-            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}",
+            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}",
             tags::DAEMON_ID,
             tags::WORKSPACE_ID,
             tags::TERMINAL_ID,
@@ -183,6 +209,10 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
     let terminal_id = Uuid::parse_str(f[6].trim()).ok()?;
     let schema_version: u32 = f[7].trim().parse().ok()?;
 
+    // tmux renders `#{pane_dead}` as "1" when set and empty when not.
+    let dead = f.get(8).map(|v| v.trim() == "1").unwrap_or(false);
+    let dead_status = f.get(9).and_then(|v| v.trim().parse::<i32>().ok());
+
     Some(TaggedPane {
         daemon_id,
         workspace_id,
@@ -192,6 +222,8 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
         window_id: f[1].trim().to_string(),
         columns: f[2].trim().parse().unwrap_or(0),
         rows: f[3].trim().parse().unwrap_or(0),
+        dead,
+        dead_status,
     })
 }
 
@@ -200,7 +232,7 @@ mod tests {
     use super::*;
 
     fn line(daemon: &str, ws: &str, term: &str) -> String {
-        format!("%3\t@2\t120\t40\t{daemon}\t{ws}\t{term}\t1")
+        format!("%3\t@2\t120\t40\t{daemon}\t{ws}\t{term}\t1\t\t")
     }
 
     #[test]
@@ -221,13 +253,34 @@ mod tests {
     #[test]
     fn untagged_pane_is_ignored_completely() {
         // A user's own pane on some other server has empty tag fields.
-        assert!(parse_pane_line("%1\t@1\t80\t24\t\t\t\t").is_none());
+        assert!(parse_pane_line("%1\t@1\t80\t24\t\t\t\t\t\t").is_none());
     }
 
     #[test]
     fn partially_tagged_pane_is_not_identity() {
         let d = Uuid::from_u128(1).to_string();
-        assert!(parse_pane_line(&format!("%1\t@1\t80\t24\t{d}\t\t\t1")).is_none());
+        assert!(parse_pane_line(&format!("%1\t@1\t80\t24\t{d}\t\t\t1\t\t")).is_none());
+    }
+
+    #[test]
+    fn parses_a_dead_pane_with_its_exit_status() {
+        let d = Uuid::from_u128(1).to_string();
+        let w = Uuid::from_u128(2).to_string();
+        let t = Uuid::from_u128(3).to_string();
+        let p = parse_pane_line(&format!("%3\t@2\t120\t40\t{d}\t{w}\t{t}\t1\t1\t137")).unwrap();
+        assert!(p.dead, "a retained pane reports itself dead");
+        assert_eq!(p.dead_status, Some(137));
+        assert!(!p.proves_life(), "a dead pane must never prove life");
+    }
+
+    #[test]
+    fn a_live_pane_reports_itself_alive() {
+        let d = Uuid::from_u128(1).to_string();
+        let w = Uuid::from_u128(2).to_string();
+        let t = Uuid::from_u128(3).to_string();
+        let p = parse_pane_line(&format!("%3\t@2\t120\t40\t{d}\t{w}\t{t}\t1\t\t")).unwrap();
+        assert!(!p.dead);
+        assert!(p.proves_life());
     }
 
     #[test]
@@ -237,6 +290,6 @@ mod tests {
 
     #[test]
     fn non_uuid_tag_is_ignored() {
-        assert!(parse_pane_line("%1\t@1\t80\t24\tnot-a-uuid\tx\ty\t1").is_none());
+        assert!(parse_pane_line("%1\t@1\t80\t24\tnot-a-uuid\tx\ty\t1\t\t").is_none());
     }
 }

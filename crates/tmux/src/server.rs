@@ -5,12 +5,13 @@
 //! dedicated socket with minimal config:
 //!
 //! ```text
-//! tmux -L overnight-<install-id> -f /dev/null
+//! tmux -L overnight-<install-id> -f <overnight-managed.conf>
 //! ```
 //!
 //! A workspace is a daemon grouping of TAGGED WINDOWS, not a tmux session. There
 //! is one host-wide session.
 
+use std::path::PathBuf;
 use std::process::Stdio;
 
 use overnight_core::{DomainError, Result, SCHEMA_VERSION, tags};
@@ -25,7 +26,23 @@ pub const SESSION_NAME: &str = "overnight";
 pub struct TmuxServer {
     socket: String,
     daemon_id: Uuid,
+    config_path: PathBuf,
 }
+
+/// Overnight's own minimal tmux configuration.
+///
+/// This is NOT the user's config: the server starts with `-f` pointing here, so
+/// nothing in `~/.tmux.conf` can change managed behaviour, and these two options
+/// are in force from the very first window rather than being applied afterwards.
+///
+/// `remain-on-exit` is the load-bearing one. Applied post-hoc it would race a
+/// command that exits immediately, and that terminal would derive `lost` when it
+/// actually exited cleanly.
+const MANAGED_CONFIG: &str = "\
+set -g remain-on-exit on
+set -g window-size latest
+set -g status off
+";
 
 /// Raw result of one tmux invocation.
 #[derive(Debug)]
@@ -43,7 +60,23 @@ impl Output {
 
 impl TmuxServer {
     pub fn new(install_id: &str, daemon_id: Uuid) -> Self {
-        Self { socket: format!("overnight-{install_id}"), daemon_id }
+        let config_path = std::env::temp_dir().join(format!("overnight-{install_id}.tmux.conf"));
+        Self::with_config(install_id, daemon_id, config_path)
+    }
+
+    pub fn with_config(install_id: &str, daemon_id: Uuid, config_path: PathBuf) -> Self {
+        Self { socket: format!("overnight-{install_id}"), daemon_id, config_path }
+    }
+
+    /// Write the managed config if it is not already in place.
+    fn ensure_config(&self) -> Result<()> {
+        if self.config_path.exists() {
+            return Ok(());
+        }
+        std::fs::write(&self.config_path, MANAGED_CONFIG).map_err(|e| {
+            tracing::warn!(error = %e, "could not write managed tmux config");
+            DomainError::TmuxUnavailable
+        })
     }
 
     pub fn socket(&self) -> &str {
@@ -57,13 +90,20 @@ impl TmuxServer {
     /// The raw recovery command shown to users for transparency. It reaches the
     /// same live session and is documented as bypassing writer-lease enforcement.
     pub fn recovery_command(&self) -> String {
-        format!("tmux -L {} attach -t {}", self.socket, SESSION_NAME)
+        format!(
+            "tmux -L {} -f {} attach -t {}",
+            self.socket,
+            self.config_path.display(),
+            SESSION_NAME
+        )
     }
 
     /// Run a tmux command against the private server.
     pub async fn run(&self, args: &[&str]) -> Result<Output> {
+        self.ensure_config()?;
+
         let mut cmd = Command::new("tmux");
-        cmd.arg("-L").arg(&self.socket).arg("-f").arg("/dev/null");
+        cmd.arg("-L").arg(&self.socket).arg("-f").arg(&self.config_path);
         cmd.args(args);
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -84,45 +124,19 @@ impl TmuxServer {
         self.run(&["has-session", "-t", SESSION_NAME]).await.map(|o| o.ok()).unwrap_or(false)
     }
 
-    /// Ensure the host-wide session exists.
+    /// Tag the session and set its size policy once it exists.
     ///
-    /// The session contains managed terminal windows only and keeps no fake
-    /// sentinel shell. The first terminal creates it; removing the last may let
-    /// it exit, after which the daemon recreates it on demand.
-    pub async fn ensure_session(&self) -> Result<()> {
-        if self.is_running().await {
-            return Ok(());
-        }
-
-        // `new-session -d` with a placeholder window; the caller renames and tags
-        // the first real terminal into it. `-x/-y` give a sane detached size.
-        let out = self
-            .run(&[
-                "new-session",
-                "-d",
-                "-s",
-                SESSION_NAME,
-                "-x",
-                "120",
-                "-y",
-                "40",
-                "-n",
-                "overnight-bootstrap",
-            ])
-            .await?;
-
-        if !out.ok() && !out.stderr.contains("duplicate session") {
-            tracing::warn!(stderr = %out.stderr, "failed to create host session");
-            return Err(DomainError::TmuxUnavailable);
-        }
-
-        // Tag the session so a foreign server can never be mistaken for ours.
+    /// The session contains managed terminal windows only and keeps NO fake
+    /// sentinel shell. Creating a placeholder window would squat the session's
+    /// base index and make the first real terminal fail with "index 0 in use",
+    /// so the first terminal creates the session instead. See
+    /// `create_terminal_window`.
+    pub(crate) async fn tag_session(&self) -> Result<()> {
         self.set_session_option(tags::DAEMON_ID, &self.daemon_id.to_string()).await?;
         self.set_session_option(tags::SCHEMA_VERSION, &SCHEMA_VERSION.to_string()).await?;
 
-        // Size a window to its most recently active client, which is the same
-        // rule the protocol uses for the size controller.
-        let _ = self.run(&["set-option", "-t", SESSION_NAME, "window-size", "latest"]).await;
+        // `remain-on-exit` and `window-size latest` come from MANAGED_CONFIG so
+        // they are in force from the first window, not applied afterwards.
         Ok(())
     }
 

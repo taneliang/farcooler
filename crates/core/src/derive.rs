@@ -67,23 +67,31 @@ pub fn derive_terminal(record: &TerminalRecord, snapshot: &RuntimeSnapshot) -> D
             let claimants: Vec<TaggedPane> =
                 snapshot.claimants(record.id).into_iter().cloned().collect();
 
-            match claimants.len() {
-                1 => DerivedTerminal {
-                    state: TerminalState::Running,
-                    orphan_candidates: Vec::new(),
-                },
-                0 if !record.runtime_confirmed => DerivedTerminal {
-                    state: TerminalState::Starting,
-                    orphan_candidates: Vec::new(),
-                },
-                0 => DerivedTerminal { state: TerminalState::Lost, orphan_candidates: Vec::new() },
-                // Duplicate claimants are simply not proof of identity, so the
-                // terminal is `lost` and both panes become candidates. There is
-                // no `conflict` state, because there is no comparison to arbitrate.
-                _ => DerivedTerminal {
+            // Duplicate claimants are simply not proof of identity, so the
+            // terminal is `lost` and every claimant becomes an orphan candidate.
+            // There is no `conflict` state, because there is no comparison to
+            // arbitrate.
+            if claimants.len() > 1 {
+                return DerivedTerminal {
                     state: TerminalState::Lost,
                     orphan_candidates: claimants,
-                },
+                };
+            }
+
+            match claimants.first() {
+                // A live pane proves the terminal is running.
+                Some(p) if p.proves_life() => {
+                    DerivedTerminal { state: TerminalState::Running, orphan_candidates: Vec::new() }
+                }
+                // A retained dead pane is an OBSERVED exit, not a loss. This is
+                // the whole reason managed windows set `remain-on-exit`.
+                Some(_) => {
+                    DerivedTerminal { state: TerminalState::Exited, orphan_candidates: Vec::new() }
+                }
+                None if !record.runtime_confirmed => {
+                    DerivedTerminal { state: TerminalState::Starting, orphan_candidates: Vec::new() }
+                }
+                None => DerivedTerminal { state: TerminalState::Lost, orphan_candidates: Vec::new() },
             }
         }
     }
@@ -149,7 +157,13 @@ mod tests {
             window_id: "@1".into(),
             columns: 80,
             rows: 24,
+            dead: false,
+            dead_status: None,
         }
+    }
+
+    fn dead_pane(terminal_id: Uuid, status: i32) -> TaggedPane {
+        TaggedPane { dead: true, dead_status: Some(status), ..pane(terminal_id) }
     }
 
     fn record(intent: TerminalIntent, confirmed: bool) -> TerminalRecord {
@@ -169,6 +183,21 @@ mod tests {
         let r = record(TerminalIntent::Running, true);
         let s = RuntimeSnapshot::healthy(vec![pane(r.id)]);
         assert_eq!(derive_terminal(&r, &s).state, TerminalState::Running);
+    }
+
+    #[test]
+    fn a_retained_dead_pane_is_an_observed_exit_not_a_loss() {
+        // Without remain-on-exit tmux would destroy the window and this would be
+        // indistinguishable from `lost`. That is the bug the retained pane fixes.
+        let r = record(TerminalIntent::Running, true);
+        let s = RuntimeSnapshot::healthy(vec![dead_pane(r.id, 0)]);
+        assert_eq!(derive_terminal(&r, &s).state, TerminalState::Exited);
+    }
+
+    #[test]
+    fn a_dead_pane_does_not_prove_life() {
+        let p = dead_pane(Uuid::from_u128(100), 1);
+        assert!(!p.proves_life());
     }
 
     #[test]

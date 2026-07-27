@@ -8,7 +8,7 @@
 
 use uuid::Uuid;
 
-/// One live pane carrying Overnight's exact tags.
+/// One pane carrying Overnight's exact tags.
 ///
 /// Names, indexes, and PID values are display or diagnostic data only and never
 /// establish identity.
@@ -24,6 +24,23 @@ pub struct TaggedPane {
     pub window_id: String,
     pub columns: u32,
     pub rows: u32,
+    /// The command exited but the pane is retained by `remain-on-exit`.
+    ///
+    /// This distinction is load-bearing. Without a retained pane, tmux destroys
+    /// the window the instant the command exits, and a clean exit becomes
+    /// indistinguishable from a terminal that was lost. `exited` is defined as
+    /// "the daemon observed an exit code or signal", which is only observable
+    /// because the dead pane stays long enough to be read.
+    pub dead: bool,
+    /// Exit code reported by tmux for a dead pane, when it gave one.
+    pub dead_status: Option<i32>,
+}
+
+impl TaggedPane {
+    /// A dead pane proves an exit. It does not prove life.
+    pub fn proves_life(&self) -> bool {
+        !self.dead
+    }
 }
 
 /// A snapshot of what is alive right now.
