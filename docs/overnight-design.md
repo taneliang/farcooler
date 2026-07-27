@@ -463,6 +463,51 @@ mosh user@host -- overnight attach WORKSPACE_ID
 
 Exiting releases the external leases; an explicit takeover from Overnight detaches that tmux client before granting a new writer. A raw attachment can navigate across workspaces and bypass daemon writer-lease enforcement. The CLI labels it as a recovery interface, and this is acceptable because a user with same-account access to the private socket already has equivalent command-execution authority. This escape hatch does not claim that the daemon itself runs on unsupported host operating systems.
 
+##### CLI launch environments and exact session restoration
+
+Coding-agent presets run through the user's configured shell so that shell startup files, version managers, `direnv`, aliases, functions, and custom environment setup behave like a hand-launched terminal. The default launch mode is **interactive login shell**, for example `${SHELL} -ilc <preset command>`, with the tmux window's working directory set to the workspace worktree before the shell starts.
+
+Launch behavior is configurable per host and overridable per preset:
+
+| Launch mode | Behavior |
+|---|---|
+| `interactive_login` | Default; run the configured shell as interactive and login before invoking the preset |
+| `login` | Run login but non-interactive startup files |
+| `interactive` | Run interactive but non-login startup files |
+| `direct` | Execute an absolute program and structured arguments without shell startup |
+| `custom` | Run a user-authored shell command after an optional user-authored setup fragment |
+
+The app shows the exact shell, mode, setup fragment, command, and worktree before saving a profile. Custom commands are host-local configuration with `control` scope, never accepted from an untrusted remote repository, and never interpolated with client-provided paths or prompts. Worktree selection uses the daemon's validated tmux working-directory argument rather than `cd` text. Shell startup output and prompts appear in the real terminal; a blocked or broken startup remains visible and cancellable instead of timing out invisibly. Overnight sets only namespaced metadata such as `OVERNIGHT_WORKSPACE_ID` and does not capture, persist, return, or log the resulting environment or its secrets.
+
+Every supported coding-agent preset implements a versioned `AgentAdapter` contract:
+
+```text
+detect + version + auth_check
+new_session_command
+capture_exact_session_id
+resume_exact_session_command(session_id)
+validate_session_id
+supported_launch_modes
+```
+
+SQLite stores `AgentSession {terminal_id, adapter_id, adapter_version, cli_version, vendor_session_id, capture_source, restore_policy, last_seen_at}`. Vendor session IDs are local metadata, are hidden from read-scoped clients by default, and are never inferred from a global “latest session” because several agents may start concurrently.
+
+Session identity is captured through vendor-supported lifecycle surfaces, with the terminal ID supplied through the process environment so callbacks correlate exactly:
+
+- **Claude Code:** an additive per-launch `SessionStart` hook receives `session_id`, `cwd`, and source; restore invokes `claude --resume SESSION_ID`.
+- **Codex:** an additive per-launch notification/hook captures the documented `thread-id`; restore invokes `codex resume SESSION_ID`. The adapter must preserve and chain the user's existing notification command rather than replacing it.
+- **Cursor CLI:** an additive `sessionStart` hook captures `conversation_id`/`session_id`; restore invokes `cursor-agent --resume=SESSION_ID`.
+
+Adapters install or inject hooks idempotently, show the exact change during preset setup, preserve existing user hooks, use an authenticated daemon-local callback, emit no model-visible context, and remove only their own configuration. Terminal output is never scraped for session IDs. If an installed CLI version cannot produce an exact correlated ID and resume that exact ID, its adapter health is `restore_unsupported` and it does not satisfy the supported-preset exit criterion.
+
+Restore policy is configurable per host, preset, workspace, and terminal, with narrower scope overriding broader scope:
+
+- `automatic_after_infrastructure_loss` is the default. After host reboot, tmux loss, or another verified infrastructure failure, Overnight starts the documented exact-ID resume command and stops at the restored interactive prompt. It never fabricates or resubmits the last user input.
+- `ask` offers the exact session and command but waits for confirmation.
+- `off` leaves the terminal `lost` and offers a new session.
+
+Client disconnect, app suspension, daemon restart, and transport switching normally reattach to the still-live tmux process and do not invoke a vendor resume command. Explicit user exit, stop, archive, logout, or session-clear never auto-restores. If delivery of the last input was uncertain, restoration shows that fact and does not replay it. If the exact vendor session is missing, incompatible, already active elsewhere, or rejected by the CLI, the operation fails visibly and requires the user to choose retry, new session, or a vendor-native picker.
+
 The MVP guarantee is precise:
 
 - Managed processes survive loss or suspension of every client while the host and selected session backend remain running.
@@ -536,6 +581,7 @@ Use a versioned, documented protocol with these resources:
 - `Repository {id, host_id, display_name, canonical_git_dir, remote_summary}`
 - `Workspace {id, repository_id, task_name, branch, worktree_path_token, state}`
 - `Terminal {id, workspace_id, title, command_preset, state, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
+- `AgentSession {terminal_id, adapter_id, adapter_version, cli_version, vendor_session_id?, capture_source?, restore_policy, restore_state}`
 - `Server {id, workspace_id, title, command, expected_port, state}`
 - `Client {id, display_name, public_key, scopes, revoked_at}`
 - `Operation {id, kind, resource_id, state, cancellable, error_code, log_cursor}`
@@ -571,7 +617,8 @@ repository.list, repository.register, repository.clone
 workspace.list, workspace.create, workspace.archive,
 workspace.restore, workspace.remove_worktree
 terminal.list, terminal.create, terminal.attach, terminal.write,
-terminal.resize, terminal.take_writer, terminal.release_writer, terminal.stop
+terminal.resize, terminal.take_writer, terminal.release_writer, terminal.stop,
+terminal.restore_agent_session
 server.list, server.create, server.start, server.stop
 operation.get, operation.cancel
 client.list, client.revoke
@@ -590,13 +637,14 @@ Versioned Protocol Buffer files are the canonical protocol source of truth and s
 | `terminal.create` | `{workspace_id, title, command_preset, expected_workspace_version}` | `Terminal` |
 | `terminal.take_writer` | `{terminal_id, expected_terminal_version, expected_lease_generation}` | `Terminal` |
 | `terminal.resize` | `{terminal_id, columns, rows, view_activity_id, expected_terminal_version}` | `Terminal` |
+| `terminal.restore_agent_session` | `{terminal_id, expected_terminal_version, expected_agent_session_version, user_confirmed}` | `Operation` |
 | `terminal.stop` | `{terminal_id, expected_terminal_version, force, typed_confirmation?}` | `Operation` |
 | `server.create` | `{workspace_id, title, command_preset, expected_port, expected_workspace_version}` | `Server` |
 | `client.revoke` | `{client_id, expected_client_version}` | `Operation` |
 
 IDs are UUIDv7. Display names are 1–80 UTF-8 scalar values; task names are 1–120; branch names must pass `git check-ref-format --branch`; command-preset identifiers are 1–64 ASCII characters. Arbitrary command text is stored in host-side presets and is not accepted through workspace creation. Individual binary terminal payloads are capped at 64 KiB.
 
-Events are resource snapshots or transitions: `host.changed`, `repository.changed`, `workspace.changed`, `terminal.changed`, `server.changed`, `operation.changed`, and `client.revoked`. Each event includes the authoritative new resource version.
+Events are resource snapshots or transitions: `host.changed`, `repository.changed`, `workspace.changed`, `terminal.changed`, `agent_session.changed`, `server.changed`, `operation.changed`, and `client.revoked`. Each event includes the authoritative new resource version.
 
 ##### Authorization matrix
 
@@ -604,8 +652,8 @@ Scopes are cumulative: `host_admin` includes `control`, which includes `read`.
 
 | Method or field | Minimum scope |
 |---|---|
-| List resources, attach terminal output read-only, read operation logs excluding paths | `read` |
-| Create/stop terminals, write input, resize, take/release writer, start/stop declared servers | `control` |
+| List resources, attach terminal output read-only, read operation logs excluding paths and vendor session IDs | `read` |
+| Create/stop terminals, write input, resize, take/release writer, restore an exact agent session, start/stop declared servers | `control` |
 | Register/clone repositories, create/archive/restore workspaces | `control` within an administrator-approved repository root |
 | Reveal canonical paths, remove worktrees, change repository roots, revoke clients, update daemon | `host_admin` |
 | Pair a new first administrator | Local host confirmation |
@@ -619,7 +667,7 @@ The daemon does not attempt indefinite control-event replay. After every new con
 
 1. Client sends its last `snapshot_id` for diagnostics only.
 2. Daemon sends `snapshot.begin {snapshot_id, generated_at}`.
-3. Daemon sends authoritative resources visible to the client's scopes in dependency order: host, clients, repositories, workspaces, terminals, servers, operations.
+3. Daemon sends authoritative resources visible to the client's scopes in dependency order: host, clients, repositories, workspaces, terminals, agent sessions, servers, operations.
 4. Mutations during the snapshot are buffered.
 5. Daemon sends `snapshot.end {snapshot_id}`, then buffered events with resource versions greater than those in the snapshot.
 6. Client atomically replaces its local resource store only after `snapshot.end`.
@@ -824,11 +872,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 2. **Gate 2:** Which maintained iOS SSH implementation supports host-key verification, modern keys, bastions/agents, and a reliable stdio tunnel without making React Native own crypto? Does the Mosh terminal adapter earn its added UDP and client-library complexity?
 3. **Accepted before Milestone 1:** Implement the daemon and CLI in Rust, using Tokio, Prost, bundled SQLite through rusqlite, and a crate boundary that keeps protocol, core state, storage, tmux, transport, composition, and CLI concerns separate. Validate macOS arm64 packaging in the first vertical slice and add Linux/WSL2 build-and-smoke CI before remote-host support enters scope.
 4. **Accepted before Milestone 1:** Bundle the Rust daemon, CLI, LaunchAgent plist, protocol descriptors, and terminal artifacts inside the native Mac app. Register the unprivileged per-user daemon through `SMAppService`, use the app as the Mac release unit, and offer an opt-in `~/.local/bin/overnight` CLI copy without requiring root or editing shell files.
-5. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-6. **Before Cursor enters Milestone 2:** Are Cursor CLI invocation, authentication, and redistribution stable enough for a supported preset? If not, document it as an external command preset with reduced compatibility guarantees.
-7. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-8. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-9. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+5. **Accepted before Milestone 1:** Launch coding agents through the user's interactive login shell by default, with per-host and per-preset alternatives for login, interactive, direct, and custom modes. Require each supported adapter to capture an exact correlated vendor session ID through an additive lifecycle hook and resume that exact ID without scraping terminal output or choosing a global latest session. Make restore policy configurable and default to automatic restoration only after verified infrastructure loss.
+6. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+7. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+8. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+9. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+10. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -852,6 +901,7 @@ The MVP succeeds when all of the following are demonstrated:
 16. From a machine with no Overnight GUI, `ssh user@host overnight attach WORKSPACE_ID` and `mosh user@host -- overnight attach WORKSPACE_ID` reach the existing terminal session and release the external writer lease on exit. If Gate 1 selects tmux, both reach the same private tmux-backed session.
 17. After an iPhone is suspended for five minutes, a Mac client attaches using only daemon state, takes the writer lease, and continues the same workspace; returning to iPhone reconciles without treating stale cached UI as authoritative.
 18. **Conditional on paid Apple enrollment:** a hard-fact daemon event reaches an enrolled iPhone through APNs, deep-links to the correct workspace, updates the fleet Live Activity/Dynamic Island presentation, contains no terminal content or path, and is superseded by the next foreground daemon snapshot.
+19. For Claude Code, Codex, and Cursor CLI, parallel sessions capture distinct exact vendor IDs through supported lifecycle callbacks. After a forced tmux/host-loss fixture, each adapter resumes its recorded session at an interactive prompt without selecting a global latest session, replaying uncertain input, or replacing the user's existing hooks.
 
 ## Distribution Plan
 
@@ -996,7 +1046,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 1. The post-restart reconciliation language references dismissing or restarting uncertain terminals and servers, but the bounded protocol lacks explicit reconciliation methods.
 2. Repository-root administration and client-scope changes are referenced without protocol resources or a documented local-CLI-only workflow.
-3. Host-local CLI preset creation, validation, editing, and storage are not yet specified.
+3. **Resolved in engineering review:** host-local CLI presets now define configurable shell launch modes, safe configuration ownership, adapter validation, exact session-ID capture, stored session metadata, and configurable exact-ID restoration.
 4. The method table does not yet define canonical payload, result, idempotency, version target, and synchronous/asynchronous behavior for every listed MVP method.
 
 ### Consistency
