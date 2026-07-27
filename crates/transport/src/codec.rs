@@ -147,14 +147,16 @@ mod tests {
 
     #[tokio::test]
     async fn eof_mid_frame_is_truncated_not_dispatched() {
-        let (client, server) = tokio::io::duplex(4096);
-        let (_cr, mut cw) = tokio::io::split(client);
+        // Deliberately unsplit: `tokio::io::split` halves share the
+        // underlying stream, so dropping only one half leaves it open (the
+        // peer never sees EOF). Dropping the whole `DuplexStream` does.
+        let (mut client, server) = tokio::io::duplex(4096);
         let (sr, _sw) = tokio::io::split(server);
 
         let bytes = encode_frame(&hello()).unwrap();
-        cw.write_all(&bytes[..bytes.len() - 1]).await.unwrap();
-        cw.flush().await.unwrap();
-        drop(cw); // EOF with a partial frame still sitting in the buffer
+        client.write_all(&bytes[..bytes.len() - 1]).await.unwrap();
+        client.flush().await.unwrap();
+        drop(client); // EOF with a partial frame still sitting in the buffer
 
         let mut reader = FrameReader::new(sr);
         let err = reader.read_frame().await.unwrap_err();
@@ -164,9 +166,8 @@ mod tests {
     #[tokio::test]
     async fn clean_eof_between_frames_is_none() {
         let (client, server) = tokio::io::duplex(4096);
-        let (_cr, cw) = tokio::io::split(client);
+        drop(client); // whole stream gone, not just one split half
         let (sr, _sw) = tokio::io::split(server);
-        drop(cw);
 
         let mut reader = FrameReader::new(sr);
         assert_eq!(reader.read_frame().await.unwrap(), None);

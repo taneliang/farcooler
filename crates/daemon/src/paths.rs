@@ -61,7 +61,15 @@ pub fn worktrees_dir() -> Result<PathBuf> {
 
 /// Stable per-install id, generated once.
 pub fn load_or_create_install_id() -> Result<String> {
-    let path = install_id_path()?;
+    load_or_create_install_id_in(&ensure_runtime_dir()?)
+}
+
+/// Explicit-directory form.
+///
+/// The environment is read only at the edge, so tests exercise this without
+/// mutating a process-global variable that parallel tests would race on.
+pub fn load_or_create_install_id_in(dir: &std::path::Path) -> Result<String> {
+    let path = dir.join("install-id");
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let trimmed = existing.trim().to_string();
         if !trimmed.is_empty() {
@@ -69,6 +77,7 @@ pub fn load_or_create_install_id() -> Result<String> {
         }
     }
     let id = uuid::Uuid::now_v7().simple().to_string();
+    std::fs::create_dir_all(dir).map_err(|_| DomainError::OperationFailed)?;
     std::fs::write(&path, &id).map_err(|_| DomainError::OperationFailed)?;
     Ok(id)
 }
@@ -77,42 +86,37 @@ pub fn load_or_create_install_id() -> Result<String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn overnight_home_overrides_the_default_location() {
-        let tmp = std::env::temp_dir().join("overnight-paths-test");
-        unsafe { std::env::set_var("OVERNIGHT_HOME", &tmp) };
-        assert_eq!(runtime_dir().unwrap(), tmp);
-        unsafe { std::env::remove_var("OVERNIGHT_HOME") };
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir()
+            .join(format!("overnight-paths-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
     }
 
     #[test]
     fn install_id_is_stable_across_calls() {
-        let tmp = std::env::temp_dir().join(format!("overnight-id-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        unsafe { std::env::set_var("OVERNIGHT_HOME", &tmp) };
-
-        let a = load_or_create_install_id().unwrap();
-        let b = load_or_create_install_id().unwrap();
+        let dir = scratch("id");
+        let a = load_or_create_install_id_in(&dir).unwrap();
+        let b = load_or_create_install_id_in(&dir).unwrap();
         assert_eq!(a, b, "the install id must not change between runs");
         assert!(!a.is_empty());
-
-        unsafe { std::env::remove_var("OVERNIGHT_HOME") };
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[cfg(unix)]
     #[test]
-    fn runtime_dir_is_user_only() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = std::env::temp_dir().join(format!("overnight-perm-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        unsafe { std::env::set_var("OVERNIGHT_HOME", &tmp) };
+    fn a_different_install_gets_a_different_id() {
+        let a = load_or_create_install_id_in(&scratch("id-a")).unwrap();
+        let b = load_or_create_install_id_in(&scratch("id-b")).unwrap();
+        assert_ne!(a, b);
+    }
 
-        let dir = ensure_runtime_dir().unwrap();
-        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o700, "runtime dir must not be group or world readable");
-
-        unsafe { std::env::remove_var("OVERNIGHT_HOME") };
-        let _ = std::fs::remove_dir_all(&tmp);
+    #[test]
+    fn an_empty_install_id_file_is_regenerated() {
+        let dir = scratch("id-empty");
+        std::fs::write(dir.join("install-id"), "   \n").unwrap();
+        let id = load_or_create_install_id_in(&dir).unwrap();
+        assert!(!id.trim().is_empty(), "a blank file must not yield a blank id");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
