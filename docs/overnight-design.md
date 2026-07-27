@@ -448,6 +448,8 @@ The MVP guarantee is precise:
 - One client holds the writer lease for a terminal; all other attached clients are read-only.
 - A writer can release the lease or another client can explicitly take over. The old writer is revoked before the new lease becomes active.
 - A disconnected writer lease expires after 30 seconds. Clients display writer ownership at all times.
+- Terminal sizing follows tmux's “latest active viewer” model and is independent of the writer lease. The most recently active control-scoped client displaying that terminal controls its canonical columns and rows; other viewers adapt until they become active.
+- “Active” means the terminal surface is foregrounded, visible, and selected. Merely connecting, synchronizing in the background, or rendering a hidden tab never claims size authority. With no active viewer, the terminal retains its last dimensions.
 
 Every managed terminal or server starts in a daemon-owned operating-system session/process group. Normal stop sends `SIGINT` to the entire group, waits five seconds, sends `SIGTERM`, waits ten seconds, then asks before `SIGKILL`. “Force stop” sends `SIGKILL` after exact confirmation. The daemon never targets a PID it did not launch into its owned group. macOS, Linux, and the supported WSL2 topology each have independent process-tree conformance tests.
 
@@ -500,7 +502,7 @@ The Live Activity begins locally when the user enables “Monitor fleet” and a
 - Attach to the same daemon-managed terminal session as the iPhone.
 - Transfer the terminal writer lease between Mac and iPhone.
 
-The Mac client is a founder-required part of the MVP because cross-device control is part of the thesis. Milestone 3 limits it to fleet navigation, workspace creation/archive, terminal attachment, and writer handoff. IDE launch, worktree removal, rich inspection, server administration, and diff review are post-MVP. It is delivered only after the iOS workflow is proven.
+The Mac client is a founder-required part of the MVP because cross-device control is part of the thesis. The Mac-first slice limits it to fleet navigation, workspace creation/archive, terminal attachment, and writer handoff. IDE launch, worktree removal, rich inspection, server administration, and diff review are post-MVP. The same daemon service contract is later exposed remotely to the iOS and Android clients.
 
 #### 4. Protocol
 
@@ -509,7 +511,7 @@ Use a versioned, documented protocol with these resources:
 - `Host {id, platform, daemon_version, protocol_version, health, last_seen}`
 - `Repository {id, host_id, display_name, canonical_git_dir, remote_summary}`
 - `Workspace {id, repository_id, task_name, branch, worktree_path_token, state}`
-- `Terminal {id, workspace_id, title, command_preset, state, exit_status, writer_client_id}`
+- `Terminal {id, workspace_id, title, command_preset, state, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
 - `Server {id, workspace_id, title, command, expected_port, state}`
 - `Client {id, display_name, public_key, scopes, revoked_at}`
 - `Operation {id, kind, resource_id, state, cancellable, error_code, log_cursor}`
@@ -563,6 +565,7 @@ Versioned Protocol Buffer files are the canonical protocol source of truth and s
 | `workspace.remove_worktree` | `{workspace_id, expected_workspace_version, typed_confirmation?}` | `Operation` |
 | `terminal.create` | `{workspace_id, title, command_preset, expected_workspace_version}` | `Terminal` |
 | `terminal.take_writer` | `{terminal_id, expected_terminal_version, expected_lease_generation}` | `Terminal` |
+| `terminal.resize` | `{terminal_id, columns, rows, view_activity_id, expected_terminal_version}` | `Terminal` |
 | `terminal.stop` | `{terminal_id, expected_terminal_version, force, typed_confirmation?}` | `Operation` |
 | `server.create` | `{workspace_id, title, command_preset, expected_port, expected_workspace_version}` | `Server` |
 | `client.revoke` | `{client_id, expected_client_version}` | `Operation` |
@@ -652,7 +655,10 @@ SSH support must include known-host verification with first-use fingerprints, ch
 - Per-client output windows cap unacknowledged data at 1 MiB. Slow clients stop receiving live frames and must resume; they cannot create unbounded daemon memory.
 - Input frames require the current writer lease and carry a monotonic client input ID.
 - The daemon acknowledges an input ID only after the complete byte payload is written to the PTY. Partial writes are retried inside the daemon until complete or failed; a failure closes the writer request without acknowledgment and emits a terminal error event. Clients never automatically retransmit uncertain input, preventing duplicate shell commands; they show “delivery uncertain” and require the user to decide.
-- Resize events are last-write-wins within the writer lease and include terminal columns and rows.
+- Resize requests do not require the writer lease, but they require `control` scope and a foreground, visible, selected terminal surface. They include terminal columns, rows, and a monotonic per-client `view_activity_id`.
+- The daemon accepts the most recently received valid resize from an active viewer, clamps it to 20–500 columns and 5–200 rows, updates `size_controller_client_id`, and applies it to the exact tmux window with `resize-window`. First-party clients coalesce resize traffic to at most 10 updates per second.
+- Hidden, backgrounded, disconnected, stale-activity, and read-scoped clients cannot change terminal size. When no active viewer remains, the last dimensions persist. Taking or losing the writer lease does not itself resize the terminal.
+- The control-mode client never calls `refresh-client -C`, so its own pseudo-terminal dimensions cannot affect managed windows. `overnight attach` forwards the attached TTY's initial size and `SIGWINCH` changes as active-view resize requests; raw tmux recovery access may bypass this policy just as it bypasses writer leases.
 
 `overnight protocol inspect` can decode a captured length-delimited stream or individual protobuf envelope into redacted protobuf JSON for debugging. It hides terminal input/output and path-bearing fields unless the user passes an explicit local reveal flag.
 
