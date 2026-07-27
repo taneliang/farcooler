@@ -60,7 +60,7 @@ From an iPhone, create and operate five concurrent terminal workspaces across tw
 
 > one repository + one git worktree + one branch + its terminals, coding agents, and running servers
 
-The user can create a workspace, launch any of the three supported coding-agent CLIs, switch among terminal tabs, provide direct input and approvals, see which workspaces are active, quiet, exited, failed, or offline, and later resume control from the native Mac app or another paired iPhone without reconstructing client-local state.
+The user can create a workspace, launch any of the three supported coding-agent CLIs, switch among terminal tabs, provide direct input and approvals, see which workspaces are active, quiet, exited, failed, or offline, and later resume control from the native Mac app or another enrolled iPhone without reconstructing client-local state.
 
 This is not a generic cloud IDE, hosted compute service, chat wrapper, or remote desktop.
 
@@ -68,7 +68,7 @@ This is not a generic cloud IDE, hosted compute service, chat wrapper, or remote
 
 - **Terminal first:** Direct terminal control is the default on mobile and desktop. Chat-like abstractions may be added later but cannot replace terminal access.
 - **User-owned compute:** The daemon runs on the user's macOS, Linux, and WSL2 hosts. Overnight does not require managed development VMs.
-- **Configurable connectivity:** Tailscale-direct is the simplest default, but the client/daemon protocol is transport-independent. SSH tunnel/stdio connectivity is an MVP requirement so users can reuse host keys, bastions, `ProxyJump`, and existing access policy. Mosh is an optional terminal data-plane transport paired with SSH or Tailscale for workspace control because Mosh synchronizes an interactive terminal rather than carrying arbitrary application RPC.
+- **SSH control plane:** SSH stdio is the only control-plane transport. The daemon opens no network listener at all; it accepts connections on its local Unix socket and connections that sshd launches on its behalf. Users reuse their existing host keys, agents, bastions, `ProxyJump`, and access policy. Tailscale keeps its full value as the network layer, because an SSH route to a MagicDNS name still gets NAT traversal and stable addressing, but tailnet membership is a path and never an authorization. Mosh remains an optional terminal data-plane transport because it synchronizes an interactive terminal rather than carrying arbitrary application RPC.
 - **Reuse before reinvention:** Prefer established primitives such as OpenSSH, tmux, Mosh, git worktrees, launchd/systemd, SQLite, and Tailscale when they satisfy the security and experience contract. Overnight adds adapters and durable product semantics instead of forking or disguising those tools.
 - **Open source:** The host daemon, protocol, and clients begin as open source. The license and future paid boundary remain open decisions.
 - **Mobile:** The MVP ships an iOS app built with React Native. The same codebase must preserve a credible Android path; Android is the first major follow-up.
@@ -77,7 +77,7 @@ This is not a generic cloud IDE, hosted compute service, chat wrapper, or remote
 - **Background mobile awareness:** Remote push notifications plus one fleet-level Live Activity with Lock Screen and Dynamic Island presentations are desired MVP features, but production APNs and distributable iOS builds require paid Apple Developer Program membership. If the project has not enrolled by the iOS release gate, these features become the first fast follow rather than blocking the terminal/workspace MVP.
 - **Hosts:** The daemon supports macOS and Linux, including Linux running under WSL2.
 - **Deferred:** Workspace transfer, automatic failover, split terminal panes, rich diff review, Windows-native hosts, and managed cloud compute are outside the MVP.
-- **Security:** Tailscale membership alone is not sufficient authorization. Devices require explicit pairing, scoped host permissions, and revocation.
+- **Security:** Tailscale membership alone is not sufficient authorization. Every device authenticates with its own SSH key, is enrolled with an explicit scope, and can be revoked individually. Overnight does not operate a certificate authority or issue client certificates.
 - **Privacy:** Product artifacts and user-facing examples must not identify individual design partners.
 
 ## Premises
@@ -86,7 +86,7 @@ This is not a generic cloud IDE, hosted compute service, chat wrapper, or remote
 2. The core object is a fleet of concurrent task workspaces, not a single remote terminal.
 3. No individual feature is unique. The differentiated product is the combination of terminal-quality mobile access, parallel workspaces, vendor-neutral CLIs, and user-owned heterogeneous hosts.
 4. A workspace is a repository worktree and branch for one task, plus its terminals, agent processes, and servers.
-5. Tailscale or SSH provides connectivity, while Overnight owns discovery, pairing/authorization above the transport where needed, worktree lifecycle, process lifecycle, authoritative workspace state, notification policy, and the client experience.
+5. SSH provides transport, mutual authentication, and device credentials; Tailscale provides the network path where the user wants one. Overnight owns enrollment scope, worktree lifecycle, process lifecycle, authoritative workspace state, notification policy, and the client experience. It does not build its own authentication system.
 6. Host failover and workspace transfer are secondary benefits and remain post-MVP.
 7. Android is strategically important but can follow the iOS proof if the React Native architecture and terminal renderer are validated against Android constraints during MVP development.
 8. The first product must be distributable without a developer assembling the system manually.
@@ -122,12 +122,12 @@ This thesis is plausible but unproven. The MVP must test the combined workflow, 
 
 ### Approach A: Direct Fleet MVP
 
-Build a standalone daemon, React Native iOS client, and native Swift Mac client. The daemon manages repositories, worktrees, terminal processes, coding-agent presets, running servers, notification events, and authoritative workspace metadata. Clients connect through a transport adapter, initially Tailscale-direct or SSH. Terminal sessions use tmux where the backend spike proves it reliable, with a native PTY fallback; Mosh may run the host-local `overnight attach` path without becoming the control-plane protocol.
+Build a standalone daemon, React Native iOS client, and native Swift Mac client. The daemon manages repositories, worktrees, terminal processes, coding-agent presets, running servers, notification events, and authoritative workspace metadata. Clients connect through a transport adapter over a local Unix socket or SSH stdio. Terminal sessions use tmux where the backend spike proves it reliable, with a native PTY fallback; Mosh may run the host-local `overnight attach` path without becoming the control-plane protocol.
 
-- **Effort:** Large; provisional human-team estimate 6–9 months / AI-assisted estimate 8–14 weeks. Replace these estimates after the terminal, pairing, and persistence spikes.
+- **Effort:** Large; provisional human-team estimate 6–9 months / AI-assisted estimate 8–14 weeks. Replace these estimates after the terminal, transport, and persistence spikes.
 - **Risk:** Medium-high.
 - **Advantages:** Proves the exact product thesis, owns the user experience, remains vendor-neutral, and replaces the initial design partner's fragmented setup.
-- **Costs:** Requires reliable cross-platform process control, terminal rendering, device pairing, and three CLI presets before demand is established.
+- **Costs:** Requires reliable cross-platform process control, terminal rendering, device enrollment, and three CLI presets before demand is established.
 
 ### Approach B: Complete Overnight Control Plane
 
@@ -162,7 +162,7 @@ The first implementation slice proves workspace and terminal-control correctness
 - The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy and controls. Its terminal surface uses the shared libghostty core through an Overnight-owned adapter.
 - `overnight attach WORKSPACE_ID` remains mandatory and attaches an ordinary shell client to the managed session. The equivalent raw tmux command is shown for transparency and recovery.
 - SQLite is canonical for desired Overnight product state and stable IDs. tmux supplies observed terminal/runtime state. Restart reconciliation compares them; it never treats an untagged or unmatched tmux window or pane as an Overnight workspace or terminal automatically.
-- No Tailscale-direct listener, SSH application transport, embedded Mosh transport, React Native iOS app, APNs relay, Live Activity, Linux/WSL2 support, or native PTY fallback in this slice.
+- No SSH application transport, embedded Mosh transport, React Native iOS app, APNs relay, Live Activity, Linux/WSL2 support, or native PTY fallback in this slice.
 
 This is an engineering validation slice, not validation of the mobile product thesis. After local workspace creation, five-way parallelism, daemon restart reconciliation, shell attachment, and Mac UI control pass their acceptance tests, the next slice exposes the same daemon protocol through SSH and builds the React Native iOS client. Failure of tmux control mode against the terminal acceptance suite triggers the native PTY fallback decision before remote work begins.
 
@@ -178,7 +178,7 @@ iOS client ──── SSH stdio ───┘
 
 - Every client uses the same generated protocol types and daemon methods. The Mac app never calls git, SQLite, tmux, or process APIs directly.
 - The Unix-socket and SSH-stdio adapters share framing, request dispatch, event ordering, resource versions, operation lifecycle, replay, writer leases, and error codes.
-- Only connection authentication differs. The Unix socket requires a daemon-owned mode-`0600` socket under the same user and records an explicit local client identity; SSH verifies its host/user credentials and then binds an Overnight client identity. Authorization is evaluated after either adapter produces the same connection principal.
+- Only connection authentication differs, and neither adapter implements its own. The Unix socket relies on a daemon-owned mode-`0600` socket under the same user and records an explicit local client identity. SSH stdio relies on sshd having already verified the host key and the device key, and reads the resulting client identity and scope from the forced command that sshd invoked. Authorization is evaluated after either adapter produces the same connection principal.
 - Contract tests run unchanged against an in-memory adapter, Unix socket, and SSH stdio. A behavior is not complete if it passes locally through a special path that the remote adapter cannot exercise.
 - The native Mac app, future React Native client, and CLI consume generated SDKs from the same typed IDL. Platform clients own presentation and local caches only.
 
@@ -291,7 +291,7 @@ The founder-approved product boundary remains intact, but implementation is orde
 3. **Milestone 1: Mac-first local vertical slice.** Native Swift Mac client with a libghostty-backed terminal surface, macOS arm64 daemon/CLI, Unix-socket protocol, SQLite metadata, existing repository, transactional worktree creation, one CLI preset, multiple terminal tabs, five concurrent workspaces, archive, and observable process states.
 4. **Gate 2: SSH transport and reconnect spike.** Expose the same daemon protocol through SSH stdio, connect a second client, disconnect repeatedly, transfer writer ownership, and prove ordered replay without duplicate input. `mosh host -- overnight attach WORKSPACE` remains the terminal escape hatch rather than a GUI transport requirement.
 5. **Milestone 2: mobile vertical slice.** One React Native iOS screen connects through SSH, lists the Mac-proven workspaces, controls a terminal, and passes the mobile terminal acceptance suite. Run the same renderer on Android as architecture validation only.
-6. **Milestone 3: validated product workflow.** Multiple macOS/Linux hosts, repository clone, five concurrent workspaces, server metadata, Claude Code/Codex/Cursor presets, signed installers, upgrade/rollback path, and the design-partner success criterion.
+6. **Milestone 3: validated product workflow.** Multiple macOS/Linux hosts, remote daemon installation over SSH for Linux and WSL2, repository clone, five concurrent workspaces, server metadata, Claude Code/Codex/Cursor presets, signed installers, upgrade/rollback path, and the design-partner success criterion.
 7. **Milestone 4: founder-scoped public MVP.** Native Swift Mac client, iOS client, WSL2 supported topology, public distribution, and all technical success criteria. If Apple Developer Program enrollment is complete by the release gate, this milestone also includes the APNs relay, push notifications, and Live Activity/Dynamic Island surfaces; otherwise those move together to the first fast follow.
 
 Failure at a gate stops expansion and produces a revised design. Android buildability is checked during Gate 1 and CI, but a user-ready Android client remains post-MVP.
@@ -306,7 +306,7 @@ MVP status is based only on facts the daemon can observe. Overnight does **not**
 Daemon self-health: healthy ↔ degraded
 
 Client-local connection:
-unpaired → connecting → connected ↔ reconnecting → disconnected
+unenrolled → connecting → connected ↔ reconnecting → disconnected
 ```
 
 - **Healthy:** the connected daemon reports no failed subsystem and at least 2 GiB free storage.
@@ -315,7 +315,7 @@ unpaired → connecting → connected ↔ reconnecting → disconnected
 - **Reconnecting:** this client missed a heartbeat and is trying its ordered routes.
 - **Disconnected:** this client missed three consecutive heartbeats or exhausted its routes. Disconnection is not proof that host processes stopped.
 
-Each client stores a local `HostConnection {host_id, active_route, state, last_connected_at, last_event_at, latency_ms, error?}` for every paired host. It derives the fleet labels **online** from connected plus healthy, **degraded** from connected plus degraded self-health or a degraded route, and **offline** from disconnected. `HostConnection` is not a daemon resource, is not synchronized between clients, and may legitimately differ between an iPhone and Mac on different networks. Protocol incompatibility is likewise a client-local connection error. The daemon never claims that it is offline.
+Each client stores a local `HostConnection {host_id, active_route, state, last_connected_at, last_event_at, latency_ms, error?}` for every enrolled host. It derives the fleet labels **online** from connected plus healthy, **degraded** from connected plus degraded self-health or a degraded route, and **offline** from disconnected. `HostConnection` is not a daemon resource, is not synchronized between clients, and may legitimately differ between an iPhone and Mac on different networks. Protocol incompatibility is likewise a client-local connection error. The daemon never claims that it is offline.
 
 #### Workspace
 
@@ -376,7 +376,7 @@ The client shows an explicit output-gap marker if replay cannot cover a sequence
 
 Runs as an unprivileged background service for the logged-in developer on macOS and Linux. WSL2 is a separate MVP milestone rather than an assumed Linux-equivalent target.
 
-- Explicit device pairing, scoped authorization, key rotation, and revocation.
+- Explicit per-device SSH key enrollment, scoped authorization, and individual revocation.
 - Host identity, health, operating-system details, and free storage.
 - Repository registration and cloning.
 - Worktree and branch creation, listing, validation, and safe cleanup.
@@ -386,7 +386,7 @@ Runs as an unprivileged background service for the logged-in developer on macOS 
 - Named terminal tabs within a workspace. Split panes are deferred.
 - Command presets for Claude Code, Codex, and Cursor CLI.
 - Declared dev-server commands, process state, and port metadata.
-- A transport-neutral protocol exposed through mutual-TLS WebSocket over Tailscale-direct and through an authenticated SSH stdio/tunnel adapter.
+- A transport-neutral protocol exposed through a local Unix socket and an sshd-launched SSH stdio adapter. The daemon binds no TCP port.
 - Audit records for workspace creation, process launch, and destructive actions.
 - When the paid-Apple-account gate passes, signed hard-fact notification events sent outbound to the minimal APNs relay for explicitly enrolled devices.
 
@@ -461,7 +461,7 @@ On daemon startup, hold a reconciliation lock, open SQLite, and inventory the pr
 | Exact IDs disagree, duplicate, or schema is unsupported | Ambiguous runtime | Quarantine as `conflict`; block mutation and show recovery instructions |
 | No SQLite record | Untagged or different daemon identity | Ignore completely |
 
-Adopting an `orphaned` tmux candidate creates a new SQLite record only after exact user confirmation and a fresh daemon/workspace/terminal tag check. This is recovery of a cryptographically paired daemon's exactly tagged tmux object, not adoption of an OS process from a persisted PID or PGID. Terminating one requires the same confirmation. Reconciliation is idempotent, bounded by a startup deadline, and leaves the daemon read-only with a visible degraded state if the private tmux server cannot be inventoried safely.
+Adopting an `orphaned` tmux candidate creates a new SQLite record only after exact user confirmation and a fresh daemon/workspace/terminal tag check. This is recovery of an exactly tagged tmux object belonging to this same daemon identity, not adoption of an OS process from a persisted PID or PGID. Terminating one requires the same confirmation. Reconciliation is idempotent, bounded by a startup deadline, and leaves the daemon read-only with a visible degraded state if the private tmux server cannot be inventoried safely.
 
 The tmux backend has one unusually valuable acceptance requirement: shell portability. `overnight attach WORKSPACE_ID` runs locally on the host, claims external writer leases for that workspace's terminals, attaches to the host session, and selects the workspace's last active window. The raw recovery command `tmux -L overnight-<install-id> attach -t overnight` exposes the flat list of every managed terminal on the host. Therefore a user on an unsupported **client** operating system needs only an ordinary SSH or Mosh client:
 
@@ -556,12 +556,12 @@ Terminal acceptance requires:
 
 ##### iOS background boundary
 
-iOS suspends direct network connections. The MVP therefore guarantees terminal streaming and interactive control only while the app is foregrounded. Host processes and daemon-owned state continue through client suspension, another paired client can attach immediately, and the iOS app retrieves an authoritative snapshot plus bounded replay when foregrounded again.
+iOS suspends direct network connections. The MVP therefore guarantees terminal streaming and interactive control only while the app is foregrounded. Host processes and daemon-owned state continue through client suspension, another enrolled client can attach immediately, and the iOS app retrieves an authoritative snapshot plus bounded replay when foregrounded again.
 
 Push notifications and remotely updated Live Activities require paid Apple Developer Program capabilities and a deliberately narrow hosted APNs provider. The source tree should preserve the native extension and relay interfaces, but this section becomes first-fast-follow scope if enrollment has not completed by Milestone 3:
 
-1. After pairing, the iOS app explicitly enrolls a host/device notification route and sends its APNs device token and ActivityKit push token to the relay. Notification permission is requested after the user launches or monitors a real workspace, not during first-run host pairing.
-2. The client gives the paired daemon a revocable, random routing capability. The daemon sends outbound HTTPS events to the relay; the relay cannot connect to the host, run commands, list repositories, or read terminal output.
+1. After host enrollment, the iOS app explicitly enrolls a host/device notification route and sends its APNs device token and ActivityKit push token to the relay. Notification permission is requested after the user launches or monitors a real workspace, not during first-run host enrollment.
+2. The client gives the daemon a revocable, random routing capability. The daemon sends outbound HTTPS events to the relay; the relay cannot connect to the host, run commands, list repositories, or read terminal output.
 3. Events use an allowlisted schema with an opaque host/workspace routing ID, event kind, monotonic event version, timestamp, and minimal display state. Terminal contents, commands, diffs, filesystem paths, and credentials are forbidden.
 4. Privacy defaults to generic text such as “A workspace exited.” Showing repository, branch, task, or host names on the Lock Screen/Dynamic Island is a per-device opt-in because those surfaces may be visible to bystanders and APNs payloads traverse hosted infrastructure.
 5. The relay validates capability, signature, payload size, event version, and rate limits before sending to APNs. It stores tokens and routing metadata only as long as needed, exposes route revocation, and publishes a self-hosting protocol even though the official App Store build uses Overnight's provider credentials.
@@ -592,7 +592,7 @@ Use a versioned, documented protocol with these resources:
 - `Terminal {id, resource_version, lease_generation, workspace_id, title, command_preset, state, reconciliation_resolution?, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
 - `AgentSession {terminal_id, resource_version, adapter_id, adapter_version, cli_version, vendor_session_id?, capture_source?, restore_policy, restore_state}`
 - `Server {id, resource_version, workspace_id, title, command, expected_port, state, reconciliation_resolution?}`
-- `Client {id, resource_version, display_name, public_key, scopes, revoked_at}`
+- `Client {id, resource_version, display_name, ssh_key_fingerprint, scopes, enrolled_at, last_seen_at, revoked_at}`
 - `Operation {id, resource_version, kind, resource_id, state, cancellable, error_code, log_cursor}`
 
 Paths are returned only to clients with the `host_admin` scope; ordinary clients use stable opaque IDs.
@@ -695,14 +695,16 @@ What `host_admin` does buy is worth keeping: it prevents accidental repository-r
 | Create/stop/restart/dismiss-lost terminals, write input, resize, take/release writer, restore an exact agent session, start/stop/restart/dismiss-unknown declared servers | `control` |
 | Register/clone repositories, create/archive/restore workspaces | `control` within an administrator-approved repository root |
 | Reveal canonical paths, remove worktrees, change repository roots, revoke clients, update daemon | `host_admin` |
-| Pair a new first administrator | Local host confirmation |
-| Pair subsequent clients or change scopes | `host_admin` plus daemon confirmation policy |
+| Enroll the first device | Existing SSH access to the host, or local shell |
+| Enroll subsequent devices or change an enrolled scope | `host_admin`, or local shell |
 
-Every request checks live revocation and scope state, including requests on an established WebSocket. Revoking a client immediately closes all of its active connections before the revoke operation succeeds.
+Every request checks live revocation and scope state, including requests on an already-established SSH connection. Revoking a client removes its enrolled key and closes all of its active connections before the revoke operation succeeds.
 
-Because `control` carries full host-user authority, pairing enforces the distinction in the product surface rather than only in documentation. Granting `control` or `host_admin` to a client requires local host confirmation and displays the plain-language warning that the device gains the ability to run any command as the host user. `read` is offered as the safe choice for a device the user does not fully trust. Revocation is the only containment response to a compromised `control` client, so revocation latency is a success criterion and revocation is reachable from the host CLI without a paired client.
+Because `control` carries full host-user authority, enrollment enforces the distinction in the product surface rather than only in documentation. Enrolling a device at `control` or `host_admin` displays the plain-language warning that the device gains the ability to run any command as the host user. `read` is offered as the safe choice for a device the user does not fully trust, and it is enforced by sshd rather than by Overnight alone: a read-enrolled key carries `restrict` plus a forced command, so it cannot open an interactive SSH shell even if the daemon is compromised.
 
-This posture matches Overnight's initial threat model: a single developer's personal hosts, where every paired device is one the user already trusts with their laptop. A real containment boundary would require a separate operating-system principal for daemon administration with sandboxed terminal workers and narrow IPC between them. That is deliberately deferred; see "Deferred."
+Revocation is the containment response to a compromised `control` device, so revocation latency is a success criterion and revocation is reachable both through the protocol and from a host shell. Revocation ends Overnight-mediated access and removes the enrolled key. It does not undo what that device already did through a terminal: a `control` client with shell authority can install its own persistence that Overnight never observes. The documented recovery is revoke first, then audit the host.
+
+This posture matches Overnight's initial threat model: a single developer's personal hosts, where every enrolled device is one the user already trusts with their laptop. A real containment boundary would require a separate operating-system principal for daemon administration with sandboxed terminal workers and narrow IPC between them. That is deliberately deferred; see "Deferred."
 
 ##### Control-channel synchronization
 
@@ -746,17 +748,17 @@ The protocol includes:
 
 The resource model, method schemas, event versions, terminal IDs, operation IDs, writer leases, and replay semantics are invariant across transports.
 
-- **Tailscale-direct:** The client opens the daemon's mutually authenticated WebSocket at its paired MagicDNS name or tailnet IP. This is the lowest-friction default for the intended user.
-- **SSH stdio/tunnel:** The client verifies the SSH host key, authenticates using a user-selected key or agent, and launches a noninteractive `overnight transport stdio` subsystem or forwards a loopback-only daemon socket. SSH configuration may name a bastion or `ProxyJump`; Overnight does not copy private keys to the daemon. Application-level client identity and scopes still bind audit records and writer leases even though SSH authenticates the OS account.
-- **Mosh terminal adapter:** Mosh bootstraps through SSH and then uses its roaming terminal protocol over UDP. It can run `overnight attach WORKSPACE_ID` and provide resilient interactive terminal access, but it does not carry the workspace CRUD, fleet snapshot, notification, or permission RPCs. A first-party GUI using Mosh therefore maintains a separate SSH or Tailscale control connection and treats Mosh as one terminal data-plane adapter.
+- **SSH stdio:** the only control-plane adapter. The client verifies the SSH host key, authenticates with its enrolled device key, and sshd launches the forced `overnight transport stdio` command. SSH configuration may name a bastion or `ProxyJump`; Overnight never copies private keys to the daemon. The client identity and scope that bind audit records, writer leases, and idempotency records come from the enrolled key that sshd authenticated.
+- **Routes are SSH endpoints, not distinct protocols.** A host may have several ordered routes that all speak SSH stdio: a tailnet MagicDNS name, a LAN or public address, or a bastion hop. Tailscale supplies NAT traversal and stable addressing for the route that uses it and supplies no authorization. Because every route runs the same adapter, route switching cannot change identity, ordering, replay, or lease semantics.
+- **Mosh terminal adapter:** Mosh bootstraps through SSH and then uses its roaming terminal protocol over UDP. It can run `overnight attach WORKSPACE_ID` and provide resilient interactive terminal access, but it does not carry the workspace CRUD, fleet snapshot, notification, or permission RPCs. A first-party GUI using Mosh therefore maintains a separate SSH control connection and treats Mosh as one terminal data-plane adapter.
 
-The connection settings are per host, not global. A paired host may have several ordered routes, for example `Tailscale-direct → SSH via bastion`, and the client reports which route is active. Automatic fallback is allowed only before an input is accepted; transport switching never retransmits uncertain terminal input.
+The connection settings are per host, not global. An enrolled host may have several ordered routes, for example `SSH over tailnet → SSH via bastion`, and the client reports which route is active. Automatic fallback is allowed only before an input is accepted; route switching never retransmits uncertain terminal input.
 
-SSH support must include known-host verification with first-use fingerprints, changed-host-key blocking, encrypted Keychain storage for imported keys, hardware-backed keys where the chosen iOS SSH library supports them, agent/bastion configuration, and no password persistence. Mosh support must expose its UDP port requirement and fall back visibly when the network blocks it.
+SSH support must include known-host verification with first-use fingerprints, changed-host-key blocking, encrypted Keychain storage for device and imported keys, hardware-backed keys where the chosen iOS SSH library supports them, agent/bastion configuration, and no password persistence. Because SSH is now the only control transport, the iOS SSH implementation is a Milestone 1 blocking dependency rather than a Gate 2 question. Mosh support must expose its UDP port requirement and fall back visibly when the network blocks it.
 
 ##### Protocol framing, terminal replay, and backpressure
 
-- Unix sockets and SSH stdio carry the exact same stream: `envelope_length:u32` in network byte order followed by one serialized `WireEnvelope`. A binary WebSocket adapter later maps one `WireEnvelope` to one WebSocket binary message without changing its protobuf body.
+- Unix sockets and SSH stdio carry the exact same stream: `envelope_length:u32` in network byte order followed by one serialized `WireEnvelope`. The framing stays transport-portable: if a direct network transport is ever reconsidered, one `WireEnvelope` maps to one binary message without changing its protobuf body.
 - `WireEnvelope` contains negotiated protocol version, request or event identity, and a `oneof` payload for `ClientHello`, `ServerHello`, `Request`, `Response`, `Event`, `SnapshotChunk`, or `TerminalFrame`. The first client frame must be `ClientHello`; no other message is dispatched until `ServerHello` selects a compatible version, capabilities, and maximum frame sizes.
 - Control envelopes are capped at 1 MiB. `TerminalFrame.payload` is capped at 64 KiB, and total envelope length is validated before allocation. Invalid, oversized, or truncated frames close the connection with a protocol error and never reach method dispatch.
 - UUIDv7 values are encoded as validated 16-byte fields, timestamps use `google.protobuf.Timestamp`, counters use protobuf `uint64`, and absence uses protobuf presence rather than sentinel values.
@@ -779,50 +781,51 @@ SSH support must include known-host verification with first-use fingerprints, ch
 
 Length-delimited protobuf envelopes are sufficient for the first-party clients. The Mosh adapter terminates at `overnight attach`/tmux rather than encapsulating this full protocol. The Rust daemon and CLI are distributed as self-contained native executables without requiring a language runtime.
 
-#### 5. Pairing, identity, and trust boundaries
+#### 5. Identity, enrollment, and trust boundaries
 
-Tailscale supplies private WireGuard connectivity and stable addressing; SSH supplies host-key verification, user authentication, and optional bastion policy. Overnight separately authenticates application peers for direct mode and binds an Overnight client identity to SSH connections so authorization, revocation, writer leases, and audits behave consistently:
+SSH is Overnight's only control-plane transport and its only authentication mechanism. Overnight does not run a certificate authority, issue client certificates, pin its own identity key, or operate a QR pairing flow. OpenSSH already authenticates both directions, and D17 established that the asset being protected is a shell that SSH gates anyway. Delegating removes an entire security subsystem Overnight would otherwise own for the life of the product.
 
-1. On first run, the daemon generates a long-lived Ed25519 identity key. The private key is stored in the macOS Keychain or a mode-`0600` Linux file.
-2. The identity key signs a long-lived local CA certificate. Short-lived daemon transport certificates are signed by that CA; the stable identity public-key fingerprint, not the leaf certificate, is pinned.
-3. `overnight pair` prints a QR code and manual code containing one or more selected routes—Tailscale MagicDNS/IP and/or SSH host/config alias—plus the daemon's stable identity fingerprint and a single-use nonce that expires after five minutes.
-4. The client generates its own key in the iOS or macOS Keychain, pins the stable daemon identity fingerprint, and signs the nonce.
-5. The daemon shows the client name and requested scopes locally. The user confirms locally for the first administrative client.
-6. The daemon issues a client certificate bound to `read`, `control`, or `host_admin` scopes. Mutual TLS authenticates subsequent WebSocket connections.
-7. Revocation immediately closes established sessions and rejects every subsequent request through the live revocation table. An online client cannot mint or extend its own scopes.
-8. Daemon leaf certificates rotate automatically without changing the pinned identity. Client certificates last 90 days, become renewable 30 days before expiry, and overlap the replacement certificate for seven days. A client offline past expiry must re-pair locally; there is no expired-certificate bypass.
-9. A daemon identity-key change requires explicit re-pairing and displays the new identity fingerprint. A changed SSH host key is a separate hard failure and never silently updates the known-host record. MagicDNS rename requires route repair or re-pairing; normal IP changes resolve through the selected Tailscale or SSH route.
-10. If every client is lost, recovery requires local shell access to the host and `overnight pair reset`. There is no remote account-recovery bypass.
+1. **Host authentication.** The client verifies the SSH host key on first use, stores its fingerprint locally, and treats a changed host key as a hard failure that never silently updates the known-host record. This replaces daemon identity-key pinning.
+2. **Device authentication.** Each device generates its own SSH keypair in the iOS or macOS Keychain, hardware-backed where the SSH library supports it, and never shares or exports it. Private keys are never copied to the host.
+3. **Device identity.** The daemon identifies the connecting device by the enrolled key that sshd authenticated, supplied through the forced command rather than inferred. A `Client` record is keyed by SSH key fingerprint and carries the display name, scope, enrollment time, and last-seen time. Two devices sharing one host account remain distinct clients, which is what writer leases, size-controller attribution, audit records, and per-client idempotency scoping require.
+4. **Enrollment.** Overnight-managed entries live in a fenced block inside `~/.ssh/authorized_keys`. Every enrolled entry carries `restrict` plus `command="overnight transport stdio --client CLIENT_ID --scope SCOPE"`, so an Overnight device key reaches the daemon protocol and cannot open an interactive SSH shell, request port forwarding, or allocate a PTY. The daemon revalidates the client and scope itself and never trusts a client-supplied identity.
+5. **Bootstrap.** Enrolling the first device requires access the user already has: an existing SSH key or agent, a host-permitted password, Tailscale SSH, or a local shell. Overnight adds no separate bootstrapping secret and no QR nonce. The client connects with that existing credential once, generates its device key, enrolls it, and uses only the device key afterward.
+6. **Scope changes and revocation.** `client.revoke` removes the fenced entry and closes that client's live connections before succeeding. Scope changes rewrite the entry's forced command. The daemon edits only inside its own fence markers, writes atomically through a temporary file and rename while preserving mode `0600`, keeps a checksummed backup, and never reorders or removes entries it did not create. If the fence markers are missing or damaged, it refuses to edit and surfaces the exact manual instructions rather than risking the user's SSH access.
+7. **Recovery.** If every enrolled device is lost, recovery uses ordinary SSH or local shell access plus `overnight client list` and `overnight client revoke`. There is no remote account-recovery bypass, and there is no expired-credential bypass because there are no expiring credentials to bypass.
+8. **Remote installation.** `overnight host install` runs over the same SSH connection: it detects platform and architecture, verifies the checksum of the daemon binary before execution, installs a `systemd --user` unit, and enables lingering so the daemon survives logout. This is Linux and WSL2 only. A macOS host keeps the bundled-app path from the packaging decision, because registering a LaunchAgent through `SMAppService` requires a GUI session; headless remote installation on macOS is not supported in MVP.
 
 Security boundaries:
 
 - The daemon never runs as root and can operate only as its operating-system user.
+- The daemon opens no network listener. Its only entry points are a mode-`0600` Unix socket and processes that sshd starts after authenticating a device key. There is no TLS stack, no WebSocket server, and no port to expose, scan, or misconfigure.
+- Overnight-enrolled device keys are restricted to the daemon subsystem and cannot open an interactive SSH shell. This genuinely constrains a `read` device. It does not reduce `control`, which reaches a shell by writing into a managed terminal, exactly as D17 describes.
+- `~/.ssh/authorized_keys` is a user-critical file. Overnight edits only inside its own fence markers, atomically, with a checksummed backup, and refuses to edit a file whose fence it cannot verify. Losing SSH access to your own machine because of a management action is treated as a release-blocking failure and has its own tests.
 - Repository roots are explicitly allowlisted. Overnight rejects arbitrary path traversal outside them. The allowlist constrains Overnight's own git and worktree operations; it does not constrain what a shell running inside a terminal can reach, because that shell has the host user's full filesystem access.
 - Terminal control grants arbitrary command execution as the daemon user. The UI states this plainly; “control” is not a reduced shell permission.
 - Overnight runs one operating-system security principal: the daemon's user. Terminal workers, the daemon, its identity key, its SQLite database, and the user's repositories all live inside that one principal. There is no privilege separation between a managed terminal and daemon-owned state in MVP.
 - Consequently `host_admin` is an application safety rail, not a containment boundary. It stops accidental and casual destructive actions through Overnight's own APIs. It does not stop a hostile `control` client, which can read daemon secrets, drive the local CLI, or alter daemon-owned state directly on the filesystem. Only `read` is a genuine non-executing boundary.
 - Destructive workspace actions require `host_admin` plus exact typed confirmation when state is uncertain.
 - Audit logs contain client ID, operation, resource ID, result, and timestamp, not terminal contents or command text. Default retention is seven days and is locally configurable. Audit records attribute API actions to a client identity; they cannot attribute actions a `control` client took by running commands inside a terminal, because those are indistinguishable from the user's own shell activity.
-- A compromised paired control client is contained only by its daemon scopes and host-user permissions. Revocation is the immediate response; Overnight cannot make an arbitrary shell intrinsically safe.
+- A compromised enrolled control client is contained only by its daemon scopes and host-user permissions. Revocation is the immediate response; Overnight cannot make an arbitrary shell intrinsically safe.
 - Same-user access to the private tmux socket, the Unix domain socket, or the runtime directory is equivalent to `control` and is outside the application trust boundary by construction, as documented in the reconciliation and escape-hatch sections.
 
 ### First-run onboarding
 
-With either Tailscale installed or working SSH access, and with the supported CLI authenticated:
+Onboarding requires no physical presence at the host. With working SSH access and the supported CLI authenticated:
 
-1. Install the daemon package and start the launchd/systemd user service.
-2. Run `overnight pair`; choose Tailscale-direct, SSH, or both. The command validates the selected route and prints daemon health, route metadata, identity fingerprint, QR code, manual code, and the five-minute expiry.
-3. In the iOS app, scan the QR code or enter the route and code. For SSH, verify the host-key fingerprint and select an existing Keychain key, hardware-backed key, or approved agent/bastion configuration.
-4. Confirm the client name and `host_admin` scope in the local host terminal.
-5. The app verifies the pinned fingerprint, finishes mutual-TLS enrollment, and displays the host.
+1. In the app, add a host by entering its SSH target: a tailnet MagicDNS name, an address, or an existing `ssh_config` alias, plus a bastion or `ProxyJump` if the user's configuration names one.
+2. Verify and accept the host-key fingerprint on first use, then authenticate with an existing key, agent, or host-permitted password.
+3. The app checks whether a compatible daemon is already running. If none is installed and the host is Linux or WSL2, it offers `overnight host install`, which verifies the binary checksum, installs the `systemd --user` unit, and enables lingering. A macOS host installs `Overnight.app` instead.
+4. The app generates a device key in the Keychain and enrolls it at the chosen scope. It uses only the device key from this point forward, and the bootstrap credential is never stored.
+5. The host appears with its health, route, and daemon version.
 6. Add an allowlisted repository root.
 7. Register an existing repository or clone a URL using host-managed git credentials.
 8. Create a task workspace by choosing repository, base revision, task name, branch name, and CLI preset.
 9. The daemon creates the worktree transaction, launches the terminal, and returns ordered output.
 
-MVP does not request broad Tailscale administrative API access or scan the tailnet. A client learns an unpaired daemon only from its QR/manual pairing payload or an explicit SSH target; paired routes and host-key records are stored locally and refreshed only through an authenticated route-repair flow.
+MVP does not request broad Tailscale administrative API access or scan the tailnet. A client learns a host only from a user-entered SSH target. Host-key records and enrolled routes are stored locally on the client.
 
-The five-minute onboarding target measures steps 1–5 with either Tailscale already authenticated or SSH access already working, plus one supported CLI already present. Creating a new SSH key, configuring a bastion, repository cloning, and dependency installation are measured separately.
+The five-minute onboarding target measures steps 1–5 with SSH access already working and one supported CLI already present. Creating a new SSH key, configuring a bastion, repository cloning, and dependency installation are measured separately. Because no step requires standing at the host, a second host can be onboarded entirely from the phone.
 
 ### Failure UX
 
@@ -830,7 +833,8 @@ Every mutating flow produces a durable `Operation` with progress, logs, retryabi
 
 | Failure | User sees | Available action |
 |---|---|---|
-| Pairing timeout or fingerprint mismatch | Connection refused with both fingerprints | Restart local pairing; no bypass |
+| SSH host-key mismatch | Connection refused with both fingerprints and the stored record | Resolve at the host; never silently accept the new key |
+| Enrollment fails or `authorized_keys` fence is damaged | Exact file state and the entry Overnight intended to write | Apply the printed entry manually, or repair the fence and retry |
 | Clone authentication/network failure | Failed clone operation and git stderr | Retry after fixing host credentials, or remove partial clone |
 | Branch/worktree collision | Existing conflicting ref/path named explicitly | Choose a different branch/task; never overwrite |
 | Worktree creation partially fails | Error state plus artifacts preserved or rolled back | Retry reconciliation or open manual recovery instructions |
@@ -846,13 +850,13 @@ Mutating retries reuse idempotency keys where appropriate. Rollback itself is re
 ### Installation, upgrade, and uninstall lifecycle
 
 - Daemon protocol major version `N` supports clients on `N` and `N-1`. Newer clients hide unsupported capabilities after negotiation.
-- Database migrations are forward-only within a major version. Before migration, the daemon writes a checksummed backup of metadata and pairing state.
+- Database migrations are forward-only within a major version. Before migration, the daemon writes a checksummed backup of metadata and enrollment state.
 - Automatic daemon upgrade is disabled while terminals run. The user can wait, stop sessions explicitly, or force upgrade with a warning that PTYs will be lost.
 - If the new daemon fails its startup health check, the installer restores the prior binary and metadata backup.
 - Client apps may update independently within the compatibility window.
-- Uninstall stops the service and removes the binary. Repositories, worktrees, branches, and `~/.overnight` metadata are preserved by default.
-- `overnight uninstall --purge-metadata` removes Overnight metadata and certificates only after an exact typed confirmation; it still does not delete repositories, branches, or worktrees.
-- Configuration export contains daemon settings and workspace metadata but excludes private keys. Pairing keys are never exportable.
+- Uninstall stops the service, removes the binary, and removes Overnight's fenced block from `~/.ssh/authorized_keys` while leaving every other entry untouched. Repositories, worktrees, branches, and `~/.overnight` metadata are preserved by default.
+- `overnight uninstall --purge-metadata` removes Overnight metadata and enrollment records only after an exact typed confirmation; it still does not delete repositories, branches, or worktrees.
+- Configuration export contains daemon settings and workspace metadata but excludes enrolled key material and host-key records.
 
 ### Interaction model
 
@@ -878,10 +882,11 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 ### Included
 
 - macOS and Linux/WSL2 daemon.
-- Per-host Tailscale-direct and SSH connectivity with explicit route selection and fallback.
+- Per-host SSH connectivity with several ordered routes, including SSH over a tailnet and SSH via bastion, with explicit route selection and fallback.
+- Remote daemon installation over SSH for Linux and WSL2 hosts, so a new host is onboarded without physical presence.
 - `ssh user@host overnight attach WORKSPACE_ID` terminal escape hatch on unsupported client operating systems.
 - Gate 1 decision between a private tmux backend and native daemon PTYs; tmux is preferred only if it passes the same lifecycle and protocol contract.
-- Explicit device pairing and revocation.
+- Explicit per-device SSH key enrollment, scoping, and revocation.
 - Repository onboarding and cloning.
 - Worktree/branch workspace lifecycle.
 - Daemon-owned terminal tabs that persist across client disconnects.
@@ -909,6 +914,7 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 - Team collaboration and shared workspaces.
 - Windows-native daemon outside WSL2.
 - Full IDE or remote-desktop streaming.
+- An Overnight-owned certificate authority and a Tailscale-direct mutual-TLS listener. Delegating authentication to SSH removes the entire subsystem; a keyless direct route can return later if users ask for one, at which point it must re-justify the CA, rotation, expiry, and recovery work it brings with it.
 - Operating-system privilege separation between managed terminals and daemon administration. A separate administrative principal with sandboxed terminal workers would make `host_admin` a real containment boundary, but it expands macOS, Linux, WSL2, installation, packaging, credential-access, and recovery work well beyond the MVP proof.
 
 ## Open Questions
@@ -916,7 +922,7 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 These questions have explicit decision gates and may not remain unresolved when their milestone begins:
 
 1. **Accepted for Gate 1:** Use pinned `libghostty-vt` behind an Overnight-owned C-ABI adapter as the shared Mac, iOS, and Android terminal core. Use one private tmux server and one host-wide session; represent workspaces as tagged groups of terminal windows and drain them through one host-wide control client with per-pane flow control. Prove tmux control mode through the Mac surface and require an Android ARM64 build plus rendered-fixture smoke test in the same spike. Reopen the backend if it fails a required persistence, handoff, process-ownership, noisy-neighbor, or shell-escape-hatch invariant.
-2. **Gate 2:** Which maintained iOS SSH implementation supports host-key verification, modern keys, bastions/agents, and a reliable stdio tunnel without making React Native own crypto? Does the Mosh terminal adapter earn its added UDP and client-library complexity?
+2. **Blocking for Milestone 1:** Which maintained iOS SSH implementation supports host-key verification, modern keys, bastions/agents, and a reliable stdio tunnel without making React Native own crypto? SSH is now the only control transport, so this moved off Gate 2 and has no fallback route behind it. Separately, does the Mosh terminal adapter earn its added UDP and client-library complexity?
 3. **Accepted before Milestone 1:** Implement the daemon and CLI in Rust, using Tokio, Prost, bundled SQLite through rusqlite, and a crate boundary that keeps protocol, core state, storage, tmux, transport, composition, and CLI concerns separate. Validate macOS arm64 packaging in the first vertical slice and add Linux/WSL2 build-and-smoke CI before remote-host support enters scope.
 4. **Accepted before Milestone 1:** Bundle the Rust daemon, CLI, LaunchAgent plist, protocol descriptors, and terminal artifacts inside the native Mac app. Register the unprivileged per-user daemon through `SMAppService`, use the app as the Mac release unit, and offer an opt-in `~/.local/bin/overnight` CLI copy without requiring root or editing shell files.
 5. **Accepted before Milestone 1:** Launch coding agents through the user's interactive login shell by default, with per-host and per-preset alternatives for login, interactive, direct, and custom modes. Require each supported adapter to capture an exact correlated vendor session ID through an additive lifecycle hook and resume that exact ID without scraping terminal output or choosing a global latest session. Make restore policy configurable and default to automatic restoration only after verified infrastructure loss.
@@ -924,18 +930,19 @@ These questions have explicit decision gates and may not remain unresolved when 
 7. **Accepted before Milestone 1:** Keep daemon self-health on the `Host` resource but make reachability a per-client `HostConnection` observation. Each client records its active route, connection state, last connection/event times, latency, and error, then derives online/degraded/offline locally; an offline daemon never attempts to report itself offline.
 8. **Accepted before Milestone 1:** Resolve uncertain runtime state through typed per-resource methods: dismiss, restart, or exact-agent restore for lost terminals and dismiss or restart for unknown servers. Never adopt an OS process from persisted PID/PGID data; exact automatic reattachment remains limited to live tmux objects whose daemon and resource tags match.
 9. **Accepted before Milestone 1:** Make runtime states proof-based: an exact-tagged live tmux terminal is `running`, an expected terminal without exact runtime identity is `lost`, and terminals never use `unknown`; a server whose post-restart identity cannot be proved is `unknown`. A workspace stays `error` only while child uncertainty is unresolved, then recomputes to `ready` or `active`.
-10. **Accepted before Milestone 1:** Keep `read`, `control`, and `host_admin`, and document `host_admin` as an application safety rail rather than containment. `read` is the only genuine non-executing boundary; `control` grants full command execution as the host user and cannot be securely contained beneath `host_admin` without a second operating-system principal. Pairing states this plainly and requires local confirmation for `control` or `host_admin`; revocation is the containment response. Privilege-separated terminal workers are deferred.
-11. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-12. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-13. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-14. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-15. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+10. **Accepted before Milestone 1:** Keep `read`, `control`, and `host_admin`, and document `host_admin` as an application safety rail rather than containment. `read` is the only genuine non-executing boundary; `control` grants full command execution as the host user and cannot be securely contained beneath `host_admin` without a second operating-system principal. Enrollment states this plainly when granting `control` or `host_admin`; revocation is the containment response, followed by a host audit. Privilege-separated terminal workers are deferred.
+11. **Accepted before Milestone 1:** Delegate all authentication to SSH. Delete the Overnight certificate authority, client certificates, identity pinning, and QR pairing flow, and drop the Tailscale-direct mutual-TLS listener; the daemon opens no network listener. Device identity is the enrolled SSH key fingerprint, scope is carried by a `restrict` plus forced-command entry in a fenced `authorized_keys` block, and revocation removes the entry and closes live connections. Tailscale remains a network path. Onboarding requires no presence at the host and installs the daemon remotely on Linux and WSL2.
+12. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+13. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+14. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+15. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+16. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
 The MVP succeeds when all of the following are demonstrated:
 
-1. A new user with either Tailscale already authenticated or SSH access already working, plus one authenticated CLI, can install, pair, and display one host in under five minutes; new key/bastion setup, repository cloning, and dependencies are timed separately.
+1. A new user with SSH access already working, plus one authenticated CLI, can install, enroll, and display one host in under five minutes entirely from the client, with no physical access to the host; new key/bastion setup, repository cloning, and dependencies are timed separately.
 2. From the iPhone, the user can register a pre-cloned 100 MiB fixture repository with no submodules/LFS and create a worktree workspace in under two minutes on the reference macOS host. Clone duration is reported separately with repository size and network profile.
 3. The user can run at least five concurrent workspaces across two hosts.
 4. Claude Code, Codex, and Cursor CLI can each be launched and controlled through a real terminal.
@@ -948,12 +955,13 @@ The MVP succeeds when all of the following are demonstrated:
 11. The React Native terminal spike renders and accepts input on an Android reference device using the same application protocol and passes all compatibility fixtures except platform-specific accessibility checks before iOS architecture lock.
 12. A daemon crash test freshly verifies exact tags and keeps matching live tmux panes **running** without restarting them; missing/mismatched panes and any destroyed native PTYs become **lost**, and stale terminal state is never presented as live. A host reboot or tmux-server-loss fixture must make every formerly running tmux terminal **lost**.
 13. A replay-buffer overflow test clears the client terminal model, produces an explicit `GAP` marker, and replays only the retained tail.
-14. Revoking a client certificate blocks its next request within one second without affecting other paired clients.
-15. The same workspace is reachable through Tailscale-direct and SSH without changing its ID or process state; switching routes before new input is accepted causes no duplicate input.
+14. Revoking a client removes its enrolled key, closes its live connections, and blocks its next request within one second, without affecting other enrolled clients or any entry in `~/.ssh/authorized_keys` that Overnight did not write.
+15. The same workspace is reachable through an SSH route over the tailnet and an SSH route through a bastion without changing its ID or process state; switching routes before new input is accepted causes no duplicate input.
 16. From a machine with no Overnight GUI, `ssh user@host overnight attach WORKSPACE_ID` and `mosh user@host -- overnight attach WORKSPACE_ID` reach the existing terminal session and release the external writer lease on exit. If Gate 1 selects tmux, both reach the same private tmux-backed session.
 17. After an iPhone is suspended for five minutes, a Mac client attaches using only daemon state, takes the writer lease, and continues the same workspace; returning to iPhone reconciles without treating stale cached UI as authoritative.
 18. **Conditional on paid Apple enrollment:** a hard-fact daemon event reaches an enrolled iPhone through APNs, deep-links to the correct workspace, updates the fleet Live Activity/Dynamic Island presentation, contains no terminal content or path, and is superseded by the next foreground daemon snapshot.
-19. For Claude Code, Codex, and Cursor CLI, parallel sessions capture distinct exact vendor IDs through supported lifecycle callbacks. After a forced tmux/host-loss fixture, each adapter resumes its recorded session at an interactive prompt without selecting a global latest session, replaying uncertain input, or replacing the user's existing hooks.
+19. From the phone alone, a second Linux host with no Overnight installation is onboarded end to end: host key verified, daemon installed with a verified checksum, `systemd --user` unit enabled with lingering, device key enrolled, and a workspace created. A parallel fixture proves the daemon never modifies, reorders, or removes an `authorized_keys` entry outside its fence, and that a damaged fence produces refusal plus manual instructions rather than a rewrite.
+20. For Claude Code, Codex, and Cursor CLI, parallel sessions capture distinct exact vendor IDs through supported lifecycle callbacks. After a forced tmux/host-loss fixture, each adapter resumes its recorded session at an interactive prompt without selecting a global latest session, replaying uncertain input, or replacing the user's existing hooks.
 
 ## Distribution Plan
 
@@ -996,7 +1004,8 @@ GitHub Actions should:
 
 ## Dependencies
 
-- Either Tailscale installed/authenticated or SSH access configured for each host/client route under test.
+- SSH access configured for each host/client route under test. Tailscale is optional and supplies NAT traversal and stable addressing for routes that use it.
+- A maintained iOS SSH implementation with host-key verification, modern key types, agent/bastion support, and reliable stdio. This is now a blocking dependency, since SSH is the only control transport.
 - tmux installed on hosts if Gate 1 selects the tmux backend; Mosh installed only for hosts/routes that enable its terminal adapter.
 - Git installed on each host.
 - At least one supported coding-agent CLI installed and authenticated on a host.
@@ -1020,12 +1029,12 @@ The MVP supports the Linux daemon inside WSL2 only when Tailscale also runs insi
 ### Remote execution security
 
 **Risk:** A compromised phone or client can run commands with the user's host permissions.  
-**Mitigation:** Explicit pairing, SSH host-key verification where applicable, per-device revocation, secure key storage, scoped host permissions, exact confirmation for destructive workspace actions, and no public listener by default. SSH authentication does not replace Overnight's application identity, writer lease, or audit records.
+**Mitigation:** Per-device SSH key enrollment, host-key verification with changed-key blocking, restricted forced-command entries, per-device revocation that closes live connections, secure Keychain key storage, scoped permissions, exact confirmation for destructive workspace actions, and no network listener at all. The enrolled key that sshd authenticated supplies the client identity that binds writer leases and audit records. Overnight does not attempt to make a `control` device safe; it makes revocation fast and tells the user to audit the host afterward.
 
 ### Transport complexity
 
-**Risk:** Supporting Tailscale-direct, SSH, and Mosh creates three subtly different reconnect, identity, input-delivery, and firewall behaviors.  
-**Mitigation:** Keep one transport-invariant protocol and conformance suite. SSH and Tailscale carry the control plane; Mosh is terminal-only. Never fail over after accepting uncertain input, and show the active route in every connection surface.
+**Risk:** Several routes and an optional Mosh adapter could create subtly different reconnect, identity, input-delivery, and firewall behaviors.  
+**Mitigation:** Collapsing the control plane onto SSH removes most of this risk by construction: every route runs one adapter, so routes differ only in addressing and reachability, not in identity or semantics. Keep one transport-invariant conformance suite, never fail over after accepting uncertain input, and show the active route in every connection surface. Mosh remains terminal-only. The residual risk moved to a single dependency: a maintained iOS SSH implementation, now blocking rather than optional.
 
 ### tmux backend coupling
 
@@ -1049,7 +1058,7 @@ The MVP supports the Linux daemon inside WSL2 only when Tailscale also runs insi
 
 ### iOS suspension
 
-**Risk:** Direct Tailscale connections stop when iOS suspends the app.  
+**Risk:** Network connections, including SSH over a tailnet, stop when iOS suspends the app.  
 **Mitigation:** Bound interactive terminal control to foreground use. Reconnection retrieves authoritative state and bounded replay from the host, and another client can attach while the phone sleeps. If the paid-Apple-account gate passes, the minimal APNs relay supplies advisory hard-fact updates and Live Activity state; otherwise background awareness is the first fast follow.
 
 ### Apple program dependency
@@ -1065,7 +1074,7 @@ The MVP supports the Linux daemon inside WSL2 only when Tailscale also runs insi
 ### Scope expansion
 
 **Risk:** Diff review, transfer, scheduling, cloud environments, collaboration, three transports, and notification infrastructure delay the core proof.  
-**Mitigation:** Hold the unconditional MVP to workspace creation, parallel terminals, daemon-owned continuity, Tailscale/SSH access, fleet triage, and two clients. Mosh remains terminal-only; APNs/Live Activities ship only if the paid-account gate passes without delaying the core.
+**Mitigation:** Hold the unconditional MVP to workspace creation, parallel terminals, daemon-owned continuity, SSH access over the user's chosen network, fleet triage, and two clients. Mosh remains terminal-only; APNs/Live Activities ship only if the paid-account gate passes without delaying the core.
 
 ### Android deferral
 
@@ -1116,7 +1125,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 ### Feasibility and security
 
-12. **Resolved in engineering review:** the concern is accurate and is now stated in the design rather than papered over. `control` is full host authority as the daemon's OS user, `read` is the only genuine non-executing boundary, and `host_admin` is documented as an application safety rail that stops accidental destructive actions through Overnight's APIs, not as containment against a hostile `control` client. Pairing warns in plain language and requires local confirmation for `control` or `host_admin`; revocation is the containment response. Moving daemon administration to a separate OS principal with sandboxed terminal workers is deferred with an explicit rationale.
+12. **Resolved in engineering review:** the concern is accurate and is now stated in the design rather than papered over. `control` is full host authority as the daemon's OS user, `read` is the only genuine non-executing boundary, and `host_admin` is documented as an application safety rail that stops accidental destructive actions through Overnight's APIs, not as containment against a hostile `control` client. Enrollment warns in plain language when a device is granted `control` or `host_admin`; revocation is the containment response, and the documented recovery is revoke first, then audit the host, because revocation cannot undo what a shell already did. Moving daemon administration to a separate OS principal with sandboxed terminal workers is deferred with an explicit rationale.
 13. **Resolved in engineering review:** MVP never adopts an unknown OS process from persisted PID/PGID data. It may automatically reattach only to live tmux objects with exact daemon/resource tags, and adopting an orphaned tagged tmux candidate requires confirmation plus a fresh identity check.
 14. macOS LaunchAgent and Linux user-service behavior across logout must be tested and the supported unattended-host requirement stated explicitly.
 15. Full control snapshots need duration and buffered-event caps to prevent a slow client or large fleet from consuming unbounded daemon memory.
@@ -1125,7 +1134,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 The SSH/Mosh/tmux and Apple-platform changes were added after the three-round review and require fresh treatment in `/plan-eng-review`:
 
-16. The transport conformance suite must prove identical identity, authorization, event ordering, replay, cancellation, and uncertain-input behavior across Tailscale-direct and SSH.
+16. **Partly resolved in engineering review:** the control plane is now SSH-only, so there is one adapter rather than two competing identity models. The conformance suite must still prove identical identity, authorization, event ordering, replay, cancellation, and uncertain-input behavior across the in-memory adapter, the local Unix socket, a direct SSH route, and an SSH route through a bastion.
 17. The tmux/native PTY spike needs a scored decision matrix covering control-mode stability, raw-byte fidelity, scrollback, process groups, daemon upgrades, tmux-server loss, resource use, and packaging on macOS/Linux/WSL2.
 18. External `overnight attach` sessions need exact lease acquisition, takeover, detach, audit, resize, and abandoned-client semantics; raw same-user access to the private tmux socket must be documented as outside the application trust boundary.
 19. The Apple Developer Program enrollment deadline must be chosen before Milestone 3. CI and release criteria need separate capability matrices for Personal Team, paid-development, TestFlight, and App Store builds.
