@@ -172,9 +172,14 @@ async fn truncated_frame_after_handshake_does_not_dispatch() {
     // then close the write side: a truncated frame must never dispatch.
     let full = overnight_protocol::framing::encode(&request_envelope("Ping")).unwrap();
     raw_writer.write_raw(&full[..full.len() - 1]).await.unwrap();
-    drop(raw_writer);
+    // A real shutdown(SHUT_WR), not just a drop: `read_half` is still alive
+    // in `raw_reader`, and a plain drop of only the write half would not
+    // guarantee the peer observes EOF.
+    raw_writer.shutdown().await.unwrap();
 
-    let outcome = raw_reader.read_frame().await;
+    let outcome = tokio::time::timeout(Duration::from_secs(5), raw_reader.read_frame())
+        .await
+        .expect("server must close, not hang, on a truncated frame");
     assert!(outcome.is_err() || outcome.unwrap().is_none(), "the connection must close, never respond");
     assert_eq!(handler.calls.load(Ordering::SeqCst), 0, "a truncated frame must never reach the handler");
 }

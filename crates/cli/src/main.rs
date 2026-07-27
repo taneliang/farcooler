@@ -17,6 +17,11 @@ use uuid::Uuid;
     about = "A terminal-first command center for parallel coding agents"
 )]
 struct Cli {
+    /// Emit machine-readable JSON. The Mac app consumes this rather than
+    /// scraping human output.
+    #[arg(long, global = true)]
+    json: bool,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -174,6 +179,42 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         Command::Workspace(WorkspaceCmd::List) => {
             let fleet = svc.fleet().await?;
+
+            if cli.json {
+                let live = svc.inventory_snapshot();
+                let items: Vec<_> = fleet
+                    .iter()
+                    .map(|v| {
+                        serde_json::json!({
+                            "id": v.workspace.id.to_string(),
+                            "short": short(v.workspace.id),
+                            "task": v.workspace.task_name,
+                            "branch": v.workspace.branch,
+                            "worktree": v.workspace.worktree_path,
+                            "state": workspace_label(v.state),
+                            "terminals": v.terminals.iter().map(|t| serde_json::json!({
+                                "id": t.terminal.id.to_string(),
+                                "short": short(t.terminal.id),
+                                "title": t.terminal.title,
+                                "preset": t.terminal.command_preset,
+                                "state": terminal_label(t.state()),
+                                "epoch": t.terminal.epoch,
+                            })).collect::<Vec<_>>(),
+                        })
+                    })
+                    .collect();
+
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "runtime_healthy": live.inventory_healthy,
+                        "live_panes": live.panes.len(),
+                        "workspaces": items,
+                    })
+                );
+                return Ok(());
+            }
+
             if fleet.is_empty() {
                 println!("no workspaces yet");
             }

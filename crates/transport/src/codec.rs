@@ -88,6 +88,15 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
         self.inner.flush().await?;
         Ok(())
     }
+
+    /// Half-closes the write side. For a real socket this is a genuine
+    /// `shutdown(SHUT_WR)`, distinct from just dropping the handle: dropping
+    /// one half of a split stream does not by itself guarantee the peer
+    /// observes EOF while the other half is still alive.
+    pub async fn shutdown(&mut self) -> Result<(), CodecError> {
+        self.inner.shutdown().await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -98,7 +107,7 @@ mod tests {
     fn hello() -> WireEnvelope {
         WireEnvelope {
             protocol_version: 1,
-            message_id: overnight_protocol::ids::new_id(),
+            message_id: vec![7u8; 16].into(),
             body: Some(wire_envelope::Body::ClientHello(ClientHello {
                 supported_protocol_versions: vec![1],
                 client_name: "test".into(),
@@ -115,12 +124,13 @@ mod tests {
         let (_cr, cw) = tokio::io::split(client);
         let (sr, _sw) = tokio::io::split(server);
 
+        let env = hello();
         let mut writer = FrameWriter::new(cw);
-        writer.write_frame(&hello()).await.unwrap();
+        writer.write_frame(&env).await.unwrap();
 
         let mut reader = FrameReader::new(sr);
         let got = reader.read_frame().await.unwrap().unwrap();
-        assert_eq!(got, hello());
+        assert_eq!(got, env);
     }
 
     #[tokio::test]

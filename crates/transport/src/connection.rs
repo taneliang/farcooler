@@ -102,11 +102,22 @@ impl<R> Connection<R> {
 
 impl<R> Drop for Connection<R> {
     fn drop(&mut self) {
-        // Aborting drops the owned writer half too, which closes that side
-        // of the transport; this is how a rule-4 disconnect actually severs
-        // the socket rather than just returning an error to the caller.
-        self.writer_task.abort();
         self.watchdog_task.abort();
+
+        if *self.too_slow.borrow() {
+            // Already declared unrecoverably stuck (rule 4): nothing queued
+            // is going to drain in reasonable time, so force the writer
+            // closed rather than leak a task blocked on a dead peer forever.
+            self.writer_task.abort();
+        }
+        // Otherwise leave the writer task running detached: `writer_tx` (a
+        // plain struct field) drops right after this function returns, which
+        // closes the channel once every already-queued frame has been
+        // handed to it. The writer keeps draining that backlog and exits on
+        // its own. This matters because a `send` is very often immediately
+        // followed by dropping the connection (a handshake rejection, a
+        // final response before the peer misbehaves) — without this, the
+        // last frame could be queued but never actually reach the wire.
     }
 }
 
@@ -375,11 +386,17 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let hello = server.handshake(&cfg).await.unwrap();
             assert_eq!(hello.client_name, "itest");
+            // `send`'s reply only queues the bytes; the writer task delivers
+            // them on its own schedule. Stay alive (as `serve_connection`'s
+            // loop naturally would) until the client is done with us, rather
+            // than dropping `server` immediately and racing that delivery.
+            let _ = server.recv().await;
         });
 
         let server_hello = client.client_handshake("itest", "0.1.0").await.unwrap();
         assert_eq!(server_hello.daemon_version, "dtest");
         assert_eq!(server_hello.selected_protocol_version, PROTOCOL_VERSION);
+        drop(client);
         server_task.await.unwrap();
     }
 
