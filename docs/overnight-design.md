@@ -1364,6 +1364,149 @@ The cost is named rather than absorbed: deferring means the central product clai
 **Risk:** iOS-specific terminal or navigation decisions make the promised Android follow-up expensive.  
 **Mitigation:** Keep application logic in React Native, run Android CI from the start, and require the terminal spike to pass Android feasibility before architecture lock.
 
+## Engineering Review Outputs
+
+### What already exists
+
+Nothing. The repository contains one file, `docs/overnight-design.md`, and no code, tests, CI, or scaffolding. There is no existing flow to capture output from and no prior implementation to reuse or rebuild, so every path in the coverage map is new construction.
+
+What does exist is external and load-bearing, and the plan's posture toward each is to compose rather than reimplement: OpenSSH for transport and authentication, tmux for session persistence and runtime truth, `libghostty-vt` for terminal emulation, git for worktrees, launchd and systemd for service lifetime, SQLite for durable state, and Tailscale for network reach. This review pushed further in that direction by deleting an Overnight certificate authority in favour of sshd and a second terminal backend in favour of committing to tmux.
+
+### NOT in scope
+
+Considered during this review and explicitly excluded, each with the reason it was cut rather than a bare list:
+
+| Excluded | Why |
+|---|---|
+| Overnight certificate authority, client certificates, QR pairing, Tailscale-direct mTLS listener | SSH already authenticates both directions; the CA duplicated it and would be owned forever |
+| Native PTY backend | Stopped being a swap once runtime state derived from tmux and the escape hatch became a tmux client |
+| Declared servers, port metadata, liveness probes, browser handoff | Tailscale already makes `http://host:PORT` reachable; the resource was a duplicate terminal lifecycle |
+| Mosh, in every form | Carried no RPCs, so it needed a parallel SSH connection anyway, and the terminal channel already does durable resume |
+| Push notifications, APNs relay, Live Activities, Dynamic Island | Carried a hosted service, privacy model, retention, rotation, and abuse limits the core thesis does not need proven |
+| Buffered control snapshots | Removed rather than capped; version-ordered streaming has no buffer to size |
+| OS privilege separation between terminals and daemon administration | Would make `host_admin` a real boundary, but expands install, packaging, and recovery across three platforms |
+| Follow-the-active-window attach leases | Had a race in which the invariant was false; no lease at all is the honest position |
+| Real sshd in per-commit CI | Moved to a scheduled pre-release lane rather than removed |
+| Global replay memory budget | Fixed per-terminal cap kept for predictability; recorded as the known fix if the footprint bites |
+| Workspace transfer, failover, scheduling, hosted environments, team collaboration, Windows-native daemon, IDE streaming | Pre-existing deferrals, unchanged by this review |
+
+### Failure modes
+
+For each new codepath, one realistic production failure, whether a test covers it, whether error handling exists, and what the user sees.
+
+| Codepath | Realistic failure | Test | Handled | User sees |
+|---|---|---|---|---|
+| Control-mode parser | Escape sequence split across reads corrupts the stream | Planned | Yes: pause commands, reconnect, advance epoch, emit gap | Visible gap marker |
+| Inventory live view | A notification type is never parsed, so a dead pane stays `running` | Planned backstop reconcile | Partial: reconcile detects, logs as defect | Correct state after reconcile; stale until then |
+| Derivation | Two panes claim one terminal ID | Planned | Yes: derives `lost`, surfaces both as orphans | Terminal `lost`, adopt-or-kill offered |
+| Worktree saga | Disk fills between git success and metadata commit | Planned | Yes: intent persists, derives `lost`, artifacts preserved | Named failure plus recovery instructions |
+| `authorized_keys` fence edit | Concurrent external edit corrupts the fence | Planned | Yes: verify-then-refuse, never rewrite | Exact file state and the entry to add manually |
+| Terminal input | Delayed input from a revoked writer arrives on a live connection | Planned | Yes: lease-generation fence rejects pre-PTY | Nothing; rejected silently by design |
+| Input acknowledgment | Partial PTY write fails midway | Planned | Yes: retried internally, then unacknowledged | "Delivery uncertain", user decides, never auto-resent |
+| Replay | Client returns after more output than the buffer holds | Planned | Yes: `Gap` with exact `lost_bytes` | Permanent gap marker with byte count |
+| Snapshot | Connection drops mid-snapshot | Planned | Yes: discard and restart | Brief reconnect, then full state |
+| Control backpressure | Client too slow for 30 s | Planned | Yes: `CLIENT_TOO_SLOW`, disconnect, re-snapshot | Reconnecting banner |
+| SSH transport | Host key changed | Planned | Yes: hard refusal | Both fingerprints, no bypass offered |
+| Agent session capture | Vendor CLI changes its hook contract | Planned, scheduled lane | Yes: adapter health `restore_unsupported` | Preset flagged unsupported before it is relied on |
+| macOS unattended mode | Booted with login keychain locked | Planned | Yes: named self-health condition | "Log in once at the Mac", not an auth error |
+| Remote install | Checksum mismatch on the daemon binary | Planned | Yes: refuse before execution | Named mismatch, install aborted |
+
+**Critical gaps: 0.** Every failure above has a planned test, error handling, and a user-visible outcome. The one partial is the inventory live view, where a missed notification type is silent until the backstop reconcile runs; it is not a critical gap because a detection path exists, but it is the single place where correctness rests on parser completeness, and it deserves the most adversarial testing in the suite.
+
+### Parallelization strategy
+
+| Step | Modules touched | Depends on |
+|---|---|---|
+| S1 Protocol and codegen | `crates/protocol` | — |
+| S2 Durable store | `crates/store` | S1 |
+| S3 Core state and derivation | `crates/core` | S1 |
+| S4 tmux control and inventory | `crates/tmux` | S3 (trait only) |
+| S5 Transport and framing | `crates/transport` | S1 |
+| S6 Daemon composition and lifecycle | `crates/daemon` | S2, S3, S4, S5 |
+| S7 CLI | `crates/cli` | S1, S5 |
+| S8 Terminal core FFI | `native/terminal` | — |
+| S9 SSH core FFI | `native/ssh` | — |
+| S10 Mac app | `apps/macos` | S1, S8 |
+| S11 Test infrastructure | `test/rigs` | — |
+
+```text
+Lane A: S1 → S2 → S6            (protocol, store, then composition)
+Lane B: S1 → S3 → S4            (core, then tmux against core's trait)
+Lane C: S1 → S5 → S7            (transport, then CLI)
+Lane D: S8 (independent)        (terminal FFI, no daemon dependency)
+Lane E: S9 (independent)        (SSH FFI, no daemon dependency)
+Lane F: S11 (independent)       (network rig, reboot fixture, output generator)
+
+Launch: S1 alone, then A + B + C + D + E + F in parallel.
+Join:   S6 waits on A, B, C. S10 waits on S1 and D.
+```
+
+Conflict flags: Lanes A and B both land in `crates/core`'s type definitions early, since `store` and `tmux` both consume them; freeze the resource types at the end of S1 to avoid churn. Lanes D and E both establish the shared FFI convention, so whichever starts first writes it and the other adopts it rather than both inventing one.
+
+### Implementation Tasks
+
+Synthesized from this review's findings. Each task derives from a specific finding above.
+P1 blocks ship, P2 lands on the same branch, P3 is a follow-up.
+
+- [ ] **T1 (P1, human: ~2h / CC: ~10min)** — `crates/core` — Define `RuntimeInventory` and put derivation behind it
+  - Surfaced by: Code Quality CQ1 — `core` and `tmux` would each need the other's types, which is a compile error
+  - Files: `crates/core/src/inventory.rs`, `crates/core/src/derive.rs`
+  - Verify: `cargo test -p core derive::` passes against a fake inventory with no tmux present
+- [ ] **T2 (P1, human: ~1h / CC: ~5min)** — `crates/protocol` — Add the `intent` enum and forbid client derivation
+  - Surfaced by: Code Quality CQ3 — D25 added the field without enumerating it, inside a never-reuse-numbers contract
+  - Files: `proto/terminal.proto`, `crates/core/src/terminal.rs`
+  - Verify: `cargo test -p core intent::` covers all three values; no client code references `intent` in a state computation
+- [ ] **T3 (P1, human: ~half a day / CC: ~15min)** — `crates/core` — One error enum, exhaustively matched to wire codes
+  - Surfaced by: Code Quality CQ4 — no catch-all, so an unmapped variant fails the build
+  - Files: `crates/core/src/error.rs`, `crates/protocol/src/codes.rs`
+  - Verify: `cargo test -p core error::round_trip` asserts every variant maps and no message leaks a path, terminal byte, command, or session ID
+- [ ] **T4 (P1, human: ~half a day / CC: ~15min)** — `crates/tmux` — Live inventory view driven by control-mode notifications
+  - Surfaced by: Performance P1 — a timed cache reintroduces the stale `running` that D25 removed
+  - Files: `crates/tmux/src/inventory.rs`, `crates/tmux/src/control.rs`
+  - Verify: killing a pane flips derived state without waiting for a tick; backstop reconcile logs divergence as a defect
+- [ ] **T5 (P1, human: ~3h / CC: ~10min)** — `native/` — Write the shared FFI convention before either core exists
+  - Surfaced by: Code Quality CQ2 — two native cores across three platforms is six places to invent lifetime rules
+  - Files: `native/README-ffi.md`, `native/terminal/include/`, `native/ssh/include/`
+  - Verify: both cores' headers conform; ABI version mismatch fails loudly at load in a test
+- [ ] **T6 (P1, human: ~1.5 days / CC: ~25min)** — `crates/daemon` — Fenced `authorized_keys` editing
+  - Surfaced by: D19 — enrollment, scope changes, and revocation all mutate a user-critical file
+  - Files: `crates/daemon/src/enrollment.rs`
+  - Verify: atomic write preserving mode `0600`; foreign entries never reordered; damaged fence refuses and prints the manual entry
+- [ ] **T7 (P1, human: ~1 day / CC: ~20min)** — `crates/transport` — Version-ordered snapshot streaming with no buffering
+  - Surfaced by: D28 — the buffered design had an unbounded daemon-memory path driven by a slow client
+  - Files: `crates/transport/src/snapshot.rs`
+  - Verify: snapshot interleaved with heavy mutation converges identically to a quiet one; 4 MiB ceiling for 30 s yields `CLIENT_TOO_SLOW`
+- [ ] **T8 (P1, human: ~1 day / CC: ~20min)** — `crates/protocol` — Terminal channel wire contract
+  - Surfaced by: D22 — sequence units, `FlowAck`, `Gap`, and resume tokens were undefined
+  - Files: `proto/terminal_frame.proto`, `crates/transport/src/replay.rs`
+  - Verify: byte offsets are reproducible across differing chunk boundaries; overflow reports exact `lost_bytes`; token bound to client, terminal, and epoch
+- [ ] **T9 (P1, human: ~3 days / CC: ~half a day)** — `test/rigs` — Build the three test rigs the criteria depend on
+  - Surfaced by: Test review T1 — criteria 7, 12, and the throughput suite cannot be honestly claimed without them
+  - Files: `test/rigs/netprofile/`, `test/rigs/reboot/`, `test/rigs/output-gen/`
+  - Verify: rig holds RTT at 100 ms with 1% loss; reboot fixture returns a host to a known state; generator sustains 1 MiB/s
+- [ ] **T10 (P2, human: ~1 day / CC: ~20min)** — `crates/protocol` — Repository-root and scope administration methods
+  - Surfaced by: D20 — Reviewer Concern 2, referenced without any method behind it
+  - Files: `proto/admin.proto`, `crates/core/src/roots.rs`
+  - Verify: root removal refused while non-archived workspaces exist; scope lowering closes live connections
+- [ ] **T11 (P2, human: ~1 day / CC: ~20min)** — `apps/macos` — Worktree removal with its specified confirmation path
+  - Surfaced by: D29 — the Mac section contradicted itself on whether this shipped
+  - Files: `apps/macos/Sources/WorkspaceRemoval/`
+  - Verify: blocked while terminals run and names them; dirty state demands the exact workspace name; branch never offered for deletion
+- [ ] **T12 (P2, human: ~1.5 weeks / CC: ~2-3 days)** — `native/ssh` — Shared Rust SSH client behind the C ABI
+  - Surfaced by: D33 — host-key verification is now the whole of transport authentication
+  - Files: `native/ssh/`, platform signer bindings
+  - Verify: crate meets the written acceptance criteria; hardware-backed signing never exposes the private key; bastion hop works on all clients
+- [ ] **T13 (P2, human: ~1 day / CC: ~20min)** — `apps/macos` — Unattended-mode registration and its limits
+  - Surfaced by: D27 — logout, reboot, FileVault, and keychain behaviour were untested and unstated
+  - Files: `apps/macos/Sources/ServiceRegistration/`
+  - Verify: service-lifetime matrix passes; daemon runs as the enrolling user, never root; keychain-locked state is a named condition
+- [ ] **T14 (P3, human: ~2h / CC: ~10min)** — `crates/daemon` — Report replay memory in host self-health
+  - Surfaced by: Performance P2 — the ~160 MiB cost was accepted on condition it stays observable
+  - Files: `crates/daemon/src/health.rs`
+  - Verify: reported total matches the sum of retained windows under the five-workspace fixture
+
+_No new tasks from the Architecture section beyond those above; its twenty decisions are folded into the design text itself._
+
 ## The Assignment
 
 Schedule a 60-minute observation session with the anonymized ML-engineer design partner. Do not demo a proposed interface. Ask them to recreate their current workflow while sharing their screen:
