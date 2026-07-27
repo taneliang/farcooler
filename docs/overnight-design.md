@@ -683,6 +683,12 @@ Events are resource snapshots or transitions: `host.changed`, `repository.change
 
 Scopes are cumulative: `host_admin` includes `control`, which includes `read`.
 
+`read` is a genuine security boundary. A read-scoped client never executes anything on the host: it lists resources, attaches to terminal output, and reads operation logs with paths and vendor session IDs withheld.
+
+`host_admin` is an application safety rail, not containment. A `control` client writes bytes into a real shell running as the daemon's own operating-system user, so it can read `~/Library/Application Support/Overnight/`, the identity key, and the SQLite database, invoke the `overnight` CLI over the local socket, or run any other program as that user. Everything `host_admin` protects is reachable by going around the API instead of through it. Overnight therefore does not claim that a hostile `control` client is contained beneath `host_admin`, and no part of the product may be documented as if it were.
+
+What `host_admin` does buy is worth keeping: it prevents accidental repository-root changes, path disclosure, worktree removal, client revocation, daemon updates, and other destructive actions from happening through ordinary APIs and ordinary UI taps. It is an accident brake and an audit distinction, evaluated on every request.
+
 | Method or field | Minimum scope |
 |---|---|
 | List resources, attach terminal output read-only, read operation logs excluding paths and vendor session IDs | `read` |
@@ -693,6 +699,10 @@ Scopes are cumulative: `host_admin` includes `control`, which includes `read`.
 | Pair subsequent clients or change scopes | `host_admin` plus daemon confirmation policy |
 
 Every request checks live revocation and scope state, including requests on an established WebSocket. Revoking a client immediately closes all of its active connections before the revoke operation succeeds.
+
+Because `control` carries full host-user authority, pairing enforces the distinction in the product surface rather than only in documentation. Granting `control` or `host_admin` to a client requires local host confirmation and displays the plain-language warning that the device gains the ability to run any command as the host user. `read` is offered as the safe choice for a device the user does not fully trust. Revocation is the only containment response to a compromised `control` client, so revocation latency is a success criterion and revocation is reachable from the host CLI without a paired client.
+
+This posture matches Overnight's initial threat model: a single developer's personal hosts, where every paired device is one the user already trusts with their laptop. A real containment boundary would require a separate operating-system principal for daemon administration with sandboxed terminal workers and narrow IPC between them. That is deliberately deferred; see "Deferred."
 
 ##### Control-channel synchronization
 
@@ -787,11 +797,14 @@ Tailscale supplies private WireGuard connectivity and stable addressing; SSH sup
 Security boundaries:
 
 - The daemon never runs as root and can operate only as its operating-system user.
-- Repository roots are explicitly allowlisted. Overnight rejects arbitrary path traversal outside them.
+- Repository roots are explicitly allowlisted. Overnight rejects arbitrary path traversal outside them. The allowlist constrains Overnight's own git and worktree operations; it does not constrain what a shell running inside a terminal can reach, because that shell has the host user's full filesystem access.
 - Terminal control grants arbitrary command execution as the daemon user. The UI states this plainly; “control” is not a reduced shell permission.
+- Overnight runs one operating-system security principal: the daemon's user. Terminal workers, the daemon, its identity key, its SQLite database, and the user's repositories all live inside that one principal. There is no privilege separation between a managed terminal and daemon-owned state in MVP.
+- Consequently `host_admin` is an application safety rail, not a containment boundary. It stops accidental and casual destructive actions through Overnight's own APIs. It does not stop a hostile `control` client, which can read daemon secrets, drive the local CLI, or alter daemon-owned state directly on the filesystem. Only `read` is a genuine non-executing boundary.
 - Destructive workspace actions require `host_admin` plus exact typed confirmation when state is uncertain.
-- Audit logs contain client ID, operation, resource ID, result, and timestamp, not terminal contents or command text. Default retention is seven days and is locally configurable.
+- Audit logs contain client ID, operation, resource ID, result, and timestamp, not terminal contents or command text. Default retention is seven days and is locally configurable. Audit records attribute API actions to a client identity; they cannot attribute actions a `control` client took by running commands inside a terminal, because those are indistinguishable from the user's own shell activity.
 - A compromised paired control client is contained only by its daemon scopes and host-user permissions. Revocation is the immediate response; Overnight cannot make an arbitrary shell intrinsically safe.
+- Same-user access to the private tmux socket, the Unix domain socket, or the runtime directory is equivalent to `control` and is outside the application trust boundary by construction, as documented in the reconciliation and escape-hatch sections.
 
 ### First-run onboarding
 
@@ -896,6 +909,7 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 - Team collaboration and shared workspaces.
 - Windows-native daemon outside WSL2.
 - Full IDE or remote-desktop streaming.
+- Operating-system privilege separation between managed terminals and daemon administration. A separate administrative principal with sandboxed terminal workers would make `host_admin` a real containment boundary, but it expands macOS, Linux, WSL2, installation, packaging, credential-access, and recovery work well beyond the MVP proof.
 
 ## Open Questions
 
@@ -910,11 +924,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 7. **Accepted before Milestone 1:** Keep daemon self-health on the `Host` resource but make reachability a per-client `HostConnection` observation. Each client records its active route, connection state, last connection/event times, latency, and error, then derives online/degraded/offline locally; an offline daemon never attempts to report itself offline.
 8. **Accepted before Milestone 1:** Resolve uncertain runtime state through typed per-resource methods: dismiss, restart, or exact-agent restore for lost terminals and dismiss or restart for unknown servers. Never adopt an OS process from persisted PID/PGID data; exact automatic reattachment remains limited to live tmux objects whose daemon and resource tags match.
 9. **Accepted before Milestone 1:** Make runtime states proof-based: an exact-tagged live tmux terminal is `running`, an expected terminal without exact runtime identity is `lost`, and terminals never use `unknown`; a server whose post-restart identity cannot be proved is `unknown`. A workspace stays `error` only while child uncertainty is unresolved, then recomputes to `ready` or `active`.
-10. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-11. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-12. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-13. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-14. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+10. **Accepted before Milestone 1:** Keep `read`, `control`, and `host_admin`, and document `host_admin` as an application safety rail rather than containment. `read` is the only genuine non-executing boundary; `control` grants full command execution as the host user and cannot be securely contained beneath `host_admin` without a second operating-system principal. Pairing states this plainly and requires local confirmation for `control` or `host_admin`; revocation is the containment response. Privilege-separated terminal workers are deferred.
+11. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+12. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+13. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+14. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+15. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -1101,7 +1116,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 ### Feasibility and security
 
-12. A terminal-control client can execute as the daemon's operating-system user, so `control` is effectively full host administration unless daemon secrets and administration move to another OS security principal.
+12. **Resolved in engineering review:** the concern is accurate and is now stated in the design rather than papered over. `control` is full host authority as the daemon's OS user, `read` is the only genuine non-executing boundary, and `host_admin` is documented as an application safety rail that stops accidental destructive actions through Overnight's APIs, not as containment against a hostile `control` client. Pairing warns in plain language and requires local confirmation for `control` or `host_admin`; revocation is the containment response. Moving daemon administration to a separate OS principal with sandboxed terminal workers is deferred with an explicit rationale.
 13. **Resolved in engineering review:** MVP never adopts an unknown OS process from persisted PID/PGID data. It may automatically reattach only to live tmux objects with exact daemon/resource tags, and adopting an orphaned tagged tmux candidate requires confirmation plus a fresh identity check.
 14. macOS LaunchAgent and Linux user-service behavior across logout must be tested and the supported unattended-host requirement stated explicitly.
 15. Full control snapshots need duration and buffered-event caps to prevent a slow client or large fleet from consuming unbounded daemon memory.
