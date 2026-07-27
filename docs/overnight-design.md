@@ -159,7 +159,7 @@ The first implementation slice proves workspace and terminal-control correctness
 - One launchd-managed, unprivileged local daemon plus CLI, reached through a Unix domain socket. The Mac app stays a thin client; workspace, git, process, terminal, and operation truth remain daemon-owned and survive Mac-app termination.
 - One existing local repository, one worktree/branch workspace flow, one supported coding-agent CLI preset, and multiple terminal tabs.
 - A dedicated tmux server namespace such as `tmux -L overnight-<install-id> -f /dev/null`. Overnight never mixes managed sessions into the user's default tmux server or depends on the user's tmux configuration.
-- The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy, controls, and terminal surface.
+- The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy and controls. Its terminal surface uses the shared libghostty core through an Overnight-owned adapter.
 - `overnight attach WORKSPACE_ID` remains mandatory and attaches an ordinary shell client to the managed session. The equivalent raw tmux command is shown for transparency and recovery.
 - SQLite is canonical for desired Overnight product state and stable IDs. tmux supplies observed terminal/runtime state. Restart reconciliation compares them; it never treats an untagged or unmatched tmux session as an Overnight workspace automatically.
 - No Tailscale-direct listener, SSH application transport, embedded Mosh transport, React Native iOS app, APNs relay, Live Activity, Linux/WSL2 support, or native PTY fallback in this slice.
@@ -211,6 +211,41 @@ apps/
 
 The first slice may ship separate `overnightd` and `overnight` executables from the same Cargo workspace. “Single statically distributable binary” means self-contained installation without a language runtime; it does not require collapsing daemon and CLI process roles or fully static macOS linking.
 
+### Shared terminal core: libghostty
+
+Overnight uses `libghostty-vt` as its terminal emulation and render-state core on Mac, iOS, and Android. This decision gives every client the same VT parsing, Unicode and grapheme behavior, terminal modes, key and mouse encoding, text reflow, scrollback model, and render-state semantics while preserving platform-native UI:
+
+```text
+protobuf terminal frames
+           │
+  OvernightTerminalCore
+           │
+     libghostty-vt
+      ┌────┼──────────┐
+      │    │          │
+Mac Swift  iOS native Android Kotlin
+AppKit     RN module  RN module + JNI
+renderer   renderer   renderer
+```
+
+- `libghostty-vt` consumes terminal output bytes and produces terminal/render state. It does not own the daemon connection, replay sequence, writer lease, workspace model, or tmux lifecycle.
+- `OvernightTerminalCore` is a narrow C-ABI adapter owned by Overnight. Platform code depends on this adapter rather than directly exposing upstream structs or function signatures.
+- Upstream is pinned to an audited commit. Upgrades are explicit dependency changes that must pass the terminal conformance corpus on every supported client platform.
+- The Mac app embeds the adapter from Swift and uses a native AppKit rendering surface. The mobile application remains React Native, with native terminal components mounted behind one JavaScript/TypeScript component contract.
+- Android packages the core through the Android NDK and a small JNI bridge. Kotlin owns Android text input, IME composition, hardware keys, touch selection, clipboard, accessibility, lifecycle, and the selected native rendering surface.
+- iOS uses the same core through its C ABI. Swift owns UIKit text input, selection, accessibility, lifecycle, and the selected Metal/Core Graphics rendering surface.
+- The shared React Native terminal contract is byte-oriented: write ordered output, reset after a declared gap, emit exact input bytes, resize, select, copy/paste, search, and publish renderer metrics. No platform renderer invents transport or reconnection behavior.
+- A terminal `Gap` discards the affected client-side emulator instance before applying the retained tail. The UI shows a persistent output-gap marker because a byte tail cannot reconstruct terminal state that was evicted.
+
+The initial terminal spike is not complete until it:
+
+1. Renders a tmux control-mode session in the Swift Mac app through libghostty.
+2. Builds `libghostty-vt` and the Overnight adapter for Android ARM64 in CI.
+3. Displays a recorded interactive terminal fixture in a minimal Android React Native native component on an emulator or physical device.
+4. Runs the same output, key-encoding, resize, alternate-screen, Unicode, scrollback, and gap fixtures against Mac and Android.
+
+Android compilation and rendered-fixture tests are architecture validation for this Mac-first slice, not a user-ready Android client. If the Android build or input/render contract fails, terminal architecture is reopened before the Mac vertical slice expands. Because libghostty's embedding API is not yet versioned, Overnight budgets adapter maintenance and does not depend on source compatibility across pinned upgrades.
+
 ### Product hierarchy
 
 ```text
@@ -228,8 +263,8 @@ Fleet
 The founder-approved product boundary remains intact, but implementation is ordered to resolve the hardest risks first:
 
 1. **Gate 0: observe the design partner.** Confirm that parallel mobile terminal control is the highest-value workflow and record the actual host, CLI, repository, and failure sequence.
-2. **Gate 1: local tmux correctness spike.** A local daemon creates one private tmux-backed workspace, streams it through control mode, supports `overnight attach`, and survives Mac-app disconnect/reconnect. Compare against the terminal, process, scrollback, resize, writer, and reconciliation acceptance suite; choose native PTYs only if tmux fails a required invariant.
-3. **Milestone 1: Mac-first local vertical slice.** Native Swift Mac client, macOS arm64 daemon/CLI, Unix-socket protocol, SQLite metadata, existing repository, transactional worktree creation, one CLI preset, multiple terminal tabs, five concurrent workspaces, archive, and observable process states.
+2. **Gate 1: local tmux and libghostty correctness spike.** A local daemon creates one private tmux-backed workspace, streams it through control mode into a libghostty-backed Mac surface, supports `overnight attach`, and survives Mac-app disconnect/reconnect. Build the same libghostty adapter for Android ARM64 and render the recorded fixture through a minimal React Native native component. Compare Mac and Android against the terminal, process, scrollback, resize, writer, and reconciliation acceptance suites; choose native PTYs only if tmux fails a required invariant, and reopen the renderer architecture if the Android proof fails.
+3. **Milestone 1: Mac-first local vertical slice.** Native Swift Mac client with a libghostty-backed terminal surface, macOS arm64 daemon/CLI, Unix-socket protocol, SQLite metadata, existing repository, transactional worktree creation, one CLI preset, multiple terminal tabs, five concurrent workspaces, archive, and observable process states.
 4. **Gate 2: SSH transport and reconnect spike.** Expose the same daemon protocol through SSH stdio, connect a second client, disconnect repeatedly, transfer writer ownership, and prove ordered replay without duplicate input. `mosh host -- overnight attach WORKSPACE` remains the terminal escape hatch rather than a GUI transport requirement.
 5. **Milestone 2: mobile vertical slice.** One React Native iOS screen connects through SSH, lists the Mac-proven workspaces, controls a terminal, and passes the mobile terminal acceptance suite. Run the same renderer on Android as architecture validation only.
 6. **Milestone 3: validated product workflow.** Multiple macOS/Linux hosts, repository clone, five concurrent workspaces, server metadata, Claude Code/Codex/Cursor presets, signed installers, upgrade/rollback path, and the design-partner success criterion.
@@ -411,7 +446,7 @@ Every managed terminal or server starts in a daemon-owned operating-system sessi
 - When that gate passes: one fleet-level Live Activity, implemented by a native ActivityKit/WidgetKit extension and React Native bridge, showing aggregate running, exited/failed, and offline/unknown counts on the Lock Screen and supported Dynamic Island presentations.
 - Clear display of host, repository, branch, worktree cleanliness, process status, and connection state.
 
-The terminal renderer is the highest-risk technical spike. Before full implementation, validate one renderer on iOS and Android for latency, ANSI/VT compatibility, keyboard behavior, selection, accessibility, and large scrollback. React Native remains the application framework even if the terminal itself requires a native module.
+The terminal renderer is the highest-risk technical spike. `libghostty-vt` is the accepted shared terminal core; platform-native render and input adapters must still be validated on iOS and Android for latency, keyboard behavior, selection, accessibility, and large scrollback. React Native remains the mobile application framework while the terminal surface is a native module.
 
 Terminal acceptance requires:
 
@@ -738,7 +773,7 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 
 These questions have explicit decision gates and may not remain unresolved when their milestone begins:
 
-1. **Gate 1:** Which terminal renderer passes the iOS acceptance suite and Android architecture-validation build inside React Native, and does a private tmux backend or native PTY backend better satisfy persistence, handoff, process ownership, and shell-escape-hatch requirements?
+1. **Accepted for Gate 1:** Use pinned `libghostty-vt` behind an Overnight-owned C-ABI adapter as the shared Mac, iOS, and Android terminal core. Prove tmux control mode through the Mac surface and require an Android ARM64 build plus rendered-fixture smoke test in the same spike. Keep the private tmux backend unless it fails a required persistence, handoff, process-ownership, or shell-escape-hatch invariant.
 2. **Gate 2:** Which maintained iOS SSH implementation supports host-key verification, modern keys, bastions/agents, and a reliable stdio tunnel without making React Native own crypto? Does the Mosh terminal adapter earn its added UDP and client-library complexity?
 3. **Accepted before Milestone 1:** Implement the daemon and CLI in Rust, using Tokio, Prost, bundled SQLite through rusqlite, and a crate boundary that keeps protocol, core state, storage, tmux, transport, composition, and CLI concerns separate. Validate macOS arm64 packaging in the first vertical slice and add Linux/WSL2 build-and-smoke CI before remote-host support enters scope.
 4. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
