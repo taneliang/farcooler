@@ -182,6 +182,35 @@ iOS client ──── SSH stdio ───┘
 - Contract tests run unchanged against an in-memory adapter, Unix socket, and SSH stdio. A behavior is not complete if it passes locally through a special path that the remote adapter cannot exercise.
 - The native Mac app, future React Native client, and CLI consume generated SDKs from the same typed IDL. Platform clients own presentation and local caches only.
 
+### Daemon and CLI implementation: Rust
+
+The daemon and CLI are implemented in Rust. Swift remains a client language for the native Mac app and does not cross the daemon ownership boundary. Rust is selected for the long-lived terminal, process, protocol, persistence, and reconciliation core because it provides memory safety, explicit state modeling, and portable binaries across macOS, Linux, and WSL2.
+
+The initial Cargo workspace is divided by behavior boundary rather than transport:
+
+```text
+crates/
+├── protocol    protobuf-generated types, framing, compatibility
+├── core        resource models, state machines, commands, events
+├── store       SQLite schema, migrations, repositories
+├── tmux        private-server lifecycle, control mode, reconciliation
+├── transport   shared connection/session logic and Unix-socket adapter
+├── daemon      composition root, launchd lifecycle, observability
+└── cli         workspace commands, attach, protocol inspection
+apps/
+└── macos       native Swift client using generated protobuf types
+```
+
+- Tokio owns asynchronous I/O, Unix sockets, subprocess supervision, cancellation, and bounded channels.
+- Prost generates Rust protobuf types from the canonical `.proto` files. The Swift client generates its corresponding types from the same files.
+- rusqlite uses bundled SQLite so the daemon controls its database version and does not depend on a host package manager.
+- `tracing` produces structured, redacted daemon logs with request, operation, workspace, and terminal IDs.
+- Domain state transitions live in `core`; transports, tmux output, CLI arguments, and database rows are translated at the boundary. Transport handlers do not mutate SQLite or tmux directly.
+- Platform-specific code is isolated behind narrow traits and modules. The Mac-first slice implements macOS process and launchd behavior without introducing a separate service contract that Linux must later emulate.
+- Unsafe Rust is forbidden in Overnight-owned crates during the first slice. Any dependency requiring unsafe code is reviewed and pinned through the dependency policy.
+
+The first slice may ship separate `overnightd` and `overnight` executables from the same Cargo workspace. “Single statically distributable binary” means self-contained installation without a language runtime; it does not require collapsing daemon and CLI process roles or fully static macOS linking.
+
 ### Product hierarchy
 
 ```text
@@ -575,7 +604,7 @@ SSH support must include known-host verification with first-use fingerprints, ch
 
 `overnight protocol inspect` can decode a captured length-delimited stream or individual protobuf envelope into redacted protobuf JSON for debugging. It hides terminal input/output and path-bearing fields unless the user passes an explicit local reveal flag.
 
-Length-delimited protobuf envelopes are sufficient for the first-party clients. The Mosh adapter terminates at `overnight attach`/tmux rather than encapsulating this full protocol. The implementation language for the daemon remains an engineering-plan decision; a single statically distributable binary is strongly preferred.
+Length-delimited protobuf envelopes are sufficient for the first-party clients. The Mosh adapter terminates at `overnight attach`/tmux rather than encapsulating this full protocol. The Rust daemon and CLI are distributed as self-contained native executables without requiring a language runtime.
 
 #### 5. Pairing, identity, and trust boundaries
 
@@ -711,7 +740,7 @@ These questions have explicit decision gates and may not remain unresolved when 
 
 1. **Gate 1:** Which terminal renderer passes the iOS acceptance suite and Android architecture-validation build inside React Native, and does a private tmux backend or native PTY backend better satisfy persistence, handoff, process ownership, and shell-escape-hatch requirements?
 2. **Gate 2:** Which maintained iOS SSH implementation supports host-key verification, modern keys, bastions/agents, and a reliable stdio tunnel without making React Native own crypto? Does the Mosh terminal adapter earn its added UDP and client-library complexity?
-3. **Before Milestone 1:** Which daemon implementation language best supports portable PTYs/tmux control, static distribution, mTLS, SSH stdio, SQLite, and maintainability? Decide with two small spikes, not preference.
+3. **Accepted before Milestone 1:** Implement the daemon and CLI in Rust, using Tokio, Prost, bundled SQLite through rusqlite, and a crate boundary that keeps protocol, core state, storage, tmux, transport, composition, and CLI concerns separate. Validate macOS arm64 packaging in the first vertical slice and add Linux/WSL2 build-and-smoke CI before remote-host support enters scope.
 4. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
 5. **Before Cursor enters Milestone 2:** Are Cursor CLI invocation, authentication, and redistribution stable enough for a supported preset? If not, document it as an external command preset with reduced compatibility guarantees.
 6. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
