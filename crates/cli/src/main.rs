@@ -89,6 +89,12 @@ enum TerminalCmd {
     },
     /// Send exact bytes to a terminal.
     Send { terminal: String, data: String },
+    /// Send exact input bytes as hex. This is the terminal client input path.
+    SendHex { terminal: String, hex: String },
+    /// Print the rendered visible screen with colour escapes intact.
+    Screen { terminal: String },
+    /// Resize the terminal to a viewer's geometry.
+    Resize { terminal: String, columns: u32, rows: u32 },
     /// Print recent output.
     Read {
         terminal: String,
@@ -257,6 +263,29 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let id = resolve_terminal(&svc, &terminal).await?;
             svc.send_input(id, &data).await?;
             println!("sent {} bytes", data.len());
+        }
+
+        Command::Terminal(TerminalCmd::SendHex { terminal, hex }) => {
+            let id = resolve_terminal(&svc, &terminal).await?;
+            svc.send_bytes_hex(id, &hex).await?;
+        }
+
+        Command::Terminal(TerminalCmd::Screen { terminal }) => {
+            let id = resolve_terminal(&svc, &terminal).await?;
+            let (text, cols, rows) = svc.screen(id).await?;
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "screen": text, "columns": cols, "rows": rows })
+                );
+            } else {
+                print!("{text}");
+            }
+        }
+
+        Command::Terminal(TerminalCmd::Resize { terminal, columns, rows }) => {
+            let id = resolve_terminal(&svc, &terminal).await?;
+            svc.resize_terminal(id, columns, rows).await?;
         }
 
         Command::Terminal(TerminalCmd::Read { terminal, lines }) => {

@@ -166,6 +166,50 @@ impl TmuxServer {
         Ok(())
     }
 
+    /// Send exact input BYTES, given as hex.
+    ///
+    /// This is the real input path for a terminal client. The client computes
+    /// the VT encoding for whatever the user pressed, arrows and control chords
+    /// included, and those exact bytes reach the PTY. Nothing is interpreted as
+    /// a tmux key name along the way, so a literal `Up` typed by a user is text
+    /// and an actual arrow key is `1b5b41`.
+    pub async fn send_bytes_hex(&self, pane_id: &str, hex: &str) -> Result<()> {
+        if hex.is_empty() {
+            return Ok(());
+        }
+        if !hex.chars().all(|c| c.is_ascii_hexdigit()) || hex.len() % 2 != 0 {
+            return Err(DomainError::InvalidArgument { what: "hex payload" });
+        }
+
+        // tmux -H takes space-separated byte values.
+        let bytes: Vec<String> =
+            hex.as_bytes().chunks(2).map(|p| String::from_utf8_lossy(p).into_owned()).collect();
+
+        let mut args: Vec<&str> = vec!["send-keys", "-t", pane_id, "-H"];
+        args.extend(bytes.iter().map(|s| s.as_str()));
+
+        let out = self.run(&args).await?;
+        if !out.ok() {
+            tracing::warn!(stderr = %out.stderr, "send-keys -H failed");
+            return Err(DomainError::TmuxUnavailable);
+        }
+        Ok(())
+    }
+
+    /// The rendered visible screen, with SGR escape sequences preserved.
+    ///
+    /// tmux is already the terminal emulator: it has parsed the program's
+    /// output and maintains the screen. Capturing the rendered result is why
+    /// Overnight does not need to emulate a VT itself to show a full-screen TUI
+    /// like a coding agent.
+    pub async fn capture_screen(&self, pane_id: &str) -> Result<String> {
+        let out = self.run(&["capture-pane", "-e", "-p", "-t", pane_id]).await?;
+        if !out.ok() {
+            return Err(DomainError::TmuxUnavailable);
+        }
+        Ok(out.stdout)
+    }
+
     /// Resize the exact window backing a terminal.
     pub async fn resize_window(&self, window_id: &str, columns: u32, rows: u32) -> Result<()> {
         let out = self

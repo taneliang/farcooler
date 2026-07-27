@@ -5,8 +5,8 @@ struct ContentView: View {
     @State private var selectedWorkspace: Workspace?
     @State private var selectedTerminal: Terminal?
     @State private var output = ""
-    @State private var input = ""
     @State private var pollTask: Task<Void, Never>?
+    @State private var ticks = 0
 
     var body: some View {
         NavigationSplitView {
@@ -16,6 +16,7 @@ struct ContentView: View {
         }
         .task {
             await client.refresh()
+            selectFirstRunningTerminal()
             startPolling()
         }
         .onDisappear { pollTask?.cancel() }
@@ -82,23 +83,23 @@ struct ContentView: View {
         if let terminal = selectedTerminal {
             TerminalPane(
                 terminal: terminal,
-                output: $output,
-                input: $input,
-                onSend: {
-                    let text = input
-                    input = ""
-                    Task {
-                        await client.send(terminal: terminal.short, text: text + "\n")
-                        try? await Task.sleep(for: .milliseconds(350))
-                        output = await client.capture(terminal: terminal.short)
-                    }
+                screen: $output,
+                onBytes: { bytes in
+                    // Straight into the serial queue. Never spawn a task per
+                    // keystroke: concurrent sends reorder the bytes and "echo"
+                    // arrives as "ehco".
+                    let q = inputQueue(for: terminal.short)
+                    Task { await q.submit(bytes) }
+                },
+                onGeometry: { cols, rows in
+                    Task { await client.resize(terminal: terminal.short, columns: cols, rows: rows) }
                 },
                 onRestart: { Task { await client.restart(terminal: terminal.short) } },
                 onDismiss: { Task { await client.dismissLost(terminal: terminal.short) } },
                 onStop: { Task { await client.stop(terminal: terminal.short) } }
             )
             .task(id: terminal.id) {
-                output = await client.capture(terminal: terminal.short)
+                output = await client.screen(terminal: terminal.short)
             }
         } else if let ws = selectedWorkspace {
             WorkspaceSummary(workspace: ws) { preset in
@@ -113,16 +114,61 @@ struct ContentView: View {
         }
     }
 
+    /// Land on something usable rather than an empty pane.
+    ///
+    /// A running terminal is what you almost always want on open, so prefer one,
+    /// then fall back to any terminal, then to a workspace.
+    private func selectFirstRunningTerminal() {
+        guard selectedTerminal == nil else { return }
+
+        for ws in client.fleet.workspaces {
+            if let t = ws.terminals.first(where: { StateKind.parse($0.state) == .running }) {
+                selectedWorkspace = ws
+                selectedTerminal = t
+                return
+            }
+        }
+        for ws in client.fleet.workspaces where !ws.terminals.isEmpty {
+            selectedWorkspace = ws
+            selectedTerminal = ws.terminals.first
+            return
+        }
+        selectedWorkspace = client.fleet.workspaces.first
+    }
+
+    /// One serial input queue per terminal, created on first keystroke.
+    ///
+    /// Held outside SwiftUI state because recreating it on a view update would
+    /// lose the ordering guarantee it exists to provide.
+    private func inputQueue(for terminal: String) -> InputQueue {
+        if let existing = Self.queues[terminal] { return existing }
+
+        let client = self.client
+        let q = InputQueue { bytes in
+            await client.sendBytes(terminal: terminal, bytes: bytes)
+        }
+        Self.queues[terminal] = q
+        return q
+    }
+
+    private static var queues: [String: InputQueue] = [:]
+
     private func startPolling() {
         pollTask?.cancel()
         pollTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3))
+                // Two cadences: the screen refreshes fast enough to feel live,
+                // the fleet list far less often because it is not latency
+                // sensitive and each refresh costs a tmux inventory.
+                try? await Task.sleep(for: .milliseconds(60))
                 if Task.isCancelled { return }
-                await client.refresh()
+
                 if let t = selectedTerminal {
-                    output = await client.capture(terminal: t.short)
+                    output = await client.screen(terminal: t.short)
                 }
+
+                ticks += 1
+                if ticks % 50 == 0 { await client.refresh() }
             }
         }
     }
@@ -244,9 +290,9 @@ struct WorkspaceSummary: View {
 
 struct TerminalPane: View {
     let terminal: Terminal
-    @Binding var output: String
-    @Binding var input: String
-    let onSend: () -> Void
+    @Binding var screen: String
+    let onBytes: ([UInt8]) -> Void
+    let onGeometry: (Int, Int) -> Void
     let onRestart: () -> Void
     let onDismiss: () -> Void
     let onStop: () -> Void
@@ -257,23 +303,32 @@ struct TerminalPane: View {
         VStack(spacing: 0) {
             header
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(output.isEmpty ? "(no output yet)" : output)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .id("bottom")
-                }
-                .background(Color(nsColor: .textBackgroundColor))
-                .onChange(of: output) { _, _ in
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
+            if kind == .running || kind == .starting {
+                // Keystrokes go straight here. No input box: a text field would
+                // steal Return and swallow the control chords an agent needs.
+                TerminalSurface(
+                    screen: screen,
+                    onBytes: onBytes,
+                    onGeometry: onGeometry
+                )
+            } else {
+                inactiveScreen
             }
 
-            composer
+            footer
         }
+    }
+
+    private var inactiveScreen: some View {
+        ScrollView {
+            Text(screen.isEmpty ? "(no output)" : screen)
+                .font(.system(.body, design: .monospaced))
+                .textSelection(.enabled)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
     }
 
     private var header: some View {
@@ -301,17 +356,20 @@ struct TerminalPane: View {
     }
 
     @ViewBuilder
-    private var composer: some View {
+    private var footer: some View {
         Divider()
-        if kind == .running {
-            HStack(spacing: 8) {
-                TextField("Send to terminal", text: $input)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onSubmit(onSend)
-                Button("Send", action: onSend).disabled(input.isEmpty)
+        if kind == .running || kind == .starting {
+            HStack(spacing: 6) {
+                Image(systemName: "keyboard")
+                Text("Typing goes straight to the terminal. Ctrl-C, arrows, Tab and Esc all pass through.")
+                Spacer()
+                Text("\(terminal.preset)")
+                    .foregroundStyle(.tertiary)
             }
-            .padding(12)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
         } else {
             Text(explanation)
                 .font(.caption)

@@ -57,14 +57,28 @@ final class DaemonClient: ObservableObject {
         }
     }
 
+    /// The rendered visible screen, colour escapes intact.
+    func screen(terminal: String) async -> String {
+        guard let data = await run(["terminal", "screen", terminal, "--json"]) else { return "" }
+        struct Screen: Decodable { var screen: String }
+        return (try? JSONDecoder().decode(Screen.self, from: data))?.screen ?? ""
+    }
+
     func capture(terminal: String, lines: Int = 400) async -> String {
         guard let data = await run(["terminal", "read", terminal, "--lines", "\(lines)"])
         else { return "" }
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    func send(terminal: String, text: String) async {
-        _ = await run(["terminal", "send", terminal, text])
+    /// Exact input bytes. The client computes the VT encoding; nothing along the
+    /// way reinterprets them as key names.
+    func sendBytes(terminal: String, bytes: [UInt8]) async {
+        guard !bytes.isEmpty else { return }
+        _ = await run(["terminal", "send-hex", terminal, KeyEncoder.hex(bytes)])
+    }
+
+    func resize(terminal: String, columns: Int, rows: Int) async {
+        _ = await run(["terminal", "resize", terminal, "\(columns)", "\(rows)"])
     }
 
     func createTerminal(workspace: String, preset: String) async {

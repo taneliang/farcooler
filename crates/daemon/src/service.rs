@@ -368,6 +368,40 @@ impl Service {
         self.tmux.send_keys(&pane, data).await
     }
 
+    /// Exact input bytes, hex encoded, to the live pane proving this terminal.
+    pub async fn send_bytes_hex(&self, id: Uuid, hex: &str) -> Result<()> {
+        let snapshot = self.inventory.snapshot();
+        let pane = snapshot
+            .claimants(id)
+            .into_iter()
+            .find(|p| p.proves_life())
+            .ok_or(DomainError::NotFound)?
+            .pane_id
+            .clone();
+        self.tmux.send_bytes_hex(&pane, hex).await
+    }
+
+    /// The rendered visible screen with colour, plus the pane geometry so a
+    /// client can size itself to what it is actually showing.
+    pub async fn screen(&self, id: Uuid) -> Result<(String, u32, u32)> {
+        let snapshot = self.inventory.snapshot();
+        let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
+        let text = self.tmux.capture_screen(&pane.pane_id).await?;
+        Ok((text, pane.columns, pane.rows))
+    }
+
+    /// Resize the window backing a terminal to the viewer's geometry.
+    pub async fn resize_terminal(&self, id: Uuid, columns: u32, rows: u32) -> Result<()> {
+        let (columns, rows) = validate::clamp_size(columns, rows);
+        let snapshot = self.inventory.snapshot();
+        let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
+
+        if pane.columns == columns && pane.rows == rows {
+            return Ok(());
+        }
+        self.tmux.resize_window(&pane.window_id, columns, rows).await
+    }
+
     pub async fn capture(&self, id: Uuid, lines: u32) -> Result<String> {
         let snapshot = self.inventory.snapshot();
         let pane = snapshot
