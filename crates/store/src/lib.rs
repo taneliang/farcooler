@@ -14,7 +14,7 @@
 mod backup;
 mod error;
 mod migrate;
-mod models;
+pub mod models;
 mod store;
 
 pub use models::{

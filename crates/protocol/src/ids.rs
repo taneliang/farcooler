@@ -23,9 +23,16 @@ pub fn from_bytes(raw: &[u8]) -> Result<Uuid, InvalidId> {
 }
 
 /// Short, stable display form for logs and CLI output.
+///
+/// Taken from the TRAILING hex. UUIDv7 encodes a timestamp in its leading bytes,
+/// so ids minted in the same millisecond share a head and a head-prefix would
+/// not distinguish them. The tail is random.
 pub fn short(raw: &[u8]) -> String {
     match from_bytes(raw) {
-        Ok(u) => u.simple().to_string()[..8].to_string(),
+        Ok(u) => {
+            let s = u.simple().to_string();
+            s[s.len() - 8..].to_string()
+        }
         Err(_) => "????????".to_string(),
     }
 }
@@ -45,6 +52,14 @@ mod tests {
     fn wrong_length_rejected() {
         assert_eq!(from_bytes(&[1, 2, 3]), Err(InvalidId(3)));
         assert_eq!(from_bytes(&[]), Err(InvalidId(0)));
+    }
+
+    #[test]
+    fn short_ids_distinguish_same_millisecond_ids() {
+        // The whole point: v7 heads collide, tails do not.
+        let a = new_id();
+        let b = new_id();
+        assert_ne!(short(&a), short(&b), "short ids must distinguish rapid creations");
     }
 
     #[test]

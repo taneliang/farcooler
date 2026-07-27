@@ -5,4 +5,22 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lib]
+name = "overnight_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "overnightd"
+path = "src/main.rs"
+
 [dependencies]
+overnight-core.workspace = true
+overnight-protocol.workspace = true
+overnight-store.workspace = true
+overnight-tmux.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+directories.workspace = true

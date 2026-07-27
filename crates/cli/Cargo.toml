@@ -5,4 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "overnight"
+path = "src/main.rs"
+
 [dependencies]
+overnight-core.workspace = true
+overnight-protocol.workspace = true
+overnight-daemon.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true

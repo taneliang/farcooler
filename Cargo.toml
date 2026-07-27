@@ -22,6 +22,7 @@ overnight-core = { path = "crates/core" }
 overnight-store = { path = "crates/store" }
 overnight-tmux = { path = "crates/tmux" }
 overnight-transport = { path = "crates/transport" }
+overnight-daemon = { path = "crates/daemon" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "process", "sync", "time", "signal"] }
 prost = "0.13"
