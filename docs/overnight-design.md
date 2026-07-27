@@ -6,9 +6,9 @@ Repo: office-hours-users-e-liang-gstack
 Status: APPROVED  
 Mode: Startup
 
-Revised 2026-07-26 to add SSH connectivity, tmux reuse and shell fallback, daemon-owned cross-client state, and a paid-Apple-account gate for push notifications, Live Activities, and Dynamic Island support.
+Revised 2026-07-26 to add SSH connectivity, tmux reuse and shell fallback, and daemon-owned cross-client state.
 
-Revised again during `/plan-eng-review` on 2026-07-26. The load-bearing changes: SSH is the only control transport and the Overnight certificate authority is gone; terminal runtime state is derived from tmux rather than stored and reconciled; tmux is a hard dependency with no PTY fallback; declared servers and Mosh are removed from the product; and the snapshot path buffers nothing.
+Revised again during `/plan-eng-review` on 2026-07-26. The load-bearing changes: SSH is the only control transport and the Overnight certificate authority is gone; terminal runtime state is derived from tmux rather than stored and reconciled; tmux is a hard dependency with no PTY fallback; declared servers, Mosh, and all notification surfaces are removed from the product; and the snapshot path buffers nothing.
 
 ## Problem Statement
 
@@ -76,7 +76,7 @@ This is not a generic cloud IDE, hosted compute service, chat wrapper, or remote
 - **Mobile:** The MVP ships an iOS app built with React Native. The same codebase must preserve a credible Android path; Android is the first major follow-up.
 - **Desktop:** The macOS client is native Swift and uses a workspace-oriented layout conceptually similar to current desktop agent orchestrators without copying their visual design.
 - **Agent compatibility:** Claude Code, Codex, and Cursor CLI are MVP exit requirements. They are integrated sequentially within the MVP, starting with the design partner's primary CLI. The terminal-first approach should avoid deep dependence on undocumented vendor UI internals.
-- **Background mobile awareness:** Remote push notifications plus one fleet-level Live Activity with Lock Screen and Dynamic Island presentations are desired MVP features, but production APNs and distributable iOS builds require paid Apple Developer Program membership. If the project has not enrolled by the iOS release gate, these features become the first fast follow rather than blocking the terminal/workspace MVP.
+- **No background mobile awareness in MVP:** push notifications, the APNs relay, Live Activities, and Dynamic Island presentations are out of scope entirely. Not gated, not stubbed, not behind a capability boundary. Interactive control is a foreground activity, and the fleet view on foreground reconnect is how the user learns what happened.
 - **Hosts:** The daemon supports macOS and Linux, including Linux running under WSL2.
 - **Deferred:** Workspace transfer, automatic failover, split terminal panes, rich diff review, Windows-native hosts, and managed cloud compute are outside the MVP.
 - **Security:** Tailscale membership alone is not sufficient authorization. Every device authenticates with its own SSH key, is enrolled with an explicit scope, and can be revoked individually. Overnight does not operate a certificate authority or issue client certificates.
@@ -103,7 +103,6 @@ Relevant primary references:
 
 - [tmux's official wiki](https://github.com/tmux/tmux/wiki) documents detached sessions and multi-client reattachment; [control mode](https://github.com/tmux/tmux/wiki/Control-Mode) is the candidate machine interface.
 - [Apple's membership comparison](https://developer.apple.com/support/compare-memberships/) distinguishes free Personal Team testing from paid distribution and advanced capabilities.
-- [ActivityKit push updates](https://developer.apple.com/documentation/ActivityKit/starting-and-updating-live-activities-with-activitykit-push-notifications) require an APNs provider and ActivityKit push tokens for remote start/update/end.
 
 ### Layer 2: Current products
 
@@ -163,7 +162,7 @@ The first implementation slice proves workspace and terminal-control correctness
 - The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy and controls. Its terminal surface uses the shared libghostty core through an Overnight-owned adapter.
 - `overnight attach WORKSPACE_ID` remains mandatory and attaches an ordinary shell client to the managed session. The equivalent raw tmux command is shown for transparency and recovery.
 - State ownership splits by durability. SQLite stores only what must outlive tmux: repository roots, repositories, workspaces with their worktree and branch, terminal durable identity and intent, agent session IDs, operations, and audit records. tmux is the sole authority for whether a managed process is alive right now. The daemon never stores a terminal runtime state field, so it cannot serve a stale `running`; runtime state is derived per request from intent plus a live exactly-tagged pane, and an untagged or unmatched window is never treated as an Overnight object automatically.
-- No SSH application transport, React Native iOS app, APNs relay, Live Activity, or Linux/WSL2 support in this slice.
+- No SSH application transport, React Native iOS app, or Linux/WSL2 support in this slice.
 
 This is an engineering validation slice, not validation of the mobile product thesis. After local workspace creation, five-way parallelism, daemon-restart derivation, shell attachment, and Mac UI control pass their acceptance tests, the next slice exposes the same daemon protocol through SSH and builds the React Native iOS client. Failure of tmux control mode against a required Gate 1 dimension reopens the terminal architecture before remote work begins; there is no second backend to fall back to.
 
@@ -249,7 +248,7 @@ The second limit is credentials. A daemon started before any login has no unlock
 - Moving or replacing the app bundle, disabling its background item, version incompatibility, and deleting the app each have explicit detection and recovery tests in both registration modes. Uninstalling while unattended mode is active unregisters the system daemon, which prompts for administrator authorization once; an uninstall that cannot obtain it reports the exact leftover registration rather than leaving a silent orphan. Unregistering either registration stops only `overnightd`; removing user data, managed worktrees, or live tmux sessions requires separate exact confirmation and is never part of ordinary app deletion.
 - Runtime data lives under `~/Library/Application Support/Overnight/` with user-only permissions. The Unix socket and identity/database files are created in user-only subdirectories and never inside the replaceable app bundle.
 - The daemon needs the user's repositories, git tooling, shells, tmux, and coding-agent CLIs, so the independently distributed Mac build does not place the daemon inside the App Sandbox. Hardened runtime, code signing, notarization, and least-privilege filesystem validation remain release requirements.
-- Personal Team development builds exercise the same bundled-agent registration locally. Lack of paid Apple Developer Program enrollment blocks notarized public distribution, TestFlight, production APNs, and App Store release, not local architecture validation.
+- Personal Team development builds exercise the same bundled-agent registration locally. Lack of paid Apple Developer Program enrollment blocks notarized public distribution, TestFlight, and App Store release, not local architecture validation.
 
 The app offers an explicit **Install command-line tool** action that atomically copies the matching `overnight` executable to `~/.local/bin/overnight`. It never edits shell startup files or writes to `/usr/local/bin`; when `~/.local/bin` is absent from `PATH`, it shows the exact user-approved shell configuration. App updates refresh this copy only after compatibility checks, and the CLI always negotiates with the running daemon rather than assuming an identical version.
 
@@ -309,7 +308,7 @@ The founder-approved product boundary remains intact, but implementation is orde
 4. **Gate 2: SSH transport and reconnect spike.** Expose the same daemon protocol through SSH stdio, connect a second client, disconnect repeatedly, transfer writer ownership, and prove ordered replay without duplicate input. `ssh host overnight attach WORKSPACE` remains the terminal escape hatch rather than a GUI transport requirement.
 5. **Milestone 2: mobile vertical slice.** One React Native iOS screen connects through SSH, lists the Mac-proven workspaces, controls a terminal, and passes the mobile terminal acceptance suite. Run the same renderer on Android as architecture validation only.
 6. **Milestone 3: validated product workflow.** Multiple macOS/Linux hosts, remote daemon installation over SSH for Linux and WSL2, repository clone, five concurrent workspaces, Claude Code/Codex/Cursor presets, signed installers, upgrade/rollback path, and the design-partner success criterion.
-7. **Milestone 4: founder-scoped public MVP.** Native Swift Mac client, iOS client, WSL2 supported topology, public distribution, and all technical success criteria. If Apple Developer Program enrollment is complete by the release gate, this milestone also includes the APNs relay, push notifications, and Live Activity/Dynamic Island surfaces; otherwise those move together to the first fast follow.
+7. **Milestone 4: founder-scoped public MVP.** Native Swift Mac client, iOS client, WSL2 supported topology, public distribution, and all technical success criteria. No notification surfaces of any kind.
 
 Failure at a gate stops expansion and produces a revised design. Android buildability is checked during Gate 1 and CI, but a user-ready Android client remains post-MVP.
 
@@ -401,7 +400,6 @@ Runs as an unprivileged background service for the logged-in developer on macOS 
 - Command presets for Claude Code, Codex, and Cursor CLI.
 - A transport-neutral protocol exposed through a local Unix socket and an sshd-launched SSH stdio adapter. The daemon binds no TCP port.
 - Audit records for workspace creation, process launch, and destructive actions.
-- When the paid-Apple-account gate passes, signed hard-fact notification events sent outbound to the minimal APNs relay for explicitly enrolled devices.
 
 For MVP, the CLI integrations are launch presets inside real terminals. Overnight does not parse or emulate each vendor's entire interaction model.
 
@@ -598,8 +596,6 @@ Every managed terminal starts in a daemon-owned operating-system session/process
 - Switch among workspace terminal tabs.
 - Start, stop, and rename terminals.
 - Reconnect after Wi-Fi/cellular changes without stopping remote processes.
-- When the paid-Apple-account release gate passes: push notifications for hard facts such as workspace creation failure and terminal exit, with per-host/workspace notification controls and deep links.
-- When that gate passes: one fleet-level Live Activity, implemented by a native ActivityKit/WidgetKit extension and React Native bridge, showing aggregate running, exited/failed, and offline/unknown counts on the Lock Screen and supported Dynamic Island presentations.
 - Clear display of host, repository, branch, worktree cleanliness, process status, and connection state.
 
 The terminal renderer is the highest-risk technical spike. `libghostty-vt` is the accepted shared terminal core; platform-native render and input adapters must still be validated on iOS and Android for latency, keyboard behavior, selection, accessibility, and large scrollback. React Native remains the mobile application framework while the terminal surface is a native module.
@@ -617,18 +613,11 @@ Terminal acceptance requires:
 
 iOS suspends direct network connections. The MVP therefore guarantees terminal streaming and interactive control only while the app is foregrounded. Host processes and daemon-owned state continue through client suspension, another enrolled client can attach immediately, and the iOS app retrieves an authoritative snapshot plus bounded replay when foregrounded again.
 
-Push notifications and remotely updated Live Activities require paid Apple Developer Program capabilities and a deliberately narrow hosted APNs provider. The source tree should preserve the native extension and relay interfaces, but this section becomes first-fast-follow scope if enrollment has not completed by Milestone 3:
+There is no background awareness in MVP, and none is stubbed. No APNs relay, no push notifications, no Live Activity, no Dynamic Island, and no capability boundary holding a place for them. That work carried a hosted relay, a privacy model for Lock Screen text, token retention, capability rotation, abuse limits, and an operational service to run, none of which the core thesis needs proven.
 
-1. After host enrollment, the iOS app explicitly enrolls a host/device notification route and sends its APNs device token and ActivityKit push token to the relay. Notification permission is requested after the user launches or monitors a real workspace, not during first-run host enrollment.
-2. The client gives the daemon a revocable, random routing capability. The daemon sends outbound HTTPS events to the relay; the relay cannot connect to the host, run commands, list repositories, or read terminal output.
-3. Events use an allowlisted schema with an opaque host/workspace routing ID, event kind, monotonic event version, timestamp, and minimal display state. Terminal contents, commands, diffs, filesystem paths, and credentials are forbidden.
-4. Privacy defaults to generic text such as “A workspace exited.” Showing repository, branch, task, or host names on the Lock Screen/Dynamic Island is a per-device opt-in because those surfaces may be visible to bystanders and APNs payloads traverse hosted infrastructure.
-5. The relay validates capability, signature, payload size, event version, and rate limits before sending to APNs. It stores tokens and routing metadata only as long as needed, exposes route revocation, and publishes a self-hosting protocol even though the official App Store build uses Overnight's provider credentials.
-6. APNs delivery is advisory and may be delayed or coalesced. The app always replaces notification/Live Activity state with a daemon snapshot after foreground reconnect.
+What replaces it is honest and free: when the app returns to the foreground it reconnects, takes an authoritative snapshot, and shows what changed while it was away. The user learns a terminal exited by opening the app, not by being interrupted.
 
-The Live Activity begins locally when the user enables “Monitor fleet” and at least one managed terminal is running; it ends when monitoring is disabled or no managed activity remains. It displays counts and a compact last hard-fact event, and tapping it deep-links to fleet triage or the relevant workspace. It never embeds a terminal or accepts shell input. Before paid enrollment, the layout may be developed with simulator fixtures or any capabilities allowed by a Personal Team, but production remote updates and distribution are not claimed.
-
-“Needs input” cannot be a notification or Live Activity state without an explicit vendor adapter because generic PTY output cannot establish it reliably.
+If notifications return later, two constraints from this review carry forward. Events may only carry hard facts the daemon actually observed, never inferred attention states, because “needs input” cannot be established from generic PTY output. And any relay would need its own threat model covering protocol, retention, capability rotation, abuse limits, privacy copy, and operational ownership before it ships, not after.
 
 #### 3. Native Swift macOS app
 
@@ -1014,7 +1003,6 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 
 - Android client from the React Native codebase.
 - Rich workspace diff review.
-- APNs push notifications and the fleet Live Activity/Dynamic Island surface if paid Apple Developer Program enrollment misses the Milestone 3 release gate.
 - Importing or adopting arbitrary user-owned tmux sessions.
 - Additional coding-agent CLIs.
 
@@ -1026,6 +1014,7 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 - Team collaboration and shared workspaces.
 - Windows-native daemon outside WSL2.
 - Full IDE or remote-desktop streaming.
+- Push notifications, the APNs relay, Live Activities, and Dynamic Island surfaces. Cut entirely rather than gated behind Apple enrollment, because the relay carried a hosted service, a Lock Screen privacy model, token retention, capability rotation, and abuse limits that the core thesis does not need proven. Foreground reconnect covers the need. If they return, a dedicated threat model is a precondition of shipping, and events may carry only observed hard facts.
 - Mosh, in any form: as a transport, an adapter, a documented invocation, or a dependency. The terminal channel already provides byte-exact resume, an 8 MiB replay buffer, and honest gap markers, which is the durable half of what Mosh offers. The trigger to revisit is evidence from real use: if interactive latency on lossy or roaming links proves bad enough that local echo is the fix, Mosh comes back with that measurement behind it.
 - Declared servers as a tracked resource, with port metadata, liveness, and a browser handoff. A development server runs in an ordinary terminal, and Tailscale already makes `http://host:PORT` reachable from a phone, so the feature would have added a duplicate lifecycle to produce a URL the user can type. Reintroducing it must re-justify that lifecycle.
 - An Overnight-owned certificate authority and a Tailscale-direct mutual-TLS listener. Delegating authentication to SSH removes the entire subsystem; a keyless direct route can return later if users ask for one, at which point it must re-justify the CA, rotation, expiry, and recovery work it brings with it.
@@ -1053,7 +1042,7 @@ These questions have explicit decision gates and may not remain unresolved when 
 16. **Accepted before Milestone 1, as a scope cut:** Remove declared servers from the product. No `Server` resource, no port metadata, no liveness probe, no browser handoff, and no declared-server notification. A development server is a long-lived command in an ordinary terminal, and Tailscale already makes `http://host:PORT` reachable from a phone. Accepted consequence: a crashed development server is noticed by reading its terminal, not flagged by the fleet view.
 17. **Accepted before Milestone 1:** Offer an opt-in macOS unattended mode registering a system LaunchDaemon through `SMAppService.daemon`, pinned to the enrolling user so execution stays unprivileged, with the default remaining the per-user LaunchAgent. Use `enable-linger` on Linux and WSL2. State the FileVault and login-keychain limits explicitly rather than implying a Mac host is always reachable, and never recommend disabling FileVault or enabling auto-login as a workaround.
 18. **Accepted before Milestone 1:** Stream control snapshots and live events concurrently with no daemon-side buffering, ordering by `resource_version` with last-writer-wins, upserts for unseen resources, and versioned tombstones for deletions. Bound the daemon with control-channel backpressure that disconnects a hopelessly slow client rather than with a snapshot duration budget or event ceiling.
-19. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+19. **Accepted before Milestone 1, as a scope cut:** Remove push notifications, the APNs relay, Live Activities, and Dynamic Island from the product. Not gated, not stubbed, no capability boundary. Foreground reconnect plus an authoritative snapshot is how a user learns what happened. **Still open, and now isolated:** without paid Apple Developer Program membership there is no TestFlight, and Personal Team builds are explicitly not a design-partner channel, so how does the design partner receive the iOS app? Gate 0 and success criterion 10 both depend on the answer. This is a distribution question, not a notification one, and it survives the cut above.
 20. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
 21. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
 22. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
@@ -1080,10 +1069,9 @@ The MVP succeeds when all of the following are demonstrated:
 15. The same workspace is reachable through an SSH route over the tailnet and an SSH route through a bastion without changing its ID or process state; switching routes before new input is accepted causes no duplicate input.
 16. From a machine with no Overnight GUI, `ssh user@host overnight attach WORKSPACE_ID` reaches the existing terminal session, warns about current protocol writers before entering, raises the external-client-attached indicator in other clients for the duration, and audits attach and detach. If Gate 1 selects tmux, both reach the same private tmux-backed session.
 17. After an iPhone is suspended for five minutes, a Mac client attaches using only daemon state, takes the writer lease, and continues the same workspace; returning to iPhone reconciles without treating stale cached UI as authoritative.
-18. **Conditional on paid Apple enrollment:** a hard-fact daemon event reaches an enrolled iPhone through APNs, deep-links to the correct workspace, updates the fleet Live Activity/Dynamic Island presentation, contains no terminal content or path, and is superseded by the next foreground daemon snapshot.
-19. A service-lifetime matrix passes on both platforms: a macOS host in agent mode stops on logout and returns on login; the same host in unattended mode survives logout, fast user switching, and a non-FileVault reboot, runs as the enrolling user rather than root, and reports a named login-keychain condition until the user logs in once; a FileVault reboot produces no daemon in either mode and the client says so specifically; a Linux host with lingering enabled survives logout and reboot, and with lingering disabled does not.
-20. From the phone alone, a second Linux host with no Overnight installation is onboarded end to end: host key verified, daemon installed with a verified checksum, `systemd --user` unit enabled with lingering, device key enrolled, and a workspace created. A parallel fixture proves the daemon never modifies, reorders, or removes an `authorized_keys` entry outside its fence, and that a damaged fence produces refusal plus manual instructions rather than a rewrite.
-21. For Claude Code, Codex, and Cursor CLI, parallel sessions capture distinct exact vendor IDs through supported lifecycle callbacks. After a forced tmux/host-loss fixture, each adapter resumes its recorded session at an interactive prompt without selecting a global latest session, replaying uncertain input, or replacing the user's existing hooks.
+18. A service-lifetime matrix passes on both platforms: a macOS host in agent mode stops on logout and returns on login; the same host in unattended mode survives logout, fast user switching, and a non-FileVault reboot, runs as the enrolling user rather than root, and reports a named login-keychain condition until the user logs in once; a FileVault reboot produces no daemon in either mode and the client says so specifically; a Linux host with lingering enabled survives logout and reboot, and with lingering disabled does not.
+19. From the phone alone, a second Linux host with no Overnight installation is onboarded end to end: host key verified, daemon installed with a verified checksum, `systemd --user` unit enabled with lingering, device key enrolled, and a workspace created. A parallel fixture proves the daemon never modifies, reorders, or removes an `authorized_keys` entry outside its fence, and that a damaged fence produces refusal plus manual instructions rather than a rewrite.
+20. For Claude Code, Codex, and Cursor CLI, parallel sessions capture distinct exact vendor IDs through supported lifecycle callbacks. After a forced tmux/host-loss fixture, each adapter resumes its recorded session at an interactive prompt without selecting a global latest session, replaying uncertain input, or replacing the user's existing hooks.
 
 ## Distribution Plan
 
@@ -1105,7 +1093,7 @@ The MVP succeeds when all of the following are demonstrated:
 ### iOS and Android
 
 - Before paid Apple Developer Program enrollment, support simulator development and founder-device Personal Team builds only; these are not a design-partner distribution channel and may require periodic reprovisioning.
-- After enrollment, distribute the iOS MVP through TestFlight to design partners, then the App Store. Production APNs and remotely updated Live Activities enter the release only after their entitlements, provider key, and privacy path are verified.
+- After enrollment, distribute the iOS MVP through TestFlight to design partners, then the App Store.
 - Maintain Android buildability throughout MVP development and open a Play internal-testing track as the first major follow-up.
 
 ### macOS
@@ -1132,7 +1120,7 @@ GitHub Actions should:
 - tmux installed on every host, since it is a hard dependency; remote install provisions it where absent.
 - Git installed on each host.
 - At least one supported coding-agent CLI installed and authenticated on a host.
-- Paid Apple Developer Program membership for TestFlight, App Store distribution, production APNs, remotely updated Live Activities, and the relevant iOS capabilities. Without it, only simulator/Personal Team development is claimed and notification surfaces are fast follow.
+- Paid Apple Developer Program membership for TestFlight and App Store distribution. Without it, only simulator and Personal Team development is claimed, and there is no channel that reaches a design partner's device durably. Notification capabilities are no longer part of this dependency, since notifications are out of scope.
 - A terminal rendering solution that satisfies mobile quality requirements.
 - Code-signing secrets and a release pipeline.
 - Test hosts covering macOS arm64, Linux x86_64, Linux arm64, and WSL2.
@@ -1182,12 +1170,12 @@ The MVP supports the Linux daemon inside WSL2 only when Tailscale also runs insi
 ### iOS suspension
 
 **Risk:** Network connections, including SSH over a tailnet, stop when iOS suspends the app.  
-**Mitigation:** Bound interactive terminal control to foreground use. Reconnection retrieves authoritative state and bounded replay from the host, and another client can attach while the phone sleeps. If the paid-Apple-account gate passes, the minimal APNs relay supplies advisory hard-fact updates and Live Activity state; otherwise background awareness is the first fast follow.
+**Mitigation:** Bound interactive terminal control to foreground use and say so plainly. Reconnection retrieves authoritative state and bounded replay from the host, another client can attach while the phone sleeps, and returning to the foreground shows what changed. There is no background awareness in MVP and none is promised.
 
 ### Apple program dependency
 
-**Risk:** The project currently has no paid Apple Developer Program membership, which blocks TestFlight/App Store distribution and production APNs capabilities and may constrain extension testing.  
-**Mitigation:** Develop the core app with simulator and Personal Team builds, make enrollment a dated Milestone 3 gate, and keep push/Live Activity code behind a capability boundary. Do not let the account dependency delay daemon, transport, tmux, terminal, or workspace validation, but do not call a founder-only reprovisioned build a shipped iOS MVP.
+**Risk:** The project has no paid Apple Developer Program membership. Cutting notifications removed the capability half of this dependency but not the distribution half: without membership there is no TestFlight, and the plan already states that founder-device Personal Team builds are not a design-partner channel and need periodic reprovisioning. Gate 0 and the design-partner success criterion both assume the partner can actually run the iOS app.  
+**Mitigation:** Develop the core app with simulator and Personal Team builds, and do not let this delay daemon, transport, tmux, terminal, or workspace validation, none of which need it. But the iOS delivery path for a design partner is genuinely unresolved and is recorded as an open question rather than assumed away. Do not call a founder-only reprovisioned build a shipped iOS MVP.
 
 ### WSL2 variation
 
@@ -1197,7 +1185,7 @@ The MVP supports the Linux daemon inside WSL2 only when Tailscale also runs insi
 ### Scope expansion
 
 **Risk:** Diff review, transfer, scheduling, cloud environments, collaboration, three transports, and notification infrastructure delay the core proof.  
-**Mitigation:** Hold the unconditional MVP to workspace creation, parallel terminals, daemon-owned continuity, SSH access over the user's chosen network, fleet triage, and two clients. APNs and Live Activities ship only if the paid-account gate passes without delaying the core.
+**Mitigation:** Hold the MVP to workspace creation, parallel terminals, daemon-owned continuity, SSH access over the user's chosen network, fleet triage, and two clients. This review cut declared servers, Mosh, notification infrastructure, and the second terminal backend outright rather than deferring them behind gates, which is what made the remaining scope defensible.
 
 ### Android deferral
 
@@ -1260,5 +1248,5 @@ The SSH/tmux and Apple-platform changes were added after the three-round review 
 16. **Resolved in engineering review:** the control plane is SSH-only, so there is one adapter rather than two competing identity models, and the suite proves identical identity binding, authorization, event ordering, replay, cancellation, and uncertain-input behavior across the in-memory adapter, the Unix socket, and SSH stdio. Per-commit CI drives stdio through a pipe for speed, with forced-command and fence editing covered by golden-file unit tests. Because sshd is what actually enforces scope, a scheduled pre-release lane runs the same suite through a real loopback sshd on both platforms, asserting a `read` key cannot obtain a shell or a port forward, revocation closes connections within a second, and a bastion hop behaves identically. Releases require that lane green.
 17. **Resolved in engineering review:** the spike is now a scored go/no-go rather than a selection, because the native PTY fallback stopped being a swap once runtime state became a tmux derivation and the escape hatch became a tmux client. The matrix scores twelve dimensions 0 to 3 on macOS, Linux, and WSL2, splits them into required and weighted, and fails the gate outright if any required dimension scores below 2 on any platform. Failing reopens the terminal architecture; there is no second backend.
 18. **Resolved in engineering review:** `overnight attach` acquires no lease and is documented as a bypass with the same standing as raw `tmux attach`, because a tmux client can reach every window in the session and any narrower claim would be false. The accepted consequence, interleaved input from two writers into one shell, is stated plainly. The path provides visibility instead of enforcement: audited attach and detach, an external-client-attached indicator in every app, and a pre-entry warning naming current protocol writers. `window-size latest` keeps external attach inside the same latest-active-viewer sizing rule. Abandoned clients need no lease expiry because no lease is taken.
-19. The Apple Developer Program enrollment deadline must be chosen before Milestone 3. CI and release criteria need separate capability matrices for Personal Team, paid-development, TestFlight, and App Store builds.
-20. If APNs ships, the relay protocol, data retention, capability rotation, abuse limits, privacy copy, operational ownership, and self-hosting compatibility require a dedicated threat model.
+19. **Partly resolved in engineering review by removal:** notifications, the APNs relay, and Live Activities are cut from the product, so no capability matrix is needed for them and no enrollment deadline gates them. The distribution half survives and is now an isolated open question: without membership there is no TestFlight channel to a design partner, which Gate 0 and success criterion 10 assume exists.
+20. **Resolved in engineering review by removal:** no APNs relay ships, so there is no relay protocol, retention policy, capability rotation, abuse limit, privacy copy, or operational ownership to threat-model. If notifications ever return, the threat model is a precondition of shipping them rather than a follow-up, and events may carry only hard facts the daemon observed.
