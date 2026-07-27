@@ -303,14 +303,19 @@ MVP status is based only on facts the daemon can observe. Overnight does **not**
 #### Host
 
 ```text
-unpaired → online ↔ degraded → offline
+Daemon self-health: healthy ↔ degraded
+
+Client-local connection:
+unpaired → connecting → connected ↔ reconnecting → disconnected
 ```
 
-- **Online:** authenticated control heartbeat received within 15 seconds.
-- **Degraded:** daemon is reachable but reports storage below 2 GiB or one failed subsystem.
-- **Offline:** three consecutive heartbeats are missed. Offline is a connection fact, not proof that host processes stopped.
+- **Healthy:** the connected daemon reports no failed subsystem and at least 2 GiB free storage.
+- **Degraded:** the connected daemon reports storage below 2 GiB or one failed subsystem. This is a daemon self-health fact, not reachability.
+- **Connected:** this client has an authenticated control route and received a heartbeat within 15 seconds.
+- **Reconnecting:** this client missed a heartbeat and is trying its ordered routes.
+- **Disconnected:** this client missed three consecutive heartbeats or exhausted its routes. Disconnection is not proof that host processes stopped.
 
-Protocol incompatibility is a client-relative `Connection` error and never changes the global host-health value.
+Each client stores a local `HostConnection {host_id, active_route, state, last_connected_at, last_event_at, latency_ms, error?}` for every paired host. It derives the fleet labels **online** from connected plus healthy, **degraded** from connected plus degraded self-health or a degraded route, and **offline** from disconnected. `HostConnection` is not a daemon resource, is not synchronized between clients, and may legitimately differ between an iPhone and Mac on different networks. Protocol incompatibility is likewise a client-local connection error. The daemon never claims that it is offline.
 
 #### Workspace
 
@@ -577,7 +582,7 @@ The Mac client is a founder-required part of the MVP because cross-device contro
 
 Use a versioned, documented protocol with these resources:
 
-- `Host {id, resource_version, platform, daemon_version, protocol_version, health, last_seen}`
+- `Host {id, resource_version, platform, daemon_version, protocol_version, self_health, self_health_reasons}`
 - `Repository {id, resource_version, host_id, display_name, canonical_git_dir, remote_summary}`
 - `Workspace {id, resource_version, repository_id, task_name, branch, worktree_path_token, state}`
 - `Terminal {id, resource_version, lease_generation, workspace_id, title, command_preset, state, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
@@ -663,7 +668,7 @@ Versioned Protocol Buffer files are the canonical protocol source of truth and s
 
 IDs are UUIDv7. Display names are 1–80 UTF-8 scalar values; task names are 1–120; branch names must pass `git check-ref-format --branch`; command-preset identifiers are 1–64 ASCII characters. Arbitrary command text is stored in host-side presets and is not accepted through workspace creation. Individual binary terminal payloads are capped at 64 KiB.
 
-Events are resource snapshots or transitions: `host.changed`, `repository.changed`, `workspace.changed`, `terminal.changed`, `agent_session.changed`, `server.changed`, `operation.changed`, and `client.revoked`. Each event includes the authoritative new resource version.
+Events are resource snapshots or transitions: `host.changed`, `repository.changed`, `workspace.changed`, `terminal.changed`, `agent_session.changed`, `server.changed`, `operation.changed`, and `client.revoked`. Each event includes the authoritative new resource version. `host.changed` carries daemon self-health but never authoritative reachability; clients update their local `HostConnection` from transport and heartbeat observations.
 
 ##### Authorization matrix
 
@@ -811,7 +816,7 @@ Every mutating flow produces a durable `Operation` with progress, logs, retryabi
 | Client disconnects | Reconnecting banner; host process continues | Wait, cancel reconnect, or attach from another client |
 | Replay gap | Permanent visible gap marker, cleared terminal model, and retained replay tail | Continue with acknowledged missing history |
 | Declared server exits | Exited status, port unavailable, exit code | Relaunch server command |
-| Host goes offline | Last-seen timestamp; no claim about process state | Retry connection or use another host |
+| Client cannot reach host | Client-local last-event timestamp, attempted route, and no claim about process state | Retry connection, change route, or use another host |
 | Cleanup is uncertain | Exact dirty/unpushed/running reasons | Archive, cancel, or type the workspace name to remove the worktree |
 
 Mutating retries reuse idempotency keys where appropriate. Rollback itself is recorded as an operation and can be retried safely.
@@ -893,11 +898,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 4. **Accepted before Milestone 1:** Bundle the Rust daemon, CLI, LaunchAgent plist, protocol descriptors, and terminal artifacts inside the native Mac app. Register the unprivileged per-user daemon through `SMAppService`, use the app as the Mac release unit, and offer an opt-in `~/.local/bin/overnight` CLI copy without requiring root or editing shell files.
 5. **Accepted before Milestone 1:** Launch coding agents through the user's interactive login shell by default, with per-host and per-preset alternatives for login, interactive, direct, and custom modes. Require each supported adapter to capture an exact correlated vendor session ID through an additive lifecycle hook and resume that exact ID without scraping terminal output or choosing a global latest session. Make restore policy configurable and default to automatic restoration only after verified infrastructure loss.
 6. **Accepted before Milestone 1:** Put generic target identity, optimistic concurrency, writer-lease fencing, and idempotency metadata only in the protobuf request envelope. Keep method payloads business-only, expose `resource_version` on every mutable resource and `lease_generation` on terminals, validate both generically before domain dispatch, and target a parent resource for create mutations.
-7. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-8. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-9. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-10. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-11. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+7. **Accepted before Milestone 1:** Keep daemon self-health on the `Host` resource but make reachability a per-client `HostConnection` observation. Each client records its active route, connection state, last connection/event times, latency, and error, then derives online/degraded/offline locally; an offline daemon never attempts to report itself offline.
+8. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+9. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+10. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+11. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+12. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -1074,7 +1080,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 5. Terminal, server, and workspace diagrams require a final transition audit for `unknown`, `lost`, and restart-driven `error` states.
 6. **Resolved in engineering review:** concurrency, lease, and idempotency metadata now lives only in the request envelope; mutable resources expose `resource_version`, terminals expose `lease_generation`, create mutations target their parent, and the generic dispatcher validates all envelope preconditions before domain logic.
 7. One Mac-client bullet still needs to be checked against the decision to defer worktree removal.
-8. Host reachability and `last_seen` should be client-local connection facts, not authoritative daemon health reported by an offline host.
+8. **Resolved in engineering review:** `Host` reports only daemon self-health while connected; every client owns its route, heartbeat, latency, last-event, and reachability observations in a local `HostConnection` model and derives online/degraded/offline for its own network.
 
 ### Protocol clarity
 
