@@ -208,6 +208,28 @@ apps/
 - rusqlite uses bundled SQLite so the daemon controls its database version and does not depend on a host package manager.
 - `tracing` produces structured, redacted daemon logs with request, operation, workspace, and terminal IDs.
 - Domain state transitions live in `core`; transports, tmux output, CLI arguments, and database rows are translated at the boundary. Transport handlers do not mutate SQLite or tmux directly.
+- Crate dependencies point one way. Runtime derivation is domain logic and lives in `core`, but `core` never depends on `tmux`. Instead `core` defines a `RuntimeInventory` trait and `tmux` implements it:
+
+```text
+        ┌────────────────────────────────────────┐
+        │ core                                   │
+        │   state machines, derivation rule      │
+        │   trait RuntimeInventory {             │
+        │     fn live_tagged_panes(&self)        │
+        │        -> Result<Vec<TaggedPane>>      │  ← bulk, not per-terminal
+        │   }                                    │
+        └────────────────────────────────────────┘
+             ▲              ▲              ▲
+             │ impl         │ uses         │ uses
+        ┌────┴─────┐   ┌────┴─────┐   ┌────┴─────┐
+        │ tmux     │   │ store    │   │ daemon   │
+        │ control  │   │ SQLite   │   │ wires    │
+        │ mode +   │   │ durable  │   │ them     │
+        │ cache    │   │ records  │   │ together │
+        └──────────┘   └──────────┘   └──────────┘
+```
+
+  The trait returns the whole tagged inventory in one call rather than answering per-terminal lookups, because derivation runs on the fleet-render path and a per-terminal trait would reintroduce the round-trip problem the inventory cache exists to avoid. The rule that decides `running` versus `lost` is unit-tested against a fake inventory with no tmux server present.
 - Platform-specific code is isolated behind narrow traits and modules. The Mac-first slice implements macOS process and launchd behavior without introducing a separate service contract that Linux must later emulate.
 - Unsafe Rust is forbidden in Overnight-owned crates during the first slice. Any dependency requiring unsafe code is reviewed and pinned through the dependency policy.
 
@@ -271,6 +293,17 @@ renderer   renderer   renderer
 
 - `libghostty-vt` consumes terminal output bytes and produces terminal/render state. It does not own the daemon connection, replay sequence, writer lease, workspace model, or tmux lifecycle.
 - `OvernightTerminalCore` is a narrow C-ABI adapter owned by Overnight. Platform code depends on this adapter rather than directly exposing upstream structs or function signatures.
+- Overnight ships two native cores across three platforms: this terminal core and the shared SSH client. They are separate artifacts with separate versions, because the terminal core's pinned upstream cadence and the SSH client's security-patch cadence must not drag each other, but they follow **one** documented FFI convention:
+
+| Rule | Convention |
+|---|---|
+| Ownership | The allocating side frees. Every `*_new` has a matching `*_free`, and no caller frees memory it did not allocate |
+| Errors | Every fallible call returns a status code and writes into an out-parameter; nothing panics or unwinds across the boundary, and Rust panics are caught at the edge and converted |
+| Strings and bytes | Length-prefixed byte spans with explicit lengths; no NUL-terminated strings and no assumption of valid UTF-8 on the terminal path |
+| Threading | Each handle is owned by one thread at a time and documented as such; callbacks state which thread invokes them and may not re-enter the core |
+| Versioning | Each core exports an ABI version queried at load, and a mismatch fails loudly at startup rather than corrupting a call |
+
+  Platform bindings share one helper layer per language, so Swift and Kotlin each have one set of habits rather than one per core. A future native core inherits this convention rather than inventing a third.
 - Upstream is pinned to an audited commit. Upgrades are explicit dependency changes that must pass the terminal conformance corpus on every supported client platform.
 - The Mac app embeds the adapter from Swift and uses a native AppKit rendering surface. The mobile application remains React Native, with native terminal components mounted behind one JavaScript/TypeScript component contract.
 - Android packages the core through the Android NDK and a small JNI bridge. Kotlin owns Android text input, IME composition, hardware keys, touch selection, clipboard, accessibility, lifecycle, and the selected native rendering surface.
@@ -1251,5 +1284,5 @@ The SSH/tmux and Apple-platform changes were added after the three-round review 
 16. **Resolved in engineering review:** the control plane is SSH-only, so there is one adapter rather than two competing identity models, and the suite proves identical identity binding, authorization, event ordering, replay, cancellation, and uncertain-input behavior across the in-memory adapter, the Unix socket, and SSH stdio. Per-commit CI drives stdio through a pipe for speed, with forced-command and fence editing covered by golden-file unit tests. Because sshd is what actually enforces scope, a scheduled pre-release lane runs the same suite through a real loopback sshd on both platforms, asserting a `read` key cannot obtain a shell or a port forward, revocation closes connections within a second, and a bastion hop behaves identically. Releases require that lane green.
 17. **Resolved in engineering review:** the spike is now a scored go/no-go rather than a selection, because the native PTY fallback stopped being a swap once runtime state became a tmux derivation and the escape hatch became a tmux client. The matrix scores twelve dimensions 0 to 3 on macOS, Linux, and WSL2, splits them into required and weighted, and fails the gate outright if any required dimension scores below 2 on any platform. Failing reopens the terminal architecture; there is no second backend.
 18. **Resolved in engineering review:** `overnight attach` acquires no lease and is documented as a bypass with the same standing as raw `tmux attach`, because a tmux client can reach every window in the session and any narrower claim would be false. The accepted consequence, interleaved input from two writers into one shell, is stated plainly. The path provides visibility instead of enforcement: audited attach and detach, an external-client-attached indicator in every app, and a pre-entry warning naming current protocol writers. `window-size latest` keeps external attach inside the same latest-active-viewer sizing rule. Abandoned clients need no lease expiry because no lease is taken.
-19. **Partly resolved in engineering review by removal:** notifications, the APNs relay, and Live Activities are cut from the product, so no capability matrix is needed for them and no enrollment deadline gates them. The distribution half survives and is now an isolated open question: without membership there is no TestFlight channel to a design partner, which Gate 0 and success criterion 10 assume exists.
+19. **Resolved in engineering review, both halves by removal:** notifications, the APNs relay, and Live Activities are cut, so no capability matrix is needed for them and no enrollment deadline gates them. The distribution half is resolved by deferring rather than by paying: design-partner validation runs on the native Mac client, and the iPhone test moves to success criterion 20, gated on a real delivery channel. Enrollment now gates no code and no milestone, only the ability to validate the mobile thesis, and the plan says so explicitly rather than implying the thesis is proven.
 20. **Resolved in engineering review by removal:** no APNs relay ships, so there is no relay protocol, retention policy, capability rotation, abuse limit, privacy copy, or operational ownership to threat-model. If notifications ever return, the threat model is a precondition of shipping them rather than a follow-up, and events may carry only hard facts the daemon observed.
