@@ -4,9 +4,7 @@ struct ContentView: View {
     @StateObject private var client = DaemonClient()
     @State private var selectedWorkspace: Workspace?
     @State private var selectedTerminal: Terminal?
-    @State private var output = ""
     @State private var pollTask: Task<Void, Never>?
-    @State private var ticks = 0
 
     var body: some View {
         NavigationSplitView {
@@ -83,7 +81,8 @@ struct ContentView: View {
         if let terminal = selectedTerminal {
             TerminalPane(
                 terminal: terminal,
-                screen: $output,
+                binary: client.cliPath,
+                environment: client.cliEnvironment,
                 onBytes: { bytes in
                     // Straight into the serial queue. Never spawn a task per
                     // keystroke: concurrent sends reorder the bytes and "echo"
@@ -92,15 +91,12 @@ struct ContentView: View {
                     Task { await q.submit(bytes) }
                 },
                 onGeometry: { cols, rows in
-                    Task { await client.resize(terminal: terminal.short, columns: cols, rows: rows) }
+                    await client.resize(terminal: terminal.short, columns: cols, rows: rows)
                 },
                 onRestart: { Task { await client.restart(terminal: terminal.short) } },
                 onDismiss: { Task { await client.dismissLost(terminal: terminal.short) } },
                 onStop: { Task { await client.stop(terminal: terminal.short) } }
             )
-            .task(id: terminal.id) {
-                output = await client.screen(terminal: terminal.short)
-            }
         } else if let ws = selectedWorkspace {
             WorkspaceSummary(workspace: ws) { preset in
                 Task { await client.createTerminal(workspace: ws.short, preset: preset) }
@@ -160,15 +156,11 @@ struct ContentView: View {
                 // Two cadences: the screen refreshes fast enough to feel live,
                 // the fleet list far less often because it is not latency
                 // sensitive and each refresh costs a tmux inventory.
-                try? await Task.sleep(for: .milliseconds(60))
+                // The screen no longer polls: it streams. Only the fleet list
+                // needs a periodic refresh, and it is not latency sensitive.
+                try? await Task.sleep(for: .seconds(3))
                 if Task.isCancelled { return }
-
-                if let t = selectedTerminal {
-                    output = await client.screen(terminal: t.short)
-                }
-
-                ticks += 1
-                if ticks % 50 == 0 { await client.refresh() }
+                await client.refresh()
             }
         }
     }
@@ -290,9 +282,10 @@ struct WorkspaceSummary: View {
 
 struct TerminalPane: View {
     let terminal: Terminal
-    @Binding var screen: String
+    let binary: String?
+    let environment: [String: String]
     let onBytes: ([UInt8]) -> Void
-    let onGeometry: (Int, Int) -> Void
+    let onGeometry: (Int, Int) async -> Void
     let onRestart: () -> Void
     let onDismiss: () -> Void
     let onStop: () -> Void
@@ -304,13 +297,16 @@ struct TerminalPane: View {
             header
 
             if kind == .running || kind == .starting {
-                // Keystrokes go straight here. No input box: a text field would
-                // steal Return and swallow the control chords an agent needs.
+                // A real emulator fed by a live byte stream. Keystrokes, control
+                // chords, arrows, mouse reports and scrolling all belong to it.
                 TerminalSurface(
-                    screen: screen,
-                    onBytes: onBytes,
-                    onGeometry: onGeometry
+                    terminal: terminal.short,
+                    binary: binary,
+                    environment: environment,
+                    onInput: onBytes,
+                    onResize: onGeometry
                 )
+                .id(terminal.id)
             } else {
                 inactiveScreen
             }
@@ -320,14 +316,19 @@ struct TerminalPane: View {
     }
 
     private var inactiveScreen: some View {
-        ScrollView {
-            Text(screen.isEmpty ? "(no output)" : screen)
-                .font(.system(.body, design: .monospaced))
-                .textSelection(.enabled)
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: kind == .lost ? "questionmark.circle" : "stop.circle")
+                .font(.system(size: 34))
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
+            Text(explanation)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 460)
+            Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
     }
 

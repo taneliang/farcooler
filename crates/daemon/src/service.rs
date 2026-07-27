@@ -390,6 +390,101 @@ impl Service {
         Ok((text, pane.columns, pane.rows))
     }
 
+    /// Stream a terminal's live output to this process's stdout.
+    ///
+    /// Emits the retained history first so the client opens onto the session as
+    /// it already is, then hands over to a live pipe. Runs until the caller is
+    /// killed or the pane goes away.
+    pub async fn stream(&self, id: Uuid) -> Result<()> {
+        use tokio::io::AsyncWriteExt;
+
+        let snapshot = self.inventory.snapshot();
+        let pane = snapshot
+            .claimants(id)
+            .into_iter()
+            .find(|p| p.proves_life())
+            .ok_or(DomainError::NotFound)?
+            .clone();
+
+        let mut stdout = tokio::io::stdout();
+
+        // 1. Replay the VISIBLE screen only, not the whole scrollback.
+        //
+        // tmux stores scrollback as the lines were written, so history from when
+        // the pane was a different width re-wraps in a client sized differently
+        // and the screen arrives staggered. The visible screen is re-rendered by
+        // tmux at the current size, so it always lands correctly. Deep history
+        // is deliberately not replayed; the client accumulates its own scrollback
+        // from the live stream onward.
+        //
+        // Re-read the pane geometry first so a resize that just happened has
+        // settled before the capture.
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+        if let Ok(screen) = self.tmux.capture_screen(&pane.pane_id).await {
+            // Home the cursor and clear, so the replay paints a clean screen.
+            let _ = stdout.write_all(b"\x1b[H\x1b[2J").await;
+
+            // capture-pane separates lines with a bare LF. To a terminal that is
+            // line feed WITHOUT carriage return, so every line starts where the
+            // previous one ended and the screen arrives as a staircase. The live
+            // pipe does not need this because a pty already emits CRLF.
+            let normalized = screen.trim_end().replace('\n', "\r\n");
+            let _ = stdout.write_all(normalized.as_bytes()).await;
+            let _ = stdout.write_all(b"\r\n").await;
+            let _ = stdout.flush().await;
+        }
+
+        // 2. Live bytes through a fifo. tmux writes, we forward.
+        let fifo = std::env::temp_dir().join(format!("overnight-stream-{}.fifo", Uuid::now_v7()));
+        let fifo_str = fifo.to_string_lossy().to_string();
+        make_fifo(&fifo_str)?;
+
+        self.tmux
+            .pipe_pane_start(&pane.pane_id, &format!("cat > '{fifo_str}'"))
+            .await?;
+
+        // Open the fifo READ-WRITE, not read-only.
+        //
+        // A read-only fifo reader gets EOF the instant the last writer closes,
+        // and tmux's `cat` opens lazily, so a read-only open ends the stream
+        // immediately on an idle terminal. Holding a write handle ourselves
+        // means there is always at least one writer, so reads block for more
+        // data instead of reporting end of stream.
+        let file = tokio::task::spawn_blocking({
+            let fifo = fifo.clone();
+            move || std::fs::OpenOptions::new().read(true).write(true).open(&fifo)
+        })
+        .await
+        .map_err(|_| DomainError::OperationFailed)?
+        .map_err(|e| {
+            tracing::warn!(error = %e, "could not open stream fifo");
+            DomainError::OperationFailed
+        })?;
+        let file = tokio::fs::File::from_std(file);
+
+        let mut reader = tokio::io::BufReader::new(file);
+        let mut buf = vec![0u8; 16 * 1024];
+
+        loop {
+            use tokio::io::AsyncReadExt;
+            match reader.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if stdout.write_all(&buf[..n]).await.is_err() {
+                        break;
+                    }
+                    let _ = stdout.flush().await;
+                }
+                Err(_) => break,
+            }
+        }
+
+        let _ = self.tmux.pipe_pane_stop(&pane.pane_id).await;
+        let _ = std::fs::remove_file(&fifo);
+        Ok(())
+    }
+
     /// Resize the window backing a terminal to the viewer's geometry.
     pub async fn resize_terminal(&self, id: Uuid, columns: u32, rows: u32) -> Result<()> {
         let (columns, rows) = validate::clamp_size(columns, rows);
@@ -584,4 +679,16 @@ mod tests {
         assert_eq!(sanitize("my repo/name"), "my-repo-name");
         assert_eq!(sanitize("ok_name-1"), "ok_name-1");
     }
+}
+
+/// Create a fifo. tmux writes into it, the daemon reads and forwards.
+fn make_fifo(path: &str) -> Result<()> {
+    let c = std::ffi::CString::new(path).map_err(|_| DomainError::OperationFailed)?;
+    // SAFETY: c is a valid NUL terminated path for the duration of the call.
+    let rc = unsafe { libc::mkfifo(c.as_ptr(), 0o600) };
+    if rc != 0 {
+        tracing::warn!(path, "mkfifo failed");
+        return Err(DomainError::OperationFailed);
+    }
+    Ok(())
 }

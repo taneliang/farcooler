@@ -20,6 +20,10 @@ final class DaemonClient: ObservableObject {
     /// inherits no shell environment and cannot find something that only exists
     /// on your PATH. The env override and PATH lookups are for running from a
     /// checkout during development.
+    var cliPath: String? { binary }
+
+    var cliEnvironment: [String: String] { environment }
+
     private var binary: String? {
         var candidates: [String] = []
 

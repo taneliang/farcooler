@@ -230,6 +230,41 @@ impl TmuxServer {
         Ok(())
     }
 
+    /// Start streaming a pane's raw output into `command`'s stdin.
+    ///
+    /// This is the real terminal data plane. `pipe-pane` hands over the exact
+    /// bytes the program wrote, escape sequences and all, which is what a VT
+    /// emulator needs. Polling a rendered snapshot can never show a cursor
+    /// moving or an animation, because it only ever sees the settled screen.
+    ///
+    /// `-O` is output only: nothing the user types is echoed back into the pipe.
+    pub async fn pipe_pane_start(&self, pane_id: &str, command: &str) -> Result<()> {
+        let out = self.run(&["pipe-pane", "-O", "-t", pane_id, command]).await?;
+        if !out.ok() {
+            tracing::warn!(stderr = %out.stderr, "pipe-pane failed");
+            return Err(DomainError::TmuxUnavailable);
+        }
+        Ok(())
+    }
+
+    /// Stop streaming. `pipe-pane` with no command detaches the pipe.
+    pub async fn pipe_pane_stop(&self, pane_id: &str) -> Result<()> {
+        let _ = self.run(&["pipe-pane", "-t", pane_id]).await?;
+        Ok(())
+    }
+
+    /// Everything tmux still holds for a pane, scrollback included, with colour.
+    ///
+    /// Sent once before live streaming begins so a client opens onto the session
+    /// as it already is rather than onto a blank screen.
+    pub async fn capture_history(&self, pane_id: &str) -> Result<String> {
+        let out = self.run(&["capture-pane", "-e", "-p", "-S", "-", "-t", pane_id]).await?;
+        if !out.ok() {
+            return Err(DomainError::TmuxUnavailable);
+        }
+        Ok(out.stdout)
+    }
+
     /// Retained pane contents, used to resynchronize after a gap.
     pub async fn capture_pane(&self, pane_id: &str, lines: u32) -> Result<String> {
         let start = format!("-{lines}");

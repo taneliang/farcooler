@@ -93,6 +93,8 @@ enum TerminalCmd {
     SendHex { terminal: String, hex: String },
     /// Print the rendered visible screen with colour escapes intact.
     Screen { terminal: String },
+    /// Stream live output bytes to stdout until killed. The terminal data plane.
+    Stream { terminal: String },
     /// Resize the terminal to a viewer's geometry.
     Resize { terminal: String, columns: u32, rows: u32 },
     /// Print recent output.
@@ -268,6 +270,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Command::Terminal(TerminalCmd::SendHex { terminal, hex }) => {
             let id = resolve_terminal(&svc, &terminal).await?;
             svc.send_bytes_hex(id, &hex).await?;
+        }
+
+        Command::Terminal(TerminalCmd::Stream { terminal }) => {
+            let id = resolve_terminal(&svc, &terminal).await?;
+            svc.stream(id).await?;
         }
 
         Command::Terminal(TerminalCmd::Screen { terminal }) => {

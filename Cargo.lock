@@ -483,6 +483,7 @@ name = "overnight-daemon"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "libc",
  "overnight-core",
  "overnight-protocol",
  "overnight-store",

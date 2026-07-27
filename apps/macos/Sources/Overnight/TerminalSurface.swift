@@ -1,188 +1,228 @@
 import AppKit
+import SwiftTerm
 import SwiftUI
 
-/// The terminal surface: an NSView that takes the keyboard directly.
+/// The terminal surface.
 ///
-/// There is no input box. Keystrokes go to the terminal, which is what makes a
-/// full-screen agent usable: Ctrl-C interrupts, arrows navigate its menus, Esc
-/// dismisses, and Tab completes, none of which survive a text field that steals
-/// Return and swallows control chords.
-final class TerminalNSView: NSView {
-    var onBytes: (([UInt8]) -> Void)?
-    var onGeometry: ((Int, Int) -> Void)?
+/// SwiftTerm owns VT parsing, the screen grid, the cursor, selection, scrollback
+/// and mouse reporting. Overnight owns the transport: bytes in from a live
+/// stream, bytes out to the pane. That split is why a full-screen agent behaves
+/// correctly here rather than approximately.
+@MainActor
+final class OvernightTerminalView: TerminalView, @preconcurrency TerminalViewDelegate {
+    /// Exact input bytes leaving the terminal, already VT encoded by SwiftTerm.
+    var onInput: (([UInt8]) -> Void)?
+    /// The emulator's own idea of its grid, which is what the pane must match.
+    var onResize: ((Int, Int) -> Void)?
 
-    private let scroll = NSScrollView()
-    private let text = NSTextView()
-    private var lastGeometry: (Int, Int) = (0, 0)
+    private var lastSize: (Int, Int) = (0, 0)
 
-    /// Monospaced, because column alignment is the whole point.
-    private let font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
-
-    override init(frame: NSRect) {
+    override init(frame: CGRect) {
         super.init(frame: frame)
-        setUp()
+        terminalDelegate = self
+        configure()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        setUp()
+        terminalDelegate = self
+        configure()
     }
 
-    private func setUp() {
-        wantsLayer = true
-        layer?.backgroundColor = NSColor(srgbRed: 0.07, green: 0.08, blue: 0.10, alpha: 1).cgColor
+    private func configure() {
+        // A terminal is a dark grid of monospaced cells. Match the app's ground.
+        nativeBackgroundColor = NSColor(srgbRed: 0.07, green: 0.08, blue: 0.10, alpha: 1)
+        nativeForegroundColor = NSColor(srgbRed: 0.86, green: 0.88, blue: 0.91, alpha: 1)
+        font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+        // Mouse reporting is on by default in SwiftTerm and gated by the program:
+        // an agent that asks for mouse events gets them, one that does not still
+        // gets ordinary selection.
+        optionAsMetaKey = true
+    }
 
-        text.isEditable = false          // input arrives as key events, not edits
-        text.isSelectable = true         // but text stays selectable and copyable
-        text.drawsBackground = false
-        text.textContainerInset = NSSize(width: 10, height: 8)
-        text.isVerticallyResizable = true
-        text.isHorizontallyResizable = false
-        text.autoresizingMask = [.width]
-        text.textContainer?.widthTracksTextView = true
-
-        // tmux has already wrapped the screen to the pane width. Letting the
-        // view wrap again would fold lines a second time at a different column
-        // and misalign every full-screen TUI.
-        text.textContainer?.lineFragmentPadding = 0
-        text.isAutomaticQuoteSubstitutionEnabled = false
-        text.isAutomaticDashSubstitutionEnabled = false
-        text.isAutomaticTextReplacementEnabled = false
-
-        scroll.documentView = text
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.autoresizingMask = [.width, .height]
-        scroll.frame = bounds
-        addSubview(scroll)
+    /// Feed bytes from the daemon into the emulator.
+    func receive(_ bytes: [UInt8]) {
+        feed(byteArray: bytes[...])
     }
 
     // MARK: - Focus
     //
-    // Without these the view never becomes first responder and every keystroke
-    // goes somewhere else, which is the bug that made the first build unusable.
-
-    override var acceptsFirstResponder: Bool { true }
-    override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
-    override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
-    override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self) }
+    // SwiftUI's split view parks first responder in the sidebar, so without
+    // claiming it the terminal renders perfectly and silently ignores every
+    // keystroke. Claim it when the surface appears and whenever it is clicked.
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        // Claim the keyboard as soon as the surface appears.
+        claimKeyboard()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        claimKeyboard()
+        super.mouseDown(with: event)
+    }
+
+    /// Take the keyboard on the next runloop turn, after SwiftUI has finished
+    /// installing its own focus.
+    func claimKeyboard() {
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.window?.makeFirstResponder(self)
+            guard let self, let window = self.window else { return }
+            if window.firstResponder !== self {
+                window.makeFirstResponder(self)
+            }
         }
     }
 
-    // MARK: - Keyboard
+    // MARK: - TerminalViewDelegate
 
-    override func keyDown(with event: NSEvent) {
-        // Cmd chords belong to the app (copy, paste, quit), not the terminal.
-        if event.modifierFlags.contains(.command) {
-            super.keyDown(with: event)
-            return
-        }
-        if let bytes = KeyEncoder.bytes(for: event) {
-            onBytes?(bytes)
-        }
+    func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        // SwiftTerm has already encoded the keystroke, chord, arrow, function
+        // key or mouse report into exact bytes. Pass them through untouched.
+        onInput?(Array(data))
     }
 
-    /// Cmd-V pastes into the terminal as exact bytes.
-    @objc func paste(_ sender: Any?) {
-        guard let s = NSPasteboard.general.string(forType: .string) else { return }
-        onBytes?(KeyEncoder.bytes(forText: s))
+    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        guard (newCols, newRows) != lastSize, newCols > 1, newRows > 1 else { return }
+        lastSize = (newCols, newRows)
+        onResize?(newCols, newRows)
     }
 
-    @objc func copy(_ sender: Any?) {
-        guard let range = text.selectedRanges.first as? NSRange, range.length > 0 else { return }
-        let selected = (text.string as NSString).substring(with: range)
+    func setTerminalTitle(source: TerminalView, title: String) {}
+
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+
+    func scrolled(source: TerminalView, position: Double) {}
+
+    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+
+    func clipboardCopy(source: TerminalView, content: Data) {
+        guard let s = String(data: content, encoding: .utf8) else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(selected, forType: .string)
+        NSPasteboard.general.setString(s, forType: .string)
     }
 
-    // MARK: - Content
-
-    func render(_ raw: String) {
-        let attributed = ANSIRenderer.attributed(
-            raw, font: font,
-            defaultFG: NSColor(srgbRed: 0.86, green: 0.88, blue: 0.91, alpha: 1))
-
-        // Preserve the scroll position unless the user is already at the bottom,
-        // so reading back through output is not yanked away by a refresh.
-        let atBottom = isScrolledToBottom()
-        let selected = text.selectedRanges
-
-        text.textStorage?.setAttributedString(attributed)
-
-        if atBottom {
-            text.scrollToEndOfDocument(nil)
-        } else {
-            text.selectedRanges = selected
-        }
-        reportGeometry()
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        guard let url = URL(string: link) else { return }
+        NSWorkspace.shared.open(url)
     }
 
-    private func isScrolledToBottom() -> Bool {
-        let visible = scroll.contentView.documentVisibleRect
-        let height = text.frame.height
-        return visible.maxY >= height - 24
+    func bell(source: TerminalView) {
+        NSSound.beep()
     }
 
-    /// Tell the daemon how many columns and rows we are actually showing, so the
-    /// pane is sized to the viewer rather than to a guess.
-    ///
-    /// Measured from the SCROLL VIEW's content size, not the text container. The
-    /// container tracks the text view and is not meaningful until layout has
-    /// run, and reading it early yielded a near-zero width that clamped to the
-    /// 20 column floor and shrank the real tmux pane to 20x5.
-    private func reportGeometry() {
-        let charW = ("W" as NSString)
-            .size(withAttributes: [.font: font]).width
-        let lineH = NSLayoutManager().defaultLineHeight(for: font)
-        guard charW > 1, lineH > 1 else { return }
-
-        let usableW = scroll.contentView.bounds.width - text.textContainerInset.width * 2
-        let usableH = scroll.contentView.bounds.height - text.textContainerInset.height * 2
-
-        // Before the first real layout the view has no useful size. Reporting
-        // then would resize the pane to the clamp floor, so say nothing.
-        guard usableW > 120, usableH > 40 else { return }
-
-        let cols = max(20, Int(usableW / charW))
-        let rows = max(5, Int(usableH / lineH))
-
-        if (cols, rows) != lastGeometry {
-            lastGeometry = (cols, rows)
-            onGeometry?(cols, rows)
-        }
-    }
-
-    override func layout() {
-        super.layout()
-        scroll.frame = bounds
-        reportGeometry()
-    }
+    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
 }
 
-/// SwiftUI wrapper.
+/// SwiftUI wrapper. Owns the stream lifecycle for the selected terminal.
 struct TerminalSurface: NSViewRepresentable {
-    let screen: String
-    let onBytes: ([UInt8]) -> Void
-    let onGeometry: (Int, Int) -> Void
+    let terminal: String
+    let binary: String?
+    let environment: [String: String]
+    let onInput: ([UInt8]) -> Void
+    /// Resize the pane. Must complete before history is captured.
+    let onResize: (Int, Int) async -> Void
 
-    func makeNSView(context: Context) -> TerminalNSView {
-        let v = TerminalNSView()
-        v.onBytes = onBytes
-        v.onGeometry = onGeometry
-        v.render(screen)
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    @MainActor
+    final class Coordinator {
+        var stream: TerminalStream?
+        var attached: String?
+        var started = false
+
+        func stop() {
+            stream?.stop()
+            stream = nil
+            started = false
+        }
+    }
+
+    func makeNSView(context: Context) -> OvernightTerminalView {
+        let v = OvernightTerminalView(frame: .zero)
+        attach(v, context: context)
         return v
     }
 
-    func updateNSView(_ v: TerminalNSView, context: Context) {
-        v.onBytes = onBytes
-        v.onGeometry = onGeometry
-        v.render(screen)
+    func updateNSView(_ v: OvernightTerminalView, context: Context) {
+        // Only re-attach when the selected terminal actually changes. Restarting
+        // on every SwiftUI update would reset the screen constantly.
+        if context.coordinator.attached != terminal {
+            attach(v, context: context)
+        }
     }
+
+    /// Wire callbacks and wait for the emulator to report its grid.
+    ///
+    /// The stream deliberately does NOT start here. Its first act is to replay
+    /// the pane's history, and tmux wraps that history at the PANE width. If the
+    /// pane is 190 columns while the view is 95, every replayed line wraps a
+    /// second time and the screen arrives staggered. So: learn our size, resize
+    /// the pane to match, and only then start streaming.
+    private func attach(_ v: OvernightTerminalView, context: Context) {
+        let coord = context.coordinator
+        coord.stop()
+        coord.attached = terminal
+        v.getTerminal().resetToInitialState()
+
+        v.onInput = onInput
+        v.claimKeyboard()
+
+        let box = MainActorBox(v)
+        let terminal = self.terminal
+        let binary = self.binary
+        let environment = self.environment
+        let onResize = self.onResize
+
+        /// Resize the pane, then start streaming once.
+        ///
+        /// Idempotent: whichever path gets here first wins.
+        @MainActor
+        func begin(_ cols: Int, _ rows: Int) async {
+            await onResize(cols, rows)
+
+            guard !coord.started, let binary else { return }
+            coord.started = true
+
+            let stream = TerminalStream(onBytes: { bytes in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { box.value.receive(bytes) }
+                }
+            })
+            stream.start(binary: binary, terminal: terminal, environment: environment)
+            coord.stream = stream
+        }
+
+        v.onResize = { cols, rows in
+            Task { @MainActor in await begin(cols, rows) }
+        }
+
+        // Do not wait for a size CHANGE to start.
+        //
+        // SwiftTerm sizes itself during construction, so that notification has
+        // usually already fired by the time this callback is installed, and a
+        // window that is never resized would never stream at all. Kick off from
+        // the size the emulator already has.
+        Task { @MainActor in
+            // One turn, so layout has settled and the grid is real.
+            try? await Task.sleep(for: .milliseconds(120))
+            let t = v.getTerminal()
+            let cols = t.cols
+            let rows = t.rows
+            guard cols > 1, rows > 1 else { return }
+            await begin(cols, rows)
+        }
+    }
+
+    static func dismantleNSView(_ v: OvernightTerminalView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+}
+
+/// Carries a main-actor value across a callback boundary.
+///
+/// The stream reader thread hands bytes back, and the view it feeds is
+/// main-actor isolated. Every use hops to the main actor before touching the
+/// value, so the unchecked conformance is the assertion, not a shortcut.
+struct MainActorBox<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
 }
