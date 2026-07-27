@@ -854,7 +854,20 @@ The resource model, method schemas, event versions, terminal IDs, operation IDs,
 
 The connection settings are per host, not global. An enrolled host may have several ordered routes, for example `SSH over tailnet → SSH via bastion`, and the client reports which route is active. Automatic fallback is allowed only before an input is accepted; route switching never retransmits uncertain terminal input.
 
-SSH support must include known-host verification with first-use fingerprints, changed-host-key blocking, encrypted Keychain storage for device and imported keys, hardware-backed keys where the chosen iOS SSH library supports them, agent/bastion configuration, and no password persistence. Because SSH is now the only control transport, the iOS SSH implementation is a Milestone 1 blocking dependency rather than a Gate 2 question. Mosh support must expose its UDP port requirement and fall back visibly when the network blocks it.
+SSH support must include known-host verification with first-use fingerprints, changed-host-key blocking, encrypted Keychain storage for device and imported keys, hardware-backed keys, agent and bastion configuration, and no password persistence. Because SSH is the only control transport, this is a Milestone 1 blocking dependency rather than a Gate 2 question.
+
+**One SSH implementation serves every client.** A single Rust SSH client sits behind an Overnight-owned C ABI alongside the terminal core, and iOS, Android, the Mac app, and the CLI all consume it. Host-key verification is now the whole of transport authentication, so it is the last thing that should have two independent implementations that can disagree about what a verified host means. React Native never touches crypto. Private keys never enter the library: hardware-backed keys stay in the Secure Enclave or Android Keystore and the client calls out to a platform signer callback, which also requires the chosen crate to support custom signers.
+
+The crate is selected during the spike against explicit acceptance criteria rather than chosen here: reputable and open source, actively maintained with a responsive security process, a published advisory history that shows issues being found and fixed rather than ignored, modern key types and algorithms, agent and `ProxyJump` support, custom signers, reliable stdio, and a clean cross-compile to iOS and Android. Two candidates meet the bar in different ways:
+
+| Candidate | Strength | Cost |
+|---|---|---|
+| `russh` | Pure Rust with no system C dependencies, which is what makes the iOS and Android cross-compile tractable; actively maintained | Younger codebase; recent advisories include Terrapin (which affected nearly every SSH implementation), an authentication-handling issue, and a banner-parsing issue, all fixed in the current line |
+| `ssh2` (libssh2 bindings) | A decades-old, heavily deployed C core with the strongest battle-tested claim | Pulls in OpenSSL and C build complexity, which is the painful part of targeting iOS and Android |
+
+Whichever is chosen: pin the exact version, subscribe to its advisory feed, verify the Terrapin countermeasure is active, and treat an unpatched advisory in the SSH stack as release-blocking rather than a scheduled upgrade.
+
+Mosh support must expose its UDP port requirement and fall back visibly when the network blocks it.
 
 ##### Protocol framing, terminal replay, and backpressure
 
@@ -1025,7 +1038,7 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 These questions have explicit decision gates and may not remain unresolved when their milestone begins:
 
 1. **Accepted for Gate 1:** Use pinned `libghostty-vt` behind an Overnight-owned C-ABI adapter as the shared Mac, iOS, and Android terminal core. Use one private tmux server and one host-wide session; represent workspaces as tagged groups of terminal windows and drain them through one host-wide control client with per-pane flow control. Prove tmux control mode through the Mac surface and require an Android ARM64 build plus rendered-fixture smoke test in the same spike. Reopen the backend if it fails a required persistence, handoff, process-ownership, noisy-neighbor, or shell-escape-hatch invariant.
-2. **Blocking for Milestone 1:** Which maintained iOS SSH implementation supports host-key verification, modern keys, bastions/agents, and a reliable stdio tunnel without making React Native own crypto? SSH is now the only control transport, so this moved off Gate 2 and has no fallback route behind it. Separately, does the Mosh terminal adapter earn its added UDP and client-library complexity?
+2. **Accepted before Milestone 1:** One Rust SSH client serves every client behind the Overnight-owned C ABI, with platform signer callbacks so hardware-backed keys never leave the Secure Enclave or Android Keystore. The crate is chosen at the spike against written acceptance criteria (reputable, open source, actively maintained, responsive security process, modern algorithms, agents, `ProxyJump`, custom signers, clean iOS and Android cross-compile), with `russh` and `ssh2` as the candidates and their tradeoffs recorded. **Still open:** does the Mosh terminal adapter earn its added UDP and client-library complexity?
 3. **Accepted before Milestone 1:** Implement the daemon and CLI in Rust, using Tokio, Prost, bundled SQLite through rusqlite, and a crate boundary that keeps protocol, core state, storage, tmux, transport, composition, and CLI concerns separate. Validate macOS arm64 packaging in the first vertical slice and add Linux/WSL2 build-and-smoke CI before remote-host support enters scope.
 4. **Accepted before Milestone 1:** Bundle the Rust daemon, CLI, LaunchAgent plist, protocol descriptors, and terminal artifacts inside the native Mac app. Register the unprivileged per-user daemon through `SMAppService`, use the app as the Mac release unit, and offer an opt-in `~/.local/bin/overnight` CLI copy without requiring root or editing shell files.
 5. **Accepted before Milestone 1:** Launch coding agents through the user's interactive login shell by default, with per-host and per-preset alternatives for login, interactive, direct, and custom modes. Require each supported adapter to capture an exact correlated vendor session ID through an additive lifecycle hook and resume that exact ID without scraping terminal output or choosing a global latest session. Make restore policy configurable and default to automatic restoration only after verified infrastructure loss.
@@ -1117,7 +1130,7 @@ GitHub Actions should:
 ## Dependencies
 
 - SSH access configured for each host/client route under test. Tailscale is optional and supplies NAT traversal and stable addressing for routes that use it.
-- A maintained iOS SSH implementation with host-key verification, modern key types, agent/bastion support, and reliable stdio. This is now a blocking dependency, since SSH is the only control transport.
+- One maintained Rust SSH client, cross-compiled for iOS and Android behind the shared C ABI, with host-key verification, modern key types, agent and bastion support, custom signers, and reliable stdio. This is a blocking dependency, since SSH is the only control transport, and an unpatched advisory in it blocks a release.
 - tmux installed on hosts if Gate 1 selects the tmux backend; Mosh installed only for hosts/routes that enable its terminal adapter.
 - Git installed on each host.
 - At least one supported coding-agent CLI installed and authenticated on a host.
