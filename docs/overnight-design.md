@@ -12,7 +12,7 @@ Revised 2026-07-26 to add configurable SSH/Mosh connectivity, tmux reuse and she
 
 Engineers can run increasingly capable coding agents, but serious parallel use still pulls them back to a laptop. Desktop orchestrators make it easier to run multiple agents, while first-party mobile products make individual vendor sessions reachable from a phone. The missing experience is a terminal-first command center that lets an engineer create and supervise many task-scoped coding workspaces across machines they control.
 
-Overnight should let an engineer onboard macOS, Linux, and WSL2 hosts; create repositories and task workspaces on those hosts; launch Claude Code, Codex, or Cursor CLI in parallel; attach directly to their terminals; monitor running servers; and move between an iPhone and a Mac without interrupting the underlying work. The host daemon, not a thin client, owns authoritative workspace, process, and session state so an iPhone can disappear offline and another device can pick up the same work.
+Overnight should let an engineer onboard macOS, Linux, and WSL2 hosts; create repositories and task workspaces on those hosts; launch Claude Code, Codex, or Cursor CLI in parallel; attach directly to their terminals; and move between an iPhone and a Mac without interrupting the underlying work. The host daemon, not a thin client, owns authoritative workspace, process, and session state so an iPhone can disappear offline and another device can pick up the same work.
 
 The product promise is freedom from the desk. Host failure recovery and workspace transfer are useful extensions, but they are not the initial product thesis.
 
@@ -35,7 +35,7 @@ The current workaround is a fragile collection of products and infrastructure:
 2. Configure repository access, credentials, language runtimes, dependencies, ports, and networking.
 3. Combine vendor cloud agents, custom runners, SSH or remote terminals, and local IDEs.
 4. Manually create branches or worktrees for parallel tasks.
-5. Remember which agent, terminal, server, repository, branch, and machine belong together.
+5. Remember which agent, terminal, repository, branch, and machine belong together.
 6. Reconnect from another device and reconstruct enough context to continue.
 7. Return to a laptop for terminal interaction, approvals, diff review, or recovery when the mobile experience is incomplete.
 
@@ -58,7 +58,7 @@ A technical power user such as an ML or software engineer who:
 
 From an iPhone, create and operate five concurrent terminal workspaces across two user-owned hosts. Each workspace represents one task and is defined as:
 
-> one repository + one git worktree + one branch + its terminals, coding agents, and running servers
+> one repository + one git worktree + one branch + its terminals and coding agents
 
 The user can create a workspace, launch any of the three supported coding-agent CLIs, switch among terminal tabs, provide direct input and approvals, see which workspaces are active, quiet, exited, failed, or offline, and later resume control from the native Mac app or another enrolled iPhone without reconstructing client-local state.
 
@@ -85,7 +85,7 @@ This is not a generic cloud IDE, hosted compute service, chat wrapper, or remote
 1. The core outcome is working from anywhere by supervising meaningful parallel coding work from a phone.
 2. The core object is a fleet of concurrent task workspaces, not a single remote terminal.
 3. No individual feature is unique. The differentiated product is the combination of terminal-quality mobile access, parallel workspaces, vendor-neutral CLIs, and user-owned heterogeneous hosts.
-4. A workspace is a repository worktree and branch for one task, plus its terminals, agent processes, and servers.
+4. A workspace is a repository worktree and branch for one task, plus its terminals and agent processes.
 5. SSH provides transport, mutual authentication, and device credentials; Tailscale provides the network path where the user wants one. Overnight owns enrollment scope, worktree lifecycle, process lifecycle, authoritative workspace state, notification policy, and the client experience. It does not build its own authentication system.
 6. Host failover and workspace transfer are secondary benefits and remain post-MVP.
 7. Android is strategically important but can follow the iOS proof if the React Native architecture and terminal renderer are validated against Android constraints during MVP development.
@@ -122,7 +122,7 @@ This thesis is plausible but unproven. The MVP must test the combined workflow, 
 
 ### Approach A: Direct Fleet MVP
 
-Build a standalone daemon, React Native iOS client, and native Swift Mac client. The daemon manages repositories, worktrees, terminal processes, coding-agent presets, running servers, notification events, and authoritative workspace metadata. Clients connect through a transport adapter over a local Unix socket or SSH stdio. Terminal sessions use tmux where the backend spike proves it reliable, with a native PTY fallback; Mosh may run the host-local `overnight attach` path without becoming the control-plane protocol.
+Build a standalone daemon, React Native iOS client, and native Swift Mac client. The daemon manages repositories, worktrees, terminal processes, coding-agent presets, notification events, and authoritative workspace metadata. Clients connect through a transport adapter over a local Unix socket or SSH stdio. Terminal sessions use tmux where the backend spike proves it reliable, with a native PTY fallback; Mosh may run the host-local `overnight attach` path without becoming the control-plane protocol.
 
 - **Effort:** Large; provisional human-team estimate 6–9 months / AI-assisted estimate 8–14 weeks. Replace these estimates after the terminal, transport, and persistence spikes.
 - **Risk:** Medium-high.
@@ -278,8 +278,7 @@ Fleet
     └── Repository
         └── Workspace = worktree + branch + one task
             ├── Terminal tabs
-            ├── Claude Code, Codex, or Cursor CLI processes
-            └── Running servers and forwarded ports
+            └── Claude Code, Codex, or Cursor CLI processes
 ```
 
 ### Staged MVP delivery
@@ -291,7 +290,7 @@ The founder-approved product boundary remains intact, but implementation is orde
 3. **Milestone 1: Mac-first local vertical slice.** Native Swift Mac client with a libghostty-backed terminal surface, macOS arm64 daemon/CLI, Unix-socket protocol, SQLite metadata, existing repository, transactional worktree creation, one CLI preset, multiple terminal tabs, five concurrent workspaces, archive, and observable process states.
 4. **Gate 2: SSH transport and reconnect spike.** Expose the same daemon protocol through SSH stdio, connect a second client, disconnect repeatedly, transfer writer ownership, and prove ordered replay without duplicate input. `mosh host -- overnight attach WORKSPACE` remains the terminal escape hatch rather than a GUI transport requirement.
 5. **Milestone 2: mobile vertical slice.** One React Native iOS screen connects through SSH, lists the Mac-proven workspaces, controls a terminal, and passes the mobile terminal acceptance suite. Run the same renderer on Android as architecture validation only.
-6. **Milestone 3: validated product workflow.** Multiple macOS/Linux hosts, remote daemon installation over SSH for Linux and WSL2, repository clone, five concurrent workspaces, server metadata, Claude Code/Codex/Cursor presets, signed installers, upgrade/rollback path, and the design-partner success criterion.
+6. **Milestone 3: validated product workflow.** Multiple macOS/Linux hosts, remote daemon installation over SSH for Linux and WSL2, repository clone, five concurrent workspaces, Claude Code/Codex/Cursor presets, signed installers, upgrade/rollback path, and the design-partner success criterion.
 7. **Milestone 4: founder-scoped public MVP.** Native Swift Mac client, iOS client, WSL2 supported topology, public distribution, and all technical success criteria. If Apple Developer Program enrollment is complete by the release gate, this milestone also includes the APNs relay, push notifications, and Live Activity/Dynamic Island surfaces; otherwise those move together to the first fast follow.
 
 Failure at a gate stops expansion and produces a revised design. Android buildability is checked during Gate 1 and CI, but a user-ready Android client remains post-MVP.
@@ -328,9 +327,9 @@ ready | error ──→ archived ──→ ready | error
 
 - **Creating:** repository/worktree transaction is in progress.
 - **Ready:** worktree exists and no terminal is currently running.
-- **Active:** at least one terminal or declared server is running.
-- **Error:** creation failed or at least one child has unresolved `lost`/`unknown` reconciliation state. After every resolution, the daemon recomputes the workspace to `ready` or `active` from its children.
-- **Archived:** hidden from the default fleet until restored. Archiving is prohibited while any managed terminal or server is running and never deletes a branch or worktree.
+- **Active:** at least one terminal is running.
+- **Error:** creation failed or at least one terminal is `lost` and unresolved. After every resolution, the daemon derives the workspace as `ready` or `active` from its children.
+- **Archived:** hidden from the default fleet until restored. Archiving is prohibited while any managed terminal is running and never deletes a branch or worktree.
 
 There is no inferred **completed** state in MVP. The user archives a finished task.
 
@@ -349,18 +348,15 @@ starting → running → exited
 
 A lost terminal retains its truthful `lost` state plus an optional reconciliation resolution. `terminal.dismiss_lost` records that the user acknowledged the loss so it no longer keeps the workspace in `error`; it never relabels the terminal `exited`. `terminal.restart` launches a new terminal epoch from the same preset, while `terminal.restore_agent_session` starts the exact stored vendor session when its adapter permits restoration.
 
-#### Declared server
+#### Declared servers are not a product concept
 
-```text
-starting → running → exited
-   └────→ error  └────→ unknown ──→ starting
-```
+Overnight has no `Server` resource, no port metadata, and no browser handoff. A development server is a long-lived command in an ordinary Overnight terminal, with the same output, scrollback, restart, and `lost` semantics as any other terminal, and nothing tracks it as a distinct object.
 
-A server is a user-launched command associated with a workspace and an expected port. MVP does not scan arbitrary host processes. It shows the declared command, process state, port, and a Safari/external-browser URL over Tailscale.
+Reaching that server from a phone needs no product feature. Tailscale already supplies the network path, so `http://host-magicdns-name:5173` works in Safari with no Overnight involvement, and users who prefer it can forward a port over their existing SSH access or expose it with a tunnel of their own choosing. A port field, a liveness probe, and a second lifecycle would have bought a URL the user can already type.
 
-After daemon restart, any formerly running declared server becomes **unknown**. The daemon may test whether its expected port is listening, but it cannot relabel the process **running** or adopt a process from persisted PID/PGID data. `server.dismiss_unknown` acknowledges the uncertainty without claiming an exit; `server.restart` launches a new owned process group from the stored preset. Server `error` means creation or launch failed before a live owned process was established.
+The tradeoff is explicit: a crashed development server is something the user notices by reading its terminal, not something the fleet view flags. Reintroducing declared servers is a post-MVP question that must re-justify the duplicate lifecycle it brings with it.
 
-Workspace state is derived from its children on every read, not recomputed at restart. Any unresolved `lost` terminal or `unknown` server makes the workspace `error` until the user dismisses, restarts, or exactly restores every uncertain process.
+Workspace state is derived from its terminals on every read, not recomputed at restart. Any unresolved `lost` terminal makes the workspace `error` until the user dismisses, restarts, or exactly restores it.
 
 #### Connection
 
@@ -385,7 +381,6 @@ Runs as an unprivileged background service for the logged-in developer on macOS 
 - Terminal resize, input, output, exit status, and scrollback streaming.
 - Named terminal tabs within a workspace. Split panes are deferred.
 - Command presets for Claude Code, Codex, and Cursor CLI.
-- Declared dev-server commands, process state, and port metadata.
 - A transport-neutral protocol exposed through a local Unix socket and an sshd-launched SSH stdio adapter. The daemon binds no TCP port.
 - Audit records for workspace creation, process launch, and destructive actions.
 - When the paid-Apple-account gate passes, signed hard-fact notification events sent outbound to the minimal APNs relay for explicitly enrolled devices.
@@ -426,7 +421,7 @@ private tmux server
     ├── window: workspace A / shell   [workspace_id=A, terminal_id=1]
     ├── window: workspace A / codex   [workspace_id=A, terminal_id=2]
     ├── window: workspace B / claude  [workspace_id=B, terminal_id=3]
-    └── window: workspace B / server  [workspace_id=B, terminal_id=4]
+    └── window: workspace B / dev      [workspace_id=B, terminal_id=4]
 ```
 
 One long-lived `tmux -CC attach-session` control client attaches to the host session. Because tmux sends output from every pane in every window of the attached session, this client drains and routes all terminal output by stable pane ID. The Rust control actor serializes tmux commands and continuously parses stdout into per-terminal bounded queues; client or renderer backpressure never blocks that reader. It enables tmux's per-pane control-mode flow control and resynchronizes a paused or reconnected pane with an explicit gap plus `capture-pane`, never by silently claiming byte-perfect replay.
@@ -547,7 +542,7 @@ The MVP guarantee is precise:
 - Terminal sizing follows tmux's “latest active viewer” model and is independent of the writer lease. The most recently active control-scoped client displaying that terminal controls its canonical columns and rows; other viewers adapt until they become active.
 - “Active” means the terminal surface is foregrounded, visible, and selected. Merely connecting, synchronizing in the background, or rendering a hidden tab never claims size authority. With no active viewer, the terminal retains its last dimensions.
 
-Every managed terminal or server starts in a daemon-owned operating-system session/process group. Normal stop sends `SIGINT` to the entire group, waits five seconds, sends `SIGTERM`, waits ten seconds, then asks before `SIGKILL`. “Force stop” sends `SIGKILL` after exact confirmation. The daemon never targets a PID it did not launch into its owned group. macOS, Linux, and the supported WSL2 topology each have independent process-tree conformance tests.
+Every managed terminal starts in a daemon-owned operating-system session/process group. Normal stop sends `SIGINT` to the entire group, waits five seconds, sends `SIGTERM`, waits ten seconds, then asks before `SIGKILL`. “Force stop” sends `SIGKILL` after exact confirmation. The daemon never targets a PID it did not launch into its owned group. macOS, Linux, and the supported WSL2 topology each have independent process-tree conformance tests.
 
 #### 2. React Native iOS client
 
@@ -555,9 +550,9 @@ Every managed terminal or server starts in a daemon-owned operating-system sessi
 - Create workspace: choose host, choose or clone repository, name task and branch, create worktree, choose CLI, launch.
 - Terminal-first workspace view with fast rendering, hardware and software keyboard support, copy/paste, selection, scrollback, control and escape keys, command history, text composition, and terminal resize.
 - Switch among workspace terminal tabs.
-- Start, stop, and rename terminals and servers.
+- Start, stop, and rename terminals.
 - Reconnect after Wi-Fi/cellular changes without stopping remote processes.
-- When the paid-Apple-account release gate passes: push notifications for hard facts such as workspace creation failure, terminal exit, and declared-server exit, with per-host/workspace notification controls and deep links.
+- When the paid-Apple-account release gate passes: push notifications for hard facts such as workspace creation failure and terminal exit, with per-host/workspace notification controls and deep links.
 - When that gate passes: one fleet-level Live Activity, implemented by a native ActivityKit/WidgetKit extension and React Native bridge, showing aggregate running, exited/failed, and offline/unknown counts on the Lock Screen and supported Dynamic Island presentations.
 - Clear display of host, repository, branch, worktree cleanliness, process status, and connection state.
 
@@ -585,7 +580,7 @@ Push notifications and remotely updated Live Activities require paid Apple Devel
 5. The relay validates capability, signature, payload size, event version, and rate limits before sending to APNs. It stores tokens and routing metadata only as long as needed, exposes route revocation, and publishes a self-hosting protocol even though the official App Store build uses Overnight's provider credentials.
 6. APNs delivery is advisory and may be delayed or coalesced. The app always replaces notification/Live Activity state with a daemon snapshot after foreground reconnect.
 
-The Live Activity begins locally when the user enables “Monitor fleet” and at least one managed agent or server is running; it ends when monitoring is disabled or no managed activity remains. It displays counts and a compact last hard-fact event, and tapping it deep-links to fleet triage or the relevant workspace. It never embeds a terminal or accepts shell input. Before paid enrollment, the layout may be developed with simulator fixtures or any capabilities allowed by a Personal Team, but production remote updates and distribution are not claimed.
+The Live Activity begins locally when the user enables “Monitor fleet” and at least one managed terminal is running; it ends when monitoring is disabled or no managed activity remains. It displays counts and a compact last hard-fact event, and tapping it deep-links to fleet triage or the relevant workspace. It never embeds a terminal or accepts shell input. Before paid enrollment, the layout may be developed with simulator fixtures or any capabilities allowed by a Personal Team, but production remote updates and distribution are not claimed.
 
 “Needs input” cannot be a notification or Live Activity state without an explicit vendor adapter because generic PTY output cannot establish it reliably.
 
@@ -594,11 +589,11 @@ The Live Activity begins locally when the user enables “Monitor fleet” and a
 - Sidebar hierarchy: hosts → repositories → workspaces.
 - Create, open, archive, and safely remove workspaces.
 - Terminal tabs as the primary workspace surface.
-- Compact workspace facts for branch, worktree status, processes, servers, clients, and connection health.
+- Compact workspace facts for branch, worktree status, processes, clients, and connection health.
 - Attach to the same daemon-managed terminal session as the iPhone.
 - Transfer the terminal writer lease between Mac and iPhone.
 
-The Mac client is a founder-required part of the MVP because cross-device control is part of the thesis. The Mac-first slice limits it to fleet navigation, workspace creation/archive, terminal attachment, and writer handoff. IDE launch, worktree removal, rich inspection, server administration, and diff review are post-MVP. The same daemon service contract is later exposed remotely to the iOS and Android clients.
+The Mac client is a founder-required part of the MVP because cross-device control is part of the thesis. The Mac-first slice limits it to fleet navigation, workspace creation/archive, terminal attachment, and writer handoff. IDE launch, worktree removal, rich inspection, and diff review are post-MVP. The same daemon service contract is later exposed remotely to the iOS and Android clients.
 
 #### 4. Protocol
 
@@ -610,7 +605,6 @@ Use a versioned, documented protocol with these resources:
 - `Workspace {id, resource_version, repository_id, task_name, branch, worktree_path_token, state}`
 - `Terminal {id, resource_version, lease_generation, workspace_id, title, command_preset, intent, state, reconciliation_resolution?, exit_status, writer_client_id, columns, rows, size_controller_client_id}` where `intent` is durable and `state` is derived at read time, never stored
 - `AgentSession {terminal_id, resource_version, adapter_id, adapter_version, cli_version, vendor_session_id?, capture_source?, restore_policy, restore_state}`
-- `Server {id, resource_version, workspace_id, title, command, expected_port, state, reconciliation_resolution?}`
 - `Client {id, resource_version, display_name, ssh_key_fingerprint, scopes, enrolled_at, last_seen_at, revoked_at}`
 - `Operation {id, resource_version, kind, resource_id, state, cancellable, error_code, log_cursor}`
 
@@ -667,8 +661,6 @@ workspace.restore, workspace.remove_worktree
 terminal.list, terminal.create, terminal.attach, terminal.write,
 terminal.resize, terminal.take_writer, terminal.release_writer, terminal.stop,
 terminal.dismiss_lost, terminal.restart, terminal.restore_agent_session
-server.list, server.create, server.start, server.stop,
-server.dismiss_unknown, server.restart
 operation.get, operation.cancel
 client.list, client.set_scopes, client.revoke
 daemon.version, daemon.update
@@ -693,7 +685,6 @@ The table is exhaustive for MVP. A method not listed here does not exist in MVP.
 | `repository.list` | `read` | — | `{repository_root_id?}` | `Repository[]` | read |
 | `workspace.list` | `read` | — | `{repository_id?, include_archived}` | `Workspace[]` | read |
 | `terminal.list` | `read` | — | `{workspace_id?}` | `Terminal[]` | read |
-| `server.list` | `read` | — | `{workspace_id?}` | `Server[]` | read |
 | `client.list` | `read` | — | `{}` | `Client[]`, fingerprints and scopes redacted below `host_admin` | read |
 | `operation.get` | `read` | — | `{operation_id, log_cursor?}` | `Operation` plus bounded log page | read |
 | `repository_root.add` | `host_admin` | `Host` | `{absolute_path, typed_confirmation}` | `RepositoryRoot` | sync |
@@ -713,11 +704,6 @@ The table is exhaustive for MVP. A method not listed here does not exist in MVP.
 | `terminal.restart` | `control` | `Terminal` | `{}` | `Operation` | async |
 | `terminal.restore_agent_session` | `control` | `AgentSession` | `{user_confirmed}` | `Operation` | async |
 | `terminal.stop` | `control` | `Terminal` | `{force, typed_confirmation?}` | `Operation` | async, non-cancellable after the first signal |
-| `server.create` | `control` | `Workspace` | `{title, command_preset, expected_port}` | `Server` in `starting` | sync |
-| `server.start` | `control` | `Server` | `{}` | `Operation` | async, cancellable |
-| `server.stop` | `control` | `Server` | `{force, typed_confirmation?}` | `Operation` | async |
-| `server.restart` | `control` | `Server` | `{}` | `Operation` | async |
-| `server.dismiss_unknown` | `control` | `Server` | `{}` | `Server` | sync |
 | `client.set_scopes` | `host_admin` | `Client` | `{scopes, typed_confirmation?}` | `Client` | sync |
 | `client.revoke` | `host_admin` | `Client` | `{}` | `Client` | sync |
 | `operation.cancel` | `control` | `Operation` | `{}` | `Operation` in `canceling` | sync |
@@ -727,7 +713,7 @@ Three contract notes the table cannot carry:
 
 - `terminal.write` is deliberately absent. Terminal input is not a request/response method; it is `TerminalFrame.Input` on the terminal channel, carrying the granted `lease_generation` and a monotonic client input ID, acknowledged only after the complete byte payload reaches the PTY.
 - `client.revoke` is synchronous. Removing the fenced `authorized_keys` entry and closing that client's live connections has no logs, no progress, and nothing to cancel, and a synchronous answer is what makes the one-second revocation criterion measurable.
-- `terminal.stop` and `server.stop` do not require the writer lease. Signal escalation takes up to fifteen seconds and is a progress surface, so they return an `Operation`; `force` additionally requires a typed confirmation.
+- `terminal.stop` does not require the writer lease. Signal escalation takes up to fifteen seconds and is a progress surface, so it returns an `Operation`; `force` additionally requires a typed confirmation.
 
 Administrative semantics are explicit rather than implied:
 
@@ -739,7 +725,7 @@ Administrative semantics are explicit rather than implied:
 
 IDs are UUIDv7. Display names are 1–80 UTF-8 scalar values; task names are 1–120; branch names must pass `git check-ref-format --branch`; command-preset identifiers are 1–64 ASCII characters. Arbitrary command text is stored in host-side presets and is not accepted through workspace creation. Individual binary terminal payloads are capped at 64 KiB.
 
-Events are resource snapshots or transitions: `host.changed`, `repository_root.changed`, `repository.changed`, `workspace.changed`, `terminal.changed`, `agent_session.changed`, `server.changed`, `operation.changed`, and `client.revoked`. Each event includes the authoritative new resource version. `host.changed` carries daemon self-health but never authoritative reachability; clients update their local `HostConnection` from transport and heartbeat observations.
+Events are resource snapshots or transitions: `host.changed`, `repository_root.changed`, `repository.changed`, `workspace.changed`, `terminal.changed`, `agent_session.changed`, `operation.changed`, and `client.revoked`. Each event includes the authoritative new resource version. `host.changed` carries daemon self-health but never authoritative reachability; clients update their local `HostConnection` from transport and heartbeat observations.
 
 ##### Authorization matrix
 
@@ -754,7 +740,7 @@ What `host_admin` does buy is worth keeping: it prevents accidental repository-r
 | Method or field | Minimum scope |
 |---|---|
 | List resources, attach terminal output read-only, read operation logs excluding paths and vendor session IDs | `read` |
-| Create/stop/restart/dismiss-lost terminals, write input, resize, take/release writer, restore an exact agent session, start/stop/restart/dismiss-unknown declared servers | `control` |
+| Create/stop/restart/dismiss-lost terminals, write input, resize, take/release writer, restore an exact agent session | `control` |
 | Register/clone repositories, create/archive/restore workspaces | `control` within an administrator-approved repository root |
 | Reveal canonical paths, remove worktrees, add/remove repository roots, change an enrolled client's scopes, revoke clients, update daemon | `host_admin` |
 | Enroll the first device | Existing SSH access to the host, or local shell |
@@ -774,7 +760,7 @@ The daemon does not attempt indefinite control-event replay. After every new con
 
 1. Client sends its last `snapshot_id` for diagnostics only.
 2. Daemon sends `snapshot.begin {snapshot_id, generated_at}`.
-3. Daemon sends authoritative resources visible to the client's scopes in dependency order: host, clients, repository roots, repositories, workspaces, terminals, agent sessions, servers, operations.
+3. Daemon sends authoritative resources visible to the client's scopes in dependency order: host, clients, repository roots, repositories, workspaces, terminals, agent sessions, operations.
 4. Mutations during the snapshot are buffered.
 5. Daemon sends `snapshot.end {snapshot_id}`, then buffered events with resource versions greater than those in the snapshot.
 6. Client atomically replaces its local resource store only after `snapshot.end`.
@@ -791,7 +777,7 @@ queued → running → succeeded
 running → canceling
 ```
 
-- Only clone and server-start operations are cancellable after entering `running`.
+- Only clone operations are cancellable after entering `running`.
 - Worktree creation becomes non-cancellable immediately before the git mutation and then relies on its rollback transaction.
 - Terminal stop becomes non-cancellable after the first signal is delivered.
 - Cancel means “stop future work,” not “erase completed side effects.” The result lists preserved or rolled-back artifacts.
@@ -800,7 +786,7 @@ running → canceling
 
 The protocol includes:
 
-- A control channel for hosts, repositories, workspaces, terminals, servers, operations, and permissions.
+- A control channel for hosts, repositories, workspaces, terminals, operations, and permissions.
 - A terminal channel optimized for ordered binary output, input, resize, and reconnect.
 - Stable opaque IDs rather than filesystem paths as client identifiers.
 - Capability negotiation so older clients degrade safely when a daemon gains features.
@@ -905,7 +891,6 @@ Every mutating flow produces a durable `Operation` with progress, logs, retryabi
 | CLI launch fails | Terminal exits with code and original stderr | Edit preset/command and relaunch |
 | Client disconnects | Reconnecting banner; host process continues | Wait, cancel reconnect, or attach from another client |
 | Replay gap | Permanent visible gap marker, cleared terminal model, and retained replay tail | Continue with acknowledged missing history |
-| Declared server exits | Exited status, port unavailable, exit code | Relaunch server command |
 | Client cannot reach host | Client-local last-event timestamp, attempted route, and no claim about process state | Retry connection, change route, or use another host |
 | Cleanup is uncertain | Exact dirty/unpushed/running reasons | Archive, cancel, or type the workspace name to remove the worktree |
 
@@ -933,7 +918,6 @@ Mobile fleet view
 
 Workspace view
 ├── Claude / Codex / Cursor terminal
-├── Server terminal
 ├── Shell terminal
 ├── Additional terminal tabs
 └── Workspace facts: host, repo, branch, worktree, processes
@@ -955,7 +939,6 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 - Worktree/branch workspace lifecycle.
 - Daemon-owned terminal tabs that persist across client disconnects.
 - Claude Code, Codex, and Cursor CLI launch presets.
-- Declared server commands, process state, port visibility, and external-browser handoff.
 - React Native iOS app.
 - Native Swift macOS app.
 - Observable fleet process states and reconnection.
@@ -978,6 +961,7 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 - Team collaboration and shared workspaces.
 - Windows-native daemon outside WSL2.
 - Full IDE or remote-desktop streaming.
+- Declared servers as a tracked resource, with port metadata, liveness, and a browser handoff. A development server runs in an ordinary terminal, and Tailscale already makes `http://host:PORT` reachable from a phone, so the feature would have added a duplicate lifecycle to produce a URL the user can type. Reintroducing it must re-justify that lifecycle.
 - An Overnight-owned certificate authority and a Tailscale-direct mutual-TLS listener. Delegating authentication to SSH removes the entire subsystem; a keyless direct route can return later if users ask for one, at which point it must re-justify the CA, rotation, expiry, and recovery work it brings with it.
 - Operating-system privilege separation between managed terminals and daemon administration. A separate administrative principal with sandboxed terminal workers would make `host_admin` a real containment boundary, but it expands macOS, Linux, WSL2, installation, packaging, credential-access, and recovery work well beyond the MVP proof.
 
@@ -992,19 +976,20 @@ These questions have explicit decision gates and may not remain unresolved when 
 5. **Accepted before Milestone 1:** Launch coding agents through the user's interactive login shell by default, with per-host and per-preset alternatives for login, interactive, direct, and custom modes. Require each supported adapter to capture an exact correlated vendor session ID through an additive lifecycle hook and resume that exact ID without scraping terminal output or choosing a global latest session. Make restore policy configurable and default to automatic restoration only after verified infrastructure loss.
 6. **Accepted before Milestone 1:** Put generic target identity, optimistic concurrency, writer-lease fencing, and idempotency metadata only in the protobuf request envelope. Keep method payloads business-only, expose `resource_version` on every mutable resource and `lease_generation` on terminals, validate both generically before domain dispatch, and target a parent resource for create mutations.
 7. **Accepted before Milestone 1:** Keep daemon self-health on the `Host` resource but make reachability a per-client `HostConnection` observation. Each client records its active route, connection state, last connection/event times, latency, and error, then derives online/degraded/offline locally; an offline daemon never attempts to report itself offline.
-8. **Accepted before Milestone 1:** Resolve uncertain runtime state through typed per-resource methods: dismiss, restart, or exact-agent restore for lost terminals and dismiss or restart for unknown servers. Never adopt an OS process from persisted PID/PGID data; exact automatic reattachment remains limited to live tmux objects whose daemon and resource tags match.
-9. **Accepted before Milestone 1:** Make runtime states proof-based: an exact-tagged live tmux terminal is `running`, an expected terminal without exact runtime identity is `lost`, and terminals never use `unknown`; a server whose post-restart identity cannot be proved is `unknown`. A workspace stays `error` only while child uncertainty is unresolved, then recomputes to `ready` or `active`.
+8. **Accepted before Milestone 1:** Resolve uncertain runtime state through typed per-resource methods: dismiss, restart, or exact-agent restore for lost terminals. Never adopt an OS process from persisted PID/PGID data; exact automatic reattachment remains limited to live tmux objects whose daemon and resource tags match.
+9. **Accepted before Milestone 1:** Make runtime states proof-based: an exact-tagged live tmux terminal is `running` and an expected terminal without exact runtime identity is `lost`. Terminals never use `unknown`. A workspace stays `error` only while a terminal's uncertainty is unresolved, then derives to `ready` or `active`.
 10. **Accepted before Milestone 1:** Keep `read`, `control`, and `host_admin`, and document `host_admin` as an application safety rail rather than containment. `read` is the only genuine non-executing boundary; `control` grants full command execution as the host user and cannot be securely contained beneath `host_admin` without a second operating-system principal. Enrollment states this plainly when granting `control` or `host_admin`; revocation is the containment response, followed by a host audit. Privilege-separated terminal workers are deferred.
 11. **Accepted before Milestone 1:** Delegate all authentication to SSH. Delete the Overnight certificate authority, client certificates, identity pinning, and QR pairing flow, and drop the Tailscale-direct mutual-TLS listener; the daemon opens no network listener. Device identity is the enrolled SSH key fingerprint, scope is carried by a `restrict` plus forced-command entry in a fenced `authorized_keys` block, and revocation removes the entry and closes live connections. Tailscale remains a network path. Onboarding requires no presence at the host and installs the daemon remotely on Linux and WSL2.
 12. **Accepted before Milestone 1:** Expose repository-root administration and enrolled-client scope changes as `host_admin` protocol methods rather than host-shell-only workflows, with typed confirmation on widening actions, refusal to remove a root that still holds active workspaces, and no enrollment method at all.
 13. **Accepted before Milestone 1:** A mutating method returns its mutated resource unless the client needs streamed logs, progress, or cancellation, in which case it returns an `Operation`. Publish an exhaustive method-contract table carrying scope, envelope target, version target, payload, result, and kind for every MVP method, and document the reconciliation saga's internal operation row as distinct from a method result.
 14. **Accepted before Milestone 1:** Sequence terminal output as `uint64` byte offsets within an epoch so the replay buffer, flow-control window, frame cap, and resume point share one unit. Give `FlowAck` and `Gap` exact fields, report exact `lost_bytes` when the epoch matches, bind hashed resume tokens to client, terminal, and epoch with a ten-minute post-disconnect expiry, and require acknowledgment within 1 s of unacknowledged output in addition to the frequency cap.
 15. **Accepted before Milestone 1:** Split state ownership by durability. tmux is the sole authority for whether a managed process is alive; SQLite stores only what must outlive tmux, including workspaces, worktrees and branches, terminal durable identity and intent, agent session IDs, operations, and audit. Never store a terminal runtime state field. Derive runtime state per request from intent plus a live exactly-tagged pane, which deletes the reconciliation table and the `conflict` state and leaves `orphaned` as the one real recovery case.
-16. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-17. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-18. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-19. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-20. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+16. **Accepted before Milestone 1, as a scope cut:** Remove declared servers from the product. No `Server` resource, no port metadata, no liveness probe, no browser handoff, and no declared-server notification. A development server is a long-lived command in an ordinary terminal, and Tailscale already makes `http://host:PORT` reachable from a phone. Accepted consequence: a crashed development server is noticed by reading its terminal, not flagged by the fleet view.
+17. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+18. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+19. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+20. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+21. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -1173,14 +1158,14 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 ### Completeness
 
-1. **Resolved in engineering review:** the bounded protocol now includes typed dismiss/restart methods for lost terminals and unknown servers plus the existing exact-agent restoration method; dismissed uncertainty remains historically truthful rather than being relabeled as an observed exit.
+1. **Resolved in engineering review:** the bounded protocol now includes typed dismiss/restart methods for lost terminals plus the existing exact-agent restoration method; dismissed uncertainty remains historically truthful rather than being relabeled as an observed exit.
 2. **Resolved in engineering review:** a `RepositoryRoot` resource plus `repository_root.list/add/remove` and `client.set_scopes` are `host_admin` protocol methods with typed confirmation, idempotency keys, audit records, and defined refusal rules. `repository.register` now targets a root rather than a host. Device enrollment needs no method, because a device that cannot already reach the host over SSH cannot use an enrolled key.
 3. **Resolved in engineering review:** host-local CLI presets now define configurable shell launch modes, safe configuration ownership, adapter validation, exact session-ID capture, stored session metadata, and configurable exact-ID restoration.
 4. **Resolved in engineering review:** the method-contract table is exhaustive and states scope, envelope target, version target, payload, result, and synchronous/asynchronous kind for every MVP method. One stated rule decides sync from async: a mutating method returns its resource unless the client needs logs, progress, or cancellation. The saga's internal `Operation` record is documented as distinct from a method result, resolving the contradiction with `terminal.create`.
 
 ### Consistency
 
-5. **Resolved in engineering review:** state machines are proof-based and consistent: exact-tagged live tmux terminals remain `running`, unproved terminals become `lost`, unproved post-restart servers become `unknown`, and workspaces remain `error` only while child uncertainty is unresolved.
+5. **Resolved in engineering review:** state machines are proof-based and consistent: exact-tagged live tmux terminals remain `running`, unproved terminals become `lost`, and workspaces remain `error` only while a terminal's uncertainty is unresolved. Runtime state is derived rather than stored, so the rule holds structurally.
 6. **Resolved in engineering review:** concurrency, lease, and idempotency metadata now lives only in the request envelope; mutable resources expose `resource_version`, terminals expose `lease_generation`, create mutations target their parent, and the generic dispatcher validates all envelope preconditions before domain logic.
 7. One Mac-client bullet still needs to be checked against the decision to defer worktree removal.
 8. **Resolved in engineering review:** `Host` reports only daemon self-health while connected; every client owns its route, heartbeat, latency, last-event, and reachability observations in a local `HostConnection` model and derives online/degraded/offline for its own network.
@@ -1189,7 +1174,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 9. **Resolved in engineering review:** a sequence number is a `uint64` byte offset within a terminal epoch, which puts it on the same axis as the 8 MiB replay buffer, the 1 MiB unacknowledged window, and the 64 KiB frame cap. `FlowAck` and `Gap` have exact fields, including a `reason` enum and an exact `lost_bytes` when the epoch matches. Resume tokens are 32 random bytes bound to client, terminal, and epoch, stored hashed, expiring on use or ten minutes after disconnect, and are stream continuation rather than authentication.
 10. **Resolved in engineering review:** a client acknowledges at 256 KiB unacknowledged or 250 ms, whichever comes first, and always within 1 s of output that leaves anything unacknowledged. The maximum-delay clause exists because a frequency cap alone lets a client trickle acknowledgments and stall the daemon's window without violating it.
-11. Declared-server state needs separate process-liveness and port-readiness facts with polling and timeout behavior.
+11. **Resolved in engineering review by removal:** declared servers are no longer a product concept. There is no `Server` resource, no port metadata, no liveness probe, and no browser handoff. A development server is a long-lived command in an ordinary terminal, and Tailscale already provides the network path that makes `http://host:PORT` work without any Overnight feature.
 
 ### Feasibility and security
 
