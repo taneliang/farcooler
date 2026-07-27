@@ -158,10 +158,10 @@ The first implementation slice proves workspace and terminal-control correctness
 - Native Swift macOS app as the first client.
 - One launchd-managed, unprivileged local daemon plus CLI, reached through a Unix domain socket. The Mac app stays a thin client; workspace, git, process, terminal, and operation truth remain daemon-owned and survive Mac-app termination.
 - One existing local repository, one worktree/branch workspace flow, one supported coding-agent CLI preset, and multiple terminal tabs.
-- A dedicated tmux server namespace such as `tmux -L overnight-<install-id> -f /dev/null`. Overnight never mixes managed sessions into the user's default tmux server or depends on the user's tmux configuration.
+- A dedicated tmux server namespace such as `tmux -L overnight-<install-id> -f /dev/null`, containing one host-wide managed session. Overnight never mixes managed windows into the user's default tmux server or depends on the user's tmux configuration.
 - The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy and controls. Its terminal surface uses the shared libghostty core through an Overnight-owned adapter.
 - `overnight attach WORKSPACE_ID` remains mandatory and attaches an ordinary shell client to the managed session. The equivalent raw tmux command is shown for transparency and recovery.
-- SQLite is canonical for desired Overnight product state and stable IDs. tmux supplies observed terminal/runtime state. Restart reconciliation compares them; it never treats an untagged or unmatched tmux session as an Overnight workspace automatically.
+- SQLite is canonical for desired Overnight product state and stable IDs. tmux supplies observed terminal/runtime state. Restart reconciliation compares them; it never treats an untagged or unmatched tmux window or pane as an Overnight workspace or terminal automatically.
 - No Tailscale-direct listener, SSH application transport, embedded Mosh transport, React Native iOS app, APNs relay, Live Activity, Linux/WSL2 support, or native PTY fallback in this slice.
 
 This is an engineering validation slice, not validation of the mobile product thesis. After local workspace creation, five-way parallelism, daemon restart reconciliation, shell attachment, and Mac UI control pass their acceptance tests, the next slice exposes the same daemon protocol through SSH and builds the React Native iOS client. Failure of tmux control mode against the terminal acceptance suite triggers the native PTY fallback decision before remote work begins.
@@ -385,18 +385,35 @@ Workspace removal is conservative:
 
 Overnight's conceptual model is “tmux for the GUI and coding-agent era”: the daemon owns durable workspaces and sessions, while each thin client owns only device-specific presentation such as visible split sizes, selected tab, font size, and keyboard toolbar state. Reusing tmux underneath does not mean displaying tmux's interface; React Native and Swift clients render the complete Overnight UI from daemon resources and terminal frames.
 
-The terminal backend is an internal interface selected after Gate 1 rather than assumed in advance. The tmux candidate launches a private tmux server under a daemon-specific socket and minimal configuration rather than attaching to or mutating the user's ordinary tmux server. A workspace maps to a tmux session; terminal tabs map to windows or panes using stable Overnight IDs stored alongside tmux identifiers. The daemon uses supported tmux commands/control mode for create, attach, resize, input, output, exit, and reconciliation. The native candidate implements the same interface with daemon-owned PTYs. Users may opt to expose or import an existing tmux session later, but MVP never assumes ownership of an arbitrary user session.
+The accepted MVP backend launches one private tmux server under a daemon-specific socket and minimal configuration rather than attaching to or mutating the user's ordinary tmux server. It creates one host-wide managed session, named `overnight` for display but addressed internally by its stable tmux session ID. A workspace is a daemon/SQLite grouping of tagged tmux windows, not a tmux session. Each terminal tab maps to one window containing one pane for MVP; later split panes may add panes within that terminal window.
+
+```text
+private tmux server
+└── host session: overnight
+    ├── window: workspace A / shell   [workspace_id=A, terminal_id=1]
+    ├── window: workspace A / codex   [workspace_id=A, terminal_id=2]
+    ├── window: workspace B / claude  [workspace_id=B, terminal_id=3]
+    └── window: workspace B / server  [workspace_id=B, terminal_id=4]
+```
+
+One long-lived `tmux -CC attach-session` control client attaches to the host session. Because tmux sends output from every pane in every window of the attached session, this client drains and routes all terminal output by stable pane ID. The Rust control actor serializes tmux commands and continuously parses stdout into per-terminal bounded queues; client or renderer backpressure never blocks that reader. It enables tmux's per-pane control-mode flow control and resynchronizes a paused or reconnected pane with an explicit gap plus `capture-pane`, never by silently claiming byte-perfect replay.
+
+The single control client is a streaming failure domain, not a process-lifetime failure domain. If it exits or its parser rejects malformed output, all managed commands are paused, tmux processes continue, and the daemon reconnects, inventories stable tags, captures retained pane state, advances terminal epochs, and emits visible gaps before accepting new input. A sustained-output test across five simultaneous workspaces must prove that a noisy pane cannot starve command responses or output routing for the others.
+
+The daemon uses supported tmux commands and control mode for create, attach, resize, input, output, exit, and reconciliation. Every command targets stable session, window, or pane IDs rather than names or indexes. Users may opt to expose or import an existing tmux session later, but MVP never assumes ownership of an arbitrary user session.
+
+The host session contains managed terminal windows only; it does not keep a fake sentinel shell. The first terminal creates the session. Removing the final terminal may let the session and private server exit, after which the daemon recreates them on demand. Removing or archiving one workspace targets only windows whose fresh tags exactly match that workspace ID and never uses `kill-session`.
 
 The tmux backend must pass the same ordering, writer-lease, process-group, resize, scrollback, upgrade, and crash tests as the native PTY backend. If tmux cannot provide an invariant without parsing unstable screen output or weakening isolation, the daemon keeps that invariant in its own metadata/protocol layer. tmux is a session engine, not the product database or authorization boundary.
 
 ##### SQLite/tmux reconciliation
 
-SQLite stores desired workspaces, terminals, lifecycle state, operation history, and stable Overnight IDs. Every private tmux session/window/pane is tagged with tmux user options for `@overnight_daemon_id`, `@overnight_workspace_id`, `@overnight_terminal_id`, and `@overnight_schema_version`. Names and PID values are display or diagnostic data only and never establish identity.
+SQLite stores desired workspaces, terminals, lifecycle state, operation history, and stable Overnight IDs. The host session is tagged with `@overnight_daemon_id` and `@overnight_schema_version`. Every managed window and pane is tagged with `@overnight_daemon_id`, `@overnight_workspace_id`, `@overnight_terminal_id`, and `@overnight_schema_version`. Names, indexes, and PID values are display or diagnostic data only and never establish identity.
 
 Workspace/terminal creation is a recoverable saga rather than a false cross-system transaction:
 
 1. Commit a SQLite `Operation` and desired terminal record in `creating`.
-2. Create and tag the private tmux session/window/pane.
+2. Create the host session if needed, then create and tag the terminal window and pane.
 3. Verify the exact tags and live pane through a fresh tmux query.
 4. Commit the observed tmux IDs and transition the terminal to `running`.
 5. If any step fails, preserve enough operation evidence for deterministic reconciliation. Do not erase a possibly live session merely to make the database look clean.
@@ -413,20 +430,20 @@ On daemon startup, hold a reconciliation lock, open SQLite, and inventory the pr
 
 Adopting an `orphaned` candidate creates a new SQLite record only after exact user confirmation and a fresh tag/identity check. Terminating one requires the same confirmation. Reconciliation is idempotent, bounded by a startup deadline, and leaves the daemon read-only with a visible degraded state if the private tmux server cannot be inventoried safely.
 
-The tmux candidate has one unusually valuable acceptance requirement: shell portability. `overnight attach WORKSPACE_ID` runs locally on the host, claims an external writer lease, and execs the correct private tmux attachment. Therefore a user on an unsupported **client** operating system needs only an ordinary SSH or Mosh client:
+The tmux backend has one unusually valuable acceptance requirement: shell portability. `overnight attach WORKSPACE_ID` runs locally on the host, claims external writer leases for that workspace's terminals, attaches to the host session, and selects the workspace's last active window. The raw recovery command `tmux -L overnight-<install-id> attach -t overnight` exposes the flat list of every managed terminal on the host. Therefore a user on an unsupported **client** operating system needs only an ordinary SSH or Mosh client:
 
 ```text
 ssh user@host overnight attach WORKSPACE_ID
 mosh user@host -- overnight attach WORKSPACE_ID
 ```
 
-Exiting releases the lease; an explicit takeover from Overnight detaches that tmux client before granting a new writer. A user with same-account shell access can still bypass the wrapper and access the private tmux socket, which is acceptable because that OS account already has equivalent command-execution authority. This escape hatch does not claim that the daemon itself runs on unsupported host operating systems.
+Exiting releases the external leases; an explicit takeover from Overnight detaches that tmux client before granting a new writer. A raw attachment can navigate across workspaces and bypass daemon writer-lease enforcement. The CLI labels it as a recovery interface, and this is acceptable because a user with same-account access to the private socket already has equivalent command-execution authority. This escape hatch does not claim that the daemon itself runs on unsupported host operating systems.
 
 The MVP guarantee is precise:
 
 - Managed processes survive loss or suspension of every client while the host and selected session backend remain running.
 - With the native PTY backend, host reboot, daemon crash, forced daemon termination, or disk exhaustion may end sessions; a recovered daemon marks those terminals **lost** rather than pretending to resume them.
-- With the private tmux backend, a daemon restart may reattach to sessions proven to belong to the same daemon identity and tmux socket. Host reboot or tmux-server loss still marks them **lost**. Reconciliation never adopts a session from names or PID values alone.
+- With the private tmux backend, a daemon restart may reattach to the host session and panes proven to belong to the same daemon identity and tmux socket. Host reboot or tmux-server loss still marks them **lost**. Reconciliation never adopts a session or pane from names, indexes, or PID values alone.
 - Ordinary daemon upgrades are blocked while native PTYs run. A tmux-backed upgrade may proceed only after an acceptance test proves reattachment across the exact old/new version pair; otherwise the user can defer or explicitly accept termination.
 - One client holds the writer lease for a terminal; all other attached clients are read-only.
 - A writer can release the lease or another client can explicitly take over. The old writer is revoked before the new lease becomes active.
@@ -773,7 +790,7 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 
 These questions have explicit decision gates and may not remain unresolved when their milestone begins:
 
-1. **Accepted for Gate 1:** Use pinned `libghostty-vt` behind an Overnight-owned C-ABI adapter as the shared Mac, iOS, and Android terminal core. Prove tmux control mode through the Mac surface and require an Android ARM64 build plus rendered-fixture smoke test in the same spike. Keep the private tmux backend unless it fails a required persistence, handoff, process-ownership, or shell-escape-hatch invariant.
+1. **Accepted for Gate 1:** Use pinned `libghostty-vt` behind an Overnight-owned C-ABI adapter as the shared Mac, iOS, and Android terminal core. Use one private tmux server and one host-wide session; represent workspaces as tagged groups of terminal windows and drain them through one host-wide control client with per-pane flow control. Prove tmux control mode through the Mac surface and require an Android ARM64 build plus rendered-fixture smoke test in the same spike. Reopen the backend if it fails a required persistence, handoff, process-ownership, noisy-neighbor, or shell-escape-hatch invariant.
 2. **Gate 2:** Which maintained iOS SSH implementation supports host-key verification, modern keys, bastions/agents, and a reliable stdio tunnel without making React Native own crypto? Does the Mosh terminal adapter earn its added UDP and client-library complexity?
 3. **Accepted before Milestone 1:** Implement the daemon and CLI in Rust, using Tokio, Prost, bundled SQLite through rusqlite, and a crate boundary that keeps protocol, core state, storage, tmux, transport, composition, and CLI concerns separate. Validate macOS arm64 packaging in the first vertical slice and add Linux/WSL2 build-and-smoke CI before remote-host support enters scope.
 4. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
