@@ -577,37 +577,56 @@ The Mac client is a founder-required part of the MVP because cross-device contro
 
 Use a versioned, documented protocol with these resources:
 
-- `Host {id, platform, daemon_version, protocol_version, health, last_seen}`
-- `Repository {id, host_id, display_name, canonical_git_dir, remote_summary}`
-- `Workspace {id, repository_id, task_name, branch, worktree_path_token, state}`
-- `Terminal {id, workspace_id, title, command_preset, state, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
-- `AgentSession {terminal_id, adapter_id, adapter_version, cli_version, vendor_session_id?, capture_source?, restore_policy, restore_state}`
-- `Server {id, workspace_id, title, command, expected_port, state}`
-- `Client {id, display_name, public_key, scopes, revoked_at}`
-- `Operation {id, kind, resource_id, state, cancellable, error_code, log_cursor}`
+- `Host {id, resource_version, platform, daemon_version, protocol_version, health, last_seen}`
+- `Repository {id, resource_version, host_id, display_name, canonical_git_dir, remote_summary}`
+- `Workspace {id, resource_version, repository_id, task_name, branch, worktree_path_token, state}`
+- `Terminal {id, resource_version, lease_generation, workspace_id, title, command_preset, state, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
+- `AgentSession {terminal_id, resource_version, adapter_id, adapter_version, cli_version, vendor_session_id?, capture_source?, restore_policy, restore_state}`
+- `Server {id, resource_version, workspace_id, title, command, expected_port, state}`
+- `Client {id, resource_version, display_name, public_key, scopes, revoked_at}`
+- `Operation {id, resource_version, kind, resource_id, state, cancellable, error_code, log_cursor}`
 
 Paths are returned only to clients with the `host_admin` scope; ordinary clients use stable opaque IDs.
 
-The control envelope is:
+The control wire contract separates transport identity from method-specific business data:
 
 ```text
-{
+WireEnvelope {
   protocol_version,
   message_id,
-  kind: request | response | event,
+  body: Request | Response | Event | SnapshotChunk | TerminalFrame
+}
+
+Request {
+  request_id,
   method,
-  resource_id?,
+  target_resource_id?,
   expected_resource_version?,
-  sequence?,
+  expected_lease_generation?,
   idempotency_key?,
-  payload,
-  error?: { code, retryable, message }
+  payload
+}
+
+Response {
+  request_id,
+  result?,
+  error?: {code, retryable, message}
+}
+
+Event {
+  event_id,
+  sequence,
+  payload
 }
 ```
 
-Mutating requests require a client-generated idempotency key retained by the daemon for 24 hours. Repeating the same key returns the original result; reusing it with a different payload is rejected.
+Concurrency, lease, and idempotency metadata are canonical only in `Request`; business payloads never repeat the target ID, target version, or lease generation. A generic dispatcher authenticates the client and validates these envelope preconditions before invoking domain logic. Domain-specific preconditions that are not generic resource concurrency checks may remain in a method payload.
 
-Every mutable resource has an unsigned 64-bit `resource_version`. Conflicting mutations require `expected_resource_version`; a stale version returns `RESOURCE_CONFLICT` with the current resource. Writer-lease acquisition is an atomic compare-and-swap against both terminal resource version and current lease generation.
+Every mutable resource has an unsigned 64-bit `resource_version`. A mutation of an existing resource targets that resource and requires its `expected_resource_version`; a create mutation targets and versions its parent—for example, workspace creation targets a repository and terminal creation targets a workspace. A stale version returns `RESOURCE_CONFLICT` with the current resource.
+
+Every mutating request requires a client-generated idempotency key retained by the daemon for 24 hours and scoped to the authenticated client identity. The stored record includes a canonical hash of method, target, envelope preconditions, and payload. Repeating the key with the same hash returns the original result; reusing it with a different hash is rejected.
+
+`Terminal.lease_generation` is an unsigned 64-bit fencing token incremented whenever writer ownership is granted, released, expires, or is administratively replaced. Writer-lease mutations atomically compare both the terminal resource version and lease generation. Terminal input carries the granted lease generation so delayed input from a former writer is rejected even if it arrives on a live connection.
 
 MVP methods are explicitly bounded:
 
@@ -627,20 +646,20 @@ daemon.version, daemon.update
 
 Versioned Protocol Buffer files are the canonical protocol source of truth and ship with every daemon/client release. They generate daemon, CLI, Swift, and future TypeScript/Kotlin types plus method clients. Field numbers are never reused, removed fields are reserved, unknown fields are tolerated within a compatible major version, and generated code is checked into releases but never hand-edited. Required MVP request/result shapes include:
 
-| Method | Request payload | Result |
-|---|---|---|
-| `repository.register` | `{host_id, allowlisted_path, expected_host_version}` | `Repository` |
-| `repository.clone` | `{host_id, remote_url, destination_name, expected_host_version}` | `Operation` |
-| `workspace.create` | `{repository_id, task_name, branch, base_revision, cli_preset, expected_repository_version}` | `Operation` |
-| `workspace.archive/restore` | `{workspace_id, expected_workspace_version}` | `Workspace` |
-| `workspace.remove_worktree` | `{workspace_id, expected_workspace_version, typed_confirmation?}` | `Operation` |
-| `terminal.create` | `{workspace_id, title, command_preset, expected_workspace_version}` | `Terminal` |
-| `terminal.take_writer` | `{terminal_id, expected_terminal_version, expected_lease_generation}` | `Terminal` |
-| `terminal.resize` | `{terminal_id, columns, rows, view_activity_id, expected_terminal_version}` | `Terminal` |
-| `terminal.restore_agent_session` | `{terminal_id, expected_terminal_version, expected_agent_session_version, user_confirmed}` | `Operation` |
-| `terminal.stop` | `{terminal_id, expected_terminal_version, force, typed_confirmation?}` | `Operation` |
-| `server.create` | `{workspace_id, title, command_preset, expected_port, expected_workspace_version}` | `Server` |
-| `client.revoke` | `{client_id, expected_client_version}` | `Operation` |
+| Method | Envelope target | Business payload | Result |
+|---|---|---|---|
+| `repository.register` | `Host` | `{allowlisted_path}` | `Repository` |
+| `repository.clone` | `Host` | `{remote_url, destination_name}` | `Operation` |
+| `workspace.create` | `Repository` | `{task_name, branch, base_revision, cli_preset}` | `Operation` |
+| `workspace.archive/restore` | `Workspace` | `{}` | `Workspace` |
+| `workspace.remove_worktree` | `Workspace` | `{typed_confirmation?}` | `Operation` |
+| `terminal.create` | `Workspace` | `{title, command_preset}` | `Terminal` |
+| `terminal.take_writer` | `Terminal` | `{}` | `Terminal` |
+| `terminal.resize` | `Terminal` | `{columns, rows, view_activity_id}` | `Terminal` |
+| `terminal.restore_agent_session` | `AgentSession` | `{user_confirmed}` | `Operation` |
+| `terminal.stop` | `Terminal` | `{force, typed_confirmation?}` | `Operation` |
+| `server.create` | `Workspace` | `{title, command_preset, expected_port}` | `Server` |
+| `client.revoke` | `Client` | `{}` | `Operation` |
 
 IDs are UUIDv7. Display names are 1–80 UTF-8 scalar values; task names are 1–120; branch names must pass `git check-ref-format --branch`; command-preset identifiers are 1–64 ASCII characters. Arbitrary command text is stored in host-side presets and is not accepted through workspace creation. Individual binary terminal payloads are capped at 64 KiB.
 
@@ -725,7 +744,7 @@ SSH support must include known-host verification with first-use fingerprints, ch
 - If the epoch matches and replay is available, the daemon resumes at the next sequence.
 - If replay is unavailable or the epoch changed, the daemon sends `GAP` plus `oldest_sequence`, clears the client terminal model, inserts a visible gap marker, and replays only the retained tail. MVP has no daemon-side terminal emulator and does not claim to reconstruct the missing screen.
 - Per-client output windows cap unacknowledged data at 1 MiB. Slow clients stop receiving live frames and must resume; they cannot create unbounded daemon memory.
-- Input frames require the current writer lease and carry a monotonic client input ID.
+- Input frames require the current writer lease and carry its `lease_generation` plus a monotonic client input ID. A generation mismatch is rejected before any byte reaches the PTY.
 - The daemon acknowledges an input ID only after the complete byte payload is written to the PTY. Partial writes are retried inside the daemon until complete or failed; a failure closes the writer request without acknowledgment and emits a terminal error event. Clients never automatically retransmit uncertain input, preventing duplicate shell commands; they show “delivery uncertain” and require the user to decide.
 - Resize requests do not require the writer lease, but they require `control` scope and a foreground, visible, selected terminal surface. They include terminal columns, rows, and a monotonic per-client `view_activity_id`.
 - The daemon accepts the most recently received valid resize from an active viewer, clamps it to 20–500 columns and 5–200 rows, updates `size_controller_client_id`, and applies it to the exact tmux window with `resize-window`. First-party clients coalesce resize traffic to at most 10 updates per second.
@@ -873,11 +892,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 3. **Accepted before Milestone 1:** Implement the daemon and CLI in Rust, using Tokio, Prost, bundled SQLite through rusqlite, and a crate boundary that keeps protocol, core state, storage, tmux, transport, composition, and CLI concerns separate. Validate macOS arm64 packaging in the first vertical slice and add Linux/WSL2 build-and-smoke CI before remote-host support enters scope.
 4. **Accepted before Milestone 1:** Bundle the Rust daemon, CLI, LaunchAgent plist, protocol descriptors, and terminal artifacts inside the native Mac app. Register the unprivileged per-user daemon through `SMAppService`, use the app as the Mac release unit, and offer an opt-in `~/.local/bin/overnight` CLI copy without requiring root or editing shell files.
 5. **Accepted before Milestone 1:** Launch coding agents through the user's interactive login shell by default, with per-host and per-preset alternatives for login, interactive, direct, and custom modes. Require each supported adapter to capture an exact correlated vendor session ID through an additive lifecycle hook and resume that exact ID without scraping terminal output or choosing a global latest session. Make restore policy configurable and default to automatic restoration only after verified infrastructure loss.
-6. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-7. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-8. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-9. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-10. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+6. **Accepted before Milestone 1:** Put generic target identity, optimistic concurrency, writer-lease fencing, and idempotency metadata only in the protobuf request envelope. Keep method payloads business-only, expose `resource_version` on every mutable resource and `lease_generation` on terminals, validate both generically before domain dispatch, and target a parent resource for create mutations.
+7. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+8. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+9. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+10. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+11. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -1052,7 +1072,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 ### Consistency
 
 5. Terminal, server, and workspace diagrams require a final transition audit for `unknown`, `lost`, and restart-driven `error` states.
-6. Concurrency metadata appears partly in the envelope and partly in method payloads; the implementation spec must choose one canonical placement and add `resource_version` and `lease_generation` to the resource schemas.
+6. **Resolved in engineering review:** concurrency, lease, and idempotency metadata now lives only in the request envelope; mutable resources expose `resource_version`, terminals expose `lease_generation`, create mutations target their parent, and the generic dispatcher validates all envelope preconditions before domain logic.
 7. One Mac-client bullet still needs to be checked against the decision to defer worktree removal.
 8. Host reachability and `last_seen` should be client-local connection facts, not authoritative daemon health reported by an offline host.
 
