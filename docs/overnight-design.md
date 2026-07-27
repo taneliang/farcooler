@@ -471,7 +471,7 @@ client.list, client.revoke
 daemon.version, daemon.update
 ```
 
-Canonical JSON Schema files generated from one typed IDL are the protocol source of truth and ship with every daemon/client release. Required MVP request/result shapes include:
+Versioned Protocol Buffer files are the canonical protocol source of truth and ship with every daemon/client release. They generate daemon, CLI, Swift, and future TypeScript/Kotlin types plus method clients. Field numbers are never reused, removed fields are reserved, unknown fields are tolerated within a compatible major version, and generated code is checked into releases but never hand-edited. Required MVP request/result shapes include:
 
 | Method | Request payload | Result |
 |---|---|---|
@@ -555,12 +555,13 @@ The connection settings are per host, not global. A paired host may have several
 
 SSH support must include known-host verification with first-use fingerprints, changed-host-key blocking, encrypted Keychain storage for imported keys, hardware-backed keys where the chosen iOS SSH library supports them, agent/bastion configuration, and no password persistence. Mosh support must expose its UDP port requirement and fall back visibly when the network blocks it.
 
-##### Terminal framing, replay, and backpressure
+##### Protocol framing, terminal replay, and backpressure
 
-- Control messages are UTF-8 JSON, maximum 1 MiB, with UUIDv7 IDs, RFC 3339 UTC timestamps, unsigned 64-bit integers encoded as decimal strings, and absent optional fields rather than implicit nulls.
-- Terminal frames use network byte order: `type:u8 | flags:u8 | reserved:u16 | terminal_id:16 bytes | epoch:u64 | sequence_or_input_id:u64 | payload_length:u32 | payload`.
-- Frame types are `OUTPUT=1`, `INPUT=2`, `INPUT_ACK=3`, `RESIZE=4`, `FLOW_ACK=5`, and `GAP=6`. Unknown frame types are ignored only when capability negotiation marks them optional.
-- `OUTPUT` payload is raw PTY bytes. `INPUT` payload is the exact byte sequence to write. `INPUT_ACK` has an empty payload. `RESIZE` payload is `cols:u16 | rows:u16`.
+- Unix sockets and SSH stdio carry the exact same stream: `envelope_length:u32` in network byte order followed by one serialized `WireEnvelope`. A binary WebSocket adapter later maps one `WireEnvelope` to one WebSocket binary message without changing its protobuf body.
+- `WireEnvelope` contains negotiated protocol version, request or event identity, and a `oneof` payload for `ClientHello`, `ServerHello`, `Request`, `Response`, `Event`, `SnapshotChunk`, or `TerminalFrame`. The first client frame must be `ClientHello`; no other message is dispatched until `ServerHello` selects a compatible version, capabilities, and maximum frame sizes.
+- Control envelopes are capped at 1 MiB. `TerminalFrame.payload` is capped at 64 KiB, and total envelope length is validated before allocation. Invalid, oversized, or truncated frames close the connection with a protocol error and never reach method dispatch.
+- UUIDv7 values are encoded as validated 16-byte fields, timestamps use `google.protobuf.Timestamp`, counters use protobuf `uint64`, and absence uses protobuf presence rather than sentinel values.
+- `TerminalFrame` has a `oneof` kind for `Output`, `Input`, `InputAck`, `Resize`, `FlowAck`, and `Gap`. Output and input contain exact byte payloads; resize contains validated columns and rows.
 - Sequence numbers are monotonic within a daemon-generated terminal epoch.
 - Each terminal keeps an 8 MiB bounded replay buffer. Eviction advances `oldest_sequence`.
 - Clients acknowledge the highest contiguous output sequence at most every 250 ms.
@@ -572,7 +573,9 @@ SSH support must include known-host verification with first-use fingerprints, ch
 - The daemon acknowledges an input ID only after the complete byte payload is written to the PTY. Partial writes are retried inside the daemon until complete or failed; a failure closes the writer request without acknowledgment and emits a terminal error event. Clients never automatically retransmit uncertain input, preventing duplicate shell commands; they show “delivery uncertain” and require the user to decide.
 - Resize events are last-write-wins within the writer lease and include terminal columns and rows.
 
-JSON control messages plus binary terminal frames over a secure WebSocket or length-delimited SSH stdio stream are sufficient for the first-party GUI. The Mosh adapter terminates at `overnight attach`/tmux rather than encapsulating this full protocol. The implementation language for the daemon remains an engineering-plan decision; a single statically distributable binary is strongly preferred.
+`overnight protocol inspect` can decode a captured length-delimited stream or individual protobuf envelope into redacted protobuf JSON for debugging. It hides terminal input/output and path-bearing fields unless the user passes an explicit local reveal flag.
+
+Length-delimited protobuf envelopes are sufficient for the first-party clients. The Mosh adapter terminates at `overnight attach`/tmux rather than encapsulating this full protocol. The implementation language for the daemon remains an engineering-plan decision; a single statically distributable binary is strongly preferred.
 
 #### 5. Pairing, identity, and trust boundaries
 
