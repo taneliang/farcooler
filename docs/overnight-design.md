@@ -771,16 +771,20 @@ This posture matches Overnight's initial threat model: a single developer's pers
 
 ##### Control-channel synchronization
 
-The daemon does not attempt indefinite control-event replay. After every new connection or reconnect:
+The daemon does not attempt indefinite control-event replay, and it buffers nothing on a client's behalf. After every new connection or reconnect:
 
 1. Client sends its last `snapshot_id` for diagnostics only.
 2. Daemon sends `snapshot.begin {snapshot_id, generated_at}`.
-3. Daemon sends authoritative resources visible to the client's scopes in dependency order: host, clients, repository roots, repositories, workspaces, terminals, agent sessions, operations.
-4. Mutations during the snapshot are buffered.
-5. Daemon sends `snapshot.end {snapshot_id}`, then buffered events with resource versions greater than those in the snapshot.
-6. Client atomically replaces its local resource store only after `snapshot.end`.
+3. Daemon streams the resources visible to the client's scopes in dependency order: host, clients, repository roots, repositories, workspaces, terminals, agent sessions, operations.
+4. Live events stream concurrently on the same channel throughout. They are never held back and never accumulate in daemon memory.
+5. Daemon sends `snapshot.end {snapshot_id}` when the last resource has been written.
+6. Client applies everything in arrival order, resolving by `resource_version`: an arriving record replaces a held one only when its version is greater, an event for a resource the client has not seen yet is applied as an upsert, and a deletion arrives as a versioned tombstone rather than an absence.
 
-If the connection drops before `snapshot.end`, the partial snapshot is discarded. A revoked client receives no snapshot.
+Because ordering comes from resource versions rather than from arrival position, a snapshot that interleaves with heavy mutation converges to the same state as a quiet one. There is no buffer to size, no snapshot duration budget, and no abort-and-retry path that a slow client would only trip again.
+
+The one bound that remains is transport backpressure. A client that stays above its 4 MiB queued-control-envelope ceiling for 30 seconds is disconnected with `CLIENT_TOO_SLOW` rather than accumulated, and it re-snapshots on reconnect. That ceiling protects the daemon regardless of fleet size or client speed, which is what the buffer was reaching for.
+
+If the connection drops mid-snapshot the client discards what it received and starts over, because a partial world with no `snapshot.end` is not a consistent one. A revoked client receives no snapshot.
 
 ##### Operation lifecycle
 
@@ -805,7 +809,7 @@ The protocol includes:
 - A terminal channel optimized for ordered binary output, input, resize, and reconnect.
 - Stable opaque IDs rather than filesystem paths as client identifiers.
 - Capability negotiation so older clients degrade safely when a daemon gains features.
-- Stable error codes including `AUTH_REQUIRED`, `SCOPE_DENIED`, `VERSION_INCOMPATIBLE`, `HOST_OFFLINE`, `REPOSITORY_LOCKED`, `BRANCH_EXISTS`, `WORKTREE_EXISTS`, `DIRTY_WORKTREE`, `RUNNING_PROCESSES`, `OUTPUT_GAP`, and `OPERATION_FAILED`.
+- Stable error codes including `AUTH_REQUIRED`, `SCOPE_DENIED`, `VERSION_INCOMPATIBLE`, `HOST_OFFLINE`, `REPOSITORY_LOCKED`, `BRANCH_EXISTS`, `WORKTREE_EXISTS`, `DIRTY_WORKTREE`, `RUNNING_PROCESSES`, `OUTPUT_GAP`, `CLIENT_TOO_SLOW`, and `OPERATION_FAILED`.
 
 ##### Transport adapters
 
@@ -835,6 +839,7 @@ SSH support must include known-host verification with first-use fingerprints, ch
 - Reconnect presents `{terminal_id, epoch, last_acked_sequence, resume_token}`. When the epoch matches, the token validates, and `last_acked_sequence` is at or after `oldest_sequence`, the daemon resumes at exactly that offset, slicing a retained frame when the offset falls inside one.
 - Otherwise the daemon sends `Gap`, the client clears its terminal model, and only the retained tail replays. MVP has no daemon-side terminal emulator and does not claim to reconstruct the missing screen.
 - Per-client output windows cap unacknowledged data at 1 MiB. Slow clients stop receiving live frames and must resume; they cannot create unbounded daemon memory.
+- The control channel has its own ceiling: 4 MiB of queued unwritten control envelopes per client. A client that stays above it for 30 seconds is disconnected with `CLIENT_TOO_SLOW` and re-snapshots on reconnect. This is the only bound the snapshot path needs, because the daemon holds no per-client snapshot state to grow.
 - Input frames require the current writer lease and carry its `lease_generation` plus a monotonic client input ID. A generation mismatch is rejected before any byte reaches the PTY.
 - The daemon acknowledges an input ID only after the complete byte payload is written to the PTY. Partial writes are retried inside the daemon until complete or failed; a failure closes the writer request without acknowledgment and emits a terminal error event. Clients never automatically retransmit uncertain input, preventing duplicate shell commands; they show “delivery uncertain” and require the user to decide.
 - Resize requests do not require the writer lease, but they require `control` scope and a foreground, visible, selected terminal surface. They include terminal columns, rows, and a monotonic per-client `view_activity_id`.
@@ -1003,11 +1008,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 15. **Accepted before Milestone 1:** Split state ownership by durability. tmux is the sole authority for whether a managed process is alive; SQLite stores only what must outlive tmux, including workspaces, worktrees and branches, terminal durable identity and intent, agent session IDs, operations, and audit. Never store a terminal runtime state field. Derive runtime state per request from intent plus a live exactly-tagged pane, which deletes the reconciliation table and the `conflict` state and leaves `orphaned` as the one real recovery case.
 16. **Accepted before Milestone 1, as a scope cut:** Remove declared servers from the product. No `Server` resource, no port metadata, no liveness probe, no browser handoff, and no declared-server notification. A development server is a long-lived command in an ordinary terminal, and Tailscale already makes `http://host:PORT` reachable from a phone. Accepted consequence: a crashed development server is noticed by reading its terminal, not flagged by the fleet view.
 17. **Accepted before Milestone 1:** Offer an opt-in macOS unattended mode registering a system LaunchDaemon through `SMAppService.daemon`, pinned to the enrolling user so execution stays unprivileged, with the default remaining the per-user LaunchAgent. Use `enable-linger` on Linux and WSL2. State the FileVault and login-keychain limits explicitly rather than implying a Mac host is always reachable, and never recommend disabling FileVault or enabling auto-login as a workaround.
-18. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-19. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-20. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-21. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-22. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+18. **Accepted before Milestone 1:** Stream control snapshots and live events concurrently with no daemon-side buffering, ordering by `resource_version` with last-writer-wins, upserts for unseen resources, and versioned tombstones for deletions. Bound the daemon with control-channel backpressure that disconnects a hopelessly slow client rather than with a snapshot duration budget or event ceiling.
+19. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+20. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+21. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+22. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+23. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -1200,7 +1206,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 12. **Resolved in engineering review:** the concern is accurate and is now stated in the design rather than papered over. `control` is full host authority as the daemon's OS user, `read` is the only genuine non-executing boundary, and `host_admin` is documented as an application safety rail that stops accidental destructive actions through Overnight's APIs, not as containment against a hostile `control` client. Enrollment warns in plain language when a device is granted `control` or `host_admin`; revocation is the containment response, and the documented recovery is revoke first, then audit the host, because revocation cannot undo what a shell already did. Moving daemon administration to a separate OS principal with sandboxed terminal workers is deferred with an explicit rationale.
 13. **Resolved in engineering review:** MVP never adopts an unknown OS process from persisted PID/PGID data. It may automatically reattach only to live tmux objects with exact daemon/resource tags, and adopting an orphaned tagged tmux candidate requires confirmation plus a fresh identity check.
 14. **Resolved in engineering review:** macOS offers an opt-in unattended mode that registers a system LaunchDaemon pinned to the enrolling user, so it starts at boot and survives logout while never running as root. Linux and WSL2 use `enable-linger`. The honest boundaries are stated in a table: FileVault blocks any pre-unlock start in either mode, and a boot-started daemon has no login keychain until the user logs in once. Both conditions are named client-side rather than surfaced as generic failures, and the logout, lock, fast-user-switching, reboot, and linger matrix is a test requirement.
-15. Full control snapshots need duration and buffered-event caps to prevent a slow client or large fleet from consuming unbounded daemon memory.
+15. **Resolved in engineering review by removal:** the daemon buffers nothing during a snapshot. Resources and live events stream concurrently and the client orders them by `resource_version` with last-writer-wins, upserts, and versioned tombstones, so no duration budget or buffered-event ceiling is needed. Transport backpressure remains the one bound: a client exceeding its unacknowledged control-channel ceiling is disconnected and re-snapshots rather than being accumulated in daemon memory.
 
 ### Post-approval revision concerns
 
