@@ -1095,6 +1095,34 @@ These questions have explicit decision gates and may not remain unresolved when 
 
 ## Success Criteria
 
+Every criterion binds to a named automated test or a named manual procedure with a recorded result and an owner. A criterion with neither is not a criterion, it is an intention. The binding runs both ways: a gap in the coverage map is a criterion at risk, and a criterion with no test is a hole in the map.
+
+| # | Verified by | Kind |
+|---|---|---|
+| 1 | `onboard::five_minute_first_host` | auto, timed |
+| 2 | `workspace::create_from_fixture_repo_under_two_minutes` | auto, timed |
+| 3 | `fleet::five_concurrent_across_two_hosts` | auto |
+| 4 | `agent::launch_and_control_each_cli` | auto, scheduled lane with vendor credentials |
+| 5 | `terminal::switch_tabs_preserves_process_state` | auto |
+| 6 | `reconnect::under_buffer_full_replay` and `reconnect::overflow_emits_gap` | auto |
+| 7 | `input::ten_thousand_events_no_duplicate_reorder_loss` | auto, needs the loss-profile rig |
+| 8 | `handoff::mac_attaches_without_restart` | auto |
+| 9 | `destructive::archive_immutable`, `::running_blocks_removal`, `::branch_never_deleted`, `::typed_name_required` | auto |
+| 10 | Design-partner session on the Mac client | **manual**, owner: founder, result recorded in the Gate 0 notes |
+| 11 | `terminal::android_fixture_corpus` | auto, CI on the Android reference target |
+| 12 | `restart::tagged_panes_survive`, `reboot::all_terminals_lost`, `tmux_loss::all_terminals_lost` | auto, needs the reboot fixture |
+| 13 | `replay::overflow_reports_exact_lost_bytes` | auto |
+| 14 | `revoke::blocks_next_request_within_one_second` | auto |
+| 15 | `transport::same_workspace_across_routes_no_duplicate_input` | auto, scheduled real-sshd lane |
+| 16 | `attach::external_warns_indicates_audits` | auto |
+| 17 | `handoff::suspend_resume_reconciles` | auto |
+| 18 | `service::lifetime_matrix` | auto for logout, lock, switching, linger; **manual** for FileVault reboot, owner: founder |
+| 19 | `install::remote_linux_end_to_end` and `authorized_keys::fence_safety` | auto |
+| 20 | Design-partner session on iPhone | **manual**, deferred until a delivery channel exists |
+| 21 | `agent::parallel_sessions_distinct_ids_and_exact_resume` | auto, scheduled lane |
+
+Three pieces of infrastructure are prerequisites rather than afterthoughts, and appear as implementation tasks: a network profile rig that can hold RTT at 100 ms with 1% loss, a host-reboot fixture, and a sustained 1 MiB/s output generator. Criteria 7, 12, and the throughput half of the terminal suite cannot be honestly claimed without them.
+
 The MVP succeeds when all of the following are demonstrated:
 
 1. A new user with SSH access already working, plus one authenticated CLI, can install, enroll, and display one host in under five minutes entirely from the client, with no physical access to the host; new key/bastion setup, repository cloning, and dependencies are timed separately.
@@ -1118,6 +1146,97 @@ The MVP succeeds when all of the following are demonstrated:
 19. From the phone alone, a second Linux host with no Overnight installation is onboarded end to end: host key verified, daemon installed with a verified checksum, `systemd --user` unit enabled with lingering, device key enrolled, and a workspace created. A parallel fixture proves the daemon never modifies, reorders, or removes an `authorized_keys` entry outside its fence, and that a damaged fence produces refusal plus manual instructions rather than a rewrite.
 20. **Deferred, gated on paid Apple Developer Program enrollment:** the same design partner repeats criterion 10 from an iPhone, on a device Overnight did not have to be rebuilt onto that week. Until this passes, the central product claim, that an engineer will supervise meaningful parallel coding work from a phone, is unvalidated, and no material may claim otherwise.
 21. For Claude Code, Codex, and Cursor CLI, parallel sessions capture distinct exact vendor IDs through supported lifecycle callbacks. After a forced tmux/host-loss fixture, each adapter resumes its recorded session at an interactive prompt without selecting a global latest session, replaying uncertain input, or replacing the user's existing hooks.
+
+## Test Coverage Map
+
+No code exists yet, so every path below is a gap by construction. The map's purpose is to fix what must exist before implementation starts, so tests are written alongside each feature rather than retrofitted. Frameworks: `cargo test` for the Rust crates, XCTest for the Swift Mac client, Jest plus native harnesses for the React Native client, and a shared fixture corpus for terminal conformance.
+
+```text
+CODE PATHS                                          USER FLOWS
+[+] crates/protocol                                 [+] Onboard a host
+  ├── envelope framing / length prefix                ├── [GAP] [→E2E] Add host, verify host key, enroll
+  │   ├── [GAP] valid round-trip                      ├── [GAP] Host-key changed → hard refusal
+  │   ├── [GAP] oversized → close, no dispatch        ├── [GAP] [→E2E] Remote install on Linux + linger
+  │   ├── [GAP] truncated → close, no alloc           └── [GAP] Bootstrap credential never persisted
+  │   └── [GAP] unknown field tolerated (same major)
+  ├── ClientHello / ServerHello negotiation         [+] Create a workspace
+  │   ├── [GAP] compatible → selected version         ├── [GAP] [→E2E] Repo → branch → worktree → terminal
+  │   ├── [GAP] incompatible → VERSION_INCOMPATIBLE   ├── [GAP] Branch collision → named, never overwritten
+  │   └── [GAP] non-Hello first frame → close         ├── [GAP] Worktree path collision → named
+  └── UUIDv7 / timestamp validation                   ├── [GAP] Metadata fails → clean rollback only
+      └── [GAP] malformed 16-byte field rejected      └── [GAP] Disk full mid-create → artifacts preserved
+
+[+] crates/core                                     [+] Run a coding agent
+  ├── derivation rule (D25)                           ├── [GAP] Launch via interactive login shell
+  │   ├── [GAP] RUNNING + 1 pane   → running          ├── [GAP] SessionStart hook captures exact ID
+  │   ├── [GAP] RUNNING + 0 panes  → lost             ├── [GAP] Two agents in parallel → distinct IDs
+  │   ├── [GAP] RUNNING + 2 panes  → lost + orphans   ├── [GAP] Hook composes, user's own hook preserved
+  │   ├── [GAP] STOPPED            → exited           └── [GAP] Vendor ID never scraped from output
+  │   ├── [GAP] FAILED             → error
+  │   └── [GAP] no record + our tag → orphaned      [+] Writer handoff
+  ├── workspace state derivation                      ├── [GAP] [→E2E] Mac takes lease from iPhone
+  │   ├── [GAP] any lost child     → error            ├── [GAP] Old writer revoked before new grant
+  │   └── [GAP] resolved           → ready | active   ├── [GAP] Stale generation input → rejected
+  ├── envelope preconditions                          └── [GAP] Disconnected writer → 30 s expiry
+  │   ├── [GAP] stale version      → RESOURCE_CONFLICT
+  │   ├── [GAP] stale lease gen    → rejected pre-PTY [+] Reconnect
+  │   └── [GAP] create targets parent version         ├── [GAP] < 8 MiB missed → full ordered replay
+  ├── idempotency                                     ├── [GAP] > 8 MiB missed → Gap + exact lost_bytes
+  │   ├── [GAP] same key + same hash → same result    ├── [GAP] Epoch changed → Gap, no lost_bytes
+  │   ├── [GAP] same key + diff hash → rejected       ├── [GAP] Resume token wrong epoch → fresh attach
+  │   └── [GAP] 24 h retention boundary               ├── [GAP] Token expired at 10 min → fresh attach
+  └── error enum → wire code (CQ4)                    └── [GAP] Uncertain input → shown, never resent
+      ├── [GAP] every variant maps, exhaustive
+      └── [GAP] no message leaks path/content/ID    [+] Uncertain runtime
+                                                      ├── [GAP] Daemon restart → tagged panes still running
+[+] crates/store                                      ├── [GAP] Host reboot → all terminals lost
+  ├── [GAP] forward-only migration + backup           ├── [GAP] tmux server loss → all terminals lost
+  ├── [GAP] durable record survives tmux loss         ├── [GAP] dismiss_lost → not relabelled exited
+  └── [GAP] no runtime state column exists            ├── [GAP] restart → new epoch
+                                                      └── [GAP] restore_agent_session → exact ID resumed
+[+] crates/tmux
+  ├── control-mode parser                           [+] Destructive actions
+  │   ├── [GAP] split escape seq across reads         ├── [GAP] [→E2E] Archive never mutates git
+  │   ├── [GAP] malformed → pause, not corrupt        ├── [GAP] Running terminal blocks removal
+  │   └── [GAP] 5 workspaces, 1 MiB/s, no starve      ├── [GAP] Dirty state → exact typed name required
+  ├── RuntimeInventory impl (CQ1)                     ├── [GAP] Branch never auto-deleted
+  │   ├── [GAP] bulk query, not per-terminal          └── [GAP] Wrong name typed → refused
+  │   └── [GAP] cache refresh within staleness budget
+  ├── [GAP] exact tag match only, never name/PID     [+] Revoke a device
+  └── [GAP] kill-session never used                   ├── [GAP] [→E2E] Next request blocked < 1 s
+                                                      ├── [GAP] Live connections closed
+[+] crates/transport                                  ├── [GAP] Other clients unaffected
+  ├── [GAP] same suite: in-memory | unix | ssh stdio  ├── [GAP] Non-Overnight authorized_keys untouched
+  ├── [GAP] 1 MiB unacked terminal window enforced    └── [GAP] Damaged fence → refuse + instructions
+  ├── [GAP] 4 MiB control ceiling → CLIENT_TOO_SLOW
+  └── [GAP] snapshot interleaved with mutation      [+] Service lifetime
+      └── [GAP] converges by resource_version         ├── [GAP] Mac agent mode: logout stops it
+                                                      ├── [GAP] Mac unattended: logout survives
+[+] crates/daemon                                     ├── [GAP] Unattended runs as user, not root
+  ├── [GAP] startup inventory primes cache only       ├── [GAP] FileVault reboot → nothing runs, said so
+  ├── [GAP] inventory fails → all lost + degraded     ├── [GAP] Keychain locked → named condition
+  └── authorized_keys fence editing                   └── [GAP] Linux linger on/off behaviour
+      ├── [GAP] atomic write, mode 0600 preserved
+      ├── [GAP] foreign entries never reordered      [+] External attach
+      └── [GAP] fence damaged → refuse, no rewrite     ├── [GAP] Warns which terminals have writers
+                                                      ├── [GAP] Indicator raised in other clients
+[+] crates/cli                                        └── [GAP] Attach + detach audited
+  ├── [GAP] attach selects last active window
+  ├── [GAP] host install verifies checksum          [+] Terminal quality (conformance corpus)
+  └── [GAP] protocol inspect redacts by default       ├── [GAP] [→CONF] UTF-8, ANSI, alt-screen, colour
+                                                      ├── [GAP] [→CONF] Key encoding, control chords
+[+] apps/macos                                        ├── [GAP] [→CONF] 10,000-line scrollback
+  ├── [GAP] renders derived state, never re-derives   ├── [GAP] [→CONF] 1 MiB/s sustained output
+  └── [GAP] worktree removal: blocked / typed / clean └── [GAP] [→CONF] Same corpus passes on Android
+
+COVERAGE: 0/104 paths tested (0%)  |  Code paths: 0/56  |  User flows: 0/48
+QUALITY:  ★★★:0  ★★:0  ★:0         |  GAPS: 104 (7 E2E, 5 conformance)
+```
+
+Legend: ★★★ behaviour + edge + error | ★★ happy path | ★ smoke
+`[→E2E]` needs an integration test | `[→CONF]` belongs in the cross-platform conformance corpus
+
+Zero coverage is the correct reading for a repository containing one design document. The number that matters is 104, because it is the size of the suite that has to exist for this plan's promises to be checkable, and it is why tests are written with each feature rather than after.
 
 ## Distribution Plan
 
