@@ -608,7 +608,9 @@ The Live Activity begins locally when the user enables “Monitor fleet” and a
 - Attach to the same daemon-managed terminal session as the iPhone.
 - Transfer the terminal writer lease between Mac and iPhone.
 
-The Mac client is a founder-required part of the MVP because cross-device control is part of the thesis. The Mac-first slice limits it to fleet navigation, workspace creation/archive, terminal attachment, and writer handoff. IDE launch, worktree removal, rich inspection, and diff review are post-MVP. The same daemon service contract is later exposed remotely to the iOS and Android clients.
+The Mac client is a founder-required part of the MVP because cross-device control is part of the thesis. The Mac-first slice covers fleet navigation, workspace creation, archive, worktree removal, terminal attachment, and writer handoff. IDE launch, rich inspection, and diff review are post-MVP.
+
+Worktree removal is the most destructive action in the product, so its interface is specified rather than left to a default dialog. The Mac app disables it outright while any managed terminal is running and names those terminals. When the worktree is dirty, has untracked files, has unpushed commits, has an unknown upstream, or cannot be assessed, the app states each reason in plain language and requires the user to type the exact workspace name. It never offers to delete the branch, and it says explicitly that the branch is being kept. A clean, fully pushed workspace still requires a deliberate confirmation, just not a typed one. The same daemon service contract is later exposed remotely to the iOS and Android clients.
 
 #### 4. Protocol
 
@@ -1192,7 +1194,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 5. **Resolved in engineering review:** state machines are proof-based and consistent: exact-tagged live tmux terminals remain `running`, unproved terminals become `lost`, and workspaces remain `error` only while a terminal's uncertainty is unresolved. Runtime state is derived rather than stored, so the rule holds structurally.
 6. **Resolved in engineering review:** concurrency, lease, and idempotency metadata now lives only in the request envelope; mutable resources expose `resource_version`, terminals expose `lease_generation`, create mutations target their parent, and the generic dispatcher validates all envelope preconditions before domain logic.
-7. One Mac-client bullet still needs to be checked against the decision to defer worktree removal.
+7. **Resolved in engineering review:** worktree removal is in the Mac MVP, and the contradictory post-MVP claim is gone. The destructive path is specified: blocked while managed terminals run, every uncertainty reason named in plain language, exact typed workspace name required when any exists, branch never deleted and said so explicitly, and a deliberate confirmation even when clean.
 8. **Resolved in engineering review:** `Host` reports only daemon self-health while connected; every client owns its route, heartbeat, latency, last-event, and reachability observations in a local `HostConnection` model and derives online/degraded/offline for its own network.
 
 ### Protocol clarity
