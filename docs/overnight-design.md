@@ -156,7 +156,7 @@ Proceed provisionally with **Approach A: Direct Fleet MVP**, revised to match th
 The first implementation slice proves workspace and terminal-control correctness on one Mac before introducing mobile rendering or remote transport:
 
 - Native Swift macOS app as the first client.
-- One local unprivileged daemon plus CLI, reached through a Unix domain socket. The Mac app stays a thin client; workspace, git, process, terminal, and operation truth remain daemon-owned.
+- One launchd-managed, unprivileged local daemon plus CLI, reached through a Unix domain socket. The Mac app stays a thin client; workspace, git, process, terminal, and operation truth remain daemon-owned and survive Mac-app termination.
 - One existing local repository, one worktree/branch workspace flow, one supported coding-agent CLI preset, and multiple terminal tabs.
 - A dedicated tmux server namespace such as `tmux -L overnight-<install-id> -f /dev/null`. Overnight never mixes managed sessions into the user's default tmux server or depends on the user's tmux configuration.
 - The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy, controls, and terminal surface.
@@ -165,6 +165,22 @@ The first implementation slice proves workspace and terminal-control correctness
 - No Tailscale-direct listener, SSH application transport, embedded Mosh transport, React Native iOS app, APNs relay, Live Activity, Linux/WSL2 support, or native PTY fallback in this slice.
 
 This is an engineering validation slice, not validation of the mobile product thesis. After local workspace creation, five-way parallelism, daemon restart reconciliation, shell attachment, and Mac UI control pass their acceptance tests, the next slice exposes the same daemon protocol through SSH and builds the React Native iOS client. Failure of tmux control mode against the terminal acceptance suite triggers the native PTY fallback decision before remote work begins.
+
+### One behavior contract for local and remote clients
+
+Local and remote are deployment routes, not separate product modes:
+
+```text
+Swift Mac app ── Unix socket ─┐
+Overnight CLI ── Unix socket ─┼── transport adapter ── one daemon protocol/service
+iOS client ──── SSH stdio ───┘
+```
+
+- Every client uses the same generated protocol types and daemon methods. The Mac app never calls git, SQLite, tmux, or process APIs directly.
+- The Unix-socket and SSH-stdio adapters share framing, request dispatch, event ordering, resource versions, operation lifecycle, replay, writer leases, and error codes.
+- Only connection authentication differs. The Unix socket requires a daemon-owned mode-`0600` socket under the same user and records an explicit local client identity; SSH verifies its host/user credentials and then binds an Overnight client identity. Authorization is evaluated after either adapter produces the same connection principal.
+- Contract tests run unchanged against an in-memory adapter, Unix socket, and SSH stdio. A behavior is not complete if it passes locally through a special path that the remote adapter cannot exercise.
+- The native Mac app, future React Native client, and CLI consume generated SDKs from the same typed IDL. Platform clients own presentation and local caches only.
 
 ### Product hierarchy
 
