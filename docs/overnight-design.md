@@ -587,7 +587,8 @@ The Mac client is a founder-required part of the MVP because cross-device contro
 Use a versioned, documented protocol with these resources:
 
 - `Host {id, resource_version, platform, daemon_version, protocol_version, self_health, self_health_reasons}`
-- `Repository {id, resource_version, host_id, display_name, canonical_git_dir, remote_summary}`
+- `RepositoryRoot {id, resource_version, host_id, path_token, display_path, created_at, repository_count}`
+- `Repository {id, resource_version, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary}`
 - `Workspace {id, resource_version, repository_id, task_name, branch, worktree_path_token, state}`
 - `Terminal {id, resource_version, lease_generation, workspace_id, title, command_preset, state, reconciliation_resolution?, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
 - `AgentSession {terminal_id, resource_version, adapter_id, adapter_version, cli_version, vendor_session_id?, capture_source?, restore_policy, restore_state}`
@@ -641,6 +642,7 @@ MVP methods are explicitly bounded:
 
 ```text
 host.get, host.health
+repository_root.list, repository_root.add, repository_root.remove
 repository.list, repository.register, repository.clone
 workspace.list, workspace.create, workspace.archive,
 workspace.restore, workspace.remove_worktree
@@ -650,7 +652,7 @@ terminal.dismiss_lost, terminal.restart, terminal.restore_agent_session
 server.list, server.create, server.start, server.stop,
 server.dismiss_unknown, server.restart
 operation.get, operation.cancel
-client.list, client.revoke
+client.list, client.set_scopes, client.revoke
 daemon.version, daemon.update
 ```
 
@@ -658,7 +660,10 @@ Versioned Protocol Buffer files are the canonical protocol source of truth and s
 
 | Method | Envelope target | Business payload | Result |
 |---|---|---|---|
-| `repository.register` | `Host` | `{allowlisted_path}` | `Repository` |
+| `repository_root.add` | `Host` | `{absolute_path, typed_confirmation}` | `RepositoryRoot` |
+| `repository_root.remove` | `RepositoryRoot` | `{typed_confirmation}` | `RepositoryRoot` |
+| `client.set_scopes` | `Client` | `{scopes, typed_confirmation?}` | `Client` |
+| `repository.register` | `RepositoryRoot` | `{relative_path}` | `Repository` |
 | `repository.clone` | `Host` | `{remote_url, destination_name}` | `Operation` |
 | `workspace.create` | `Repository` | `{task_name, branch, base_revision, cli_preset}` | `Operation` |
 | `workspace.archive/restore` | `Workspace` | `{}` | `Workspace` |
@@ -675,9 +680,17 @@ Versioned Protocol Buffer files are the canonical protocol source of truth and s
 | `server.restart` | `Server` | `{}` | `Operation` |
 | `client.revoke` | `Client` | `{}` | `Operation` |
 
+Administrative semantics are explicit rather than implied:
+
+- `repository_root.add` takes an absolute host path plus a typed confirmation of that path. The daemon canonicalizes it, resolves symlinks, rejects a path that is not an existing readable directory, rejects one that nests inside or contains an existing root, and rejects sensitive locations such as `/`, a home directory root, and system directories. Adding a root does not scan or register anything inside it.
+- `repository_root.remove` is refused while any repository under that root has a non-archived workspace, and the error names them. Removing a root never touches files, worktrees, or branches; it only withdraws Overnight's permission to operate there. Repositories under a removed root become unavailable for new workspace creation and are shown as such.
+- `client.set_scopes` rewrites the forced command in that client's fenced `authorized_keys` entry through the same atomic, fence-verified write path as revocation. Raising a scope to `control` or `host_admin` requires a typed confirmation naming the device, because it grants full command execution as the host user. Lowering a scope takes effect on the client's next connection and immediately closes its live connections so it cannot continue at the old scope.
+- Enrolling a device needs no method. A device that cannot already reach the host over SSH cannot use an enrolled key, so every device self-enrolls with the SSH access it already has, exactly as the first one did.
+- All three are `host_admin`, carry idempotency keys, target and version their resource, and produce audit records.
+
 IDs are UUIDv7. Display names are 1–80 UTF-8 scalar values; task names are 1–120; branch names must pass `git check-ref-format --branch`; command-preset identifiers are 1–64 ASCII characters. Arbitrary command text is stored in host-side presets and is not accepted through workspace creation. Individual binary terminal payloads are capped at 64 KiB.
 
-Events are resource snapshots or transitions: `host.changed`, `repository.changed`, `workspace.changed`, `terminal.changed`, `agent_session.changed`, `server.changed`, `operation.changed`, and `client.revoked`. Each event includes the authoritative new resource version. `host.changed` carries daemon self-health but never authoritative reachability; clients update their local `HostConnection` from transport and heartbeat observations.
+Events are resource snapshots or transitions: `host.changed`, `repository_root.changed`, `repository.changed`, `workspace.changed`, `terminal.changed`, `agent_session.changed`, `server.changed`, `operation.changed`, and `client.revoked`. Each event includes the authoritative new resource version. `host.changed` carries daemon self-health but never authoritative reachability; clients update their local `HostConnection` from transport and heartbeat observations.
 
 ##### Authorization matrix
 
@@ -694,9 +707,9 @@ What `host_admin` does buy is worth keeping: it prevents accidental repository-r
 | List resources, attach terminal output read-only, read operation logs excluding paths and vendor session IDs | `read` |
 | Create/stop/restart/dismiss-lost terminals, write input, resize, take/release writer, restore an exact agent session, start/stop/restart/dismiss-unknown declared servers | `control` |
 | Register/clone repositories, create/archive/restore workspaces | `control` within an administrator-approved repository root |
-| Reveal canonical paths, remove worktrees, change repository roots, revoke clients, update daemon | `host_admin` |
+| Reveal canonical paths, remove worktrees, add/remove repository roots, change an enrolled client's scopes, revoke clients, update daemon | `host_admin` |
 | Enroll the first device | Existing SSH access to the host, or local shell |
-| Enroll subsequent devices or change an enrolled scope | `host_admin`, or local shell |
+| Enroll subsequent devices | Existing SSH access from that device; no protocol method |
 
 Every request checks live revocation and scope state, including requests on an already-established SSH connection. Revoking a client removes its enrolled key and closes all of its active connections before the revoke operation succeeds.
 
@@ -712,7 +725,7 @@ The daemon does not attempt indefinite control-event replay. After every new con
 
 1. Client sends its last `snapshot_id` for diagnostics only.
 2. Daemon sends `snapshot.begin {snapshot_id, generated_at}`.
-3. Daemon sends authoritative resources visible to the client's scopes in dependency order: host, clients, repositories, workspaces, terminals, agent sessions, servers, operations.
+3. Daemon sends authoritative resources visible to the client's scopes in dependency order: host, clients, repository roots, repositories, workspaces, terminals, agent sessions, servers, operations.
 4. Mutations during the snapshot are buffered.
 5. Daemon sends `snapshot.end {snapshot_id}`, then buffered events with resource versions greater than those in the snapshot.
 6. Client atomically replaces its local resource store only after `snapshot.end`.
@@ -932,11 +945,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 9. **Accepted before Milestone 1:** Make runtime states proof-based: an exact-tagged live tmux terminal is `running`, an expected terminal without exact runtime identity is `lost`, and terminals never use `unknown`; a server whose post-restart identity cannot be proved is `unknown`. A workspace stays `error` only while child uncertainty is unresolved, then recomputes to `ready` or `active`.
 10. **Accepted before Milestone 1:** Keep `read`, `control`, and `host_admin`, and document `host_admin` as an application safety rail rather than containment. `read` is the only genuine non-executing boundary; `control` grants full command execution as the host user and cannot be securely contained beneath `host_admin` without a second operating-system principal. Enrollment states this plainly when granting `control` or `host_admin`; revocation is the containment response, followed by a host audit. Privilege-separated terminal workers are deferred.
 11. **Accepted before Milestone 1:** Delegate all authentication to SSH. Delete the Overnight certificate authority, client certificates, identity pinning, and QR pairing flow, and drop the Tailscale-direct mutual-TLS listener; the daemon opens no network listener. Device identity is the enrolled SSH key fingerprint, scope is carried by a `restrict` plus forced-command entry in a fenced `authorized_keys` block, and revocation removes the entry and closes live connections. Tailscale remains a network path. Onboarding requires no presence at the host and installs the daemon remotely on Linux and WSL2.
-12. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-13. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-14. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-15. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-16. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+12. **Accepted before Milestone 1:** Expose repository-root administration and enrolled-client scope changes as `host_admin` protocol methods rather than host-shell-only workflows, with typed confirmation on widening actions, refusal to remove a root that still holds active workspaces, and no enrollment method at all.
+13. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+14. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+15. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+16. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+17. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -1106,7 +1120,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 ### Completeness
 
 1. **Resolved in engineering review:** the bounded protocol now includes typed dismiss/restart methods for lost terminals and unknown servers plus the existing exact-agent restoration method; dismissed uncertainty remains historically truthful rather than being relabeled as an observed exit.
-2. Repository-root administration and client-scope changes are referenced without protocol resources or a documented local-CLI-only workflow.
+2. **Resolved in engineering review:** a `RepositoryRoot` resource plus `repository_root.list/add/remove` and `client.set_scopes` are `host_admin` protocol methods with typed confirmation, idempotency keys, audit records, and defined refusal rules. `repository.register` now targets a root rather than a host. Device enrollment needs no method, because a device that cannot already reach the host over SSH cannot use an enrolled key.
 3. **Resolved in engineering review:** host-local CLI presets now define configurable shell launch modes, safe configuration ownership, adapter validation, exact session-ID capture, stored session metadata, and configurable exact-ID restoration.
 4. The method table does not yet define canonical payload, result, idempotency, version target, and synchronous/asynchronous behavior for every listed MVP method.
 
