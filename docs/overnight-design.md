@@ -161,7 +161,7 @@ The first implementation slice proves workspace and terminal-control correctness
 - A dedicated tmux server namespace such as `tmux -L overnight-<install-id> -f /dev/null`, containing one host-wide managed session. Overnight never mixes managed windows into the user's default tmux server or depends on the user's tmux configuration.
 - The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy and controls. Its terminal surface uses the shared libghostty core through an Overnight-owned adapter.
 - `overnight attach WORKSPACE_ID` remains mandatory and attaches an ordinary shell client to the managed session. The equivalent raw tmux command is shown for transparency and recovery.
-- SQLite is canonical for desired Overnight product state and stable IDs. tmux supplies observed terminal/runtime state. Restart reconciliation compares them; it never treats an untagged or unmatched tmux window or pane as an Overnight workspace or terminal automatically.
+- State ownership splits by durability. SQLite stores only what must outlive tmux: repository roots, repositories, workspaces with their worktree and branch, terminal durable identity and intent, agent session IDs, operations, and audit records. tmux is the sole authority for whether a managed process is alive right now. The daemon never stores a terminal runtime state field, so it cannot serve a stale `running`; runtime state is derived per request from intent plus a live exactly-tagged pane, and an untagged or unmatched window is never treated as an Overnight object automatically.
 - No SSH application transport, embedded Mosh transport, React Native iOS app, APNs relay, Live Activity, Linux/WSL2 support, or native PTY fallback in this slice.
 
 This is an engineering validation slice, not validation of the mobile product thesis. After local workspace creation, five-way parallelism, daemon restart reconciliation, shell attachment, and Mac UI control pass their acceptance tests, the next slice exposes the same daemon protocol through SSH and builds the React Native iOS client. Failure of tmux control mode against the terminal acceptance suite triggers the native PTY fallback decision before remote work begins.
@@ -193,7 +193,7 @@ crates/
 ├── protocol    protobuf-generated types, framing, compatibility
 ├── core        resource models, state machines, commands, events
 ├── store       SQLite schema, migrations, repositories
-├── tmux        private-server lifecycle, control mode, reconciliation
+├── tmux        private-server lifecycle, control mode, runtime inventory
 ├── transport   shared connection/session logic and Unix-socket adapter
 ├── daemon      composition root, launchd lifecycle, observability
 └── cli         workspace commands, attach, protocol inspection
@@ -360,7 +360,7 @@ A server is a user-launched command associated with a workspace and an expected 
 
 After daemon restart, any formerly running declared server becomes **unknown**. The daemon may test whether its expected port is listening, but it cannot relabel the process **running** or adopt a process from persisted PID/PGID data. `server.dismiss_unknown` acknowledges the uncertainty without claiming an exit; `server.restart` launches a new owned process group from the stored preset. Server `error` means creation or launch failed before a live owned process was established.
 
-Workspace state is recomputed from reconciled children after daemon restart. Any unresolved `lost` terminal or `unknown` server makes the workspace `error` until the user dismisses, restarts, or exactly restores every uncertain process.
+Workspace state is derived from its children on every read, not recomputed at restart. Any unresolved `lost` terminal or `unknown` server makes the workspace `error` until the user dismisses, restarts, or exactly restores every uncertain process.
 
 #### Connection
 
@@ -380,7 +380,7 @@ Runs as an unprivileged background service for the logged-in developer on macOS 
 - Host identity, health, operating-system details, and free storage.
 - Repository registration and cloning.
 - Worktree and branch creation, listing, validation, and safe cleanup.
-- Authoritative workspace, process, terminal, server, operation, and notification metadata stored locally in a small durable database. Thin clients render snapshots and cache display state but do not own lifecycle truth.
+- Durable workspace, terminal-identity, operation, and notification metadata in a small local database, with live terminal runtime derived from tmux rather than stored. Thin clients render snapshots and cache display state but do not own lifecycle truth.
 - Daemon-managed terminal sessions that continue while every client disconnects. Prefer a dedicated tmux server/socket when the backend acceptance suite passes; provide a native PTY backend for unsupported or incompatible hosts.
 - Terminal resize, input, output, exit status, and scrollback streaming.
 - Named terminal tabs within a workspace. Split panes are deferred.
@@ -433,35 +433,53 @@ One long-lived `tmux -CC attach-session` control client attaches to the host ses
 
 The single control client is a streaming failure domain, not a process-lifetime failure domain. If it exits or its parser rejects malformed output, all managed commands are paused, tmux processes continue, and the daemon reconnects, inventories stable tags, captures retained pane state, advances terminal epochs, and emits visible gaps before accepting new input. A sustained-output test across five simultaneous workspaces must prove that a noisy pane cannot starve command responses or output routing for the others.
 
-The daemon uses supported tmux commands and control mode for create, attach, resize, input, output, exit, and reconciliation. Every command targets stable session, window, or pane IDs rather than names or indexes. Users may opt to expose or import an existing tmux session later, but MVP never assumes ownership of an arbitrary user session.
+The daemon uses supported tmux commands and control mode for create, attach, resize, input, output, exit, and runtime inventory. Every command targets stable session, window, or pane IDs rather than names or indexes. Users may opt to expose or import an existing tmux session later, but MVP never assumes ownership of an arbitrary user session.
 
 The host session contains managed terminal windows only; it does not keep a fake sentinel shell. The first terminal creates the session. Removing the final terminal may let the session and private server exit, after which the daemon recreates them on demand. Removing or archiving one workspace targets only windows whose fresh tags exactly match that workspace ID and never uses `kill-session`.
 
 The tmux backend must pass the same ordering, writer-lease, process-group, resize, scrollback, upgrade, and crash tests as the native PTY backend. If tmux cannot provide an invariant without parsing unstable screen output or weakening isolation, the daemon keeps that invariant in its own metadata/protocol layer. tmux is a session engine, not the product database or authorization boundary.
 
-##### SQLite/tmux reconciliation
+##### State ownership and runtime derivation
 
-SQLite stores desired workspaces, terminals, lifecycle state, operation history, and stable Overnight IDs. The host session is tagged with `@overnight_daemon_id` and `@overnight_schema_version`. Every managed window and pane is tagged with `@overnight_daemon_id`, `@overnight_workspace_id`, `@overnight_terminal_id`, and `@overnight_schema_version`. Names, indexes, and PID values are display or diagnostic data only and never establish identity.
+State ownership splits by durability rather than by preference. tmux forgets everything when the host reboots, so tmux owns exactly what dies with it, and SQLite owns exactly what must survive it.
 
-Workspace/terminal creation is a recoverable saga rather than a false cross-system transaction:
+| Store | Owns |
+|---|---|
+| SQLite | Repository roots and repositories, workspaces with their worktree and branch, terminal durable identity and intent, agent session IDs and restore policy, client enrollments, operations and their logs, audit records |
+| tmux | Whether a managed process is alive right now, its window and pane IDs, its current size, and its retained pane contents |
 
-1. Commit a SQLite `Operation` and desired terminal record in `creating`.
-2. Create the host session if needed, then create and tag the terminal window and pane.
-3. Verify the exact tags and live pane through a fresh tmux query.
-4. Commit the observed tmux IDs and transition the terminal to `running`.
-5. If any step fails, preserve enough operation evidence for deterministic reconciliation. Do not erase a possibly live session merely to make the database look clean.
+SQLite never stores a terminal runtime state field. There is no row that could say `running` after the process died, so the daemon cannot serve a stale claim. The proof-based rule becomes structural instead of a discipline someone has to remember.
 
-On daemon startup, hold a reconciliation lock, open SQLite, and inventory the private tmux server before accepting mutating requests:
+The host session is tagged with `@overnight_daemon_id` and `@overnight_schema_version`. Every managed window and pane is tagged with `@overnight_daemon_id`, `@overnight_workspace_id`, `@overnight_terminal_id`, and `@overnight_schema_version`. Names, indexes, and PID values are display or diagnostic data only and never establish identity.
 
-| SQLite desired record | Tagged tmux runtime | Result |
+Runtime state is derived per request from durable intent plus a fresh tmux inventory:
+
+| Durable intent | Live exactly-tagged pane | Derived state |
 |---|---|---|
-| Exact daemon/workspace/terminal ID match | Live pane exists | Reattach control mode; update observed fields; `running` |
-| Terminal expected to run | No exact pane | Mark `lost`; retain history and offer restart/dismiss |
-| No SQLite record | Tags name this daemon identity | Create an `orphaned` recovery candidate; never auto-adopt or kill |
-| Exact IDs disagree, duplicate, or schema is unsupported | Ambiguous runtime | Quarantine as `conflict`; block mutation and show recovery instructions |
-| No SQLite record | Untagged or different daemon identity | Ignore completely |
+| Intended running | Exactly one | `running` |
+| Intended running | None | `lost` |
+| Intended running | More than one | `lost`, and every claimant pane becomes an orphaned candidate |
+| Stopped, with a recorded exit code or signal | Any | `exited` |
+| Creation failed before a live runtime existed | Any | `error` |
+| No durable record | Tags name this daemon identity | Not a terminal; an `orphaned` recovery candidate |
+| No durable record | Untagged or another daemon identity | Ignored completely |
 
-Adopting an `orphaned` tmux candidate creates a new SQLite record only after exact user confirmation and a fresh daemon/workspace/terminal tag check. This is recovery of an exactly tagged tmux object belonging to this same daemon identity, not adoption of an OS process from a persisted PID or PGID. Terminating one requires the same confirmation. Reconciliation is idempotent, bounded by a startup deadline, and leaves the daemon read-only with a visible degraded state if the private tmux server cannot be inventoried safely.
+There is no `conflict` state, because there is no longer a comparison to arbitrate. Duplicate claimant panes are simply not proof of identity, so the terminal derives as `lost` and the panes become candidates the user can adopt or kill.
+
+Terminal creation is a short saga rather than a false cross-system transaction:
+
+1. Commit the durable terminal record with intent `running`.
+2. Create the host session if needed, then create and tag the window and pane.
+3. Verify the exact tags and live pane through a fresh tmux query.
+4. If any step fails, leave the durable record and its intent in place. Derivation reports `lost` until the user restarts, restores, or dismisses it. Cleanup never kills a possibly live session to make the database look tidy.
+
+On daemon startup the daemon opens SQLite, attaches its control client, and inventories the private tmux server once. That inventory primes a cache; it is not a reconciliation pass, because it resolves nothing and decides nothing. If the private tmux server cannot be inventoried safely, the daemon serves durable state with every terminal derived as `lost` and shows a visible degraded state rather than guessing.
+
+With the native PTY backend there is no external runtime to inventory, so derivation reads the daemon's own live child processes instead. Any daemon restart therefore derives every native-PTY terminal as `lost` by construction, which is the same guarantee the design already states rather than a new one.
+
+Because derivation sits on the fleet-render path, the inventory is performance-sensitive. The control actor maintains a cached tmux inventory updated from control-mode notifications, refreshed on demand within a bounded staleness budget, and a fleet listing never issues one tmux round trip per terminal.
+
+Adopting an `orphaned` candidate creates a durable record only after exact user confirmation and a fresh daemon/workspace/terminal tag check. This is recovery of an exactly tagged tmux object belonging to this same daemon identity, never adoption of an OS process from a persisted PID or PGID. Terminating one requires the same confirmation.
 
 The tmux backend has one unusually valuable acceptance requirement: shell portability. `overnight attach WORKSPACE_ID` runs locally on the host, claims external writer leases for that workspace's terminals, attaches to the host session, and selects the workspace's last active window. The raw recovery command `tmux -L overnight-<install-id> attach -t overnight` exposes the flat list of every managed terminal on the host. Therefore a user on an unsupported **client** operating system needs only an ordinary SSH or Mosh client:
 
@@ -590,7 +608,7 @@ Use a versioned, documented protocol with these resources:
 - `RepositoryRoot {id, resource_version, host_id, path_token, display_path, created_at, repository_count}`
 - `Repository {id, resource_version, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary}`
 - `Workspace {id, resource_version, repository_id, task_name, branch, worktree_path_token, state}`
-- `Terminal {id, resource_version, lease_generation, workspace_id, title, command_preset, state, reconciliation_resolution?, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
+- `Terminal {id, resource_version, lease_generation, workspace_id, title, command_preset, intent, state, reconciliation_resolution?, exit_status, writer_client_id, columns, rows, size_controller_client_id}` where `intent` is durable and `state` is derived at read time, never stored
 - `AgentSession {terminal_id, resource_version, adapter_id, adapter_version, cli_version, vendor_session_id?, capture_source?, restore_policy, restore_state}`
 - `Server {id, resource_version, workspace_id, title, command, expected_port, state, reconciliation_resolution?}`
 - `Client {id, resource_version, display_name, ssh_key_fingerprint, scopes, enrolled_at, last_seen_at, revoked_at}`
@@ -660,7 +678,7 @@ Versioned Protocol Buffer files are the canonical protocol source of truth and s
 
 One rule decides synchronous from asynchronous: **a mutating method returns its mutated resource unless the client needs streamed logs, progress, or cancellation, in which case it returns an `Operation`.** Resource state machines already express `creating`, `starting`, `running`, and `error` truthfully, and clients follow them through `*.changed` events. An `Operation` is reserved for work that has something a state machine cannot express.
 
-The saga's internal `Operation` record is not the same thing as a method result. Terminal creation still commits an operation row for deterministic reconciliation; that row is daemon bookkeeping, and `terminal.create` still answers with the `Terminal` so the client can draw its tab immediately.
+Under the derivation model terminal creation commits no operation row at all. Its durable record and intent are the only state involved, and `terminal.create` answers with the `Terminal` so the client can draw its tab immediately while the pane comes up.
 
 Every mutating method requires an idempotency key and an `expected_resource_version` on its envelope target. Mutations of an existing resource target that resource; create mutations target and version their parent. Writer-lease mutations additionally compare `expected_lease_generation`. Reads carry neither.
 
@@ -981,11 +999,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 12. **Accepted before Milestone 1:** Expose repository-root administration and enrolled-client scope changes as `host_admin` protocol methods rather than host-shell-only workflows, with typed confirmation on widening actions, refusal to remove a root that still holds active workspaces, and no enrollment method at all.
 13. **Accepted before Milestone 1:** A mutating method returns its mutated resource unless the client needs streamed logs, progress, or cancellation, in which case it returns an `Operation`. Publish an exhaustive method-contract table carrying scope, envelope target, version target, payload, result, and kind for every MVP method, and document the reconciliation saga's internal operation row as distinct from a method result.
 14. **Accepted before Milestone 1:** Sequence terminal output as `uint64` byte offsets within an epoch so the replay buffer, flow-control window, frame cap, and resume point share one unit. Give `FlowAck` and `Gap` exact fields, report exact `lost_bytes` when the epoch matches, bind hashed resume tokens to client, terminal, and epoch with a ten-minute post-disconnect expiry, and require acknowledgment within 1 s of unacknowledged output in addition to the frequency cap.
-15. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-16. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-17. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-18. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-19. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+15. **Accepted before Milestone 1:** Split state ownership by durability. tmux is the sole authority for whether a managed process is alive; SQLite stores only what must outlive tmux, including workspaces, worktrees and branches, terminal durable identity and intent, agent session IDs, operations, and audit. Never store a terminal runtime state field. Derive runtime state per request from intent plus a live exactly-tagged pane, which deletes the reconciliation table and the `conflict` state and leaves `orphaned` as the one real recovery case.
+16. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+17. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+18. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+19. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+20. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
