@@ -346,6 +346,8 @@ starting → running → exited
 - **Lost:** the daemon restarted or crashed and can no longer prove that the PTY is attached.
 - **Quiet:** an activity indicator meaning no output for a selected interval, not a workflow state and never labeled “needs input.”
 
+A lost terminal retains its truthful `lost` state plus an optional reconciliation resolution. `terminal.dismiss_lost` records that the user acknowledged the loss so it no longer keeps the workspace in `error`; it never relabels the terminal `exited`. `terminal.restart` launches a new terminal epoch from the same preset, while `terminal.restore_agent_session` starts the exact stored vendor session when its adapter permits restoration.
+
 #### Declared server
 
 ```text
@@ -354,9 +356,9 @@ starting → running → exited
 
 A server is a user-launched command associated with a workspace and an expected port. MVP does not scan arbitrary host processes. It shows the declared command, process state, port, and a Safari/external-browser URL over Tailscale.
 
-After daemon restart, any formerly running declared server becomes **unknown**. The daemon may test whether its expected port is listening, but it cannot relabel the process **running** until the user explicitly adopts or restarts it.
+After daemon restart, any formerly running declared server becomes **unknown**. The daemon may test whether its expected port is listening, but it cannot relabel the process **running** or adopt a process from persisted PID/PGID data. `server.dismiss_unknown` acknowledges the uncertainty without claiming an exit; `server.restart` launches a new owned process group from the stored preset.
 
-Workspace state is recomputed from reconciled children after daemon restart. Any `lost` terminal or `unknown` server makes the workspace `error` until the user dismisses, adopts, or restarts every uncertain process.
+Workspace state is recomputed from reconciled children after daemon restart. Any unresolved `lost` terminal or `unknown` server makes the workspace `error` until the user dismisses, restarts, or exactly restores every uncertain process.
 
 #### Connection
 
@@ -457,7 +459,7 @@ On daemon startup, hold a reconciliation lock, open SQLite, and inventory the pr
 | Exact IDs disagree, duplicate, or schema is unsupported | Ambiguous runtime | Quarantine as `conflict`; block mutation and show recovery instructions |
 | No SQLite record | Untagged or different daemon identity | Ignore completely |
 
-Adopting an `orphaned` candidate creates a new SQLite record only after exact user confirmation and a fresh tag/identity check. Terminating one requires the same confirmation. Reconciliation is idempotent, bounded by a startup deadline, and leaves the daemon read-only with a visible degraded state if the private tmux server cannot be inventoried safely.
+Adopting an `orphaned` tmux candidate creates a new SQLite record only after exact user confirmation and a fresh daemon/workspace/terminal tag check. This is recovery of a cryptographically paired daemon's exactly tagged tmux object, not adoption of an OS process from a persisted PID or PGID. Terminating one requires the same confirmation. Reconciliation is idempotent, bounded by a startup deadline, and leaves the daemon read-only with a visible degraded state if the private tmux server cannot be inventoried safely.
 
 The tmux backend has one unusually valuable acceptance requirement: shell portability. `overnight attach WORKSPACE_ID` runs locally on the host, claims external writer leases for that workspace's terminals, attaches to the host session, and selects the workspace's last active window. The raw recovery command `tmux -L overnight-<install-id> attach -t overnight` exposes the flat list of every managed terminal on the host. Therefore a user on an unsupported **client** operating system needs only an ordinary SSH or Mosh client:
 
@@ -585,9 +587,9 @@ Use a versioned, documented protocol with these resources:
 - `Host {id, resource_version, platform, daemon_version, protocol_version, self_health, self_health_reasons}`
 - `Repository {id, resource_version, host_id, display_name, canonical_git_dir, remote_summary}`
 - `Workspace {id, resource_version, repository_id, task_name, branch, worktree_path_token, state}`
-- `Terminal {id, resource_version, lease_generation, workspace_id, title, command_preset, state, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
+- `Terminal {id, resource_version, lease_generation, workspace_id, title, command_preset, state, reconciliation_resolution?, exit_status, writer_client_id, columns, rows, size_controller_client_id}`
 - `AgentSession {terminal_id, resource_version, adapter_id, adapter_version, cli_version, vendor_session_id?, capture_source?, restore_policy, restore_state}`
-- `Server {id, resource_version, workspace_id, title, command, expected_port, state}`
+- `Server {id, resource_version, workspace_id, title, command, expected_port, state, reconciliation_resolution?}`
 - `Client {id, resource_version, display_name, public_key, scopes, revoked_at}`
 - `Operation {id, resource_version, kind, resource_id, state, cancellable, error_code, log_cursor}`
 
@@ -642,8 +644,9 @@ workspace.list, workspace.create, workspace.archive,
 workspace.restore, workspace.remove_worktree
 terminal.list, terminal.create, terminal.attach, terminal.write,
 terminal.resize, terminal.take_writer, terminal.release_writer, terminal.stop,
-terminal.restore_agent_session
-server.list, server.create, server.start, server.stop
+terminal.dismiss_lost, terminal.restart, terminal.restore_agent_session
+server.list, server.create, server.start, server.stop,
+server.dismiss_unknown, server.restart
 operation.get, operation.cancel
 client.list, client.revoke
 daemon.version, daemon.update
@@ -661,9 +664,13 @@ Versioned Protocol Buffer files are the canonical protocol source of truth and s
 | `terminal.create` | `Workspace` | `{title, command_preset}` | `Terminal` |
 | `terminal.take_writer` | `Terminal` | `{}` | `Terminal` |
 | `terminal.resize` | `Terminal` | `{columns, rows, view_activity_id}` | `Terminal` |
+| `terminal.dismiss_lost` | `Terminal` | `{}` | `Terminal` |
+| `terminal.restart` | `Terminal` | `{}` | `Operation` |
 | `terminal.restore_agent_session` | `AgentSession` | `{user_confirmed}` | `Operation` |
 | `terminal.stop` | `Terminal` | `{force, typed_confirmation?}` | `Operation` |
 | `server.create` | `Workspace` | `{title, command_preset, expected_port}` | `Server` |
+| `server.dismiss_unknown` | `Server` | `{}` | `Server` |
+| `server.restart` | `Server` | `{}` | `Operation` |
 | `client.revoke` | `Client` | `{}` | `Operation` |
 
 IDs are UUIDv7. Display names are 1–80 UTF-8 scalar values; task names are 1–120; branch names must pass `git check-ref-format --branch`; command-preset identifiers are 1–64 ASCII characters. Arbitrary command text is stored in host-side presets and is not accepted through workspace creation. Individual binary terminal payloads are capped at 64 KiB.
@@ -677,7 +684,7 @@ Scopes are cumulative: `host_admin` includes `control`, which includes `read`.
 | Method or field | Minimum scope |
 |---|---|
 | List resources, attach terminal output read-only, read operation logs excluding paths and vendor session IDs | `read` |
-| Create/stop terminals, write input, resize, take/release writer, restore an exact agent session, start/stop declared servers | `control` |
+| Create/stop/restart/dismiss-lost terminals, write input, resize, take/release writer, restore an exact agent session, start/stop/restart/dismiss-unknown declared servers | `control` |
 | Register/clone repositories, create/archive/restore workspaces | `control` within an administrator-approved repository root |
 | Reveal canonical paths, remove worktrees, change repository roots, revoke clients, update daemon | `host_admin` |
 | Pair a new first administrator | Local host confirmation |
@@ -899,11 +906,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 5. **Accepted before Milestone 1:** Launch coding agents through the user's interactive login shell by default, with per-host and per-preset alternatives for login, interactive, direct, and custom modes. Require each supported adapter to capture an exact correlated vendor session ID through an additive lifecycle hook and resume that exact ID without scraping terminal output or choosing a global latest session. Make restore policy configurable and default to automatic restoration only after verified infrastructure loss.
 6. **Accepted before Milestone 1:** Put generic target identity, optimistic concurrency, writer-lease fencing, and idempotency metadata only in the protobuf request envelope. Keep method payloads business-only, expose `resource_version` on every mutable resource and `lease_generation` on terminals, validate both generically before domain dispatch, and target a parent resource for create mutations.
 7. **Accepted before Milestone 1:** Keep daemon self-health on the `Host` resource but make reachability a per-client `HostConnection` observation. Each client records its active route, connection state, last connection/event times, latency, and error, then derives online/degraded/offline locally; an offline daemon never attempts to report itself offline.
-8. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-9. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-10. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-11. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-12. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+8. **Accepted before Milestone 1:** Resolve uncertain runtime state through typed per-resource methods: dismiss, restart, or exact-agent restore for lost terminals and dismiss or restart for unknown servers. Never adopt an OS process from persisted PID/PGID data; exact automatic reattachment remains limited to live tmux objects whose daemon and resource tags match.
+9. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+10. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+11. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+12. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+13. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -1070,7 +1078,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 ### Completeness
 
-1. The post-restart reconciliation language references dismissing or restarting uncertain terminals and servers, but the bounded protocol lacks explicit reconciliation methods.
+1. **Resolved in engineering review:** the bounded protocol now includes typed dismiss/restart methods for lost terminals and unknown servers plus the existing exact-agent restoration method; dismissed uncertainty remains historically truthful rather than being relabeled as an observed exit.
 2. Repository-root administration and client-scope changes are referenced without protocol resources or a documented local-CLI-only workflow.
 3. **Resolved in engineering review:** host-local CLI presets now define configurable shell launch modes, safe configuration ownership, adapter validation, exact session-ID capture, stored session metadata, and configurable exact-ID restoration.
 4. The method table does not yet define canonical payload, result, idempotency, version target, and synchronous/asynchronous behavior for every listed MVP method.
@@ -1091,7 +1099,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 ### Feasibility and security
 
 12. A terminal-control client can execute as the daemon's operating-system user, so `control` is effectively full host administration unless daemon secrets and administration move to another OS security principal.
-13. Unknown post-crash processes cannot be safely adopted using persisted PID/PGID alone; MVP should avoid adoption or use platform-specific durable process identity.
+13. **Resolved in engineering review:** MVP never adopts an unknown OS process from persisted PID/PGID data. It may automatically reattach only to live tmux objects with exact daemon/resource tags, and adopting an orphaned tagged tmux candidate requires confirmation plus a fresh identity check.
 14. macOS LaunchAgent and Linux user-service behavior across logout must be tested and the supported unattended-host requirement stated explicitly.
 15. Full control snapshots need duration and buffered-event caps to prevent a slow client or large fleet from consuming unbounded daemon memory.
 
