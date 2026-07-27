@@ -211,6 +211,30 @@ apps/
 
 The first slice may ship separate `overnightd` and `overnight` executables from the same Cargo workspace. “Single statically distributable binary” means self-contained installation without a language runtime; it does not require collapsing daemon and CLI process roles or fully static macOS linking.
 
+### Mac packaging and daemon lifecycle
+
+The Mac-first slice targets macOS 13 or later and ships one native `Overnight.app` containing the Swift client, Rust daemon, Rust CLI, LaunchAgent property list, protobuf descriptors, and pinned libghostty artifacts:
+
+```text
+Overnight.app/
+└── Contents/
+    ├── MacOS/Overnight
+    ├── Resources/overnightd
+    ├── Resources/overnight
+    └── Library/LaunchAgents/com.overnight.daemon.plist
+```
+
+- The daemon is an unprivileged per-user LaunchAgent registered through `SMAppService.agent(plistName:)`. Its plist uses `BundleProgram` to address the daemon inside the app bundle. Overnight does not install a system LaunchDaemon, request administrator access, or write a legacy plist into `~/Library/LaunchAgents`.
+- First run explains why the background service is required, then explicitly registers it. The app checks `SMAppService.Status` on every connection attempt and offers to open the Login Items settings panel if authorization is denied or later disabled.
+- launchd starts the daemon immediately and on later logins, restarts unexpected nonzero exits with bounded crash-loop backoff, and leaves tmux-owned processes running across a daemon restart.
+- The app is the distribution unit for the Mac daemon. App, daemon, CLI, protocol descriptors, and libghostty pin share one release version. A replacement app performs protocol compatibility checks, asks the old daemon to quiesce, updates registration if necessary, restarts the agent, and verifies tmux reconciliation before declaring the upgrade complete.
+- Moving or replacing the app bundle, disabling its background item, version incompatibility, and deleting the app each have explicit detection and recovery tests. Unregistering the agent stops only `overnightd`; removing user data, managed worktrees, or live tmux sessions requires separate exact confirmation and is never part of ordinary app deletion.
+- Runtime data lives under `~/Library/Application Support/Overnight/` with user-only permissions. The Unix socket and identity/database files are created in user-only subdirectories and never inside the replaceable app bundle.
+- The daemon needs the user's repositories, git tooling, shells, tmux, and coding-agent CLIs, so the independently distributed Mac build does not place the daemon inside the App Sandbox. Hardened runtime, code signing, notarization, and least-privilege filesystem validation remain release requirements.
+- Personal Team development builds exercise the same bundled-agent registration locally. Lack of paid Apple Developer Program enrollment blocks notarized public distribution, TestFlight, production APNs, and App Store release, not local architecture validation.
+
+The app offers an explicit **Install command-line tool** action that atomically copies the matching `overnight` executable to `~/.local/bin/overnight`. It never edits shell startup files or writes to `/usr/local/bin`; when `~/.local/bin` is absent from `PATH`, it shows the exact user-approved shell configuration. App updates refresh this copy only after compatibility checks, and the CLI always negotiates with the running daemon rather than assuming an identical version.
+
 ### Shared terminal core: libghostty
 
 Overnight uses `libghostty-vt` as its terminal emulation and render-state core on Mac, iOS, and Android. This decision gives every client the same VT parsing, Unicode and grapheme behavior, terminal modes, key and mouse encoding, text reflow, scrollback model, and render-state semantics while preserving platform-native UI:
@@ -799,11 +823,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 1. **Accepted for Gate 1:** Use pinned `libghostty-vt` behind an Overnight-owned C-ABI adapter as the shared Mac, iOS, and Android terminal core. Use one private tmux server and one host-wide session; represent workspaces as tagged groups of terminal windows and drain them through one host-wide control client with per-pane flow control. Prove tmux control mode through the Mac surface and require an Android ARM64 build plus rendered-fixture smoke test in the same spike. Reopen the backend if it fails a required persistence, handoff, process-ownership, noisy-neighbor, or shell-escape-hatch invariant.
 2. **Gate 2:** Which maintained iOS SSH implementation supports host-key verification, modern keys, bastions/agents, and a reliable stdio tunnel without making React Native own crypto? Does the Mosh terminal adapter earn its added UDP and client-library complexity?
 3. **Accepted before Milestone 1:** Implement the daemon and CLI in Rust, using Tokio, Prost, bundled SQLite through rusqlite, and a crate boundary that keeps protocol, core state, storage, tmux, transport, composition, and CLI concerns separate. Validate macOS arm64 packaging in the first vertical slice and add Linux/WSL2 build-and-smoke CI before remote-host support enters scope.
-4. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-5. **Before Cursor enters Milestone 2:** Are Cursor CLI invocation, authentication, and redistribution stable enough for a supported preset? If not, document it as an external command preset with reduced compatibility guarantees.
-6. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-7. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-8. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+4. **Accepted before Milestone 1:** Bundle the Rust daemon, CLI, LaunchAgent plist, protocol descriptors, and terminal artifacts inside the native Mac app. Register the unprivileged per-user daemon through `SMAppService`, use the app as the Mac release unit, and offer an opt-in `~/.local/bin/overnight` CLI copy without requiring root or editing shell files.
+5. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+6. **Before Cursor enters Milestone 2:** Are Cursor CLI invocation, authentication, and redistribution stable enough for a supported preset? If not, document it as an external command preset with reduced compatibility guarantees.
+7. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+8. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+9. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
