@@ -656,29 +656,60 @@ client.list, client.set_scopes, client.revoke
 daemon.version, daemon.update
 ```
 
-Versioned Protocol Buffer files are the canonical protocol source of truth and ship with every daemon/client release. They generate daemon, CLI, Swift, and future TypeScript/Kotlin types plus method clients. Field numbers are never reused, removed fields are reserved, unknown fields are tolerated within a compatible major version, and generated code is checked into releases but never hand-edited. Required MVP request/result shapes include:
+Versioned Protocol Buffer files are the canonical protocol source of truth and ship with every daemon/client release. They generate daemon, CLI, Swift, and future TypeScript/Kotlin types plus method clients. Field numbers are never reused, removed fields are reserved, unknown fields are tolerated within a compatible major version, and generated code is checked into releases but never hand-edited. ##### Method contracts
 
-| Method | Envelope target | Business payload | Result |
-|---|---|---|---|
-| `repository_root.add` | `Host` | `{absolute_path, typed_confirmation}` | `RepositoryRoot` |
-| `repository_root.remove` | `RepositoryRoot` | `{typed_confirmation}` | `RepositoryRoot` |
-| `client.set_scopes` | `Client` | `{scopes, typed_confirmation?}` | `Client` |
-| `repository.register` | `RepositoryRoot` | `{relative_path}` | `Repository` |
-| `repository.clone` | `Host` | `{remote_url, destination_name}` | `Operation` |
-| `workspace.create` | `Repository` | `{task_name, branch, base_revision, cli_preset}` | `Operation` |
-| `workspace.archive/restore` | `Workspace` | `{}` | `Workspace` |
-| `workspace.remove_worktree` | `Workspace` | `{typed_confirmation?}` | `Operation` |
-| `terminal.create` | `Workspace` | `{title, command_preset}` | `Terminal` |
-| `terminal.take_writer` | `Terminal` | `{}` | `Terminal` |
-| `terminal.resize` | `Terminal` | `{columns, rows, view_activity_id}` | `Terminal` |
-| `terminal.dismiss_lost` | `Terminal` | `{}` | `Terminal` |
-| `terminal.restart` | `Terminal` | `{}` | `Operation` |
-| `terminal.restore_agent_session` | `AgentSession` | `{user_confirmed}` | `Operation` |
-| `terminal.stop` | `Terminal` | `{force, typed_confirmation?}` | `Operation` |
-| `server.create` | `Workspace` | `{title, command_preset, expected_port}` | `Server` |
-| `server.dismiss_unknown` | `Server` | `{}` | `Server` |
-| `server.restart` | `Server` | `{}` | `Operation` |
-| `client.revoke` | `Client` | `{}` | `Operation` |
+One rule decides synchronous from asynchronous: **a mutating method returns its mutated resource unless the client needs streamed logs, progress, or cancellation, in which case it returns an `Operation`.** Resource state machines already express `creating`, `starting`, `running`, and `error` truthfully, and clients follow them through `*.changed` events. An `Operation` is reserved for work that has something a state machine cannot express.
+
+The saga's internal `Operation` record is not the same thing as a method result. Terminal creation still commits an operation row for deterministic reconciliation; that row is daemon bookkeeping, and `terminal.create` still answers with the `Terminal` so the client can draw its tab immediately.
+
+Every mutating method requires an idempotency key and an `expected_resource_version` on its envelope target. Mutations of an existing resource target that resource; create mutations target and version their parent. Writer-lease mutations additionally compare `expected_lease_generation`. Reads carry neither.
+
+The table is exhaustive for MVP. A method not listed here does not exist in MVP.
+
+| Method | Scope | Target (versioned) | Payload | Result | Kind |
+|---|---|---|---|---|---|
+| `host.get` | `read` | — | `{}` | `Host` | read |
+| `host.health` | `read` | — | `{}` | `Host` with freshly sampled self-health | read |
+| `daemon.version` | `read` | — | `{}` | `{daemon_version, protocol_versions, capabilities}` | read |
+| `repository_root.list` | `host_admin` | — | `{}` | `RepositoryRoot[]` | read |
+| `repository.list` | `read` | — | `{repository_root_id?}` | `Repository[]` | read |
+| `workspace.list` | `read` | — | `{repository_id?, include_archived}` | `Workspace[]` | read |
+| `terminal.list` | `read` | — | `{workspace_id?}` | `Terminal[]` | read |
+| `server.list` | `read` | — | `{workspace_id?}` | `Server[]` | read |
+| `client.list` | `read` | — | `{}` | `Client[]`, fingerprints and scopes redacted below `host_admin` | read |
+| `operation.get` | `read` | — | `{operation_id, log_cursor?}` | `Operation` plus bounded log page | read |
+| `repository_root.add` | `host_admin` | `Host` | `{absolute_path, typed_confirmation}` | `RepositoryRoot` | sync |
+| `repository_root.remove` | `host_admin` | `RepositoryRoot` | `{typed_confirmation}` | `RepositoryRoot` | sync |
+| `repository.register` | `control` | `RepositoryRoot` | `{relative_path}` | `Repository` | sync |
+| `repository.clone` | `control` | `RepositoryRoot` | `{remote_url, destination_name}` | `Operation` | async, cancellable |
+| `workspace.create` | `control` | `Repository` | `{task_name, branch, base_revision, cli_preset}` | `Operation` | async, cancellable until the git mutation |
+| `workspace.archive` | `control` | `Workspace` | `{}` | `Workspace` | sync |
+| `workspace.restore` | `control` | `Workspace` | `{}` | `Workspace` | sync |
+| `workspace.remove_worktree` | `host_admin` | `Workspace` | `{typed_confirmation}` | `Operation` | async |
+| `terminal.create` | `control` | `Workspace` | `{title, command_preset}` | `Terminal` in `starting` | sync |
+| `terminal.attach` | `read` | `Terminal`, unversioned | `{last_acked_sequence?, resume_token?}` | `{epoch, next_sequence, oldest_sequence, columns, rows}` then frames | stream |
+| `terminal.resize` | `control` | `Terminal` | `{columns, rows, view_activity_id}` | `Terminal` | sync, no lease required |
+| `terminal.take_writer` | `control` | `Terminal` + `lease_generation` | `{}` | `Terminal` | sync |
+| `terminal.release_writer` | `control` | `Terminal` + `lease_generation` | `{}` | `Terminal` | sync |
+| `terminal.dismiss_lost` | `control` | `Terminal` | `{}` | `Terminal` | sync |
+| `terminal.restart` | `control` | `Terminal` | `{}` | `Operation` | async |
+| `terminal.restore_agent_session` | `control` | `AgentSession` | `{user_confirmed}` | `Operation` | async |
+| `terminal.stop` | `control` | `Terminal` | `{force, typed_confirmation?}` | `Operation` | async, non-cancellable after the first signal |
+| `server.create` | `control` | `Workspace` | `{title, command_preset, expected_port}` | `Server` in `starting` | sync |
+| `server.start` | `control` | `Server` | `{}` | `Operation` | async, cancellable |
+| `server.stop` | `control` | `Server` | `{force, typed_confirmation?}` | `Operation` | async |
+| `server.restart` | `control` | `Server` | `{}` | `Operation` | async |
+| `server.dismiss_unknown` | `control` | `Server` | `{}` | `Server` | sync |
+| `client.set_scopes` | `host_admin` | `Client` | `{scopes, typed_confirmation?}` | `Client` | sync |
+| `client.revoke` | `host_admin` | `Client` | `{}` | `Client` | sync |
+| `operation.cancel` | `control` | `Operation` | `{}` | `Operation` in `canceling` | sync |
+| `daemon.update` | `host_admin` | `Host` | `{typed_confirmation}` | `Operation` | async |
+
+Three contract notes the table cannot carry:
+
+- `terminal.write` is deliberately absent. Terminal input is not a request/response method; it is `TerminalFrame.Input` on the terminal channel, carrying the granted `lease_generation` and a monotonic client input ID, acknowledged only after the complete byte payload reaches the PTY.
+- `client.revoke` is synchronous. Removing the fenced `authorized_keys` entry and closing that client's live connections has no logs, no progress, and nothing to cancel, and a synchronous answer is what makes the one-second revocation criterion measurable.
+- `terminal.stop` and `server.stop` do not require the writer lease. Signal escalation takes up to fifteen seconds and is a progress surface, so they return an `Operation`; `force` additionally requires a typed confirmation.
 
 Administrative semantics are explicit rather than implied:
 
@@ -946,11 +977,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 10. **Accepted before Milestone 1:** Keep `read`, `control`, and `host_admin`, and document `host_admin` as an application safety rail rather than containment. `read` is the only genuine non-executing boundary; `control` grants full command execution as the host user and cannot be securely contained beneath `host_admin` without a second operating-system principal. Enrollment states this plainly when granting `control` or `host_admin`; revocation is the containment response, followed by a host audit. Privilege-separated terminal workers are deferred.
 11. **Accepted before Milestone 1:** Delegate all authentication to SSH. Delete the Overnight certificate authority, client certificates, identity pinning, and QR pairing flow, and drop the Tailscale-direct mutual-TLS listener; the daemon opens no network listener. Device identity is the enrolled SSH key fingerprint, scope is carried by a `restrict` plus forced-command entry in a fenced `authorized_keys` block, and revocation removes the entry and closes live connections. Tailscale remains a network path. Onboarding requires no presence at the host and installs the daemon remotely on Linux and WSL2.
 12. **Accepted before Milestone 1:** Expose repository-root administration and enrolled-client scope changes as `host_admin` protocol methods rather than host-shell-only workflows, with typed confirmation on widening actions, refusal to remove a root that still holds active workspaces, and no enrollment method at all.
-13. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-14. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-15. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-16. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-17. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+13. **Accepted before Milestone 1:** A mutating method returns its mutated resource unless the client needs streamed logs, progress, or cancellation, in which case it returns an `Operation`. Publish an exhaustive method-contract table carrying scope, envelope target, version target, payload, result, and kind for every MVP method, and document the reconciliation saga's internal operation row as distinct from a method result.
+14. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+15. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+16. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+17. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+18. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -1122,7 +1154,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 1. **Resolved in engineering review:** the bounded protocol now includes typed dismiss/restart methods for lost terminals and unknown servers plus the existing exact-agent restoration method; dismissed uncertainty remains historically truthful rather than being relabeled as an observed exit.
 2. **Resolved in engineering review:** a `RepositoryRoot` resource plus `repository_root.list/add/remove` and `client.set_scopes` are `host_admin` protocol methods with typed confirmation, idempotency keys, audit records, and defined refusal rules. `repository.register` now targets a root rather than a host. Device enrollment needs no method, because a device that cannot already reach the host over SSH cannot use an enrolled key.
 3. **Resolved in engineering review:** host-local CLI presets now define configurable shell launch modes, safe configuration ownership, adapter validation, exact session-ID capture, stored session metadata, and configurable exact-ID restoration.
-4. The method table does not yet define canonical payload, result, idempotency, version target, and synchronous/asynchronous behavior for every listed MVP method.
+4. **Resolved in engineering review:** the method-contract table is exhaustive and states scope, envelope target, version target, payload, result, and synchronous/asynchronous kind for every MVP method. One stated rule decides sync from async: a mutating method returns its resource unless the client needs logs, progress, or cancellation. The saga's internal `Operation` record is documented as distinct from a method result, resolving the contradiction with `terminal.create`.
 
 ### Consistency
 
