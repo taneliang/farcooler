@@ -14,22 +14,35 @@ final class DaemonClient: ObservableObject {
     @Published var lastError: String?
     @Published var busy = false
 
-    /// Where the built CLI lives. Overridable so the app runs from a checkout.
-    private var binary: String {
-        if let override = ProcessInfo.processInfo.environment["OVERNIGHT_BIN"] {
-            return override
+    /// Where the CLI lives.
+    ///
+    /// The bundled copy comes first, because an app launched from the Dock
+    /// inherits no shell environment and cannot find something that only exists
+    /// on your PATH. The env override and PATH lookups are for running from a
+    /// checkout during development.
+    private var binary: String? {
+        var candidates: [String] = []
+
+        if let bundled = Bundle.main.resourceURL?
+            .appendingPathComponent("overnight").path
+        {
+            candidates.append(bundled)
         }
-        return "/usr/local/bin/overnight"
+        if let override = ProcessInfo.processInfo.environment["OVERNIGHT_BIN"] {
+            candidates.append(override)
+        }
+        candidates += ["/usr/local/bin/overnight", "\(NSHomeDirectory())/.local/bin/overnight"]
+
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    /// Deliberately does NOT set OVERNIGHT_HOME.
+    ///
+    /// The CLI already resolves its own runtime directory. Setting a second
+    /// guess here would point the app at a different database than the CLI uses
+    /// from your shell, and the two would silently disagree about what exists.
     private var environment: [String: String] {
-        var env = ProcessInfo.processInfo.environment
-        // Keep the app pointed at the same runtime the CLI uses.
-        if env["OVERNIGHT_HOME"] == nil, let home = env["HOME"] {
-            env["OVERNIGHT_HOME"] =
-                "\(home)/Library/Application Support/Overnight"
-        }
-        return env
+        ProcessInfo.processInfo.environment
     }
 
     // MARK: - Commands
@@ -81,10 +94,10 @@ final class DaemonClient: ObservableObject {
         busy = true
         defer { busy = false }
 
-        let bin = binary
-        guard FileManager.default.isExecutableFile(atPath: bin) else {
+        guard let bin = binary else {
             lastError =
-                "overnight CLI not found at \(bin). Set OVERNIGHT_BIN to the built binary."
+                "The overnight CLI was not found. Rebuild the app with "
+                + "apps/macos/build-app.sh so it bundles one, or set OVERNIGHT_BIN."
             return nil
         }
 
