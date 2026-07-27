@@ -1565,3 +1565,35 @@ The SSH/tmux and Apple-platform changes were added after the three-round review 
 18. **Resolved in engineering review:** `overnight attach` acquires no lease and is documented as a bypass with the same standing as raw `tmux attach`, because a tmux client can reach every window in the session and any narrower claim would be false. The accepted consequence, interleaved input from two writers into one shell, is stated plainly. The path provides visibility instead of enforcement: audited attach and detach, an external-client-attached indicator in every app, and a pre-entry warning naming current protocol writers. `window-size latest` keeps external attach inside the same latest-active-viewer sizing rule. Abandoned clients need no lease expiry because no lease is taken.
 19. **Resolved in engineering review, both halves by removal:** notifications, the APNs relay, and Live Activities are cut, so no capability matrix is needed for them and no enrollment deadline gates them. The distribution half is resolved by deferring rather than by paying: design-partner validation runs on the native Mac client, and the iPhone test moves to success criterion 20, gated on a real delivery channel. Enrollment now gates no code and no milestone, only the ability to validate the mobile thesis, and the plan says so explicitly rather than implying the thesis is proven.
 20. **Resolved in engineering review by removal:** no APNs relay ships, so there is no relay protocol, retention policy, capability rotation, abuse limit, privacy copy, or operational ownership to threat-model. If notifications ever return, the threat model is a precondition of shipping them rather than a follow-up, and events may carry only hard facts the daemon observed.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR | 27 issues, 0 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+
+**Section breakdown**
+
+| Section | Issues | Outcome |
+|---|---|---|
+| Step 0: scope challenge | — | Scope reduced: six subsystems removed from the product |
+| Architecture | 20 raised, 17 landed | 3 superseded mid-review as later decisions changed their ground |
+| Code Quality | 4 | All folded; 3 closed gaps this review's own edits created |
+| Tests | Diagram produced | 104 required paths mapped, 0 covered, all 21 criteria bound to named verification |
+| Performance | 2 | Both folded; 1 corrected a correctness regression introduced by an optimisation |
+| Failure modes | 14 codepaths | 0 critical gaps; 1 partial flagged for adversarial testing |
+| Parallelization | 11 steps | 6 lanes, 2 conflict flags |
+| Implementation tasks | 14 | 9 P1, 4 P2, 1 P3 |
+| TODOs | 2 proposed | 1 added to `TODOS.md`, 1 declined as already captured |
+
+**What changed structurally.** Six things left the product: the Overnight certificate authority and pairing flow, the Tailscale-direct mTLS listener, the native PTY backend, declared servers, Mosh, and every notification surface. Two mechanisms were deleted rather than bounded: the SQLite-versus-tmux reconciliation table and the snapshot event buffer. All twenty inherited reviewer concerns are resolved, six of them by removal rather than specification.
+
+**Where the review disagreed with itself.** Three findings in Code Quality and one in Performance corrected text this review had added earlier in the same session: an unenumerated `intent` enum, a latent crate dependency cycle, an undefined FFI convention, and a cached inventory that reintroduced the staleness the derivation redesign existed to eliminate. Later decisions changing the ground under earlier ones is why D18, D23, and D24 were withdrawn rather than answered.
+
+**VERDICT:** ENG CLEARED — architecture, code quality, tests, and performance reviewed in full; 27 findings folded into the plan; 0 critical gaps. Ready to implement, starting with the 9 P1 tasks.
+
+NO UNRESOLVED DECISIONS
