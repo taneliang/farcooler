@@ -151,6 +151,21 @@ Build a mobile launcher, terminal, and decision inbox on top of Superset, Conduc
 
 Proceed provisionally with **Approach A: Direct Fleet MVP**, revised to match the approved scope. Implementation is gated on the design-partner observation and the three technical spikes defined below. If those gates fail, revise the approach before building the full platform.
 
+### Accepted first implementation slice: Mac-first local control
+
+The first implementation slice proves workspace and terminal-control correctness on one Mac before introducing mobile rendering or remote transport:
+
+- Native Swift macOS app as the first client.
+- One local unprivileged daemon plus CLI, reached through a Unix domain socket. The Mac app stays a thin client; workspace, git, process, terminal, and operation truth remain daemon-owned.
+- One existing local repository, one worktree/branch workspace flow, one supported coding-agent CLI preset, and multiple terminal tabs.
+- A dedicated tmux server namespace such as `tmux -L overnight-<install-id> -f /dev/null`. Overnight never mixes managed sessions into the user's default tmux server or depends on the user's tmux configuration.
+- The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy, controls, and terminal surface.
+- `overnight attach WORKSPACE_ID` remains mandatory and attaches an ordinary shell client to the managed session. The equivalent raw tmux command is shown for transparency and recovery.
+- SQLite persists the daemon's product metadata; tmux persists terminal sessions. Neither is treated as the other's source of truth.
+- No Tailscale-direct listener, SSH application transport, embedded Mosh transport, React Native iOS app, APNs relay, Live Activity, Linux/WSL2 support, or native PTY fallback in this slice.
+
+This is an engineering validation slice, not validation of the mobile product thesis. After local workspace creation, five-way parallelism, daemon restart reconciliation, shell attachment, and Mac UI control pass their acceptance tests, the next slice exposes the same daemon protocol through SSH and builds the React Native iOS client. Failure of tmux control mode against the terminal acceptance suite triggers the native PTY fallback decision before remote work begins.
+
 ### Product hierarchy
 
 ```text
@@ -165,14 +180,15 @@ Fleet
 
 ### Staged MVP delivery
 
-The MVP boundary remains the founder-approved scope, but implementation is ordered to resolve the hardest risks first:
+The founder-approved product boundary remains intact, but implementation is ordered to resolve the hardest risks first:
 
 1. **Gate 0: observe the design partner.** Confirm that parallel mobile terminal control is the highest-value workflow and record the actual host, CLI, repository, and failure sequence.
-2. **Gate 1: terminal and persistence spike.** One React Native iOS screen connects to one daemon terminal and passes the terminal acceptance suite. Compare a dedicated tmux server/control-mode backend against the native PTY design, validate attach/detach and scrollback behavior, prove the plain `ssh host overnight attach WORKSPACE` escape hatch, and run the same renderer on Android as architecture validation only.
-3. **Gate 2: transport, pairing, and reconnect spike.** Connect one iPhone to one macOS host through both Tailscale-direct and SSH, disconnect repeatedly, transfer writer ownership to a second client, and prove ordered replay without duplicate input. Prototype `mosh host -- overnight attach WORKSPACE` for the terminal data plane and retain it only if it preserves Overnight's identity, writer-lease, and handoff semantics.
-4. **Milestone 1: vertical slice.** macOS arm64 host, existing local repository, worktree creation, one CLI, iOS terminal tabs, and observable process states.
-5. **Milestone 2: validated workflow.** Multiple macOS/Linux hosts, repository clone, five concurrent workspaces, server metadata, and Codex and Cursor presets. Passing the design-partner success criterion validates the product thesis.
-6. **Milestone 3: founder-scoped MVP and public beta.** Native Swift Mac client, WSL2 supported topology, signed installers, upgrade/rollback path, and all technical success criteria. If Apple Developer Program enrollment is complete by the release gate, this milestone also includes the APNs relay, push notifications, and Live Activity/Dynamic Island surfaces; otherwise those move together to the first fast follow.
+2. **Gate 1: local tmux correctness spike.** A local daemon creates one private tmux-backed workspace, streams it through control mode, supports `overnight attach`, and survives Mac-app disconnect/reconnect. Compare against the terminal, process, scrollback, resize, writer, and reconciliation acceptance suite; choose native PTYs only if tmux fails a required invariant.
+3. **Milestone 1: Mac-first local vertical slice.** Native Swift Mac client, macOS arm64 daemon/CLI, Unix-socket protocol, SQLite metadata, existing repository, transactional worktree creation, one CLI preset, multiple terminal tabs, five concurrent workspaces, archive, and observable process states.
+4. **Gate 2: SSH transport and reconnect spike.** Expose the same daemon protocol through SSH stdio, connect a second client, disconnect repeatedly, transfer writer ownership, and prove ordered replay without duplicate input. `mosh host -- overnight attach WORKSPACE` remains the terminal escape hatch rather than a GUI transport requirement.
+5. **Milestone 2: mobile vertical slice.** One React Native iOS screen connects through SSH, lists the Mac-proven workspaces, controls a terminal, and passes the mobile terminal acceptance suite. Run the same renderer on Android as architecture validation only.
+6. **Milestone 3: validated product workflow.** Multiple macOS/Linux hosts, repository clone, five concurrent workspaces, server metadata, Claude Code/Codex/Cursor presets, signed installers, upgrade/rollback path, and the design-partner success criterion.
+7. **Milestone 4: founder-scoped public MVP.** Native Swift Mac client, iOS client, WSL2 supported topology, public distribution, and all technical success criteria. If Apple Developer Program enrollment is complete by the release gate, this milestone also includes the APNs relay, push notifications, and Live Activity/Dynamic Island surfaces; otherwise those move together to the first fast follow.
 
 Failure at a gate stops expansion and produces a revised design. Android buildability is checked during Gate 1 and CI, but a user-ready Android client remains post-MVP.
 
