@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/protocol",
+    "crates/core",
+    "crates/store",
+    "crates/tmux",
+    "crates/transport",
+    "crates/daemon",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+overnight-protocol = { path = "crates/protocol" }
+overnight-core = { path = "crates/core" }
+overnight-store = { path = "crates/store" }
+overnight-tmux = { path = "crates/tmux" }
+overnight-transport = { path = "crates/transport" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "process", "sync", "time", "signal"] }
+prost = "0.13"
+prost-types = "0.13"
+prost-build = "0.13"
+protoc-bin-vendored = "3"
+rusqlite = { version = "0.32", features = ["bundled"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+clap = { version = "4", features = ["derive"] }
+bytes = "1"
+directories = "5"
+
+[profile.release]
+lto = "thin"
+strip = true

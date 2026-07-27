@@ -1,0 +1,410 @@
+syntax = "proto3";
+
+package overnight.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ---------------------------------------------------------------------------
+// Wire envelope
+//
+// Concurrency, lease, and idempotency metadata are canonical ONLY here. Business
+// payloads never repeat the target ID, target version, or lease generation. The
+// generic dispatcher validates these preconditions before invoking domain logic.
+// ---------------------------------------------------------------------------
+
+message WireEnvelope {
+  uint32 protocol_version = 1;
+  bytes message_id = 2; // UUIDv7, 16 bytes
+
+  oneof body {
+    ClientHello client_hello = 10;
+    ServerHello server_hello = 11;
+    Request request = 12;
+    Response response = 13;
+    Event event = 14;
+    SnapshotChunk snapshot_chunk = 15;
+    TerminalFrame terminal_frame = 16;
+  }
+}
+
+message ClientHello {
+  repeated uint32 supported_protocol_versions = 1;
+  string client_name = 2;
+  string client_version = 3;
+}
+
+message ServerHello {
+  uint32 selected_protocol_version = 1;
+  string daemon_version = 2;
+  uint32 max_control_envelope_bytes = 3;
+  uint32 max_terminal_payload_bytes = 4;
+  Scope granted_scope = 5;
+}
+
+message Request {
+  bytes request_id = 1;
+  string method = 2;
+
+  // Generic envelope preconditions. A mutation of an existing resource targets
+  // that resource; a create mutation targets and versions its PARENT.
+  optional bytes target_resource_id = 3;
+  optional uint64 expected_resource_version = 4;
+  optional uint64 expected_lease_generation = 5;
+  optional string idempotency_key = 6;
+
+  oneof payload {
+    Empty empty = 20;
+    RepositoryRootAdd repository_root_add = 21;
+    RepositoryRegister repository_register = 22;
+    WorkspaceCreate workspace_create = 23;
+    TerminalCreate terminal_create = 24;
+    TerminalResize terminal_resize = 25;
+    TerminalStop terminal_stop = 26;
+    TypedConfirmation typed_confirmation = 27;
+    TerminalAttach terminal_attach = 28;
+  }
+}
+
+message Response {
+  bytes request_id = 1;
+  oneof outcome {
+    Result result = 2;
+    Error error = 3;
+  }
+}
+
+message Error {
+  ErrorCode code = 1;
+  bool retryable = 2;
+  string message = 3; // redacted: never a path, terminal byte, command, or session id
+}
+
+message Result {
+  oneof value {
+    Host host = 1;
+    RepositoryRoot repository_root = 2;
+    RepositoryRootList repository_root_list = 3;
+    Repository repository = 4;
+    RepositoryList repository_list = 5;
+    Workspace workspace = 6;
+    WorkspaceList workspace_list = 7;
+    Terminal terminal = 8;
+    TerminalList terminal_list = 9;
+    Operation operation = 10;
+    DaemonVersion daemon_version = 11;
+    TerminalAttachResult terminal_attach = 12;
+  }
+}
+
+message Event {
+  bytes event_id = 1;
+  uint64 sequence = 2;
+  oneof payload {
+    Host host_changed = 10;
+    RepositoryRoot repository_root_changed = 11;
+    Repository repository_changed = 12;
+    Workspace workspace_changed = 13;
+    Terminal terminal_changed = 14;
+    Operation operation_changed = 15;
+  }
+}
+
+message SnapshotChunk {
+  oneof kind {
+    SnapshotBegin begin = 1;
+    SnapshotEnd end = 2;
+    Event resource = 3;
+  }
+}
+
+message SnapshotBegin {
+  bytes snapshot_id = 1;
+  google.protobuf.Timestamp generated_at = 2;
+}
+
+message SnapshotEnd {
+  bytes snapshot_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Terminal channel
+//
+// A sequence number is a uint64 BYTE OFFSET from the first byte of the current
+// terminal epoch. Frame boundaries carry no protocol meaning.
+// ---------------------------------------------------------------------------
+
+message TerminalFrame {
+  bytes terminal_id = 1;
+  uint64 epoch = 2;
+
+  oneof kind {
+    TerminalOutput output = 10;
+    TerminalInput input = 11;
+    TerminalInputAck input_ack = 12;
+    TerminalResizeFrame resize = 13;
+    FlowAck flow_ack = 14;
+    Gap gap = 15;
+  }
+}
+
+message TerminalOutput {
+  uint64 start_sequence = 1; // byte offset of the first payload byte
+  bytes payload = 2;
+}
+
+message TerminalInput {
+  uint64 lease_generation = 1;
+  uint64 client_input_id = 2;
+  bytes payload = 3;
+}
+
+message TerminalInputAck {
+  uint64 client_input_id = 1;
+}
+
+message TerminalResizeFrame {
+  uint32 columns = 1;
+  uint32 rows = 2;
+  uint64 view_activity_id = 3;
+}
+
+message FlowAck {
+  uint64 acked_sequence = 1; // one past the highest contiguous byte applied
+}
+
+message Gap {
+  uint64 resumed_at_sequence = 1;
+  optional uint64 lost_bytes = 2; // exact when the epoch matches; absent otherwise
+  GapReason reason = 3;
+}
+
+enum GapReason {
+  GAP_REASON_UNSPECIFIED = 0;
+  GAP_REASON_REPLAY_EVICTED = 1;
+  GAP_REASON_EPOCH_CHANGED = 2;
+  GAP_REASON_CLIENT_TOO_SLOW = 3;
+  GAP_REASON_RUNTIME_LOST = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Resources
+// ---------------------------------------------------------------------------
+
+enum Scope {
+  SCOPE_UNSPECIFIED = 0;
+  SCOPE_READ = 1;
+  SCOPE_CONTROL = 2;
+  SCOPE_HOST_ADMIN = 3;
+}
+
+message Host {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  string platform = 3;
+  string daemon_version = 4;
+  uint32 protocol_version = 5;
+  SelfHealth self_health = 6;
+  repeated string self_health_reasons = 7;
+  uint64 replay_bytes_retained = 8; // observability for the per-terminal replay cost
+}
+
+enum SelfHealth {
+  SELF_HEALTH_UNSPECIFIED = 0;
+  SELF_HEALTH_HEALTHY = 1;
+  SELF_HEALTH_DEGRADED = 2;
+}
+
+message RepositoryRoot {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes host_id = 3;
+  string path_token = 4;
+  optional string display_path = 5; // host_admin only
+  google.protobuf.Timestamp created_at = 6;
+  uint32 repository_count = 7;
+}
+
+message RepositoryRootList { repeated RepositoryRoot items = 1; }
+
+message Repository {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes host_id = 3;
+  bytes repository_root_id = 4;
+  string display_name = 5;
+  optional string canonical_git_dir = 6; // host_admin only
+  string remote_summary = 7;
+}
+
+message RepositoryList { repeated Repository items = 1; }
+
+message Workspace {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes repository_id = 3;
+  string task_name = 4;
+  string branch = 5;
+  string worktree_path_token = 6;
+  optional string worktree_path = 7; // host_admin only
+  WorkspaceState state = 8;
+}
+
+message WorkspaceList { repeated Workspace items = 1; }
+
+enum WorkspaceState {
+  WORKSPACE_STATE_UNSPECIFIED = 0;
+  WORKSPACE_STATE_CREATING = 1;
+  WORKSPACE_STATE_READY = 2;
+  WORKSPACE_STATE_ACTIVE = 3;
+  WORKSPACE_STATE_ERROR = 4;
+  WORKSPACE_STATE_ARCHIVED = 5;
+}
+
+// `intent` is durable. `state` is DERIVED at read time and never stored.
+// Clients render `state` and must never compute it themselves.
+message Terminal {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  uint64 lease_generation = 3;
+  bytes workspace_id = 4;
+  string title = 5;
+  string command_preset = 6;
+  TerminalIntent intent = 7;
+  TerminalState state = 8;
+  optional ExitStatus exit_status = 9;
+  optional bytes writer_client_id = 10;
+  uint32 columns = 11;
+  uint32 rows = 12;
+  optional bytes size_controller_client_id = 13;
+  uint64 epoch = 14;
+}
+
+message TerminalList { repeated Terminal items = 1; }
+
+enum TerminalIntent {
+  TERMINAL_INTENT_UNSPECIFIED = 0;
+  TERMINAL_INTENT_RUNNING = 1; // the user wants this terminal alive
+  TERMINAL_INTENT_STOPPED = 2; // deliberate stop or observed exit
+  TERMINAL_INTENT_FAILED = 3;  // creation never established a live runtime
+}
+
+enum TerminalState {
+  TERMINAL_STATE_UNSPECIFIED = 0;
+  TERMINAL_STATE_STARTING = 1;
+  TERMINAL_STATE_RUNNING = 2;
+  TERMINAL_STATE_EXITED = 3;
+  TERMINAL_STATE_ERROR = 4;
+  TERMINAL_STATE_LOST = 5;
+}
+
+message ExitStatus {
+  optional int32 code = 1;
+  optional int32 signal = 2;
+}
+
+message Operation {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  string kind = 3;
+  bytes resource_id = 4;
+  OperationState state = 5;
+  bool cancellable = 6;
+  optional ErrorCode error_code = 7;
+  uint64 log_cursor = 8;
+}
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_QUEUED = 1;
+  OPERATION_STATE_RUNNING = 2;
+  OPERATION_STATE_SUCCEEDED = 3;
+  OPERATION_STATE_FAILED = 4;
+  OPERATION_STATE_CANCELING = 5;
+  OPERATION_STATE_CANCELED = 6;
+}
+
+message DaemonVersion {
+  string daemon_version = 1;
+  repeated uint32 protocol_versions = 2;
+  repeated string capabilities = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Business payloads (no target ids, no expected_* fields)
+// ---------------------------------------------------------------------------
+
+message Empty {}
+
+message TypedConfirmation { string typed_confirmation = 1; }
+
+message RepositoryRootAdd {
+  string absolute_path = 1;
+  string typed_confirmation = 2;
+}
+
+message RepositoryRegister { string relative_path = 1; }
+
+message WorkspaceCreate {
+  string task_name = 1;
+  string branch = 2;
+  string base_revision = 3;
+  string cli_preset = 4;
+}
+
+message TerminalCreate {
+  string title = 1;
+  string command_preset = 2;
+}
+
+message TerminalResize {
+  uint32 columns = 1;
+  uint32 rows = 2;
+  uint64 view_activity_id = 3;
+}
+
+message TerminalStop {
+  bool force = 1;
+  optional string typed_confirmation = 2;
+}
+
+message TerminalAttach {
+  optional uint64 last_acked_sequence = 1;
+  optional string resume_token = 2;
+}
+
+message TerminalAttachResult {
+  uint64 epoch = 1;
+  uint64 next_sequence = 2;
+  uint64 oldest_sequence = 3;
+  uint32 columns = 4;
+  uint32 rows = 5;
+  string resume_token = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Stable error codes. `core` owns one domain error enum exhaustively matched
+// onto these; there is no catch-all arm.
+// ---------------------------------------------------------------------------
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_AUTH_REQUIRED = 1;
+  ERROR_CODE_SCOPE_DENIED = 2;
+  ERROR_CODE_VERSION_INCOMPATIBLE = 3;
+  ERROR_CODE_HOST_OFFLINE = 4;
+  ERROR_CODE_REPOSITORY_LOCKED = 5;
+  ERROR_CODE_BRANCH_EXISTS = 6;
+  ERROR_CODE_WORKTREE_EXISTS = 7;
+  ERROR_CODE_DIRTY_WORKTREE = 8;
+  ERROR_CODE_RUNNING_PROCESSES = 9;
+  ERROR_CODE_OUTPUT_GAP = 10;
+  ERROR_CODE_CLIENT_TOO_SLOW = 11;
+  ERROR_CODE_OPERATION_FAILED = 12;
+  ERROR_CODE_RESOURCE_CONFLICT = 13;
+  ERROR_CODE_NOT_FOUND = 14;
+  ERROR_CODE_INVALID_ARGUMENT = 15;
+  ERROR_CODE_IDEMPOTENCY_MISMATCH = 16;
+  ERROR_CODE_TMUX_UNAVAILABLE = 17;
+  ERROR_CODE_PATH_NOT_ALLOWED = 18;
+  ERROR_CODE_CONFIRMATION_REQUIRED = 19;
+}
