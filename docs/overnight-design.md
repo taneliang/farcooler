@@ -320,15 +320,16 @@ Each client stores a local `HostConnection {host_id, active_route, state, last_c
 #### Workspace
 
 ```text
-creating → ready ↔ active
-    └────→ error
-ready | error → archived
+creating ──→ ready ↔ active
+    └──────→ error
+ready | active ──→ error ──→ ready | active
+ready | error ──→ archived ──→ ready | error
 ```
 
 - **Creating:** repository/worktree transaction is in progress.
 - **Ready:** worktree exists and no terminal is currently running.
 - **Active:** at least one terminal or declared server is running.
-- **Error:** creation or metadata reconciliation failed; retry or rollback is available.
+- **Error:** creation failed or at least one child has unresolved `lost`/`unknown` reconciliation state. After every resolution, the daemon recomputes the workspace to `ready` or `active` from its children.
 - **Archived:** hidden from the default fleet until restored. Archiving is prohibited while any managed terminal or server is running and never deletes a branch or worktree.
 
 There is no inferred **completed** state in MVP. The user archives a finished task.
@@ -337,13 +338,13 @@ There is no inferred **completed** state in MVP. The user archives a finished ta
 
 ```text
 starting → running → exited
-              └────→ unknown
-              └────→ lost
+   └────→ error  └────→ lost ──→ starting
 ```
 
-- **Running:** the daemon owns a live PTY child process.
+- **Running:** the daemon owns a live PTY child process or has freshly verified an exact daemon/workspace/terminal tag match on a live tmux pane.
 - **Exited:** the daemon observed a process exit code or signal.
-- **Lost:** the daemon restarted or crashed and can no longer prove that the PTY is attached.
+- **Error:** terminal creation or launch failed before a live runtime was established.
+- **Lost:** a terminal expected to be running has no exact live tmux match, or a non-tmux PTY was destroyed by daemon loss. Terminals never use `unknown`: exact runtime identity is either freshly proved or it is lost.
 - **Quiet:** an activity indicator meaning no output for a selected interval, not a workflow state and never labeled “needs input.”
 
 A lost terminal retains its truthful `lost` state plus an optional reconciliation resolution. `terminal.dismiss_lost` records that the user acknowledged the loss so it no longer keeps the workspace in `error`; it never relabels the terminal `exited`. `terminal.restart` launches a new terminal epoch from the same preset, while `terminal.restore_agent_session` starts the exact stored vendor session when its adapter permits restoration.
@@ -352,11 +353,12 @@ A lost terminal retains its truthful `lost` state plus an optional reconciliatio
 
 ```text
 starting → running → exited
+   └────→ error  └────→ unknown ──→ starting
 ```
 
 A server is a user-launched command associated with a workspace and an expected port. MVP does not scan arbitrary host processes. It shows the declared command, process state, port, and a Safari/external-browser URL over Tailscale.
 
-After daemon restart, any formerly running declared server becomes **unknown**. The daemon may test whether its expected port is listening, but it cannot relabel the process **running** or adopt a process from persisted PID/PGID data. `server.dismiss_unknown` acknowledges the uncertainty without claiming an exit; `server.restart` launches a new owned process group from the stored preset.
+After daemon restart, any formerly running declared server becomes **unknown**. The daemon may test whether its expected port is listening, but it cannot relabel the process **running** or adopt a process from persisted PID/PGID data. `server.dismiss_unknown` acknowledges the uncertainty without claiming an exit; `server.restart` launches a new owned process group from the stored preset. Server `error` means creation or launch failed before a live owned process was established.
 
 Workspace state is recomputed from reconciled children after daemon restart. Any unresolved `lost` terminal or `unknown` server makes the workspace `error` until the user dismisses, restarts, or exactly restores every uncertain process.
 
@@ -907,11 +909,12 @@ These questions have explicit decision gates and may not remain unresolved when 
 6. **Accepted before Milestone 1:** Put generic target identity, optimistic concurrency, writer-lease fencing, and idempotency metadata only in the protobuf request envelope. Keep method payloads business-only, expose `resource_version` on every mutable resource and `lease_generation` on terminals, validate both generically before domain dispatch, and target a parent resource for create mutations.
 7. **Accepted before Milestone 1:** Keep daemon self-health on the `Host` resource but make reachability a per-client `HostConnection` observation. Each client records its active route, connection state, last connection/event times, latency, and error, then derives online/degraded/offline locally; an offline daemon never attempts to report itself offline.
 8. **Accepted before Milestone 1:** Resolve uncertain runtime state through typed per-resource methods: dismiss, restart, or exact-agent restore for lost terminals and dismiss or restart for unknown servers. Never adopt an OS process from persisted PID/PGID data; exact automatic reattachment remains limited to live tmux objects whose daemon and resource tags match.
-9. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
-10. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
-11. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
-12. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-13. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+9. **Accepted before Milestone 1:** Make runtime states proof-based: an exact-tagged live tmux terminal is `running`, an expected terminal without exact runtime identity is `lost`, and terminals never use `unknown`; a server whose post-restart identity cannot be proved is `unknown`. A workspace stays `error` only while child uncertainty is unresolved, then recomputes to `ready` or `active`.
+10. **Before Milestone 3:** Has the project enrolled in the paid Apple Developer Program? If not, keep Personal Team/simulator development only, remove APNs/Live Activities from MVP exit criteria, and do not promise TestFlight or App Store distribution.
+11. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
+12. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
+13. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
+14. **After design-partner observation:** Which existing orchestrator or CLI conventions should Overnight deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -928,7 +931,7 @@ The MVP succeeds when all of the following are demonstrated:
 9. Automated destructive-action tests prove that archive never changes git state, running processes block worktree removal, branches are never auto-deleted, and every uncertain git state requires the exact typed workspace name.
 10. The anonymized ML-engineer design partner completes one real task while supervising at least three concurrent workspaces from an iPhone without opening a laptop, then asks to use Overnight again.
 11. The React Native terminal spike renders and accepts input on an Android reference device using the same application protocol and passes all compatibility fixtures except platform-specific accessibility checks before iOS architecture lock.
-12. A daemon crash test marks every formerly attached PTY **lost** after restart and never presents stale terminal state as live.
+12. A daemon crash test freshly verifies exact tags and keeps matching live tmux panes **running** without restarting them; missing/mismatched panes and any destroyed native PTYs become **lost**, and stale terminal state is never presented as live. A host reboot or tmux-server-loss fixture must make every formerly running tmux terminal **lost**.
 13. A replay-buffer overflow test clears the client terminal model, produces an explicit `GAP` marker, and replays only the retained tail.
 14. Revoking a client certificate blocks its next request within one second without affecting other paired clients.
 15. The same workspace is reachable through Tailscale-direct and SSH without changing its ID or process state; switching routes before new input is accepted causes no duplicate input.
@@ -1085,7 +1088,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 ### Consistency
 
-5. Terminal, server, and workspace diagrams require a final transition audit for `unknown`, `lost`, and restart-driven `error` states.
+5. **Resolved in engineering review:** state machines are proof-based and consistent: exact-tagged live tmux terminals remain `running`, unproved terminals become `lost`, unproved post-restart servers become `unknown`, and workspaces remain `error` only while child uncertainty is unresolved.
 6. **Resolved in engineering review:** concurrency, lease, and idempotency metadata now lives only in the request envelope; mutable resources expose `resource_version`, terminals expose `lease_generation`, create mutations target their parent, and the generic dispatcher validates all envelope preconditions before domain logic.
 7. One Mac-client bullet still needs to be checked against the decision to defer worktree removal.
 8. **Resolved in engineering review:** `Host` reports only daemon self-health while connected; every client owns its route, heartbeat, latency, last-event, and reachability observations in a local `HostConnection` model and derives online/degraded/offline for its own network.
