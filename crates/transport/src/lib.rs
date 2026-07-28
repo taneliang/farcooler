@@ -6,11 +6,13 @@
 //! same `codec.rs` and `connection.rs`, so the wire behavior cannot drift
 //! between them.
 
+pub mod client;
 pub mod codec;
 pub mod connection;
 pub mod listener;
 pub mod stdio;
 
+pub use client::{Client, ClientError, request};
 pub use codec::{CodecError, FrameReader, FrameWriter};
 pub use connection::{Connection, ConnectionError, HandshakeConfig, TOO_SLOW_DISCONNECT, serve_connection};
 pub use listener::UnixListenerServer;

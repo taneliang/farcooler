@@ -18,6 +18,9 @@ overnight-core.workspace = true
 overnight-protocol.workspace = true
 overnight-store.workspace = true
 overnight-tmux.workspace = true
+overnight-transport.workspace = true
+prost-types.workspace = true
+bytes.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -25,3 +28,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 directories.workspace = true
 libc.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+overnight-transport.workspace = true

@@ -28,10 +28,26 @@ use crate::models::{
 pub const IDEMPOTENCY_RETENTION_MILLIS: i64 = 24 * 60 * 60 * 1000;
 
 pub struct Store {
-    conn: Connection,
+    /// Behind a mutex so the store is `Sync`.
+    ///
+    /// rusqlite's `Connection` holds its handle in a `RefCell` and is `Send`
+    /// but not `Sync`. The daemon serves connections from a multi-threaded
+    /// runtime and one `Service` is shared by all of them, so the store has to
+    /// cross threads. A mutex is also the honest model of the thing underneath:
+    /// SQLite serialises writes regardless, and every call here is short.
+    db: std::sync::Mutex<Connection>,
 }
 
 impl Store {
+    /// The connection, locked.
+    ///
+    /// A poisoned lock means a previous caller panicked mid-query. The
+    /// connection itself is unaffected, and refusing every later request
+    /// because of one panic would turn a single bug into an outage.
+    fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.db.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Open (creating if absent) a database file, migrating it forward if
     /// needed. A pre-existing database that is behind the current schema gets
     /// a checksummed backup written next to it before anything is touched.
@@ -40,14 +56,14 @@ impl Store {
         let existed = path.exists();
         let mut conn = Connection::open(path).map_err(map_err)?;
         Self::init(&mut conn, existed.then_some(path))?;
-        Ok(Store { conn })
+        Ok(Store { db: std::sync::Mutex::new(conn) })
     }
 
     /// An in-memory database for tests: always fresh, nothing to back up.
     pub fn open_in_memory() -> Result<Store> {
         let mut conn = Connection::open_in_memory().map_err(map_err)?;
         Self::init(&mut conn, None)?;
-        Ok(Store { conn })
+        Ok(Store { db: std::sync::Mutex::new(conn) })
     }
 
     fn init(conn: &mut Connection, backup_source: Option<&Path>) -> Result<()> {
@@ -88,12 +104,12 @@ impl Store {
         exists_sql: &str,
         exists_params: &[&dyn ToSql],
     ) -> Result<()> {
-        let affected = self.conn.execute(mutate_sql, mutate_params).map_err(map_err)?;
+        let affected = self.conn().execute(mutate_sql, mutate_params).map_err(map_err)?;
         if affected == 1 {
             return Ok(());
         }
         let exists: Option<i64> = self
-            .conn
+            .conn()
             .query_row(exists_sql, exists_params, |r| r.get(0))
             .optional()
             .map_err(map_err)?;
@@ -109,7 +125,7 @@ impl Store {
         created_at: i64,
     ) -> Result<RepositoryRoot> {
         let id = Uuid::now_v7();
-        self.conn
+        self.conn()
             .execute(
                 "INSERT INTO repository_roots (id, host_id, path, created_at, resource_version)
                  VALUES (?1, ?2, ?3, ?4, 1)",
@@ -120,7 +136,7 @@ impl Store {
     }
 
     pub fn get_repository_root(&self, id: Uuid) -> Result<RepositoryRoot> {
-        self.conn
+        self.conn()
             .query_row(
                 "SELECT id, host_id, path, created_at, resource_version
                  FROM repository_roots WHERE id = ?1",
@@ -131,8 +147,8 @@ impl Store {
     }
 
     pub fn list_repository_roots(&self) -> Result<Vec<RepositoryRoot>> {
-        let mut stmt = self
-            .conn
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare(
                 "SELECT id, host_id, path, created_at, resource_version
                  FROM repository_roots ORDER BY created_at",
@@ -162,7 +178,7 @@ impl Store {
         remote_summary: &str,
     ) -> Result<Repository> {
         let id = Uuid::now_v7();
-        self.conn
+        self.conn()
             .execute(
                 "INSERT INTO repositories
                  (id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version)
@@ -189,7 +205,7 @@ impl Store {
     }
 
     pub fn get_repository(&self, id: Uuid) -> Result<Repository> {
-        self.conn
+        self.conn()
             .query_row(
                 "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version
                  FROM repositories WHERE id = ?1",
@@ -200,8 +216,8 @@ impl Store {
     }
 
     pub fn list_repositories_for_root(&self, repository_root_id: Uuid) -> Result<Vec<Repository>> {
-        let mut stmt = self
-            .conn
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare(
                 "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version
                  FROM repositories WHERE repository_root_id = ?1",
@@ -257,7 +273,7 @@ impl Store {
         worktree_path: &str,
     ) -> Result<Workspace> {
         let id = Uuid::now_v7();
-        self.conn
+        self.conn()
             .execute(
                 "INSERT INTO workspaces
                  (id, repository_id, task_name, branch, worktree_path, archived, creation_failed, resource_version)
@@ -278,7 +294,7 @@ impl Store {
     }
 
     pub fn get_workspace(&self, id: Uuid) -> Result<Workspace> {
-        self.conn
+        self.conn()
             .query_row(
                 "SELECT id, repository_id, task_name, branch, worktree_path, archived, creation_failed, resource_version
                  FROM workspaces WHERE id = ?1",
@@ -289,8 +305,8 @@ impl Store {
     }
 
     pub fn list_workspaces_for_repository(&self, repository_id: Uuid) -> Result<Vec<Workspace>> {
-        let mut stmt = self
-            .conn
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare(
                 "SELECT id, repository_id, task_name, branch, worktree_path, archived, creation_failed, resource_version
                  FROM workspaces WHERE repository_id = ?1",
@@ -354,7 +370,7 @@ impl Store {
         rows: u32,
     ) -> Result<Terminal> {
         let id = Uuid::now_v7();
-        self.conn
+        self.conn()
             .execute(
                 r#"INSERT INTO terminals
                  (id, workspace_id, title, command_preset, intent, runtime_confirmed,
@@ -391,7 +407,7 @@ impl Store {
     }
 
     pub fn get_terminal(&self, id: Uuid) -> Result<Terminal> {
-        self.conn
+        self.conn()
             .query_row(
                 r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, loss_dismissed, lease_generation, epoch,
@@ -404,8 +420,8 @@ impl Store {
     }
 
     pub fn list_terminals_for_workspace(&self, workspace_id: Uuid) -> Result<Vec<Terminal>> {
-        let mut stmt = self
-            .conn
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare(
                 r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, loss_dismissed, lease_generation, epoch,
@@ -496,7 +512,7 @@ impl Store {
         now_millis: i64,
     ) -> Result<bool> {
         let existing: Option<String> = self
-            .conn
+            .conn()
             .query_row(
                 "SELECT request_hash FROM idempotency WHERE key = ?1 AND client_id = ?2",
                 params![key, uuid_blob(client_id)],
@@ -507,7 +523,7 @@ impl Store {
 
         let is_replay = check_idempotency_replay(existing.as_deref(), request_hash)?;
         if !is_replay {
-            self.conn
+            self.conn()
                 .execute(
                     "INSERT INTO idempotency (key, client_id, request_hash, created_at)
                      VALUES (?1, ?2, ?3, ?4)",
@@ -519,7 +535,7 @@ impl Store {
     }
 
     pub fn get_idempotency(&self, key: &str, client_id: Uuid) -> Result<Option<IdempotencyRecord>> {
-        self.conn
+        self.conn()
             .query_row(
                 "SELECT key, client_id, request_hash, created_at FROM idempotency
                  WHERE key = ?1 AND client_id = ?2",
@@ -541,7 +557,7 @@ impl Store {
     /// `now_millis`. Returns the number of rows pruned.
     pub fn prune_idempotency(&self, now_millis: i64) -> Result<usize> {
         let cutoff = now_millis - IDEMPOTENCY_RETENTION_MILLIS;
-        self.conn
+        self.conn()
             .execute("DELETE FROM idempotency WHERE created_at < ?1", params![cutoff])
             .map_err(map_err)
     }
@@ -550,8 +566,9 @@ impl Store {
     /// must never grow a runtime-state column".
     #[cfg(test)]
     pub(crate) fn column_names(&self, table: &str) -> Vec<String> {
+        let conn = self.conn();
         let mut stmt =
-            self.conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')")).unwrap();
+            conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')")).unwrap();
         stmt.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
     }
 }

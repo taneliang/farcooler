@@ -38,6 +38,14 @@ pub struct Service {
     pub tmux: TmuxServer,
     pub inventory: LiveInventory,
     pub host_id: Uuid,
+    /// Where this service's runtime data lives.
+    ///
+    /// Held rather than re-derived from `OVERNIGHT_HOME` at each use. The
+    /// environment is process-global, so a service that consulted it on every
+    /// call could be moved out from under itself — which is exactly what
+    /// happens when two tests run in parallel, and would happen in production
+    /// the first time anything set the variable after startup.
+    root: PathBuf,
 }
 
 /// A workspace plus its derived state and terminals.
@@ -61,9 +69,18 @@ impl TerminalView {
 }
 
 impl Service {
+    /// Open the service at the user's runtime directory.
     pub async fn open() -> Result<Self> {
-        let install_id = paths::load_or_create_install_id()?;
-        let store = Store::open(paths::database_path()?)?;
+        Self::open_in(paths::ensure_runtime_dir()?).await
+    }
+
+    /// Open the service at an explicit directory.
+    ///
+    /// The environment is read once, at the edge, so nothing below this point
+    /// depends on a process-global that another thread can change.
+    pub async fn open_in(root: PathBuf) -> Result<Self> {
+        let install_id = paths::load_or_create_install_id_in(&root)?;
+        let store = Store::open(root.join("overnight.db"))?;
 
         // The daemon identity is stable per install, so tags written by a prior
         // run of this same daemon remain provable after a restart.
@@ -72,7 +89,14 @@ impl Service {
         let inventory = LiveInventory::new(tmux.clone());
         inventory.refresh().await;
 
-        Ok(Self { store, tmux, inventory, host_id })
+        Ok(Self { store, tmux, inventory, host_id, root })
+    }
+
+    /// Where managed worktrees are created, one directory per workspace.
+    fn worktrees_dir(&self) -> Result<PathBuf> {
+        let dir = self.root.join("worktrees");
+        std::fs::create_dir_all(&dir).map_err(|_| DomainError::OperationFailed)?;
+        Ok(dir)
     }
 
     // ---- repository roots ----
@@ -181,7 +205,7 @@ impl Service {
         let repo = self.store.get_repository(repository_id)?;
         let repo_path = self.repository_worktree(&repo);
 
-        let dest = paths::worktrees_dir()?.join(format!(
+        let dest = self.worktrees_dir()?.join(format!(
             "{}-{}",
             sanitize(&repo.display_name),
             sanitize(task_name)

@@ -588,12 +588,16 @@ dependencies = [
 name = "overnight-daemon"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "directories",
  "libc",
  "overnight-core",
  "overnight-protocol",
  "overnight-store",
  "overnight-tmux",
+ "overnight-transport",
+ "prost-types",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
