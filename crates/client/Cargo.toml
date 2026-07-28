@@ -1,0 +1,29 @@
+[package]
+name = "overnight-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "overnight_client"
+# Both, so iOS links statically and macOS development can link dynamically.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+overnight-core.workspace = true
+overnight-protocol.workspace = true
+overnight-transport.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+uuid.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+russh = "0.62"
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+# The tests drive the real daemon binary, not a stub.
+overnight-daemon.workspace = true

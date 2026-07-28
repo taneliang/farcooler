@@ -1,0 +1,217 @@
+//! The mobile client core, against a real daemon.
+//!
+//! This is the code iOS and Android will run, so it is worth proving against
+//! the actual daemon binary rather than a stub: the JSON shapes a phone decodes
+//! have to match what a host actually sends, and a mock would agree with
+//! whatever this file believed on the day it was written.
+//!
+//! The transport here is the local socket rather than SSH, because SSH is not
+//! what can go wrong at this layer — it is a byte pipe, and `ssh.rs` puts an
+//! `AsyncRead`/`AsyncWrite` on either end of it. What is under test is
+//! everything above that: the handshake, the calls, and the shapes.
+
+use std::path::PathBuf;
+
+use overnight_client::session::Session;
+
+/// Where cargo put `overnightd`.
+///
+/// `CARGO_BIN_EXE_*` only covers binaries in the same crate, and the daemon
+/// lives in another one. The test executable sits in `target/<profile>/deps/`,
+/// so the binary is two levels up — which is a cargo layout detail, but a
+/// stable one, and the alternative is a dev-dependency cycle between these two
+/// crates.
+fn daemon_binary() -> PathBuf {
+    let mut path = std::env::current_exe().expect("test executable path");
+    path.pop(); // deps/
+    path.pop(); // <profile>/
+    path.push("overnightd");
+    assert!(
+        path.is_file(),
+        "no overnightd at {} — run `cargo build -p overnight-daemon` first",
+        path.display()
+    );
+    path
+}
+
+/// A daemon on a private socket with a private database.
+struct Daemon {
+    _dir: tempfile::TempDir,
+    socket: PathBuf,
+    process: std::process::Child,
+}
+
+impl Drop for Daemon {
+    fn drop(&mut self) {
+        let _ = self.process.kill();
+        let _ = self.process.wait();
+    }
+}
+
+async fn start() -> Daemon {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("overnightd.sock");
+
+    let process = std::process::Command::new(daemon_binary())
+        .env("OVERNIGHT_HOME", dir.path())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn overnightd");
+
+    // Wait for the socket rather than sleeping a fixed amount: a slow machine
+    // would otherwise make this flaky and a fast one would waste the time.
+    for _ in 0..100 {
+        if tokio::net::UnixStream::connect(&socket).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    Daemon { _dir: dir, socket, process }
+}
+
+#[tokio::test]
+async fn a_client_connects_and_learns_the_daemon_version() {
+    let daemon = start().await;
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
+    assert!(!session.daemon_version().is_empty());
+}
+
+#[tokio::test]
+async fn the_fleet_shape_is_the_one_a_phone_decodes() {
+    // These key names are the app's contract. Changing one breaks a client that
+    // cannot be updated at the same moment, which is the whole hazard of having
+    // a phone in the picture.
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let fleet = session.fleet().await.expect("fleet");
+    assert!(fleet.get("runtime_healthy").is_some_and(|v| v.is_boolean()));
+    assert!(fleet.get("live_panes").is_some_and(|v| v.is_number()));
+    assert!(fleet.get("workspaces").is_some_and(|v| v.is_array()));
+}
+
+#[tokio::test]
+async fn a_workspace_created_through_the_client_comes_back_in_the_fleet() {
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    // A real repository, because workspace creation makes a real worktree.
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+
+    let repositories = session.repositories().await.expect("repositories");
+    assert_eq!(repositories.len(), 1, "the repository must be visible to a second session");
+
+    let repository = overnight_client::session::uuid_of(&repositories[0].id);
+    let workspace = session
+        .create_workspace(repository, "phone task", "feat/phone", "HEAD")
+        .await
+        .expect("create_workspace");
+    assert_eq!(workspace.task_name, "phone task");
+
+    let fleet = session.fleet().await.expect("fleet");
+    let workspaces = fleet["workspaces"].as_array().unwrap();
+    assert_eq!(workspaces.len(), 1);
+    assert_eq!(workspaces[0]["task"], "phone task");
+    assert_eq!(workspaces[0]["branch"], "feat/phone");
+    // Derived, never stored — and a fresh workspace with no terminals is ready.
+    assert_eq!(workspaces[0]["state"], "ready");
+    assert!(workspaces[0]["terminals"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn archiving_and_restoring_round_trips_through_the_client() {
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = overnight_client::session::uuid_of(&repositories[0].id);
+    let workspace = session
+        .create_workspace(repository, "reversible", "feat/rev", "HEAD")
+        .await
+        .expect("create");
+    let id = overnight_client::session::uuid_of(&workspace.id);
+
+    session.archive_workspace(id).await.expect("archive");
+    let fleet = session.fleet().await.expect("fleet");
+    assert_eq!(fleet["workspaces"][0]["state"], "archived");
+
+    session.restore_workspace(id).await.expect("restore");
+    let fleet = session.fleet().await.expect("fleet");
+    assert_eq!(fleet["workspaces"][0]["state"], "ready");
+}
+
+#[tokio::test]
+async fn a_failed_call_arrives_as_an_error_not_a_dropped_session() {
+    // A phone on a train needs the session to survive a refusal; reconnecting
+    // over SSH for every rejected request would be unusable.
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let missing = uuid::Uuid::now_v7();
+    assert!(session.archive_workspace(missing).await.is_err());
+
+    // Still usable.
+    assert!(session.fleet().await.is_ok());
+}
+
+/// Add a root and register a repository, over a throwaway session.
+async fn register_root_and_repository(
+    socket: &std::path::Path,
+    root: &std::path::Path,
+    repo: &std::path::Path,
+) {
+    use overnight_protocol::v1::request::Payload;
+
+    let stream = tokio::net::UnixStream::connect(socket).await.unwrap();
+    let (read, write) = stream.into_split();
+    let mut client = overnight_transport::Client::over(
+        Box::new(read) as Box<dyn tokio::io::AsyncRead + Unpin + Send>,
+        Box::new(write) as Box<dyn tokio::io::AsyncWrite + Unpin + Send>,
+        "test",
+        "0.0.0",
+    )
+    .await
+    .unwrap();
+
+    let mut add = overnight_transport::request("repository_root.add");
+    add.payload = Some(Payload::RepositoryRootAdd(overnight_protocol::v1::RepositoryRootAdd {
+        absolute_path: root.to_string_lossy().into_owned(),
+        typed_confirmation: String::new(),
+    }));
+    client.call(add).await.expect("root add");
+
+    let mut register = overnight_transport::request("repository.register");
+    register.payload = Some(Payload::RepositoryRegister(
+        overnight_protocol::v1::RepositoryRegister {
+            relative_path: repo.to_string_lossy().into_owned(),
+        },
+    ));
+    client.call(register).await.expect("register");
+}

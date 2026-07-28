@@ -1,0 +1,355 @@
+//! An Overnight session, over whichever transport reached the host.
+//!
+//! Above this line nothing knows whether it is talking to a local Unix socket
+//! or to a daemon on the other side of an SSH connection. That is the property
+//! worth protecting: a remote host is not a different product with its own
+//! subtly different behaviour.
+//!
+//! Answers come back as JSON rather than protobuf. Not because JSON is better —
+//! it is not, and the wire stays protobuf — but because the alternative is a
+//! protobuf runtime and generated types in Swift and again in Kotlin, to
+//! describe messages this crate has already decoded. JSON at the boundary means
+//! the iOS app decodes the same shapes the Mac app already decodes from the
+//! CLI, with the model types it already has.
+
+use overnight_protocol::v1::{
+    Repository, RepositoryRoot, Terminal, TerminalState, Workspace, WorkspaceState, request, result,
+};
+use overnight_transport::{Client, ClientError};
+use serde_json::json;
+use tokio::io::{AsyncRead, AsyncWrite};
+use uuid::Uuid;
+
+use crate::ssh;
+
+#[derive(Debug, thiserror::Error)]
+pub enum SessionError {
+    #[error(transparent)]
+    Ssh(#[from] ssh::SshError),
+    #[error("{0}")]
+    Protocol(String),
+    #[error("the daemon returned {got} where {expected} was expected")]
+    WrongResult { expected: &'static str, got: &'static str },
+    #[error(
+        "connected, but `overnightd --stdio` did not answer. Is Overnight installed on that host?"
+    )]
+    DaemonMissing,
+    #[error("the host runs protocol {daemon}; this client speaks {client}")]
+    VersionMismatch { daemon: u32, client: u32 },
+}
+
+impl From<ClientError> for SessionError {
+    fn from(error: ClientError) -> Self {
+        match error {
+            // Silence from the far side almost always means the command did not
+            // exist, not that the protocol went wrong.
+            ClientError::Closed | ClientError::NoHello => SessionError::DaemonMissing,
+            ClientError::VersionMismatch { daemon, client } => {
+                SessionError::VersionMismatch { daemon, client }
+            }
+            other => SessionError::Protocol(other.to_string()),
+        }
+    }
+}
+
+type Reader = Box<dyn AsyncRead + Unpin + Send>;
+type Writer = Box<dyn AsyncWrite + Unpin + Send>;
+
+/// A connected Overnight host.
+pub struct Session {
+    client: Client<Reader, Writer>,
+    /// Held so the SSH connection lives as long as the session does.
+    _ssh: Option<ssh::Session>,
+}
+
+impl Session {
+    /// Connect over SSH and start a daemon session on the far side.
+    pub async fn connect_ssh(destination: &ssh::Destination) -> Result<Self, SessionError> {
+        let mut transport = ssh::Session::open(destination).await?;
+        let streams = transport.exec("overnightd --stdio").await?;
+
+        let client = Client::over(
+            Box::new(streams.reader) as Reader,
+            Box::new(streams.writer) as Writer,
+            "overnight-mobile",
+            env!("CARGO_PKG_VERSION"),
+        )
+        .await?;
+
+        Ok(Self { client, _ssh: Some(transport) })
+    }
+
+    /// Connect to a daemon on this machine. Used by tests and by any desktop
+    /// client that wants the same API as the mobile one.
+    pub async fn connect_local(socket: &std::path::Path) -> Result<Self, SessionError> {
+        let stream = tokio::net::UnixStream::connect(socket)
+            .await
+            .map_err(|e| SessionError::Protocol(format!("cannot reach the daemon: {e}")))?;
+        let (read, write) = stream.into_split();
+        let client = Client::over(
+            Box::new(read) as Reader,
+            Box::new(write) as Writer,
+            "overnight-mobile",
+            env!("CARGO_PKG_VERSION"),
+        )
+        .await?;
+        Ok(Self { client, _ssh: None })
+    }
+
+    pub fn daemon_version(&self) -> &str {
+        &self.client.server_hello().daemon_version
+    }
+
+    // ---- reads ----
+
+    /// Everything a fleet view needs, in one round trip per resource.
+    ///
+    /// Shaped identically to the CLI's `workspace list --json`, so a client
+    /// decodes one set of types no matter which one it is talking to.
+    pub async fn fleet(&mut self) -> Result<serde_json::Value, SessionError> {
+        let workspaces = self.workspaces().await?;
+        let terminals = self.terminals().await?;
+        let host = self.host().await?;
+        let healthy =
+            host.self_health != overnight_protocol::v1::SelfHealth::Degraded as i32;
+
+        let items: Vec<_> = workspaces
+            .iter()
+            .map(|w| {
+                json!({
+                    "id": uuid_of(&w.id).to_string(),
+                    "short": short(&w.id),
+                    "task": w.task_name,
+                    "branch": w.branch,
+                    "worktree": w.worktree_path,
+                    "state": workspace_label(w.state()),
+                    "terminals": terminals.iter()
+                        .filter(|t| t.workspace_id == w.id)
+                        .map(|t| json!({
+                            "id": uuid_of(&t.id).to_string(),
+                            "short": short(&t.id),
+                            "title": t.title,
+                            "preset": t.command_preset,
+                            "state": terminal_label(t.state()),
+                            "epoch": t.epoch,
+                        }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "runtime_healthy": healthy,
+            "live_panes": host.live_terminal_count,
+            "workspaces": items,
+        }))
+    }
+
+    pub async fn host(&mut self) -> Result<overnight_protocol::v1::Host, SessionError> {
+        match self.value("host.health", None, None).await? {
+            result::Value::Host(h) => Ok(h),
+            other => Err(wrong("host", &other)),
+        }
+    }
+
+    pub async fn workspaces(&mut self) -> Result<Vec<Workspace>, SessionError> {
+        match self.value("workspace.list", None, None).await? {
+            result::Value::WorkspaceList(l) => Ok(l.items),
+            other => Err(wrong("workspaces", &other)),
+        }
+    }
+
+    pub async fn terminals(&mut self) -> Result<Vec<Terminal>, SessionError> {
+        match self.value("terminal.list", None, None).await? {
+            result::Value::TerminalList(l) => Ok(l.items),
+            other => Err(wrong("terminals", &other)),
+        }
+    }
+
+    pub async fn repositories(&mut self) -> Result<Vec<Repository>, SessionError> {
+        match self.value("repository.list", None, None).await? {
+            result::Value::RepositoryList(l) => Ok(l.items),
+            other => Err(wrong("repositories", &other)),
+        }
+    }
+
+    pub async fn roots(&mut self) -> Result<Vec<RepositoryRoot>, SessionError> {
+        match self.value("repository_root.list", None, None).await? {
+            result::Value::RepositoryRootList(l) => Ok(l.items),
+            other => Err(wrong("roots", &other)),
+        }
+    }
+
+    // ---- mutations ----
+
+    pub async fn create_workspace(
+        &mut self,
+        repository: Uuid,
+        task: &str,
+        branch: &str,
+        base: &str,
+    ) -> Result<Workspace, SessionError> {
+        let payload = request::Payload::WorkspaceCreate(overnight_protocol::v1::WorkspaceCreate {
+            task_name: task.into(),
+            branch: branch.into(),
+            base_revision: base.into(),
+            cli_preset: String::new(),
+        });
+        match self.value("workspace.create", Some(repository), Some(payload)).await? {
+            result::Value::Workspace(w) => Ok(w),
+            other => Err(wrong("workspace", &other)),
+        }
+    }
+
+    pub async fn create_terminal(
+        &mut self,
+        workspace: Uuid,
+        title: &str,
+        preset: &str,
+    ) -> Result<Terminal, SessionError> {
+        let payload = request::Payload::TerminalCreate(overnight_protocol::v1::TerminalCreate {
+            title: title.into(),
+            command_preset: preset.into(),
+        });
+        match self.value("terminal.create", Some(workspace), Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
+    pub async fn archive_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
+        self.value("workspace.archive", Some(workspace), None).await.map(|_| ())
+    }
+
+    pub async fn restore_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
+        self.value("workspace.restore", Some(workspace), None).await.map(|_| ())
+    }
+
+    pub async fn stop_terminal(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+        self.value("terminal.stop", Some(terminal), None).await.map(|_| ())
+    }
+
+    pub async fn restart_terminal(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+        self.value("terminal.restart", Some(terminal), None).await.map(|_| ())
+    }
+
+    pub async fn dismiss_lost(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+        self.value("terminal.dismiss_lost", Some(terminal), None).await.map(|_| ())
+    }
+
+    pub async fn resize_terminal(
+        &mut self,
+        terminal: Uuid,
+        columns: u32,
+        rows: u32,
+    ) -> Result<(), SessionError> {
+        let payload = request::Payload::TerminalResize(overnight_protocol::v1::TerminalResize {
+            columns,
+            rows,
+            view_activity_id: 0,
+        });
+        self.value("terminal.resize", Some(terminal), Some(payload)).await.map(|_| ())
+    }
+
+    async fn value(
+        &mut self,
+        method: &str,
+        target: Option<Uuid>,
+        payload: Option<request::Payload>,
+    ) -> Result<result::Value, SessionError> {
+        let mut request = overnight_transport::request(method);
+        if let Some(id) = target {
+            request.target_resource_id = Some(bytes::Bytes::copy_from_slice(id.as_bytes()));
+        }
+        if let Some(p) = payload {
+            request.payload = Some(p);
+        }
+        let outcome = self.client.call(request).await?;
+        outcome.value.ok_or_else(|| SessionError::Protocol(format!("{method} returned nothing")))
+    }
+}
+
+fn wrong(expected: &'static str, got: &result::Value) -> SessionError {
+    SessionError::WrongResult { expected, got: variant_name(got) }
+}
+
+fn variant_name(value: &result::Value) -> &'static str {
+    match value {
+        result::Value::Host(_) => "host",
+        result::Value::RepositoryRoot(_) => "repository_root",
+        result::Value::RepositoryRootList(_) => "repository_root_list",
+        result::Value::Repository(_) => "repository",
+        result::Value::RepositoryList(_) => "repository_list",
+        result::Value::Workspace(_) => "workspace",
+        result::Value::WorkspaceList(_) => "workspace_list",
+        result::Value::Terminal(_) => "terminal",
+        result::Value::TerminalList(_) => "terminal_list",
+        result::Value::Operation(_) => "operation",
+        result::Value::DaemonVersion(_) => "daemon_version",
+        result::Value::TerminalAttach(_) => "terminal_attach",
+    }
+}
+
+pub fn uuid_of(bytes: &[u8]) -> Uuid {
+    Uuid::from_slice(bytes).unwrap_or(Uuid::nil())
+}
+
+/// UUIDv7 puts a timestamp in its LEADING bytes, so anything created in the
+/// same millisecond shares a prefix. Short ids use the trailing random bytes.
+pub fn short(bytes: &[u8]) -> String {
+    let s = uuid_of(bytes).simple().to_string();
+    s[s.len() - 8..].to_string()
+}
+
+fn workspace_label(s: WorkspaceState) -> &'static str {
+    match s {
+        WorkspaceState::Unspecified => "?",
+        WorkspaceState::Creating => "creating",
+        WorkspaceState::Ready => "ready",
+        WorkspaceState::Active => "active",
+        WorkspaceState::Error => "ERROR",
+        WorkspaceState::Archived => "archived",
+    }
+}
+
+fn terminal_label(s: TerminalState) -> &'static str {
+    match s {
+        TerminalState::Unspecified => "?",
+        TerminalState::Starting => "starting",
+        TerminalState::Running => "running",
+        TerminalState::Exited => "exited",
+        TerminalState::Error => "error",
+        TerminalState::Lost => "LOST",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_ids_use_the_random_tail_not_the_timestamp_head() {
+        // Two ids minted in the same millisecond share a leading prefix, so a
+        // head-based short id would collide constantly.
+        let a = Uuid::now_v7();
+        let b = Uuid::now_v7();
+        assert_ne!(short(a.as_bytes()), short(b.as_bytes()));
+        assert_eq!(short(a.as_bytes()).len(), 8);
+    }
+
+    #[test]
+    fn a_wrong_result_variant_names_both_sides() {
+        let error = wrong("terminal", &result::Value::Workspace(Workspace::default()));
+        let message = error.to_string();
+        assert!(message.contains("terminal") && message.contains("workspace"));
+    }
+
+    #[test]
+    fn silence_from_the_far_side_reads_as_a_missing_daemon() {
+        // The single most common remote failure, and it must not surface as a
+        // protocol error nobody can act on.
+        let error: SessionError = ClientError::Closed.into();
+        assert!(matches!(error, SessionError::DaemonMissing));
+        assert!(error.to_string().contains("installed"));
+    }
+}

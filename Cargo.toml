@@ -7,6 +7,7 @@ members = [
     "crates/tmux",
     "crates/transport",
     "crates/vt",
+    "crates/client",
     "crates/daemon",
     "crates/cli",
 ]
@@ -23,6 +24,7 @@ overnight-core = { path = "crates/core" }
 overnight-store = { path = "crates/store" }
 overnight-tmux = { path = "crates/tmux" }
 overnight-transport = { path = "crates/transport" }
+overnight-client = { path = "crates/client" }
 overnight-daemon = { path = "crates/daemon" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "process", "sync", "time", "signal", "fs"] }
