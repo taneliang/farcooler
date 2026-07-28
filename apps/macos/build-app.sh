@@ -24,7 +24,7 @@ BIN=".build/$CONFIG/Overnight"
 
 echo "==> Assembling $APP"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
 
 cp "$BIN" "$APP/Contents/MacOS/Overnight"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
@@ -51,6 +51,10 @@ else
   echo "    WARNING: missing $CLI or $DAEMON"
   echo "    build them first:  (cd ../.. && cargo build --release)"
 fi
+
+# SMAppService looks for the agent plist at exactly this path inside the bundle.
+# Anywhere else and registration reports notFound.
+cp Resources/com.overnight.daemon.plist "$APP/Contents/Library/LaunchAgents/"
 
 echo "==> Rendering icon"
 ICONSET="build/AppIcon.iconset"

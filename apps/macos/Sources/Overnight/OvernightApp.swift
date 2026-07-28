@@ -24,6 +24,9 @@ enum Entry {
         if let path = ProcessInfo.processInfo.environment["OVERNIGHT_RENDER_PROBE"] {
             MainActor.assumeIsolated { RenderProbe.run(writingTo: path) }
         }
+        if let action = ProcessInfo.processInfo.environment["OVERNIGHT_SERVICE_PROBE"] {
+            MainActor.assumeIsolated { ServiceProbe.run(action) }
+        }
         OvernightApp.main()
     }
 }

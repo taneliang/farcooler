@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var client = DaemonClient()
+    @StateObject private var service = ServiceRegistration()
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
     @State private var pollTask: Task<Void, Never>?
@@ -30,6 +31,14 @@ struct ContentView: View {
             startPolling()
         }
         .onDisappear { pollTask?.cancel() }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            // The user may have approved the login item in System Settings
+            // while we were in the background; nothing tells us but this.
+            service.refresh()
+        }
         .sheet(isPresented: $showNewWorkspace) {
             NewWorkspaceSheet(repositories: client.repositories) { repo, task, branch, base in
                 await client.createWorkspace(repo: repo, task: task, branch: branch, base: base)
@@ -136,6 +145,48 @@ struct ContentView: View {
         .padding(.vertical, 34)
     }
 
+    /// Whether the daemon starts at login.
+    ///
+    /// Surfaced here rather than buried in a settings pane because it decides
+    /// whether this host is reachable when nobody is sitting at it, which is
+    /// the difference between a terminal multiplexer and the thing this is
+    /// meant to be.
+    @ViewBuilder
+    private var loginItemToggle: some View {
+        switch service.state {
+        case .registered:
+            Button { service.unregister() } label: {
+                Label("Starts at login", systemImage: "bolt.fill").font(.system(size: 10))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("The daemon starts at login, so this host stays reachable. Click to stop.")
+
+        case .notRegistered:
+            Button { service.register() } label: {
+                Label("Start at login", systemImage: "bolt").font(.system(size: 10))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Keep this host reachable without opening Overnight first.")
+
+        case .awaitingApproval:
+            Button { service.register() } label: {
+                Label("Approve in Settings", systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 10))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.orange)
+            .help("macOS needs you to enable Overnight under Login Items.")
+
+        case .unavailable(let why):
+            Image(systemName: "bolt.slash")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .help(why)
+        }
+    }
+
     private var statusBar: some View {
         VStack(spacing: 0) {
             Divider()
@@ -152,6 +203,8 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
 
                 Spacer()
+
+                loginItemToggle
 
                 Button {
                     Task {
