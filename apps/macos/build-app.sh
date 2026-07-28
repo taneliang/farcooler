@@ -35,13 +35,21 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 # This is also what makes launching from the Dock work at all. A double-clicked
 # app inherits no shell environment, so it cannot find a binary that only exists
 # on your PATH.
+# Both binaries, side by side.
+#
+# The CLI starts the daemon by looking for `overnightd` next to itself, so a
+# bundle carrying only the CLI would auto-start nothing and every command would
+# time out waiting. Shipping them together also guarantees the pair match, which
+# is the mismatch the version handshake exists to catch.
 CLI="../../target/release/overnight"
-if [ -x "$CLI" ]; then
+DAEMON="../../target/release/overnightd"
+if [ -x "$CLI" ] && [ -x "$DAEMON" ]; then
   cp "$CLI" "$APP/Contents/Resources/overnight"
-  echo "    bundled CLI $(cd ../.. && ./target/release/overnight --version 2>/dev/null || echo '')"
+  cp "$DAEMON" "$APP/Contents/Resources/overnightd"
+  echo "    bundled $(cd ../.. && ./target/release/overnight --version 2>/dev/null || echo 'cli') + overnightd"
 else
-  echo "    WARNING: no release CLI at $CLI"
-  echo "    build it first:  (cd ../.. && cargo build --release)"
+  echo "    WARNING: missing $CLI or $DAEMON"
+  echo "    build them first:  (cd ../.. && cargo build --release)"
 fi
 
 echo "==> Rendering icon"

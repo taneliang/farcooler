@@ -78,8 +78,13 @@ final class DaemonClient: ObservableObject {
         await refresh()
     }
 
-    func removeWorktree(_ workspace: String) async {
-        _ = await run(["workspace", "remove-worktree", workspace])
+    /// Remove a worktree. `confirm` must be the workspace's exact task name.
+    ///
+    /// Forwarded rather than checked only here: the daemon refuses a mismatch
+    /// itself, so the dialog is a courtesy and the daemon's check is the one
+    /// that actually protects the files.
+    func removeWorktree(_ workspace: String, confirm: String) async {
+        _ = await run(["workspace", "remove-worktree", workspace, "--confirm", confirm])
         await refresh()
     }
 

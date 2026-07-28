@@ -147,7 +147,8 @@ struct NewTerminalSheet: View {
 struct RemoveWorkspaceSheet: View {
     let workspace: Workspace
     let hasRunningTerminals: Bool
-    let onRemove: () async -> Void
+    /// Receives the exact text the user typed, which the daemon re-checks.
+    let onRemove: (String) async -> Void
     @Environment(\.dismiss) private var dismiss
 
     @State private var typed = ""
@@ -167,7 +168,7 @@ struct RemoveWorkspaceSheet: View {
             onCancel: { dismiss() },
             onConfirm: {
                 working = true
-                await onRemove()
+                await onRemove(typed)
                 working = false
                 dismiss()
             }

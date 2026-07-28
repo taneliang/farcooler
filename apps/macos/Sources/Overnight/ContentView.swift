@@ -48,8 +48,8 @@ struct ContentView: View {
                 hasRunningTerminals: ws.terminals.contains {
                     StateKind.parse($0.state) == .running
                 }
-            ) {
-                await client.removeWorktree(ws.short)
+            ) { typed in
+                await client.removeWorktree(ws.short, confirm: typed)
                 if case .terminal(let w, _) = selection, w == ws.id { selection = nil }
             }
         }
