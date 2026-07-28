@@ -43,16 +43,40 @@ fn path_token(id: Uuid) -> String {
     format!("p-{}", &hex[hex.len() - 12..])
 }
 
-pub fn host(daemon_version: &str, host_id: Uuid, replay_bytes: u64) -> wire::Host {
+/// Host facts, including whether the runtime is answering.
+///
+/// Health is reported by the daemon rather than sampled by the client. A remote
+/// client has no tmux to look at, and a local one that looked would be a second
+/// authority on the same question — which is the whole failure the derivation
+/// model exists to prevent.
+pub fn host(
+    daemon_version: &str,
+    host_id: Uuid,
+    runtime: &overnight_core::inventory::RuntimeSnapshot,
+    replay_bytes: u64,
+) -> wire::Host {
+    let healthy = runtime.inventory_healthy;
     wire::Host {
         id: id_bytes(host_id),
         resource_version: 1,
         platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         daemon_version: daemon_version.to_string(),
         protocol_version: overnight_protocol::PROTOCOL_VERSION,
-        self_health: wire::SelfHealth::Healthy as i32,
-        self_health_reasons: Vec::new(),
+        self_health: if healthy {
+            wire::SelfHealth::Healthy as i32
+        } else {
+            wire::SelfHealth::Degraded as i32
+        },
+        self_health_reasons: if healthy {
+            Vec::new()
+        } else {
+            // Named, because "degraded" alone tells a user nothing about what
+            // to do, and this particular degradation makes every terminal
+            // derive as lost.
+            vec!["tmux inventory unavailable; every terminal derives lost".into()]
+        },
         replay_bytes_retained: replay_bytes,
+        live_terminal_count: runtime.panes.len() as u32,
     }
 }
 

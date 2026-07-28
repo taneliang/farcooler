@@ -18,12 +18,13 @@
 //! stored "running" flag, because none exists.
 
 mod daemon_link;
+mod host_install;
+mod remote;
 
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use daemon_link::{Link, connect, expect_value, req, req_for, with};
-use overnight_core::inventory::RuntimeInventory;
+use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use overnight_daemon::runtime::Runtime;
 use overnight_protocol::v1::{
     Repository, RepositoryRoot, Terminal, TerminalState, Workspace, WorkspaceState, request, result,
@@ -41,6 +42,14 @@ struct Cli {
     /// scraping human output.
     #[arg(long, global = true)]
     json: bool,
+
+    /// Operate on another machine, as `user@host` or an ssh config alias.
+    ///
+    /// Runs the same protocol over ssh. There is no Overnight network
+    /// listener: a host reachable by ssh is reachable by Overnight, and one
+    /// that is not, is not.
+    #[arg(long, global = true, value_name = "TARGET")]
+    host: Option<String>,
 
     #[command(subcommand)]
     command: Command,
@@ -64,6 +73,22 @@ enum Command {
     Terminal(TerminalCmd),
     /// Show how to attach to a workspace's live tmux session.
     Attach { workspace: String },
+    /// Install or inspect Overnight on a Linux host over ssh.
+    #[command(subcommand, name = "host")]
+    HostCmd(HostCmd),
+}
+
+#[derive(Subcommand)]
+enum HostCmd {
+    /// Copy the daemon and CLI to a Linux host and register a user service.
+    Install {
+        target: String,
+        /// The Linux binaries to install. Defaults to ./dist/<arch>-linux/.
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
+    /// Report what is installed and running on a host.
+    Status { target: String },
 }
 
 #[derive(Subcommand)]
@@ -180,13 +205,18 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 
 async fn run() -> Fallible {
     let cli = Cli::parse();
+    let host = cli.host.as_deref();
     match cli.command {
-        Command::Status => status(cli.json).await,
-        Command::Root(c) => root(c, cli.json).await,
-        Command::Repo(c) => repo(c, cli.json).await,
-        Command::Workspace(c) => workspace(c, cli.json).await,
-        Command::Terminal(c) => terminal(c, cli.json).await,
-        Command::Attach { workspace } => attach(&workspace).await,
+        Command::Status => status(host, cli.json).await,
+        Command::Root(c) => root(host, c, cli.json).await,
+        Command::Repo(c) => repo(host, c, cli.json).await,
+        Command::Workspace(c) => workspace(host, c, cli.json).await,
+        Command::Terminal(c) => terminal(host, c, cli.json).await,
+        Command::Attach { workspace } => attach(host, &workspace).await,
+        Command::HostCmd(HostCmd::Install { target, from }) => {
+            host_install::install(&target, from.as_deref()).await
+        }
+        Command::HostCmd(HostCmd::Status { target }) => host_install::status(&target).await,
     }
 }
 
@@ -194,25 +224,23 @@ async fn run() -> Fallible {
 // Durable state, through the daemon
 // ---------------------------------------------------------------------------
 
-async fn status(json: bool) -> Fallible {
-    let mut link = connect().await?;
+async fn status(host: Option<&str>, json: bool) -> Fallible {
+    let mut link = connect_to(host).await?;
     let roots = list_roots(&mut link).await?;
     let repos = list_repositories(&mut link).await?;
     let workspaces = list_workspaces(&mut link).await?;
     let terminals = list_terminals(&mut link, None).await?;
-
-    // tmux facts come from the runtime, not the daemon: they describe what is
-    // live, and the runtime is where that is known.
-    let runtime = Runtime::open().await?;
-    let live = runtime.inventory.snapshot();
+    let host_facts = host_get(&mut link).await?;
+    let healthy = host_facts.self_health != overnight_protocol::v1::SelfHealth::Degraded as i32;
 
     if json {
         println!(
             "{}",
             serde_json::json!({
-                "daemonVersion": link.server_hello().daemon_version,
-                "runtimeHealthy": live.inventory_healthy,
-                "livePanes": live.panes.len(),
+                "daemonVersion": host_facts.daemon_version,
+                "platform": host_facts.platform,
+                "runtimeHealthy": healthy,
+                "livePanes": host_facts.live_terminal_count,
                 "roots": roots.len(),
                 "repositories": repos.len(),
                 "workspaces": workspaces.len(),
@@ -222,27 +250,34 @@ async fn status(json: bool) -> Fallible {
         return Ok(());
     }
 
-    println!("daemon        {}", link.server_hello().daemon_version);
-    println!("tmux socket   {}", runtime.tmux.socket());
+    println!("host          {}", host.unwrap_or("local"));
+    println!("platform      {}", host_facts.platform);
+    println!("daemon        {}", host_facts.daemon_version);
     println!(
         "tmux runtime  {}",
-        if live.inventory_healthy {
-            "reachable"
-        } else {
-            "UNAVAILABLE (all terminals derive lost)"
-        }
+        if healthy { "reachable" } else { "UNAVAILABLE (all terminals derive lost)" }
     );
+    for reason in &host_facts.self_health_reasons {
+        println!("              {reason}");
+    }
     println!("roots         {}", roots.len());
     println!("repositories  {}", repos.len());
     println!("workspaces    {}", workspaces.len());
-    println!("live panes    {}", live.panes.len());
-    println!();
-    println!("recovery: {}", runtime.tmux.recovery_command());
+    println!("live panes    {}", host_facts.live_terminal_count);
+
+    // The recovery command names a tmux socket on THIS machine, so it is only
+    // meaningful locally. Printing a local socket path while reporting a remote
+    // host would be an invitation to run the wrong thing.
+    if host.is_none() {
+        let runtime = Runtime::open().await?;
+        println!();
+        println!("recovery: {}", runtime.tmux.recovery_command());
+    }
     Ok(())
 }
 
-async fn root(cmd: RootCmd, json: bool) -> Fallible {
-    let mut link = connect().await?;
+async fn root(host: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
+    let mut link = connect_to(host).await?;
     match cmd {
         RootCmd::Add { path } => {
             // Canonicalised here so the daemon is handed an absolute path
@@ -309,8 +344,8 @@ async fn root(cmd: RootCmd, json: bool) -> Fallible {
     Ok(())
 }
 
-async fn repo(cmd: RepoCmd, json: bool) -> Fallible {
-    let mut link = connect().await?;
+async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
+    let mut link = connect_to(host).await?;
     match cmd {
         RepoCmd::Register { path } => {
             let absolute = path.canonicalize().unwrap_or(path);
@@ -359,8 +394,8 @@ async fn repo(cmd: RepoCmd, json: bool) -> Fallible {
     Ok(())
 }
 
-async fn workspace(cmd: WorkspaceCmd, json: bool) -> Fallible {
-    let mut link = connect().await?;
+async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
+    let mut link = connect_to(host).await?;
     match cmd {
         WorkspaceCmd::Create { repo, task, branch, base } => {
             let repos = list_repositories(&mut link).await?;
@@ -389,8 +424,9 @@ async fn workspace(cmd: WorkspaceCmd, json: bool) -> Fallible {
         WorkspaceCmd::List => {
             let workspaces = list_workspaces(&mut link).await?;
             let terminals = list_terminals(&mut link, None).await?;
-            let runtime = Runtime::open().await?;
-            let live = runtime.inventory.snapshot();
+            let host_facts = host_get(&mut link).await?;
+            let healthy =
+                host_facts.self_health != overnight_protocol::v1::SelfHealth::Degraded as i32;
 
             if json {
                 let items: Vec<_> = workspaces
@@ -421,8 +457,8 @@ async fn workspace(cmd: WorkspaceCmd, json: bool) -> Fallible {
                 println!(
                     "{}",
                     serde_json::json!({
-                        "runtime_healthy": live.inventory_healthy,
-                        "live_panes": live.panes.len(),
+                        "runtime_healthy": healthy,
+                        "live_panes": host_facts.live_terminal_count,
                         "workspaces": items,
                     })
                 );
@@ -484,18 +520,26 @@ async fn workspace(cmd: WorkspaceCmd, json: bool) -> Fallible {
     Ok(())
 }
 
-async fn attach(workspace: &str) -> Fallible {
-    let mut link = connect().await?;
+async fn attach(host: Option<&str>, workspace: &str) -> Fallible {
+    let mut link = connect_to(host).await?;
     let all = list_workspaces(&mut link).await?;
     let ws = resolve(&all, workspace, |w| &w.id, "workspace")?;
-    let runtime = Runtime::open().await?;
 
     println!("Attaching to the live tmux session for {}.", ws.task_name);
     println!();
     println!("This is a recovery interface. It takes no writer lease and is");
     println!("outside lease enforcement, exactly like raw tmux attach.");
     println!();
-    println!("  {}", runtime.tmux.recovery_command());
+    match host {
+        // The tmux socket is on the host, so the command has to run there.
+        Some(target) => {
+            println!("  ssh -t {target} overnight attach {workspace}");
+        }
+        None => {
+            let runtime = Runtime::open().await?;
+            println!("  {}", runtime.tmux.recovery_command());
+        }
+    }
     println!();
     println!("Run that to attach. Detach with your tmux prefix then d.");
     Ok(())
@@ -505,11 +549,11 @@ async fn attach(workspace: &str) -> Fallible {
 // Terminals: records through the daemon, bytes through tmux
 // ---------------------------------------------------------------------------
 
-async fn terminal(cmd: TerminalCmd, json: bool) -> Fallible {
+async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible {
     match cmd {
         // Record changes. These write durable intent, so they go to the daemon.
         TerminalCmd::Create { workspace, preset, title } => {
-            let mut link = connect().await?;
+            let mut link = connect_to(host).await?;
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
             let title = title.unwrap_or_else(|| preset.clone());
@@ -529,19 +573,19 @@ async fn terminal(cmd: TerminalCmd, json: bool) -> Fallible {
         }
 
         TerminalCmd::Stop { terminal } => {
-            let (mut link, id) = terminal_by_record(&terminal).await?;
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(req_for("terminal.stop", id)).await?;
             println!("stopped {}", short(id));
         }
 
         TerminalCmd::DismissLost { terminal } => {
-            let (mut link, id) = terminal_by_record(&terminal).await?;
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(req_for("terminal.dismiss_lost", id)).await?;
             println!("dismissed {} (still truthfully lost, no exit claimed)", short(id));
         }
 
         TerminalCmd::Restart { terminal } => {
-            let (mut link, id) = terminal_by_record(&terminal).await?;
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
             let r = link.call(req_for("terminal.restart", id)).await?;
             let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
                 return Err("the daemon returned the wrong resource".into());
@@ -552,6 +596,44 @@ async fn terminal(cmd: TerminalCmd, json: bool) -> Fallible {
         // Live bytes. No daemon and no database — tmux is the authority, and
         // holding a request/response conversation open for the life of a
         // stream would be the wrong shape for both.
+        //
+        // On a remote host they run over their own ssh session, hitting the
+        // host's own CLI. ssh is already a byte pipe and so are these, so the
+        // honest implementation is to connect the two and get out of the way.
+        TerminalCmd::Send { terminal, data } if host.is_some() => {
+            return proxy(host, &["terminal".into(), "send".into(), terminal, data]).await;
+        }
+        TerminalCmd::SendHex { terminal, hex } if host.is_some() => {
+            return proxy(host, &["terminal".into(), "send-hex".into(), terminal, hex]).await;
+        }
+        TerminalCmd::Stream { terminal } if host.is_some() => {
+            return proxy(host, &["terminal".into(), "stream".into(), terminal]).await;
+        }
+        TerminalCmd::Input { terminal } if host.is_some() => {
+            return proxy(host, &["terminal".into(), "input".into(), terminal]).await;
+        }
+        TerminalCmd::Screen { terminal } if host.is_some() => {
+            let mut args = vec!["terminal".into(), "screen".into(), terminal];
+            if json {
+                args.push("--json".into());
+            }
+            return proxy(host, &args).await;
+        }
+        TerminalCmd::Resize { terminal, columns, rows } if host.is_some() => {
+            return proxy(
+                host,
+                &["terminal".into(), "resize".into(), terminal, columns.to_string(), rows.to_string()],
+            )
+            .await;
+        }
+        TerminalCmd::Read { terminal, lines } if host.is_some() => {
+            return proxy(
+                host,
+                &["terminal".into(), "read".into(), terminal, "--lines".into(), lines.to_string()],
+            )
+            .await;
+        }
+
         TerminalCmd::Send { terminal, data } => {
             let runtime = Runtime::open().await?;
             let id = runtime.resolve_terminal(&terminal)?;
@@ -606,12 +688,25 @@ async fn terminal(cmd: TerminalCmd, json: bool) -> Fallible {
     Ok(())
 }
 
+/// Run a command on the host's own CLI and adopt its exit status.
+async fn proxy(host: Option<&str>, args: &[String]) -> Fallible {
+    let Some(target) = host else { return Ok(()) };
+    let code = remote::exec(target, args, false).await?;
+    if code != 0 {
+        std::process::exit(code);
+    }
+    Ok(())
+}
+
 /// Resolve a terminal against the daemon's RECORDS, not the live panes.
 ///
 /// Stopping, restarting or dismissing a terminal has to work on one that is
 /// already dead, which is precisely when it has no pane to be found by.
-async fn terminal_by_record(prefix: &str) -> Result<(Link, Uuid), Box<dyn std::error::Error>> {
-    let mut link = connect().await?;
+async fn terminal_by_record(
+    host: Option<&str>,
+    prefix: &str,
+) -> Result<(Link, Uuid), Box<dyn std::error::Error>> {
+    let mut link = connect_to(host).await?;
     let terminals = list_terminals(&mut link, None).await?;
     let t = resolve(&terminals, prefix, |t| &t.id, "terminal")?;
     let id = uuid_of(&t.id);
@@ -621,6 +716,16 @@ async fn terminal_by_record(prefix: &str) -> Result<(Link, Uuid), Box<dyn std::e
 // ---------------------------------------------------------------------------
 // Calls
 // ---------------------------------------------------------------------------
+
+async fn host_get(
+    link: &mut Link,
+) -> Result<overnight_protocol::v1::Host, Box<dyn std::error::Error>> {
+    let r = link.call(req("host.health")).await?;
+    match expect_value(r.value, "host")? {
+        result::Value::Host(h) => Ok(h),
+        _ => Err("the daemon returned the wrong resource".into()),
+    }
+}
 
 async fn list_roots(link: &mut Link) -> Result<Vec<RepositoryRoot>, Box<dyn std::error::Error>> {
     let r = link.call(req("repository_root.list")).await?;

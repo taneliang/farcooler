@@ -24,6 +24,8 @@ async fn main() {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "overnight=info,warn".into()),
         )
+        // stderr always: in --stdio mode stdout IS the wire, and one log line
+        // on it would corrupt the first frame.
         .with_writer(std::io::stderr)
         .init();
 
@@ -33,6 +35,17 @@ async fn main() {
 }
 
 async fn run() -> Result<(), i32> {
+    // `overnightd --stdio` is the remote entry point.
+    //
+    // sshd launches it, and it speaks the identical framing over stdin and
+    // stdout that the socket speaks. That is the whole of Overnight's remote
+    // transport: no listener, no port, no second authentication system. SSH has
+    // already proved who the caller is, and the caller is the same Unix user
+    // who owns the database and could read it directly anyway.
+    if std::env::args().any(|a| a == "--stdio") {
+        return serve_stdio_session().await;
+    }
+
     let socket = paths::socket_path().map_err(|e| {
         eprintln!("cannot determine the socket path: {e}");
         1
@@ -99,6 +112,30 @@ async fn run() -> Result<(), i32> {
 
     let _ = std::fs::remove_file(&socket);
     result
+}
+
+/// Serve exactly one session over stdin/stdout, then exit.
+///
+/// One session per process, because that is what sshd gives us: a connection is
+/// a process. It opens its own `Service`, which is the one place a second
+/// SQLite handle exists — brief, single-threaded, and gone when the ssh session
+/// ends. Long-lived state stays in tmux, which is shared safely by design.
+async fn serve_stdio_session() -> Result<(), i32> {
+    // Nothing may be printed to stdout: it is the wire.
+    let service = Arc::new(Service::open().await.map_err(|e| {
+        eprintln!("cannot open the service: {e}");
+        1
+    })?);
+
+    let cfg = HandshakeConfig {
+        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
+        granted_scope: Scope::HostAdmin,
+    };
+
+    overnight_transport::serve_stdio(cfg, RpcFactory { service }).await.map_err(|e| {
+        eprintln!("stdio session ended: {e}");
+        1
+    })
 }
 
 /// One `Rpc` per request, over one shared `Service`.

@@ -206,6 +206,10 @@ message Host {
   SelfHealth self_health = 6;
   repeated string self_health_reasons = 7;
   uint64 replay_bytes_retained = 8; // observability for the per-terminal replay cost
+  // Live tagged panes the daemon can currently see. A client must not count
+  // these itself: a remote one has no tmux to look at, and a local one that
+  // looked would be a second authority on the same question.
+  uint32 live_terminal_count = 9;
 }
 
 enum SelfHealth {

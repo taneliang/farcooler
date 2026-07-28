@@ -132,11 +132,17 @@ impl Rpc {
 
         match req.method.as_str() {
             // ---- reads ----
-            "host.get" | "host.health" => Ok(result::Value::Host(wire::host(
-                &self.daemon_version,
-                svc.host_id,
-                0,
-            ))),
+            "host.get" | "host.health" => {
+                // Refresh before answering: a client asking about health wants
+                // the answer now, not the one cached at connect time.
+                svc.inventory.refresh().await;
+                Ok(result::Value::Host(wire::host(
+                    &self.daemon_version,
+                    svc.host_id,
+                    &svc.inventory_snapshot(),
+                    0,
+                )))
+            }
 
             "daemon.version" => Ok(result::Value::DaemonVersion(
                 overnight_protocol::v1::DaemonVersion {
