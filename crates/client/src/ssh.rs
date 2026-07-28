@@ -204,7 +204,7 @@ impl Session {
     /// This is the whole remote transport: `overnightd --stdio` on one end, the
     /// protocol client on the other, and SSH in between doing what it is for.
     pub async fn exec(&mut self, command: &str) -> Result<Streams, SshError> {
-        let mut channel = self
+        let channel = self
             .handle
             .channel_open_session()
             .await
@@ -322,6 +322,12 @@ impl AsyncRead for ChannelReader {
             Poll::Pending => Poll::Pending,
         }
     }
+}
+
+/// Load a key, for tests in sibling modules that need to prove one is usable.
+#[cfg(test)]
+pub(crate) fn decode_key_for_test(text: &str) -> Result<ssh_key::PrivateKey, SshError> {
+    decode_key(text, None)
 }
 
 #[cfg(test)]

@@ -8,7 +8,11 @@ license.workspace = true
 [lib]
 name = "overnight_client"
 # Both, so iOS links statically and macOS development can link dynamically.
-crate-type = ["staticlib", "cdylib", "rlib"]
+# staticlib for Apple platforms and the NDK; rlib so the workspace can
+# use it directly. No cdylib: iOS does not load dynamic libraries from an
+# app bundle, and its presence made every iOS build fail at a link step
+# that produces something nothing would ever load.
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 overnight-core.workspace = true
@@ -22,6 +26,9 @@ tracing.workspace = true
 thiserror.workspace = true
 russh = "0.62"
 async-trait = "0.1"
+# The RNG russh itself uses to generate keys. Matching upstream rather than
+# picking our own means one source of randomness, and one thing to audit.
+rand = "0.10"
 
 [dev-dependencies]
 tempfile = "3"

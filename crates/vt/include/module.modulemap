@@ -1,0 +1,6 @@
+// Makes the terminal core importable as a Swift module. See the client core's
+// module map for why an XCFramework needs one.
+module OvernightVT {
+    header "overnight_vt.h"
+    export *
+}

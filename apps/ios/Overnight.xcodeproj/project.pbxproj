@@ -1,0 +1,243 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		F8189DC63FA15F9390E78B5C /* OvernightApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0375F02F76AF55DBA61CB317; };
+		C204AD5EE5DE50D0BFB66A28 /* ClientCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0633AE253F835A34A9A9D169; };
+		07D87E54DCF4532A9432BCE2 /* Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF154E462EB1532396A5C5F3; };
+		3CB766C82CEA5109A2AA4C8E /* FleetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF27428554395E3898D3722A; };
+		84CD1507E8FC591EB0F90F4B /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC8223110EB551FAAB056EB; };
+		255E0E0A6E6F5519A9B56104 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CA58826B13541AAD8DB092; };
+		FECA7427E1AD5FCCA209AB94 /* overnight_vt.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5FA5EC59B6750A5905DB67D; };
+		2E99CD1866A95EFDAC853396 /* overnight_client.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA8286B4C4C155E1B03E0475; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0375F02F76AF55DBA61CB317 /* OvernightApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OvernightApp.swift; sourceTree = "<group>"; };
+		0633AE253F835A34A9A9D169 /* ClientCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientCore.swift; sourceTree = "<group>"; };
+		CF154E462EB1532396A5C5F3 /* Connection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Connection.swift; sourceTree = "<group>"; };
+		DF27428554395E3898D3722A /* FleetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetView.swift; sourceTree = "<group>"; };
+		9BC8223110EB551FAAB056EB /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
+		A5CA58826B13541AAD8DB092 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		C5FA5EC59B6750A5905DB67D /* overnight_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_vt.xcframework; path = Frameworks/overnight_vt.xcframework; sourceTree = "<group>"; };
+		FA8286B4C4C155E1B03E0475 /* overnight_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_client.xcframework; path = Frameworks/overnight_client.xcframework; sourceTree = "<group>"; };
+		C406B4C87D4D5001A4F23C30 /* Overnight.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Overnight.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		21958B6942C0578F9B807E09 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FECA7427E1AD5FCCA209AB94 /* overnight_vt.xcframework in Frameworks */,
+				2E99CD1866A95EFDAC853396 /* overnight_client.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AE36FCCB3BA05996A856A238 = {
+			isa = PBXGroup;
+			children = (
+				63DD385570A45649B43B8E30 /* Overnight */,
+				5FD0074FA69A5B7790E1CFAF /* Frameworks */,
+				49C89B1CC34B5EBC92D8231C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		63DD385570A45649B43B8E30 /* Overnight */ = {
+			isa = PBXGroup;
+			children = (
+				0375F02F76AF55DBA61CB317 /* OvernightApp.swift */,
+				0633AE253F835A34A9A9D169 /* ClientCore.swift */,
+				CF154E462EB1532396A5C5F3 /* Connection.swift */,
+				DF27428554395E3898D3722A /* FleetView.swift */,
+				9BC8223110EB551FAAB056EB /* Model.swift */,
+				A5CA58826B13541AAD8DB092 /* Store.swift */,
+			);
+			path = Overnight;
+			sourceTree = "<group>";
+		};
+		5FD0074FA69A5B7790E1CFAF /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C5FA5EC59B6750A5905DB67D /* overnight_vt.xcframework */,
+				FA8286B4C4C155E1B03E0475 /* overnight_client.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		49C89B1CC34B5EBC92D8231C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C406B4C87D4D5001A4F23C30 /* Overnight.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8F2166960029520B871E39BB /* Overnight */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BA455F34B6465DEA8FF122D4;
+			buildPhases = (
+				9BED9FE9D0DC582DBA7DD7D6,
+				21958B6942C0578F9B807E09,
+				E7D9730917215D49871E8A60,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = Overnight;
+			productName = Overnight;
+			productReference = C406B4C87D4D5001A4F23C30;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		3E2B7BAC2E3752AD99F7FEB5 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = D4EB074E6A955E1ABC3D0746;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = AE36FCCB3BA05996A856A238;
+			productRefGroup = 49C89B1CC34B5EBC92D8231C;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8F2166960029520B871E39BB /* Overnight */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		E7D9730917215D49871E8A60 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		9BED9FE9D0DC582DBA7DD7D6 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F8189DC63FA15F9390E78B5C /* OvernightApp.swift in Sources */,
+				C204AD5EE5DE50D0BFB66A28 /* ClientCore.swift in Sources */,
+				07D87E54DCF4532A9432BCE2 /* Connection.swift in Sources */,
+				3CB766C82CEA5109A2AA4C8E /* FleetView.swift in Sources */,
+				84CD1507E8FC591EB0F90F4B /* Model.swift in Sources */,
+				255E0E0A6E6F5519A9B56104 /* Store.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		9AFC72E4EE605879A4D54AAF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				SWIFT_VERSION = 5.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				GCC_OPTIMIZATION_LEVEL = 0;
+				ENABLE_TESTABILITY = YES;
+			};
+			name = Debug;
+		};
+		85D58175604850659074E3CB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				SWIFT_VERSION = 5.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		D78A7D7727515645B14E6040 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = Overnight;
+				PRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Overnight;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				OTHER_LDFLAGS = "-lc++";
+				SWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
+				HEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";
+			};
+			name = Debug;
+		};
+		272786108E6C5997AD4FC042 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = Overnight;
+				PRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Overnight;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				OTHER_LDFLAGS = "-lc++";
+				SWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
+				HEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D4EB074E6A955E1ABC3D0746 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9AFC72E4EE605879A4D54AAF /* Debug */,
+				85D58175604850659074E3CB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BA455F34B6465DEA8FF122D4 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D78A7D7727515645B14E6040 /* Debug */,
+				272786108E6C5997AD4FC042 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 3E2B7BAC2E3752AD99F7FEB5 /* Project object */;
+}

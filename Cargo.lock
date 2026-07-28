@@ -1412,6 +1412,7 @@ dependencies = [
  "overnight-daemon",
  "overnight-protocol",
  "overnight-transport",
+ "rand",
  "russh",
  "serde_json",
  "tempfile",

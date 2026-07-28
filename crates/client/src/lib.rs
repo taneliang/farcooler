@@ -8,5 +8,6 @@
 //! This is the same bet as `crates/vt`: put the part that must not differ
 //! between platforms in one place, and give the platforms a narrow boundary.
 
+pub mod ffi;
 pub mod session;
 pub mod ssh;
