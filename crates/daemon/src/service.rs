@@ -17,6 +17,7 @@ use overnight_store::{Store, models};
 use overnight_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
+use crate::runtime::Runtime;
 use crate::{git, paths};
 
 /// Launch presets. Coding agents run through the user's configured shell so
@@ -414,216 +415,46 @@ impl Service {
         )
     }
 
+    // ---- runtime ----
+    //
+    // These operate on tmux alone and never touch the database, which is what
+    // lets a client stream a terminal without going through the daemon at all.
+    // They live on `Runtime`; `Service` exposes them for callers that already
+    // hold one.
+
+    pub fn runtime(&self) -> Runtime {
+        // A clone, but not a copy: `LiveInventory` shares one `Arc` view, so
+        // this is the same inventory rather than a second one that could
+        // disagree with it.
+        Runtime { tmux: self.tmux.clone(), inventory: self.inventory.clone() }
+    }
+
     pub async fn send_input(&self, id: Uuid, data: &str) -> Result<()> {
-        let snapshot = self.inventory.snapshot();
-        let pane = snapshot
-            .claimants(id)
-            .into_iter()
-            .find(|p| p.proves_life())
-            .ok_or(DomainError::NotFound)?
-            .pane_id
-            .clone();
-        self.tmux.send_keys(&pane, data).await
+        self.runtime().send_input(id, data).await
     }
 
-    /// Exact input bytes, hex encoded, to the live pane proving this terminal.
     pub async fn send_bytes_hex(&self, id: Uuid, hex: &str) -> Result<()> {
-        let snapshot = self.inventory.snapshot();
-        let pane = snapshot
-            .claimants(id)
-            .into_iter()
-            .find(|p| p.proves_life())
-            .ok_or(DomainError::NotFound)?
-            .pane_id
-            .clone();
-        self.tmux.send_bytes_hex(&pane, hex).await
+        self.runtime().send_bytes_hex(id, hex).await
     }
 
-    /// The rendered visible screen with colour, plus the pane geometry so a
-    /// client can size itself to what it is actually showing.
     pub async fn screen(&self, id: Uuid) -> Result<(String, u32, u32)> {
-        let snapshot = self.inventory.snapshot();
-        let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
-        let text = self.tmux.capture_screen(&pane.pane_id).await?;
-        Ok((text, pane.columns, pane.rows))
+        self.runtime().screen(id).await
     }
 
-    /// Stream a terminal's live output to this process's stdout.
-    ///
-    /// Emits the retained history first so the client opens onto the session as
-    /// it already is, then hands over to a live pipe. Runs until the caller is
-    /// killed or the pane goes away.
     pub async fn stream(&self, id: Uuid) -> Result<()> {
-        use tokio::io::AsyncWriteExt;
-
-        let snapshot = self.inventory.snapshot();
-        let pane = snapshot
-            .claimants(id)
-            .into_iter()
-            .find(|p| p.proves_life())
-            .ok_or(DomainError::NotFound)?
-            .clone();
-
-        let mut stdout = tokio::io::stdout();
-
-        // 1. Replay the VISIBLE screen only, not the whole scrollback.
-        //
-        // tmux stores scrollback as the lines were written, so history from when
-        // the pane was a different width re-wraps in a client sized differently
-        // and the screen arrives staggered. The visible screen is re-rendered by
-        // tmux at the current size, so it always lands correctly. Deep history
-        // is deliberately not replayed; the client accumulates its own scrollback
-        // from the live stream onward.
-        //
-        // Re-read the pane geometry first so a resize that just happened has
-        // settled before the capture.
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-
-        if let Ok(screen) = self.tmux.capture_screen(&pane.pane_id).await {
-            // Home the cursor and clear, so the replay paints a clean screen.
-            let _ = stdout.write_all(b"\x1b[H\x1b[2J").await;
-
-            // capture-pane separates lines with a bare LF. To a terminal that is
-            // line feed WITHOUT carriage return, so every line starts where the
-            // previous one ended and the screen arrives as a staircase. The live
-            // pipe does not need this because a pty already emits CRLF.
-            let normalized = screen.trim_end().replace('\n', "\r\n");
-            let _ = stdout.write_all(normalized.as_bytes()).await;
-
-            // No trailing newline.
-            //
-            // The capture is exactly as many lines as the screen is tall
-            // whenever the program fills it — which a full-screen agent always
-            // does. One more line feed at the bottom row scrolls the whole
-            // screen up by one: the top line is pushed into history, everything
-            // appears one row too high, and the caret is left on a blank bottom
-            // row. Both symptoms, one newline.
-
-            // A captured screen is text and carries no cursor, so ask tmux
-            // where it actually is. Without this the caret sits wherever the
-            // last replayed character ended, which is the bottom-left corner,
-            // not the prompt the user is typing into.
-            if let Ok((column, row)) = self.tmux.cursor_position(&pane.pane_id).await {
-                // The wire format is one-based.
-                let _ = stdout.write_all(format!("\x1b[{};{}H", row + 1, column + 1).as_bytes()).await;
-            }
-            let _ = stdout.flush().await;
-        }
-
-        // 2. Live bytes through a fifo. tmux writes, we forward.
-        let fifo = std::env::temp_dir().join(format!("overnight-stream-{}.fifo", Uuid::now_v7()));
-        let fifo_str = fifo.to_string_lossy().to_string();
-        make_fifo(&fifo_str)?;
-
-        self.tmux
-            .pipe_pane_start(&pane.pane_id, &format!("cat > '{fifo_str}'"))
-            .await?;
-
-        // Open the fifo READ-WRITE, not read-only.
-        //
-        // A read-only fifo reader gets EOF the instant the last writer closes,
-        // and tmux's `cat` opens lazily, so a read-only open ends the stream
-        // immediately on an idle terminal. Holding a write handle ourselves
-        // means there is always at least one writer, so reads block for more
-        // data instead of reporting end of stream.
-        let file = tokio::task::spawn_blocking({
-            let fifo = fifo.clone();
-            move || std::fs::OpenOptions::new().read(true).write(true).open(&fifo)
-        })
-        .await
-        .map_err(|_| DomainError::OperationFailed)?
-        .map_err(|e| {
-            tracing::warn!(error = %e, "could not open stream fifo");
-            DomainError::OperationFailed
-        })?;
-        let file = tokio::fs::File::from_std(file);
-
-        let mut reader = tokio::io::BufReader::new(file);
-        let mut buf = vec![0u8; 16 * 1024];
-
-        loop {
-            use tokio::io::AsyncReadExt;
-            match reader.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    if stdout.write_all(&buf[..n]).await.is_err() {
-                        break;
-                    }
-                    let _ = stdout.flush().await;
-                }
-                Err(_) => break,
-            }
-        }
-
-        let _ = self.tmux.pipe_pane_stop(&pane.pane_id).await;
-        let _ = std::fs::remove_file(&fifo);
-        Ok(())
+        self.runtime().stream(id).await
     }
 
-    /// Persistent input channel: read hex byte-runs from stdin, forward each.
-    ///
-    /// Spawning a process per keystroke costs a SQLite open and a full tmux
-    /// inventory before a single byte moves, which is most of the latency a
-    /// typist actually feels. This resolves the pane ONCE and then forwards,
-    /// so the steady-state cost of a keystroke is one `send-keys`.
     pub async fn input_channel(&self, id: Uuid) -> Result<()> {
-        use tokio::io::{AsyncBufReadExt, BufReader};
-
-        let snapshot = self.inventory.snapshot();
-        let mut pane = snapshot
-            .claimants(id)
-            .into_iter()
-            .find(|p| p.proves_life())
-            .ok_or(DomainError::NotFound)?
-            .pane_id
-            .clone();
-
-        let mut lines = BufReader::new(tokio::io::stdin()).lines();
-
-        while let Ok(Some(line)) = lines.next_line().await {
-            let hex = line.trim();
-            if hex.is_empty() {
-                continue;
-            }
-
-            if self.tmux.send_bytes_hex(&pane, hex).await.is_err() {
-                // The pane may have been replaced by a restart. Re-resolve once
-                // rather than dropping the user's input on the floor.
-                let fresh = self.inventory.refresh().await;
-                match fresh.claimants(id).into_iter().find(|p| p.proves_life()) {
-                    Some(p) => {
-                        pane = p.pane_id.clone();
-                        let _ = self.tmux.send_bytes_hex(&pane, hex).await;
-                    }
-                    None => break,
-                }
-            }
-        }
-        Ok(())
+        self.runtime().input_channel(id).await
     }
 
-    /// Resize the window backing a terminal to the viewer's geometry.
     pub async fn resize_terminal(&self, id: Uuid, columns: u32, rows: u32) -> Result<()> {
-        let (columns, rows) = validate::clamp_size(columns, rows);
-        let snapshot = self.inventory.snapshot();
-        let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
-
-        if pane.columns == columns && pane.rows == rows {
-            return Ok(());
-        }
-        self.tmux.resize_window(&pane.window_id, columns, rows).await
+        self.runtime().resize_terminal(id, columns, rows).await
     }
 
     pub async fn capture(&self, id: Uuid, lines: u32) -> Result<String> {
-        let snapshot = self.inventory.snapshot();
-        let pane = snapshot
-            .claimants(id)
-            .into_iter()
-            .next()
-            .ok_or(DomainError::NotFound)?
-            .pane_id
-            .clone();
-        self.tmux.capture_pane(&pane, lines).await
+        self.runtime().capture(id, lines).await
     }
 
     // ---- derivation ----
@@ -744,7 +575,7 @@ fn now_millis() -> i64 {
 
 /// Derive a stable UUID from the install id so the daemon identity survives
 /// restarts and previously written tags remain provable.
-fn stable_host_id(install_id: &str) -> Uuid {
+pub(crate) fn stable_host_id(install_id: &str) -> Uuid {
     let mut bytes = [0u8; 16];
     for (i, b) in install_id.as_bytes().iter().enumerate() {
         bytes[i % 16] ^= *b;
@@ -799,7 +630,7 @@ mod tests {
 }
 
 /// Create a fifo. tmux writes into it, the daemon reads and forwards.
-fn make_fifo(path: &str) -> Result<()> {
+pub(crate) fn make_fifo(path: &str) -> Result<()> {
     let c = std::ffi::CString::new(path).map_err(|_| DomainError::OperationFailed)?;
     // SAFETY: c is a valid NUL terminated path for the duration of the call.
     let rc = unsafe { libc::mkfifo(c.as_ptr(), 0o600) };
