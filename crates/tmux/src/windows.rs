@@ -200,14 +200,30 @@ impl TmuxServer {
     ///
     /// tmux is already the terminal emulator: it has parsed the program's
     /// output and maintains the screen. Capturing the rendered result is why
-    /// Overnight does not need to emulate a VT itself to show a full-screen TUI
-    /// like a coding agent.
+    /// a client can open onto a running full-screen TUI rather than a blank
+    /// screen it would have to wait for the program to repaint.
     pub async fn capture_screen(&self, pane_id: &str) -> Result<String> {
         let out = self.run(&["capture-pane", "-e", "-p", "-t", pane_id]).await?;
         if !out.ok() {
             return Err(DomainError::TmuxUnavailable);
         }
         Ok(out.stdout)
+    }
+
+    /// Where the cursor is in the pane, zero-based as (column, row).
+    ///
+    /// A captured screen is text: it carries no cursor. Without asking tmux
+    /// separately, a client that replays a capture leaves its caret wherever
+    /// the last replayed character happened to end — which is the bottom of the
+    /// screen, not where the user is typing.
+    pub async fn cursor_position(&self, pane_id: &str) -> Result<(u32, u32)> {
+        let out = self
+            .run(&["display-message", "-p", "-t", pane_id, "#{cursor_x}\t#{cursor_y}"])
+            .await?;
+        if !out.ok() {
+            return Err(DomainError::TmuxUnavailable);
+        }
+        parse_cursor(&out.stdout).ok_or(DomainError::TmuxUnavailable)
     }
 
     /// Resize the exact window backing a terminal.
@@ -306,9 +322,31 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
     })
 }
 
+/// Parse `display-message -p "#{cursor_x}\t#{cursor_y}"`.
+fn parse_cursor(text: &str) -> Option<(u32, u32)> {
+    let line = text.lines().next()?;
+    let (x, y) = line.split_once('\t')?;
+    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_position_is_parsed() {
+        assert_eq!(parse_cursor("12\t7\n"), Some((12, 7)));
+        assert_eq!(parse_cursor("0\t0"), Some((0, 0)));
+    }
+
+    #[test]
+    fn a_cursor_reply_that_is_not_two_numbers_is_rejected() {
+        // Guessing a position would put the caret somewhere the user is not
+        // typing, which is worse than leaving it where the replay ended.
+        assert_eq!(parse_cursor(""), None);
+        assert_eq!(parse_cursor("12"), None);
+        assert_eq!(parse_cursor("a\tb"), None);
+    }
 
     fn line(daemon: &str, ws: &str, term: &str) -> String {
         format!("%3\t@2\t120\t40\t{daemon}\t{ws}\t{term}\t1\t\t")

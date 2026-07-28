@@ -306,6 +306,48 @@ mod tests {
     }
 
     #[test]
+    fn replaying_a_full_screen_must_not_end_with_a_newline() {
+        // The rule the daemon's replay has to respect, stated where the
+        // behaviour actually lives.
+        //
+        // A captured screen is exactly as many lines as the screen is tall
+        // whenever the program fills it, which a full-screen agent always does.
+        // One more line feed at the bottom row scrolls everything up by one:
+        // the top line goes to history, every row appears one too high, and the
+        // caret is stranded on a blank bottom row. That is one newline
+        // producing two different-looking bugs.
+        let lines = ["ROW1", "ROW2", "ROW3", "ROW4", "LAST"];
+        let replay = lines.join("\r\n");
+
+        let mut good = Terminal::new(40, 5);
+        good.feed(b"\x1b[H\x1b[2J");
+        good.feed(replay.as_bytes());
+        let rendered = render(&good);
+        assert_eq!(rendered[0], "ROW1", "the top line must survive");
+        assert_eq!(rendered[4], "LAST", "the last line must sit on the last row");
+
+        let mut bad = Terminal::new(40, 5);
+        bad.feed(b"\x1b[H\x1b[2J");
+        bad.feed(replay.as_bytes());
+        bad.feed(b"\r\n");
+        let shifted = render(&bad);
+        assert_eq!(shifted[0], "ROW2", "the trailing newline scrolls the top line away");
+        assert_eq!(shifted[4], "", "and leaves a blank row where the caret lands");
+    }
+
+    #[test]
+    fn a_replay_can_restore_the_cursor_it_could_not_carry() {
+        // Captured text has no cursor in it, so the position is sent
+        // separately. One-based on the wire, zero-based in the snapshot.
+        let mut t = Terminal::new(40, 5);
+        t.feed(b"\x1b[H\x1b[2Jabc\r\ndef");
+        t.feed(b"\x1b[2;3H");
+        let snap = snapshot(&t);
+        assert_eq!((snap.cursor_row, snap.cursor_column), (1, 2));
+        assert!(snap.cursor_visible);
+    }
+
+    #[test]
     fn scrolling_back_shows_history_and_returning_shows_the_live_screen() {
         let mut t = Terminal::new(40, 6);
         fill(&mut t, 30);

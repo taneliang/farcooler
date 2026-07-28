@@ -465,7 +465,24 @@ impl Service {
             // pipe does not need this because a pty already emits CRLF.
             let normalized = screen.trim_end().replace('\n', "\r\n");
             let _ = stdout.write_all(normalized.as_bytes()).await;
-            let _ = stdout.write_all(b"\r\n").await;
+
+            // No trailing newline.
+            //
+            // The capture is exactly as many lines as the screen is tall
+            // whenever the program fills it — which a full-screen agent always
+            // does. One more line feed at the bottom row scrolls the whole
+            // screen up by one: the top line is pushed into history, everything
+            // appears one row too high, and the caret is left on a blank bottom
+            // row. Both symptoms, one newline.
+
+            // A captured screen is text and carries no cursor, so ask tmux
+            // where it actually is. Without this the caret sits wherever the
+            // last replayed character ended, which is the bottom-left corner,
+            // not the prompt the user is typing into.
+            if let Ok((column, row)) = self.tmux.cursor_position(&pane.pane_id).await {
+                // The wire format is one-based.
+                let _ = stdout.write_all(format!("\x1b[{};{}H", row + 1, column + 1).as_bytes()).await;
+            }
             let _ = stdout.flush().await;
         }
 

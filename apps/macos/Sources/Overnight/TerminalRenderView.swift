@@ -136,6 +136,20 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         onGeometry?(columns, rows)
     }
 
+    /// Where the grid sits, so a diagnostic can check ink against cell rows.
+    struct Metrics {
+        let cellWidth: CGFloat
+        let cellHeight: CGFloat
+        let paddingTop: CGFloat
+        let paddingLeft: CGFloat
+    }
+
+    var metrics: Metrics {
+        Metrics(
+            cellWidth: cellWidth, cellHeight: cellHeight,
+            paddingTop: padding.top, paddingLeft: padding.left)
+    }
+
     /// Replace the core, for when the view is pointed at a different terminal.
     func reset(columns: Int, rows: Int) {
         core = VTCore(columns: columns, rows: rows)
