@@ -50,14 +50,16 @@ fn required_scope(method: &str) -> Option<Scope> {
         "repository.register"
         | "workspace.create"
         | "workspace.archive"
+        | "workspace.restore"
         | "terminal.create"
         | "terminal.resize"
         | "terminal.stop"
         | "terminal.dismiss_lost"
         | "terminal.restart" => Scope::Control,
-        "repository_root.list" | "repository_root.add" | "workspace.remove_worktree" => {
-            Scope::HostAdmin
-        }
+        "repository_root.list"
+        | "repository_root.add"
+        | "repository_root.remove"
+        | "workspace.remove_worktree" => Scope::HostAdmin,
         _ => return None,
     })
 }
@@ -223,6 +225,36 @@ impl Rpc {
                 Ok(result::Value::Workspace(wire::workspace(&view, scope)))
             }
 
+            "workspace.restore" => {
+                let ws = svc.restore_workspace(Self::target(&req)?).await?;
+                let view = svc.workspace_view(&ws).await?;
+                Ok(result::Value::Workspace(wire::workspace(&view, scope)))
+            }
+
+            "repository_root.remove" => {
+                let id = Self::target(&req)?;
+                // Removing a root revokes Overnight's permission to operate
+                // under a whole directory tree, so it is confirmed by name for
+                // the same reason deleting a worktree is.
+                let Some(request::Payload::TypedConfirmation(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let root = svc
+                    .list_roots()?
+                    .into_iter()
+                    .find(|r| r.id == id)
+                    .ok_or(DomainError::NotFound)?;
+                let expected = std::path::Path::new(&root.path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| root.path.clone());
+                if p.typed_confirmation.trim() != expected {
+                    return Err(DomainError::ConfirmationRequired);
+                }
+                let removed = svc.remove_root(id).await?;
+                Ok(result::Value::RepositoryRoot(wire::repository_root(&removed, 0, scope)))
+            }
+
             "workspace.remove_worktree" => {
                 let id = Self::target(&req)?;
                 // The typed confirmation is checked HERE rather than in the
@@ -341,6 +373,8 @@ mod tests {
             "repository.register",
             "workspace.create",
             "workspace.archive",
+            "workspace.restore",
+            "repository_root.remove",
             "workspace.remove_worktree",
             "terminal.create",
             "terminal.resize",
@@ -365,6 +399,7 @@ mod tests {
         // removing a worktree deletes files. Neither is a `control` action.
         assert_eq!(required_scope("repository_root.add"), Some(Scope::HostAdmin));
         assert_eq!(required_scope("workspace.remove_worktree"), Some(Scope::HostAdmin));
+        assert_eq!(required_scope("repository_root.remove"), Some(Scope::HostAdmin));
         // Paths live behind the same gate, so listing roots is admin too.
         assert_eq!(required_scope("repository_root.list"), Some(Scope::HostAdmin));
     }

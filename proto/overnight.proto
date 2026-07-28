@@ -407,4 +407,7 @@ enum ErrorCode {
   ERROR_CODE_TMUX_UNAVAILABLE = 17;
   ERROR_CODE_PATH_NOT_ALLOWED = 18;
   ERROR_CODE_CONFIRMATION_REQUIRED = 19;
+  // Workspaces still exist under the resource being removed. Distinct from
+  // RUNNING_PROCESSES: nothing is running, but records would be orphaned.
+  ERROR_CODE_WORKSPACES_EXIST = 20;
 }

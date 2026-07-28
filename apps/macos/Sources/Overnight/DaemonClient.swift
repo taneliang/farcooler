@@ -68,6 +68,27 @@ final class DaemonClient: ObservableObject {
         repositories = (try? JSONDecoder().decode(RepositoryList.self, from: data))?.repositories ?? []
     }
 
+    /// Allowlisted roots, so the app can tell whether a chosen repository is
+    /// already covered by one.
+    @Published var roots: [RepositoryRoot] = []
+
+    func refreshRoots() async {
+        guard let data = await run(["root", "list", "--json"], background: true) else { return }
+        roots = (try? JSONDecoder().decode(RootList.self, from: data))?.roots ?? []
+    }
+
+    /// Allowlist a directory. Returns the daemon's message, or nil on success.
+    func addRoot(_ path: String) async -> String? {
+        await runReportingError(["root", "add", path])
+    }
+
+    /// Register a git repository that sits inside an allowlisted root.
+    func registerRepository(_ path: String) async -> String? {
+        let error = await runReportingError(["repo", "register", path])
+        await refreshRepositories()
+        return error
+    }
+
     func createWorkspace(repo: String, task: String, branch: String, base: String) async {
         _ = await run(["workspace", "create", repo, task, "--branch", branch, "--base", base])
         await refresh()
@@ -179,5 +200,22 @@ final class DaemonClient: ObservableObject {
                 continuation.resume(returning: stdout)
             }
         }
+    }
+
+    /// Run a command and hand back its failure instead of only banner-ing it.
+    ///
+    /// A sheet needs to show the reason next to the field that caused it and
+    /// stay open so the user can fix it. `lastError` alone would put the
+    /// message in the window behind the sheet, where nobody is looking.
+    private func runReportingError(_ args: [String]) async -> String? {
+        let before = lastError
+        let output = await run(args)
+        if output == nil {
+            let message = lastError ?? "command failed"
+            // Leave the banner clean: the sheet is showing this one.
+            lastError = before
+            return message
+        }
+        return nil
     }
 }

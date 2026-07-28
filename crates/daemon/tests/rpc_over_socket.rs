@@ -211,3 +211,172 @@ async fn a_second_client_sees_what_the_first_one_wrote() {
     let Some(result::Value::RepositoryRootList(list)) = result.value else { panic!("wrong result") };
     assert_eq!(list.items.len(), 1, "a separate connection must see the same state");
 }
+
+#[tokio::test]
+async fn a_root_is_removed_only_with_its_exact_name() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let repo = tempfile::tempdir().unwrap();
+    let name = repo.path().file_name().unwrap().to_string_lossy().into_owned();
+
+    let mut add = request("repository_root.add");
+    add.payload = Some(request::Payload::RepositoryRootAdd(
+        overnight_protocol::v1::RepositoryRootAdd {
+            absolute_path: repo.path().to_string_lossy().into_owned(),
+            typed_confirmation: String::new(),
+        },
+    ));
+    let result = client.call(add).await.expect("add");
+    let Some(result::Value::RepositoryRoot(root)) = result.value else { panic!("wrong result") };
+
+    // The wrong name is refused. Removing a root revokes access to a whole
+    // tree, so a near-miss must not go through.
+    let mut wrong = request("repository_root.remove");
+    wrong.target_resource_id = Some(root.id.clone());
+    wrong.payload = Some(request::Payload::TypedConfirmation(
+        overnight_protocol::v1::TypedConfirmation { typed_confirmation: "nope".into() },
+    ));
+    match client.call(wrong).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(code, ErrorCode::ConfirmationRequired as i32)
+        }
+        other => panic!("expected a confirmation refusal, got {other:?}"),
+    }
+
+    // Still there.
+    let result = client.call(request("repository_root.list")).await.expect("list");
+    let Some(result::Value::RepositoryRootList(list)) = result.value else { panic!("wrong result") };
+    assert_eq!(list.items.len(), 1);
+
+    let mut right = request("repository_root.remove");
+    right.target_resource_id = Some(root.id.clone());
+    right.payload = Some(request::Payload::TypedConfirmation(
+        overnight_protocol::v1::TypedConfirmation { typed_confirmation: name },
+    ));
+    client.call(right).await.expect("remove");
+
+    let result = client.call(request("repository_root.list")).await.expect("list");
+    let Some(result::Value::RepositoryRootList(list)) = result.value else { panic!("wrong result") };
+    assert!(list.items.is_empty());
+
+    // Nothing on disk was touched.
+    assert!(repo.path().exists(), "removing a root must not delete anything");
+}
+
+#[tokio::test]
+async fn removing_a_root_leaves_no_orphaned_repositories() {
+    // A repository exists only as a member of a root. Leaving one behind would
+    // strand a row pointing at a tree Overnight may no longer touch.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let name = dir.path().file_name().unwrap().to_string_lossy().into_owned();
+    let repo_path = dir.path().join("demo");
+    std::fs::create_dir(&repo_path).unwrap();
+    std::process::Command::new("git")
+        .args(["init", "-q", "."])
+        .current_dir(&repo_path)
+        .status()
+        .unwrap();
+
+    let mut add = request("repository_root.add");
+    add.payload = Some(request::Payload::RepositoryRootAdd(
+        overnight_protocol::v1::RepositoryRootAdd {
+            absolute_path: dir.path().to_string_lossy().into_owned(),
+            typed_confirmation: String::new(),
+        },
+    ));
+    let result = client.call(add).await.expect("add");
+    let Some(result::Value::RepositoryRoot(root)) = result.value else { panic!("wrong result") };
+
+    let mut register = request("repository.register");
+    register.payload = Some(request::Payload::RepositoryRegister(
+        overnight_protocol::v1::RepositoryRegister {
+            relative_path: repo_path.to_string_lossy().into_owned(),
+        },
+    ));
+    client.call(register).await.expect("register");
+
+    let mut remove = request("repository_root.remove");
+    remove.target_resource_id = Some(root.id.clone());
+    remove.payload = Some(request::Payload::TypedConfirmation(
+        overnight_protocol::v1::TypedConfirmation { typed_confirmation: name },
+    ));
+    client.call(remove).await.expect("remove");
+
+    let result = client.call(request("repository.list")).await.expect("list");
+    let Some(result::Value::RepositoryList(list)) = result.value else { panic!("wrong result") };
+    assert!(list.items.is_empty(), "the repository must go with its root");
+}
+
+#[tokio::test]
+async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() {
+    // Not RUNNING_PROCESSES: nothing is running. The distinction matters
+    // because the two have different remedies, and a client can only say
+    // "remove the worktrees first" if it is told that is the problem.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let name = dir.path().file_name().unwrap().to_string_lossy().into_owned();
+    let repo_path = dir.path().join("demo");
+    std::fs::create_dir(&repo_path).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo_path)
+            .status()
+            .unwrap();
+    }
+
+    let mut add = request("repository_root.add");
+    add.payload = Some(request::Payload::RepositoryRootAdd(
+        overnight_protocol::v1::RepositoryRootAdd {
+            absolute_path: dir.path().to_string_lossy().into_owned(),
+            typed_confirmation: String::new(),
+        },
+    ));
+    let result = client.call(add).await.expect("add");
+    let Some(result::Value::RepositoryRoot(root)) = result.value else { panic!("wrong result") };
+
+    let mut register = request("repository.register");
+    register.payload = Some(request::Payload::RepositoryRegister(
+        overnight_protocol::v1::RepositoryRegister {
+            relative_path: repo_path.to_string_lossy().into_owned(),
+        },
+    ));
+    let result = client.call(register).await.expect("register");
+    let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
+
+    let mut create = request("workspace.create");
+    create.target_resource_id = Some(repository.id.clone());
+    create.payload = Some(request::Payload::WorkspaceCreate(
+        overnight_protocol::v1::WorkspaceCreate {
+            task_name: "a task".into(),
+            branch: "feat/x".into(),
+            base_revision: "HEAD".into(),
+            cli_preset: String::new(),
+        },
+    ));
+    client.call(create).await.expect("workspace.create");
+
+    let mut remove = request("repository_root.remove");
+    remove.target_resource_id = Some(root.id.clone());
+    remove.payload = Some(request::Payload::TypedConfirmation(
+        overnight_protocol::v1::TypedConfirmation { typed_confirmation: name },
+    ));
+    match client.call(remove).await {
+        Err(ClientError::Daemon { code, retryable, .. }) => {
+            assert_eq!(code, ErrorCode::WorkspacesExist as i32);
+            assert!(!retryable, "retrying cannot help; the user has to act");
+        }
+        other => panic!("expected WORKSPACES_EXIST, got {other:?}"),
+    }
+}

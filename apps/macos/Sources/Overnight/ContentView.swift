@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var pollTask: Task<Void, Never>?
 
     @State private var showNewWorkspace = false
+    @State private var showAddRepository = false
     @State private var newTerminalFor: Workspace?
     @State private var removeWorkspace: Workspace?
 
@@ -26,6 +27,7 @@ struct ContentView: View {
         .task {
             await client.refresh()
             await client.refreshRepositories()
+            await client.refreshRoots()
             expandAll()
             selectFirstRunningTerminal()
             startPolling()
@@ -38,6 +40,17 @@ struct ContentView: View {
             // The user may have approved the login item in System Settings
             // while we were in the background; nothing tells us but this.
             service.refresh()
+        }
+        .sheet(isPresented: $showAddRepository) {
+            AddRepositorySheet(
+                roots: client.roots,
+                onAddRoot: { path in
+                    let failure = await client.addRoot(path)
+                    await client.refreshRoots()
+                    return failure
+                },
+                onRegister: { path in await client.registerRepository(path) }
+            )
         }
         .sheet(isPresented: $showNewWorkspace) {
             NewWorkspaceSheet(repositories: client.repositories) { repo, task, branch, base in
@@ -106,14 +119,22 @@ struct ContentView: View {
             Text("Fleet").font(.headline)
             if client.busy { ProgressView().controlSize(.mini) }
             Spacer()
-            Button {
-                showNewWorkspace = true
+            // A menu rather than a button, because "add a repository" has to be
+            // reachable at all times. It used to live only in the empty state,
+            // so once you had one workspace there was no way to add a second
+            // repository without dropping to the terminal.
+            Menu {
+                Button("New workspace…") { showNewWorkspace = true }
+                    .disabled(client.repositories.isEmpty)
+                Divider()
+                Button("Add repository…") { showAddRepository = true }
             } label: {
                 Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
             }
-            .buttonStyle(.borderless)
-            .help("New workspace")
-            .disabled(client.repositories.isEmpty)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Add a workspace or a repository")
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
@@ -132,11 +153,11 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
 
             if client.repositories.isEmpty {
-                Text("Register a repository first:\novernight repo register <path>")
-                    .font(.caption.monospaced())
+                Text("Add a repository to get started.")
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
-                    .padding(.top, 2)
+                Button("Add repository…") { showAddRepository = true }.padding(.top, 4)
             } else {
                 Button("New workspace") { showNewWorkspace = true }.padding(.top, 4)
             }

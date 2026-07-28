@@ -62,6 +62,14 @@ pub enum DomainError {
 
     #[error("exact typed confirmation required")]
     ConfirmationRequired,
+
+    /// Deliberately distinct from `RunningProcesses`: nothing is running, but
+    /// removing anyway would strand records and leave worktree directories on
+    /// disk that Overnight would no longer be allowed to clean up. A client has
+    /// to tell the user to remove those first, which it cannot do if this
+    /// arrives as "managed processes are still running".
+    #[error("workspaces still exist under this resource")]
+    WorkspacesExist,
 }
 
 impl DomainError {
@@ -86,6 +94,7 @@ impl DomainError {
             DomainError::TmuxUnavailable => (ErrorCode::TmuxUnavailable, true),
             DomainError::PathNotAllowed => (ErrorCode::PathNotAllowed, false),
             DomainError::ConfirmationRequired => (ErrorCode::ConfirmationRequired, false),
+            DomainError::WorkspacesExist => (ErrorCode::WorkspacesExist, false),
         }
     }
 
@@ -134,6 +143,7 @@ mod tests {
             DomainError::TmuxUnavailable,
             DomainError::PathNotAllowed,
             DomainError::ConfirmationRequired,
+            DomainError::WorkspacesExist,
         ]
     }
 

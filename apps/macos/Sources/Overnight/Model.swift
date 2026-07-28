@@ -38,6 +38,21 @@ struct Repository: Decodable, Identifiable, Hashable {
     var remote: String
 }
 
+/// An allowlisted directory Overnight may operate under.
+///
+/// `path` is optional in the protocol — it is returned only to a host_admin
+/// client — so the model has to allow its absence rather than assume it.
+struct RepositoryRoot: Decodable, Identifiable, Hashable {
+    var id: String
+    var short: String
+    var path: String?
+    var repositories: Int
+}
+
+struct RootList: Decodable {
+    var roots: [RepositoryRoot]
+}
+
 struct RepositoryList: Decodable {
     var repositories: [Repository]
 }

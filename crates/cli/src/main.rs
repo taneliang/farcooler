@@ -71,6 +71,16 @@ enum RootCmd {
     /// Allowlist a directory Overnight may operate in.
     Add { path: PathBuf },
     List,
+    /// Stop allowing Overnight to operate under a directory.
+    ///
+    /// Removes its registered repositories too, and touches nothing on disk.
+    Remove {
+        root: String,
+        /// The root directory's exact name. Required, because this revokes
+        /// access to a whole tree.
+        #[arg(long)]
+        confirm: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -95,6 +105,8 @@ enum WorkspaceCmd {
     List,
     /// Hide a workspace. Never changes git data.
     Archive { workspace: String },
+    /// Bring an archived workspace back.
+    Restore { workspace: String },
     /// Remove the worktree. Keeps the branch and everything committed.
     RemoveWorktree {
         workspace: String,
@@ -247,6 +259,18 @@ async fn root(cmd: RootCmd, json: bool) -> Fallible {
                 short_bytes(&root.id),
                 root.display_path.unwrap_or_else(|| root.path_token.clone())
             );
+        }
+        RootCmd::Remove { root, confirm } => {
+            let roots = list_roots(&mut link).await?;
+            let target = resolve(&roots, &root, |r| &r.id, "root")?;
+            link.call(with(
+                req_for("repository_root.remove", uuid_of(&target.id)),
+                request::Payload::TypedConfirmation(overnight_protocol::v1::TypedConfirmation {
+                    typed_confirmation: confirm,
+                }),
+            ))
+            .await?;
+            println!("removed root {} (nothing on disk was touched)", short_bytes(&target.id));
         }
         RootCmd::List => {
             let roots = list_roots(&mut link).await?;
@@ -425,6 +449,13 @@ async fn workspace(cmd: WorkspaceCmd, json: bool) -> Fallible {
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
             link.call(req_for("workspace.archive", uuid_of(&ws.id))).await?;
             println!("archived {}  (git data untouched)", short_bytes(&ws.id));
+        }
+
+        WorkspaceCmd::Restore { workspace } => {
+            let all = list_workspaces(&mut link).await?;
+            let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
+            link.call(req_for("workspace.restore", uuid_of(&ws.id))).await?;
+            println!("restored {}", short_bytes(&ws.id));
         }
 
         WorkspaceCmd::RemoveWorktree { workspace, confirm } => {

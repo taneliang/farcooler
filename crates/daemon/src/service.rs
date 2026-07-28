@@ -263,6 +263,65 @@ impl Service {
         )
     }
 
+    /// Bring an archived workspace back.
+    ///
+    /// Archiving hides; it never touched git, so restoring never has to
+    /// reconstruct anything. If the worktree was separately removed the
+    /// workspace comes back without one and derives its state accordingly,
+    /// which is more honest than refusing to show it at all.
+    pub async fn restore_workspace(&self, id: Uuid) -> Result<models::Workspace> {
+        let ws = self.store.get_workspace(id)?;
+        if !ws.archived {
+            return Ok(ws);
+        }
+        self.store.update_workspace(
+            id,
+            ws.resource_version,
+            &ws.task_name,
+            &ws.branch,
+            &ws.worktree_path,
+            false,
+            ws.creation_failed,
+        )
+    }
+
+    /// Stop allowing Overnight to operate under a directory.
+    ///
+    /// Refused while any workspace under this root is still live, because a
+    /// root is the thing that makes those workspaces legal: removing it while
+    /// they exist would leave records Overnight can no longer act on. Archived
+    /// workspaces do not block it — they are already out of the way — and
+    /// nothing on disk is touched either way.
+    pub async fn remove_root(&self, id: Uuid) -> Result<models::RepositoryRoot> {
+        let root = self.store.get_repository_root(id)?;
+        let repositories = self.store.list_repositories_for_root(id)?;
+
+        // Refused while ANY workspace remains, archived or not.
+        //
+        // The design's rule was "refused while non-archived workspaces exist",
+        // which is the right instinct but leaves a gap: an archived workspace
+        // still has a worktree directory on disk. Deleting its record with the
+        // root would strand that directory somewhere Overnight is no longer
+        // allowed to touch, so it could never be cleaned up. Removing the
+        // worktree already deletes the record, so "remove the worktrees first"
+        // is a reachable instruction rather than a dead end.
+        let mut remaining = 0;
+        for repository in &repositories {
+            remaining += self.store.list_workspaces_for_repository(repository.id)?.len();
+        }
+        if remaining > 0 {
+            return Err(DomainError::WorkspacesExist);
+        }
+
+        // The repositories go with it. They exist only as members of a root,
+        // and leaving them behind would strand rows pointing at nothing.
+        for repository in repositories {
+            self.store.delete_repository(repository.id, repository.resource_version)?;
+        }
+        self.store.delete_repository_root(id, root.resource_version)?;
+        Ok(root)
+    }
+
     /// Remove a workspace's worktree.
     ///
     /// The most destructive action in the product. Refused while any managed
