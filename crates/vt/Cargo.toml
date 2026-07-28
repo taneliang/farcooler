@@ -1,0 +1,13 @@
+[package]
+name = "overnight-vt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+# Both, so platforms can link statically (iOS) or dynamically (Mac dev).
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+alacritty_terminal = "0.26"

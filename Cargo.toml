@@ -6,6 +6,7 @@ members = [
     "crates/store",
     "crates/tmux",
     "crates/transport",
+    "crates/vt",
     "crates/daemon",
     "crates/cli",
 ]
