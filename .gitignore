@@ -2,3 +2,8 @@
 **/*.rs.bk
 .DS_Store
 apps/macos/.build
+apps/macos/build
+
+# Staged by apps/macos/build-vt.sh from crates/vt/include, which is the single
+# source of truth for the ABI. Committing a copy would let the two drift.
+apps/macos/Sources/COvernightVT/overnight_vt.h

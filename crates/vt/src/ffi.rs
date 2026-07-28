@@ -51,6 +51,10 @@ pub struct VtSnapshot {
     pub cursor_row: u16,
     pub cursor_column: u16,
     pub cursor_visible: bool,
+    /// How far the view is scrolled back, in lines. Zero means live.
+    pub display_offset: u32,
+    /// Lines available above the screen, for drawing a scrollbar.
+    pub history_size: u32,
 }
 
 /// Opaque to callers.
@@ -162,9 +166,34 @@ pub unsafe extern "C" fn overnight_vt_snapshot(handle: *mut c_void, out: *mut Vt
             cursor_row: snap.cursor_row,
             cursor_column: snap.cursor_column,
             cursor_visible: snap.cursor_visible,
+            display_offset: snap.display_offset,
+            history_size: snap.history_size,
         };
     }
     true
+}
+
+/// Scroll the view. Positive goes back into history, negative returns toward
+/// the live screen. Clamped at both ends.
+///
+/// Scrollback is the client's own view; the program is never told about it, so
+/// this produces no bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn overnight_vt_scroll(handle: *mut c_void, lines: i32) {
+    let Some(h) = (unsafe { as_handle(handle) }) else { return };
+    h.terminal.scroll(lines);
+    h.revision = h.revision.wrapping_add(1);
+}
+
+/// Jump back to the live screen.
+///
+/// Call this on input: typing into a scrolled-back view would show the user
+/// nothing of what they typed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn overnight_vt_scroll_to_bottom(handle: *mut c_void) {
+    let Some(h) = (unsafe { as_handle(handle) }) else { return };
+    h.terminal.scroll_to_bottom();
+    h.revision = h.revision.wrapping_add(1);
 }
 
 /// Take bytes the program wants written back to the pty.
@@ -418,6 +447,8 @@ mod tests {
             cursor_row: 0,
             cursor_column: 0,
             cursor_visible: false,
+            display_offset: 0,
+            history_size: 0,
         };
         assert!(unsafe { overnight_vt_snapshot(h, &mut snap) });
         let cells = unsafe {
@@ -620,6 +651,28 @@ mod tests {
             unsafe { overnight_vt_encode_paste(h, text.as_ptr(), text.len(), buf.as_mut_ptr(), needed) };
         assert_eq!(n, needed);
         assert_eq!(buf, b"\x1b[200~hello\x1b[201~".to_vec());
+
+        unsafe { overnight_vt_free(h) };
+    }
+
+    #[test]
+    fn scrolling_crosses_the_boundary_with_its_position() {
+        let h = overnight_vt_new(40, 6);
+        for i in 0..30 {
+            feed(h, format!("line{i}\r\n").as_bytes());
+        }
+
+        let live = read(h).0;
+        assert_eq!(live.display_offset, 0);
+        assert_eq!(live.history_size, 25);
+
+        unsafe { overnight_vt_scroll(h, 10) };
+        let back = read(h).0;
+        assert_eq!(back.display_offset, 10);
+        assert!(!back.cursor_visible, "the caret is off-screen when scrolled back");
+
+        unsafe { overnight_vt_scroll_to_bottom(h) };
+        assert_eq!(read(h).0.display_offset, 0);
 
         unsafe { overnight_vt_free(h) };
     }

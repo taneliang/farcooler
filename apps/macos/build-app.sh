@@ -13,6 +13,9 @@ cd "$(dirname "$0")"
 CONFIG="${1:-release}"
 APP="build/Overnight.app"
 
+# SwiftPM cannot build a Rust crate, and the app will not link without it.
+./build-vt.sh >/dev/null
+
 echo "==> Building ($CONFIG)"
 swift build -c "$CONFIG" >/dev/null
 

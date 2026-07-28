@@ -37,20 +37,31 @@ pub struct Snapshot {
     pub cursor_row: u16,
     pub cursor_column: u16,
     pub cursor_visible: bool,
+    /// How far the view is scrolled back, in lines. Zero means live.
+    pub display_offset: u32,
+    /// Lines available above the screen. The client draws its scrollbar from
+    /// this rather than counting rows itself.
+    pub history_size: u32,
 }
 
-/// Read the current screen.
+/// Read the currently displayed screen, which is not always the live one: when
+/// the user has scrolled back, this returns what they are looking at.
 pub fn snapshot(term: &Terminal) -> Snapshot {
     let t = term.term();
     let grid = t.grid();
     let cols = grid.columns();
     let lines = grid.screen_lines();
+    // Indexing the grid by line ignores the scroll position — line 0 is always
+    // the top of the ACTIVE region, and history is at negative lines. So the
+    // offset has to be applied here, or scrolling back would silently show the
+    // live screen.
+    let offset = grid.display_offset() as i32;
 
     let mut rows = Vec::with_capacity(lines);
     for line in 0..lines {
         let mut cells = Vec::with_capacity(cols);
         for col in 0..cols {
-            let c = &grid[Line(line as i32)][Column(col)];
+            let c = &grid[Line(line as i32 - offset)][Column(col)];
             let flags = c.flags;
             cells.push(Cell {
                 ch: c.c,
@@ -66,13 +77,23 @@ pub fn snapshot(term: &Terminal) -> Snapshot {
         rows.push(Row { cells });
     }
 
+    // The cursor sits at a fixed place in the active region, so scrolling back
+    // moves it down the view and eventually off it. Reporting it as invisible
+    // then is the honest answer: drawing it clamped to the last row would put a
+    // caret somewhere the user is not typing.
     let cursor = grid.cursor.point;
+    let cursor_row = cursor.line.0 + offset;
+    let on_screen = cursor_row >= 0 && (cursor_row as usize) < lines;
+
     Snapshot {
         columns: cols as u16,
         rows,
-        cursor_row: cursor.line.0.max(0) as u16,
+        cursor_row: cursor_row.max(0) as u16,
         cursor_column: cursor.column.0 as u16,
-        cursor_visible: t.mode().contains(alacritty_terminal::term::TermMode::SHOW_CURSOR),
+        cursor_visible: on_screen
+            && t.mode().contains(alacritty_terminal::term::TermMode::SHOW_CURSOR),
+        display_offset: offset as u32,
+        history_size: grid.total_lines().saturating_sub(lines) as u32,
     }
 }
 

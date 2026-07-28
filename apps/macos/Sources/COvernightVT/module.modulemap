@@ -1,0 +1,8 @@
+// The Rust terminal core, as seen by Swift.
+//
+// The header is copied here by build-vt.sh from crates/vt/include, which is the
+// single source of truth. Do not edit the copy.
+module COvernightVT {
+    header "overnight_vt.h"
+    export *
+}

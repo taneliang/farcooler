@@ -62,8 +62,9 @@ impl Terminal {
         let (columns, rows) = clamp(columns, rows);
         let collector = Collector::default();
         let size = TermSize::new(columns as usize, rows as usize);
+        let config = Config { scrolling_history: SCROLLBACK_LINES, ..Config::default() };
         Self {
-            term: Term::new(Config::default(), &size, collector.clone()),
+            term: Term::new(config, &size, collector.clone()),
             parser: Processor::new(),
             collector,
         }
@@ -99,6 +100,23 @@ impl Terminal {
         std::mem::take(&mut *guard)
     }
 
+    /// Scroll the view. Positive goes back into history, negative returns
+    /// toward the live screen; the core clamps at both ends.
+    ///
+    /// Scrollback is the client's own view, not something the program is told
+    /// about, so this never sends bytes anywhere.
+    pub fn scroll(&mut self, lines: i32) {
+        use alacritty_terminal::grid::Scroll;
+        self.term.scroll_display(Scroll::Delta(lines));
+    }
+
+    /// Jump back to the live screen. Typing should always do this, or the user
+    /// types into a view that is not showing them what they typed.
+    pub fn scroll_to_bottom(&mut self) {
+        use alacritty_terminal::grid::Scroll;
+        self.term.scroll_display(Scroll::Bottom);
+    }
+
     /// The modes the program has set. Input encoding depends on these, which is
     /// why key encoding lives beside the emulator rather than in a renderer.
     pub fn mode(&self) -> alacritty_terminal::term::TermMode {
@@ -131,6 +149,15 @@ impl Terminal {
         &self.term
     }
 }
+
+/// How much history a terminal keeps.
+///
+/// Stated rather than inherited, because it is a product decision: an agent
+/// working overnight produces a lot of output, and the user's first question in
+/// the morning is what it did an hour ago. At ~200 bytes a line this is a few
+/// megabytes per terminal, which is the same order as the design's 8 MiB
+/// replay buffer, so the two stay in proportion.
+pub const SCROLLBACK_LINES: usize = 10_000;
 
 /// Terminal dimensions are clamped to the same range the protocol enforces.
 fn clamp(columns: u16, rows: u16) -> (u16, u16) {
@@ -269,6 +296,79 @@ mod tests {
         let s = t.take_signals();
         assert!(!s.pty_writes.is_empty(), "the reply must be sent back to the program");
         assert_eq!(s.pty_writes[0], 0x1b);
+    }
+
+    /// Write `count` numbered lines, so scrolled-back content is identifiable.
+    fn fill(t: &mut Terminal, count: usize) {
+        for i in 0..count {
+            t.feed(format!("line{i}\r\n").as_bytes());
+        }
+    }
+
+    #[test]
+    fn scrolling_back_shows_history_and_returning_shows_the_live_screen() {
+        let mut t = Terminal::new(40, 6);
+        fill(&mut t, 30);
+        let live = render(&t);
+        assert_eq!(live[4], "line29");
+
+        t.scroll(10);
+        let back = render(&t);
+        assert_ne!(back, live);
+        assert_eq!(back[4], "line19");
+
+        t.scroll_to_bottom();
+        assert_eq!(render(&t), live);
+    }
+
+    #[test]
+    fn scrolling_is_clamped_at_both_ends() {
+        let mut t = Terminal::new(40, 6);
+        fill(&mut t, 30);
+
+        t.scroll(100_000);
+        let top = render(&t);
+        assert_eq!(top[0], "line0", "cannot scroll past the oldest line");
+
+        t.scroll(-100_000);
+        assert_eq!(snapshot(&t).display_offset, 0, "cannot scroll past the live screen");
+    }
+
+    #[test]
+    fn the_cursor_is_not_drawn_where_the_user_is_not_typing() {
+        // Scrolled back, the cursor is off-screen. Clamping it to the last row
+        // would put a caret somewhere nothing is being typed.
+        let mut t = Terminal::new(40, 6);
+        fill(&mut t, 30);
+        assert!(snapshot(&t).cursor_visible);
+
+        t.scroll(20);
+        assert!(!snapshot(&t).cursor_visible);
+
+        t.scroll_to_bottom();
+        assert!(snapshot(&t).cursor_visible);
+    }
+
+    #[test]
+    fn history_size_reports_what_is_available_above() {
+        let mut t = Terminal::new(40, 6);
+        assert_eq!(snapshot(&t).history_size, 0);
+        fill(&mut t, 30);
+        // 30 lines written into a 6-row screen leaves 25 above it.
+        assert_eq!(snapshot(&t).history_size, 25);
+    }
+
+    #[test]
+    fn new_output_does_not_yank_a_scrolled_back_view_to_the_bottom() {
+        // An agent that keeps printing must not drag the screen out from under
+        // someone reading what it did ten minutes ago.
+        let mut t = Terminal::new(40, 6);
+        fill(&mut t, 30);
+        t.scroll(10);
+        let reading = render(&t);
+
+        fill(&mut t, 5);
+        assert_eq!(render(&t), reading, "the view must stay where the user put it");
     }
 
     #[test]

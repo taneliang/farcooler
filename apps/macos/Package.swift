@@ -1,22 +1,36 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
+
+// Where the Rust terminal core's static library lands.
+//
+// SwiftPM has no notion of "build the Rust first", and a relative -L is
+// resolved against a working directory SwiftPM does not promise. So the path is
+// derived from this file's own location, which is the one thing that is always
+// known. build-vt.sh puts the library there.
+let repoRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()  // apps/macos
+    .deletingLastPathComponent()  // apps
+    .deletingLastPathComponent()  // repo root
+let rustLibDir = repoRoot.appendingPathComponent("target/release").path
 
 let package = Package(
     name: "Overnight",
     platforms: [.macOS(.v14)],
-    dependencies: [
-        // A real VT emulator. Overnight's accepted long-term core is
-        // libghostty-vt behind an Overnight-owned C ABI shared by Mac, iOS and
-        // Android. SwiftTerm is the Mac-only interim: it gives correct VT
-        // parsing, mouse reporting, selection and scrollback today, which is
-        // what makes a coding agent usable, without hand-rolling an emulator.
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.0")
-    ],
     targets: [
+        // The Rust terminal core. One emulator, in the language the daemon
+        // already speaks, behind an Overnight-owned C ABI — so the same core
+        // serves Mac, iOS and Android, and each platform writes only a
+        // renderer. See crates/vt.
+        .systemLibrary(name: "COvernightVT", path: "Sources/COvernightVT"),
         .executableTarget(
             name: "Overnight",
-            dependencies: ["SwiftTerm"],
-            path: "Sources/Overnight"
-        )
+            dependencies: ["COvernightVT"],
+            path: "Sources/Overnight",
+            linkerSettings: [
+                .unsafeFlags(["-L\(rustLibDir)"]),
+                .linkedLibrary("overnight_vt"),
+            ]
+        ),
     ]
 )
