@@ -2,9 +2,19 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var client = DaemonClient()
-    @State private var selectedWorkspace: Workspace?
-    @State private var selectedTerminal: Terminal?
+    @State private var selection: Selection?
+    @State private var expanded: Set<String> = []
     @State private var pollTask: Task<Void, Never>?
+
+    @State private var showNewWorkspace = false
+    @State private var newTerminalFor: Workspace?
+    @State private var removeWorkspace: Workspace?
+
+    /// What the detail pane is showing.
+    enum Selection: Hashable {
+        case workspace(String)
+        case terminal(workspace: String, terminal: String)
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -14,150 +24,246 @@ struct ContentView: View {
         }
         .task {
             await client.refresh()
+            await client.refreshRepositories()
+            expandAll()
             selectFirstRunningTerminal()
             startPolling()
         }
         .onDisappear { pollTask?.cancel() }
-    }
-
-    // MARK: - Sidebar: the fleet
-
-    private var sidebar: some View {
-        List(selection: $selectedWorkspace) {
-            Section {
-                ForEach(client.fleet.workspaces) { ws in
-                    WorkspaceRow(workspace: ws, selectedTerminal: $selectedTerminal)
-                        .tag(ws)
-                }
-            } header: {
-                HStack {
-                    Text("Fleet")
-                    Spacer()
-                    if client.busy { ProgressView().controlSize(.mini) }
-                }
-            }
-
-            if !client.fleet.runtimeHealthy {
-                // An unusable inventory never claims life: everything derives lost.
-                Label(
-                    "tmux runtime unavailable, every terminal derives lost",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .foregroundStyle(.orange)
-                .font(.caption)
+        .sheet(isPresented: $showNewWorkspace) {
+            NewWorkspaceSheet(repositories: client.repositories) { repo, task, branch, base in
+                await client.createWorkspace(repo: repo, task: task, branch: branch, base: base)
+                expandAll()
             }
         }
-        .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 260, ideal: 300)
-        .safeAreaInset(edge: .bottom) { statusBar }
+        .sheet(item: $newTerminalFor) { ws in
+            NewTerminalSheet(workspaceName: ws.task) { preset, title in
+                await client.createTerminal(workspace: ws.short, preset: preset, title: title)
+                expanded.insert(ws.id)
+            }
+        }
+        .sheet(item: $removeWorkspace) { ws in
+            RemoveWorkspaceSheet(
+                workspace: ws,
+                hasRunningTerminals: ws.terminals.contains {
+                    StateKind.parse($0.state) == .running
+                }
+            ) {
+                await client.removeWorktree(ws.short)
+                if case .terminal(let w, _) = selection, w == ws.id { selection = nil }
+            }
+        }
+    }
+
+    // MARK: - Sidebar
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            sidebarHeader
+
+            if client.fleet.workspaces.isEmpty {
+                emptyFleet
+                Spacer(minLength: 0)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 3) {
+                        ForEach(client.fleet.workspaces) { ws in
+                            WorkspaceSection(
+                                workspace: ws,
+                                isExpanded: expanded.contains(ws.id),
+                                selection: $selection,
+                                onToggle: { toggle(ws.id) },
+                                onNewTerminal: { newTerminalFor = ws },
+                                onArchive: { Task { await client.archiveWorkspace(ws.short) } },
+                                onRemove: { removeWorkspace = ws },
+                                onTerminalAction: { term, action in
+                                    Task { await run(action, on: term) }
+                                }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                }
+            }
+
+            statusBar
+        }
+        .navigationSplitViewColumnWidth(min: 268, ideal: 300, max: 400)
+    }
+
+    private var sidebarHeader: some View {
+        HStack(spacing: 8) {
+            Text("Fleet").font(.headline)
+            if client.busy { ProgressView().controlSize(.mini) }
+            Spacer()
+            Button {
+                showNewWorkspace = true
+            } label: {
+                Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .help("New workspace")
+            .disabled(client.repositories.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+    }
+
+    private var emptyFleet: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "rectangle.stack")
+                .font(.system(size: 26))
+                .foregroundStyle(.tertiary)
+            Text("No workspaces").font(.callout.weight(.medium))
+            Text("A workspace is one worktree and branch for one task.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            if client.repositories.isEmpty {
+                Text("Register a repository first:\novernight repo register <path>")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 2)
+            } else {
+                Button("New workspace") { showNewWorkspace = true }.padding(.top, 4)
+            }
+        }
+        .padding(.horizontal, 26)
+        .padding(.vertical, 34)
     }
 
     private var statusBar: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(client.fleet.runtimeHealthy ? Color.green : Color.orange)
-                .frame(width: 7, height: 7)
-            Text("\(client.fleet.livePanes) live panes")
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(client.fleet.runtimeHealthy ? Color.green : Color.orange)
+                    .frame(width: 7, height: 7)
+                Text(
+                    client.fleet.runtimeHealthy
+                        ? "\(client.fleet.livePanes) live"
+                        : "tmux unavailable"
+                )
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Spacer()
-            Button {
-                Task { await client.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
+
+                Spacer()
+
+                Button {
+                    Task {
+                        await client.refresh()
+                        await client.refreshRepositories()
+                    }
+                } label: {
+                    Image(systemName: "arrow.clockwise").font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh")
             }
-            .buttonStyle(.borderless)
-            .help("Refresh")
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.bar)
     }
 
-    // MARK: - Detail: the terminal
+    // MARK: - Detail
 
     @ViewBuilder
     private var detail: some View {
-        if let terminal = selectedTerminal {
-            TerminalPane(
-                terminal: terminal,
-                binary: client.cliPath,
-                environment: client.cliEnvironment,
-                onBytes: { bytes in
-                    // Straight into the serial queue. Never spawn a task per
-                    // keystroke: concurrent sends reorder the bytes and "echo"
-                    // arrives as "ehco".
-                    let q = inputQueue(for: terminal.short)
-                    Task { await q.submit(bytes) }
-                },
-                onGeometry: { cols, rows in
-                    await client.resize(terminal: terminal.short, columns: cols, rows: rows)
-                },
-                onRestart: { Task { await client.restart(terminal: terminal.short) } },
-                onDismiss: { Task { await client.dismissLost(terminal: terminal.short) } },
-                onStop: { Task { await client.stop(terminal: terminal.short) } }
-            )
-        } else if let ws = selectedWorkspace {
-            WorkspaceSummary(workspace: ws) { preset in
-                Task { await client.createTerminal(workspace: ws.short, preset: preset) }
+        switch selection {
+        case .terminal(let wsID, let termID):
+            if let ws = workspace(wsID), let term = ws.terminals.first(where: { $0.id == termID }) {
+                TerminalPane(
+                    terminal: term,
+                    workspace: ws,
+                    binary: client.cliPath,
+                    environment: client.cliEnvironment,
+                    onGeometry: { cols, rows in
+                        await client.resize(terminal: term.short, columns: cols, rows: rows)
+                    },
+                    onAction: { action in Task { await run(action, on: term) } }
+                )
+            } else {
+                placeholder
             }
-        } else {
-            ContentUnavailableView(
-                "Select a workspace",
-                systemImage: "rectangle.split.3x1",
-                description: Text("Each workspace is one worktree and branch for one task.")
-            )
+
+        case .workspace(let wsID):
+            if let ws = workspace(wsID) {
+                WorkspaceDetail(
+                    workspace: ws,
+                    onNewTerminal: { newTerminalFor = ws },
+                    onArchive: { Task { await client.archiveWorkspace(ws.short) } },
+                    onRemove: { removeWorkspace = ws },
+                    onOpenTerminal: { t in
+                        selection = .terminal(workspace: ws.id, terminal: t.id)
+                    }
+                )
+            } else {
+                placeholder
+            }
+
+        case nil:
+            placeholder
         }
+    }
+
+    private var placeholder: some View {
+        ContentUnavailableView {
+            Label("Select a workspace", systemImage: "rectangle.split.3x1")
+        } description: {
+            Text("Each workspace is one worktree and branch for one task.")
+        } actions: {
+            if !client.repositories.isEmpty {
+                Button("New workspace") { showNewWorkspace = true }
+            }
+        }
+    }
+
+    // MARK: - Behaviour
+
+    private func run(_ action: TerminalAction, on term: Terminal) async {
+        switch action {
+        case .restart: await client.restart(terminal: term.short)
+        case .dismissLost: await client.dismissLost(terminal: term.short)
+        case .stop: await client.stop(terminal: term.short)
+        }
+    }
+
+    private func workspace(_ id: String) -> Workspace? {
+        client.fleet.workspaces.first { $0.id == id }
+    }
+
+    private func toggle(_ id: String) {
+        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+    }
+
+    private func expandAll() {
+        expanded.formUnion(client.fleet.workspaces.map(\.id))
     }
 
     /// Land on something usable rather than an empty pane.
-    ///
-    /// A running terminal is what you almost always want on open, so prefer one,
-    /// then fall back to any terminal, then to a workspace.
     private func selectFirstRunningTerminal() {
-        guard selectedTerminal == nil else { return }
-
+        guard selection == nil else { return }
         for ws in client.fleet.workspaces {
             if let t = ws.terminals.first(where: { StateKind.parse($0.state) == .running }) {
-                selectedWorkspace = ws
-                selectedTerminal = t
+                selection = .terminal(workspace: ws.id, terminal: t.id)
                 return
             }
         }
-        for ws in client.fleet.workspaces where !ws.terminals.isEmpty {
-            selectedWorkspace = ws
-            selectedTerminal = ws.terminals.first
-            return
+        if let ws = client.fleet.workspaces.first {
+            selection = .workspace(ws.id)
         }
-        selectedWorkspace = client.fleet.workspaces.first
     }
-
-    /// One serial input queue per terminal, created on first keystroke.
-    ///
-    /// Held outside SwiftUI state because recreating it on a view update would
-    /// lose the ordering guarantee it exists to provide.
-    private func inputQueue(for terminal: String) -> InputQueue {
-        if let existing = Self.queues[terminal] { return existing }
-
-        let client = self.client
-        let q = InputQueue { bytes in
-            await client.sendBytes(terminal: terminal, bytes: bytes)
-        }
-        Self.queues[terminal] = q
-        return q
-    }
-
-    private static var queues: [String: InputQueue] = [:]
 
     private func startPolling() {
         pollTask?.cancel()
         pollTask = Task {
             while !Task.isCancelled {
-                // Two cadences: the screen refreshes fast enough to feel live,
-                // the fleet list far less often because it is not latency
-                // sensitive and each refresh costs a tmux inventory.
-                // The screen no longer polls: it streams. Only the fleet list
-                // needs a periodic refresh, and it is not latency sensitive.
+                // The screen streams, so only the fleet list needs polling and it
+                // is not latency sensitive.
                 try? await Task.sleep(for: .seconds(3))
                 if Task.isCancelled { return }
                 await client.refresh()
@@ -166,234 +272,4 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Rows
-
-struct WorkspaceRow: View {
-    let workspace: Workspace
-    @Binding var selectedTerminal: Terminal?
-
-    var body: some View {
-        DisclosureGroup {
-            ForEach(workspace.terminals) { t in
-                Button {
-                    selectedTerminal = t
-                } label: {
-                    HStack(spacing: 8) {
-                        StateDot(state: t.state)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(t.title).font(.callout)
-                            Text(t.preset)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if t.epoch > 0 {
-                            Text("e\(t.epoch)")
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .background(
-                    selectedTerminal?.id == t.id
-                        ? Color.accentColor.opacity(0.15) : Color.clear
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-            }
-        } label: {
-            HStack(spacing: 8) {
-                StateDot(state: workspace.state)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(workspace.task).font(.body)
-                    Text(workspace.branch)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-}
-
-struct StateDot: View {
-    let state: String
-
-    private var color: Color {
-        switch StateKind.parse(state) {
-        case .running, .active: return .green
-        case .starting: return .yellow
-        case .exited, .ready: return .secondary
-        case .lost, .error: return .red
-        case .archived: return .gray
-        case .unknown: return .gray
-        }
-    }
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 8, height: 8)
-            .help(state)
-    }
-}
-
-// MARK: - Panes
-
-struct WorkspaceSummary: View {
-    let workspace: Workspace
-    let onCreate: (String) -> Void
-
-    private let presets = ["shell", "claude", "codex", "cursor"]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(workspace.task).font(.largeTitle.weight(.semibold))
-                Text(workspace.branch).font(.title3).foregroundStyle(.secondary)
-            }
-
-            LabeledContent("State") {
-                HStack(spacing: 6) {
-                    StateDot(state: workspace.state)
-                    Text(workspace.state)
-                }
-            }
-            LabeledContent("Worktree") {
-                Text(workspace.worktree).font(.caption.monospaced()).textSelection(.enabled)
-            }
-            LabeledContent("Terminals") { Text("\(workspace.terminals.count)") }
-
-            Divider()
-
-            Text("Launch a terminal").font(.headline)
-            HStack {
-                ForEach(presets, id: \.self) { p in
-                    Button(p) { onCreate(p) }
-                }
-            }
-
-            Spacer()
-        }
-        .padding(28)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct TerminalPane: View {
-    let terminal: Terminal
-    let binary: String?
-    let environment: [String: String]
-    let onBytes: ([UInt8]) -> Void
-    let onGeometry: (Int, Int) async -> Void
-    let onRestart: () -> Void
-    let onDismiss: () -> Void
-    let onStop: () -> Void
-
-    private var kind: StateKind { StateKind.parse(terminal.state) }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-
-            if kind == .running || kind == .starting {
-                // A real emulator fed by a live byte stream. Keystrokes, control
-                // chords, arrows, mouse reports and scrolling all belong to it.
-                TerminalSurface(
-                    terminal: terminal.short,
-                    binary: binary,
-                    environment: environment,
-                    onInput: onBytes,
-                    onResize: onGeometry
-                )
-                .id(terminal.id)
-            } else {
-                inactiveScreen
-            }
-
-            footer
-        }
-    }
-
-    private var inactiveScreen: some View {
-        VStack(spacing: 10) {
-            Spacer()
-            Image(systemName: kind == .lost ? "questionmark.circle" : "stop.circle")
-                .font(.system(size: 34))
-                .foregroundStyle(.secondary)
-            Text(explanation)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 460)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            StateDot(state: terminal.state)
-            Text(terminal.title).font(.headline)
-            Text(terminal.preset).font(.caption).foregroundStyle(.secondary)
-
-            Spacer()
-
-            if kind == .lost {
-                // A lost terminal is truthfully lost. Dismissing acknowledges it
-                // without ever relabelling it as an observed exit.
-                Button("Dismiss loss", action: onDismiss)
-                Button("Restart", action: onRestart).buttonStyle(.borderedProminent)
-            } else if kind == .exited {
-                Button("Restart", action: onRestart)
-            } else if kind == .running {
-                Button("Stop", action: onStop)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.bar)
-    }
-
-    @ViewBuilder
-    private var footer: some View {
-        Divider()
-        if kind == .running || kind == .starting {
-            HStack(spacing: 6) {
-                Image(systemName: "keyboard")
-                Text("Typing goes straight to the terminal. Ctrl-C, arrows, Tab and Esc all pass through.")
-                Spacer()
-                Text("\(terminal.preset)")
-                    .foregroundStyle(.tertiary)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-        } else {
-            Text(explanation)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-        }
-    }
-
-    private var explanation: String {
-        switch kind {
-        case .lost:
-            return
-                "This terminal was expected to be running but no live tagged pane proves it. "
-                + "Overnight will not guess: it says lost rather than claiming an exit."
-        case .exited:
-            return "The command exited and Overnight observed it. Restart begins a new epoch."
-        case .starting:
-            return "Coming up. Not yet proved by a live pane."
-        case .error:
-            return "Creation never established a live runtime."
-        default:
-            return "Not accepting input."
-        }
-    }
-}
+enum TerminalAction { case restart, dismissLost, stop }

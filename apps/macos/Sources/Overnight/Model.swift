@@ -31,6 +31,17 @@ struct Workspace: Decodable, Identifiable, Hashable {
     var terminals: [Terminal]
 }
 
+struct Repository: Decodable, Identifiable, Hashable {
+    var id: String
+    var short: String
+    var displayName: String
+    var remote: String
+}
+
+struct RepositoryList: Decodable {
+    var repositories: [Repository]
+}
+
 struct Terminal: Decodable, Identifiable, Hashable {
     var id: String
     var short: String

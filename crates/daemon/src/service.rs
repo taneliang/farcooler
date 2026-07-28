@@ -238,6 +238,40 @@ impl Service {
         )
     }
 
+    /// Remove a workspace's worktree.
+    ///
+    /// The most destructive action in the product. Refused while any managed
+    /// terminal is running, and it never deletes the branch: git history and
+    /// anything pushed survive untouched. A dirty worktree still requires the
+    /// caller to have confirmed, which the client enforces by demanding the
+    /// exact workspace name.
+    pub async fn remove_worktree(&self, id: Uuid) -> Result<()> {
+        let ws = self.store.get_workspace(id)?;
+        let view = self.workspace_view(&ws).await?;
+
+        if view.terminals.iter().any(|t| t.state() == TerminalState::Running) {
+            return Err(DomainError::RunningProcesses);
+        }
+
+        let repo = self.store.get_repository(ws.repository_id)?;
+        let repo_path = self.repository_worktree(&repo);
+        let dest = PathBuf::from(&ws.worktree_path);
+
+        let out = git::git(
+            &repo_path,
+            &["worktree", "remove", "--force", &dest.to_string_lossy()],
+        )
+        .await?;
+
+        if !out.ok {
+            tracing::warn!(stderr = %out.stderr, "worktree remove failed");
+            return Err(DomainError::OperationFailed);
+        }
+
+        // The workspace record goes with the worktree; the BRANCH stays.
+        self.store.delete_workspace(id, ws.resource_version)
+    }
+
     // ---- terminals ----
 
     /// Create a terminal: a tagged tmux window running the preset.
@@ -482,6 +516,48 @@ impl Service {
 
         let _ = self.tmux.pipe_pane_stop(&pane.pane_id).await;
         let _ = std::fs::remove_file(&fifo);
+        Ok(())
+    }
+
+    /// Persistent input channel: read hex byte-runs from stdin, forward each.
+    ///
+    /// Spawning a process per keystroke costs a SQLite open and a full tmux
+    /// inventory before a single byte moves, which is most of the latency a
+    /// typist actually feels. This resolves the pane ONCE and then forwards,
+    /// so the steady-state cost of a keystroke is one `send-keys`.
+    pub async fn input_channel(&self, id: Uuid) -> Result<()> {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let snapshot = self.inventory.snapshot();
+        let mut pane = snapshot
+            .claimants(id)
+            .into_iter()
+            .find(|p| p.proves_life())
+            .ok_or(DomainError::NotFound)?
+            .pane_id
+            .clone();
+
+        let mut lines = BufReader::new(tokio::io::stdin()).lines();
+
+        while let Ok(Some(line)) = lines.next_line().await {
+            let hex = line.trim();
+            if hex.is_empty() {
+                continue;
+            }
+
+            if self.tmux.send_bytes_hex(&pane, hex).await.is_err() {
+                // The pane may have been replaced by a restart. Re-resolve once
+                // rather than dropping the user's input on the floor.
+                let fresh = self.inventory.refresh().await;
+                match fresh.claimants(id).into_iter().find(|p| p.proves_life()) {
+                    Some(p) => {
+                        pane = p.pane_id.clone();
+                        let _ = self.tmux.send_bytes_hex(&pane, hex).await;
+                    }
+                    None => break,
+                }
+            }
+        }
         Ok(())
     }
 

@@ -52,13 +52,35 @@ final class DaemonClient: ObservableObject {
     // MARK: - Commands
 
     func refresh() async {
-        guard let data = await run(["workspace", "list", "--json"]) else { return }
+        guard let data = await run(["workspace", "list", "--json"], background: true) else { return }
         do {
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
             lastError = nil
         } catch {
             lastError = "could not read fleet: \(error.localizedDescription)"
         }
+    }
+
+    @Published var repositories: [Repository] = []
+
+    func refreshRepositories() async {
+        guard let data = await run(["repo", "list", "--json"], background: true) else { return }
+        repositories = (try? JSONDecoder().decode(RepositoryList.self, from: data))?.repositories ?? []
+    }
+
+    func createWorkspace(repo: String, task: String, branch: String, base: String) async {
+        _ = await run(["workspace", "create", repo, task, "--branch", branch, "--base", base])
+        await refresh()
+    }
+
+    func archiveWorkspace(_ workspace: String) async {
+        _ = await run(["workspace", "archive", workspace])
+        await refresh()
+    }
+
+    func removeWorktree(_ workspace: String) async {
+        _ = await run(["workspace", "remove-worktree", workspace])
+        await refresh()
     }
 
     /// The rendered visible screen, colour escapes intact.
@@ -74,19 +96,12 @@ final class DaemonClient: ObservableObject {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    /// Exact input bytes. The client computes the VT encoding; nothing along the
-    /// way reinterprets them as key names.
-    func sendBytes(terminal: String, bytes: [UInt8]) async {
-        guard !bytes.isEmpty else { return }
-        _ = await run(["terminal", "send-hex", terminal, KeyEncoder.hex(bytes)])
-    }
-
     func resize(terminal: String, columns: Int, rows: Int) async {
         _ = await run(["terminal", "resize", terminal, "\(columns)", "\(rows)"])
     }
 
-    func createTerminal(workspace: String, preset: String) async {
-        _ = await run(["terminal", "create", workspace, "--preset", preset])
+    func createTerminal(workspace: String, preset: String, title: String) async {
+        _ = await run(["terminal", "create", workspace, "--preset", preset, "--title", title])
         await refresh()
     }
 
@@ -108,9 +123,12 @@ final class DaemonClient: ObservableObject {
     // MARK: - Subprocess
 
     @discardableResult
-    private func run(_ args: [String]) async -> Data? {
-        busy = true
-        defer { busy = false }
+    private func run(_ args: [String], background: Bool = false) async -> Data? {
+        // A background poll must not toggle `busy`. That is a @Published change,
+        // and every one of them re-evaluates the whole view tree including the
+        // terminal surface, which is wasted work several times a second.
+        if !background { busy = true }
+        defer { if !background { busy = false } }
 
         guard let bin = binary else {
             lastError =

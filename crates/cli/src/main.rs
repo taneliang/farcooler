@@ -75,6 +75,8 @@ enum WorkspaceCmd {
     List,
     /// Hide a workspace. Never changes git data.
     Archive { workspace: String },
+    /// Remove the worktree. Keeps the branch and everything committed.
+    RemoveWorktree { workspace: String },
 }
 
 #[derive(Subcommand)]
@@ -95,6 +97,8 @@ enum TerminalCmd {
     Screen { terminal: String },
     /// Stream live output bytes to stdout until killed. The terminal data plane.
     Stream { terminal: String },
+    /// Persistent input channel: one hex byte-run per stdin line.
+    Input { terminal: String },
     /// Resize the terminal to a viewer's geometry.
     Resize { terminal: String, columns: u32, rows: u32 },
     /// Print recent output.
@@ -171,7 +175,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("registered {}  {}  ({})", short(r.id), r.display_name, r.remote_summary);
         }
         Command::Repo(RepoCmd::List) => {
-            for r in svc.list_repositories()? {
+            let repos = svc.list_repositories()?;
+            if cli.json {
+                let items: Vec<_> = repos
+                    .iter()
+                    .map(|r| {
+                        serde_json::json!({
+                            "id": r.id.to_string(),
+                            "short": short(r.id),
+                            "displayName": r.display_name,
+                            "remote": r.remote_summary,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::json!({ "repositories": items }));
+                return Ok(());
+            }
+            for r in repos {
                 println!("{}  {:20}  {}", short(r.id), r.display_name, r.remote_summary);
             }
         }
@@ -253,6 +273,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("archived {}  (git data untouched)", short(updated.id));
         }
 
+        Command::Workspace(WorkspaceCmd::RemoveWorktree { workspace }) => {
+            let all = svc.list_workspaces()?;
+            let ws = resolve(&all, &workspace, |x| x.id, "workspace")?;
+            svc.remove_worktree(ws.id).await?;
+            println!("removed worktree for {} (branch kept)", short(ws.id));
+        }
+
         Command::Terminal(TerminalCmd::Create { workspace, preset, title }) => {
             let all = svc.list_workspaces()?;
             let ws = resolve(&all, &workspace, |x| x.id, "workspace")?;
@@ -275,6 +302,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Command::Terminal(TerminalCmd::Stream { terminal }) => {
             let id = resolve_terminal(&svc, &terminal).await?;
             svc.stream(id).await?;
+        }
+
+        Command::Terminal(TerminalCmd::Input { terminal }) => {
+            let id = resolve_terminal(&svc, &terminal).await?;
+            svc.input_channel(id).await?;
         }
 
         Command::Terminal(TerminalCmd::Screen { terminal }) => {

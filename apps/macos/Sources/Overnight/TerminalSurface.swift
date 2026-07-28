@@ -117,7 +117,6 @@ struct TerminalSurface: NSViewRepresentable {
     let terminal: String
     let binary: String?
     let environment: [String: String]
-    let onInput: ([UInt8]) -> Void
     /// Resize the pane. Must complete before history is captured.
     let onResize: (Int, Int) async -> Void
 
@@ -126,12 +125,15 @@ struct TerminalSurface: NSViewRepresentable {
     @MainActor
     final class Coordinator {
         var stream: TerminalStream?
+        var input: TerminalInput?
         var attached: String?
         var started = false
 
         func stop() {
             stream?.stop()
             stream = nil
+            input?.stop()
+            input = nil
             started = false
         }
     }
@@ -163,7 +165,11 @@ struct TerminalSurface: NSViewRepresentable {
         coord.attached = terminal
         v.getTerminal().resetToInitialState()
 
-        v.onInput = onInput
+        // Input goes down a persistent pipe, opened once per terminal.
+        let input = TerminalInput()
+        if let binary { input.start(binary: binary, terminal: terminal, environment: environment) }
+        coord.input = input
+        v.onInput = { bytes in input.send(bytes) }
         v.claimKeyboard()
 
         let box = MainActorBox(v)
