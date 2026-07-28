@@ -159,7 +159,7 @@ The first implementation slice proves workspace and terminal-control correctness
 - One launchd-managed, unprivileged local daemon plus CLI, reached through a Unix domain socket. The Mac app stays a thin client; workspace, git, process, terminal, and operation truth remain daemon-owned and survive Mac-app termination.
 - One existing local repository, one worktree/branch workspace flow, one supported coding-agent CLI preset, and multiple terminal tabs.
 - A dedicated tmux server namespace such as `tmux -L overnight-<install-id> -f /dev/null`, containing one host-wide managed session. Overnight never mixes managed windows into the user's default tmux server or depends on the user's tmux configuration.
-- The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy and controls. Its terminal surface uses the shared libghostty core through an Overnight-owned adapter.
+- The daemon uses tmux control mode and stable tmux IDs while the Mac app renders its own hierarchy and controls. Its terminal surface uses the shared Rust terminal core through an Overnight-owned C ABI.
 - `overnight attach WORKSPACE_ID` remains mandatory and attaches an ordinary shell client to the managed session. The equivalent raw tmux command is shown for transparency and recovery.
 - State ownership splits by durability. SQLite stores only what must outlive tmux: repository roots, repositories, workspaces with their worktree and branch, terminal durable identity and intent, agent session IDs, operations, and audit records. tmux is the sole authority for whether a managed process is alive right now. The daemon never stores a terminal runtime state field, so it cannot serve a stale `running`; runtime state is derived per request from intent plus a live exactly-tagged pane, and an untagged or unmatched window is never treated as an Overnight object automatically.
 - No SSH application transport, React Native iOS app, or Linux/WSL2 support in this slice.
@@ -237,7 +237,7 @@ The first slice may ship separate `overnightd` and `overnight` executables from 
 
 ### Mac packaging and daemon lifecycle
 
-The Mac-first slice targets macOS 13 or later and ships one native `Overnight.app` containing the Swift client, Rust daemon, Rust CLI, LaunchAgent property list, protobuf descriptors, and pinned libghostty artifacts:
+The Mac-first slice targets macOS 13 or later and ships one native `Overnight.app` containing the Swift client, Rust daemon, Rust CLI, LaunchAgent property list, protobuf descriptors, and the terminal core static library:
 
 ```text
 Overnight.app/
@@ -266,7 +266,7 @@ Unattended mode has honest boundaries, and the product states them rather than i
 FileVault is the hard limit. Before the disk is unlocked no launchd job of any kind exists, so unattended mode closes the logout gap and cannot close the encrypted-reboot gap. Overnight does not suggest disabling FileVault or enabling auto-login to work around this, because both weaken at-rest protection on a machine holding source code and agent credentials.
 
 The second limit is credentials. A daemon started before any login has no unlocked login keychain, so git operations and coding-agent CLIs that store credentials there fail until the user logs in once after boot. Overnight surfaces this as a specific, named condition rather than an opaque authentication failure, and the host reports it in its self-health reasons.
-- The app is the distribution unit for the Mac daemon. App, daemon, CLI, protocol descriptors, and libghostty pin share one release version. A replacement app performs protocol compatibility checks, asks the old daemon to quiesce, updates registration if necessary, restarts the agent, and verifies tmux reconciliation before declaring the upgrade complete.
+- The app is the distribution unit for the Mac daemon. App, daemon, CLI, protocol descriptors, and terminal core share one release version — they are built from one workspace, so they cannot drift apart. A replacement app performs protocol compatibility checks, asks the old daemon to quiesce, updates registration if necessary, restarts the agent, and verifies tmux reconciliation before declaring the upgrade complete.
 - Moving or replacing the app bundle, disabling its background item, version incompatibility, and deleting the app each have explicit detection and recovery tests in both registration modes. Uninstalling while unattended mode is active unregisters the system daemon, which prompts for administrator authorization once; an uninstall that cannot obtain it reports the exact leftover registration rather than leaving a silent orphan. Unregistering either registration stops only `overnightd`; removing user data, managed worktrees, or live tmux sessions requires separate exact confirmation and is never part of ordinary app deletion.
 - Runtime data lives under `~/Library/Application Support/Overnight/` with user-only permissions. The Unix socket and identity/database files are created in user-only subdirectories and never inside the replaceable app bundle.
 - The daemon needs the user's repositories, git tooling, shells, tmux, and coding-agent CLIs, so the independently distributed Mac build does not place the daemon inside the App Sandbox. Hardened runtime, code signing, notarization, and least-privilege filesystem validation remain release requirements.
@@ -274,16 +274,16 @@ The second limit is credentials. A daemon started before any login has no unlock
 
 The app offers an explicit **Install command-line tool** action that atomically copies the matching `overnight` executable to `~/.local/bin/overnight`. It never edits shell startup files or writes to `/usr/local/bin`; when `~/.local/bin` is absent from `PATH`, it shows the exact user-approved shell configuration. App updates refresh this copy only after compatibility checks, and the CLI always negotiates with the running daemon rather than assuming an identical version.
 
-### Shared terminal core: libghostty
+### Shared terminal core
 
-Overnight uses `libghostty-vt` as its terminal emulation and render-state core on Mac, iOS, and Android. This decision gives every client the same VT parsing, Unicode and grapheme behavior, terminal modes, key and mouse encoding, text reflow, scrollback model, and render-state semantics while preserving platform-native UI:
+Overnight uses one terminal emulation and render-state core on Mac, iOS, and Android, reached through an Overnight-owned C ABI. This gives every client the same VT parsing, Unicode and grapheme behavior, terminal modes, key and mouse encoding, text reflow, scrollback model, and render-state semantics while preserving platform-native UI:
 
 ```text
 protobuf terminal frames
            │
-  OvernightTerminalCore
+  OvernightTerminalCore   ← Overnight's own C ABI
            │
-     libghostty-vt
+   crates/vt (Rust)       ← alacritty_terminal + vte
       ┌────┼──────────┐
       │    │          │
 Mac Swift  iOS native Android Kotlin
@@ -291,8 +291,20 @@ AppKit     RN module  RN module + JNI
 renderer   renderer   renderer
 ```
 
-- `libghostty-vt` consumes terminal output bytes and produces terminal/render state. It does not own the daemon connection, replay sequence, writer lease, workspace model, or tmux lifecycle.
-- `OvernightTerminalCore` is a narrow C-ABI adapter owned by Overnight. Platform code depends on this adapter rather than directly exposing upstream structs or function signatures.
+**The emulator behind the ABI is `alacritty_terminal`, not `libghostty-vt`.** The architecture above is unchanged — a single shared core, an Overnight-owned boundary, thin native renderers — and this is precisely the substitution that owning the boundary was meant to allow. The reasons for the change:
+
+- `libghostty-vt` has no published C package and no released standalone artifact. Building it means vendoring a Zig toolchain into the build of a project whose every other component is Rust.
+- The design already commits to Rust for the daemon, CLI, protocol, and store. Putting the terminal core in the same language means one toolchain, one dependency graph, one cross-compilation story for Android's NDK targets, and no FFI at all between the core and the rest of the backend.
+- `alacritty_terminal` is published on crates.io, semver-stable, and is the emulator inside Alacritty. It carries no rendering, no window system, and no configuration format — it is the VT model alone, which is exactly the slot being filled.
+- The measured cost is not a constraint: parsing runs at ~190 MB/s and a full grid snapshot takes ~11 µs, together 0.4% of a 120 Hz frame. `crates/vt/examples/bench.rs` reproduces this, so a future "the terminal feels laggy" report can be attributed rather than guessed at.
+
+If `libghostty-vt` later ships a stable, packaged C API, only `crates/vt` changes; the ABI and every renderer stay put. That property is the reason this section describes a *boundary* rather than a dependency.
+
+- The core consumes terminal output bytes and produces terminal/render state. It does not own the daemon connection, replay sequence, writer lease, workspace model, or tmux lifecycle.
+- `OvernightTerminalCore` (`crates/vt/include/overnight_vt.h`) is a narrow C-ABI adapter owned by Overnight. Platform code depends on this adapter rather than on upstream structs or function signatures. A test compares the header against the exported ABI in both directions, and compares every constant, because a renamed function fails at link time but a drifted constant fails silently at runtime — sending the wrong key, painting the wrong colour.
+- **Key and mouse encoding live in the core, not in the renderers.** The correct bytes for an arrow key depend on application cursor mode; the wheel becomes arrow keys in the alternate screen; mouse reports have four encodings and the program chooses. Those modes are held by the emulator, so a renderer that encodes input itself is guessing — which is how `[A` ends up typed into a prompt. Ownership here is also what stops Mac, iOS, and Android disagreeing about what Ctrl-C is.
+- **Colour resolution is likewise in the core.** Named and 256-colour palette entries are resolved to packed RGB before crossing the ABI, so three renderers cannot drift into three different palettes.
+- The ABI is shaped for a 60–120 Hz redraw: one call per frame rather than one per cell, filling a buffer owned by the handle and reused, so a steady redraw allocates nothing. A revision counter lets an idle terminal — most of a night — skip the frame for the cost of one integer comparison.
 - Overnight ships two native cores across three platforms: this terminal core and the shared SSH client. They are separate artifacts with separate versions, because the terminal core's pinned upstream cadence and the SSH client's security-patch cadence must not drag each other, but they follow **one** documented FFI convention:
 
 | Rule | Convention |
@@ -313,12 +325,12 @@ renderer   renderer   renderer
 
 The initial terminal spike is not complete until it:
 
-1. Renders a tmux control-mode session in the Swift Mac app through libghostty.
-2. Builds `libghostty-vt` and the Overnight adapter for Android ARM64 in CI.
+1. Renders a tmux control-mode session in the Swift Mac app through the shared core.
+2. Builds `crates/vt` for Android ARM64 in CI.
 3. Displays a recorded interactive terminal fixture in a minimal Android React Native native component on an emulator or physical device.
 4. Runs the same output, key-encoding, resize, alternate-screen, Unicode, scrollback, and gap fixtures against Mac and Android.
 
-Android compilation and rendered-fixture tests are architecture validation for this Mac-first slice, not a user-ready Android client. If the Android build or input/render contract fails, terminal architecture is reopened before the Mac vertical slice expands. Because libghostty's embedding API is not yet versioned, Overnight budgets adapter maintenance and does not depend on source compatibility across pinned upgrades.
+Android compilation and rendered-fixture tests are architecture validation for this Mac-first slice, not a user-ready Android client. If the Android build or input/render contract fails, terminal architecture is reopened before the Mac vertical slice expands. Because the ABI is Overnight's own rather than an upstream one, an emulator upgrade is contained to `crates/vt` and cannot reach a renderer.
 
 ### Product hierarchy
 
@@ -336,8 +348,8 @@ Fleet
 The founder-approved product boundary remains intact, but implementation is ordered to resolve the hardest risks first:
 
 1. **Gate 0: observe the design partner.** Confirm that parallel mobile terminal control is the highest-value workflow and record the actual host, CLI, repository, and failure sequence.
-2. **Gate 1: local tmux and libghostty correctness spike.** A local daemon creates one private tmux-backed workspace, streams it through control mode into a libghostty-backed Mac surface, supports `overnight attach`, and survives Mac-app disconnect/reconnect. Build the same libghostty adapter for Android ARM64 and render the recorded fixture through a minimal React Native native component. Compare Mac and Android against the terminal, process, scrollback, resize, writer, and derivation acceptance suites, and score the go/no-go matrix on every target platform. A required dimension below 2 fails the gate and reopens the terminal architecture; the Android proof failing reopens the renderer architecture.
-3. **Milestone 1: Mac-first local vertical slice.** Native Swift Mac client with a libghostty-backed terminal surface, macOS arm64 daemon/CLI, Unix-socket protocol, SQLite metadata, existing repository, transactional worktree creation, one CLI preset, multiple terminal tabs, five concurrent workspaces, archive, and observable process states.
+2. **Gate 1: local tmux and terminal-core correctness spike.** A local daemon creates one private tmux-backed workspace, streams it through control mode into a Mac surface backed by the shared core, supports `overnight attach`, and survives Mac-app disconnect/reconnect. Build the same core for Android ARM64 and render the recorded fixture through a minimal React Native native component. Compare Mac and Android against the terminal, process, scrollback, resize, writer, and derivation acceptance suites, and score the go/no-go matrix on every target platform. A required dimension below 2 fails the gate and reopens the terminal architecture; the Android proof failing reopens the renderer architecture.
+3. **Milestone 1: Mac-first local vertical slice.** Native Swift Mac client with a terminal surface backed by the shared core, macOS arm64 daemon/CLI, Unix-socket protocol, SQLite metadata, existing repository, transactional worktree creation, one CLI preset, multiple terminal tabs, five concurrent workspaces, archive, and observable process states.
 4. **Gate 2: SSH transport and reconnect spike.** Expose the same daemon protocol through SSH stdio, connect a second client, disconnect repeatedly, transfer writer ownership, and prove ordered replay without duplicate input. `ssh host overnight attach WORKSPACE` remains the terminal escape hatch rather than a GUI transport requirement.
 5. **Milestone 2: mobile vertical slice.** One React Native iOS screen connects through SSH, lists the Mac-proven workspaces, controls a terminal, and passes the mobile terminal acceptance suite. Run the same renderer on Android as architecture validation only.
 6. **Milestone 3: validated product workflow.** Multiple macOS/Linux hosts, remote daemon installation over SSH for Linux and WSL2, repository clone, five concurrent workspaces, Claude Code/Codex/Cursor presets, signed installers, upgrade/rollback path, and the Mac-based design-partner success criterion. The iPhone-based one is deferred until there is a real delivery channel.
@@ -643,7 +655,7 @@ Every managed terminal starts in a daemon-owned operating-system session/process
 - Reconnect after Wi-Fi/cellular changes without stopping remote processes.
 - Clear display of host, repository, branch, worktree cleanliness, process status, and connection state.
 
-The terminal renderer is the highest-risk technical spike. `libghostty-vt` is the accepted shared terminal core; platform-native render and input adapters must still be validated on iOS and Android for latency, keyboard behavior, selection, accessibility, and large scrollback. React Native remains the mobile application framework while the terminal surface is a native module.
+The terminal renderer is the highest-risk technical spike. `crates/vt` behind the Overnight C ABI is the accepted shared terminal core; platform-native render and input adapters must still be validated on iOS and Android for latency, keyboard behavior, selection, accessibility, and large scrollback. React Native remains the mobile application framework while the terminal surface is a native module.
 
 Terminal acceptance requires:
 
@@ -1074,7 +1086,7 @@ Direct terminal control remains the default. Parallelism is surfaced through fle
 
 These questions have explicit decision gates and may not remain unresolved when their milestone begins:
 
-1. **Accepted for Gate 1:** Use pinned `libghostty-vt` behind an Overnight-owned C-ABI adapter as the shared Mac, iOS, and Android terminal core. Use one private tmux server and one host-wide session; represent workspaces as tagged groups of terminal windows and drain them through one host-wide control client with per-pane flow control. Prove tmux control mode through the Mac surface and require an Android ARM64 build plus rendered-fixture smoke test in the same spike. Reopen the backend if it fails a required persistence, handoff, process-ownership, noisy-neighbor, or shell-escape-hatch invariant.
+1. **Accepted for Gate 1:** Use `crates/vt` behind an Overnight-owned C-ABI adapter as the shared Mac, iOS, and Android terminal core. Use one private tmux server and one host-wide session; represent workspaces as tagged groups of terminal windows and drain them through one host-wide control client with per-pane flow control. Prove tmux control mode through the Mac surface and require an Android ARM64 build plus rendered-fixture smoke test in the same spike. Reopen the backend if it fails a required persistence, handoff, process-ownership, noisy-neighbor, or shell-escape-hatch invariant.
 2. **Accepted before Milestone 1:** One Rust SSH client serves every client behind the Overnight-owned C ABI, with platform signer callbacks so hardware-backed keys never leave the Secure Enclave or Android Keystore. The crate is chosen at the spike against written acceptance criteria (reputable, open source, actively maintained, responsive security process, modern algorithms, agents, `ProxyJump`, custom signers, clean iOS and Android cross-compile), with `russh` and `ssh2` as the candidates and their tradeoffs recorded. Mosh is dropped entirely and returns only with latency evidence from real use.
 3. **Accepted before Milestone 1:** Implement the daemon and CLI in Rust, using Tokio, Prost, bundled SQLite through rusqlite, and a crate boundary that keeps protocol, core state, storage, tmux, transport, composition, and CLI concerns separate. Validate macOS arm64 packaging in the first vertical slice and add Linux/WSL2 build-and-smoke CI before remote-host support enters scope.
 4. **Accepted before Milestone 1:** Bundle the Rust daemon, CLI, LaunchAgent plist, protocol descriptors, and terminal artifacts inside the native Mac app. Register the unprivileged per-user daemon through `SMAppService`, use the app as the Mac release unit, and offer an opt-in `~/.local/bin/overnight` CLI copy without requiring root or editing shell files.
@@ -1370,7 +1382,7 @@ The cost is named rather than absorbed: deferring means the central product clai
 
 Nothing. The repository contains one file, `docs/overnight-design.md`, and no code, tests, CI, or scaffolding. There is no existing flow to capture output from and no prior implementation to reuse or rebuild, so every path in the coverage map is new construction.
 
-What does exist is external and load-bearing, and the plan's posture toward each is to compose rather than reimplement: OpenSSH for transport and authentication, tmux for session persistence and runtime truth, `libghostty-vt` for terminal emulation, git for worktrees, launchd and systemd for service lifetime, SQLite for durable state, and Tailscale for network reach. This review pushed further in that direction by deleting an Overnight certificate authority in favour of sshd and a second terminal backend in favour of committing to tmux.
+What does exist is external and load-bearing, and the plan's posture toward each is to compose rather than reimplement: OpenSSH for transport and authentication, tmux for session persistence and runtime truth, `alacritty_terminal` for VT emulation, git for worktrees, launchd and systemd for service lifetime, SQLite for durable state, and Tailscale for network reach. This review pushed further in that direction by deleting an Overnight certificate authority in favour of sshd and a second terminal backend in favour of committing to tmux.
 
 ### NOT in scope
 
