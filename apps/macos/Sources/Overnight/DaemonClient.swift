@@ -51,13 +51,30 @@ final class DaemonClient: ObservableObject {
 
     // MARK: - Commands
 
+    /// Has a fleet ever been read successfully?
+    ///
+    /// Without this, "we could not read the fleet" and "there are no
+    /// workspaces" look identical to the UI, because a failed read leaves the
+    /// last value in place — and the first value is empty. A user who had just
+    /// created a workspace was shown the new-user empty state, which is the
+    /// most misleading thing the app could have said.
+    @Published private(set) var hasLoaded = false
+
     func refresh() async {
         guard let data = await run(["workspace", "list", "--json"], background: true) else { return }
         do {
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
+            hasLoaded = true
             lastError = nil
         } catch {
-            lastError = "could not read fleet: \(error.localizedDescription)"
+            // Show the daemon's own output, truncated. A decode failure is
+            // almost always something unexpected on stdout, and the first line
+            // of it says what.
+            let sample = String(data: data.prefix(200), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            lastError = sample.isEmpty
+                ? "Could not read the fleet: \(error.localizedDescription)"
+                : "Could not read the fleet. The CLI said: \(sample)"
         }
     }
 

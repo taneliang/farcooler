@@ -84,7 +84,7 @@ struct ContentView: View {
             sidebarHeader
 
             if client.fleet.workspaces.isEmpty {
-                emptyFleet
+                fleetPlaceholder
                 Spacer(minLength: 0)
             } else {
                 ScrollView {
@@ -139,6 +139,40 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 10)
+    }
+
+    /// Shown only once a fleet has actually been read.
+    ///
+    /// Telling someone they have no workspaces when the truth is that we could
+    /// not read them is worse than saying nothing, because it sends them to
+    /// create one they already have.
+    @ViewBuilder
+    private var fleetPlaceholder: some View {
+        if client.hasLoaded {
+            emptyFleet
+        } else if let error = client.lastError {
+            VStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 26))
+                    .foregroundStyle(.orange)
+                Text("Could not read the fleet").font(.callout.weight(.medium))
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                Button("Try again") {
+                    Task { await client.refresh() }
+                }
+                .padding(.top, 4)
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 34)
+        } else {
+            ProgressView()
+                .controlSize(.small)
+                .padding(.vertical, 40)
+        }
     }
 
     private var emptyFleet: some View {

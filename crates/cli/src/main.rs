@@ -154,12 +154,20 @@ enum TerminalCmd {
 
 #[tokio::main]
 async fn main() {
+    // Logs go to stderr. stdout is the DATA channel.
+    //
+    // tracing_subscriber writes to stdout by default, which put warnings in the
+    // middle of `--json` output: the Mac app's decode then failed, it kept its
+    // previous fleet, and a user who had just created a workspace was told
+    // there were none. A CLI whose machine-readable output can be corrupted by
+    // an unrelated log line is broken however good the log line is.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("OVERNIGHT_LOG")
                 .unwrap_or_else(|_| "warn".into()),
         )
         .with_target(false)
+        .with_writer(std::io::stderr)
         .init();
 
     if let Err(e) = run().await {
