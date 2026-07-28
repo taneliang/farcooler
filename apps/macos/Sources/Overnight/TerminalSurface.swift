@@ -128,8 +128,11 @@ struct TerminalSurface: NSViewRepresentable {
         var input: TerminalInput?
         var attached: String?
         var started = false
+        var resyncWork: Task<Void, Never>?
 
         func stop() {
+            resyncWork?.cancel()
+            resyncWork = nil
             stream?.stop()
             stream = nil
             input?.stop()
@@ -178,14 +181,22 @@ struct TerminalSurface: NSViewRepresentable {
         let environment = self.environment
         let onResize = self.onResize
 
-        /// Resize the pane, then start streaming once.
+        /// Resize the pane, then start (or restart) the stream.
         ///
-        /// Idempotent: whichever path gets here first wins.
+        /// A resize must RESTART the stream, not just resize the pane. Content
+        /// already on screen was laid out at the old width and the emulator does
+        /// not reflow it, so after a resize the old lines keep their old wrap
+        /// points while the cursor moves on the new grid. That is what makes
+        /// text and the caret land in the wrong place. Restarting replays the
+        /// screen as tmux re-renders it at the new size, so both sides agree
+        /// again.
         @MainActor
-        func begin(_ cols: Int, _ rows: Int) async {
+        func begin(_ cols: Int, _ rows: Int, restart: Bool) async {
             await onResize(cols, rows)
+            guard let binary else { return }
+            guard restart || !coord.started else { return }
 
-            guard !coord.started, let binary else { return }
+            coord.stream?.stop()
             coord.started = true
 
             let stream = TerminalStream(onBytes: { bytes in
@@ -197,8 +208,16 @@ struct TerminalSurface: NSViewRepresentable {
             coord.stream = stream
         }
 
+        // A later size change is a real resize: re-sync so the emulator and the
+        // pane agree again. Debounced, because a window drag fires continuously.
         v.onResize = { cols, rows in
-            Task { @MainActor in await begin(cols, rows) }
+            coord.resyncWork?.cancel()
+            let work = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(140))
+                guard !Task.isCancelled else { return }
+                await begin(cols, rows, restart: coord.started)
+            }
+            coord.resyncWork = work
         }
 
         // Do not wait for a size CHANGE to start.
@@ -214,7 +233,7 @@ struct TerminalSurface: NSViewRepresentable {
             let cols = t.cols
             let rows = t.rows
             guard cols > 1, rows > 1 else { return }
-            await begin(cols, rows)
+            await begin(cols, rows, restart: false)
         }
     }
 
