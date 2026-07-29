@@ -21,14 +21,79 @@ struct Fleet: Decodable, Equatable {
     static let empty = Fleet(runtimeHealthy: false, livePanes: 0, workspaces: [])
 }
 
+/// A worktree.
+///
+/// Fields added after the first release are OPTIONAL, not defaulted. Swift's
+/// synthesized `Decodable` ignores default values and throws on a missing key,
+/// so a client meeting an older daemon — or an app built before a CLI — would
+/// fail to decode the entire fleet over one absent field, and show "no
+/// workspaces" for a host full of them.
 struct Workspace: Decodable, Identifiable, Hashable {
     var id: String
     var short: String
     var task: String
     var branch: String
+    /// The project this worktree belongs to. Worktrees are grouped by it,
+    /// because there are a handful of projects and potentially hundreds of
+    /// worktrees across them.
+    var repository: String?
+    /// Which machine it is on. Empty means this one.
+    ///
+    /// Deliberately NOT a filter. Hosts are a grouping, not a mode: you work
+    /// across machines at once, and a picker that shows one at a time would
+    /// make a remote agent something you have to go and look for rather than
+    /// something already in front of you. It surfaces only where it
+    /// disambiguates.
+    var host: String?
     var worktree: String
     var state: String
     var terminals: [Terminal]
+
+    /// Terminals wanting the user, across this worktree.
+    var attention: [Terminal] { terminals.filter(\.status.wantsAttention) }
+
+    /// A one-line summary for a collapsed row.
+    ///
+    /// A collapsed worktree still has to answer "is anything happening here?"
+    /// or collapsing would hide the only thing the app is for.
+    var summary: String {
+        let agents = terminals.filter(\.agent.isAgent)
+        if terminals.isEmpty { return "no terminals" }
+
+        var parts: [String] = []
+        if !agents.isEmpty {
+            parts.append(agents.count == 1 ? "1 agent" : "\(agents.count) agents")
+        }
+        let others = terminals.count - agents.count
+        if others > 0 {
+            parts.append(others == 1 ? "1 shell" : "\(others) shells")
+        }
+        if !attention.isEmpty {
+            parts.append(attention.count == 1
+                ? attention[0].status.label.lowercased()
+                : "\(attention.count) need you")
+        } else if agents.contains(where: { $0.status == .working }) {
+            parts.append("working")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Does this worktree match a search?
+    ///
+    /// Matches its own name and branch AND its terminals', so typing an agent's
+    /// name finds the worktree containing it. With worktrees unbounded, search
+    /// is the primary way to reach one, not a convenience.
+    func matches(_ query: String) -> Bool {
+        let q = query.lowercased()
+        if q.isEmpty { return true }
+        if task.lowercased().contains(q) { return true }
+        if branch.lowercased().contains(q) { return true }
+        if (repository ?? "").lowercased().contains(q) { return true }
+        if (host ?? "").lowercased().contains(q) { return true }
+        return terminals.contains {
+            $0.title.lowercased().contains(q) || $0.preset.lowercased().contains(q)
+        }
+    }
 }
 
 struct Repository: Decodable, Identifiable, Hashable {

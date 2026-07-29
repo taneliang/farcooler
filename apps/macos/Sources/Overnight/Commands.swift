@@ -17,6 +17,7 @@ enum AppCommand: String {
     case addRepository
     case reload
     case showShortcuts
+    case search
 
     static let notification = Notification.Name("overnight.command")
 
@@ -77,6 +78,10 @@ struct OvernightCommands: Commands {
         }
 
         CommandGroup(after: .toolbar) {
+            // Search is navigation here, not a nicety: worktrees are unbounded
+            // and typing is the fastest way to any of them, on any machine.
+            Button("Find Worktree or Agent") { AppCommand.search.post() }
+                .keyboardShortcut("f", modifiers: .command)
             Button("Reload Fleet") { AppCommand.reload.post() }
                 .keyboardShortcut("0", modifiers: .command)
         }

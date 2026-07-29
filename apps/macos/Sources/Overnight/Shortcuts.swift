@@ -44,6 +44,7 @@ enum Shortcut {
         (
             "App",
             [
+                Item(keys: "⌘F", action: "Find a worktree or agent"),
                 Item(keys: "⌘,", action: "Settings"),
                 Item(keys: "⌘/", action: "Keyboard shortcuts"),
                 Item(keys: "⌘0", action: "Reload the fleet"),

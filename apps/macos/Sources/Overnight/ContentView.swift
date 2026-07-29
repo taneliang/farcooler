@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var showNewWorkspace = false
     @State private var showAddRepository = false
     @State private var showShortcuts = false
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
     @State private var removeWorkspace: Workspace?
 
     /// What the detail pane is showing.
@@ -29,7 +31,6 @@ struct ContentView: View {
             await client.refresh()
             await client.refreshRepositories()
             await client.refreshRoots()
-            expandAll()
             selectFirstRunningTerminal()
             // Pushed, not polled. The daemon derives once for every client and
             // sends only what changed, so a quiet fleet costs nothing and a
@@ -80,7 +81,6 @@ struct ContentView: View {
         .sheet(isPresented: $showNewWorkspace) {
             NewWorkspaceSheet(repositories: client.repositories) { repo, task, branch, base in
                 await client.createWorkspace(repo: repo, task: task, branch: branch, base: base)
-                expandAll()
             }
         }
         .sheet(item: $removeWorkspace) { ws in
@@ -98,54 +98,115 @@ struct ContentView: View {
 
     // MARK: - Sidebar
 
+    /// Worktrees matching the search, grouped by project.
+    ///
+    /// Grouped rather than filtered by host: you work across machines at once,
+    /// and a host picker would make a remote agent something to go and look for
+    /// instead of something already in the list. Where a project name appears
+    /// on more than one machine, the host is appended to tell them apart —
+    /// which is the only time it needs saying.
+    private var groups: [(String, [Workspace])] {
+        let visible = client.fleet.workspaces.filter { $0.matches(query) }
+        let hosts = Set(visible.map { $0.host ?? "" })
+        var order: [String] = []
+        var byProject: [String: [Workspace]] = [:]
+
+        for workspace in visible {
+            let project = (workspace.repository ?? "").isEmpty
+                ? "Ungrouped" : workspace.repository!
+            let host = workspace.host ?? ""
+            let key = hosts.count > 1 && !host.isEmpty ? "\(project) · \(host)" : project
+            if byProject[key] == nil { order.append(key) }
+            byProject[key, default: []].append(workspace)
+        }
+        return order.map { ($0, byProject[$0] ?? []) }
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
             sidebarHeader
+            searchField
 
             if client.fleet.workspaces.isEmpty {
                 fleetPlaceholder
                 Spacer(minLength: 0)
+            } else if groups.isEmpty {
+                VStack(spacing: 6) {
+                    Text("Nothing matches").font(.callout.weight(.medium))
+                    Text("\u{201c}\(query)\u{201d}")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 32)
+                Spacer(minLength: 0)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 3) {
-                        ForEach(client.fleet.workspaces) { ws in
-                            WorkspaceSection(
-                                workspace: ws,
-                                isExpanded: expanded.contains(ws.id),
-                                selection: $selection,
-                                onToggle: { toggle(ws.id) },
-                                onNewTerminal: { newTerminal(in: ws) },
-                                onArchive: { Task { await client.archiveWorkspace(ws.short) } },
-                                onRemove: { removeWorkspace = ws },
-                                onTerminalAction: { term, action in
-                                    Task { await run(action, on: term) }
-                                }
-                            )
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(groups, id: \.0) { project, workspaces in
+                            ProjectHeader(name: project, count: workspaces.count)
+                            ForEach(workspaces) { ws in
+                                WorkspaceSection(
+                                    workspace: ws,
+                                    isExpanded: expanded.contains(ws.id),
+                                    selection: $selection,
+                                    onToggle: { toggle(ws.id) },
+                                    onNewTerminal: { newTerminal(in: ws) },
+                                    onArchive: { Task { await client.archiveWorkspace(ws.short) } },
+                                    onRemove: { removeWorkspace = ws },
+                                    onTerminalAction: { term, action in
+                                        Task { await run(action, on: term) }
+                                    }
+                                )
+                            }
                         }
                     }
-                    // Matches the row margin, so a selected row's highlight
-                    // sits a hair inside the sidebar rather than floating in a
-                    // gutter wider than the indent it is supposed to show.
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    .padding(.bottom, 10)
                 }
             }
 
             statusBar
         }
-        .navigationSplitViewColumnWidth(min: 268, ideal: 300, max: 400)
+        .navigationSplitViewColumnWidth(min: 268, ideal: 320, max: 440)
     }
 
-    /// Everything waiting on you, across every workspace.
+    /// Search, because worktrees are unbounded.
     ///
-    /// The one number the app exists to produce. It used to be reachable only
-    /// by expanding each workspace and reading the rows — which is the work
-    /// this screen is supposed to have already done for you.
+    /// It matches terminals too, so typing an agent's name finds the worktree
+    /// containing it — which is how you reach an agent on another machine
+    /// without going looking for the machine.
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+            TextField("Search worktrees and agents", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($searchFocused)
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+        .padding(.horizontal, 14)
+        .padding(.bottom, 6)
+    }
+
+    /// Everything waiting on you, across every project and every machine.
+    ///
+    /// The one number the app exists to produce, and it deliberately spans
+    /// hosts: an agent blocked on a machine in another room is exactly as
+    /// urgent as one on this desk.
     private var attentionCount: Int {
-        client.fleet.workspaces
-            .flatMap(\.terminals)
-            .filter(\.status.wantsAttention)
-            .count
+        client.fleet.workspaces.flatMap(\.terminals).filter(\.status.wantsAttention).count
     }
 
     private var sidebarHeader: some View {
@@ -397,15 +458,33 @@ struct ContentView: View {
         if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
     }
 
+    /// Kept for the one case that still wants it: opening a worktree you just
+    /// selected. Launching no longer expands everything — with hundreds of
+    /// worktrees that produced a wall of terminals and hid the summary line
+    /// that collapsing exists to show.
     private func expandAll() {
         expanded.formUnion(client.fleet.workspaces.map(\.id))
     }
 
     /// Land on something usable rather than an empty pane.
+    /// Where to land on launch.
+    ///
+    /// Whatever wants you first, wherever it is — including on another machine.
+    /// Falling back to "the first running terminal" would open a fleet on
+    /// something arbitrary while an agent two projects down waits for an answer.
     private func selectFirstRunningTerminal() {
         guard selection == nil else { return }
+
+        for ws in client.fleet.workspaces {
+            if let t = ws.terminals.first(where: { $0.status.wantsAttention }) {
+                expanded.insert(ws.id)
+                selection = .terminal(workspace: ws.id, terminal: t.id)
+                return
+            }
+        }
         for ws in client.fleet.workspaces {
             if let t = ws.terminals.first(where: { StateKind.parse($0.state) == .running }) {
+                expanded.insert(ws.id)
                 selection = .terminal(workspace: ws.id, terminal: t.id)
                 return
             }
@@ -469,6 +548,7 @@ struct ContentView: View {
         case .addRepository: showAddRepository = true
         case .reload: Task { await client.refresh() }
         case .showShortcuts: showShortcuts = true
+        case .search: searchFocused = true
         }
     }
 

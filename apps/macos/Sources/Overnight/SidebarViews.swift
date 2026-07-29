@@ -39,7 +39,17 @@ enum Grid {
     static let group: CGFloat = 12
 }
 
-/// One workspace and its terminals in the sidebar.
+/// One worktree, and its terminals when opened.
+///
+/// Collapsed to a single line by default. The previous version made a worktree
+/// a two-line heading with its terminals always beneath it, which was built on
+/// a wrong assumption about scale: there are a handful of projects, a handful
+/// of terminals per worktree, and potentially hundreds of worktrees — some
+/// dormant for weeks and resurrected later. The thing there are hundreds of has
+/// to be the lightest row in the app, not the heaviest.
+///
+/// It expands on its own when something inside wants the user, because a
+/// collapsed row that hides the agent asking a question defeats the point.
 struct WorkspaceSection: View {
     let workspace: Workspace
     let isExpanded: Bool
@@ -52,29 +62,22 @@ struct WorkspaceSection: View {
 
     @State private var hovering = false
 
-    private var isSelected: Bool {
-        selection == .workspace(workspace.id)
-    }
+    private var isSelected: Bool { selection == .workspace(workspace.id) }
 
-    /// Terminals wanting attention first.
-    ///
-    /// A fleet is read top-down and scanning past four idle shells to find the
-    /// one asking a question is the work this screen exists to remove.
+    /// Open whether or not the user opened it.
+    private var showsTerminals: Bool { isExpanded || !workspace.attention.isEmpty }
+
     private var ordered: [Terminal] {
         workspace.terminals.sorted { a, b in
             a.status.wantsAttention && !b.status.wantsAttention
         }
     }
 
-    private var attentionCount: Int {
-        workspace.terminals.filter(\.status.wantsAttention).count
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            if isExpanded {
+            if showsTerminals {
                 ForEach(ordered) { t in
                     TerminalRow(
                         terminal: t,
@@ -86,11 +89,6 @@ struct WorkspaceSection: View {
                     )
                 }
 
-                // Deliberately not styled as a row. It used to look like a
-                // terminal that happened to be called "New terminal", which is
-                // a thing you read before realising it is a button.
-                // Aligned with the terminals' text, not with their dots and not
-                // with their parent. It used to sit left of the rows it adds to.
                 Button(action: onNewTerminal) {
                     HStack(spacing: Grid.gap) {
                         Image(systemName: "plus")
@@ -100,55 +98,55 @@ struct WorkspaceSection: View {
                     }
                     .foregroundStyle(.tertiary)
                     .padding(.vertical, 4)
-                    // Its icon sits in the status-dot column and its text in
-                    // the title column, so it reads as another row in the same
-                    // list rather than something floating beside it.
                     .padding(.leading, Grid.child)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .padding(.bottom, 4)
             }
         }
-        .padding(.bottom, Grid.group)
     }
 
+    /// One line. Name, branch, and — only when closed — what is inside.
     private var header: some View {
-        HStack(alignment: .top, spacing: 0) {
+        HStack(spacing: 0) {
             Button(action: onToggle) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    // Sized to the grid, so the title starts at a known column
-                    // rather than wherever the glyph happened to end.
-                    .frame(width: Grid.chevron, height: 17, alignment: .leading)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(showsTerminals ? 90 : 0))
+                    .frame(width: Grid.chevron, height: 16, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // A tight two-line block, not two competing lines. The branch was
-            // set in monospace at nearly the title's size, which made every
-            // workspace read as two headings stacked on each other.
-            VStack(alignment: .leading, spacing: 0) {
-                Text(workspace.task)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Text(workspace.branch)
+            Text(workspace.task)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+
+            Text(workspace.branch)
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .padding(.leading, 7)
+                .layoutPriority(-1)
+
+            Spacer(minLength: 6)
+
+            if !showsTerminals {
+                // What a closed worktree still has to answer: is anything
+                // happening in here?
+                Text(workspace.summary)
                     .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(workspace.attention.isEmpty ? .tertiary : .secondary)
                     .lineLimit(1)
-            }
-            .padding(.leading, 0)
+                    .layoutPriority(1)
 
-            Spacer(minLength: 8)
-                .frame(height: 17)
-
-            // Survives collapsing. Otherwise the agent asking for permission is
-            // hidden behind a disclosure triangle, in the app you opened to
-            // find out what needs you.
-            if !isExpanded {
-                AttentionBadge(count: attentionCount)
+                if !workspace.attention.isEmpty {
+                    Circle().fill(Color.orange).frame(width: 6, height: 6)
+                        .padding(.leading, 5)
+                }
             }
 
             Menu {
@@ -159,28 +157,51 @@ struct WorkspaceSection: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 18, height: 18)
+                    .frame(width: 18, height: 16)
                     .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            // Hidden until wanted. A row with a permanent control on it reads
-            // as busier than it is.
             .opacity(hovering ? 1 : 0)
+            .padding(.leading, 2)
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 4)
         .padding(.horizontal, Grid.margin)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                // Neutral, not accent-tinted. Selection says where you are;
-                // it must not compete with the one colour that says what needs
-                // you.
                 .fill(isSelected ? Color.primary.opacity(0.08) : (hovering ? Color.primary.opacity(0.04) : .clear))
         )
         .contentShape(Rectangle())
         .onTapGesture { selection = .workspace(workspace.id) }
         .onHover { hovering = $0 }
+    }
+}
+
+/// A project heading.
+///
+/// Projects are chrome, not content: there are three or four and they change
+/// rarely. A quiet label separating groups of worktrees is all the weight they
+/// deserve.
+struct ProjectHeader: View {
+    let name: String
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(name.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .tracking(0.6)
+            Text("\(count)")
+                .font(.system(size: 10))
+                .foregroundStyle(.quaternary)
+                .monospacedDigit()
+            Spacer()
+        }
+        .padding(.horizontal, Grid.margin + Grid.chevron)
+        .padding(.top, 14)
+        .padding(.bottom, 3)
     }
 }
 

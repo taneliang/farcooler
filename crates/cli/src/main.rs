@@ -442,6 +442,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
         WorkspaceCmd::List => {
             let workspaces = list_workspaces(&mut link).await?;
             let terminals = list_terminals(&mut link, None).await?;
+            let repositories = list_repositories(&mut link).await?;
             let host_facts = host_get(&mut link).await?;
             let healthy =
                 host_facts.self_health != overnight_protocol::v1::SelfHealth::Degraded as i32;
@@ -455,6 +456,17 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                             "short": short_bytes(&w.id),
                             "task": w.task_name,
                             "branch": w.branch,
+                            // Which project this belongs to. A fleet is grouped
+                            // by project in the UI, and a client cannot join
+                            // ids to names by itself.
+                            // Which machine. Empty means this one; a client
+                            // merges several hosts into one fleet and needs to
+                            // know where to route an action back to.
+                            "host": host.unwrap_or_default(),
+                            "repository": repositories.iter()
+                                .find(|r| r.id == w.repository_id)
+                                .map(|r| r.display_name.clone())
+                                .unwrap_or_default(),
                             "worktree": w.worktree_path,
                             "state": workspace_label(w.state()),
                             "terminals": terminals.iter()
