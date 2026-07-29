@@ -115,7 +115,12 @@ struct FleetView: View {
 
             ForEach(connection.fleet.workspaces) { workspace in
                 Section {
-                    ForEach(workspace.terminals) { terminal in
+                    // Anything waiting on you comes first. On a phone you see
+                    // four rows at a time, and scrolling to find the one that
+                    // needs an answer defeats the purpose of the screen.
+                    ForEach(workspace.terminals.sorted { a, b in
+                        a.agent.wantsAttention && !b.agent.wantsAttention
+                    }) { terminal in
                         TerminalRow(terminal: terminal) { action in
                             Task { await connection.act(action, on: terminal) }
                         }
@@ -168,6 +173,16 @@ struct TerminalRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+
+            // The reason to have opened the app. Only the two states worth
+            // acting on get colour, so a list of twenty still reads at a glance.
+            if terminal.agent.isAgent && terminal.agent != .unknown {
+                Label(terminal.agent.label, systemImage: terminal.agent.symbol)
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: 13, weight: terminal.agent.wantsAttention ? .semibold : .regular))
+                    .foregroundStyle(activityColour)
+                    .accessibilityLabel(terminal.agent.label)
+            }
         }
         .swipeActions(edge: .trailing) {
             if kind == .lost {
@@ -177,6 +192,14 @@ struct TerminalRow: View {
             if kind == .running || kind == .starting {
                 Button("Stop", role: .destructive) { onAction(.stop) }
             }
+        }
+    }
+
+    private var activityColour: Color {
+        switch terminal.agent {
+        case .blocked: return .orange
+        case .done: return .green
+        default: return .secondary
         }
     }
 
