@@ -40,6 +40,14 @@ struct ContentView: View {
         .onDisappear { client.stopEvents() }
         .onCommand { command in run(command) }
         .onSelectIndex { index in selectTerminal(at: index) }
+        .onChange(of: client.fleet) { _, _ in
+            // One rule for every way a terminal can disappear: exiting on its
+            // own, being closed here, being closed from a phone, or its
+            // workspace being archived. Hooking each path separately meant the
+            // common one — you press Ctrl-D in the terminal you are looking at —
+            // left the selection pointing at something that no longer existed.
+            healSelection()
+        }
         .onChange(of: selection) { _, new in
             // Opening a terminal is what ends `done`. Being listed is not being
             // read, so this is deliberately tied to selection.
@@ -470,20 +478,34 @@ struct ContentView: View {
     /// type in it, and leaving the selection where it was means a second click
     /// to get to the thing you just asked for.
     private func newTerminal(in workspace: Workspace) {
+        // The ids that existed before, so the new one can be identified by
+        // difference. Comparing whole `Terminal` values did not work: any of
+        // them changing activity between the two reads also looked "new", so
+        // the selection sometimes landed on a terminal the user did not create.
+        let before = Set(workspace.terminals.map(\.id))
         let existing = workspace.terminals.count
+
         Task {
             await client.createTerminal(
                 workspace: workspace.short,
                 preset: "shell",
                 title: "Terminal \(existing + 1)")
             expanded.insert(workspace.id)
-            await client.refresh()
-            if let created = client.fleet.workspaces
-                .first(where: { $0.id == workspace.id })?
-                .terminals
-                .first(where: { !workspace.terminals.contains($0) })
-            {
-                selection = .terminal(workspace: workspace.id, terminal: created.id)
+
+            // Creation is a tmux window opening, so the record can lag the
+            // call. Poll briefly rather than reading once and giving up —
+            // reading once is why this silently did nothing.
+            for _ in 0..<20 {
+                await client.refresh()
+                if let created = client.fleet.workspaces
+                    .first(where: { $0.id == workspace.id })?
+                    .terminals
+                    .first(where: { !before.contains($0.id) })
+                {
+                    selection = .terminal(workspace: workspace.id, terminal: created.id)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(150))
             }
         }
     }
@@ -503,6 +525,30 @@ struct ContentView: View {
         // Wraps, because a list you can walk off the end of makes you look.
         let next = (current + offset + ordered.count) % ordered.count
         select(ordered[next])
+    }
+
+    /// Move the selection off a terminal that has gone.
+    ///
+    /// Prefers to stay where the user was looking: another terminal in the same
+    /// workspace, whatever wants attention first, then anything running. Only
+    /// falls back to the workspace itself when the workspace is empty.
+    private func healSelection() {
+        guard case .terminal(let workspaceID, let terminalID) = selection else { return }
+        guard let workspace = client.fleet.workspaces.first(where: { $0.id == workspaceID })
+        else {
+            // The whole workspace went. Land on whatever is left rather than
+            // on nothing.
+            selection = client.fleet.workspaces.first.map { .workspace($0.id) }
+            return
+        }
+        guard !workspace.terminals.contains(where: { $0.id == terminalID }) else { return }
+
+        let candidates = workspace.terminals
+        let next = candidates.first(where: { $0.status.wantsAttention })
+            ?? candidates.first(where: { StateKind.parse($0.state) == .running })
+            ?? candidates.first
+        selection = next.map { .terminal(workspace: workspaceID, terminal: $0.id) }
+            ?? .workspace(workspaceID)
     }
 
     private func selectTerminal(at index: Int) {

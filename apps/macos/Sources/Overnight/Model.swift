@@ -7,7 +7,7 @@ import Foundation
 // A client that re-derives can disagree with the daemon and with other clients
 // about the same terminal, which is the failure the design removed everywhere.
 
-struct Fleet: Decodable {
+struct Fleet: Decodable, Equatable {
     var runtimeHealthy: Bool
     var livePanes: Int
     var workspaces: [Workspace]

@@ -33,73 +33,90 @@ use overnight_protocol::v1::AgentActivity;
 /// you, which is the one failure that makes the whole feature pointless.
 #[derive(Debug, Clone)]
 pub struct AgentRules {
-    /// A name for this agent, and the process names it runs under.
-    ///
-    /// Keyed on the RUNNING PROCESS, not on what the terminal was launched as.
-    /// A terminal is created as a plain shell and the user types `claude` into
-    /// it — so its launch preset says nothing about what is in it now, and a
-    /// terminal that was started as an agent and exited back to a shell is not
-    /// an agent any more.
+    /// What to call this agent.
     pub preset: &'static str,
-    /// Process names, as `pane_current_command` reports them.
+
+    /// Process-name PREFIXES, as `pane_current_command` reports them.
     ///
-    /// Necessary but not sufficient. Claude Code rewrites its own process name
-    /// to its version string — tmux reports `2.1.220` — so a running agent is
-    /// invisible to process matching alone.
+    /// Prefixes, not exact names, because tmux truncates the field: codex
+    /// arrives as `codex-aarch64-a`. And necessary but never sufficient —
+    /// Claude Code renames itself to its version (`2.1.220`) and cursor-agent
+    /// runs as plain `node`, which is far too generic to claim. Screen identity
+    /// is what actually carries this.
     pub commands: &'static [&'static str],
-    /// Screen text that means "this IS this agent", whatever the process is
-    /// called. Chosen to be furniture the agent always draws, not something a
-    /// user might type.
+
+    /// Screen text that means "this IS this agent".
+    ///
+    /// Furniture the agent always draws, never a phrase a user could type, so a
+    /// shell echoing "do you want to proceed?" is not promoted to an agent.
     pub identity: &'static [&'static str],
-    /// Any of these on screen means the agent is waiting for the user.
+
+    /// Waiting on the user.
+    ///
+    /// The list that has to be right. A missed blocked state is a notification
+    /// that never arrives, which is the one failure that makes the whole
+    /// feature pointless — so these are deliberately generous.
     pub blocked: &'static [&'static str],
-    /// Any of these means it is working.
+
+    /// Actively doing something.
     pub working: &'static [&'static str],
-    /// Any of these means it is present and ready for input.
-    pub idle: &'static [&'static str],
 }
 
 /// The built-in rules.
 ///
-/// Deliberately conservative: a signature that only ever appears in one state
-/// is worth having, and a clever one that is usually right is not. An agent
-/// whose screen matches nothing reports `Unknown`, which is honest, rather than
-/// `Idle`, which would silence a notification the user wanted.
+/// Every signature below was read off a running agent rather than guessed. The
+/// first version of this file was guesswork and it matched no real screen.
+///
+/// There is deliberately no `idle` list. An agent that is identified, not
+/// blocked and not working IS idle, and requiring positive idle furniture meant
+/// a version bump renaming a footer left an agent stuck on `unknown` — never
+/// reaching `done`, never notifying.
 pub const RULES: &[AgentRules] = &[
     AgentRules {
         preset: "claude",
-        commands: &["claude", "claude-code"],
-        identity: &["? for shortcuts", "esc to interrupt", "Claude Code", "auto-accept edits"],
+        commands: &["claude"],
+        identity: &["? for shortcuts", "Claude Code", "auto-accept edits", "esc to interrupt"],
         blocked: &[
             "Do you want to",
             "Do you want me to",
             "❯ 1. Yes",
             "1. Yes, and don't ask again",
-            "Allow this tool",
-            "waiting for your input",
+            // The footer under every approval prompt.
+            "Esc to cancel · Tab to amend",
             "[y/n]",
             "(y/N)",
         ],
-        // "esc to interrupt" is on screen for the whole time Claude Code is
-        // thinking or running a tool, and never when it is not.
-        working: &["esc to interrupt", "Thinking…", "ctrl+b to run in background"],
-        idle: &["? for shortcuts", "auto mode on", "manual mode on", "Try \""],
+        working: &["esc to interrupt", "Thinking…"],
     },
     AgentRules {
         preset: "codex",
+        // Truncated by tmux to `codex-aarch64-a`, hence the prefix.
         commands: &["codex"],
-        identity: &["Codex", "/help for"],
-        blocked: &["Allow command?", "approve this", "[y/n]", "(y/N)", "Do you want to"],
-        working: &["Esc to interrupt", "Working…", "Running command"],
-        idle: &["send a message", "/help for", "▌"],
+        identity: &["OpenAI Codex", "/model to change"],
+        blocked: &[
+            // Codex draws every choice as a numbered list under a `›` marker.
+            "\u{203a} 1.",
+            "Press enter to continue",
+            "Allow command",
+            "Do you want to",
+            "[y/n]",
+            "(y/N)",
+        ],
+        working: &["esc to interrupt", "Working ("],
     },
     AgentRules {
         preset: "cursor",
-        commands: &["cursor-agent", "cursor"],
-        identity: &["cursor-agent", "Ask anything"],
-        blocked: &["Allow?", "[y/n]", "(y/N)", "Do you want to", "Approve"],
-        working: &["esc to interrupt", "Generating", "Running"],
-        idle: &["Ask anything", "/ for commands"],
+        // cursor-agent runs as `node`, which cannot be claimed — matching it
+        // would label every node process a coding agent. Kept for installs that
+        // expose a real name; screen identity is what finds it here.
+        commands: &["cursor-agent"],
+        identity: &["Cursor Agent", "cursor-agent", "Press any key to sign in"],
+        // UNVERIFIED. This install could not get past its sign-in screen, so
+        // unlike the two above these were not read off a running agent. They
+        // follow the same shapes and should be checked against a signed-in
+        // cursor-agent before being trusted.
+        blocked: &["Do you want to", "Allow?", "[y/n]", "(y/N)", "\u{203a} 1."],
+        working: &["esc to interrupt", "Generating"],
     },
 ];
 
@@ -110,9 +127,12 @@ pub const RULES: &[AgentRules] = &[
 /// `claude` IS a Claude Code terminal, and one launched as an agent that has
 /// since exited to a prompt is not.
 pub fn rules_for_command(command: &str) -> Option<&'static AgentRules> {
-    // tmux reports the basename, but a wrapper may add a path or a suffix.
     let name = command.rsplit('/').next().unwrap_or(command).trim();
-    RULES.iter().find(|r| r.commands.iter().any(|c| *c == name))
+    if name.is_empty() {
+        return None;
+    }
+    // Prefix, because tmux truncates: `codex-aarch64-a` must match `codex`.
+    RULES.iter().find(|r| r.commands.iter().any(|c| name.starts_with(c)))
 }
 
 /// Look up by agent name, for callers that already know which one.
@@ -227,12 +247,10 @@ pub fn classify(command: &str, screen: &str) -> AgentActivity {
     if rules.working.iter().any(|needle| screen.contains(needle)) {
         return AgentActivity::Working;
     }
-    if rules.idle.iter().any(|needle| screen.contains(needle)) {
-        return AgentActivity::Idle;
-    }
-    // Present but unrecognised. Saying so beats guessing `Idle` and swallowing
-    // the notification the user was waiting for.
-    AgentActivity::Unknown
+    // Identified, not asking, not busy: it is sitting there. Requiring positive
+    // idle furniture left an agent whose footer changed between versions stuck
+    // on `unknown` forever — never reaching `done`, never notifying.
+    AgentActivity::Idle
 }
 
 /// Fold a fresh classification against what was last reported.
@@ -352,8 +370,47 @@ mod tests {
         let screen = "\
 ❯ hello?
 ────────────────────────
-  ⏸ manual mode on";
+  ⏸ manual mode on · ? for shortcuts";
         assert_eq!(classify("claude", screen), Idle);
+    }
+
+    #[test]
+    fn codex_is_recognised_through_a_truncated_process_name() {
+        // tmux caps the field, so a real codex arrives as `codex-aarch64-a`.
+        // Exact matching found nothing and every codex reported as a shell.
+        assert!(rules_for_command("codex-aarch64-a").is_some());
+        assert_eq!(describe("codex-aarch64-a", ""), "codex");
+    }
+
+    #[test]
+    fn codex_states_come_from_its_real_screen() {
+        let idle = "› Explain this codebase\n  gpt-5.6-sol high · ~/project\n  >_ OpenAI Codex (v0.145.0)";
+        assert_eq!(classify("codex-aarch64-a", idle), Idle);
+
+        let working = "• Working (6s • esc to interrupt) · 1 background terminal running";
+        assert_eq!(classify("codex-aarch64-a", working), Working);
+
+        let blocked = "› 1. Update now\n  2. Skip\n  Press enter to continue";
+        assert_eq!(classify("codex-aarch64-a", blocked), Blocked);
+    }
+
+    #[test]
+    fn cursor_cannot_be_claimed_by_its_process() {
+        // cursor-agent runs as plain `node`. Matching that would label every
+        // node process a coding agent, which is worse than missing it.
+        assert!(rules_for_command("node").is_none());
+        assert_eq!(describe("node", ""), "node");
+        // It is found by what it draws instead.
+        assert!(identify("node", "Press any key to sign in...").is_some());
+    }
+
+    #[test]
+    fn an_identified_agent_is_never_stuck_on_unknown() {
+        // The failure this replaced: an agent whose footer changed between
+        // versions matched no idle signature and reported `unknown` forever,
+        // so it never reached `done` and never notified.
+        let unfamiliar = "OpenAI Codex\nsome screen nobody wrote a rule for";
+        assert_eq!(classify("codex", unfamiliar), Idle);
     }
 
     #[test]
@@ -370,10 +427,11 @@ Do you want to allow this command?
     }
 
     #[test]
-    fn an_unrecognised_screen_says_so_rather_than_guessing_idle() {
-        // Guessing idle would swallow the notification the user was waiting
-        // for. Unknown is visible and fixable; a wrong idle is neither.
-        assert_eq!(classify("claude", "some output nobody wrote a rule for"), Unknown);
+    fn something_that_is_not_an_agent_stays_not_an_agent() {
+        // The important half of the honesty: a screen we cannot identify is not
+        // promoted to an agent, so a shell never appears in the list of things
+        // that might need you.
+        assert_eq!(classify("zsh", "some output nobody wrote a rule for"), None);
     }
 
     #[test]
@@ -417,7 +475,6 @@ Do you want to allow this command?
         assert!(!wants_attention(Working));
         assert!(!wants_attention(Idle));
         assert!(!wants_attention(None));
-        assert!(!wants_attention(Unknown));
     }
 
     #[test]
@@ -433,7 +490,6 @@ Do you want to allow this command?
         for rules in RULES {
             assert!(!rules.blocked.is_empty(), "{} has no blocked rules", rules.preset);
             assert!(!rules.working.is_empty(), "{} has no working rules", rules.preset);
-            assert!(!rules.idle.is_empty(), "{} has no idle rules", rules.preset);
         }
     }
 
@@ -444,10 +500,6 @@ Do you want to allow this command?
         for rules in RULES {
             for needle in rules.blocked {
                 assert!(!rules.working.contains(needle), "{needle:?} is both blocked and working");
-                assert!(!rules.idle.contains(needle), "{needle:?} is both blocked and idle");
-            }
-            for needle in rules.working {
-                assert!(!rules.idle.contains(needle), "{needle:?} is both working and idle");
             }
         }
     }
