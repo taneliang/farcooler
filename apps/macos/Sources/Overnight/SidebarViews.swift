@@ -146,6 +146,11 @@ struct TerminalRow: View {
 
             Spacer(minLength: 4)
 
+            // The activity badge sits on the right, where the eye lands last
+            // when scanning a list — so "needs you" reads as the answer to the
+            // question you opened the app with.
+            ActivityBadge(activity: terminal.agent)
+
             if hovering || kind == .lost {
                 Menu {
                     if kind == .lost {
@@ -199,6 +204,46 @@ struct StateDot: View {
             .fill(color)
             .frame(width: 7, height: 7)
             .help(state)
+    }
+}
+
+/// What the agent is doing, if it is an agent at all.
+///
+/// Only the two states worth acting on get colour and a filled symbol. Working
+/// and idle are the normal case, and a list where everything is highlighted
+/// highlights nothing.
+struct ActivityBadge: View {
+    let activity: AgentActivity
+    var compact = true
+
+    var body: some View {
+        if activity.isAgent && activity != .unknown {
+            HStack(spacing: 3) {
+                Image(systemName: activity.symbol)
+                    .font(.system(size: 9, weight: activity.wantsAttention ? .semibold : .regular))
+                    .symbolEffect(
+                        .pulse,
+                        options: .repeating,
+                        // Only a working agent pulses. Motion is the strongest
+                        // signal available and it belongs on the thing that is
+                        // genuinely in flux, not on a static badge.
+                        isActive: activity == .working)
+                if !compact {
+                    Text(activity.label).font(.system(size: 10))
+                }
+            }
+            .foregroundStyle(colour)
+            .help(activity.label)
+        }
+    }
+
+    private var colour: Color {
+        switch activity {
+        case .blocked: return .orange
+        case .done: return .green
+        case .working: return .secondary
+        default: return Color.secondary.opacity(0.55)
+        }
     }
 }
 

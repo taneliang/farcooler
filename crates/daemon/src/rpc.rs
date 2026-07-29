@@ -61,7 +61,8 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "terminal.stop"
         | "terminal.dismiss_lost"
         | "terminal.restart"
-        | "terminal.seen" => Scope::Control,
+        | "terminal.seen"
+        | "terminal.remove" => Scope::Control,
         "repository_root.list"
         | "repository_root.add"
         | "repository_root.remove"
@@ -324,6 +325,18 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
+            "terminal.remove" => {
+                let id = Self::target(&req)?;
+                svc.remove_terminal(id).await?;
+                // No terminal to return: it is gone. An empty workspace list is
+                // the honest shape for "this succeeded and there is nothing to
+                // show", rather than echoing back a record that no longer
+                // exists.
+                Ok(result::Value::TerminalList(overnight_protocol::v1::TerminalList {
+                    items: Vec::new(),
+                }))
+            }
+
             "terminal.dismiss_lost" => {
                 let id = Self::target(&req)?;
                 svc.dismiss_lost(id).await?;
@@ -414,6 +427,7 @@ mod tests {
             "workspace.archive",
             "workspace.restore",
             "terminal.seen",
+            "terminal.remove",
             "repository_root.remove",
             "workspace.remove_worktree",
             "terminal.create",

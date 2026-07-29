@@ -9,6 +9,7 @@ struct ContentView: View {
 
     @State private var showNewWorkspace = false
     @State private var showAddRepository = false
+    @State private var showShortcuts = false
     @State private var newTerminalFor: Workspace?
     @State private var removeWorkspace: Workspace?
 
@@ -25,14 +26,31 @@ struct ContentView: View {
             detail
         }
         .task {
+            Notifier.shared.requestAuthorisation()
             await client.refresh()
             await client.refreshRepositories()
             await client.refreshRoots()
             expandAll()
             selectFirstRunningTerminal()
-            startPolling()
+            // Pushed, not polled. The daemon derives once for every client and
+            // sends only what changed, so a quiet fleet costs nothing and a
+            // question from an agent arrives at once instead of up to a poll
+            // interval later.
+            client.startEvents()
         }
-        .onDisappear { pollTask?.cancel() }
+        .onDisappear { client.stopEvents() }
+        .onCommand { command in run(command) }
+        .onSelectIndex { index in selectTerminal(at: index) }
+        .onChange(of: selection) { _, new in
+            // Opening a terminal is what ends `done`. Being listed is not being
+            // read, so this is deliberately tied to selection.
+            if case .terminal(_, let id) = new,
+                let terminal = allTerminals.first(where: { $0.id == id })
+            {
+                Task { await client.markSeen(terminal.short) }
+            }
+        }
+        .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
         .onReceive(
             NotificationCenter.default.publisher(
                 for: NSApplication.didBecomeActiveNotification)
@@ -366,16 +384,108 @@ struct ContentView: View {
         }
     }
 
-    private func startPolling() {
-        pollTask?.cancel()
-        pollTask = Task {
-            while !Task.isCancelled {
-                // The screen streams, so only the fleet list needs polling and it
-                // is not latency sensitive.
-                try? await Task.sleep(for: .seconds(3))
-                if Task.isCancelled { return }
-                await client.refresh()
+    // MARK: - Commands
+
+    /// Every terminal in the fleet, in the order the sidebar shows them.
+    ///
+    /// One definition, so ⌘1 and a click select the same thing and ⌘] walks the
+    /// list a user can actually see.
+    private var allTerminals: [Terminal] {
+        client.fleet.workspaces.flatMap(\.terminals)
+    }
+
+    private var selectedTerminal: (workspace: Workspace, terminal: Terminal)? {
+        guard case .terminal(let workspaceID, let terminalID) = selection,
+            let workspace = client.fleet.workspaces.first(where: { $0.id == workspaceID }),
+            let terminal = workspace.terminals.first(where: { $0.id == terminalID })
+        else { return nil }
+        return (workspace, terminal)
+    }
+
+    private func run(_ command: AppCommand) {
+        switch command {
+        case .newTerminal:
+            // Acts on whichever workspace you are in, so making a terminal is
+            // one keystroke rather than a hunt for the right + button.
+            if let workspace = currentWorkspace { newTerminalFor = workspace }
+
+        case .closeTerminal:
+            guard let (_, terminal) = selectedTerminal else { return }
+            Task {
+                // Stop, then remove the record. Closing a terminal should leave
+                // nothing behind — that is what closing means everywhere else.
+                await client.stop(terminal: terminal.short)
+                await client.removeTerminal(terminal.short)
+                selectNeighbour(of: terminal)
             }
+
+        case .restartTerminal:
+            guard let (_, terminal) = selectedTerminal else { return }
+            Task { await client.restart(terminal: terminal.short) }
+
+        case .nextTerminal: step(by: 1)
+        case .previousTerminal: step(by: -1)
+
+        case .nextAttention:
+            // Straight to whatever is waiting on you. On a fleet of twenty this
+            // is the difference between the app being useful and being a list.
+            let ordered = allTerminals
+            let start = ordered.firstIndex { $0.id == selectedTerminal?.terminal.id } ?? -1
+            let rotated = ordered[(start + 1)...] + ordered[...max(start, 0)]
+            if let next = rotated.first(where: { $0.agent.wantsAttention }) {
+                select(next)
+            }
+
+        case .newWorkspace: showNewWorkspace = true
+        case .addRepository: showAddRepository = true
+        case .reload: Task { await client.refresh() }
+        case .showShortcuts: showShortcuts = true
+        }
+    }
+
+    private var currentWorkspace: Workspace? {
+        switch selection {
+        case .workspace(let id): return client.fleet.workspaces.first { $0.id == id }
+        case .terminal(let id, _): return client.fleet.workspaces.first { $0.id == id }
+        case nil: return client.fleet.workspaces.first
+        }
+    }
+
+    private func step(by offset: Int) {
+        let ordered = allTerminals
+        guard !ordered.isEmpty else { return }
+        let current = ordered.firstIndex { $0.id == selectedTerminal?.terminal.id } ?? 0
+        // Wraps, because a list you can walk off the end of makes you look.
+        let next = (current + offset + ordered.count) % ordered.count
+        select(ordered[next])
+    }
+
+    private func selectTerminal(at index: Int) {
+        let ordered = allTerminals
+        guard index >= 0, index < ordered.count else { return }
+        select(ordered[index])
+    }
+
+    private func select(_ terminal: Terminal) {
+        guard
+            let workspace = client.fleet.workspaces
+                .first(where: { $0.terminals.contains(where: { $0.id == terminal.id }) })
+        else { return }
+        expanded.insert(workspace.id)
+        selection = .terminal(workspace: workspace.id, terminal: terminal.id)
+    }
+
+    /// After closing one, land on the next terminal rather than on nothing.
+    private func selectNeighbour(of terminal: Terminal) {
+        let ordered = allTerminals
+        guard let index = ordered.firstIndex(where: { $0.id == terminal.id }) else { return }
+        let remaining = ordered.enumerated().filter { $0.offset != index }.map(\.element)
+        if let next = remaining.first(where: { StateKind.parse($0.state) == .running })
+            ?? remaining.first
+        {
+            select(next)
+        } else {
+            selection = currentWorkspace.map { .workspace($0.id) }
         }
     }
 }

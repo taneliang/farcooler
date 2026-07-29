@@ -49,6 +49,91 @@ final class DaemonClient: ObservableObject {
         ProcessInfo.processInfo.environment
     }
 
+    // MARK: - Live updates
+
+    private var eventStream: EventStream?
+    /// Terminals whose clean exit we have already acted on, so a burst of
+    /// events for the same one does not queue several removals.
+    private var reaped: Set<String> = []
+
+    /// Start receiving pushed changes.
+    ///
+    /// Replaces polling. A poll has to choose between noticing an agent's
+    /// question late and burning cycles on a fleet where nothing is happening;
+    /// pushed changes have neither problem, and a quiet host sends nothing.
+    func startEvents() {
+        guard eventStream == nil, let binary else { return }
+        let stream = EventStream(
+            onEvent: { [weak self] event in
+                Task { @MainActor in self?.apply(event) }
+            },
+            onEnd: { [weak self] in
+                Task { @MainActor in
+                    self?.eventStream = nil
+                    // The daemon restarted, or the CLI died. Reconnect after a
+                    // pause rather than spinning, and re-read once connected:
+                    // anything that changed while we were deaf is only visible
+                    // in a full read.
+                    try? await Task.sleep(for: .seconds(2))
+                    await self?.refresh()
+                    self?.startEvents()
+                }
+            })
+        stream.start(binary: binary, environment: environment)
+        eventStream = stream
+    }
+
+    func stopEvents() {
+        eventStream?.stop()
+        eventStream = nil
+    }
+
+    /// Fold one pushed change into the fleet.
+    ///
+    /// Applied in place rather than triggering a full re-read: a re-read per
+    /// event would make a busy fleet slower than the polling this replaced.
+    private func apply(_ event: TerminalEvent) {
+        for w in fleet.workspaces.indices {
+            guard
+                let t = fleet.workspaces[w].terminals.firstIndex(where: { $0.id == event.id })
+            else { continue }
+
+            fleet.workspaces[w].terminals[t].state = event.state
+            fleet.workspaces[w].terminals[t].activity = event.activity
+
+            let terminal = fleet.workspaces[w].terminals[t]
+            Notifier.shared.report(terminal: terminal, workspace: fleet.workspaces[w].task)
+            reapIfExited(terminal)
+            return
+        }
+
+        // A terminal we have never seen: created elsewhere, or created here
+        // before the first read finished. Only a full read can place it in a
+        // workspace, so ask for one.
+        Task { await refresh() }
+    }
+
+    /// Remove a terminal whose command exited cleanly.
+    ///
+    /// A terminal you closed should leave nothing behind. A terminal that
+    /// FAILED is never removed automatically, whatever the preference says:
+    /// a crashed agent is the one row in the list you needed to see, and
+    /// tidying it away would hide the only evidence that something went wrong.
+    private func reapIfExited(_ terminal: Terminal) {
+        guard Preferences.shared.autoRemoveExited else { return }
+        guard StateKind.parse(terminal.state) == .exited else { return }
+        guard !reaped.contains(terminal.id) else { return }
+        // The daemon reports a non-zero exit as `error`, not `exited`, so
+        // reaching here already means a clean one.
+        reaped.insert(terminal.id)
+
+        Task {
+            _ = await run(["terminal", "remove", terminal.short], background: true)
+            Notifier.shared.forget(terminal.id)
+            await refresh()
+        }
+    }
+
     // MARK: - Commands
 
     /// Has a fleet ever been read successfully?
@@ -66,6 +151,13 @@ final class DaemonClient: ObservableObject {
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
             hasLoaded = true
             lastError = nil
+            // Reap on every read, not only on events. A terminal that exited
+            // while the app was closed produces no event to react to, so
+            // without this the first thing you see on launch is exactly the
+            // clutter auto-removal exists to prevent.
+            for workspace in fleet.workspaces {
+                for terminal in workspace.terminals { reapIfExited(terminal) }
+            }
         } catch {
             // Show the daemon's own output, truncated. A decode failure is
             // almost always something unexpected on stdout, and the first line
@@ -155,6 +247,22 @@ final class DaemonClient: ObservableObject {
 
     func dismissLost(terminal: String) async {
         _ = await run(["terminal", "dismiss-lost", terminal])
+        await refresh()
+    }
+
+    /// Tell the daemon a terminal was opened.
+    ///
+    /// This is what ends `done`, which is defined as finished-and-unseen.
+    /// Called on selection, not on appearing in a list: being listed is not
+    /// being read, and clearing a notification nobody read is worse than not
+    /// sending one.
+    func markSeen(_ terminal: String) async {
+        _ = await run(["terminal", "seen", terminal], background: true)
+    }
+
+    /// Delete a terminal's record. Refused by the daemon while it is running.
+    func removeTerminal(_ terminal: String) async {
+        _ = await run(["terminal", "remove", terminal])
         await refresh()
     }
 

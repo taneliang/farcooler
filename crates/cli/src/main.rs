@@ -73,6 +73,12 @@ enum Command {
     Terminal(TerminalCmd),
     /// Show how to attach to a workspace's live tmux session.
     Attach { workspace: String },
+    /// Stream changes as they happen, one JSON object per line.
+    ///
+    /// A long-lived connection that prints only what changed. Clients used to
+    /// poll, which forces a choice between noticing an agent's question late
+    /// and spending a phone's battery asking constantly.
+    Events,
     /// Install or inspect Overnight on a Linux host over ssh.
     #[command(subcommand, name = "host")]
     HostCmd(HostCmd),
@@ -175,6 +181,8 @@ enum TerminalCmd {
     DismissLost { terminal: String },
     /// Relaunch from the same preset as a new epoch.
     Restart { terminal: String },
+    /// Delete a terminal's record. Refused while it is still running.
+    Remove { terminal: String },
     /// Mark a terminal as looked at, clearing a `done` badge.
     ///
     /// Its own command rather than a side effect of `screen`, because a
@@ -219,6 +227,7 @@ async fn run() -> Fallible {
         Command::Workspace(c) => workspace(host, c, cli.json).await,
         Command::Terminal(c) => terminal(host, c, cli.json).await,
         Command::Attach { workspace } => attach(host, &workspace).await,
+        Command::Events => events(host).await,
         Command::HostCmd(HostCmd::Install { target, from }) => {
             host_install::install(&target, from.as_deref()).await
         }
@@ -554,6 +563,51 @@ async fn attach(host: Option<&str>, workspace: &str) -> Fallible {
     Ok(())
 }
 
+/// Print changes as they arrive, forever.
+///
+/// One JSON object per line, flushed immediately: a client reads this with a
+/// line reader and reacts, rather than asking again and again. Line-delimited
+/// rather than a JSON array because there is no end to wait for.
+async fn events(host: Option<&str>) -> Fallible {
+    use std::io::Write;
+
+    let mut link = connect_to(host).await?;
+    let mut out = std::io::stdout();
+
+    loop {
+        let event = link.next_event().await?;
+        let Some(payload) = event.payload else { continue };
+
+        let line = match payload {
+            overnight_protocol::v1::event::Payload::TerminalChanged(t) => serde_json::json!({
+                "kind": "terminal",
+                "id": uuid_of(&t.id).to_string(),
+                "short": short_bytes(&t.id),
+                "workspace": uuid_of(&t.workspace_id).to_string(),
+                "title": t.title,
+                "preset": t.command_preset,
+                "state": terminal_label(t.state()),
+                "activity": activity_label(t.activity),
+            }),
+            overnight_protocol::v1::event::Payload::WorkspaceChanged(w) => serde_json::json!({
+                "kind": "workspace",
+                "id": uuid_of(&w.id).to_string(),
+                "short": short_bytes(&w.id),
+                "task": w.task_name,
+                "state": workspace_label(w.state()),
+            }),
+            // Other resources have no events yet. Skipping is right: a client
+            // that reacts to a line it cannot read would be worse.
+            _ => continue,
+        };
+
+        writeln!(out, "{line}")?;
+        // Unbuffered on purpose. A client blocked on a line that is sitting in
+        // our buffer is exactly the latency this command exists to remove.
+        out.flush()?;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Terminals: records through the daemon, bytes through tmux
 // ---------------------------------------------------------------------------
@@ -591,6 +645,12 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(req_for("terminal.dismiss_lost", id)).await?;
             println!("dismissed {} (still truthfully lost, no exit claimed)", short(id));
+        }
+
+        TerminalCmd::Remove { terminal } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(req_for("terminal.remove", id)).await?;
+            println!("removed {}", short(id));
         }
 
         TerminalCmd::Seen { terminal } => {

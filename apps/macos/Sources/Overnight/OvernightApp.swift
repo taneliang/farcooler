@@ -7,9 +7,11 @@ struct OvernightApp: App {
                 .frame(minWidth: 900, minHeight: 560)
         }
         .windowStyle(.titleBar)
-        .commands {
-            CommandGroup(replacing: .newItem) {}
-        }
+        .commands { OvernightCommands() }
+
+        // A real Settings scene, so ⌘, works the way it does in every other Mac
+        // app without anyone wiring it up.
+        Settings { SettingsView() }
     }
 }
 

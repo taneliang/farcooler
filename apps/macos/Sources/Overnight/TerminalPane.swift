@@ -2,6 +2,8 @@ import SwiftUI
 
 /// The terminal detail pane: a header of facts, the live surface, a hint bar.
 struct TerminalPane: View {
+    @ObservedObject private var preferences = Preferences.shared
+
     let terminal: Terminal
     let workspace: Workspace
     let binary: String?
@@ -21,7 +23,8 @@ struct TerminalPane: View {
                     terminal: terminal.short,
                     binary: binary,
                     environment: environment,
-                    onResize: onGeometry
+                    onResize: onGeometry,
+                    fontRevision: preferences.revision
                 )
                 .id(terminal.id)
             } else {

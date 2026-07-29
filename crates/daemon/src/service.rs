@@ -263,6 +263,26 @@ impl Service {
         )
     }
 
+    /// Delete a terminal's record.
+    ///
+    /// For a terminal that is already gone: its command exited and there is
+    /// nothing left to show. Refused while one is still live, because removing
+    /// the record of a running process would orphan it — it would keep running
+    /// inside tmux with nothing left that knows it exists.
+    pub async fn remove_terminal(&self, id: Uuid) -> Result<()> {
+        let record = self.store.get_terminal(id)?;
+        let derived = self.derive_one(&record);
+        if matches!(derived.state, TerminalState::Running | TerminalState::Starting) {
+            return Err(DomainError::RunningProcesses);
+        }
+
+        // Take the retained dead pane with it. `remain-on-exit` keeps one so a
+        // clean exit is distinguishable from a loss; once the record is gone
+        // there is nothing left for it to prove.
+        let _ = self.tmux.kill_terminal_window(id).await;
+        self.store.delete_terminal(id, record.resource_version)
+    }
+
     /// Bring an archived workspace back.
     ///
     /// Archiving hides; it never touched git, so restoring never has to

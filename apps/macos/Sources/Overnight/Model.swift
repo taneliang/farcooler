@@ -63,7 +63,59 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var title: String
     var preset: String
     var state: String
+    /// What the AGENT is doing, as the daemon derived it. Absent on older
+    /// daemons, which is why it is optional rather than defaulted to something
+    /// that would look like a real answer.
+    var activity: String?
     var epoch: Int
+
+    var agent: AgentActivity { AgentActivity.parse(activity) }
+}
+
+/// What a coding agent is doing, as distinct from whether its process is alive.
+///
+/// `done` is not a state of the agent — it is idle that nobody has looked at
+/// yet. That is what makes it worth a notification and what makes it clear
+/// itself when you open the terminal.
+enum AgentActivity: String {
+    case none, idle, working, blocked, done, unknown
+
+    static func parse(_ raw: String?) -> AgentActivity {
+        guard let raw else { return .none }
+        return AgentActivity(rawValue: raw) ?? .unknown
+    }
+
+    /// Is this worth interrupting someone for?
+    ///
+    /// One definition, so a badge, a notification and a future Live Activity
+    /// cannot disagree about what deserves attention.
+    var wantsAttention: Bool { self == .blocked || self == .done }
+
+    /// Nothing to show for a plain shell — putting it in the same visual
+    /// language as an agent is noise in the list you scan for what needs you.
+    var isAgent: Bool { self != .none }
+
+    var label: String {
+        switch self {
+        case .none: return ""
+        case .idle: return "Idle"
+        case .working: return "Working"
+        case .blocked: return "Needs you"
+        case .done: return "Done"
+        case .unknown: return "Unknown"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .none: return "terminal"
+        case .idle: return "pause.circle"
+        case .working: return "circle.dotted"
+        case .blocked: return "hand.raised.fill"
+        case .done: return "checkmark.circle.fill"
+        case .unknown: return "questionmark.circle"
+        }
+    }
 }
 
 // MARK: - State vocabulary

@@ -49,11 +49,13 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         }
     }
 
-    init(fontSize: CGFloat = 12.5) {
-        font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
-        italicFont =
-            NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+    init() {
+        // From preferences, not a constant. A monospaced face is something
+        // people have long-held preferences about, and one that renders badly
+        // on your display makes the whole app unpleasant whatever it does.
+        font = Preferences.shared.terminalFont()
+        boldFont = Preferences.shared.terminalFont(weight: .bold)
+        italicFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
         core = VTCore(columns: 80, rows: 24)
         super.init(frame: .zero)
         measure()
@@ -148,6 +150,22 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         Metrics(
             cellWidth: cellWidth, cellHeight: cellHeight,
             paddingTop: padding.top, paddingLeft: padding.left)
+    }
+
+    /// Re-read the font and re-measure.
+    ///
+    /// Changing the font changes the cell size, which changes how many columns
+    /// fit, which the pane has to be told about — so this ends in the same
+    /// resize path a window drag uses rather than a second one that could
+    /// disagree with it.
+    func applyPreferences() {
+        font = Preferences.shared.terminalFont()
+        boldFont = Preferences.shared.terminalFont(weight: .bold)
+        italicFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        measure()
+        lastReportedGeometry = (0, 0)
+        reportGeometry()
+        needsDisplay = true
     }
 
     /// Replace the core, for when the view is pointed at a different terminal.

@@ -113,6 +113,25 @@ where
         std::mem::take(&mut self.pending_events)
     }
 
+    /// Wait for the next event.
+    ///
+    /// Events buffered while a call was in flight come out first, so nothing is
+    /// lost by having made a request at the wrong moment.
+    pub async fn next_event(&mut self) -> Result<Event, ClientError> {
+        if !self.pending_events.is_empty() {
+            return Ok(self.pending_events.remove(0));
+        }
+        loop {
+            let envelope = self.reader.read_frame().await?.ok_or(ClientError::Closed)?;
+            match envelope.body {
+                Some(wire_envelope::Body::Event(event)) => return Ok(event),
+                // A response with nobody waiting for it. Dropped rather than
+                // stored: the caller that wanted it has gone.
+                _ => continue,
+            }
+        }
+    }
+
     /// Send a request and wait for the response that matches it.
     pub async fn call(
         &mut self,

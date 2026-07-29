@@ -20,6 +20,7 @@ struct TerminalSurface: NSViewRepresentable {
         var input: TerminalInput?
         var attached: String?
         var started = false
+        var fontRevision = 0
         var pendingGeometry: Task<Void, Never>?
 
         func stop() {
@@ -33,6 +34,9 @@ struct TerminalSurface: NSViewRepresentable {
         }
     }
 
+    /// Bumped by preferences, so a font change reaches a live terminal.
+    var fontRevision: Int = 0
+
     func makeNSView(context: Context) -> TerminalRenderView {
         let view = TerminalRenderView()
         attach(view, context: context)
@@ -44,6 +48,10 @@ struct TerminalSurface: NSViewRepresentable {
         // on every SwiftUI update would wipe the screen constantly.
         if context.coordinator.attached != terminal {
             attach(view, context: context)
+        }
+        if context.coordinator.fontRevision != fontRevision {
+            context.coordinator.fontRevision = fontRevision
+            view.applyPreferences()
         }
     }
 
