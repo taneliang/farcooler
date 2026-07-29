@@ -44,8 +44,9 @@ struct OvernightCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Terminal") { AppCommand.newTerminal.post() }
                 .keyboardShortcut("t", modifiers: .command)
-            Button("New Workspace…") { AppCommand.newWorkspace.post() }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+            // ⌘N, the plainest shortcut in the app, for the thing it is for.
+            Button("New Task…") { AppCommand.newWorkspace.post() }
+                .keyboardShortcut("n", modifiers: .command)
             Button("Add Repository…") { AppCommand.addRepository.post() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
         }

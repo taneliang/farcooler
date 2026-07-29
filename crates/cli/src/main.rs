@@ -943,6 +943,15 @@ fn terminal_label(s: TerminalState) -> &'static str {
     }
 }
 
+/// Normalise an id for matching.
+///
+/// Ids are compared in their dashless form, so a short id and a full hyphenated
+/// UUID both work. Without this, pasting an id straight out of `--json` — which
+/// is hyphenated — matched nothing, because the stored form is not.
+fn normalise_id(text: &str) -> String {
+    text.trim().to_lowercase().replace('-', "")
+}
+
 /// Resolve a short id suffix, refusing an ambiguous match rather than guessing.
 fn resolve<'a, T>(
     items: &'a [T],
@@ -950,9 +959,10 @@ fn resolve<'a, T>(
     id_of: impl Fn(&T) -> &[u8],
     kind: &str,
 ) -> Result<&'a T, String> {
+    let needle = normalise_id(prefix);
     let matches: Vec<&T> = items
         .iter()
-        .filter(|i| uuid_of(id_of(i)).simple().to_string().ends_with(prefix))
+        .filter(|i| uuid_of(id_of(i)).simple().to_string().ends_with(&needle))
         .collect();
 
     match matches.len() {

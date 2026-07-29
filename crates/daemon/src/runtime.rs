@@ -55,12 +55,14 @@ impl Runtime {
     /// only an archived record is not a match at all. It also means they need
     /// no database, which is what lets them run beside the daemon.
     pub fn resolve_terminal(&self, prefix: &str) -> Result<Uuid> {
+        // Dashless, so a short id and a full hyphenated UUID both work.
+        let needle = prefix.trim().to_lowercase().replace('-', "");
         let snapshot = self.inventory.snapshot();
         let mut matches: Vec<Uuid> = snapshot
             .panes
             .iter()
             .map(|p| p.terminal_id)
-            .filter(|id| id.simple().to_string().ends_with(prefix))
+            .filter(|id| id.simple().to_string().ends_with(&needle))
             .collect();
         matches.sort();
         matches.dedup();

@@ -31,6 +31,13 @@ final class Preferences: ObservableObject {
     /// state where Overnight does not know what happened.
     @AppStorage("terminals.autoRemoveExited") var autoRemoveExited = true
 
+    /// Which agent a new task starts with.
+    ///
+    /// Only quick-create uses it. ⌘T still makes a plain shell, because that is
+    /// the other thing you want a terminal for and guessing wrong there costs a
+    /// process launch.
+    @AppStorage("tasks.defaultAgent") var defaultAgent = "claude"
+
     /// Notify when an agent needs you, or finishes.
     @AppStorage("notifications.enabled") var notifyOnAttention = true
     /// Also notify when an agent finishes, not only when it is blocked.
@@ -157,6 +164,17 @@ struct SettingsView: View {
 
     private var behaviour: some View {
         Form {
+            Section {
+                Picker("New tasks start with", selection: $preferences.defaultAgent) {
+                    Text("Claude Code").tag("claude")
+                    Text("Codex").tag("codex")
+                    Text("Cursor").tag("cursor")
+                }
+                Text("⌘T still opens a plain shell.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
                 Text(

@@ -201,6 +201,71 @@ final class DaemonClient: ObservableObject {
         return error
     }
 
+    /// Everything a task needs, from one sentence.
+    ///
+    /// Creates the worktree, launches an agent in it, waits for the agent to
+    /// actually be ready, and hands it the description as its first message.
+    ///
+    /// The waiting is the interesting part. An agent takes several seconds to
+    /// boot, and text typed into it before then is swallowed by whatever it
+    /// draws over the top. Rather than guessing a delay, this waits for the
+    /// daemon to report the agent as IDLE — the same activity detection the
+    /// sidebar uses. "Ready for input" is exactly what idle means, so the
+    /// signal already existed.
+    ///
+    /// Returns the new workspace, so the caller can select it immediately
+    /// rather than after the agent has finished starting.
+    @discardableResult
+    func startTask(project: String, description: String, agent: String) async -> String? {
+        let branch = await MainActor.run { Branch.slug(from: description) }
+        let title = await MainActor.run { Branch.title(from: description) }
+
+        let before = Set(fleet.workspaces.map(\.id))
+        _ = await run(["workspace", "create", project, title, "--branch", branch])
+        await refresh()
+
+        guard let workspace = fleet.workspaces.first(where: { !before.contains($0.id) }) else {
+            return nil
+        }
+
+        _ = await run([
+            "terminal", "create", workspace.short, "--preset", agent, "--title", agent,
+        ])
+        await refresh()
+
+        guard let terminal = fleet.workspaces
+            .first(where: { $0.id == workspace.id })?
+            .terminals.first(where: { $0.preset == agent || $0.title == agent })
+        else { return workspace.id }
+
+        // Up to a minute: a cold agent on a slow machine is not a failure.
+        for _ in 0..<120 {
+            try? await Task.sleep(for: .milliseconds(500))
+            await refresh()
+            let current = fleet.workspaces
+                .first(where: { $0.id == workspace.id })?
+                .terminals.first(where: { $0.id == terminal.id })
+            guard let current else { return workspace.id }
+            if current.agent == .idle {
+                await send(terminal: current.short, text: description)
+                return workspace.id
+            }
+            // It asked something before we got a word in — a trust prompt, or a
+            // resume dialog. Stop rather than typing a task description into a
+            // yes/no question.
+            if current.agent == .blocked { return workspace.id }
+        }
+        return workspace.id
+    }
+
+    /// Type text into a terminal and press return.
+    func send(terminal: String, text: String) async {
+        _ = await run(["terminal", "send", terminal, text], background: true)
+        // Return as a separate keystroke: an agent's composer treats a newline
+        // inside pasted text as a line break, not as submit.
+        _ = await run(["terminal", "send-hex", terminal, "0d"], background: true)
+    }
+
     func createWorkspace(repo: String, task: String, branch: String, base: String) async {
         _ = await run(["workspace", "create", repo, task, "--branch", branch, "--base", base])
         await refresh()

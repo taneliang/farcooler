@@ -35,9 +35,9 @@ enum Shortcut {
             ]
         ),
         (
-            "Workspaces",
+            "Tasks",
             [
-                Item(keys: "⇧⌘N", action: "New workspace"),
+                Item(keys: "⌘N", action: "New task — describe it and go"),
                 Item(keys: "⇧⌘R", action: "Add repository"),
             ]
         ),

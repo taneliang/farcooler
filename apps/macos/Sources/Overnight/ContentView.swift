@@ -11,6 +11,8 @@ struct ContentView: View {
     @State private var showAddRepository = false
     @State private var showShortcuts = false
     @State private var query = ""
+    @State private var showQuickCreate = false
+    @AppStorage("tasks.lastProject") private var lastProject = ""
     @FocusState private var searchFocused: Bool
     @State private var removeWorkspace: Workspace?
 
@@ -59,6 +61,25 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
+        // An overlay, not a sheet. A sheet dims the window and takes it over,
+        // which is the wrong weight for something you use several times in a
+        // row and want to see the results of behind.
+        .overlay(alignment: .top) {
+            if showQuickCreate {
+                QuickCreate(
+                    projects: client.repositories,
+                    project: $lastProject,
+                    onSubmit: { description, project in
+                        lastProject = project
+                        startTask(description: description, project: project)
+                    },
+                    onClose: { showQuickCreate = false }
+                )
+                .padding(.top, 14)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.16), value: showQuickCreate)
         .onReceive(
             NotificationCenter.default.publisher(
                 for: NSApplication.didBecomeActiveNotification)
@@ -544,11 +565,42 @@ struct ContentView: View {
                 select(next)
             }
 
-        case .newWorkspace: showNewWorkspace = true
+        case .newWorkspace:
+            // Only reachable with a project registered; the panel has nothing
+            // to create into otherwise.
+            if client.repositories.isEmpty {
+                showAddRepository = true
+            } else {
+                if lastProject.isEmpty { lastProject = client.repositories[0].id }
+                showQuickCreate = true
+            }
         case .addRepository: showAddRepository = true
         case .reload: Task { await client.refresh() }
         case .showShortcuts: showShortcuts = true
         case .search: searchFocused = true
+        }
+    }
+
+    /// Start a task and go to it as soon as it exists.
+    ///
+    /// Deliberately does not wait for the agent to boot before selecting. The
+    /// point is to be looking at the thing you asked for while it starts, not
+    /// to stare at the old screen for ten seconds first.
+    private func startTask(description: String, project: String) {
+        Task {
+            let created = await client.startTask(
+                project: project,
+                description: description,
+                agent: Preferences.shared.defaultAgent)
+            guard let created else { return }
+            expanded.insert(created)
+            if let workspace = client.fleet.workspaces.first(where: { $0.id == created }),
+                let terminal = workspace.terminals.first
+            {
+                selection = .terminal(workspace: created, terminal: terminal.id)
+            } else {
+                selection = .workspace(created)
+            }
         }
     }
 
