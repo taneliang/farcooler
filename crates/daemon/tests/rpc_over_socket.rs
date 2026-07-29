@@ -33,9 +33,13 @@ async fn start(scope: Scope) -> Harness {
     let service = Arc::new(Service::open_in(dir.path().to_path_buf()).await.expect("service"));
     let server = UnixListenerServer::bind(&socket).expect("bind");
 
+    // The watcher is constructed but not run: these tests are about dispatch,
+    // and a sampling loop would make them race a tmux that may not be there.
+    let watcher = overnight_daemon::watch::Watcher::new(service.clone());
+
     let cfg = HandshakeConfig { daemon_version: "test".into(), granted_scope: scope };
     tokio::spawn(async move {
-        let _ = server.serve(cfg, Factory { service, scope }).await;
+        let _ = server.serve(cfg, Factory { service, watcher, scope }).await;
     });
 
     // The listener is bound before serve() is spawned, so a connect cannot race
@@ -47,6 +51,7 @@ async fn start(scope: Scope) -> Harness {
 #[derive(Clone)]
 struct Factory {
     service: Arc<Service>,
+    watcher: Arc<overnight_daemon::watch::Watcher>,
     scope: Scope,
 }
 
@@ -55,7 +60,7 @@ impl overnight_transport::Handler for Factory {
         &self,
         req: overnight_protocol::v1::Request,
     ) -> impl std::future::Future<Output = overnight_protocol::v1::Response> + Send {
-        let rpc = Rpc::new(self.service.clone(), self.scope);
+        let rpc = Rpc::new(self.service.clone(), self.watcher.clone(), self.scope);
         async move { overnight_transport::Handler::handle(&rpc, req).await }
     }
 }

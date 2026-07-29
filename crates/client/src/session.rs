@@ -131,6 +131,7 @@ impl Session {
                             "title": t.title,
                             "preset": t.command_preset,
                             "state": terminal_label(t.state()),
+                            "activity": activity_label(t.activity),
                             "epoch": t.epoch,
                         }))
                         .collect::<Vec<_>>(),
@@ -299,6 +300,24 @@ pub fn uuid_of(bytes: &[u8]) -> Uuid {
 pub fn short(bytes: &[u8]) -> String {
     let s = uuid_of(bytes).simple().to_string();
     s[s.len() - 8..].to_string()
+}
+
+/// The agent's activity, as the daemon derived it.
+///
+/// Distinct from `state`, which is about the process. A Claude Code sitting at
+/// a permission prompt and one halfway through a file edit are both `running`;
+/// the difference between them is the reason to look at a fleet at all.
+fn activity_label(a: i32) -> &'static str {
+    use overnight_protocol::v1::AgentActivity;
+    match AgentActivity::try_from(a).unwrap_or(AgentActivity::Unspecified) {
+        AgentActivity::None => "none",
+        AgentActivity::Idle => "idle",
+        AgentActivity::Working => "working",
+        AgentActivity::Blocked => "blocked",
+        AgentActivity::Done => "done",
+        AgentActivity::Unknown => "unknown",
+        AgentActivity::Unspecified => "none",
+    }
 }
 
 fn workspace_label(s: WorkspaceState) -> &'static str {

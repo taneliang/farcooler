@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use overnight_daemon::{paths, rpc::Rpc, service::Service};
+use overnight_daemon::{paths, rpc::Rpc, service::Service, watch::Watcher};
 use overnight_protocol::v1::{Request, Response, Scope};
 use overnight_transport::{HandshakeConfig, Handler, UnixListenerServer};
 
@@ -68,6 +68,12 @@ async fn run() -> Result<(), i32> {
         1
     })?);
 
+    // One watcher for the host, shared by every connection. Deriving activity
+    // once and pushing it is the whole point: N clients must not mean N
+    // processes reading the same screens.
+    let watcher = Watcher::new(service.clone());
+    tokio::spawn(watcher.clone().run());
+
     let server = UnixListenerServer::bind(&socket).map_err(|e| {
         eprintln!("cannot bind {}: {e}", socket.display());
         1
@@ -100,7 +106,7 @@ async fn run() -> Result<(), i32> {
     };
 
     let result = tokio::select! {
-        served = server.serve(cfg, RpcFactory { service }) => served.map_err(|e| {
+        served = server.serve(cfg, RpcFactory { service, watcher }) => served.map_err(|e| {
             tracing::error!(error = %e, "listener stopped");
             1
         }),
@@ -127,12 +133,15 @@ async fn serve_stdio_session() -> Result<(), i32> {
         1
     })?);
 
+    let watcher = Watcher::new(service.clone());
+    tokio::spawn(watcher.clone().run());
+
     let cfg = HandshakeConfig {
         daemon_version: env!("CARGO_PKG_VERSION").to_string(),
         granted_scope: Scope::HostAdmin,
     };
 
-    overnight_transport::serve_stdio(cfg, RpcFactory { service }).await.map_err(|e| {
+    overnight_transport::serve_stdio(cfg, RpcFactory { service, watcher }).await.map_err(|e| {
         eprintln!("stdio session ended: {e}");
         1
     })
@@ -146,11 +155,21 @@ async fn serve_stdio_session() -> Result<(), i32> {
 #[derive(Clone)]
 struct RpcFactory {
     service: Arc<Service>,
+    watcher: Arc<Watcher>,
 }
 
 impl Handler for RpcFactory {
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
-        let rpc = Rpc::new(self.service.clone(), Scope::HostAdmin);
+        let rpc = Rpc::new(self.service.clone(), self.watcher.clone(), Scope::HostAdmin);
         async move { rpc.handle(req).await }
+    }
+
+    /// Every connection is subscribed to the push stream.
+    ///
+    /// No opt-in request: a client that connected wants to know when something
+    /// changes, and making it ask would just be a round trip before the first
+    /// event. Cost is zero on a quiet host, because only changes are sent.
+    fn events(&self) -> Option<tokio::sync::broadcast::Receiver<overnight_protocol::v1::Event>> {
+        Some(self.watcher.subscribe())
     }
 }

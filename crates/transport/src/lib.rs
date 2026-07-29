@@ -31,4 +31,13 @@ use overnight_protocol::v1::{Request, Response};
 /// non-Send future would fail to spawn.
 pub trait Handler: Send + Sync + 'static {
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send;
+
+    /// Events to push to this connection, if the handler produces any.
+    ///
+    /// Defaulted to none so a handler that only answers requests — a test, a
+    /// one-shot stdio session — needs no change. Returning a receiver opts a
+    /// connection into the push stream instead of leaving it to poll.
+    fn events(&self) -> Option<tokio::sync::broadcast::Receiver<overnight_protocol::v1::Event>> {
+        None
+    }
 }

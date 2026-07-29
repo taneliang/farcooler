@@ -14,8 +14,8 @@ use std::time::Duration;
 use bytes::Bytes;
 use overnight_core::DomainError;
 use overnight_protocol::v1::{
-    ClientHello, Error as WireErrorMsg, ErrorCode, Response, Scope, ServerHello, WireEnvelope, response,
-    wire_envelope,
+    ClientHello, Error as WireErrorMsg, ErrorCode, Event, Response, Scope, ServerHello, WireEnvelope,
+    response, wire_envelope,
 };
 use overnight_protocol::{MAX_QUEUED_CONTROL_BYTES, PROTOCOL_VERSION, ids};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -292,23 +292,80 @@ where
 {
     conn.handshake(cfg).await?;
 
+    // Events are pushed, not polled.
+    //
+    // A client that polls has to choose between latency and cost, and gets
+    // both wrong: too slow to notice an agent asking a question, too expensive
+    // for a phone on a battery over SSH. Pushing means a change reaches every
+    // connected client as it happens and an idle fleet costs nothing.
+    let mut events = handler.events();
+
     loop {
-        let envelope = conn.recv().await?;
-        let request = match envelope.body {
-            Some(wire_envelope::Body::Request(req)) => req,
-            _ => return Err(ConnectionError::UnexpectedFrame),
-        };
+        tokio::select! {
+            // Biased so a pending request is always answered before events are
+            // drained. Without it a busy fleet could starve request handling,
+            // and a user's click would wait behind a queue of notifications.
+            biased;
 
-        let request_id = request.request_id.clone();
-        let mut response = handler.handle(request).await;
-        response.request_id = request_id;
+            incoming = conn.recv() => {
+                let envelope = incoming?;
+                let request = match envelope.body {
+                    Some(wire_envelope::Body::Request(req)) => req,
+                    _ => return Err(ConnectionError::UnexpectedFrame),
+                };
 
-        let reply = WireEnvelope {
-            protocol_version: PROTOCOL_VERSION,
-            message_id: ids::new_id(),
-            body: Some(wire_envelope::Body::Response(response)),
-        };
-        conn.send(&reply).await?;
+                let request_id = request.request_id.clone();
+                let mut response = handler.handle(request).await;
+                response.request_id = request_id;
+
+                conn.send(&WireEnvelope {
+                    protocol_version: PROTOCOL_VERSION,
+                    message_id: ids::new_id(),
+                    body: Some(wire_envelope::Body::Response(response)),
+                }).await?;
+            }
+
+            event = next_event(&mut events) => {
+                let Some(event) = event else {
+                    // The broadcaster is gone, or this handler emits nothing.
+                    // Neither is a reason to drop a working connection, so stop
+                    // listening and keep serving requests.
+                    events = None;
+                    continue;
+                };
+                conn.send(&WireEnvelope {
+                    protocol_version: PROTOCOL_VERSION,
+                    message_id: ids::new_id(),
+                    body: Some(wire_envelope::Body::Event(event)),
+                }).await?;
+            }
+        }
+    }
+}
+
+/// Await the next event, or never, when this handler emits none.
+///
+/// `select!` needs every branch to be a future; a handler without events would
+/// otherwise have to be a separate code path. Pending-forever is the honest
+/// expression of "this arm will not fire".
+async fn next_event(
+    events: &mut Option<tokio::sync::broadcast::Receiver<Event>>,
+) -> Option<Event> {
+    let Some(receiver) = events else {
+        std::future::pending::<()>().await;
+        unreachable!("pending never resolves");
+    };
+    loop {
+        match receiver.recv().await {
+            Ok(event) => return Some(event),
+            // A slow client missed some. Dropping the connection would be
+            // worse than the gap: the next event still arrives, and clients
+            // reconcile against a full read when they need certainty.
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                tracing::warn!(skipped, "client fell behind the event stream");
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+        }
     }
 }
 

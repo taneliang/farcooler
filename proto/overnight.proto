@@ -281,6 +281,35 @@ message Terminal {
   uint32 rows = 12;
   optional bytes size_controller_client_id = 13;
   uint64 epoch = 14;
+
+  // What the AGENT is doing, as distinct from whether its process is alive.
+  // Derived from the terminal's screen by the daemon, never by a client: a
+  // remote client has no screen to look at, and two clients that each decided
+  // for themselves could disagree about the same terminal.
+  AgentActivity activity = 15;
+  // When `activity` last changed. A client shows "working for 4m" from this
+  // rather than timing it locally, which would restart on every reconnect.
+  optional google.protobuf.Timestamp activity_changed_at = 16;
+}
+
+// The four states a coding agent is in, plus the two non-answers.
+//
+// DONE is not a state of the process — it is IDLE that the user has not seen
+// yet. That is what makes it the thing worth notifying about, and what makes it
+// clear itself when someone looks.
+enum AgentActivity {
+  AGENT_ACTIVITY_UNSPECIFIED = 0;
+  // Not an agent at all: a plain shell. Distinct from UNKNOWN, which means we
+  // could not tell.
+  AGENT_ACTIVITY_NONE = 1;
+  AGENT_ACTIVITY_IDLE = 2;
+  AGENT_ACTIVITY_WORKING = 3;
+  // Waiting on the user: a permission prompt, a question, a confirmation.
+  AGENT_ACTIVITY_BLOCKED = 4;
+  AGENT_ACTIVITY_DONE = 5;
+  // An agent is present but its screen matched nothing we recognise. Reported
+  // honestly rather than guessed at, the same as a lost terminal.
+  AGENT_ACTIVITY_UNKNOWN = 6;
 }
 
 message TerminalList { repeated Terminal items = 1; }

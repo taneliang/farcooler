@@ -4,6 +4,7 @@
 //! `RuntimeInventory` trait that `tmux` implements, so crate dependencies point
 //! one way and the derivation rule stays testable with no tmux present.
 
+pub mod activity;
 pub mod derive;
 pub mod error;
 pub mod inventory;

@@ -28,13 +28,18 @@ use crate::wire;
 
 pub struct Rpc {
     service: Arc<Service>,
+    watcher: Arc<crate::watch::Watcher>,
     scope: Scope,
     daemon_version: String,
 }
 
 impl Rpc {
-    pub fn new(service: Arc<Service>, scope: Scope) -> Self {
-        Self { service, scope, daemon_version: env!("CARGO_PKG_VERSION").to_string() }
+    pub fn new(
+        service: Arc<Service>,
+        watcher: Arc<crate::watch::Watcher>,
+        scope: Scope,
+    ) -> Self {
+        Self { service, watcher, scope, daemon_version: env!("CARGO_PKG_VERSION").to_string() }
     }
 }
 
@@ -55,7 +60,8 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "terminal.resize"
         | "terminal.stop"
         | "terminal.dismiss_lost"
-        | "terminal.restart" => Scope::Control,
+        | "terminal.restart"
+        | "terminal.seen" => Scope::Control,
         "repository_root.list"
         | "repository_root.add"
         | "repository_root.remove"
@@ -191,7 +197,9 @@ impl Rpc {
                     if filter.is_some_and(|id| id != view.workspace.id) {
                         continue;
                     }
-                    items.extend(view.terminals.iter().map(wire::terminal));
+                    for terminal in &view.terminals {
+                        items.push(self.with_activity(terminal).await);
+                    }
                 }
                 Ok(result::Value::TerminalList(overnight_protocol::v1::TerminalList { items }))
             }
@@ -306,6 +314,16 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
+            // Opening a terminal is what ends `Done`, which is defined as
+            // idle-and-unseen. Deliberately its own method rather than a side
+            // effect of listing: appearing in a list is not reading it, and
+            // clearing a notification nobody read is worse than not sending one.
+            "terminal.seen" => {
+                let id = Self::target(&req)?;
+                self.watcher.mark_seen(id).await;
+                self.terminal_result(id).await
+            }
+
             "terminal.dismiss_lost" => {
                 let id = Self::target(&req)?;
                 svc.dismiss_lost(id).await?;
@@ -332,10 +350,25 @@ impl Rpc {
     async fn terminal_result(&self, id: Uuid) -> Result<result::Value> {
         for view in self.service.fleet().await? {
             if let Some(t) = view.terminals.iter().find(|t| t.terminal.id == id) {
-                return Ok(result::Value::Terminal(wire::terminal(t)));
+                return Ok(result::Value::Terminal(self.with_activity(t).await));
             }
         }
         Err(DomainError::NotFound)
+    }
+
+    /// Attach what the watcher decided the agent is doing.
+    ///
+    /// One place, so a terminal in a list and the same terminal in a mutation
+    /// reply cannot disagree about whether its agent is waiting for you.
+    async fn with_activity(
+        &self,
+        view: &crate::service::TerminalView,
+    ) -> overnight_protocol::v1::Terminal {
+        let mut message = wire::terminal(view);
+        let (activity, changed_at) = self.watcher.activity(view.terminal.id).await;
+        message.activity = activity as i32;
+        message.activity_changed_at = changed_at.map(wire::timestamp);
+        message
     }
 }
 
@@ -380,6 +413,7 @@ mod tests {
             "workspace.create",
             "workspace.archive",
             "workspace.restore",
+            "terminal.seen",
             "repository_root.remove",
             "workspace.remove_worktree",
             "terminal.create",

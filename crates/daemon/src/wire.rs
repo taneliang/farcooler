@@ -151,10 +151,15 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         rows: t.rows,
         size_controller_client_id: None,
         epoch: t.epoch,
+        // Left unset here on purpose. Activity is the watcher's to decide, and
+        // it is the only thing that knows the previous observation — which is
+        // what `Done` is made of. A converter that guessed would erase it.
+        activity: wire::AgentActivity::Unspecified as i32,
+        activity_changed_at: None,
     }
 }
 
-fn timestamp(unix_millis: i64) -> prost_types::Timestamp {
+pub fn timestamp(unix_millis: i64) -> prost_types::Timestamp {
     prost_types::Timestamp {
         seconds: unix_millis.div_euclid(1000),
         nanos: (unix_millis.rem_euclid(1000) * 1_000_000) as i32,

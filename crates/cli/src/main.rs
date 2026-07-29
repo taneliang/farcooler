@@ -175,6 +175,12 @@ enum TerminalCmd {
     DismissLost { terminal: String },
     /// Relaunch from the same preset as a new epoch.
     Restart { terminal: String },
+    /// Mark a terminal as looked at, clearing a `done` badge.
+    ///
+    /// Its own command rather than a side effect of `screen`, because a
+    /// one-shot dump is not the same as opening a terminal, and clearing a
+    /// notification nobody read is worse than not sending one.
+    Seen { terminal: String },
 }
 
 #[tokio::main]
@@ -447,6 +453,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                                     "title": t.title,
                                     "preset": t.command_preset,
                                     "state": terminal_label(t.state()),
+                                    "activity": activity_label(t.activity),
                                     "epoch": t.epoch,
                                 }))
                                 .collect::<Vec<_>>(),
@@ -477,11 +484,13 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                     w.branch
                 );
                 for t in terminals.iter().filter(|t| t.workspace_id == w.id) {
+                    let activity = activity_label(t.activity);
                     println!(
-                        "    {}  {:16}  {:8}  {}",
+                        "    {}  {:16}  {:8}  {:8}  {}",
                         short_bytes(&t.id),
                         truncate(&t.title, 16),
                         terminal_label(t.state()),
+                        if activity == "none" { "" } else { activity },
                         t.command_preset
                     );
                 }
@@ -582,6 +591,12 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(req_for("terminal.dismiss_lost", id)).await?;
             println!("dismissed {} (still truthfully lost, no exit claimed)", short(id));
+        }
+
+        TerminalCmd::Seen { terminal } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(req_for("terminal.seen", id)).await?;
+            println!("marked {} seen", short(id));
         }
 
         TerminalCmd::Restart { terminal } => {
@@ -791,6 +806,24 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         s.chars().take(n.saturating_sub(1)).collect::<String>() + "~"
+    }
+}
+
+/// The agent's activity, as the daemon derived it.
+///
+/// Distinct from `state`, which is about the process. A Claude Code sitting at
+/// a permission prompt and one halfway through a file edit are both `running`;
+/// the difference between them is the reason to look at a fleet at all.
+fn activity_label(a: i32) -> &'static str {
+    use overnight_protocol::v1::AgentActivity;
+    match AgentActivity::try_from(a).unwrap_or(AgentActivity::Unspecified) {
+        AgentActivity::None => "none",
+        AgentActivity::Idle => "idle",
+        AgentActivity::Working => "working",
+        AgentActivity::Blocked => "blocked",
+        AgentActivity::Done => "done",
+        AgentActivity::Unknown => "unknown",
+        AgentActivity::Unspecified => "none",
     }
 }
 
