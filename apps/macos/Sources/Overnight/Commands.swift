@@ -10,7 +10,6 @@ import SwiftUI
 enum AppCommand: String {
     case newTerminal
     case closeTerminal
-    case restartTerminal
     case nextTerminal
     case previousTerminal
     case nextAttention
@@ -52,10 +51,11 @@ struct OvernightCommands: Commands {
 
         CommandGroup(after: .newItem) {
             Divider()
+            // No Restart. A terminal is its process: restarting one is closing
+            // it and opening another, which is ⌘W then ⌘T. A separate verb for
+            // the same two steps is a concept to learn for nothing.
             Button("Close Terminal") { AppCommand.closeTerminal.post() }
                 .keyboardShortcut("w", modifiers: .command)
-            Button("Restart Terminal") { AppCommand.restartTerminal.post() }
-                .keyboardShortcut("r", modifiers: .command)
         }
 
         CommandMenu("Terminal") {

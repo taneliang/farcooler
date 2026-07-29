@@ -113,18 +113,21 @@ final class DaemonClient: ObservableObject {
         Task { await refresh() }
     }
 
-    /// Remove a terminal whose command exited cleanly.
+    /// Remove a terminal whose process is gone.
     ///
-    /// A terminal you closed should leave nothing behind. A terminal that
-    /// FAILED is never removed automatically, whatever the preference says:
-    /// a crashed agent is the one row in the list you needed to see, and
-    /// tidying it away would hide the only evidence that something went wrong.
+    /// A terminal IS its process. When that exits — cleanly or not — there is
+    /// nothing left to show, so the row goes rather than becoming a dead entry
+    /// you have to dismiss. `error` counts too: a terminal that never started
+    /// has even less to look at than one that stopped.
+    ///
+    /// `lost` deliberately does not. That is the one state where Overnight does
+    /// not know what happened, and quietly deleting the evidence is the
+    /// opposite of what it should do.
     private func reapIfExited(_ terminal: Terminal) {
         guard Preferences.shared.autoRemoveExited else { return }
-        guard StateKind.parse(terminal.state) == .exited else { return }
+        let kind = StateKind.parse(terminal.state)
+        guard kind == .exited || kind == .error else { return }
         guard !reaped.contains(terminal.id) else { return }
-        // The daemon reports a non-zero exit as `error`, not `exited`, so
-        // reaching here already means a clean one.
         reaped.insert(terminal.id)
 
         Task {

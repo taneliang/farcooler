@@ -122,8 +122,11 @@ struct ContentView: View {
                             )
                         }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
+                    // Matches the row margin, so a selected row's highlight
+                    // sits a hair inside the sidebar rather than floating in a
+                    // gutter wider than the indent it is supposed to show.
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
                 }
             }
 
@@ -132,10 +135,36 @@ struct ContentView: View {
         .navigationSplitViewColumnWidth(min: 268, ideal: 300, max: 400)
     }
 
+    /// Everything waiting on you, across every workspace.
+    ///
+    /// The one number the app exists to produce. It used to be reachable only
+    /// by expanding each workspace and reading the rows — which is the work
+    /// this screen is supposed to have already done for you.
+    private var attentionCount: Int {
+        client.fleet.workspaces
+            .flatMap(\.terminals)
+            .filter(\.status.wantsAttention)
+            .count
+    }
+
     private var sidebarHeader: some View {
         HStack(spacing: 8) {
             Text("Fleet").font(.headline)
             if client.busy { ProgressView().controlSize(.mini) }
+
+            if attentionCount > 0 {
+                // A dot and a number, not a filled capsule. A solid block of
+                // colour in the header shouts louder than the row it points at,
+                // which leaves it pointing at itself.
+                Button {
+                    AppCommand.nextAttention.post()
+                } label: {
+                    AttentionBadge(count: attentionCount)
+                }
+                .buttonStyle(.plain)
+                .help("\(attentionCount) waiting on you — click to jump there")
+            }
+
             Spacer()
             // A menu rather than a button, because "add a repository" has to be
             // reachable at all times. It used to live only in the empty state,
@@ -154,9 +183,13 @@ struct ContentView: View {
             .fixedSize()
             .help("Add a workspace or a repository")
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        // Aligned to the same rail as the workspace names below it, so the
+        // section title heads its column instead of sitting off to one side of
+        // it. The vstack's own padding is added on top, hence the subtraction.
+        .padding(.leading, Grid.rail + 8)
+        .padding(.trailing, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
     }
 
     /// Shown only once a fleet has actually been read.
@@ -220,10 +253,9 @@ struct ContentView: View {
 
     /// Whether the daemon starts at login.
     ///
-    /// Surfaced here rather than buried in a settings pane because it decides
-    /// whether this host is reachable when nobody is sitting at it, which is
-    /// the difference between a terminal multiplexer and the thing this is
-    /// meant to be.
+    /// Lives in Settings now. It is a preference you set once, not a status you
+    /// watch, and a permanent control in the status bar made a piece of
+    /// configuration look like live information.
     @ViewBuilder
     private var loginItemToggle: some View {
         switch service.state {
@@ -276,8 +308,6 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
 
                 Spacer()
-
-                loginItemToggle
 
                 Button {
                     Task {
@@ -418,10 +448,6 @@ struct ContentView: View {
                 await client.removeTerminal(terminal.short)
                 selectNeighbour(of: terminal)
             }
-
-        case .restartTerminal:
-            guard let (_, terminal) = selectedTerminal else { return }
-            Task { await client.restart(terminal: terminal.short) }
 
         case .nextTerminal: step(by: 1)
         case .previousTerminal: step(by: -1)

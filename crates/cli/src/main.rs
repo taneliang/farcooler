@@ -463,6 +463,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                                     "preset": t.command_preset,
                                     "state": terminal_label(t.state()),
                                     "activity": activity_label(t.activity),
+                                    "activitySince": activity_since(&t),
                                     "epoch": t.epoch,
                                 }))
                                 .collect::<Vec<_>>(),
@@ -588,6 +589,7 @@ async fn events(host: Option<&str>) -> Fallible {
                 "preset": t.command_preset,
                 "state": terminal_label(t.state()),
                 "activity": activity_label(t.activity),
+                                    "activitySince": activity_since(&t),
             }),
             overnight_protocol::v1::event::Payload::WorkspaceChanged(w) => serde_json::json!({
                 "kind": "workspace",
@@ -885,6 +887,14 @@ fn activity_label(a: i32) -> &'static str {
         AgentActivity::Unknown => "unknown",
         AgentActivity::Unspecified => "none",
     }
+}
+
+/// When the activity last changed, as Unix milliseconds.
+///
+/// A client shows "working for 4m" from this rather than timing it locally,
+/// which would restart at every reconnect and lie after a laptop sleeps.
+fn activity_since(t: &overnight_protocol::v1::Terminal) -> Option<i64> {
+    t.activity_changed_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
 }
 
 fn workspace_label(s: WorkspaceState) -> &'static str {

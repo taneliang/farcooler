@@ -28,7 +28,6 @@ enum Shortcut {
             [
                 Item(keys: "⌘T", action: "New terminal in this workspace"),
                 Item(keys: "⌘W", action: "Close terminal"),
-                Item(keys: "⌘R", action: "Restart terminal"),
                 Item(keys: "⌘1 … ⌘9", action: "Jump to terminal"),
                 Item(keys: "⌘]", action: "Next terminal"),
                 Item(keys: "⌘[", action: "Previous terminal"),

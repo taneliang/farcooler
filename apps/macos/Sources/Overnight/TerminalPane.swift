@@ -1,6 +1,13 @@
 import SwiftUI
 
 /// The terminal detail pane: a header of facts, the live surface, a hint bar.
+/// The terminal.
+///
+/// No header bar and no footer hint. Both were chrome explaining what the
+/// sidebar already shows and what a terminal obviously is — a title repeating
+/// the selected row, a status repeating its dot, and a permanent sentence about
+/// how typing works. The content is a terminal; the window title says which
+/// one; everything else was in the way of it.
 struct TerminalPane: View {
     @ObservedObject private var preferences = Preferences.shared
 
@@ -11,13 +18,13 @@ struct TerminalPane: View {
     let onGeometry: (Int, Int) async -> Void
     let onAction: (TerminalAction) -> Void
 
-    private var kind: StateKind { StateKind.parse(terminal.state) }
-    private var isLive: Bool { kind == .running || kind == .starting }
+    private var isLive: Bool {
+        let kind = StateKind.parse(terminal.state)
+        return kind == .running || kind == .starting
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-
+        Group {
             if isLive {
                 TerminalSurface(
                     terminal: terminal.short,
@@ -30,111 +37,49 @@ struct TerminalPane: View {
             } else {
                 inactive
             }
-
-            footer
         }
+        // The window has rounded corners; an NSView filling the pane does not.
+        // Without this the terminal ran square past the window's bottom-right
+        // curve while the sidebar beside it curved away, and the two met at a
+        // corner that belonged to neither.
+        .clipShape(
+            UnevenRoundedRectangle(
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 10,
+                topTrailingRadius: 0))
+        // The window's own title bar, which macOS already draws. Free, native,
+        // and it costs the content no vertical space.
+        .navigationTitle(terminal.title)
+        .navigationSubtitle("\(workspace.task) · \(workspace.branch)")
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            StateDot(state: terminal.state)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(terminal.title).font(.system(size: 14, weight: .semibold))
-                HStack(spacing: 6) {
-                    Text(workspace.task)
-                    Text("·")
-                    Text(workspace.branch)
-                    if terminal.epoch > 0 {
-                        Text("·")
-                        Text("epoch \(terminal.epoch)")
-                    }
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-
-            Spacer(minLength: 12)
-
-            switch kind {
-            case .lost:
-                Button("Dismiss loss") { onAction(.dismissLost) }
-                Button("Restart") { onAction(.restart) }
-                    .buttonStyle(.borderedProminent)
-            case .exited, .error:
-                Button("Restart") { onAction(.restart) }
-                    .buttonStyle(.borderedProminent)
-            default:
-                Button("Restart") { onAction(.restart) }
-                Button("Stop", role: .destructive) { onAction(.stop) }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
-        .background(.bar)
-    }
-
+    /// The only state left that needs saying out loud.
+    ///
+    /// Everything else removes itself: a terminal is its process, and when that
+    /// exits there is nothing to look at. `lost` is the exception, because it
+    /// is the one case Overnight cannot explain and will not pretend to.
     private var inactive: some View {
         VStack(spacing: 12) {
             Spacer()
-            Image(systemName: kind == .lost ? "questionmark.circle" : "stop.circle")
-                .font(.system(size: 38))
-                .foregroundStyle(kind == .lost ? Color.red.opacity(0.75) : .secondary)
-            Text(headline).font(.title3.weight(.medium))
-            Text(explanation)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 470)
+            StatusGlyph(status: terminal.status, size: 14)
+            Text(terminal.status.label).font(.title3.weight(.medium))
+            Text(
+                "This terminal was expected to be running, but no live pane proves it. "
+                + "Overnight will not guess between an exit it never saw and a session it "
+                + "cannot reach."
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 420)
+
+            Button("Dismiss") { onAction(.dismissLost) }
+                .padding(.top, 4)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
-    }
-
-    private var headline: String {
-        switch kind {
-        case .lost: return "Lost"
-        case .exited: return "Exited"
-        case .error: return "Never started"
-        default: return terminal.state
-        }
-    }
-
-    private var explanation: String {
-        switch kind {
-        case .lost:
-            return
-                "This terminal was expected to be running, but no live tagged pane proves it. "
-                + "Overnight will not guess: it says lost rather than claiming an exit. "
-                + "Restart begins a new epoch, or dismiss to acknowledge the loss without "
-                + "recording an exit that was never observed."
-        case .exited:
-            return "The command exited and Overnight observed it. Restart begins a new epoch."
-        case .error:
-            return "Creation never established a live runtime."
-        default:
-            return "Not accepting input."
-        }
-    }
-
-    @ViewBuilder
-    private var footer: some View {
-        Divider()
-        HStack(spacing: 6) {
-            Image(systemName: "keyboard").font(.system(size: 10))
-            Text(
-                isLive
-                    ? "Typing goes straight to the terminal. Ctrl-C, arrows, Tab and Esc all pass through."
-                    : "This terminal is not accepting input."
-            )
-            Spacer()
-            Text(terminal.preset).foregroundStyle(.tertiary)
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
+        .navigationTitle(terminal.title)
+        .navigationSubtitle("\(workspace.task) · \(workspace.branch)")
     }
 }

@@ -67,9 +67,112 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// daemons, which is why it is optional rather than defaulted to something
     /// that would look like a real answer.
     var activity: String?
+    /// Unix milliseconds when the activity last changed, from the daemon.
+    ///
+    /// Timed on the host rather than by the client, so "working for 4m" does
+    /// not restart at every reconnect or lie after a laptop sleeps.
+    var activitySince: Double?
     var epoch: Int
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
+
+    /// The ONE thing this terminal's indicator should say.
+    ///
+    /// A terminal used to carry two indicators — a coloured dot for whether the
+    /// process was alive, and a glyph for what the agent was doing. They
+    /// competed for the same glance and forced a reader to learn two
+    /// vocabularies for one row. They are not independent: activity only means
+    /// anything while the process is running, so one derives from the other.
+    var status: Status {
+        switch StateKind.parse(state) {
+        case .running:
+            // Running is implied and uninteresting. What the agent is doing is
+            // the answer to the question you actually asked.
+            switch agent {
+            case .none, .unknown: return .running
+            case .idle: return .idle
+            case .working: return .working
+            case .blocked: return .blocked
+            case .done: return .done
+            }
+        case .starting: return .starting
+        case .exited: return .exited
+        case .error: return .failed
+        case .lost: return .lost
+        default: return .running
+        }
+    }
+
+    /// How long the current status has held, if that is worth knowing.
+    ///
+    /// Only for the two where duration changes what you do: an agent blocked
+    /// for twenty minutes is a different situation from one blocked for ten
+    /// seconds. "Idle for three days" is noise.
+    var statusDuration: String? {
+        guard status == .blocked || status == .working, let since = activitySince else {
+            return nil
+        }
+        let seconds = Date().timeIntervalSince1970 - since / 1000
+        guard seconds >= 5 else { return nil }
+        if seconds < 60 { return "\(Int(seconds))s" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m" }
+        return "\(Int(seconds / 3600))h"
+    }
+}
+
+/// What a terminal's single indicator says.
+///
+/// Shape carries the meaning and colour reinforces it, never the other way
+/// round: a colour-only indicator says nothing to a colourblind reader and
+/// nothing at all in a screenshot.
+enum Status: Equatable {
+    case starting, running, idle, working, blocked, done, exited, failed, lost
+
+    var label: String {
+        switch self {
+        case .starting: return "Starting"
+        case .running: return "Running"
+        case .idle: return "Idle"
+        case .working: return "Working"
+        case .blocked: return "Needs you"
+        case .done: return "Done"
+        case .exited: return "Exited"
+        case .failed: return "Failed to start"
+        case .lost: return "Lost"
+        }
+    }
+
+    /// One family, one size, one weight.
+    ///
+    /// The first attempt reached for literal imagery — a moon for idle, a
+    /// gearwheel for working — which reads as a sticker sheet rather than a
+    /// tool. These are all the same circle at the same optical weight, so a
+    /// column of them lines up and the differences between them are the only
+    /// thing that draws the eye.
+    var symbol: String {
+        switch self {
+        case .starting: return "circle.dotted"
+        case .running: return "circle.fill"
+        case .idle: return "circle"
+        case .working: return "circle.hexagonpath"
+        case .blocked: return "exclamationmark.circle.fill"
+        case .done: return "checkmark.circle.fill"
+        case .exited: return "circle.slash"
+        case .failed: return "xmark.circle.fill"
+        case .lost: return "questionmark.circle.fill"
+        }
+    }
+
+    /// Does this want the user to do something?
+    var wantsAttention: Bool {
+        self == .blocked || self == .done || self == .lost || self == .failed
+    }
+
+    /// Should it move?
+    ///
+    /// Motion is the strongest signal a UI has, so it belongs only on the thing
+    /// that is genuinely still changing. A static badge that pulses is noise.
+    var animates: Bool { self == .working || self == .starting }
 }
 
 /// What a coding agent is doing, as distinct from whether its process is alive.
@@ -95,27 +198,6 @@ enum AgentActivity: String {
     /// language as an agent is noise in the list you scan for what needs you.
     var isAgent: Bool { self != .none }
 
-    var label: String {
-        switch self {
-        case .none: return ""
-        case .idle: return "Idle"
-        case .working: return "Working"
-        case .blocked: return "Needs you"
-        case .done: return "Done"
-        case .unknown: return "Unknown"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .none: return "terminal"
-        case .idle: return "pause.circle"
-        case .working: return "circle.dotted"
-        case .blocked: return "hand.raised.fill"
-        case .done: return "checkmark.circle.fill"
-        case .unknown: return "questionmark.circle"
-        }
-    }
 }
 
 // MARK: - State vocabulary

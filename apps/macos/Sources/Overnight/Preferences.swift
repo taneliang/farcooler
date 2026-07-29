@@ -23,12 +23,12 @@ final class Preferences: ObservableObject {
         didSet { revision += 1 }
     }
 
-    /// Remove a terminal's record when its command exits cleanly.
+    /// Remove a terminal's record once its process is gone.
     ///
-    /// On by default: you typed `exit`, and a dead row you have to dismiss is
-    /// clutter. A NON-zero exit is never removed automatically, whatever this
-    /// is set to — an agent that crashed is the one thing in the list you
-    /// needed to see.
+    /// On by default, because a terminal is its process: when that exits there
+    /// is nothing left to show and a dead row you have to dismiss is pure
+    /// clutter. A `lost` terminal is never removed either way — that is the one
+    /// state where Overnight does not know what happened.
     @AppStorage("terminals.autoRemoveExited") var autoRemoveExited = true
 
     /// Notify when an agent needs you, or finishes.
@@ -80,13 +80,49 @@ final class Preferences: ObservableObject {
 
 struct SettingsView: View {
     @ObservedObject private var preferences = Preferences.shared
+    @StateObject private var service = ServiceRegistration()
 
     var body: some View {
         TabView {
             terminal.tabItem { Label("Terminal", systemImage: "terminal") }
             behaviour.tabItem { Label("Behaviour", systemImage: "gearshape") }
+            host.tabItem { Label("Host", systemImage: "bolt") }
         }
-        .frame(width: 460, height: 280)
+        .frame(width: 480, height: 320)
+    }
+
+    /// Whether this machine stays reachable when nobody is at it.
+    ///
+    /// A preference you set once, not a status you watch. It used to sit in the
+    /// sidebar's status bar, where a piece of configuration read as live
+    /// information about the fleet.
+    private var host: some View {
+        Form {
+            Section {
+                switch service.state {
+                case .registered:
+                    Toggle("Start Overnight's daemon at login", isOn: .constant(true))
+                        .onTapGesture { service.unregister() }
+                case .notRegistered:
+                    Toggle("Start Overnight's daemon at login", isOn: .constant(false))
+                        .onTapGesture { service.register() }
+                case .awaitingApproval:
+                    Button("Approve in System Settings") { service.register() }
+                case .unavailable(let why):
+                    Text(why).font(.callout).foregroundStyle(.secondary)
+                }
+
+                Text(
+                    "With this on, agents stay reachable from your phone after you close "
+                    + "the app. Terminals keep running either way — they belong to tmux."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .onAppear { service.refresh() }
     }
 
     private var terminal: some View {
@@ -122,10 +158,11 @@ struct SettingsView: View {
     private var behaviour: some View {
         Form {
             Section {
-                Toggle("Remove terminals that exit cleanly", isOn: $preferences.autoRemoveExited)
+                Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
                 Text(
-                    "A terminal you closed leaves nothing behind. One that exited with a "
-                    + "failure is always kept, so a crashed agent is never hidden."
+                    "A terminal is its process. When that exits there is nothing left to "
+                    + "show. A lost terminal is always kept — that is the one case Overnight "
+                    + "cannot explain."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
