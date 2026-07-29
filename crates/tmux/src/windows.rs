@@ -118,7 +118,7 @@ impl TmuxServer {
     /// sits on the fleet-render path.
     pub async fn list_tagged_panes(&self) -> Result<Vec<TaggedPane>> {
         let fmt = format!(
-            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}",
+            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}\t#{{pane_current_command}}",
             tags::DAEMON_ID,
             tags::WORKSPACE_ID,
             tags::TERMINAL_ID,
@@ -307,6 +307,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
     // tmux renders `#{pane_dead}` as "1" when set and empty when not.
     let dead = f.get(8).map(|v| v.trim() == "1").unwrap_or(false);
     let dead_status = f.get(9).and_then(|v| v.trim().parse::<i32>().ok());
+    let command = f.get(10).map(|v| v.trim().to_string()).unwrap_or_default();
 
     Some(TaggedPane {
         daemon_id,
@@ -319,6 +320,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
         rows: f[3].trim().parse().unwrap_or(0),
         dead,
         dead_status,
+        command,
     })
 }
 

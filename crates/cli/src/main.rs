@@ -152,6 +152,9 @@ enum TerminalCmd {
     /// Launch a preset in a new tagged tmux window.
     Create {
         workspace: String,
+        /// What to launch. Defaults to your shell, which is almost always
+        /// right: you open a terminal and type `claude` into it, and Overnight
+        /// notices what is running rather than being told in advance.
         #[arg(long, default_value = "shell")]
         preset: String,
         #[arg(long)]
@@ -460,7 +463,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                                     "id": uuid_of(&t.id).to_string(),
                                     "short": short_bytes(&t.id),
                                     "title": t.title,
-                                    "preset": t.command_preset,
+                                    "preset": label(t),
                                     "state": terminal_label(t.state()),
                                     "activity": activity_label(t.activity),
                                     "activitySince": activity_since(&t),
@@ -501,7 +504,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                         truncate(&t.title, 16),
                         terminal_label(t.state()),
                         if activity == "none" { "" } else { activity },
-                        t.command_preset
+                        label(&t)
                     );
                 }
             }
@@ -586,7 +589,7 @@ async fn events(host: Option<&str>) -> Fallible {
                 "short": short_bytes(&t.id),
                 "workspace": uuid_of(&t.workspace_id).to_string(),
                 "title": t.title,
-                "preset": t.command_preset,
+                "preset": label(&t),
                 "state": terminal_label(t.state()),
                 "activity": activity_label(t.activity),
                                     "activitySince": activity_since(&t),
@@ -887,6 +890,15 @@ fn activity_label(a: i32) -> &'static str {
         AgentActivity::Unknown => "unknown",
         AgentActivity::Unspecified => "none",
     }
+}
+
+/// What to call a terminal's contents.
+///
+/// The daemon resolves this from the running process and the screen together,
+/// so it says `claude` for a shell someone typed `claude` into. The preset is
+/// only a fallback for a terminal the watcher has not sampled yet.
+fn label(t: &overnight_protocol::v1::Terminal) -> String {
+    if t.current_command.is_empty() { t.command_preset.clone() } else { t.current_command.clone() }
 }
 
 /// When the activity last changed, as Unix milliseconds.

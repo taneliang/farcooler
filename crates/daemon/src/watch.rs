@@ -56,10 +56,20 @@ pub struct Watcher {
     state: tokio::sync::Mutex<HashMap<Uuid, Observed>>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Observed {
     activity: AgentActivity,
     changed_at: i64,
+    /// The terminal's process state when last announced.
+    ///
+    /// Watched as well as activity, and that omission was a real bug: a
+    /// terminal you ended with Ctrl-D went from `running` to `exited`, which is
+    /// not an activity change, so nothing was broadcast. Clients no longer poll,
+    /// so the dead terminal simply stayed in the list forever.
+    state: TerminalState,
+    /// What is running in the pane, so a shell someone typed `claude` into
+    /// announces itself the moment it becomes an agent.
+    command: String,
 }
 
 impl Watcher {
@@ -81,6 +91,11 @@ impl Watcher {
         }
     }
 
+    /// What is running in a terminal, as the pane reports it.
+    pub async fn command(&self, terminal: Uuid) -> Option<String> {
+        self.state.lock().await.get(&terminal).map(|o| o.command.clone())
+    }
+
     /// Mark a terminal as looked at.
     ///
     /// `Done` is defined as idle-and-unseen, so this is what ends it. Called
@@ -95,7 +110,7 @@ impl Watcher {
         }
         observed.activity = next;
         observed.changed_at = now_millis();
-        let snapshot = *observed;
+        let snapshot = observed.clone();
         drop(state);
         self.announce(terminal, snapshot).await;
     }
@@ -117,15 +132,20 @@ impl Watcher {
 
         let Ok(fleet) = self.service.fleet().await else { return };
         let runtime = self.service.runtime();
+        let panes = self.service.inventory_snapshot();
 
         let mut live = Vec::new();
         for workspace in &fleet {
             for terminal in &workspace.terminals {
-                live.push((
-                    terminal.terminal.id,
-                    terminal.terminal.command_preset.clone(),
-                    terminal.state(),
-                ));
+                let id = terminal.terminal.id;
+                // What is RUNNING, not what it was launched as.
+                let command = panes
+                    .panes
+                    .iter()
+                    .find(|p| p.terminal_id == id)
+                    .map(|p| p.command.clone())
+                    .unwrap_or_default();
+                live.push((id, command, terminal.state()));
             }
         }
 
@@ -137,35 +157,69 @@ impl Watcher {
             state.retain(|id, _| ids.contains(id));
         }
 
-        for (id, preset, terminal_state) in live {
-            // Only a live terminal has a screen worth reading. An exited one is
-            // not idle — it is not there.
-            if !matches!(terminal_state, TerminalState::Running) {
-                continue;
-            }
-            if activity::rules_for(&preset).is_none() {
-                continue;
-            }
-
-            let Ok((screen, _, _)) = runtime.screen(id).await else { continue };
-            let observed = activity::classify(&preset, &screen);
+        for (id, command, terminal_state) in live {
+            // The screen is read for any live terminal, not only one whose
+            // process name we recognise. That is the point: Claude Code renames
+            // itself to its version, so a pane reporting `2.1.220` is an agent
+            // that process matching alone would never find.
+            let (label, observed) = if matches!(terminal_state, TerminalState::Running) {
+                match runtime.screen(id).await {
+                    Ok((screen, _, _)) => (
+                        activity::describe(&command, &screen),
+                        activity::classify(&command, &screen),
+                    ),
+                    Err(_) => (activity::describe(&command, ""), AgentActivity::Unspecified),
+                }
+            } else {
+                (activity::describe(&command, ""), AgentActivity::None)
+            };
+            // Resolved here, and sent resolved. A client has no screen to
+            // inspect, so working out what an agent is called has to happen on
+            // the host — the same reason its activity does.
+            let command = label;
 
             let mut state = self.state.lock().await;
-            let previous =
-                state.get(&id).map(|o| o.activity).unwrap_or(AgentActivity::Unspecified);
-            let next = activity::advance(previous, observed);
-            if next == previous {
+            let previous = state.get(&id).cloned();
+            let next_activity = match &previous {
+                Some(p) => activity::advance(p.activity, observed),
+                None => observed,
+            };
+
+            // Announce on ANY of the three changing. State was the one that
+            // used to be missed, and it is the one that removes a dead terminal
+            // from a client's list.
+            let changed = match &previous {
+                None => true,
+                Some(p) => {
+                    p.activity != next_activity
+                        || p.state != terminal_state
+                        || p.command != command
+                }
+            };
+            if !changed {
                 continue;
             }
-            let record = Observed { activity: next, changed_at: now_millis() };
-            state.insert(id, record);
+
+            let record = Observed {
+                activity: next_activity,
+                // The clock only moves when the ACTIVITY moved. A process that
+                // exits should not reset "blocked for 12 minutes" to zero.
+                changed_at: match &previous {
+                    Some(p) if p.activity == next_activity => p.changed_at,
+                    _ => now_millis(),
+                },
+                state: terminal_state,
+                command: command.clone(),
+            };
+            state.insert(id, record.clone());
             drop(state);
 
             tracing::info!(
                 terminal = %id,
-                from = ?previous,
-                to = ?next,
-                "agent activity changed"
+                state = ?terminal_state,
+                activity = ?next_activity,
+                command = %command,
+                "terminal changed"
             );
             self.announce(id, record).await;
         }
@@ -185,6 +239,7 @@ impl Watcher {
             let mut message = wire::terminal(view);
             message.activity = observed.activity as i32;
             message.activity_changed_at = Some(wire::timestamp(observed.changed_at));
+            message.current_command = observed.command.clone();
 
             // A send with no subscribers is not a failure: it is the ordinary
             // case of a host nobody is watching, which still has to keep

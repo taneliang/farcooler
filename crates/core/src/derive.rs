@@ -159,6 +159,7 @@ mod tests {
             rows: 24,
             dead: false,
             dead_status: None,
+            command: "zsh".into(),
         }
     }
 

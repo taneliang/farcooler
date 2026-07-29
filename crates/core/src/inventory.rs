@@ -34,6 +34,13 @@ pub struct TaggedPane {
     pub dead: bool,
     /// Exit code reported by tmux for a dead pane, when it gave one.
     pub dead_status: Option<i32>,
+    /// The pane's foreground process, as tmux reports it.
+    ///
+    /// This is how Overnight knows an agent is running. A terminal is created
+    /// as a plain shell and the user types `claude` into it — so what the
+    /// terminal was launched as says nothing about what is running in it now,
+    /// and only the live process does.
+    pub command: String,
 }
 
 impl TaggedPane {

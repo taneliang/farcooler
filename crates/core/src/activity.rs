@@ -33,8 +33,24 @@ use overnight_protocol::v1::AgentActivity;
 /// you, which is the one failure that makes the whole feature pointless.
 #[derive(Debug, Clone)]
 pub struct AgentRules {
-    /// The command preset this applies to.
+    /// A name for this agent, and the process names it runs under.
+    ///
+    /// Keyed on the RUNNING PROCESS, not on what the terminal was launched as.
+    /// A terminal is created as a plain shell and the user types `claude` into
+    /// it — so its launch preset says nothing about what is in it now, and a
+    /// terminal that was started as an agent and exited back to a shell is not
+    /// an agent any more.
     pub preset: &'static str,
+    /// Process names, as `pane_current_command` reports them.
+    ///
+    /// Necessary but not sufficient. Claude Code rewrites its own process name
+    /// to its version string — tmux reports `2.1.220` — so a running agent is
+    /// invisible to process matching alone.
+    pub commands: &'static [&'static str],
+    /// Screen text that means "this IS this agent", whatever the process is
+    /// called. Chosen to be furniture the agent always draws, not something a
+    /// user might type.
+    pub identity: &'static [&'static str],
     /// Any of these on screen means the agent is waiting for the user.
     pub blocked: &'static [&'static str],
     /// Any of these means it is working.
@@ -52,6 +68,8 @@ pub struct AgentRules {
 pub const RULES: &[AgentRules] = &[
     AgentRules {
         preset: "claude",
+        commands: &["claude", "claude-code"],
+        identity: &["? for shortcuts", "esc to interrupt", "Claude Code", "auto-accept edits"],
         blocked: &[
             "Do you want to",
             "Do you want me to",
@@ -69,25 +87,69 @@ pub const RULES: &[AgentRules] = &[
     },
     AgentRules {
         preset: "codex",
+        commands: &["codex"],
+        identity: &["Codex", "/help for"],
         blocked: &["Allow command?", "approve this", "[y/n]", "(y/N)", "Do you want to"],
         working: &["Esc to interrupt", "Working…", "Running command"],
         idle: &["send a message", "/help for", "▌"],
     },
     AgentRules {
         preset: "cursor",
+        commands: &["cursor-agent", "cursor"],
+        identity: &["cursor-agent", "Ask anything"],
         blocked: &["Allow?", "[y/n]", "(y/N)", "Do you want to", "Approve"],
         working: &["esc to interrupt", "Generating", "Running"],
         idle: &["Ask anything", "/ for commands"],
     },
 ];
 
-/// Is this preset an agent at all?
+/// Which agent, if any, is running in a pane.
 ///
-/// A plain shell is not one, and reporting it `Idle` would put it in the same
-/// visual language as an agent waiting for work — which is noise in exactly the
-/// list a user scans for something that needs them.
+/// Matched on the foreground process. That is the only thing that answers the
+/// question honestly: a terminal launched as a shell in which someone typed
+/// `claude` IS a Claude Code terminal, and one launched as an agent that has
+/// since exited to a prompt is not.
+pub fn rules_for_command(command: &str) -> Option<&'static AgentRules> {
+    // tmux reports the basename, but a wrapper may add a path or a suffix.
+    let name = command.rsplit('/').next().unwrap_or(command).trim();
+    RULES.iter().find(|r| r.commands.iter().any(|c| *c == name))
+}
+
+/// Look up by agent name, for callers that already know which one.
 pub fn rules_for(preset: &str) -> Option<&'static AgentRules> {
     RULES.iter().find(|r| r.preset == preset)
+}
+
+/// Which agent is in this pane: by process, or failing that, by what it drew.
+///
+/// Both are needed. Process matching is exact when it works, and it does not
+/// always work — Claude Code renames itself to its version number, so tmux
+/// reports `2.1.220` and no name matching will ever find it. Screen matching
+/// catches that, and is why the identity markers are agent furniture rather
+/// than anything a user could type.
+pub fn identify(command: &str, screen: &str) -> Option<&'static AgentRules> {
+    if let Some(rules) = rules_for_command(command) {
+        return Some(rules);
+    }
+    let text = plain_text(screen);
+    RULES.iter().find(|r| r.identity.iter().any(|needle| text.contains(needle)))
+}
+
+/// What to call whatever is running here.
+///
+/// The agent's name when one is recognised, otherwise the process itself. A row
+/// then reads `claude` or `zsh` rather than the preset a terminal was created
+/// with, which after the first command is usually a lie.
+pub fn describe(command: &str, screen: &str) -> String {
+    if let Some(rules) = identify(command, screen) {
+        return rules.preset.to_string();
+    }
+    let name = command.rsplit('/').next().unwrap_or(command).trim();
+    // A process whose name is a version number tells a user nothing. Better to
+    // say "shell" than to label a row `2.1.220`.
+    let meaningless = name.is_empty()
+        || name.chars().all(|c| c.is_ascii_digit() || c == '.');
+    if meaningless { "shell".to_string() } else { name.to_string() }
 }
 
 /// Strip escape sequences and collapse whitespace.
@@ -151,8 +213,8 @@ pub fn plain_text(screen: &str) -> String {
 /// Classify a rendered screen.
 ///
 /// `screen` is the visible pane, with or without escape sequences.
-pub fn classify(preset: &str, screen: &str) -> AgentActivity {
-    let Some(rules) = rules_for(preset) else {
+pub fn classify(command: &str, screen: &str) -> AgentActivity {
+    let Some(rules) = identify(command, screen) else {
         return AgentActivity::None;
     };
     let screen = &plain_text(screen);
@@ -226,8 +288,54 @@ mod tests {
         // Reporting a shell as idle would put it in the same visual language as
         // an agent waiting for work, in the list a user scans for something
         // that needs them.
-        assert_eq!(classify("shell", "e-liang@Mac project % "), None);
+        assert_eq!(classify("zsh", "e-liang@Mac project % "), None);
         assert_eq!(classify("bash", "anything at all"), None);
+    }
+
+    #[test]
+    fn an_agent_is_found_by_what_is_running_not_by_how_it_was_launched() {
+        // The whole point: terminals are created as plain shells and the user
+        // types `claude` into them. Keying on the launch preset would report a
+        // live agent as a shell forever.
+        assert!(rules_for_command("claude").is_some());
+        assert!(rules_for_command("/opt/homebrew/bin/claude").is_some());
+        assert!(rules_for_command("cursor-agent").is_some());
+        assert!(rules_for_command("zsh").is_none());
+        assert!(rules_for_command("").is_none());
+    }
+
+    #[test]
+    fn a_row_is_labelled_by_what_is_actually_running() {
+        assert_eq!(describe("claude", ""), "claude");
+        assert_eq!(describe("cursor-agent", ""), "cursor");
+        // Not an agent: say what it is rather than inventing a category.
+        assert_eq!(describe("zsh", ""), "zsh");
+        assert_eq!(describe("cargo", ""), "cargo");
+        assert_eq!(describe("", ""), "shell");
+    }
+
+    #[test]
+    fn an_agent_that_renamed_itself_is_still_found() {
+        // The real case that broke process matching: Claude Code sets its
+        // process name to its version, so tmux reports `2.1.220`.
+        let screen = "❯ hello?\n  ⏸ manual mode on · ? for shortcuts";
+        assert!(identify("2.1.220", screen).is_some());
+        assert_eq!(describe("2.1.220", screen), "claude");
+        assert_eq!(classify("2.1.220", screen), Idle);
+    }
+
+    #[test]
+    fn a_version_number_is_never_shown_as_a_name() {
+        // Whatever it is, `2.1.220` is not a useful label for a row.
+        assert_eq!(describe("2.1.220", "nothing recognisable"), "shell");
+        assert_eq!(describe("1.2", ""), "shell");
+    }
+
+    #[test]
+    fn a_shell_showing_agent_like_text_is_not_promoted_to_an_agent() {
+        // Identity markers are agent furniture, not phrases a user might type.
+        assert!(identify("zsh", "$ echo 'do you want to proceed?'").is_none());
+        assert_eq!(classify("zsh", "$ echo '[y/n]'"), None);
     }
 
     #[test]
@@ -341,6 +449,25 @@ Do you want to allow this command?
             for needle in rules.working {
                 assert!(!rules.idle.contains(needle), "{needle:?} is both working and idle");
             }
+        }
+    }
+
+    #[test]
+    fn every_agent_can_be_recognised_without_its_process_name() {
+        // Process names are unreliable, so identity markers are what actually
+        // has to hold. An agent with none is invisible the moment it renames
+        // itself.
+        for rules in RULES {
+            assert!(!rules.identity.is_empty(), "{} has no identity markers", rules.preset);
+        }
+    }
+
+    #[test]
+    fn every_agent_declares_a_process_to_match() {
+        // A rule set with no command can never be selected, which is a silent
+        // hole rather than a visible bug.
+        for rules in RULES {
+            assert!(!rules.commands.is_empty(), "{} matches no process", rules.preset);
         }
     }
 }

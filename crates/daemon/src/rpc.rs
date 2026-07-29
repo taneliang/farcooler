@@ -381,6 +381,9 @@ impl Rpc {
         let (activity, changed_at) = self.watcher.activity(view.terminal.id).await;
         message.activity = activity as i32;
         message.activity_changed_at = changed_at.map(wire::timestamp);
+        if let Some(command) = self.watcher.command(view.terminal.id).await {
+            message.current_command = command;
+        }
         message
     }
 }

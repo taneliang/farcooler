@@ -10,7 +10,6 @@ struct ContentView: View {
     @State private var showNewWorkspace = false
     @State private var showAddRepository = false
     @State private var showShortcuts = false
-    @State private var newTerminalFor: Workspace?
     @State private var removeWorkspace: Workspace?
 
     /// What the detail pane is showing.
@@ -76,12 +75,6 @@ struct ContentView: View {
                 expandAll()
             }
         }
-        .sheet(item: $newTerminalFor) { ws in
-            NewTerminalSheet(workspaceName: ws.task) { preset, title in
-                await client.createTerminal(workspace: ws.short, preset: preset, title: title)
-                expanded.insert(ws.id)
-            }
-        }
         .sheet(item: $removeWorkspace) { ws in
             RemoveWorkspaceSheet(
                 workspace: ws,
@@ -113,7 +106,7 @@ struct ContentView: View {
                                 isExpanded: expanded.contains(ws.id),
                                 selection: $selection,
                                 onToggle: { toggle(ws.id) },
-                                onNewTerminal: { newTerminalFor = ws },
+                                onNewTerminal: { newTerminal(in: ws) },
                                 onArchive: { Task { await client.archiveWorkspace(ws.short) } },
                                 onRemove: { removeWorkspace = ws },
                                 onTerminalAction: { term, action in
@@ -350,7 +343,7 @@ struct ContentView: View {
             if let ws = workspace(wsID) {
                 WorkspaceDetail(
                     workspace: ws,
-                    onNewTerminal: { newTerminalFor = ws },
+                    onNewTerminal: { newTerminal(in: ws) },
                     onArchive: { Task { await client.archiveWorkspace(ws.short) } },
                     onRemove: { removeWorkspace = ws },
                     onOpenTerminal: { t in
@@ -435,9 +428,11 @@ struct ContentView: View {
     private func run(_ command: AppCommand) {
         switch command {
         case .newTerminal:
-            // Acts on whichever workspace you are in, so making a terminal is
-            // one keystroke rather than a hunt for the right + button.
-            if let workspace = currentWorkspace { newTerminalFor = workspace }
+            // Creates immediately. There is no agent to choose: a terminal is a
+            // shell, and whatever you run in it — `claude`, `codex`, a build —
+            // is detected from the process, not declared in advance. Asking
+            // first was a dialog whose answer was already knowable.
+            if let workspace = currentWorkspace { newTerminal(in: workspace) }
 
         case .closeTerminal:
             guard let (_, terminal) = selectedTerminal else { return }
@@ -466,6 +461,30 @@ struct ContentView: View {
         case .addRepository: showAddRepository = true
         case .reload: Task { await client.refresh() }
         case .showShortcuts: showShortcuts = true
+        }
+    }
+
+    /// Create a terminal and go straight to it.
+    ///
+    /// Selecting it afterwards matters: you made a terminal because you want to
+    /// type in it, and leaving the selection where it was means a second click
+    /// to get to the thing you just asked for.
+    private func newTerminal(in workspace: Workspace) {
+        let existing = workspace.terminals.count
+        Task {
+            await client.createTerminal(
+                workspace: workspace.short,
+                preset: "shell",
+                title: "Terminal \(existing + 1)")
+            expanded.insert(workspace.id)
+            await client.refresh()
+            if let created = client.fleet.workspaces
+                .first(where: { $0.id == workspace.id })?
+                .terminals
+                .first(where: { !workspace.terminals.contains($0) })
+            {
+                selection = .terminal(workspace: workspace.id, terminal: created.id)
+            }
         }
     }
 

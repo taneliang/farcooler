@@ -129,7 +129,7 @@ impl Session {
                             "id": uuid_of(&t.id).to_string(),
                             "short": short(&t.id),
                             "title": t.title,
-                            "preset": t.command_preset,
+                            "preset": if t.current_command.is_empty() { t.command_preset.clone() } else { t.current_command.clone() },
                             "state": terminal_label(t.state()),
                             "activity": activity_label(t.activity),
                                     "activitySince": activity_since(t),

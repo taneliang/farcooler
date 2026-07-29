@@ -290,6 +290,13 @@ message Terminal {
   // When `activity` last changed. A client shows "working for 4m" from this
   // rather than timing it locally, which would restart on every reconnect.
   optional google.protobuf.Timestamp activity_changed_at = 16;
+  // What is RUNNING in the pane right now, as tmux reports it.
+  //
+  // Distinct from `command_preset`, which is only what the terminal was
+  // launched as. Terminals are created as plain shells and the user types
+  // `claude` into them, so the preset stops being true after the first
+  // command; only this says what is actually there.
+  string current_command = 17;
 }
 
 // The four states a coding agent is in, plus the two non-answers.

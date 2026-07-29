@@ -156,6 +156,7 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // what `Done` is made of. A converter that guessed would erase it.
         activity: wire::AgentActivity::Unspecified as i32,
         activity_changed_at: None,
+        current_command: String::new(),
     }
 }
 
