@@ -682,17 +682,40 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
     // MARK: - Selection
 
-    private func drawSelection(_ snapshot: VTSnapshot, in context: CGContext) {
-        guard let selection else { return }
+    /// The selection, ordered and clipped to the grid that exists right now.
+    ///
+    /// `nil` when it no longer touches the screen at all, which is a state that
+    /// happens constantly: the grid reflows under a live selection every time a
+    /// pane is resized, a divider is dragged, or the window changes size.
+    ///
+    /// This used to be `start.row...min(end.row, snapshot.rows - 1)`, which is
+    /// correct only while the selection is inside the grid. Shrink a pane below
+    /// the selection's start row — drag a divider up, say — and the clamped upper
+    /// bound falls below the lower one, which is not an empty range in Swift but a
+    /// trap. It crashed the app from `draw`, so the terminal took the process down
+    /// while merely redrawing itself.
+    private func selectionSpan(
+        in snapshot: VTSnapshot
+    ) -> (start: GridPoint, end: GridPoint, rows: ClosedRange<Int>)? {
+        guard let selection, snapshot.rows > 0, snapshot.columns > 0 else { return nil }
         let (start, end) =
             selection.anchor <= selection.head
             ? (selection.anchor, selection.head) : (selection.head, selection.anchor)
 
+        let first = max(0, start.row)
+        let last = min(end.row, snapshot.rows - 1)
+        guard first <= last else { return nil }
+        return (start, end, first...last)
+    }
+
+    private func drawSelection(_ snapshot: VTSnapshot, in context: CGContext) {
+        guard let (start, end, rows) = selectionSpan(in: snapshot) else { return }
+
         context.setFillColor(Palette.selection.cgColor)
-        for row in start.row...min(end.row, snapshot.rows - 1) {
-            guard row >= 0 else { continue }
-            let first = row == start.row ? start.column : 0
-            let last = row == end.row ? end.column : snapshot.columns - 1
+        for row in rows {
+            let first = max(0, row == start.row ? start.column : 0)
+            let last = min(
+                snapshot.columns - 1, row == end.row ? end.column : snapshot.columns - 1)
             guard last >= first else { continue }
             let point = origin(row: row, column: first)
             context.fill(
@@ -703,17 +726,14 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     }
 
     private func selectedText() -> String? {
-        guard let selection else { return nil }
-        let (start, end) =
-            selection.anchor <= selection.head
-            ? (selection.anchor, selection.head) : (selection.head, selection.anchor)
-
+        guard selection != nil else { return nil }
         return core.withSnapshot { snapshot -> String in
+            guard let (start, end, rows) = self.selectionSpan(in: snapshot) else { return "" }
             var lines: [String] = []
-            for row in start.row...min(end.row, snapshot.rows - 1) {
-                guard row >= 0 else { continue }
+            for row in rows {
                 let first = max(0, row == start.row ? start.column : 0)
-                let last = min(snapshot.columns - 1, row == end.row ? end.column : snapshot.columns - 1)
+                let last = min(
+                    snapshot.columns - 1, row == end.row ? end.column : snapshot.columns - 1)
                 guard last >= first else { continue }
                 var line = ""
                 for column in first...last {
