@@ -196,6 +196,7 @@ impl Session {
             branch: branch.into(),
             base_revision: base.into(),
             cli_preset: String::new(),
+            adopt_existing: false,
         });
         match self.value("workspace.create", Some(repository), Some(payload)).await? {
             result::Value::Workspace(w) => Ok(w),
@@ -289,6 +290,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::Operation(_) => "operation",
         result::Value::DaemonVersion(_) => "daemon_version",
         result::Value::TerminalAttach(_) => "terminal_attach",
+        result::Value::BranchList(_) => "branch_list",
     }
 }
 

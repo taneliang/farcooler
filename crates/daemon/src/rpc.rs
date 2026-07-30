@@ -51,7 +51,7 @@ impl Rpc {
 fn required_scope(method: &str) -> Option<Scope> {
     Some(match method {
         "host.get" | "host.health" | "daemon.version" => Scope::Read,
-        "repository.list" | "workspace.list" | "terminal.list" => Scope::Read,
+        "repository.list" | "workspace.list" | "terminal.list" | "branch.list" => Scope::Read,
         "repository.register"
         | "workspace.create"
         | "workspace.archive"
@@ -222,14 +222,35 @@ impl Rpc {
                 Ok(result::Value::Repository(wire::repository(&repo, scope)))
             }
 
+            "branch.list" => {
+                let repository = Self::target(&req)?;
+                let items = svc
+                    .list_branches(repository)
+                    .await?
+                    .into_iter()
+                    .map(|b| overnight_protocol::v1::Branch {
+                        name: b.name,
+                        local: b.local,
+                        remote: b.remote,
+                        checked_out: b.checked_out,
+                        updated_at: Some(wire::timestamp(b.updated_at * 1000)),
+                        subject: b.subject,
+                    })
+                    .collect();
+                Ok(result::Value::BranchList(overnight_protocol::v1::BranchList { items }))
+            }
+
             "workspace.create" => {
                 let repository = Self::target(&req)?;
                 let Some(request::Payload::WorkspaceCreate(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                let ws = svc
-                    .create_workspace(repository, &p.task_name, &p.branch, &p.base_revision)
-                    .await?;
+                let ws = if p.adopt_existing {
+                    svc.adopt_branch(repository, &p.task_name, &p.branch).await?
+                } else {
+                    svc.create_workspace(repository, &p.task_name, &p.branch, &p.base_revision)
+                        .await?
+                };
                 let view = svc.workspace_view(&ws).await?;
                 Ok(result::Value::Workspace(wire::workspace(&view, scope)))
             }
@@ -424,6 +445,7 @@ mod tests {
             "repository.list",
             "workspace.list",
             "terminal.list",
+            "branch.list",
             "repository_root.add",
             "repository.register",
             "workspace.create",

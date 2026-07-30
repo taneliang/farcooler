@@ -15,6 +15,7 @@ struct ContentView: View {
     @AppStorage("tasks.lastProject") private var lastProject = ""
     @FocusState private var searchFocused: Bool
     @State private var removeWorkspace: Workspace?
+    @State private var showResumeBranch = false
 
     /// What the detail pane is showing.
     enum Selection: Hashable {
@@ -61,6 +62,17 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
+        .sheet(isPresented: $showResumeBranch) {
+            ResumeBranch(
+                projects: client.repositories,
+                project: $lastProject,
+                load: { await client.branches(project: $0) },
+                onAdopt: { branch, project, preset in
+                    lastProject = project
+                    resume(branch: branch.name, project: project, agent: preset)
+                }
+            )
+        }
         // An overlay, not a sheet. A sheet dims the window and takes it over,
         // which is the wrong weight for something you use several times in a
         // row and want to see the results of behind.
@@ -69,9 +81,13 @@ struct ContentView: View {
                 QuickCreate(
                     projects: client.repositories,
                     project: $lastProject,
-                    onSubmit: { description, project in
+                    onSubmit: { description, project, preset in
                         lastProject = project
-                        startTask(description: description, project: project)
+                        startTask(description: description, project: project, agent: preset)
+                    },
+                    onResume: {
+                        showQuickCreate = false
+                        showResumeBranch = true
                     },
                     onClose: { showQuickCreate = false }
                 )
@@ -586,21 +602,39 @@ struct ContentView: View {
     /// Deliberately does not wait for the agent to boot before selecting. The
     /// point is to be looking at the thing you asked for while it starts, not
     /// to stare at the old screen for ten seconds first.
-    private func startTask(description: String, project: String) {
+    private func startTask(description: String, project: String, agent: String) {
         Task {
             let created = await client.startTask(
                 project: project,
                 description: description,
-                agent: Preferences.shared.defaultAgent)
-            guard let created else { return }
-            expanded.insert(created)
-            if let workspace = client.fleet.workspaces.first(where: { $0.id == created }),
-                let terminal = workspace.terminals.first
-            {
-                selection = .terminal(workspace: created, terminal: terminal.id)
-            } else {
-                selection = .workspace(created)
-            }
+                agent: agent.isEmpty ? Preferences.shared.defaultAgent : agent)
+            reveal(created)
+        }
+    }
+
+    /// Pick up an existing branch and open an agent in it.
+    ///
+    /// Same landing as starting a task, because it is the same act from the
+    /// user's side: there is now a worktree with an agent in it and you want to
+    /// be looking at it. The only difference is where the code came from.
+    private func resume(branch: String, project: String, agent: String) {
+        Task {
+            let created = await client.adoptBranch(
+                project: project, branch: branch, agent: agent)
+            reveal(created)
+        }
+    }
+
+    /// Select a freshly created workspace, preferring its terminal.
+    private func reveal(_ workspace: String?) {
+        guard let workspace else { return }
+        expanded.insert(workspace)
+        if let found = client.fleet.workspaces.first(where: { $0.id == workspace }),
+            let terminal = found.terminals.first
+        {
+            selection = .terminal(workspace: workspace, terminal: terminal.id)
+        } else {
+            selection = .workspace(workspace)
         }
     }
 

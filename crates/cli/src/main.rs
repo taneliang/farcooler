@@ -134,6 +134,22 @@ enum WorkspaceCmd {
     },
     /// Show the fleet with freshly derived state.
     List,
+    /// Resume work on a branch that already exists.
+    ///
+    /// The branch may be remote-only — pushed from another machine, by a
+    /// colleague, or by a cloud agent. A local tracking branch is created for
+    /// it, so pushing back goes where it came from.
+    Adopt {
+        repo: String,
+        branch: String,
+        /// What to call it in the fleet. Defaults to the branch name.
+        #[arg(long)]
+        task: Option<String>,
+    },
+    /// List branches you could resume work on.
+    Branches {
+        repo: String,
+    },
     /// Hide a workspace. Never changes git data.
     Archive { workspace: String },
     /// Bring an archived workspace back.
@@ -426,6 +442,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                         branch,
                         base_revision: base,
                         cli_preset: String::new(),
+                        adopt_existing: false,
                     }),
                 ))
                 .await?;
@@ -519,6 +536,70 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                         label(&t)
                     );
                 }
+            }
+        }
+
+        WorkspaceCmd::Branches { repo } => {
+            let repos = list_repositories(&mut link).await?;
+            let target = resolve(&repos, &repo, |r| &r.id, "repository")?;
+            let r = link.call(req_for("branch.list", uuid_of(&target.id))).await?;
+            let result::Value::BranchList(list) = expect_value(r.value, "branches")? else {
+                return Err("the daemon returned the wrong list".into());
+            };
+
+            if json {
+                let items: Vec<_> = list
+                    .items
+                    .iter()
+                    .map(|b| {
+                        serde_json::json!({
+                            "name": b.name,
+                            "local": b.local,
+                            "remote": b.remote,
+                            "checkedOut": b.checked_out,
+                            "subject": b.subject,
+                            "updatedAt": b.updated_at.as_ref().map(|t| t.seconds),
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::json!({ "branches": items }));
+                return Ok(());
+            }
+
+            for b in list.items {
+                let where_ = match (b.local, &b.remote) {
+                    (true, Some(r)) => format!("local + {r}"),
+                    (true, None) => "local".into(),
+                    (false, Some(r)) => format!("{r} only"),
+                    (false, None) => "?".into(),
+                };
+                let busy = if b.checked_out { "  (checked out)" } else { "" };
+                println!("{:40}  {:14}{}  {}", truncate(&b.name, 40), where_, busy, truncate(&b.subject, 50));
+            }
+        }
+
+        WorkspaceCmd::Adopt { repo, branch, task } => {
+            let repos = list_repositories(&mut link).await?;
+            let target = resolve(&repos, &repo, |r| &r.id, "repository")?;
+            let task = task.unwrap_or_else(|| branch.clone());
+            let r = link
+                .call(with(
+                    req_for("workspace.create", uuid_of(&target.id)),
+                    request::Payload::WorkspaceCreate(overnight_protocol::v1::WorkspaceCreate {
+                        task_name: task,
+                        branch,
+                        base_revision: String::new(),
+                        cli_preset: String::new(),
+                        adopt_existing: true,
+                    }),
+                ))
+                .await?;
+            let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            println!("adopted {}  {}", short_bytes(&ws.id), ws.branch);
+            if let Some(path) = &ws.worktree_path {
+                println!("  worktree {path}");
             }
         }
 

@@ -109,6 +109,149 @@ pub async fn create_worktree(
     Ok(())
 }
 
+/// A branch you could resume work on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchInfo {
+    pub name: String,
+    /// Present locally. A remote-only branch has to be created before it can be
+    /// checked out.
+    pub local: bool,
+    /// The remote it tracks or came from, if any.
+    pub remote: Option<String>,
+    /// Already checked out in some worktree. git refuses a second checkout of
+    /// the same branch, so this has to be visible BEFORE someone picks it.
+    pub checked_out: bool,
+    /// Unix seconds of the last commit, for ordering by recency.
+    pub updated_at: i64,
+    pub subject: String,
+}
+
+/// Every branch worth resuming, local and remote, most recent first.
+///
+/// Both halves matter. Work moves between machines and between people, and a
+/// branch pushed from a laptop or by a cloud agent exists only as
+/// `origin/whatever` here until something checks it out.
+pub async fn list_branches(repo: &Path) -> Result<Vec<BranchInfo>> {
+    // One call for both, with a machine-readable separator. `%(if)` would let
+    // git do more of this, but keeping the format dumb keeps the parsing
+    // obvious.
+    let format = "%(refname)\t%(committerdate:unix)\t%(worktreepath)\t%(contents:subject)";
+    let out = git(
+        repo,
+        &["for-each-ref", "--format", format, "refs/heads", "refs/remotes"],
+    )
+    .await?;
+    if !out.ok {
+        return Err(DomainError::OperationFailed);
+    }
+
+    let mut byname: std::collections::HashMap<String, BranchInfo> = Default::default();
+    let mut order: Vec<String> = Vec::new();
+
+    for line in out.stdout.lines() {
+        let mut f = line.split('\t');
+        let (Some(refname), Some(date), Some(worktree)) = (f.next(), f.next(), f.next()) else {
+            continue;
+        };
+        let subject = f.next().unwrap_or("").trim().to_string();
+        let updated_at: i64 = date.trim().parse().unwrap_or(0);
+
+        let (name, remote) = if let Some(rest) = refname.strip_prefix("refs/heads/") {
+            (rest.to_string(), None)
+        } else if let Some(rest) = refname.strip_prefix("refs/remotes/") {
+            // `origin/feat/x` splits into remote `origin`, branch `feat/x`.
+            let mut parts = rest.splitn(2, '/');
+            let (Some(remote), Some(branch)) = (parts.next(), parts.next()) else { continue };
+            // HEAD is a symbolic pointer, not a branch anyone resumes.
+            if branch == "HEAD" {
+                continue;
+            }
+            (branch.to_string(), Some(remote.to_string()))
+        } else {
+            continue;
+        };
+
+        let entry = byname.entry(name.clone()).or_insert_with(|| {
+            order.push(name.clone());
+            BranchInfo {
+                name: name.clone(),
+                local: false,
+                remote: None,
+                checked_out: false,
+                updated_at: 0,
+                subject: String::new(),
+            }
+        });
+
+        // A branch that exists locally AND on a remote is one branch, and the
+        // local side is the one that decides whether it is checked out.
+        match remote {
+            None => {
+                entry.local = true;
+                entry.checked_out = !worktree.trim().is_empty();
+            }
+            Some(r) => {
+                entry.remote.get_or_insert(r);
+            }
+        }
+        if updated_at > entry.updated_at {
+            entry.updated_at = updated_at;
+            entry.subject = subject;
+        }
+    }
+
+    let mut branches: Vec<BranchInfo> = order.into_iter().filter_map(|n| byname.remove(&n)).collect();
+    branches.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(branches)
+}
+
+/// Add a worktree for a branch that already exists.
+///
+/// The remote-only case is the one that matters: a branch pushed from another
+/// machine, by a colleague, or by a cloud agent has no local ref here, and
+/// `worktree add <dest> <branch>` would simply fail. `--track -b` creates the
+/// local branch pointing at the remote one and sets upstream, so pushing back
+/// goes where it came from without further setup.
+pub async fn create_worktree_from_branch(
+    repo: &Path,
+    branch: &str,
+    destination: &Path,
+) -> Result<()> {
+    if destination.exists() {
+        return Err(DomainError::WorktreeExists);
+    }
+    let dest = destination.to_string_lossy().to_string();
+
+    let r = if branch_exists(repo, branch).await? {
+        git(repo, &["worktree", "add", &dest, branch]).await?
+    } else {
+        // Find which remote has it. Guessing `origin` is wrong often enough to
+        // matter for anyone with a fork plus an upstream.
+        let branches = list_branches(repo).await?;
+        let Some(info) = branches.iter().find(|b| b.name == branch) else {
+            return Err(DomainError::InvalidArgument { what: "no such branch" });
+        };
+        let Some(remote) = &info.remote else {
+            return Err(DomainError::InvalidArgument { what: "branch has no remote" });
+        };
+        let start = format!("{remote}/{branch}");
+        git(repo, &["worktree", "add", "--track", "-b", branch, &dest, &start]).await?
+    };
+
+    if !r.ok {
+        // The most common failure is a branch already checked out somewhere
+        // else, which git states plainly. Reporting it as such beats a generic
+        // failure the user cannot act on.
+        if r.stderr.contains("already used by worktree") || r.stderr.contains("already checked out")
+        {
+            return Err(DomainError::WorktreeExists);
+        }
+        tracing::warn!(stderr = %r.stderr, "worktree add from branch failed");
+        return Err(DomainError::OperationFailed);
+    }
+    Ok(())
+}
+
 /// Roll back a worktree created moments ago, only when it is safe.
 ///
 /// Refuses if the worktree is dirty or the branch has commits that are not on

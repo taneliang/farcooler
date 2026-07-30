@@ -216,6 +216,32 @@ final class DaemonClient: ObservableObject {
     /// Returns the new workspace, so the caller can select it immediately
     /// rather than after the agent has finished starting.
     @discardableResult
+    /// Branches in a project that work could be resumed on.
+    func branches(project: String) async -> [BranchInfo] {
+        guard let data = await run(["workspace", "branches", project, "--json"]) else { return [] }
+        return (try? JSONDecoder().decode(BranchList.self, from: data))?.branches ?? []
+    }
+
+    /// Pick up work that already exists on a branch.
+    ///
+    /// A branch that is only on a remote gets a local tracking branch, which is
+    /// the whole point when the work came from another machine or another
+    /// person: pushing back has to go where it came from.
+    @discardableResult
+    func adoptBranch(project: String, branch: String, agent: String) async -> String? {
+        let before = Set(fleet.workspaces.map(\.id))
+        _ = await run(["workspace", "adopt", project, branch])
+        await refresh()
+
+        guard let workspace = fleet.workspaces.first(where: { !before.contains($0.id) })
+        else { return nil }
+        _ = await run([
+            "terminal", "create", workspace.short, "--preset", agent, "--title", "Agent",
+        ])
+        await refresh()
+        return workspace.id
+    }
+
     func startTask(project: String, description: String, agent: String) async -> String? {
         let branch = await MainActor.run { Branch.slug(from: description) }
         let title = await MainActor.run { Branch.title(from: description) }

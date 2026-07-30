@@ -368,6 +368,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
             branch: "feat/x".into(),
             base_revision: "HEAD".into(),
             cli_preset: String::new(),
+            adopt_existing: false,
         },
     ));
     client.call(create).await.expect("workspace.create");

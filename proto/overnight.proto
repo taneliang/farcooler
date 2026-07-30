@@ -93,6 +93,7 @@ message Result {
     Operation operation = 10;
     DaemonVersion daemon_version = 11;
     TerminalAttachResult terminal_attach = 12;
+    BranchList branch_list = 13;
   }
 }
 
@@ -389,7 +390,26 @@ message WorkspaceCreate {
   string branch = 2;
   string base_revision = 3;
   string cli_preset = 4;
+  // Adopt `branch` instead of creating it.
+  //
+  // Work arrives on a branch as often as it starts on one — pushed from
+  // another machine, handed over by a colleague, or produced by a cloud agent.
+  // A branch that exists only on a remote gets a local tracking branch.
+  bool adopt_existing = 5;
 }
+
+message Branch {
+  string name = 1;
+  bool local = 2;
+  optional string remote = 3;
+  // Already checked out in another worktree. git refuses a second checkout, so
+  // a client must be able to show this before someone picks it.
+  bool checked_out = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  string subject = 6;
+}
+
+message BranchList { repeated Branch items = 1; }
 
 message TerminalCreate {
   string title = 1;
