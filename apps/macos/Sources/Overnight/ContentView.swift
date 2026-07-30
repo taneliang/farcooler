@@ -34,6 +34,7 @@ struct ContentView: View {
             await client.refresh()
             await client.refreshRepositories()
             await client.refreshRoots()
+            await client.refreshLayouts()
             selectFirstRunningTerminal()
             // Pushed, not polled. The daemon derives once for every client and
             // sends only what changed, so a quiet fleet costs nothing and a
@@ -43,7 +44,9 @@ struct ContentView: View {
         }
         .onDisappear { client.stopEvents() }
         .onCommand { command in run(command) }
+        .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in selectTerminal(at: index) }
+        .onChange(of: client.layouts) { _, _ in followLayoutFocus() }
         .onChange(of: client.fleet) { _, _ in
             // One rule for every way a terminal can disappear: exiting on its
             // own, being closed here, being closed from a phone, or its
@@ -192,7 +195,8 @@ struct ContentView: View {
                                     onRemove: { removeWorkspace = ws },
                                     onTerminalAction: { term, action in
                                         Task { await run(action, on: term) }
-                                    }
+                                    },
+                                    tiled: Set(client.activeGroup(ws.id)?.terminals ?? [])
                                 )
                             }
                         }
@@ -430,7 +434,29 @@ struct ContentView: View {
     private var detail: some View {
         switch selection {
         case .terminal(let wsID, let termID):
-            if let ws = workspace(wsID), let term = ws.terminals.first(where: { $0.id == termID }) {
+            // Tiled or solo, decided by whether the selected terminal is in the
+            // group on screen. Selecting a backgrounded terminal shows it alone,
+            // which is what makes the fourth agent reachable without disturbing
+            // the three you have arranged.
+            if let ws = workspace(wsID), let group = client.activeGroup(wsID),
+                group.terminals.contains(termID)
+            {
+                TileView(
+                    group: group,
+                    workspace: ws,
+                    binary: client.cliPath,
+                    environment: client.cliEnvironment,
+                    onFocus: { id in
+                        selection = .terminal(workspace: wsID, terminal: id)
+                        Task { await client.layout(ws, ["focus", id]) }
+                    },
+                    onResize: { short, cols, rows in
+                        await client.resize(terminal: short, columns: cols, rows: rows)
+                    }
+                )
+            } else if let ws = workspace(wsID),
+                let term = ws.terminals.first(where: { $0.id == termID })
+            {
                 TerminalPane(
                     terminal: term,
                     workspace: ws,
@@ -446,9 +472,30 @@ struct ContentView: View {
             }
 
         case .workspace(let wsID):
-            if let ws = workspace(wsID) {
+            // A worktree with a layout shows the layout. The card list was the
+            // right answer when a workspace had no arrangement of its own; once
+            // it does, showing a summary of the panes instead of the panes is a
+            // click in the way.
+            if let ws = workspace(wsID), let group = client.activeGroup(wsID),
+                !group.terminals.isEmpty
+            {
+                TileView(
+                    group: group,
+                    workspace: ws,
+                    binary: client.cliPath,
+                    environment: client.cliEnvironment,
+                    onFocus: { id in
+                        selection = .terminal(workspace: wsID, terminal: id)
+                        Task { await client.layout(ws, ["focus", id]) }
+                    },
+                    onResize: { short, cols, rows in
+                        await client.resize(terminal: short, columns: cols, rows: rows)
+                    }
+                )
+            } else if let ws = workspace(wsID) {
                 WorkspaceDetail(
                     workspace: ws,
+                    onTile: { Task { await tile(.tile) } },
                     onNewTerminal: { newTerminal(in: ws) },
                     onArchive: { Task { await client.archiveWorkspace(ws.short) } },
                     onRemove: { removeWorkspace = ws },
@@ -547,6 +594,138 @@ struct ContentView: View {
             let terminal = workspace.terminals.first(where: { $0.id == terminalID })
         else { return nil }
         return (workspace, terminal)
+    }
+
+    // MARK: - Tiling
+
+    /// The workspace a tiling keystroke acts on.
+    private var tileTarget: Workspace? { currentWorkspace }
+
+    /// Carry out a `⌃B`-prefixed command.
+    ///
+    /// Every one of them is a `layout` call and the reply is the workspace's
+    /// whole layout, so there is nothing to reconcile here: the daemon decides
+    /// what a zoom or a focus means, and it decides the same way for the CLI and
+    /// for an agent. The only thing this file adds is geometry, for the two
+    /// commands that need it.
+    private func tile(_ command: TileCommand) async {
+        guard let workspace = tileTarget else { return }
+        let group = client.activeGroup(workspace.id)
+
+        switch command {
+        case .tile:
+            let groups = await client.layout(workspace, ["tile"])
+            // Land on the layout you just made rather than leaving the selection
+            // pointing at a terminal that is now one pane of it.
+            if let focused = groups.first(where: { $0.isActive })?.focused {
+                selection = .terminal(workspace: workspace.id, terminal: focused)
+            }
+
+        case .untile:
+            // Every pane out, which deletes the group. The terminals keep
+            // running: un-tiling four agents must never be a way to stop four
+            // agents.
+            guard let group, !group.terminals.isEmpty else { return }
+            await client.layout(workspace, ["drop"] + group.terminals)
+
+        case .zoom:
+            await client.layout(workspace, ["zoom"])
+
+        case .focusNext:
+            await client.layout(workspace, ["focus", "--next"])
+        case .focusPrevious:
+            await client.layout(workspace, ["focus", "--prev"])
+
+        case .focus(let direction):
+            // The one place the client's geometry is authoritative, because it
+            // is the only place that knows where the panes actually are. The
+            // daemon is then told a plain terminal id, so there is no second
+            // copy of the layout maths on the host to disagree with this one.
+            guard let group, let from = group.focused,
+                let index = group.terminals.firstIndex(of: from)
+            else { return }
+            let frames = TileGeometry.frames(
+                count: group.terminals.count,
+                preset: group.layout,
+                ratio: group.share,
+                in: CGRect(x: 0, y: 0, width: 1000, height: 700))
+            guard
+                let next = TileGeometry.neighbour(
+                    of: index, direction: direction, frames: frames)
+            else { return }
+            await client.layout(workspace, ["focus", group.terminals[next]])
+
+        case .focusIndex(let n):
+            await client.layout(workspace, ["focus", "--pane", "\(n)"])
+
+        case .cycle:
+            await client.layout(workspace, ["cycle"])
+
+        case .preset(let preset):
+            await client.layout(workspace, ["preset", preset.rawValue])
+
+        case .splitRight, .splitDown:
+            // A split is a new terminal in the layout you are looking at. The
+            // direction is the arrangement's business, so `%` and `"` set the
+            // preset and then add a pane, which is what tmux's own splits amount
+            // to once a layout is applied.
+            let preset: TilePreset = command == .splitRight ? .mainVertical : .mainHorizontal
+            if group == nil {
+                // Nothing tiled yet: tile what is here first, or the new pane
+                // would be alone in a group and look like nothing happened.
+                await client.layout(workspace, ["tile"])
+            }
+            await client.layout(workspace, ["preset", preset.rawValue])
+            await client.createTerminal(
+                workspace: workspace.short,
+                preset: "shell",
+                title: "Terminal \(workspace.terminals.count + 1)",
+                tile: true)
+            await client.refreshLayout(workspace)
+
+        case .breakPane:
+            guard let focused = group?.focused else { return }
+            await client.layout(workspace, ["drop", focused])
+            selection = .terminal(workspace: workspace.id, terminal: focused)
+
+        case .shiftForward:
+            await client.layout(workspace, ["shift"])
+        case .shiftBack:
+            await client.layout(workspace, ["shift", "--back"])
+
+        case .closePane:
+            // tmux's `x`, and it means the same thing: the pane's process ends.
+            // Routed through the existing close so there is one implementation of
+            // what closing a terminal does.
+            run(.closeTerminal)
+
+        case .newGroup:
+            await client.layout(workspace, ["group", "new"])
+        case .nextGroup:
+            await client.layout(workspace, ["group", "select", "--next"])
+        case .previousGroup:
+            await client.layout(workspace, ["group", "select", "--prev"])
+        case .closeGroup:
+            await client.layout(workspace, ["group", "close"])
+
+        case .help:
+            showShortcuts = true
+        }
+    }
+
+    /// Follow the layout's focus when something else moved it.
+    ///
+    /// The CLI and an agent can both focus a pane, and when they do the app has
+    /// to be looking at it — otherwise `overnight layout focus` from a script
+    /// draws a border around a pane whose keystrokes still go somewhere else.
+    private func followLayoutFocus() {
+        guard case .terminal(let wsID, let termID) = selection,
+            let group = client.activeGroup(wsID),
+            let focused = group.focused,
+            focused != termID,
+            group.terminals.contains(termID)
+        else { return }
+        selection = .terminal(workspace: wsID, terminal: focused)
     }
 
     private func run(_ command: AppCommand) {

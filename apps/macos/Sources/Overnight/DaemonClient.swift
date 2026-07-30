@@ -67,6 +67,11 @@ final class DaemonClient: ObservableObject {
             onEvent: { [weak self] event in
                 Task { @MainActor in self?.apply(event) }
             },
+            onLayout: { [weak self] event in
+                Task { @MainActor in
+                    self?.layouts[event.workspace] = event.groups.map(\.group)
+                }
+            },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     self?.eventStream = nil
@@ -215,7 +220,61 @@ final class DaemonClient: ObservableObject {
     ///
     /// Returns the new workspace, so the caller can select it immediately
     /// rather than after the agent has finished starting.
+    // MARK: - Tiling
+
+    /// Each workspace's groups, keyed by workspace id.
+    ///
+    /// Held here rather than in a view, because the daemon owns it and three
+    /// things change it: this app, the CLI, and agents driving the CLI. A layout
+    /// in view state would be a fourth opinion.
+    @Published var layouts: [String: [PaneGroup]] = [:]
+
+    func activeGroup(_ workspace: String) -> PaneGroup? {
+        let groups = layouts[workspace] ?? []
+        return groups.first { $0.isActive } ?? groups.first
+    }
+
+    /// Which group holds a terminal, if any.
+    func group(holding terminal: String, in workspace: String) -> PaneGroup? {
+        (layouts[workspace] ?? []).first { $0.terminals.contains(terminal) }
+    }
+
+    func refreshLayout(_ workspace: Workspace) async {
+        guard let data = await run(["layout", "show", workspace.short, "--json"]) else { return }
+        guard let list = try? JSONDecoder().decode(PaneGroupList.self, from: data) else { return }
+        layouts[workspace.id] = list.groups
+    }
+
+    /// Every layout the fleet has, read once.
+    ///
+    /// One call per workspace rather than one for the fleet: `layout.list` is
+    /// scoped to a workspace, and a fleet-wide read would be a method that exists
+    /// only for a first paint. Events carry every change after this.
+    func refreshLayouts() async {
+        for workspace in fleet.workspaces {
+            await refreshLayout(workspace)
+        }
+    }
+
+    /// Run a layout command and apply the groups it returns.
+    ///
+    /// The reply is the workspace's whole layout, so the local copy is replaced
+    /// rather than patched — and the event that follows says the same thing,
+    /// which is what keeps a second client in step.
     @discardableResult
+    func layout(_ workspace: Workspace, _ arguments: [String]) async -> [PaneGroup] {
+        var command = ["layout"] + arguments
+        // The subcommand comes first and the workspace immediately after it,
+        // which is the shape of every one of them.
+        command.insert(workspace.short, at: 2)
+        guard let data = await run(command + ["--json"]) else { return layouts[workspace.id] ?? [] }
+        guard let list = try? JSONDecoder().decode(PaneGroupList.self, from: data) else {
+            return layouts[workspace.id] ?? []
+        }
+        layouts[workspace.id] = list.groups
+        return list.groups
+    }
+
     /// Branches in a project that work could be resumed on.
     func branches(project: String) async -> [BranchInfo] {
         guard let data = await run(["workspace", "branches", project, "--json"]) else { return [] }
@@ -329,8 +388,14 @@ final class DaemonClient: ObservableObject {
         _ = await run(["terminal", "resize", terminal, "\(columns)", "\(rows)"])
     }
 
-    func createTerminal(workspace: String, preset: String, title: String) async {
-        _ = await run(["terminal", "create", workspace, "--preset", preset, "--title", title])
+    func createTerminal(
+        workspace: String, preset: String, title: String, tile: Bool = false
+    ) async {
+        var command = ["terminal", "create", workspace, "--preset", preset, "--title", title]
+        // One call rather than create-then-add: `prefix %` is one keystroke and
+        // a pane that appears a beat after the split reads as a stutter.
+        if tile { command.append("--tile") }
+        _ = await run(command)
         await refresh()
     }
 

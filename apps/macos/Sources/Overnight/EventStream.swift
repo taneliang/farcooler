@@ -26,16 +26,55 @@ struct TerminalEvent: Sendable, Decodable {
     var activity: String?
 }
 
+/// A workspace's tiling, pushed whole.
+///
+/// Whole rather than as a diff, and that is the daemon's decision showing
+/// through: layout is changed by this app, by the CLI, and by agents driving the
+/// CLI at the same time, so a client that missed one event converges on the next
+/// instead of applying a delta to a state it may not hold.
+struct LayoutEvent: Sendable, Decodable {
+    var workspace: String
+    var groups: [PaneGroupEvent]
+}
+
+/// The event form, which carries member ids rather than member objects.
+struct PaneGroupEvent: Sendable, Decodable {
+    var id: String
+    var short: String?
+    var name: String
+    var preset: String
+    var ratio: Double?
+    var active: Bool?
+    var zoomed: String?
+    var focused: String?
+    var members: [String]
+
+    var group: PaneGroup {
+        PaneGroup(
+            id: id, short: short, name: name, preset: preset, ratio: ratio, active: active,
+            zoomed: zoomed, focused: focused,
+            members: members.map { PaneMember(id: $0, short: nil, title: nil) })
+    }
+}
+
+/// Which resource a line is about.
+private struct EventKind: Decodable {
+    var kind: String
+}
+
 final class EventStream {
     private var process: Process?
     private let onEvent: @Sendable (TerminalEvent) -> Void
+    private let onLayout: @Sendable (LayoutEvent) -> Void
     private let onEnd: @Sendable () -> Void
 
     init(
         onEvent: @escaping @Sendable (TerminalEvent) -> Void,
+        onLayout: @escaping @Sendable (LayoutEvent) -> Void = { _ in },
         onEnd: @escaping @Sendable () -> Void = {}
     ) {
         self.onEvent = onEvent
+        self.onLayout = onLayout
         self.onEnd = onEnd
     }
 
@@ -60,16 +99,28 @@ final class EventStream {
         // state across threads, which the compiler is right to refuse.
         let buffer = LineBuffer()
         let handle = out.fileHandleForReading
-        handle.readabilityHandler = { [onEvent] h in
+        handle.readabilityHandler = { [onEvent, onLayout] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
+            let decoder = JSONDecoder()
             for line in buffer.take(chunk) {
-                // Events for resources this app does not track yet decode to
-                // nothing and are skipped, rather than being an error.
-                guard let event = try? JSONDecoder().decode(TerminalEvent.self, from: line) else {
-                    continue
+                // Dispatched on `kind` rather than by trying each shape in turn.
+                // Guessing worked while there was one shape; with two, a layout
+                // line that happened to decode as a terminal would have been
+                // applied as one.
+                guard let kind = try? decoder.decode(EventKind.self, from: line) else { continue }
+                switch kind.kind {
+                case "terminal":
+                    if let event = try? decoder.decode(TerminalEvent.self, from: line) {
+                        onEvent(event)
+                    }
+                case "layout":
+                    if let event = try? decoder.decode(LayoutEvent.self, from: line) {
+                        onLayout(event)
+                    }
+                // Resources this app does not track yet are skipped, not an error.
+                default: continue
                 }
-                onEvent(event)
             }
         }
 

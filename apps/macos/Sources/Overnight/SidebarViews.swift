@@ -59,6 +59,13 @@ struct WorkspaceSection: View {
     let onArchive: () -> Void
     let onRemove: () -> Void
     let onTerminalAction: (Terminal, TerminalAction) -> Void
+    /// The terminals currently on screen together, if any.
+    ///
+    /// Passed in rather than looked up, because the sidebar's job is to show
+    /// which of these rows you are looking at — the terminals that are tiled and
+    /// the ones running behind them are the same list, and the difference is one
+    /// mark, not a second section.
+    var tiled: Set<String> = []
 
     @State private var hovering = false
 
@@ -85,6 +92,7 @@ struct WorkspaceSection: View {
                         onSelect: {
                             selection = .terminal(workspace: workspace.id, terminal: t.id)
                         },
+                        isTiled: tiled.contains(t.id),
                         onAction: { onTerminalAction(t, $0) }
                     )
                 }
@@ -216,6 +224,8 @@ struct TerminalRow: View {
     let terminal: Terminal
     let isSelected: Bool
     let onSelect: () -> Void
+    /// On screen as part of the current layout.
+    var isTiled: Bool = false
     let onAction: (TerminalAction) -> Void
 
     @State private var hovering = false
@@ -247,6 +257,15 @@ struct TerminalRow: View {
                 .layoutPriority(1)
 
             Spacer(minLength: 0)
+
+            // One small mark for "this one is on screen right now", so the
+            // fourth agent running in the background is visibly the odd one out
+            // rather than indistinguishable from the three you arranged.
+            if isTiled {
+                Image(systemName: "square.split.2x2")
+                    .font(.system(size: 9))
+                    .foregroundStyle(isSelected ? .primary : .tertiary)
+            }
 
             if status == .lost {
                 Button("Dismiss") { onAction(.dismissLost) }
@@ -297,6 +316,8 @@ struct WorkspaceDot: View {
 /// footnote you can copy when you want it.
 struct WorkspaceDetail: View {
     let workspace: Workspace
+    /// Put every terminal here on screen together.
+    var onTile: () -> Void = {}
     let onNewTerminal: () -> Void
     let onArchive: () -> Void
     let onRemove: () -> Void
@@ -349,6 +370,16 @@ struct WorkspaceDetail: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut("t", modifiers: .command)
+
+                // The way in that is not a keystroke. Tiling is keyboard-first
+                // and the prefix is the fast path, but a feature reachable only
+                // by a binding you have to be told about does not exist for
+                // anyone who has not been told.
+                if workspace.terminals.count > 1 {
+                    Button(action: onTile) {
+                        Label("Tile all", systemImage: "square.split.2x2")
+                    }
+                }
 
                 Spacer()
 

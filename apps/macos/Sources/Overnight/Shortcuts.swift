@@ -15,6 +15,21 @@ import SwiftUI
 ///   ⌘1…⌘9     jump to the nth thing, as in every browser
 ///   ⌘[ / ⌘]   back and forward through them
 ///   ⌘R        reload, which for a terminal means restart
+///
+/// Tiling is the exception, and deliberately so. It uses a tmux PREFIX — ⌃B, then
+/// a key — for two reasons. The ⌘ chords are gone: a terminal wants nearly all of
+/// them, and what is left is what nobody can remember. And a very large share of
+/// the people this is for already have ⌃B z in their fingers, so borrowing tmux's
+/// bindings means the tiling has no learning curve for them at all.
+///
+/// ⌃B ⌃B sends a literal ⌃B through, exactly as tmux does, so running tmux inside
+/// an Overnight pane still works.
+///
+/// Moving between panes is the one thing bound WITHOUT the prefix, because it is
+/// the one thing done constantly: ⌃hjkl, as vim-tmux-navigator taught everyone.
+/// Those four are also backspace, newline, kill-line and clear-screen, so they
+/// are only taken while more than one pane is on screen — with a single terminal
+/// ⌃L still clears it.
 enum Shortcut {
     struct Item: Identifiable {
         let id = UUID()
@@ -32,6 +47,34 @@ enum Shortcut {
                 Item(keys: "⌘]", action: "Next terminal"),
                 Item(keys: "⌘[", action: "Previous terminal"),
                 Item(keys: "⌃⌘N", action: "Jump to the next agent that needs you"),
+            ]
+        ),
+        (
+            "Panes",
+            [
+                Item(keys: "⌃H ⌃L", action: "Move to the pane left / right"),
+                Item(keys: "⌃K ⌃J", action: "Move to the pane above / below"),
+            ]
+        ),
+        (
+            "Tiling — press ⌃B, then",
+            [
+                Item(keys: "t", action: "Tile every terminal here"),
+                Item(keys: "⇧T", action: "Un-tile — panes keep running, off screen"),
+                Item(keys: "z", action: "Zoom the focused pane; again to come back"),
+                Item(keys: "space", action: "Next arrangement"),
+                Item(keys: "o  /  ;", action: "Next / previous pane"),
+                Item(keys: "← → ↑ ↓", action: "Move to the pane in that direction"),
+                Item(keys: "h j k l", action: "The same, without leaving home row"),
+                Item(keys: "1 … 9", action: "Focus pane by number"),
+                Item(keys: "%  /  \"", action: "Split right / down — a new pane here"),
+                Item(keys: "!", action: "Move the focused pane out of the layout"),
+                Item(keys: "{  /  }", action: "Move the focused pane along"),
+                Item(keys: "x", action: "Close the focused pane's terminal"),
+                Item(keys: "c", action: "New group — several layouts per worktree"),
+                Item(keys: "n  /  p", action: "Next / previous group"),
+                Item(keys: "&", action: "Close this group"),
+                Item(keys: "⌃B", action: "Send a literal ⌃B to the program"),
             ]
         ),
         (

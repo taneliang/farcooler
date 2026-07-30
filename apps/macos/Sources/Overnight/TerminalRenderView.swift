@@ -421,6 +421,17 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     // MARK: - Keyboard
 
     override func keyDown(with event: NSEvent) {
+        // The tiling prefix gets first refusal, because it has to: with a
+        // terminal focused there is nothing else in the responder chain that
+        // sees ⌃B before the emulator encodes it and sends it to the program.
+        //
+        // `handled` covers arming the prefix and the key that follows it.
+        // Everything else falls through untouched, including ⌃B ⌃B — which is how
+        // a literal ⌃B still reaches a tmux running inside this pane.
+        if MainActor.assumeIsolated({ PrefixMode.shared.handle(event) }) == .handled {
+            return
+        }
+
         // Reading and typing are different intents: a keystroke means "act on
         // the live screen", so it always returns there first.
         core.scrollToBottomIfScrolled()

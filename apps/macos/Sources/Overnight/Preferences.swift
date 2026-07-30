@@ -31,6 +31,23 @@ final class Preferences: ObservableObject {
     /// state where Overnight does not know what happened.
     @AppStorage("terminals.autoRemoveExited") var autoRemoveExited = true
 
+    /// The tiling prefix, as a single lowercase letter used with Control.
+    ///
+    /// Configurable because `⌃B` is not free for everyone — it is `back-char` in
+    /// readline and emacs, and someone who lives in either will want `⌃A` or
+    /// `⌃Space` instead. `⌃B` is the default because it is tmux's, and tmux is
+    /// where most people arriving here have already built the habit.
+    @AppStorage("tiling.prefixKey") var prefixKey = "b"
+
+    /// Move between panes with `⌃hjkl`, no prefix.
+    ///
+    /// A real trade: those four are backspace, newline, kill-line and
+    /// clear-screen, and that is exactly why tmux hides its bindings behind a
+    /// prefix. The cost is contained by only taking them while more than one pane
+    /// is on screen — with a single terminal `⌃L` still clears it — but if you
+    /// live in readline inside a tiled worktree, this is the switch.
+    @AppStorage("tiling.directTraversal") var directTraversal = true
+
     /// Which agent a new task starts with.
     ///
     /// Only quick-create uses it. ⌘T still makes a plain shell, because that is
@@ -177,6 +194,24 @@ struct SettingsView: View {
 
             Section {
                 Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
+
+                Toggle("Move between panes with ⌃H ⌃J ⌃K ⌃L", isOn: $preferences.directTraversal)
+                Text(
+                    "Only while more than one pane is on screen. With a single "
+                    + "terminal these stay backspace, newline, kill-line and clear."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Picker("Tiling prefix", selection: $preferences.prefixKey) {
+                    // ⌃B is tmux's, which is why it is the default. The
+                    // alternatives are the two keys people who have already
+                    // rebound tmux tend to have rebound it to, and both are
+                    // there because ⌃B is `back-char` in readline.
+                    Text("⌃B").tag("b")
+                    Text("⌃A").tag("a")
+                    Text("⌃Space").tag(" ")
+                }
                 Text(
                     "A terminal is its process. When that exits there is nothing left to "
                     + "show. A lost terminal is always kept — that is the one case Overnight "
