@@ -52,6 +52,7 @@ fn required_scope(method: &str) -> Option<Scope> {
     Some(match method {
         "host.get" | "host.health" | "daemon.version" => Scope::Read,
         "repository.list" | "workspace.list" | "terminal.list" | "branch.list" => Scope::Read,
+        "layout.list" => Scope::Read,
         "repository.register"
         | "workspace.create"
         | "workspace.archive"
@@ -63,6 +64,22 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "terminal.restart"
         | "terminal.seen"
         | "terminal.remove" => Scope::Control,
+        // Tiling is `control`, not `host_admin`. It touches no files and stops
+        // no process — the worst a wrong one does is show you the wrong pane —
+        // and it has to be reachable by an agent for any of this to be
+        // automatable.
+        "layout.tile"
+        | "layout.add"
+        | "layout.drop"
+        | "layout.preset"
+        | "layout.cycle"
+        | "layout.focus"
+        | "layout.zoom"
+        | "layout.swap"
+        | "layout.shift"
+        | "layout.group.new"
+        | "layout.group.select"
+        | "layout.group.close" => Scope::Control,
         "repository_root.list"
         | "repository_root.add"
         | "repository_root.remove"
@@ -318,6 +335,13 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let term = svc.create_terminal(workspace, &p.title, &p.command_preset).await?;
+                if p.join_active_group {
+                    // A no-op when the workspace has no layout, which is what
+                    // makes it safe to pass unconditionally from a `%` binding.
+                    if let Ok(groups) = svc.layout_add(workspace, None, &[term.id]).await {
+                        self.watcher.publish_layout(workspace, &groups);
+                    }
+                }
                 self.terminal_result(term.id).await
             }
 
@@ -368,6 +392,88 @@ impl Rpc {
                 let id = Self::target(&req)?;
                 svc.restart_terminal(id).await?;
                 self.terminal_result(id).await
+            }
+
+            // ---- tiling ----
+            //
+            // The workspace is always the envelope target and the group is
+            // always in the payload, so every one of these reads the same two
+            // things and differs only in what it does with them.
+            "layout.list" => {
+                let workspace = Self::target(&req)?;
+                Ok(result::Value::PaneGroupList(wire::pane_group_list(
+                    workspace,
+                    &svc.layout(workspace)?,
+                )))
+            }
+
+            method if method.starts_with("layout.") => {
+                let workspace = Self::target(&req)?;
+                let p = match req.payload {
+                    Some(request::Payload::LayoutUpdate(p)) => p,
+                    // An empty payload is legal for the verbs that need no
+                    // arguments: cycle, zoom-toggle, group-close.
+                    Some(request::Payload::Empty(_)) | None => Default::default(),
+                    _ => return Err(DomainError::InvalidArgument { what: "payload" }),
+                };
+                let group = p.group_id.as_deref().and_then(wire::parse_id);
+                let terminals: Vec<Uuid> =
+                    p.terminals.iter().filter_map(|t| wire::parse_id(t)).collect();
+                let preset = p.preset.and_then(|raw| {
+                    overnight_protocol::v1::LayoutPreset::try_from(raw).ok()
+                });
+
+                let step = p.step.unwrap_or(1) as i64;
+
+                let groups = match method {
+                    "layout.tile" => {
+                        svc.layout_tile(workspace, group, &terminals, preset).await?
+                    }
+                    "layout.add" => svc.layout_add(workspace, group, &terminals).await?,
+                    "layout.drop" => svc.layout_drop(workspace, &terminals).await?,
+                    "layout.preset" => {
+                        let name = (!p.name.is_empty()).then_some(p.name.as_str());
+                        svc.layout_configure(workspace, group, preset, p.ratio, name).await?
+                    }
+                    "layout.cycle" => svc.layout_cycle(workspace, group).await?,
+                    "layout.focus" => match (
+                        p.focus.as_deref().and_then(wire::parse_id),
+                        p.pane,
+                    ) {
+                        (Some(terminal), _) => svc.layout_focus(workspace, terminal).await?,
+                        (None, Some(index)) => {
+                            svc.layout_focus_index(workspace, group, index as usize).await?
+                        }
+                        (None, None) => svc.layout_focus_step(workspace, group, step).await?,
+                    },
+                    "layout.zoom" => {
+                        let terminal = p.zoom.as_deref().and_then(wire::parse_id);
+                        svc.layout_zoom(workspace, group, terminal, p.unzoom).await?
+                    }
+                    "layout.swap" => {
+                        let [a, b] = terminals.as_slice() else {
+                            return Err(DomainError::InvalidArgument { what: "two terminals" });
+                        };
+                        svc.layout_swap(workspace, *a, *b).await?
+                    }
+                    "layout.shift" => svc.layout_shift(workspace, group, step).await?,
+                    "layout.group.new" => svc.layout_group_new(workspace, &p.name).await?,
+                    "layout.group.select" => match group {
+                        Some(id) => svc.layout_group_select(workspace, id).await?,
+                        None => svc.layout_group_step(workspace, step).await?,
+                    },
+                    "layout.group.close" => svc.layout_group_close(workspace, group).await?,
+                    other => {
+                        tracing::error!(method = %other, "layout method has no handler");
+                        return Err(DomainError::NotFound);
+                    }
+                };
+
+                // Announced from here rather than from each service method: the
+                // service is also called by tests and by the local CLI path,
+                // neither of which has a client to tell.
+                self.watcher.publish_layout(workspace, &groups);
+                Ok(result::Value::PaneGroupList(wire::pane_group_list(workspace, &groups)))
             }
 
             // `required_scope` already rejected anything not listed there, so
@@ -460,6 +566,19 @@ mod tests {
             "terminal.stop",
             "terminal.dismiss_lost",
             "terminal.restart",
+            "layout.list",
+            "layout.tile",
+            "layout.add",
+            "layout.drop",
+            "layout.preset",
+            "layout.cycle",
+            "layout.focus",
+            "layout.zoom",
+            "layout.swap",
+            "layout.shift",
+            "layout.group.new",
+            "layout.group.select",
+            "layout.group.close",
         ] {
             assert!(required_scope(method).is_some(), "{method} has no declared scope");
         }
@@ -468,6 +587,9 @@ mod tests {
     #[test]
     fn an_unknown_method_is_refused_rather_than_defaulted() {
         assert_eq!(required_scope("terminal.write"), None);
+        // The `layout.` handler arm is prefix-matched, so an unlisted layout
+        // method must still be stopped by the table before it gets there.
+        assert_eq!(required_scope("layout.nonsense"), None);
         assert_eq!(required_scope(""), None);
         assert_eq!(required_scope("host.get "), None, "no fuzzy matching");
     }
@@ -481,6 +603,16 @@ mod tests {
         assert_eq!(required_scope("repository_root.remove"), Some(Scope::HostAdmin));
         // Paths live behind the same gate, so listing roots is admin too.
         assert_eq!(required_scope("repository_root.list"), Some(Scope::HostAdmin));
+    }
+
+    #[test]
+    fn tiling_is_control_not_admin() {
+        // An agent has to be able to place its own panes, and none of this
+        // touches a file or stops a process.
+        for method in ["layout.tile", "layout.zoom", "layout.group.new"] {
+            assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
+        }
+        assert_eq!(required_scope("layout.list"), Some(Scope::Read));
     }
 
     #[test]

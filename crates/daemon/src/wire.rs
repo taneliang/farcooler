@@ -249,3 +249,33 @@ mod tests {
         assert_eq!(timestamp(1500).nanos, 500_000_000);
     }
 }
+
+/// A workspace's tiling, whole.
+///
+/// Sent whole and never as a diff. Layout is edited from the app, the CLI, and
+/// agents driving the CLI at the same time, so a client that missed one event has
+/// to converge on the next rather than apply a delta to a state it may not hold.
+pub fn pane_group_list(
+    workspace: Uuid,
+    groups: &[overnight_store::PaneGroup],
+) -> overnight_protocol::v1::PaneGroupList {
+    overnight_protocol::v1::PaneGroupList {
+        workspace_id: id_bytes(workspace),
+        items: groups.iter().map(pane_group).collect(),
+    }
+}
+
+pub fn pane_group(group: &overnight_store::PaneGroup) -> overnight_protocol::v1::PaneGroup {
+    overnight_protocol::v1::PaneGroup {
+        id: id_bytes(group.id),
+        resource_version: group.resource_version,
+        workspace_id: id_bytes(group.workspace_id),
+        name: group.name.clone(),
+        preset: group.preset as i32,
+        ratio: group.ratio,
+        members: group.members.iter().copied().map(id_bytes).collect(),
+        zoomed: group.zoomed.map(id_bytes),
+        focused: group.focused.map(id_bytes),
+        active: group.active,
+    }
+}

@@ -209,10 +209,12 @@ impl Session {
         workspace: Uuid,
         title: &str,
         preset: &str,
+        join_active_group: bool,
     ) -> Result<Terminal, SessionError> {
         let payload = request::Payload::TerminalCreate(overnight_protocol::v1::TerminalCreate {
             title: title.into(),
             command_preset: preset.into(),
+            join_active_group,
         });
         match self.value("terminal.create", Some(workspace), Some(payload)).await? {
             result::Value::Terminal(t) => Ok(t),
@@ -291,6 +293,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::DaemonVersion(_) => "daemon_version",
         result::Value::TerminalAttach(_) => "terminal_attach",
         result::Value::BranchList(_) => "branch_list",
+        result::Value::PaneGroupList(_) => "pane_group_list",
     }
 }
 

@@ -369,6 +369,11 @@ impl Service {
         // clean exit is distinguishable from a loss; once the record is gone
         // there is nothing left for it to prove.
         let _ = self.tmux.kill_terminal_window(id).await;
+        // Off screen before out of the database. The membership row would
+        // cascade away on its own, but a group still pointing at this terminal
+        // as zoomed or focused would render as a blank pane — so the layout has
+        // to be told, not merely cleaned up after.
+        let _ = self.layout_drop(record.workspace_id, &[id]).await;
         self.store.delete_terminal(id, record.resource_version)
     }
 

@@ -386,3 +386,241 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
         other => panic!("expected WORKSPACES_EXIST, got {other:?}"),
     }
 }
+
+/// A workspace, over the wire, ready to have things tiled in it.
+async fn a_workspace(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+    dir: &std::path::Path,
+) -> overnight_protocol::v1::Workspace {
+    let repo_path = dir.join("demo");
+    std::fs::create_dir(&repo_path).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo_path)
+            .status()
+            .unwrap();
+    }
+
+    let mut add = request("repository_root.add");
+    add.payload = Some(request::Payload::RepositoryRootAdd(
+        overnight_protocol::v1::RepositoryRootAdd {
+            absolute_path: dir.to_string_lossy().into_owned(),
+            typed_confirmation: String::new(),
+        },
+    ));
+    client.call(add).await.expect("add root");
+
+    let mut register = request("repository.register");
+    register.payload = Some(request::Payload::RepositoryRegister(
+        overnight_protocol::v1::RepositoryRegister {
+            relative_path: repo_path.to_string_lossy().into_owned(),
+        },
+    ));
+    let result = client.call(register).await.expect("register");
+    let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
+
+    let mut create = request("workspace.create");
+    create.target_resource_id = Some(repository.id.clone());
+    create.payload = Some(request::Payload::WorkspaceCreate(
+        overnight_protocol::v1::WorkspaceCreate {
+            task_name: "tiling".into(),
+            branch: "feat/tiling".into(),
+            base_revision: "HEAD".into(),
+            cli_preset: String::new(),
+            adopt_existing: false,
+        },
+    ));
+    let result = client.call(create).await.expect("workspace.create");
+    let Some(result::Value::Workspace(workspace)) = result.value else { panic!("wrong result") };
+    workspace
+}
+
+async fn layout_call(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+    method: &str,
+    workspace: &bytes::Bytes,
+    update: overnight_protocol::v1::LayoutUpdate,
+) -> overnight_protocol::v1::PaneGroupList {
+    let mut req = request(method);
+    req.target_resource_id = Some(workspace.clone());
+    req.payload = Some(request::Payload::LayoutUpdate(update));
+    let result = client.call(req).await.unwrap_or_else(|e| panic!("{method}: {e:?}"));
+    let Some(result::Value::PaneGroupList(list)) = result.value else {
+        panic!("{method} returned the wrong resource")
+    };
+    list
+}
+
+#[tokio::test]
+async fn a_workspace_starts_with_nothing_tiled() {
+    // The stated case is four agents with three on screen, and it only works if
+    // membership is something you opt into rather than something that happens.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+
+    let mut list = request("layout.list");
+    list.target_resource_id = Some(workspace.id.clone());
+    let result = client.call(list).await.expect("layout.list");
+    let Some(result::Value::PaneGroupList(groups)) = result.value else { panic!("wrong result") };
+    assert!(groups.items.is_empty(), "nothing tiles until asked");
+}
+
+#[tokio::test]
+async fn tiling_with_no_terminals_named_takes_every_live_one() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+
+    let mut made = Vec::new();
+    for title in ["one", "two", "three"] {
+        let mut create = request("terminal.create");
+        create.target_resource_id = Some(workspace.id.clone());
+        create.payload = Some(request::Payload::TerminalCreate(
+            overnight_protocol::v1::TerminalCreate {
+                title: title.into(),
+                command_preset: "shell".into(),
+                join_active_group: false,
+            },
+        ));
+        let result = client.call(create).await.expect("terminal.create");
+        let Some(result::Value::Terminal(t)) = result.value else { panic!("wrong result") };
+        made.push(t.id);
+    }
+
+    let list =
+        layout_call(&mut client, "layout.tile", &workspace.id, Default::default()).await;
+    assert_eq!(list.items.len(), 1, "one group appears to hold them");
+    let group = &list.items[0];
+    assert!(group.active);
+    assert_eq!(group.members.len(), made.len());
+    assert_eq!(group.focused.as_ref(), Some(&group.members[0]), "something must be focused");
+    assert_eq!(group.zoomed, None, "you asked to see several things");
+}
+
+#[tokio::test]
+async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
+    // The deliberate divergence from tmux, and the reason zoom is useful with
+    // more than one agent: moving on keeps you zoomed instead of dropping you
+    // back into the grid.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+
+    for title in ["one", "two"] {
+        let mut create = request("terminal.create");
+        create.target_resource_id = Some(workspace.id.clone());
+        create.payload = Some(request::Payload::TerminalCreate(
+            overnight_protocol::v1::TerminalCreate {
+                title: title.into(),
+                command_preset: "shell".into(),
+                join_active_group: false,
+            },
+        ));
+        client.call(create).await.expect("terminal.create");
+    }
+    let list = layout_call(&mut client, "layout.tile", &workspace.id, Default::default()).await;
+    let first = list.items[0].members[0].clone();
+    let second = list.items[0].members[1].clone();
+
+    let zoomed = layout_call(&mut client, "layout.zoom", &workspace.id, Default::default()).await;
+    assert_eq!(zoomed.items[0].zoomed.as_ref(), Some(&first));
+
+    let moved = layout_call(
+        &mut client,
+        "layout.focus",
+        &workspace.id,
+        overnight_protocol::v1::LayoutUpdate { step: Some(1), ..Default::default() },
+    )
+    .await;
+    assert_eq!(moved.items[0].focused.as_ref(), Some(&second));
+    assert_eq!(moved.items[0].zoomed.as_ref(), Some(&second), "the zoom came along");
+
+    let out = layout_call(&mut client, "layout.zoom", &workspace.id, Default::default()).await;
+    assert_eq!(out.items[0].zoomed, None, "prefix z is still the way out");
+}
+
+#[tokio::test]
+async fn a_pane_moved_into_another_group_leaves_no_empty_one_behind() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+
+    let mut create = request("terminal.create");
+    create.target_resource_id = Some(workspace.id.clone());
+    create.payload = Some(request::Payload::TerminalCreate(
+        overnight_protocol::v1::TerminalCreate {
+            title: "one".into(),
+            command_preset: "shell".into(),
+            join_active_group: false,
+        },
+    ));
+    let result = client.call(create).await.expect("terminal.create");
+    let Some(result::Value::Terminal(terminal)) = result.value else { panic!("wrong result") };
+
+    layout_call(&mut client, "layout.tile", &workspace.id, Default::default()).await;
+    let two = layout_call(
+        &mut client,
+        "layout.group.new",
+        &workspace.id,
+        overnight_protocol::v1::LayoutUpdate { name: "scratch".into(), ..Default::default() },
+    )
+    .await;
+    assert_eq!(two.items.len(), 2, "a new group is empty on purpose");
+
+    // Move the only pane into the new group. The first group is now a ghost.
+    let after = layout_call(
+        &mut client,
+        "layout.add",
+        &workspace.id,
+        overnight_protocol::v1::LayoutUpdate {
+            terminals: vec![terminal.id.clone()],
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(after.items.len(), 1, "the emptied group is gone");
+    assert_eq!(after.items[0].name, "scratch");
+    assert_eq!(after.items[0].members, vec![terminal.id]);
+}
+
+#[tokio::test]
+async fn tiling_needs_control_and_reading_a_layout_does_not() {
+    // An agent has to be able to place its own panes: none of this touches a
+    // file or stops a process, so gating it behind host_admin would have made
+    // the feature unautomatable for no safety gained.
+    let h = start(Scope::Read).await;
+    let mut client = connect(&h).await;
+
+    let mut list = request("layout.list");
+    list.target_resource_id = Some(bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()));
+    // Read scope reaches the method; the workspace simply does not exist.
+    match client.call(list).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_ne!(code, ErrorCode::ScopeDenied as i32, "read must be enough to look");
+        }
+        Ok(_) => {}
+        other => panic!("unexpected {other:?}"),
+    }
+
+    let mut tile = request("layout.tile");
+    tile.target_resource_id =
+        Some(bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()));
+    tile.payload = Some(request::Payload::LayoutUpdate(Default::default()));
+    match client.call(tile).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(code, ErrorCode::ScopeDenied as i32);
+        }
+        other => panic!("expected SCOPE_DENIED, got {other:?}"),
+    }
+}

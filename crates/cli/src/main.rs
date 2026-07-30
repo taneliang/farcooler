@@ -71,6 +71,13 @@ enum Command {
     /// Manage terminals inside a workspace.
     #[command(subcommand)]
     Terminal(TerminalCmd),
+    /// Arrange terminals on screen: tile, zoom, focus, switch groups.
+    ///
+    /// Everything the Mac app's tiling does, because it is the same calls. An
+    /// agent that can open a terminal but not place it is only half
+    /// automatable, so this exists for agents as much as for people.
+    #[command(subcommand)]
+    Layout(LayoutCmd),
     /// Show how to attach to a workspace's live tmux session.
     Attach { workspace: String },
     /// Stream changes as they happen, one JSON object per line.
@@ -82,6 +89,96 @@ enum Command {
     /// Install or inspect Overnight on a Linux host over ssh.
     #[command(subcommand, name = "host")]
     HostCmd(HostCmd),
+}
+
+/// Tiling, in tmux's vocabulary.
+///
+/// The names are tmux's on purpose. A great many people already know that `z`
+/// zooms and that a layout is called `main-vertical`, and inventing a second
+/// vocabulary for the same five arrangements would have cost them that for
+/// nothing.
+#[derive(Subcommand)]
+enum LayoutCmd {
+    /// Show a workspace's groups and which panes are in them.
+    Show { workspace: String },
+    /// Put terminals on screen together, replacing what was there.
+    ///
+    /// With no terminals named, tiles every live terminal in the workspace —
+    /// the one-word version of the whole feature.
+    Tile {
+        workspace: String,
+        terminals: Vec<String>,
+        /// even-horizontal, even-vertical, main-vertical, main-horizontal, tiled.
+        #[arg(long)]
+        preset: Option<String>,
+    },
+    /// Add terminals to the group without disturbing the rest.
+    Add { workspace: String, terminals: Vec<String> },
+    /// Take terminals off screen. They keep running.
+    Drop { workspace: String, terminals: Vec<String> },
+    /// Set the arrangement, the main-pane share, or the group's name.
+    Preset {
+        workspace: String,
+        preset: Option<String>,
+        /// Fraction of the long axis for the main pane, 0.15 to 0.85.
+        #[arg(long)]
+        ratio: Option<f64>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Next arrangement of the same panes. tmux's `prefix Space`.
+    Cycle { workspace: String },
+    /// Move focus: a terminal, `--next`, `--prev`, or `--pane N`.
+    Focus {
+        workspace: String,
+        terminal: Option<String>,
+        #[arg(long)]
+        next: bool,
+        #[arg(long)]
+        prev: bool,
+        /// One-based, the way `prefix 1` reads.
+        #[arg(long, value_name = "N")]
+        pane: Option<usize>,
+    },
+    /// Fill the group with one pane. tmux's `prefix z`.
+    ///
+    /// With no terminal, toggles on whatever is focused. While zoomed, moving
+    /// focus keeps the zoom and brings the new pane forward — which is the point
+    /// of zooming when you have four agents rather than one.
+    Zoom {
+        workspace: String,
+        terminal: Option<String>,
+        #[arg(long)]
+        off: bool,
+    },
+    /// Exchange two panes' positions.
+    Swap { workspace: String, a: String, b: String },
+    /// Move the focused pane one place along. tmux's `prefix {` and `}`.
+    Shift {
+        workspace: String,
+        #[arg(long)]
+        back: bool,
+    },
+    /// Several layouts per workspace, one on screen. tmux's windows.
+    #[command(subcommand)]
+    Group(LayoutGroupCmd),
+}
+
+#[derive(Subcommand)]
+enum LayoutGroupCmd {
+    /// A new, empty group, and show it.
+    New { workspace: String, name: Option<String> },
+    /// Show a group by name, by number, or the next one.
+    Select {
+        workspace: String,
+        group: Option<String>,
+        #[arg(long)]
+        next: bool,
+        #[arg(long)]
+        prev: bool,
+    },
+    /// Stop showing a group. Its terminals keep running, backgrounded.
+    Close { workspace: String },
 }
 
 #[derive(Subcommand)]
@@ -175,6 +272,13 @@ enum TerminalCmd {
         preset: String,
         #[arg(long)]
         title: Option<String>,
+        /// Put it straight into the workspace's active group.
+        ///
+        /// tmux's `%`: you are looking at a layout and you want another pane in
+        /// it. Does nothing when there is no layout, so it is safe to always
+        /// pass from a key binding.
+        #[arg(long)]
+        tile: bool,
     },
     /// Send exact bytes to a terminal.
     Send { terminal: String, data: String },
@@ -245,6 +349,7 @@ async fn run() -> Fallible {
         Command::Repo(c) => repo(host, c, cli.json).await,
         Command::Workspace(c) => workspace(host, c, cli.json).await,
         Command::Terminal(c) => terminal(host, c, cli.json).await,
+        Command::Layout(c) => layout(host, c, cli.json).await,
         Command::Attach { workspace } => attach(host, &workspace).await,
         Command::Events => events(host).await,
         Command::HostCmd(HostCmd::Install { target, from }) => {
@@ -694,6 +799,22 @@ async fn events(host: Option<&str>) -> Fallible {
                 "task": w.task_name,
                 "state": workspace_label(w.state()),
             }),
+            overnight_protocol::v1::event::Payload::LayoutChanged(l) => serde_json::json!({
+                "kind": "layout",
+                "workspace": uuid_of(&l.workspace_id).to_string(),
+                "groups": l.items.iter().map(|g| serde_json::json!({
+                    "id": uuid_of(&g.id).to_string(),
+                    "short": short_bytes(&g.id),
+                    "name": g.name,
+                    "preset": overnight_daemon::layout::preset_name(g.preset()),
+                    "ratio": g.ratio,
+                    "active": g.active,
+                    "zoomed": g.zoomed.as_ref().map(|z| uuid_of(z).to_string()),
+                    "focused": g.focused.as_ref().map(|f| uuid_of(f).to_string()),
+                    "members": g.members.iter()
+                        .map(|m| uuid_of(m).to_string()).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+            }),
             // Other resources have no events yet. Skipping is right: a client
             // that reacts to a line it cannot read would be worse.
             _ => continue,
@@ -707,13 +828,224 @@ async fn events(host: Option<&str>) -> Fallible {
 }
 
 // ---------------------------------------------------------------------------
+// Tiling
+//
+// Every one of these is a `layout.*` call against a workspace, and every one
+// answers with the workspace's whole set of groups — so the printer is written
+// once and each command is a payload.
+// ---------------------------------------------------------------------------
+
+async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
+    use overnight_daemon::layout::{parse_preset, preset_name};
+    use overnight_protocol::v1::LayoutUpdate;
+
+    let mut link = connect_to(host).await?;
+    let workspaces = list_workspaces(&mut link).await?;
+
+    let name_of = |cmd: &LayoutCmd| -> &'static str {
+        match cmd {
+            LayoutCmd::Show { .. } => "layout.list",
+            LayoutCmd::Tile { .. } => "layout.tile",
+            LayoutCmd::Add { .. } => "layout.add",
+            LayoutCmd::Drop { .. } => "layout.drop",
+            LayoutCmd::Preset { .. } => "layout.preset",
+            LayoutCmd::Cycle { .. } => "layout.cycle",
+            LayoutCmd::Focus { .. } => "layout.focus",
+            LayoutCmd::Zoom { .. } => "layout.zoom",
+            LayoutCmd::Swap { .. } => "layout.swap",
+            LayoutCmd::Shift { .. } => "layout.shift",
+            LayoutCmd::Group(LayoutGroupCmd::New { .. }) => "layout.group.new",
+            LayoutCmd::Group(LayoutGroupCmd::Select { .. }) => "layout.group.select",
+            LayoutCmd::Group(LayoutGroupCmd::Close { .. }) => "layout.group.close",
+        }
+    };
+    let method = name_of(&cmd);
+
+    let workspace_arg = match &cmd {
+        LayoutCmd::Show { workspace }
+        | LayoutCmd::Tile { workspace, .. }
+        | LayoutCmd::Add { workspace, .. }
+        | LayoutCmd::Drop { workspace, .. }
+        | LayoutCmd::Preset { workspace, .. }
+        | LayoutCmd::Cycle { workspace }
+        | LayoutCmd::Focus { workspace, .. }
+        | LayoutCmd::Zoom { workspace, .. }
+        | LayoutCmd::Swap { workspace, .. }
+        | LayoutCmd::Shift { workspace, .. }
+        | LayoutCmd::Group(
+            LayoutGroupCmd::New { workspace, .. }
+            | LayoutGroupCmd::Select { workspace, .. }
+            | LayoutGroupCmd::Close { workspace },
+        ) => workspace.clone(),
+    };
+    let ws = resolve(&workspaces, &workspace_arg, |w| &w.id, "workspace")?;
+    let workspace_id = uuid_of(&ws.id);
+
+    // Terminals are named by short id, so they have to be resolved against the
+    // workspace before anything can be said about them.
+    let terminals = list_terminals(&mut link, Some(workspace_id)).await?;
+    let pick = |given: &str| -> Result<bytes::Bytes, String> {
+        resolve(&terminals, given, |t| &t.id, "terminal").map(|t| t.id.clone())
+    };
+    let pick_all = |given: &[String]| -> Result<Vec<bytes::Bytes>, String> {
+        given.iter().map(|g| pick(g)).collect()
+    };
+
+    let mut update = LayoutUpdate::default();
+    match &cmd {
+        LayoutCmd::Show { .. } | LayoutCmd::Cycle { .. } => {}
+        LayoutCmd::Tile { terminals, preset, .. } => {
+            update.terminals = pick_all(terminals)?;
+            if let Some(text) = preset {
+                update.preset =
+                    Some(parse_preset(text).ok_or_else(|| unknown_preset(text))? as i32);
+            }
+        }
+        LayoutCmd::Add { terminals, .. } | LayoutCmd::Drop { terminals, .. } => {
+            update.terminals = pick_all(terminals)?;
+        }
+        LayoutCmd::Preset { preset, ratio, name, .. } => {
+            if let Some(text) = preset {
+                update.preset =
+                    Some(parse_preset(text).ok_or_else(|| unknown_preset(text))? as i32);
+            }
+            update.ratio = *ratio;
+            update.name = name.clone().unwrap_or_default();
+        }
+        LayoutCmd::Focus { terminal, prev, pane, .. } => match (terminal, pane) {
+            (Some(given), _) => update.focus = Some(pick(given)?),
+            (None, Some(n)) => update.pane = Some(*n as u32),
+            (None, None) => update.step = Some(if *prev { -1 } else { 1 }),
+        },
+        LayoutCmd::Zoom { terminal, off, .. } => {
+            update.unzoom = *off;
+            if let Some(given) = terminal {
+                update.zoom = Some(pick(given)?);
+            }
+        }
+        LayoutCmd::Swap { a, b, .. } => {
+            update.terminals = vec![pick(a)?, pick(b)?];
+        }
+        LayoutCmd::Shift { back, .. } => {
+            update.step = Some(if *back { -1 } else { 1 });
+        }
+        LayoutCmd::Group(LayoutGroupCmd::New { name, .. }) => {
+            update.name = name.clone().unwrap_or_default();
+        }
+        LayoutCmd::Group(LayoutGroupCmd::Select { group, prev, .. }) => match group {
+            Some(given) => {
+                // A group can be named by number, which is what people count on
+                // screen, or by its short id, which is what a script has.
+                let existing = fetch_layout(&mut link, workspace_id).await?;
+                let found = match given.parse::<usize>() {
+                    Ok(n) if n >= 1 && n <= existing.len() => existing[n - 1].id.clone(),
+                    _ => resolve(&existing, given, |g| &g.id, "group")?.id.clone(),
+                };
+                update.group_id = Some(found);
+            }
+            None => update.step = Some(if *prev { -1 } else { 1 }),
+        },
+        LayoutCmd::Group(LayoutGroupCmd::Close { .. }) => {}
+    }
+
+    let request = if matches!(cmd, LayoutCmd::Show { .. }) {
+        req_for(method, workspace_id)
+    } else {
+        with(req_for(method, workspace_id), request::Payload::LayoutUpdate(update))
+    };
+    let r = link.call(request).await?;
+    let result::Value::PaneGroupList(list) = expect_value(r.value, "layout")? else {
+        return Err("the daemon returned the wrong resource".into());
+    };
+
+    if json {
+        println!("{}", layout_json(&list, &terminals));
+        return Ok(());
+    }
+
+    if list.items.is_empty() {
+        println!("nothing tiled");
+        return Ok(());
+    }
+    for group in &list.items {
+        println!(
+            "{} {}  {}  {} pane{}",
+            if group.active { "*" } else { " " },
+            group.name,
+            preset_name(group.preset()),
+            group.members.len(),
+            if group.members.len() == 1 { "" } else { "s" },
+        );
+        for (index, member) in group.members.iter().enumerate() {
+            let title = terminals
+                .iter()
+                .find(|t| t.id == *member)
+                .map(label)
+                .unwrap_or_else(|| "?".into());
+            // Zoom and focus are shown as marks rather than columns: they are
+            // one pane each, and a column of blanks reads as missing data.
+            let marks = format!(
+                "{}{}",
+                if group.focused.as_ref() == Some(member) { ">" } else { " " },
+                if group.zoomed.as_ref() == Some(member) { "z" } else { " " },
+            );
+            println!("   {marks} {}  {}  {}", index + 1, short_bytes(member), truncate(&title, 40));
+        }
+    }
+    Ok(())
+}
+
+fn unknown_preset(text: &str) -> String {
+    format!(
+        "unknown layout `{text}`; try even-horizontal, even-vertical, \
+         main-vertical, main-horizontal or tiled"
+    )
+}
+
+async fn fetch_layout(
+    link: &mut Link,
+    workspace: Uuid,
+) -> Result<Vec<overnight_protocol::v1::PaneGroup>, Box<dyn std::error::Error>> {
+    let r = link.call(req_for("layout.list", workspace)).await?;
+    match expect_value(r.value, "layout")? {
+        result::Value::PaneGroupList(l) => Ok(l.items),
+        _ => Err("the daemon returned the wrong resource".into()),
+    }
+}
+
+fn layout_json(
+    list: &overnight_protocol::v1::PaneGroupList,
+    terminals: &[Terminal],
+) -> serde_json::Value {
+    use overnight_daemon::layout::preset_name;
+    serde_json::json!({
+        "workspace": uuid_of(&list.workspace_id).to_string(),
+        "groups": list.items.iter().map(|g| serde_json::json!({
+            "id": uuid_of(&g.id).to_string(),
+            "short": short_bytes(&g.id),
+            "name": g.name,
+            "preset": preset_name(g.preset()),
+            "ratio": g.ratio,
+            "active": g.active,
+            "zoomed": g.zoomed.as_ref().map(|z| uuid_of(z).to_string()),
+            "focused": g.focused.as_ref().map(|f| uuid_of(f).to_string()),
+            "members": g.members.iter().map(|m| serde_json::json!({
+                "id": uuid_of(m).to_string(),
+                "short": short_bytes(m),
+                "title": terminals.iter().find(|t| t.id == *m).map(label),
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Terminals: records through the daemon, bytes through tmux
 // ---------------------------------------------------------------------------
 
 async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible {
     match cmd {
         // Record changes. These write durable intent, so they go to the daemon.
-        TerminalCmd::Create { workspace, preset, title } => {
+        TerminalCmd::Create { workspace, preset, title, tile } => {
             let mut link = connect_to(host).await?;
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
@@ -724,6 +1056,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
                     request::Payload::TerminalCreate(overnight_protocol::v1::TerminalCreate {
                         title,
                         command_preset: preset,
+                        join_active_group: tile,
                     }),
                 ))
                 .await?;

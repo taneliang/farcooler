@@ -275,7 +275,12 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
 
         "terminal.create" => {
             let terminal = session
-                .create_terminal(id("workspace")?, &text("title"), &text("preset"))
+                .create_terminal(
+                    id("workspace")?,
+                    &text("title"),
+                    &text("preset"),
+                    args.get("tile").and_then(|v| v.as_bool()).unwrap_or(false),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(json!({ "id": uuid_of(&terminal.id).to_string() }))

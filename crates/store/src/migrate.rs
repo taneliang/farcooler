@@ -11,7 +11,8 @@ use crate::error::map_err;
 
 type Migration = fn(&Transaction) -> rusqlite::Result<()>;
 
-const MIGRATIONS: &[Migration] = &[migration_0001_initial_schema];
+const MIGRATIONS: &[Migration] =
+    &[migration_0001_initial_schema, migration_0002_pane_groups];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
 
@@ -110,6 +111,54 @@ fn migration_0001_initial_schema(tx: &Transaction) -> rusqlite::Result<()> {
     )
 }
 
+/// Tiling: which terminals a person wants to see together, and how.
+///
+/// Durable for the same reason worktrees are. tmux is the authority for what is
+/// alive, but nothing about tmux knows that these three agents belong on screen
+/// together and that fourth one does not — that is a decision, and decisions are
+/// the half of the world this database owns.
+///
+/// The alternative was holding it in the Mac app's view state, which would have
+/// made it invisible to the CLI and therefore invisible to agents. An agent that
+/// can open a terminal but not place it is only half automatable.
+fn migration_0002_pane_groups(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE TABLE pane_groups (
+            id BLOB PRIMARY KEY,
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id),
+            name TEXT NOT NULL,
+            preset INTEGER NOT NULL,
+            ratio REAL NOT NULL,
+            -- The pane filling the group alone. Nullable because not zoomed is
+            -- the normal state, not a special one.
+            zoomed BLOB,
+            focused BLOB,
+            active INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            resource_version INTEGER NOT NULL
+        );
+
+        CREATE INDEX pane_groups_by_workspace ON pane_groups (workspace_id, position);
+
+        -- A terminal is in at most ONE group, and the primary key is what
+        -- enforces that rather than every caller remembering to check. Adding a
+        -- pane to a second group moves it, which is also what tmux does.
+        --
+        -- Absence from this table is meaningful: those are the background
+        -- terminals, still listed and still running, just not on screen. That is
+        -- why nothing tiles until it is asked to.
+        CREATE TABLE pane_members (
+            terminal_id BLOB PRIMARY KEY REFERENCES terminals(id) ON DELETE CASCADE,
+            group_id BLOB NOT NULL REFERENCES pane_groups(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL
+        );
+
+        CREATE INDEX pane_members_by_group ON pane_members (group_id, position);
+        "#,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,7 +205,16 @@ mod tests {
         let names: Vec<String> =
             stmt.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
         for expected in
-            ["repository_roots", "repositories", "workspaces", "terminals", "idempotency", "meta"]
+        [
+            "repository_roots",
+            "repositories",
+            "workspaces",
+            "terminals",
+            "idempotency",
+            "meta",
+            "pane_groups",
+            "pane_members",
+        ]
         {
             assert!(names.iter().any(|n| n == expected), "missing table {expected}");
         }

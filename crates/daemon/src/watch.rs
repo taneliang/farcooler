@@ -115,6 +115,23 @@ impl Watcher {
         self.announce(terminal, snapshot).await;
     }
 
+    /// Push a workspace's tiling to every connected client.
+    ///
+    /// Layout is not sampled — nothing changes it but an explicit request — so
+    /// unlike activity this is announced by whoever made the change rather than
+    /// discovered by the loop. It still goes through the watcher because the
+    /// broadcast channel is here, and one sender means one place where "only
+    /// changes are sent" stays true.
+    pub fn publish_layout(&self, workspace: Uuid, groups: &[overnight_store::PaneGroup]) {
+        let _ = self.events.send(Event {
+            event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+            sequence: 0,
+            payload: Some(overnight_protocol::v1::event::Payload::LayoutChanged(
+                wire::pane_group_list(workspace, groups),
+            )),
+        });
+    }
+
     /// Run until cancelled.
     pub async fn run(self: Arc<Self>) {
         let mut ticker = tokio::time::interval(SAMPLE_INTERVAL);

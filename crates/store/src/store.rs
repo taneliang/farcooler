@@ -44,7 +44,7 @@ impl Store {
     /// A poisoned lock means a previous caller panicked mid-query. The
     /// connection itself is unaffected, and refusing every later request
     /// because of one panic would turn a single bug into an outage.
-    fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.db.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
