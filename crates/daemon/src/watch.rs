@@ -151,16 +151,26 @@ impl Watcher {
         let runtime = self.service.runtime();
         let panes = self.service.inventory_snapshot();
 
+        // One `ps` for the whole host, not one per pane: this is the sampling
+        // loop, and a fleet of thirty panes must not mean thirty processes a
+        // second.
+        let foreground = crate::foreground::read().await;
+
         let mut live = Vec::new();
         for workspace in &fleet {
             for terminal in &workspace.terminals {
                 let id = terminal.terminal.id;
-                // What is RUNNING, not what it was launched as.
-                let command = panes
-                    .panes
-                    .iter()
-                    .find(|p| p.terminal_id == id)
-                    .map(|p| p.command.clone())
+                // What is RUNNING, not what it was launched as — and with its
+                // arguments where there are any. `pane_current_command` is a
+                // process NAME, so `pnpm dev` arrives as `node`; the foreground
+                // process group of the pane's tty has the argv that distinguishes
+                // one pane from another.
+                let pane = panes.panes.iter().find(|p| p.terminal_id == id);
+                let command = pane
+                    .and_then(|p| {
+                        foreground.get(p.tty.trim_start_matches("/dev/")).cloned()
+                    })
+                    .or_else(|| pane.map(|p| p.command.clone()))
                     .unwrap_or_default();
                 live.push((id, command, terminal.state()));
             }

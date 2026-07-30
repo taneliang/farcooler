@@ -65,7 +65,7 @@ async fn main() {
     assert_eq!(panes.iter().filter(|p| p.zoomed).count(), 0, "unzoom must clear it");
 
     // Break one out: two layouts.
-    let new_window = server.break_pane(&p3, ws).await.expect("break");
+    let new_window = server.break_pane(&p3, ws, t3).await.expect("break");
     let layouts = server.list_layouts().await.expect("layouts");
     println!("\nafter break-pane: {} layouts, new = {}", layouts.len(), new_window);
     assert_eq!(layouts.len(), 2);
@@ -73,7 +73,7 @@ async fn main() {
     // And put it back, on the left of pane 1.
     let panes = server.list_tagged_panes().await.expect("list");
     let back = panes.iter().find(|p| p.terminal_id == t3).expect("t3");
-    server.join_pane(&back.pane_id, &win.pane_id, Axis::Horizontal, true).await.expect("join");
+    server.join_pane(&back.pane_id, &win.pane_id, Axis::Horizontal, true, t3).await.expect("join");
     let layouts = server.list_layouts().await.expect("layouts");
     println!("after join-pane: {} layouts (expect 1)", layouts.len());
     assert_eq!(layouts.len(), 1);

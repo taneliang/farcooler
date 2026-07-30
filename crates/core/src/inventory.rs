@@ -38,6 +38,12 @@ pub struct TaggedPane {
     pub pane_active: bool,
     /// tmux's own zoom, `resize-pane -Z`.
     pub zoomed: bool,
+    /// The pane's terminal device, e.g. `/dev/ttys162`.
+    ///
+    /// The handle for finding what is actually running: `pane_current_command`
+    /// gives a process NAME, so `pnpm dev` reads as `node` and `cargo build` as
+    /// `cargo`. The foreground process group on this tty has the argv.
+    pub tty: String,
     /// The command exited but the pane is retained by `remain-on-exit`.
     ///
     /// This distinction is load-bearing. Without a retained pane, tmux destroys

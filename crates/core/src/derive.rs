@@ -165,6 +165,7 @@ mod tests {
             window_active: true,
             pane_active: true,
             zoomed: false,
+            tty: String::new(),
         }
     }
 

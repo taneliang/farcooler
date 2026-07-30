@@ -127,7 +127,10 @@ pub const RULES: &[AgentRules] = &[
 /// `claude` IS a Claude Code terminal, and one launched as an agent that has
 /// since exited to a prompt is not.
 pub fn rules_for_command(command: &str) -> Option<&'static AgentRules> {
-    let name = command.rsplit('/').next().unwrap_or(command).trim();
+    // The program, not the whole command line: identity comes from what was run,
+    // and `claude --model opus` is still claude.
+    let first = command.split_whitespace().next().unwrap_or(command);
+    let name = first.rsplit('/').next().unwrap_or(first).trim();
     if name.is_empty() {
         return None;
     }
@@ -163,6 +166,16 @@ pub fn identify(command: &str, screen: &str) -> Option<&'static AgentRules> {
 pub fn describe(command: &str, screen: &str) -> String {
     if let Some(rules) = identify(command, screen) {
         return rules.preset.to_string();
+    }
+    // A command line with arguments is already the label: `pnpm dev` says more
+    // than `pnpm`, and taking a basename of it would cut it back to one word.
+    if command.contains(' ') {
+        return command.trim().to_string();
+    }
+    // A command line with arguments is already the label: `pnpm dev` says more
+    // than `pnpm`, and taking a basename would cut it back to one word.
+    if command.trim().contains(' ') {
+        return command.trim().to_string();
     }
     let name = command.rsplit('/').next().unwrap_or(command).trim();
     // A process whose name is a version number tells a user nothing. Better to

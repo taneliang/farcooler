@@ -146,7 +146,7 @@ impl TmuxServer {
         // Geometry comes along for the ride: it is the same query, and asking
         // tmux where a pane is costs nothing next to computing it twice.
         let fmt = format!(
-            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}\t#{{pane_current_command}}\t#{{pane_left}}\t#{{pane_top}}\t#{{window_active}}\t#{{pane_active}}\t#{{window_zoomed_flag}}",
+            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}\t#{{pane_current_command}}\t#{{pane_left}}\t#{{pane_top}}\t#{{window_active}}\t#{{pane_active}}\t#{{window_zoomed_flag}}\t#{{pane_tty}}",
             tags::DAEMON_ID,
             tags::WORKSPACE_ID,
             tags::TERMINAL_ID,
@@ -358,6 +358,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
         // `window_zoomed_flag` is a window property, so it is only meaningful
         // together with `pane_active`: the zoomed pane is the active one.
         zoomed: flag(15) && flag(14),
+        tty: f.get(16).map(|v| v.trim().to_string()).unwrap_or_default(),
     })
 }
 
