@@ -31,6 +31,20 @@ final class Preferences: ObservableObject {
     /// state where Overnight does not know what happened.
     @AppStorage("terminals.autoRemoveExited") var autoRemoveExited = true
 
+    /// System, light, or dark.
+    ///
+    /// Defaults to system, because that is what the rest of the machine does. It
+    /// is offered at all because a great many people who run four agents overnight
+    /// keep every window dark regardless of what the OS is doing at noon.
+    ///
+    /// It never touches the terminal. Terminal colours come from `Palette`, which
+    /// is a fixed dark palette — the emulator's background is the program's
+    /// business, not the app chrome's, and a terminal that went white under a
+    /// light theme would be a different terminal.
+    @AppStorage("app.appearance") var appearance = Appearance.system {
+        didSet { Appearance.apply(appearance) }
+    }
+
     /// The tiling prefix, as a single lowercase letter used with Control.
     ///
     /// Configurable because `⌃B` is not free for everyone — it is `back-char` in
@@ -193,6 +207,14 @@ struct SettingsView: View {
             }
 
             Section {
+                Picker("Appearance", selection: $preferences.appearance) {
+                    ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text("Terminal colours are unaffected.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
 
                 Toggle("Move between panes with ⌃H ⌃J ⌃K ⌃L", isOn: $preferences.directTraversal)
@@ -232,5 +254,36 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+}
+
+
+/// The app's appearance, independent of the system's.
+enum Appearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    private var named: NSAppearance? {
+        switch self {
+        // nil hands the decision back to the system, which is what "System"
+        // means — not a snapshot of what the system currently is.
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
+
+    /// Applied application-wide, so settings and sheets follow too.
+    static func apply(_ appearance: Appearance) {
+        NSApp?.appearance = appearance.named
     }
 }

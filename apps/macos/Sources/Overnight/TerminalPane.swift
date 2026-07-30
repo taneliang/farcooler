@@ -79,7 +79,7 @@ struct TerminalPane: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(Color(nsColor: Palette.background))
         .navigationTitle(workspace.windowTitle)
         .navigationSubtitle(workspace.windowSubtitle)
     }

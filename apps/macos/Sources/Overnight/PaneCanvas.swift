@@ -52,7 +52,12 @@ extension View {
     func paneCanvas() -> some View {
         padding(Pane.inset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .underPageBackgroundColor))
+            // `underPageBackgroundColor` is deliberately dark in BOTH appearances
+            // — it is the colour behind a document page — which reads well against
+            // a dark terminal and far too heavy in light mode. The window's own
+            // background follows the appearance, which is what a backdrop should
+            // do.
+            .background(Color(nsColor: .windowBackgroundColor))
     }
 
     /// One terminal, as a card on the canvas.

@@ -25,9 +25,16 @@ enum Grid {
     /// header above them.
     static var rail: CGFloat { margin + chevron }
 
-    /// One indent step. A child's marker sits here.
+    /// One indent step, from the rail to a child's TEXT.
+    ///
+    /// The step used to be applied to the child's leading edge and then the
+    /// marker and its gap were added on top, so a terminal's name sat 32pt right
+    /// of its worktree's — two indents for one level of nesting, which is what
+    /// made the hierarchy look wrong. The marker now lives INSIDE the step, the
+    /// way a disclosure triangle lives inside its own.
     static let indent: CGFloat = 16
-    static var child: CGFloat { rail + indent }
+    /// A child row's leading edge: the same rail its parent's title sits on.
+    static var child: CGFloat { rail }
 
     /// The marker column, reserved whether or not a row has anything to show,
     /// so titles align down the list.

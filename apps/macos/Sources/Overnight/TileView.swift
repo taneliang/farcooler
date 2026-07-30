@@ -185,7 +185,7 @@ private struct TilePane: View {
                 .id(terminal.id)
             } else {
                 ZStack {
-                    Color(nsColor: .textBackgroundColor)
+                    Color(nsColor: Palette.background)
                     StatusGlyph(status: terminal.status, size: 10)
                 }
             }

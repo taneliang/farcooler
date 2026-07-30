@@ -4,6 +4,7 @@ struct OvernightApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear { Appearance.apply(Preferences.shared.appearance) }
                 // Small enough that revealing the sidebar never has to grow the
                 // window.
                 //
