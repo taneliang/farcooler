@@ -24,6 +24,20 @@ pub struct TaggedPane {
     pub window_id: String,
     pub columns: u32,
     pub rows: u32,
+    /// Where the pane sits in its window, in cells, as tmux placed it.
+    ///
+    /// Read rather than computed. tmux already owns pane arrangement — it has
+    /// split trees, five named layouts, resizable dividers and a zoom flag — and
+    /// a second implementation of that in the daemon, plus a third in each client
+    /// to draw it, was three chances to disagree about where a pane is. Asking is
+    /// one.
+    pub left: u32,
+    pub top: u32,
+    /// The window this pane shares with the rest of its layout.
+    pub window_active: bool,
+    pub pane_active: bool,
+    /// tmux's own zoom, `resize-pane -Z`.
+    pub zoomed: bool,
     /// The command exited but the pane is retained by `remain-on-exit`.
     ///
     /// This distinction is load-bearing. Without a retained pane, tmux destroys
