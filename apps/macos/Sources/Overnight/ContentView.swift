@@ -17,6 +17,11 @@ struct ContentView: View {
     @FocusState private var searchFocused: Bool
     @State private var removeWorkspace: Workspace?
     @State private var showResumeBranch = false
+    @State private var showPalette = false
+    /// Quick-create's draft, reachable from here so that what was typed into
+    /// the palette arrives in the panel that acts on it. See `perform`.
+    @AppStorage("tasks.draft") private var taskDraft = ""
+    @State private var showImportWorktrees = false
 
     /// What the detail pane is showing.
     enum Selection: Hashable {
@@ -81,6 +86,16 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
+        .sheet(isPresented: $showImportWorktrees) {
+            ImportWorktrees(
+                projects: client.repositories,
+                project: $lastProject,
+                load: { await client.existingWorktrees(project: $0) },
+                onImport: { worktrees, project in
+                    await client.importWorktrees(worktrees, project: project)
+                }
+            )
+        }
         .sheet(isPresented: $showResumeBranch) {
             ResumeBranch(
                 projects: client.repositories,
@@ -115,6 +130,30 @@ struct ContentView: View {
             }
         }
         .animation(.snappy(duration: 0.16), value: showQuickCreate)
+        // Centred and over everything, unlike quick-create. This one is not
+        // something you work alongside — it is a switcher, it is on screen for
+        // about a second, and while it is there every keystroke belongs to it.
+        // The scrim is what makes that true for the mouse as well: a panel this
+        // large with a live terminal showing round the edges invites a click
+        // that lands somewhere surprising.
+        .overlay {
+            if showPalette {
+                ZStack {
+                    Color.black.opacity(0.12)
+                        .ignoresSafeArea()
+                        .onTapGesture { showPalette = false }
+                    CommandPalette(
+                        workspaces: client.fleet.workspaces,
+                        current: selection,
+                        screen: { await client.screen(terminal: $0) },
+                        onRun: { perform($0) },
+                        onClose: { showPalette = false }
+                    )
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.snappy(duration: 0.14), value: showPalette)
         .onReceive(
             NotificationCenter.default.publisher(
                 for: NSApplication.didBecomeActiveNotification)
@@ -131,7 +170,20 @@ struct ContentView: View {
                     await client.refreshRoots()
                     return failure
                 },
-                onRegister: { path in await client.registerRepository(path) }
+                onRegister: { path in await client.registerRepository(path) },
+                onRegistered: {
+                    Task {
+                        await client.refreshRepositories()
+                        // Only if there is something to offer. A sheet that opens
+                        // to say "nothing to import" is worse than no sheet.
+                        if let newest = client.repositories.last,
+                            !(await client.existingWorktrees(project: newest.id)).isEmpty
+                        {
+                            lastProject = newest.id
+                            showImportWorktrees = true
+                        }
+                    }
+                }
             )
         }
         .sheet(isPresented: $showNewWorkspace) {
@@ -301,6 +353,8 @@ struct ContentView: View {
             // repository without dropping to the terminal.
             Menu {
                 Button("New workspace…") { showNewWorkspace = true }
+                    .disabled(client.repositories.isEmpty)
+                Button("Import existing worktrees…") { openImport() }
                     .disabled(client.repositories.isEmpty)
                 Divider()
                 Button("Add repository…") { showAddRepository = true }
@@ -830,6 +884,14 @@ struct ContentView: View {
         }
     }
 
+    /// Open the import sheet against a project that exists.
+    private func openImport() {
+        if lastProject.isEmpty || !client.repositories.contains(where: { $0.id == lastProject }) {
+            lastProject = client.repositories.first?.id ?? ""
+        }
+        showImportWorktrees = true
+    }
+
     /// Drop a terminal onto a pane: it takes that pane's place in the layout.
     ///
     /// The same gesture covers both things you want to do by hand — reordering
@@ -953,11 +1015,54 @@ struct ContentView: View {
         case .showShortcuts: showShortcuts = true
         case .search: searchFocused = true
 
+        // Toggles rather than opens. ⌘P on an open palette is what a hand
+        // reaches for when it changed its mind, and every switcher on this
+        // machine closes that way.
+        case .commandPalette: showPalette.toggle()
+
         case .toggleSidebar:
             // See `Sidebar.toggle`: AppKit's own action, with the collapse
             // behaviour set first so the detail pane absorbs the space instead of
             // the window growing.
             Sidebar.toggle()
+        }
+    }
+
+    /// Carry out whatever was chosen in the palette.
+    ///
+    /// Every case here routes into a method that already existed, and that is
+    /// the whole design of `PaletteAction`: the palette knows what you picked
+    /// and nothing about what picking it means, so opening a terminal from the
+    /// panel and clicking it in the sidebar cannot drift apart.
+    private func perform(_ action: PaletteAction) {
+        showPalette = false
+        switch action {
+        case .openTerminal(let workspace, let terminal):
+            expanded.insert(workspace)
+            selection = .terminal(workspace: workspace, terminal: terminal)
+
+        case .openWorkspace(let workspace):
+            expanded.insert(workspace)
+            selection = .workspace(workspace)
+
+        case .newTerminal(let id):
+            guard let workspace = client.fleet.workspaces.first(where: { $0.id == id }) else {
+                return
+            }
+            newTerminal(in: workspace)
+
+        case .newTask(let described):
+            if client.repositories.isEmpty {
+                showAddRepository = true
+                return
+            }
+            if lastProject.isEmpty { lastProject = client.repositories[0].id }
+            // What was typed into the palette carries over as the description,
+            // because in this panel it nearly always was one. It never
+            // overwrites a draft already in progress — that draft is often the
+            // thing someone opened the palette to go and look something up for.
+            if !described.isEmpty, taskDraft.isEmpty { taskDraft = described }
+            showQuickCreate = true
         }
     }
 

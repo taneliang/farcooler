@@ -313,6 +313,25 @@ final class DaemonClient: ObservableObject {
         return list.groups
     }
 
+    /// Worktrees on disk that Overnight does not know about yet.
+    func existingWorktrees(project: String) async -> [ExistingWorktree] {
+        guard let data = await run(["workspace", "discover", project, "--json"]) else { return [] }
+        return (try? JSONDecoder().decode(WorktreeList.self, from: data))?.worktrees ?? []
+    }
+
+    /// Register worktrees that already exist. Returns how many were taken.
+    ///
+    /// Not all-or-nothing: importing six where one has been deleted underneath
+    /// us should still import five, so the count comes from re-reading rather
+    /// than from assuming the request succeeded.
+    func importWorktrees(_ worktrees: [ExistingWorktree], project: String) async -> Int {
+        guard !worktrees.isEmpty else { return 0 }
+        let before = fleet.workspaces.count
+        _ = await run(["workspace", "import", project] + worktrees.map(\.path))
+        await refresh()
+        return max(fleet.workspaces.count - before, 0)
+    }
+
     /// Branches in a project that work could be resumed on.
     func branches(project: String) async -> [BranchInfo] {
         guard let data = await run(["workspace", "branches", project, "--json"]) else { return [] }

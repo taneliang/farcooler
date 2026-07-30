@@ -308,6 +308,11 @@ struct AddRepositorySheet: View {
     let onAddRoot: (String) async -> String?
     /// Register a repository. Returns a message on failure.
     let onRegister: (String) async -> String?
+    /// Called after a successful registration, so the worktrees that repository
+    /// already has can be offered immediately. That is the moment they matter:
+    /// the person has just pointed at a project and it very likely has three or
+    /// four checked out already.
+    var onRegistered: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
     @State private var chosen: URL?
@@ -415,5 +420,6 @@ struct AddRepositorySheet: View {
             return
         }
         dismiss()
+        onRegistered()
     }
 }

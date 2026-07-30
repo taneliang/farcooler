@@ -18,6 +18,7 @@ enum AppCommand: String {
     case reload
     case showShortcuts
     case search
+    case commandPalette
     case toggleSidebar
 
     static let notification = Notification.Name("overnight.command")
@@ -134,7 +135,18 @@ struct OvernightCommands: Commands {
                 .keyboardShortcut("b", modifiers: .command)
         }
 
+        // Nothing here prints, and the Print item SwiftUI adds for free would
+        // otherwise hold ⌘P against a window whose most useful key it is.
+        CommandGroup(replacing: .printItem) {}
+
         CommandGroup(after: .toolbar) {
+            // ⌘P, the shortcut everyone arriving here already has in their
+            // fingers from an editor, for the thing it means there: show me
+            // everything, I will type the part I remember. It is a switcher when
+            // the field is empty and a command list when it is not, which is one
+            // key for the two questions this app is always being asked.
+            Button("Go to Anything…") { AppCommand.commandPalette.post() }
+                .keyboardShortcut("p", modifiers: .command)
             // Search is navigation here, not a nicety: worktrees are unbounded
             // and typing is the fastest way to any of them, on any machine.
             Button("Find Worktree or Agent") { AppCommand.search.post() }
