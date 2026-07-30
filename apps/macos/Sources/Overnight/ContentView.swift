@@ -88,6 +88,12 @@ struct ContentView: View {
             if case .terminal(_, let id) = new,
                 let terminal = allTerminals.first(where: { $0.id == id })
             {
+                // Stamped here rather than in the palette, so every way of
+                // arriving counts: a sidebar click, ⌘], ⌃B o, a jump from the
+                // palette itself. A switcher that only learned from its own
+                // choices would order by where you had used IT, not by where you
+                // have been.
+                VisitLog.shared.visited(id)
                 Task { await client.markSeen(terminal.short) }
             }
         }

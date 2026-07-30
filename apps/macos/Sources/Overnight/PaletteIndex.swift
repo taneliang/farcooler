@@ -70,14 +70,21 @@ enum PaletteIndex {
         return kind == .running || kind == .starting
     }
 
-    /// The switcher's order: most recently active first.
+    /// The switcher's order: where you have most recently been.
     ///
-    /// Recency comes from the daemon's `activitySince`, not from anything the
-    /// app times itself, so the order survives a reconnect and does not reset
-    /// when a laptop wakes. It orders by when the agent last CHANGED what it was
-    /// doing, which is not quite "when you last looked at it" — but it is the
-    /// better answer to the question actually being asked, which is where
-    /// something has happened since you were last there.
+    /// Alt-Tab's rule, and the reason for it: the pane you are in now is not the
+    /// first entry, because you are already there. The most recent one you are
+    /// NOT in comes first, so ⌘P then Return puts you back where you just were
+    /// and holding the panel open walks further back. Without that, the single
+    /// most useful thing a switcher does — bounce between two agents — needs you
+    /// to aim at a tile every time.
+    ///
+    /// It used to order by `activitySince`, which is when an AGENT last changed
+    /// what it was doing. That is a real signal but a different question: it puts
+    /// a busy agent you have never opened above the pane you left ten seconds
+    /// ago. Agent activity is still the tie-break for panes you have not visited,
+    /// where "something happened here" is the only ordering available.
+    @MainActor
     static func recent(in workspaces: [Workspace], limit: Int = switcherLimit) -> [PaletteEntry] {
         var live: [(workspace: Workspace, terminal: Terminal)] = []
         for workspace in workspaces {
@@ -86,14 +93,28 @@ enum PaletteIndex {
             }
         }
 
+        let log = VisitLog.shared
         // Sorted through the original index, because Swift's sort is not stable
-        // and a fleet where several terminals share a timestamp would otherwise
-        // reshuffle its tiles on every refresh — a grid that rearranges itself
-        // under the hand is worse than one in the wrong order.
+        // and a fleet where several terminals tie would otherwise reshuffle its
+        // tiles on every refresh — a grid that rearranges itself under the hand
+        // is worse than one in the wrong order.
         let ordered = live.enumerated().sorted { left, right in
-            let a = left.element.terminal.activitySince ?? 0
-            let b = right.element.terminal.activitySince ?? 0
-            return a == b ? left.offset < right.offset : a > b
+            let a = left.element.terminal, b = right.element.terminal
+
+            // The pane you are in sinks to the bottom rather than vanishing: it
+            // is still somewhere you can go, just never the default.
+            let aCurrent = log.isCurrent(a.id), bCurrent = log.isCurrent(b.id)
+            if aCurrent != bCurrent { return bCurrent }
+
+            let aVisit = log.rank(a.id), bVisit = log.rank(b.id)
+            if aVisit != bVisit { return aVisit > bVisit }
+
+            // Neither has been visited this session. Fall back to which agent
+            // moved most recently, which is the only thing left that means
+            // anything.
+            let aActive = a.activitySince ?? 0, bActive = b.activitySince ?? 0
+            if aActive != bActive { return aActive > bActive }
+            return left.offset < right.offset
         }
 
         return ordered.prefix(limit).map { entry(for: $0.element.terminal, in: $0.element.workspace) }

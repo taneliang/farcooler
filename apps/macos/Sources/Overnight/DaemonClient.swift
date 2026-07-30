@@ -138,6 +138,7 @@ final class DaemonClient: ObservableObject {
         Task {
             _ = await run(["terminal", "remove", terminal.short], background: true)
             Notifier.shared.forget(terminal.id)
+            VisitLog.shared.forget(terminal.id)
             await refresh()
         }
     }
