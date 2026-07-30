@@ -16,32 +16,43 @@ import SwiftUI
 /// one corner of the app the eye is drawn to.
 enum Pane {
     /// Inset around the cards.
-    static let inset: CGFloat = 6
+    ///
+    /// Measured, not chosen. A window corner of radius R cuts furthest into the
+    /// content along the diagonal, by R(1 − 1/√2) ≈ 0.29R in each axis. This
+    /// window's corner measures about 25pt — macOS 26 rounds windows far more
+    /// than earlier releases did — so the curve reaches roughly 7.3pt inside the
+    /// corner, and a card inset by less than that gets bitten by it.
+    ///
+    /// 6pt was less than that, which is exactly what "touching the corner"
+    /// looked like: the card's own arc running into the window's, two mismatched
+    /// curves a couple of points apart.
+    static let inset: CGFloat = 10
 
     /// The cards' radius.
     ///
-    /// Near-concentric with the window's corner given the inset, which is what
-    /// makes an inset card look placed rather than pasted on.
-    static let radius: CGFloat = 6
-
-    /// The window's own bottom corner, as macOS draws it.
-    static let windowRadius: CGFloat = 10
+    /// Not derived from the window's, and deliberately: once a card is clear of
+    /// the corner curve the two arcs are far enough apart that the eye stops
+    /// relating them, and a concentric radius at this inset would be nearly
+    /// square. 10 matches the platform's own language for an inset surface.
+    static let radius: CGFloat = 10
 }
 
 extension View {
-    /// The backdrop the panes float on: inset, and shaped to the window.
+    /// The backdrop the panes float on.
+    ///
+    /// Deliberately NOT clipped to a corner radius of its own. It used to be, with
+    /// a hardcoded 10 — which is where the bad corner came from: this window's is
+    /// about 25, so a 10pt clip was nearly square by comparison and the window cut
+    /// through it. Guessing a number that has changed twice across macOS releases
+    /// is the wrong shape of fix.
+    ///
+    /// The window already clips its own content to its own shape, whatever that
+    /// shape currently is. All this has to do is keep the cards far enough from
+    /// the corner that the curve never reaches them — which is `Pane.inset`'s job.
     func paneCanvas() -> some View {
         padding(Pane.inset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .underPageBackgroundColor))
-            // Only the trailing corner is rounded: the leading edge meets the
-            // sidebar and the top meets the title bar, and rounding either would
-            // open a gap rather than close one.
-            .clipShape(
-                UnevenRoundedRectangle(
-                    bottomLeadingRadius: 0,
-                    bottomTrailingRadius: Pane.windowRadius,
-                    topTrailingRadius: 0))
     }
 
     /// One terminal, as a card on the canvas.

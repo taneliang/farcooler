@@ -4,7 +4,20 @@ struct OvernightApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 900, minHeight: 560)
+                // Small enough that revealing the sidebar never has to grow the
+                // window.
+                //
+                // This was 900×560, and that one number caused every sidebar
+                // complaint at once. A 900 minimum meant a 900-wide window was
+                // sitting exactly AT its minimum, so ⌘B could not give the
+                // sidebar's width back out of the detail — it had to widen the
+                // window instead. Hence the window creeping left and growing on
+                // every reveal, and hence the jerk: an AppKit window resize
+                // running against the sidebar's own slide animation.
+                //
+                // 640×420 is a real minimum — enough for a usable terminal beside
+                // the sidebar — rather than a preferred size expressed as a floor.
+                .frame(minWidth: 600, minHeight: 400)
         }
         .windowStyle(.titleBar)
         .commands { OvernightCommands() }

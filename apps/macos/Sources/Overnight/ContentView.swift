@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ContentView: View {
@@ -16,9 +17,6 @@ struct ContentView: View {
     @FocusState private var searchFocused: Bool
     @State private var removeWorkspace: Workspace?
     @State private var showResumeBranch = false
-    /// Bound so ⌘B can move it. `.automatic` lets the system decide the first
-    /// time, which is the right answer for a window that has never been sized.
-    @State private var columns = NavigationSplitViewVisibility.automatic
 
     /// What the detail pane is showing.
     enum Selection: Hashable {
@@ -27,7 +25,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columns) {
+        NavigationSplitView {
             sidebar
         } detail: {
             detail
@@ -211,6 +209,9 @@ struct ContentView: View {
 
             statusBar
         }
+        // Declared in exactly one place. A second declaration on the
+        // `NavigationSplitView`'s sidebar closure made which width the column
+        // settled on nondeterministic, and the window drifted with it.
         .navigationSplitViewColumnWidth(min: 268, ideal: 320, max: 440)
     }
 
@@ -778,10 +779,10 @@ struct ContentView: View {
         case .search: searchFocused = true
 
         case .toggleSidebar:
-            // Two states, not three. `.automatic` is a starting position, and
-            // cycling a user through it on the way to hidden would make the same
-            // keystroke do different things on consecutive presses.
-            columns = columns == .detailOnly ? .all : .detailOnly
+            // See `Sidebar.toggle`: AppKit's own action, with the collapse
+            // behaviour set first so the detail pane absorbs the space instead of
+            // the window growing.
+            Sidebar.toggle()
         }
     }
 
