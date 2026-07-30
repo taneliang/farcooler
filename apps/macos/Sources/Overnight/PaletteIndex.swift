@@ -145,7 +145,7 @@ enum PaletteIndex {
                 // Nobody remembers that the agent in "refactor api" is named
                 // `claude` — there are four of those — and everybody remembers
                 // "refactor api".
-                let fields = [terminal.title, terminal.preset, workspace.task]
+                let fields = [terminal.label, workspace.task]
                 guard let score = fields.compactMap({ Fuzzy.score($0, query) }).max() else {
                     continue
                 }
@@ -198,7 +198,7 @@ enum PaletteIndex {
         PaletteEntry(
             id: "terminal:\(terminal.id)",
             action: .openTerminal(workspace: workspace.id, terminal: terminal.id),
-            title: terminal.title,
+            title: terminal.label,
             detail: [workspace.task, workspace.repository ?? ""]
                 .filter { !$0.isEmpty }
                 .joined(separator: " · "),

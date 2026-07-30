@@ -68,10 +68,34 @@ struct GroupBar: View {
         .help(active ? "Showing this layout" : "Show this layout  (⌃B n)")
     }
 
-    /// A group's name, or its number when the name IS its number.
+    /// What a layout is called: what is in it.
     ///
-    /// Unnamed groups are named after their position, so printing both gave "1. 1".
+    /// Never a name, because a layout has no identity apart from its panes and
+    /// naming one would be asking a question at the moment someone least wants
+    /// to answer it. tmux does name its windows — after whatever is running,
+    /// renamed as that changes — and showing that gave a row of tabs reading
+    /// "zsh", "zsh", "shell", "agent", which is worse than nothing: it looks like
+    /// a name, so you read it as one, and it means nothing.
+    ///
+    /// So: the distinct commands inside, most common first. A layout of three
+    /// shells and a claude reads `claude · zsh`, and the count beside it says how
+    /// many panes there are. Two layouts that genuinely hold the same things read
+    /// the same, and the position distinguishes them — which is honest, because
+    /// at that point they ARE the same except for where they sit.
     private func label(_ group: PaneGroup, position: Int) -> String {
-        group.name == "\(position)" ? "Layout \(position)" : group.name
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for pane in group.panes {
+            let name = Terminal.name(of: pane.title ?? "")
+            if counts[name] == nil { order.append(name) }
+            counts[name, default: 0] += 1
+        }
+        guard !order.isEmpty else { return "\(position)" }
+
+        let ranked = order.sorted { (counts[$0] ?? 0, order.firstIndex(of: $1) ?? 0)
+            > (counts[$1] ?? 0, order.firstIndex(of: $0) ?? 0) }
+        // Two is as many as fits before the pill starts eating the tab bar; the
+        // count already says there are more.
+        return ranked.prefix(2).joined(separator: " · ")
     }
 }

@@ -110,7 +110,7 @@ struct Workspace: Decodable, Identifiable, Hashable {
         if (repository ?? "").lowercased().contains(q) { return true }
         if (host ?? "").lowercased().contains(q) { return true }
         return terminals.contains {
-            $0.title.lowercased().contains(q) || $0.preset.lowercased().contains(q)
+            $0.label.lowercased().contains(q)
         }
     }
 }
@@ -159,6 +159,40 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var epoch: Int
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
+
+    /// What to call this terminal.
+    ///
+    /// Derived, never stored, and that is the whole point: a terminal IS the thing
+    /// running in it. `preset` already carries what tmux reports is running —
+    /// `claude`, `codex`, `zsh` — resolved on the host, because only the host has a
+    /// screen to look at.
+    ///
+    /// The stored title used to be shown instead, and it was noise with a counter
+    /// attached. "Terminal 12" says nothing you cannot see, the counter came from
+    /// the terminal COUNT so it repeated after any removal — three different panes
+    /// called "Terminal 12" — and beside it sat the running command anyway, which
+    /// was the only informative half of the row.
+    var label: String { Self.name(of: preset) }
+
+    /// One word for one thing, wherever a running command is shown.
+    ///
+    /// Shared with the layout tabs, which name a layout after what is in it and
+    /// were otherwise reading `zsh` off the same panes the sidebar called `shell`.
+    static func name(of command: String) -> String {
+        let running = command.trimmingCharacters(in: .whitespaces).lowercased()
+        if running.isEmpty { return "shell" }
+        // One word for one thing. The host reports whatever tmux sees running, so
+        // the same plain shell arrives as `zsh` from a pane the watcher has looked
+        // at and as `shell` from one it has not — and a sidebar listing `zsh 1`,
+        // `shell 2`, `zsh 3` for three identical shells is worse than no name,
+        // because it implies a difference that is not there.
+        //
+        // Agents keep their own names: `claude` and `codex` are the distinction
+        // that matters, and the whole point of deriving the label is to surface it.
+        return shells.contains(running) ? "shell" : running
+    }
+
+    private static let shells: Set<String> = ["sh", "zsh", "bash", "fish", "dash", "ksh", "-zsh"]
 
     /// The ONE thing this terminal's indicator should say.
     ///

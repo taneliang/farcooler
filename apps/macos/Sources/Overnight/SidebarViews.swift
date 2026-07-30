@@ -93,6 +93,40 @@ struct WorkspaceSection: View {
     /// Open whether or not the user opened it.
     private var showsTerminals: Bool { isExpanded || !workspace.attention.isEmpty }
 
+    private func row(_ terminal: Terminal, ordinal: Int?) -> some View {
+        let id = ContentView.Selection.terminal(workspace: workspace.id, terminal: terminal.id)
+        return TerminalRow(
+            terminal: terminal,
+            isSelected: selection == id,
+            onSelect: { selection = id },
+            isTiled: tiled.contains(terminal.id),
+            layouts: layouts,
+            onMoveToLayout: { onMoveToLayout(terminal, $0) },
+            onDropTogether: { onDropTogether($0, terminal) },
+            onAction: { onTerminalAction(terminal, $0) },
+            ordinal: ordinal
+        )
+    }
+
+    /// Numbers for terminals a worktree has more than one of, by command.
+    ///
+    /// Computed over creation order rather than display order, so a row does not
+    /// renumber itself when something starts needing attention and sorts up.
+    private var ordinals: [String: Int] {
+        var counts: [String: Int] = [:]
+        for terminal in workspace.terminals {
+            counts[terminal.label, default: 0] += 1
+        }
+        var seen: [String: Int] = [:]
+        var out: [String: Int] = [:]
+        for terminal in workspace.terminals where counts[terminal.label, default: 0] > 1 {
+            let next = (seen[terminal.label] ?? 0) + 1
+            seen[terminal.label] = next
+            out[terminal.id] = next
+        }
+        return out
+    }
+
     private var ordered: [Terminal] {
         workspace.terminals.sorted { a, b in
             a.status.wantsAttention && !b.status.wantsAttention
@@ -104,19 +138,9 @@ struct WorkspaceSection: View {
             header
 
             if showsTerminals {
+                let numbering = ordinals
                 ForEach(ordered) { t in
-                    TerminalRow(
-                        terminal: t,
-                        isSelected: selection == .terminal(workspace: workspace.id, terminal: t.id),
-                        onSelect: {
-                            selection = .terminal(workspace: workspace.id, terminal: t.id)
-                        },
-                        isTiled: tiled.contains(t.id),
-                        layouts: layouts,
-                        onMoveToLayout: { onMoveToLayout(t, $0) },
-                        onDropTogether: { onDropTogether($0, t) },
-                        onAction: { onTerminalAction(t, $0) }
-                    )
+                    row(t, ordinal: numbering[t.id])
                 }
 
                 Button(action: onNewTerminal) {
@@ -264,29 +288,45 @@ struct TerminalRow: View {
 
     private var status: Status { terminal.status }
 
-    /// Preset, and the status only when it is not the boring case.
-    private var meta: String {
-        guard status.wantsAttention || status == .working else { return terminal.preset }
-        let label = terminal.statusDuration.map { "\(status.label) \($0)" } ?? status.label
-        return "\(terminal.preset) · \(label)"
+    /// Which of several identical ones this is, or nothing.
+    ///
+    /// Two shells in a worktree are genuinely alike, so they get `2` and `3` —
+    /// but only when there is something to tell apart. Numbering everything was
+    /// the old behaviour and it labelled a lone `claude` as "Terminal 7", which
+    /// answers a question nobody asked.
+    var ordinal: Int?
+
+    /// The status, and only when it is not the boring case.
+    private var meta: String? {
+        guard status.wantsAttention || status == .working else { return nil }
+        return terminal.statusDuration.map { "\(status.label) \($0)" } ?? status.label
     }
 
     var body: some View {
         HStack(spacing: Grid.gap) {
             StatusGlyph(status: status, size: Grid.marker)
 
-            Text(terminal.title)
+            Text(terminal.label)
                 .font(.system(size: 13))
                 .lineLimit(1)
-                // The title yields before the status does. Which terminal it is
+                // The name yields before the status does. Which terminal it is
                 // matters less than what it wants, and the sidebar is narrow.
                 .layoutPriority(0)
 
-            Text(meta)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .layoutPriority(1)
+            if let ordinal {
+                Text("\(ordinal)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .layoutPriority(1)
+            }
+
+            if let meta {
+                Text(meta)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+            }
 
             Spacer(minLength: 0)
 
@@ -387,6 +427,25 @@ struct WorkspaceDetail: View {
     let onRemove: () -> Void
     let onOpenTerminal: (Terminal) -> Void
 
+    /// Numbers for terminals a worktree has more than one of, by command.
+    ///
+    /// Computed over creation order rather than display order, so a row does not
+    /// renumber itself when something starts needing attention and sorts up.
+    private var ordinals: [String: Int] {
+        var counts: [String: Int] = [:]
+        for terminal in workspace.terminals {
+            counts[terminal.label, default: 0] += 1
+        }
+        var seen: [String: Int] = [:]
+        var out: [String: Int] = [:]
+        for terminal in workspace.terminals where counts[terminal.label, default: 0] > 1 {
+            let next = (seen[terminal.label] ?? 0) + 1
+            seen[terminal.label] = next
+            out[terminal.id] = next
+        }
+        return out
+    }
+
     private var ordered: [Terminal] {
         workspace.terminals.sorted { a, b in
             a.status.wantsAttention && !b.status.wantsAttention
@@ -485,7 +544,7 @@ struct WorkspaceDetail: View {
                 StatusGlyph(status: t.status, size: 10)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(t.title).font(.system(size: 14, weight: .medium))
+                    Text(t.label).font(.system(size: 14, weight: .medium))
                     Text(t.preset).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
 

@@ -381,7 +381,7 @@ private struct TilePane: View {
                     isFocused ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
                 .frame(minWidth: 9)
 
-            Text(terminal.title)
+            Text(terminal.label)
                 .font(.system(size: 11, weight: isFocused ? .medium : .regular))
                 .foregroundStyle(isFocused ? .primary : .secondary)
                 .lineLimit(1)
