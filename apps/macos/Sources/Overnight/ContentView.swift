@@ -16,6 +16,9 @@ struct ContentView: View {
     @FocusState private var searchFocused: Bool
     @State private var removeWorkspace: Workspace?
     @State private var showResumeBranch = false
+    /// Bound so ⌘B can move it. `.automatic` lets the system decide the first
+    /// time, which is the right answer for a window that has never been sized.
+    @State private var columns = NavigationSplitViewVisibility.automatic
 
     /// What the detail pane is showing.
     enum Selection: Hashable {
@@ -24,7 +27,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             sidebar
         } detail: {
             detail
@@ -773,6 +776,12 @@ struct ContentView: View {
         case .reload: Task { await client.refresh() }
         case .showShortcuts: showShortcuts = true
         case .search: searchFocused = true
+
+        case .toggleSidebar:
+            // Two states, not three. `.automatic` is a starting position, and
+            // cycling a user through it on the way to hidden would make the same
+            // keystroke do different things on consecutive presses.
+            columns = columns == .detailOnly ? .all : .detailOnly
         }
     }
 

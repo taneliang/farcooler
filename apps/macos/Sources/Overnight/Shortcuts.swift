@@ -87,6 +87,7 @@ enum Shortcut {
         (
             "App",
             [
+                Item(keys: "⌘B", action: "Show or hide the sidebar"),
                 Item(keys: "⌘F", action: "Find a worktree or agent"),
                 Item(keys: "⌘,", action: "Settings"),
                 Item(keys: "⌘/", action: "Keyboard shortcuts"),

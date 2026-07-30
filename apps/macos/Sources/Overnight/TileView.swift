@@ -59,8 +59,7 @@ struct TileView: View {
             .animation(.easeOut(duration: 0.14), value: group.zoomed)
             .animation(.easeOut(duration: 0.14), value: group.terminals)
         }
-        .padding(6)
-        .background(Color(nsColor: .underPageBackgroundColor))
+        .paneCanvas()
         .overlay(alignment: .bottom) {
             if prefix.armed {
                 PrefixHint()
@@ -142,13 +141,7 @@ private struct TilePane: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .strokeBorder(
-                    isFocused ? Color.accentColor : Color.primary.opacity(0.10),
-                    lineWidth: isFocused ? 2 : 1)
-        )
+        .paneCard(focused: isFocused)
     }
 
     /// One line, and only what a pane needs that a single terminal does not.

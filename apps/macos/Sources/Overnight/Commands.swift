@@ -18,6 +18,7 @@ enum AppCommand: String {
     case reload
     case showShortcuts
     case search
+    case toggleSidebar
 
     static let notification = Notification.Name("overnight.command")
 
@@ -116,6 +117,17 @@ struct OvernightCommands: Commands {
             Button("Next Group  ⌃B n") { TileCommand.nextGroup.post() }
             Button("Previous Group  ⌃B p") { TileCommand.previousGroup.post() }
             Button("Close Group  ⌃B &") { TileCommand.closeGroup.post() }
+        }
+
+        CommandGroup(after: .sidebar) {
+            // ⌘B, because that is what it is in every editor people already have
+            // open next to this one. macOS's own ⌃⌘S still works; this is the one
+            // fingers reach for.
+            //
+            // No collision with the tiling prefix: that is ⌃B, a different
+            // modifier, and ⌘ never reaches a terminal anyway.
+            Button("Toggle Sidebar") { AppCommand.toggleSidebar.post() }
+                .keyboardShortcut("b", modifiers: .command)
         }
 
         CommandGroup(after: .toolbar) {

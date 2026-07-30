@@ -38,15 +38,11 @@ struct TerminalPane: View {
                 inactive
             }
         }
-        // The window has rounded corners; an NSView filling the pane does not.
-        // Without this the terminal ran square past the window's bottom-right
-        // curve while the sidebar beside it curved away, and the two met at a
-        // corner that belonged to neither.
-        .clipShape(
-            UnevenRoundedRectangle(
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 10,
-                topTrailingRadius: 0))
+        // A card on the canvas, exactly as a tiled pane is — so one terminal and
+        // four are the same object at different counts, and neither has to
+        // pretend to have the window's corner. See `Pane`.
+        .paneCard()
+        .paneCanvas()
         // The window's own title bar, which macOS already draws. Free, native,
         // and it costs the content no vertical space.
         .navigationTitle(workspace.windowTitle)
