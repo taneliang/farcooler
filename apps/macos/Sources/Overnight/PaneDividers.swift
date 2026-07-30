@@ -80,7 +80,9 @@ struct PaneDividers: View {
     let group: PaneGroup
     let size: CGSize
     /// Terminal, which border, how many cells to move it. Signed.
-    let onResize: (String, TileDirection, Int) -> Void
+    ///
+    /// Returns whether the request was accepted. See `DividerView.sent`.
+    let onResize: (String, TileDirection, Int) -> Bool
 
     var body: some View {
         ForEach(group.dividers(in: size)) { divider in
@@ -117,7 +119,7 @@ struct DividerHandle: NSViewRepresentable {
     /// Measuring the font would be right only when the view happens to be an exact
     /// multiple of the cell size.
     let pointsPerCell: CGFloat
-    let onResize: (String, TileDirection, Int) -> Void
+    let onResize: (String, TileDirection, Int) -> Bool
 
     func makeNSView(context: Context) -> DividerView {
         let view = DividerView()
@@ -139,14 +141,20 @@ struct DividerHandle: NSViewRepresentable {
 final class DividerView: NSView {
     var vertical = true
     var pointsPerCell: CGFloat = 8
-    var onResize: ((Int) -> Void)?
+    var onResize: ((Int) -> Bool)?
 
-    /// Cells already asked for in this drag.
+    /// Cells the layout has actually been moved by in this drag.
     ///
     /// The gesture knows a total travel and `resize-pane` takes a relative amount,
-    /// so what gets sent is the difference. Tracking the total ASKED FOR rather
-    /// than the last thing that landed means a dropped request cannot leave the
-    /// divider permanently behind the pointer: the next one carries what is owed.
+    /// so what goes out is the difference. Crucially this only advances when the
+    /// request was ACCEPTED: resizes are serialised, so one arriving while another
+    /// is still in flight is dropped, and counting a dropped request as sent threw
+    /// its cells away for good. Over a fast drag that lost most of them, and the
+    /// divider trailed the pointer by a fraction that got worse the faster you
+    /// moved — which is precisely what it looked like.
+    ///
+    /// Left where it is on a refusal, the next mouse event simply asks for
+    /// everything still owed, so the divider catches up rather than falling behind.
     private var sent = 0
     private var origin = NSPoint.zero
     private var hovering = false { didSet { needsDisplay = true } }
@@ -188,8 +196,9 @@ final class DividerView: NSView {
         let travelled = vertical ? now.x - origin.x : origin.y - now.y
         let wanted = Int((travelled / pointsPerCell).rounded())
         guard wanted != sent else { return }
-        onResize?(wanted - sent)
-        sent = wanted
+        if onResize?(wanted - sent) == true {
+            sent = wanted
+        }
     }
 
     override func mouseUp(with event: NSEvent) {

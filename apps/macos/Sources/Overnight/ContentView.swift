@@ -833,29 +833,33 @@ struct ContentView: View {
     /// express "before" and "after", which is why dropping on the left half of a
     /// pane and on its right half used to do the same thing.
     ///
-    /// Move a divider, in cells.
+    /// Move a divider, in cells. Answers whether the request was taken.
     ///
     /// Serialised rather than queued. A drag produces one of these per cell
-    /// crossed and each is a round trip, so a fast drag across a wide pane would
-    /// stack up dozens of requests that land after the pointer has stopped and
-    /// walk the divider past where it was let go.
+    /// crossed and each is a round trip, so a fast drag would stack up dozens of
+    /// requests that land after the pointer has stopped and walk the divider past
+    /// where it was let go.
     ///
-    /// Dropping the ones that arrive while another is in flight is safe because
-    /// the handle sends the difference from what it has ASKED for rather than
-    /// from the last thing that got through — so the next request carries
-    /// everything still owed, and the divider ends where the pointer did.
+    /// Refusing has to be VISIBLE to the caller, which is what the return value is
+    /// for. The handle counts cells the layout has actually moved by, so a refusal
+    /// leaves them owed and the next mouse event asks for them again. Without
+    /// that the handle counted a dropped request as done and threw its cells away
+    /// — losing most of them over a fast drag, so the divider followed the pointer
+    /// at a fraction of its speed.
+    @discardableResult
     private func resizeDivider(
         _ terminal: String, side: TileDirection, cells: Int, in workspace: Workspace
-    ) {
-        guard cells != 0, !resizingDivider else { return }
+    ) -> Bool {
+        guard cells != 0, !resizingDivider else { return false }
         guard let pane = client.group(holding: terminal, in: workspace.id)?.pane(terminal) else {
-            return
+            return false
         }
         resizingDivider = true
         Task {
             await client.resizePane(pane.short, side: side, cells: cells, in: workspace)
             resizingDivider = false
         }
+        return true
     }
 
     /// Works across layouts too: the pane leaves whichever one it was in.

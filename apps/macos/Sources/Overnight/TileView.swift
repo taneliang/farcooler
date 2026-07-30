@@ -36,8 +36,9 @@ struct TileView: View {
     let onDropOnPane: (_ dragged: String, _ onto: String, _ side: TileDirection) -> Void
     /// How big this view is, in cells. tmux lays out into it.
     let onViewport: (Int, Int) async -> Void
-    /// A divider dragged: which pane's border, and by how many cells.
-    let onResizeDivider: (String, TileDirection, Int) -> Void
+    /// A divider dragged: which pane's border, and by how many cells. Returns
+    /// whether it was accepted — a refused request has to be re-offered, not lost.
+    let onResizeDivider: (String, TileDirection, Int) -> Bool
 
     @ObservedObject private var prefix = PrefixMode.shared
     @ObservedObject private var preferences = Preferences.shared
