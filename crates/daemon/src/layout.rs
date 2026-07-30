@@ -293,6 +293,18 @@ impl Service {
             target.zoomed = Some(terminal);
         }
         self.store.save_pane_group(&target)?;
+
+        // Focusing a pane shows its layout. Anything else is incoherent: a pane
+        // cannot hold the keyboard while a different arrangement is on screen.
+        //
+        // This is also what makes "go to that terminal" work from a client. It
+        // used to take two calls — activate the group, then focus the pane — and
+        // the group activation alone told the client the layout's REMEMBERED
+        // focus, which promptly overrode the terminal that had been asked for.
+        // One call cannot disagree with itself.
+        if !target.active {
+            self.store.activate_pane_group(target.id)?;
+        }
         self.finish(workspace)
     }
 

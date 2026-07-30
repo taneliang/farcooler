@@ -62,18 +62,24 @@ struct ContentView: View {
             healSelection()
         }
         .onChange(of: selection) { _, new in
-            // Selecting a pane that belongs to another layout switches to that
-            // layout. Done here rather than in `detail`, because activating a
-            // group is a write and a view must not perform one while it is being
-            // evaluated.
+            // Selecting a pane focuses it, which is also what switches to its
+            // layout. Done here rather than in `detail`, because it is a write and
+            // a view must not perform one while it is being evaluated.
+            //
+            // One call, not two. It used to activate the group and stop there,
+            // which put the layout on screen and left its REMEMBERED focus in
+            // charge — so clicking Terminal 6 landed you on whichever pane of that
+            // layout you had used last. `⌘P` had the same fault for the same
+            // reason: both set a selection and let the layout overrule it.
             if case .terminal(let wsID, let termID) = new,
                 let workspace = client.fleet.workspaces.first(where: { $0.id == wsID }),
                 let holder = client.group(holding: termID, in: wsID),
-                !holder.isActive
+                !holder.isActive || holder.focused != termID
             {
                 Task {
-                    await client.layout(
-                        workspace, ["group", "select"], [holder.short ?? holder.id])
+                    guard let terminal = workspace.terminals.first(where: { $0.id == termID })
+                    else { return }
+                    await client.layout(workspace, ["focus"], [terminal.short])
                 }
             }
 
@@ -825,18 +831,8 @@ struct ContentView: View {
             run(.closeTerminal)
 
         case .newGroup:
-            // A new layout with a terminal in it, the way tmux's `c` opens a
-            // window with a shell. An empty layout showed the worktree overview,
-            // which looks like the command did something else entirely.
-            await client.layout(workspace, ["group", "new"])
-            guard
-                let made = await client.createTerminal(
-                    in: workspace,
-                    preset: "shell",
-                    title: "Terminal \(workspace.terminals.count + 1)",
-                    tile: true)
-            else { return }
-            selection = .terminal(workspace: workspace.id, terminal: made.id)
+            await openTerminalInNewLayout(workspace)
+
         case .nextGroup:
             // Landing in the new layout is the point of switching to it. Without
             // this the selection stayed on a pane from the OLD group, which the
@@ -1113,16 +1109,34 @@ struct ContentView: View {
     /// type in it, and leaving the selection where it was means a second click
     /// to get to the thing you just asked for.
     private func newTerminal(in workspace: Workspace) {
-        Task {
-            expanded.insert(workspace.id)
-            guard
-                let created = await client.createTerminal(
-                    in: workspace,
-                    preset: "shell",
-                    title: "Terminal \(workspace.terminals.count + 1)")
-            else { return }
-            selection = .terminal(workspace: workspace.id, terminal: created.id)
-        }
+        Task { await openTerminalInNewLayout(workspace) }
+    }
+
+    /// A new terminal, in a layout of its own.
+    ///
+    /// Every way of making a terminal goes through this — the sidebar button, ⌘T,
+    /// the palette's action, ⌃B c — because a terminal that belongs to no layout
+    /// is a thing you cannot reach. ⌃B n and p walk layouts, so an untiled
+    /// terminal was invisible to every navigation command in the app; the only way
+    /// back to it was finding its row in the sidebar.
+    ///
+    /// tmux's `c` opens a window with a shell in it, and a window is a layout. So
+    /// does this.
+    @discardableResult
+    private func openTerminalInNewLayout(_ workspace: Workspace) async -> Terminal? {
+        expanded.insert(workspace.id)
+        // The group first, so the terminal can join it as it is created rather
+        // than existing outside one for a beat.
+        await client.layout(workspace, ["group", "new"])
+        guard
+            let created = await client.createTerminal(
+                in: workspace,
+                preset: "shell",
+                title: "Terminal \(workspace.terminals.count + 1)",
+                tile: true)
+        else { return nil }
+        selection = .terminal(workspace: workspace.id, terminal: created.id)
+        return created
     }
 
     /// The workspace the selection is in, or the first one.
