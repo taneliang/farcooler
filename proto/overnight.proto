@@ -63,6 +63,7 @@ message Request {
     TypedConfirmation typed_confirmation = 27;
     TerminalAttach terminal_attach = 28;
     LayoutUpdate layout_update = 29;
+    WorktreeImport worktree_import = 30;
   }
 }
 
@@ -96,6 +97,7 @@ message Result {
     TerminalAttachResult terminal_attach = 12;
     BranchList branch_list = 13;
     PaneGroupList pane_group_list = 14;
+    WorktreeList worktree_list = 15;
   }
 }
 
@@ -465,6 +467,44 @@ message Branch {
 }
 
 message BranchList { repeated Branch items = 1; }
+
+// A worktree that exists on disk but is not yet a task workspace.
+//
+// People arrive with a repository they have used for months and several
+// worktrees already checked out. Until Overnight can see those it only knows
+// about work it started itself, which means re-creating by hand what you already
+// have — a bad first hour with a tool whose whole point is saving you time.
+message ExistingWorktree {
+  // Present, not optional, and deliberately.
+  //
+  // Every other path in this protocol is redacted below host_admin and stood in
+  // for by a token derived from the resource's id — a hash of the path would be
+  // a fixed function of the secret being withheld, so a client could confirm a
+  // guess. A worktree that is not registered HAS no id to derive one from, and
+  // inventing an ephemeral one would make the daemon remember something between
+  // two requests for no gain. So the method requires host_admin instead, and
+  // anyone who can call it can already see paths.
+  string path = 1;
+  // Absent for a detached HEAD, rather than filled in with a guess.
+  optional string branch = 3;
+  string head = 4;
+  // Suggested workspace name: the directory's own, which is what whoever made
+  // the worktree already chose to call this work.
+  string suggested_name = 5;
+  // git holds a lock on it. Importable, but worth saying.
+  bool locked = 6;
+}
+
+message WorktreeList { repeated ExistingWorktree items = 1; }
+
+message WorktreeImport {
+  // Absolute path, as reported by `worktree.list`. Checked against git's own
+  // list on the host, so naming a directory that is not a worktree of this
+  // repository does not register it.
+  string path = 1;
+  // Defaults to the directory's name.
+  string task_name = 2;
+}
 
 message TerminalCreate {
   string title = 1;

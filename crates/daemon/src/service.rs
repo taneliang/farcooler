@@ -283,6 +283,92 @@ impl Service {
     /// else, or produced by an agent running somewhere else entirely. Without
     /// this, picking that work up meant doing it by hand outside Overnight and
     /// then having Overnight not know about it.
+    /// Worktrees that exist on disk but are not yet task workspaces.
+    ///
+    /// The onboarding path. Someone arrives with a repository they have been
+    /// working in for months and several worktrees already checked out, and
+    /// until Overnight can see those it only knows about work it started itself
+    /// — which means re-creating by hand everything you already have.
+    ///
+    /// The main checkout is excluded. It is where you work directly, and turning
+    /// it into a task workspace would put an agent in it. So is anything already
+    /// registered, matched by canonical path so a symlinked or relative spelling
+    /// of the same directory is not offered as new.
+    pub async fn discover_worktrees(&self, repository_id: Uuid) -> Result<Vec<git::WorktreeInfo>> {
+        let repo = self.store.get_repository(repository_id)?;
+        let repo_path = self.repository_worktree(&repo);
+
+        let known: std::collections::HashSet<PathBuf> = self
+            .store
+            .list_workspaces_for_repository(repository_id)?
+            .iter()
+            .map(|w| canonical_or_raw(&w.worktree_path))
+            .collect();
+
+        Ok(git::list_worktrees(&repo_path)
+            .await?
+            .into_iter()
+            .filter(|w| !w.is_main)
+            // A prunable record points at a directory that is gone. Offering it
+            // would create a workspace whose worktree does not exist.
+            .filter(|w| !w.prunable)
+            .filter(|w| !known.contains(&canonical_or_raw(&w.path)))
+            .collect())
+    }
+
+    /// Register a worktree that already exists, without touching git.
+    ///
+    /// Deliberately creates nothing: no branch, no directory, no checkout. The
+    /// worktree is already there and already someone's work in progress, so the
+    /// only thing missing is a record — and if importing could modify it, nobody
+    /// would risk pointing this at a directory they cared about.
+    pub async fn import_worktree(
+        &self,
+        repository_id: Uuid,
+        path: &str,
+        task_name: Option<&str>,
+    ) -> Result<models::Workspace> {
+        let repo = self.store.get_repository(repository_id)?;
+        let repo_path = self.repository_worktree(&repo);
+
+        // Taken from git's own list rather than from the caller, so a path that
+        // is not actually a worktree of this repository cannot be registered by
+        // asking nicely.
+        let found = git::list_worktrees(&repo_path)
+            .await?
+            .into_iter()
+            .find(|w| canonical_or_raw(&w.path) == canonical_or_raw(path))
+            .ok_or(DomainError::NotFound)?;
+
+        if found.is_main {
+            // The repository's own checkout. Refused for the same reason it is
+            // not offered: it is where the human works.
+            return Err(DomainError::InvalidArgument { what: "the main checkout" });
+        }
+        if !std::path::Path::new(&found.path).is_dir() {
+            return Err(DomainError::NotFound);
+        }
+
+        let branch = found.branch.clone().unwrap_or_else(|| {
+            // A detached worktree still has a commit, and that is the honest
+            // thing to call it rather than inventing a branch name.
+            format!("detached at {}", found.head.chars().take(8).collect::<String>())
+        });
+
+        let name = match task_name {
+            Some(given) => given.to_string(),
+            // The directory's own name, which is what the person who made the
+            // worktree already chose to call this piece of work.
+            None => std::path::Path::new(&found.path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| branch.clone()),
+        };
+        validate::task_name(&name)?;
+
+        self.store.create_workspace(repository_id, &name, &branch, &found.path)
+    }
+
     pub async fn adopt_branch(
         &self,
         repository_id: Uuid,
@@ -855,4 +941,16 @@ mod preset_tests {
         assert!(preset_command("aider").contains("'aider'"));
         assert!(preset_command("aider:sonnet").contains("aider --model sonnet"));
     }
+}
+
+
+/// A path in its canonical form, or unchanged when it cannot be resolved.
+///
+/// Comparing worktree paths by string alone would offer an already-registered
+/// worktree as new whenever git and the database spelled the same directory
+/// differently — a symlinked home, a trailing slash, `/var` against
+/// `/private/var`. A path that no longer exists cannot be canonicalised, and
+/// falling back to the raw string keeps it comparable with itself.
+fn canonical_or_raw(path: &str) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path))
 }

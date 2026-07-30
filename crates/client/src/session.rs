@@ -294,6 +294,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::TerminalAttach(_) => "terminal_attach",
         result::Value::BranchList(_) => "branch_list",
         result::Value::PaneGroupList(_) => "pane_group_list",
+        result::Value::WorktreeList(_) => "worktree_list",
     }
 }
 

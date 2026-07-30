@@ -442,3 +442,162 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
+
+/// A worktree that already exists on disk.
+///
+/// Found rather than created. People arrive at Overnight with a repository they
+/// have been using for months and a handful of worktrees already checked out —
+/// and until they can see those here, Overnight is a tool that only knows about
+/// work it started itself, which is a bad first impression and a lot of manual
+/// re-creation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeInfo {
+    pub path: String,
+    /// The branch checked out there, or `None` for a detached HEAD.
+    pub branch: Option<String>,
+    pub head: String,
+    /// The repository's own working tree, as opposed to a linked worktree.
+    ///
+    /// Listed by git and deliberately excluded from what is offered: the main
+    /// checkout is where you work by hand, and turning it into a task workspace
+    /// would put an agent in it.
+    pub is_main: bool,
+    /// git holds a lock, usually because the worktree lives on removable media.
+    pub locked: bool,
+    /// The directory is gone; git would drop this on the next `worktree prune`.
+    pub prunable: bool,
+}
+
+/// Every worktree git knows about for this repository, main checkout included.
+///
+/// `--porcelain` because the human format is not a format: it aligns columns and
+/// truncates, and parsing it would break on a long path.
+pub async fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeInfo>> {
+    let out = git(repo, &["worktree", "list", "--porcelain"]).await?;
+    if !out.ok {
+        return Err(DomainError::OperationFailed);
+    }
+
+    let mut found = Vec::new();
+    let mut current: Option<WorktreeInfo> = None;
+    // Records are separated by a blank line; the first one is the main checkout.
+    let mut first = true;
+
+    for line in out.stdout.lines() {
+        if line.is_empty() {
+            if let Some(worktree) = current.take() {
+                found.push(worktree);
+            }
+            continue;
+        }
+        let (key, value) = line.split_once(' ').unwrap_or((line, ""));
+        match key {
+            "worktree" => {
+                if let Some(worktree) = current.take() {
+                    found.push(worktree);
+                }
+                current = Some(WorktreeInfo {
+                    path: value.to_string(),
+                    branch: None,
+                    head: String::new(),
+                    is_main: std::mem::replace(&mut first, false),
+                    locked: false,
+                    prunable: false,
+                });
+            }
+            "HEAD" => {
+                if let Some(w) = current.as_mut() {
+                    w.head = value.to_string();
+                }
+            }
+            "branch" => {
+                if let Some(w) = current.as_mut() {
+                    // `refs/heads/feat/x` -> `feat/x`.
+                    w.branch = Some(value.trim_start_matches("refs/heads/").to_string());
+                }
+            }
+            "locked" => {
+                if let Some(w) = current.as_mut() {
+                    w.locked = true;
+                }
+            }
+            "prunable" => {
+                if let Some(w) = current.as_mut() {
+                    w.prunable = true;
+                }
+            }
+            // `detached`, `bare`, and anything a newer git adds. A record we do
+            // not fully understand is still a worktree at a path.
+            _ => {}
+        }
+    }
+    if let Some(worktree) = current.take() {
+        found.push(worktree);
+    }
+    Ok(found)
+}
+
+#[cfg(test)]
+mod worktree_tests {
+    use super::*;
+
+    /// Parsing is exercised through a real repository, because the shape of
+    /// `--porcelain` output is the thing under test and a hand-written fixture
+    /// would only prove I can copy it.
+    #[tokio::test]
+    async fn lists_the_main_checkout_and_every_linked_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        for args in [
+            vec!["init", "-q", "-b", "main", "."],
+            vec!["config", "user.email", "t@example.com"],
+            vec!["config", "user.name", "t"],
+            vec!["commit", "-q", "--allow-empty", "-m", "base"],
+        ] {
+            git(&repo, &args).await.unwrap();
+        }
+
+        let extra = dir.path().join("side");
+        git(&repo, &["worktree", "add", "-q", "-b", "feat/side", extra.to_str().unwrap()])
+            .await
+            .unwrap();
+
+        let found = list_worktrees(&repo).await.unwrap();
+        assert_eq!(found.len(), 2, "main checkout plus the linked one: {found:?}");
+
+        let main = &found[0];
+        assert!(main.is_main, "the first record is always the main checkout");
+        assert_eq!(main.branch.as_deref(), Some("main"));
+
+        let side = &found[1];
+        assert!(!side.is_main);
+        assert_eq!(side.branch.as_deref(), Some("feat/side"), "refs/heads/ is stripped");
+        assert!(!side.head.is_empty());
+        assert!(!side.locked && !side.prunable);
+    }
+
+    #[tokio::test]
+    async fn a_detached_worktree_has_no_branch_rather_than_a_fake_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        for args in [
+            vec!["init", "-q", "-b", "main", "."],
+            vec!["config", "user.email", "t@example.com"],
+            vec!["config", "user.name", "t"],
+            vec!["commit", "-q", "--allow-empty", "-m", "base"],
+        ] {
+            git(&repo, &args).await.unwrap();
+        }
+        let extra = dir.path().join("detached");
+        git(&repo, &["worktree", "add", "-q", "--detach", extra.to_str().unwrap()])
+            .await
+            .unwrap();
+
+        let found = list_worktrees(&repo).await.unwrap();
+        let detached = found.iter().find(|w| w.path.ends_with("detached")).expect("found");
+        assert_eq!(detached.branch, None);
+        assert!(!detached.head.is_empty(), "it still has a commit");
+    }
+}

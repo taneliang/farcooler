@@ -53,6 +53,9 @@ fn required_scope(method: &str) -> Option<Scope> {
         "host.get" | "host.health" | "daemon.version" => Scope::Read,
         "repository.list" | "workspace.list" | "terminal.list" | "branch.list" => Scope::Read,
         "layout.list" => Scope::Read,
+        // Discovery reveals paths, which live behind the same gate as every
+        // other path in this protocol.
+        "worktree.list" => Scope::HostAdmin,
         "repository.register"
         | "workspace.create"
         | "workspace.archive"
@@ -83,7 +86,11 @@ fn required_scope(method: &str) -> Option<Scope> {
         "repository_root.list"
         | "repository_root.add"
         | "repository_root.remove"
-        | "workspace.remove_worktree" => Scope::HostAdmin,
+        | "workspace.remove_worktree"
+        // Importing touches no git data — it writes a record pointing at a
+        // directory that already exists — but it needs a path to name, and
+        // naming one is the admin part.
+        | "workspace.import" => Scope::HostAdmin,
         _ => return None,
     })
 }
@@ -255,6 +262,40 @@ impl Rpc {
                     })
                     .collect();
                 Ok(result::Value::BranchList(overnight_protocol::v1::BranchList { items }))
+            }
+
+            "worktree.list" => {
+                let repository = Self::target(&req)?;
+                let items = svc
+                    .discover_worktrees(repository)
+                    .await?
+                    .into_iter()
+                    .map(|w| {
+                        let name = std::path::Path::new(&w.path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| w.head.clone());
+                        overnight_protocol::v1::ExistingWorktree {
+                            path: w.path.clone(),
+                            branch: w.branch,
+                            head: w.head,
+                            suggested_name: name,
+                            locked: w.locked,
+                        }
+                    })
+                    .collect();
+                Ok(result::Value::WorktreeList(overnight_protocol::v1::WorktreeList { items }))
+            }
+
+            "workspace.import" => {
+                let repository = Self::target(&req)?;
+                let Some(request::Payload::WorktreeImport(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let name = (!p.task_name.trim().is_empty()).then(|| p.task_name.trim());
+                let ws = svc.import_worktree(repository, &p.path, name).await?;
+                let view = svc.workspace_view(&ws).await?;
+                Ok(result::Value::Workspace(wire::workspace(&view, scope)))
             }
 
             "workspace.create" => {
@@ -552,6 +593,8 @@ mod tests {
             "workspace.list",
             "terminal.list",
             "branch.list",
+            "worktree.list",
+            "workspace.import",
             "repository_root.add",
             "repository.register",
             "workspace.create",

@@ -268,6 +268,23 @@ enum WorkspaceCmd {
         #[arg(long)]
         task: Option<String>,
     },
+    /// Show worktrees on disk that Overnight does not know about yet.
+    ///
+    /// The onboarding path: a repository you have used for months already has
+    /// worktrees checked out, and there is no reason to re-create them by hand.
+    Discover { repo: String },
+    /// Register worktrees that already exist, without touching git.
+    ///
+    /// Creates no branch, no directory and no checkout — the work is already
+    /// there, and the only thing missing is a record of it.
+    Import {
+        repo: String,
+        /// Paths to import. Omit to take everything `discover` found.
+        paths: Vec<String>,
+        /// Name for the workspace. Only meaningful with a single path.
+        #[arg(long)]
+        task: Option<String>,
+    },
     /// List branches you could resume work on.
     Branches {
         repo: String,
@@ -563,7 +580,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
     match cmd {
         WorkspaceCmd::Create { repo, task, branch, base } => {
             let repos = list_repositories(&mut link).await?;
-            let target = resolve(&repos, &repo, |r| &r.id, "repository")?;
+            let target = resolve_repository(&repos, &repo)?;
             let r = link
                 .call(with(
                     req_for("workspace.create", uuid_of(&target.id)),
@@ -669,9 +686,97 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
             }
         }
 
+        WorkspaceCmd::Discover { repo } => {
+            let mut link = connect_to(host).await?;
+            let repos = list_repositories(&mut link).await?;
+            let target = resolve_repository(&repos, &repo)?;
+            let found = discover_worktrees(&mut link, uuid_of(&target.id)).await?;
+
+            if json {
+                let items: Vec<_> = found
+                    .iter()
+                    .map(|w| {
+                        serde_json::json!({
+                            "path": w.path,
+                            "branch": w.branch,
+                            "head": w.head,
+                            "name": w.suggested_name,
+                            "locked": w.locked,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::json!({ "worktrees": items }));
+                return Ok(());
+            }
+
+            if found.is_empty() {
+                println!("no unregistered worktrees");
+                return Ok(());
+            }
+            for w in &found {
+                let branch = w.branch.clone().unwrap_or_else(|| "(detached)".into());
+                let lock = if w.locked { "  (locked)" } else { "" };
+                println!("{:28}  {:24}{}  {}", truncate(&w.suggested_name, 28), truncate(&branch, 24), lock, w.path);
+            }
+            println!("\nimport them with: overnight workspace import {repo}");
+        }
+
+        WorkspaceCmd::Import { repo, paths, task } => {
+            let mut link = connect_to(host).await?;
+            let repos = list_repositories(&mut link).await?;
+            let target = resolve_repository(&repos, &repo)?;
+            let repository = uuid_of(&target.id);
+
+            let wanted: Vec<String> = if paths.is_empty() {
+                discover_worktrees(&mut link, repository).await?.into_iter().map(|w| w.path).collect()
+            } else {
+                paths
+            };
+            if wanted.is_empty() {
+                println!("no unregistered worktrees");
+                return Ok(());
+            }
+            if wanted.len() > 1 && task.is_some() {
+                return Err("--task names one workspace; import them one at a time".into());
+            }
+
+            // One at a time, and a failure does not abandon the rest: importing
+            // eight worktrees where one has been deleted underneath us should
+            // still import seven.
+            let mut imported = 0;
+            for path in &wanted {
+                let r = link
+                    .call(with(
+                        req_for("workspace.import", repository),
+                        request::Payload::WorktreeImport(
+                            overnight_protocol::v1::WorktreeImport {
+                                path: path.clone(),
+                                task_name: task.clone().unwrap_or_default(),
+                            },
+                        ),
+                    ))
+                    .await;
+                let outcome = match r {
+                    Ok(response) => expect_value(response.value, "workspace"),
+                    Err(e) => Err(Box::new(e) as Box<dyn std::error::Error>),
+                };
+                match outcome {
+                    Ok(result::Value::Workspace(ws)) => {
+                        imported += 1;
+                        println!("imported {}  {}  {}", short_bytes(&ws.id), ws.task_name, ws.branch);
+                    }
+                    Ok(_) => eprintln!("{path}: the daemon returned the wrong resource"),
+                    Err(e) => eprintln!("{path}: {e}"),
+                }
+            }
+            if imported == 0 {
+                return Err("nothing was imported".into());
+            }
+        }
+
         WorkspaceCmd::Branches { repo } => {
             let repos = list_repositories(&mut link).await?;
-            let target = resolve(&repos, &repo, |r| &r.id, "repository")?;
+            let target = resolve_repository(&repos, &repo)?;
             let r = link.call(req_for("branch.list", uuid_of(&target.id))).await?;
             let result::Value::BranchList(list) = expect_value(r.value, "branches")? else {
                 return Err("the daemon returned the wrong list".into());
@@ -710,7 +815,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
 
         WorkspaceCmd::Adopt { repo, branch, task } => {
             let repos = list_repositories(&mut link).await?;
-            let target = resolve(&repos, &repo, |r| &r.id, "repository")?;
+            let target = resolve_repository(&repos, &repo)?;
             let task = task.unwrap_or_else(|| branch.clone());
             let r = link
                 .call(with(
@@ -1351,6 +1456,17 @@ async fn list_repositories(link: &mut Link) -> Result<Vec<Repository>, Box<dyn s
     }
 }
 
+async fn discover_worktrees(
+    link: &mut Link,
+    repository: Uuid,
+) -> Result<Vec<overnight_protocol::v1::ExistingWorktree>, Box<dyn std::error::Error>> {
+    let r = link.call(req_for("worktree.list", repository)).await?;
+    match expect_value(r.value, "worktrees")? {
+        result::Value::WorktreeList(l) => Ok(l.items),
+        _ => Err("the daemon returned the wrong list".into()),
+    }
+}
+
 async fn list_workspaces(link: &mut Link) -> Result<Vec<Workspace>, Box<dyn std::error::Error>> {
     let r = link.call(req("workspace.list")).await?;
     match expect_value(r.value, "workspaces")? {
@@ -1466,6 +1582,34 @@ fn terminal_label(s: TerminalState) -> &'static str {
 /// is hyphenated — matched nothing, because the stored form is not.
 fn normalise_id(text: &str) -> String {
     text.trim().to_lowercase().replace('-', "")
+}
+
+/// Resolve a repository by name, or by id like everything else.
+///
+/// Names first, because a repository is the one resource people know by name:
+/// they typed it when they registered it, they see it in every listing, and
+/// `overnight workspace discover myrepo` is what anyone would write. Ids still
+/// work, and an ambiguous name is refused rather than guessed at — two projects
+/// called `api` on one host is a thing that happens.
+fn resolve_repository<'a>(
+    repositories: &'a [Repository],
+    given: &str,
+) -> Result<&'a Repository, String> {
+    let needle = given.trim().to_lowercase();
+    let by_name: Vec<&Repository> = repositories
+        .iter()
+        .filter(|r| r.display_name.to_lowercase() == needle)
+        .collect();
+    match by_name.len() {
+        1 => return Ok(by_name[0]),
+        n if n > 1 => {
+            return Err(format!(
+                "{n} repositories are called \"{given}\"; name one by id instead"
+            ));
+        }
+        _ => {}
+    }
+    resolve(repositories, given, |r| &r.id, "repository")
 }
 
 /// Resolve a short id suffix, refusing an ambiguous match rather than guessing.
