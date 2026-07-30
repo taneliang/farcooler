@@ -59,6 +59,14 @@ struct WorkspaceSection: View {
     let onArchive: () -> Void
     let onRemove: () -> Void
     let onTerminalAction: (Terminal, TerminalAction) -> Void
+    /// Where a terminal can be sent: each existing layout, plus a new one.
+    ///
+    /// The answer to "how do I tile these two together, and only these two". The
+    /// keyboard can do it — ⌃B c then ⌃B a — but that is two steps in an order you
+    /// have to know, and nothing on screen said groups existed. Moving a pane to a
+    /// layout is one action and reads as what it is.
+    var layouts: [PaneGroup] = []
+    var onMoveToLayout: (Terminal, Int?) -> Void = { _, _ in }
     /// The terminals currently on screen together, if any.
     ///
     /// Passed in rather than looked up, because the sidebar's job is to show
@@ -93,6 +101,8 @@ struct WorkspaceSection: View {
                             selection = .terminal(workspace: workspace.id, terminal: t.id)
                         },
                         isTiled: tiled.contains(t.id),
+                        layouts: layouts,
+                        onMoveToLayout: { onMoveToLayout(t, $0) },
                         onAction: { onTerminalAction(t, $0) }
                     )
                 }
@@ -220,12 +230,20 @@ struct ProjectHeader: View {
 /// shape and the same height, so nothing read as containing anything. A
 /// two-line heading over single-line items is the difference between a tree and
 /// a run of similar rectangles.
+/// A layout's name, or its number when the name IS its number.
+private func layoutLabel(_ group: PaneGroup, position: Int) -> String {
+    group.name == "\(position)" ? "Move to layout \(position)" : "Move to \(group.name)"
+}
+
 struct TerminalRow: View {
     let terminal: Terminal
     let isSelected: Bool
     let onSelect: () -> Void
     /// On screen as part of the current layout.
     var isTiled: Bool = false
+    var layouts: [PaneGroup] = []
+    /// `nil` means a new layout of its own.
+    var onMoveToLayout: (Int?) -> Void = { _ in }
     let onAction: (TerminalAction) -> Void
 
     @State private var hovering = false

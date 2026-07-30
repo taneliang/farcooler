@@ -197,6 +197,10 @@ struct ContentView: View {
                                     onTerminalAction: { term, action in
                                         Task { await run(action, on: term) }
                                     },
+                                    layouts: client.layouts[ws.id] ?? [],
+                                    onMoveToLayout: { term, position in
+                                        moveToLayout(term, in: ws, position: position)
+                                    },
                                     tiled: Set(client.activeGroup(ws.id)?.terminals ?? [])
                                 )
                             }
@@ -446,13 +450,24 @@ struct ContentView: View {
                 group.terminals.contains(termID)
             {
                 TileView(
-                    group: group,
+                    groups: client.layouts[wsID] ?? [group],
                     workspace: ws,
                     binary: client.cliPath,
                     environment: client.cliEnvironment,
                     onFocus: { id in
                         selection = .terminal(workspace: wsID, terminal: id)
-                        Task { await client.layout(ws, ["focus", id]) }
+                        Task { await client.layout(ws, ["focus"], [id]) }
+                    },
+                    onSelectGroup: { chosen in
+                        Task {
+                            let groups = await client.layout(
+                                ws, ["group", "select"], [chosen.short ?? chosen.id])
+                            // Land in the layout you just chose, not on whatever
+                            // pane the previous one had focused.
+                            if let focused = groups.first(where: { $0.isActive })?.focused {
+                                selection = .terminal(workspace: wsID, terminal: focused)
+                            }
+                        }
                     },
                     onResize: { short, cols, rows in
                         await client.resize(terminal: short, columns: cols, rows: rows)
@@ -484,13 +499,24 @@ struct ContentView: View {
                 !group.terminals.isEmpty
             {
                 TileView(
-                    group: group,
+                    groups: client.layouts[wsID] ?? [group],
                     workspace: ws,
                     binary: client.cliPath,
                     environment: client.cliEnvironment,
                     onFocus: { id in
                         selection = .terminal(workspace: wsID, terminal: id)
-                        Task { await client.layout(ws, ["focus", id]) }
+                        Task { await client.layout(ws, ["focus"], [id]) }
+                    },
+                    onSelectGroup: { chosen in
+                        Task {
+                            let groups = await client.layout(
+                                ws, ["group", "select"], [chosen.short ?? chosen.id])
+                            // Land in the layout you just chose, not on whatever
+                            // pane the previous one had focused.
+                            if let focused = groups.first(where: { $0.isActive })?.focused {
+                                selection = .terminal(workspace: wsID, terminal: focused)
+                            }
+                        }
                     },
                     onResize: { short, cols, rows in
                         await client.resize(terminal: short, columns: cols, rows: rows)
@@ -630,15 +656,15 @@ struct ContentView: View {
             // running: un-tiling four agents must never be a way to stop four
             // agents.
             guard let group, !group.terminals.isEmpty else { return }
-            await client.layout(workspace, ["drop"] + group.terminals)
+            await client.layout(workspace, ["drop"], group.terminals)
 
         case .zoom:
             await client.layout(workspace, ["zoom"])
 
         case .focusNext:
-            await client.layout(workspace, ["focus", "--next"])
+            await client.layout(workspace, ["focus"], ["--next"])
         case .focusPrevious:
-            await client.layout(workspace, ["focus", "--prev"])
+            await client.layout(workspace, ["focus"], ["--prev"])
 
         case .focus(let direction):
             // The one place the client's geometry is authoritative, because it
@@ -657,16 +683,16 @@ struct ContentView: View {
                 let next = TileGeometry.neighbour(
                     of: index, direction: direction, frames: frames)
             else { return }
-            await client.layout(workspace, ["focus", group.terminals[next]])
+            await client.layout(workspace, ["focus"], [group.terminals[next]])
 
         case .focusIndex(let n):
-            await client.layout(workspace, ["focus", "--pane", "\(n)"])
+            await client.layout(workspace, ["focus"], ["--pane", "\(n)"])
 
         case .cycle:
             await client.layout(workspace, ["cycle"])
 
         case .preset(let preset):
-            await client.layout(workspace, ["preset", preset.rawValue])
+            await client.layout(workspace, ["preset"], [preset.rawValue])
 
         case .splitRight, .splitDown:
             // A split is a new terminal in the layout you are looking at. The
@@ -679,7 +705,7 @@ struct ContentView: View {
                 // would be alone in a group and look like nothing happened.
                 await client.layout(workspace, ["tile"])
             }
-            await client.layout(workspace, ["preset", preset.rawValue])
+            await client.layout(workspace, ["preset"], [preset.rawValue])
             await client.createTerminal(
                 workspace: workspace.short,
                 preset: "shell",
@@ -689,13 +715,13 @@ struct ContentView: View {
 
         case .breakPane:
             guard let focused = group?.focused else { return }
-            await client.layout(workspace, ["drop", focused])
+            await client.layout(workspace, ["drop"], [focused])
             selection = .terminal(workspace: workspace.id, terminal: focused)
 
         case .shiftForward:
             await client.layout(workspace, ["shift"])
         case .shiftBack:
-            await client.layout(workspace, ["shift", "--back"])
+            await client.layout(workspace, ["shift"], ["--back"])
 
         case .closePane:
             // tmux's `x`, and it means the same thing: the pane's process ends.
@@ -706,14 +732,33 @@ struct ContentView: View {
         case .newGroup:
             await client.layout(workspace, ["group", "new"])
         case .nextGroup:
-            await client.layout(workspace, ["group", "select", "--next"])
+            await client.layout(workspace, ["group", "select"], ["--next"])
         case .previousGroup:
-            await client.layout(workspace, ["group", "select", "--prev"])
+            await client.layout(workspace, ["group", "select"], ["--prev"])
         case .closeGroup:
             await client.layout(workspace, ["group", "close"])
 
         case .help:
             showShortcuts = true
+        }
+    }
+
+    /// Send a terminal to a layout, to a new one, or off screen.
+    ///
+    /// `nil` means a layout of its own — the two-sets-of-tiles case, and the one
+    /// the keyboard made you spell out in two steps. `-1` takes it off screen,
+    /// which stops it being drawn and does not stop the process.
+    private func moveToLayout(_ terminal: Terminal, in workspace: Workspace, position: Int?) {
+        Task {
+            switch position {
+            case nil:
+                await client.splitOff([terminal.short], in: workspace)
+            case -1:
+                await client.layout(workspace, ["drop"], [terminal.short])
+            case .some(let index):
+                await client.move(terminal.short, toGroup: index, in: workspace)
+            }
+            selection = .terminal(workspace: workspace.id, terminal: terminal.id)
         }
     }
 

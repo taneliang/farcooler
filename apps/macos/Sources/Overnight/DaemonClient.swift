@@ -239,6 +239,27 @@ final class DaemonClient: ObservableObject {
         (layouts[workspace] ?? []).first { $0.terminals.contains(terminal) }
     }
 
+    /// Put terminals in a group of their own, leaving the existing one alone.
+    ///
+    /// The two-sets-of-tiles operation. `tile` replaces what is on screen; this
+    /// adds a second arrangement beside it.
+    @discardableResult
+    func splitOff(_ terminals: [String], in workspace: Workspace, name: String = "")
+        async -> [PaneGroup]
+    {
+        var rest = terminals
+        if !name.isEmpty { rest += ["--name", name] }
+        return await layout(workspace, ["split"], rest)
+    }
+
+    /// Move a terminal into a group. A terminal is in at most one, so this moves it.
+    @discardableResult
+    func move(_ terminal: String, toGroup position: Int, in workspace: Workspace)
+        async -> [PaneGroup]
+    {
+        await layout(workspace, ["add"], [terminal, "--group", "\(position)"])
+    }
+
     func refreshLayout(_ workspace: Workspace) async {
         guard let data = await run(["layout", "show", workspace.short, "--json"]) else { return }
         guard let list = try? JSONDecoder().decode(PaneGroupList.self, from: data) else { return }
@@ -258,15 +279,20 @@ final class DaemonClient: ObservableObject {
 
     /// Run a layout command and apply the groups it returns.
     ///
+    /// `path` is the subcommand, `rest` its arguments; the workspace goes between
+    /// them, which is where every one of these commands wants it. Spelled out
+    /// rather than inserted at a fixed index — the previous version inserted it at
+    /// position 2, which is right for `layout zoom <ws>` and wrong for
+    /// `layout group new <ws>`, so every group command silently failed.
+    ///
     /// The reply is the workspace's whole layout, so the local copy is replaced
     /// rather than patched — and the event that follows says the same thing,
     /// which is what keeps a second client in step.
     @discardableResult
-    func layout(_ workspace: Workspace, _ arguments: [String]) async -> [PaneGroup] {
-        var command = ["layout"] + arguments
-        // The subcommand comes first and the workspace immediately after it,
-        // which is the shape of every one of them.
-        command.insert(workspace.short, at: 2)
+    func layout(
+        _ workspace: Workspace, _ path: [String], _ rest: [String] = []
+    ) async -> [PaneGroup] {
+        let command = ["layout"] + path + [workspace.short] + rest
         guard let data = await run(command + ["--json"]) else { return layouts[workspace.id] ?? [] }
         guard let list = try? JSONDecoder().decode(PaneGroupList.self, from: data) else {
             return layouts[workspace.id] ?? []

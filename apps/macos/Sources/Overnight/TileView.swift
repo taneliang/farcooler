@@ -12,62 +12,57 @@ import SwiftUI
 /// because the pane has to actually BE that size — the emulator reflows to its
 /// frame, and a scaled-up 40-column pane is just a blurry 40-column pane.
 struct TileView: View {
-    let group: PaneGroup
+    /// Every group in the workspace, so the bar can offer them. The one drawn is
+    /// whichever is active.
+    let groups: [PaneGroup]
     let workspace: Workspace
     let binary: String?
     let environment: [String: String]
     let onFocus: (String) -> Void
+    let onSelectGroup: (PaneGroup) -> Void
     let onResize: (String, Int, Int) async -> Void
 
     @ObservedObject private var prefix = PrefixMode.shared
 
+    private var group: PaneGroup? {
+        groups.first { $0.isActive } ?? groups.first
+    }
+
     /// The panes to draw, in member order, dropping any the fleet has not caught
     /// up with yet.
     private var panes: [Terminal] {
-        group.terminals.compactMap { id in
+        (group?.terminals ?? []).compactMap { id in
             workspace.terminals.first { $0.id == id }
         }
     }
 
     private var zoomed: Terminal? {
-        guard let id = group.zoomed else { return nil }
+        guard let id = group?.zoomed else { return nil }
         return panes.first { $0.id == id }
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let bounds = CGRect(origin: .zero, size: proxy.size)
-            ZStack(alignment: .topLeading) {
-                if let zoomed {
-                    pane(zoomed, frame: bounds)
-                } else {
-                    let frames = TileGeometry.frames(
-                        count: panes.count,
-                        preset: group.layout,
-                        ratio: group.share,
-                        in: bounds)
-                    ForEach(Array(panes.enumerated()), id: \.element.id) { index, terminal in
-                        if index < frames.count {
-                            pane(terminal, frame: frames[index])
-                        }
-                    }
-                }
+        VStack(spacing: 0) {
+            // Only when there is more than one, so a single arrangement is not
+            // labelled for the benefit of a choice nobody has.
+            if groups.count > 1 {
+                GroupBar(groups: groups, onSelect: onSelectGroup)
             }
-            // Snappy, not springy. A layout change is a change of view, and a
-            // terminal that overshoots and settles reads as a glitch.
-            .animation(.easeOut(duration: 0.14), value: group.layout)
-            .animation(.easeOut(duration: 0.14), value: group.zoomed)
-            .animation(.easeOut(duration: 0.14), value: group.terminals)
+            panels
         }
         .paneCanvas()
         .overlay(alignment: .bottom) {
             if prefix.armed {
                 PrefixHint()
                     .padding(.bottom, 14)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .transition(
+                        .opacity.combined(with: .move(edge: .bottom))
+                            .combined(with: .scale(scale: 0.96)))
             }
         }
-        .animation(.easeOut(duration: 0.12), value: prefix.armed)
+        // The hint is a chip that appears on a keystroke, so it gets the bouncier
+        // preset: it is arriving, not rearranging.
+        .animation(.snappy(duration: 0.22, extraBounce: 0.08), value: prefix.armed)
         // Told from here, because this is the only place that knows a layout is
         // actually on screen. It gates the prefix-less ⌃hjkl bindings: while a
         // single terminal is showing, ⌃L has to still clear it.
@@ -78,7 +73,66 @@ struct TileView: View {
         .navigationSubtitle(workspace.windowSubtitle)
     }
 
-    private func pane(_ terminal: Terminal, frame: CGRect) -> some View {
+    /// How the panes move.
+    ///
+    /// The platform's own spring, not a hand-rolled curve. `.smooth` is critically
+    /// damped — it settles without overshooting, which is what a terminal needs: a
+    /// pane full of text that bounces past its position and comes back reads as a
+    /// rendering glitch rather than as motion.
+    private var motion: Animation { .smooth(duration: 0.3) }
+
+    /// Zoom gets the tiny bit of energy `.smooth` deliberately lacks.
+    ///
+    /// Changing the arrangement is a change of layout; zooming is a change of
+    /// posture, and a trace of overshoot is what makes it feel like the pane came
+    /// forward rather than being swapped. `extraBounce` is kept small — this is one
+    /// pane arriving, not a notification.
+    private var zoomMotion: Animation { .snappy(duration: 0.28, extraBounce: 0.06) }
+
+    @ViewBuilder
+    private var panels: some View {
+        if let group {
+            GeometryReader { proxy in
+                let bounds = CGRect(origin: .zero, size: proxy.size)
+                let frames = TileGeometry.frames(
+                    count: panes.count,
+                    preset: group.layout,
+                    ratio: group.share,
+                    in: bounds)
+
+            // One ForEach over every pane, always, with the zoomed one given the
+            // whole area. Not `if zoomed { one } else { many }`, which was a
+            // structural branch: swapping it changed each pane's view identity, so
+            // zooming tore down four live NSViews and re-attached them — four
+            // terminals replaying their history to move one of them forward.
+            //
+            // Keeping them all mounted also means un-zooming is instant and the
+            // hidden panes never stop streaming.
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(panes.enumerated()), id: \.element.id) { index, terminal in
+                        let isZoomed = group.zoomed == terminal.id
+                        let tiled = frames[min(index, max(frames.count - 1, 0))]
+                        let frame = isZoomed && zoomed != nil ? bounds : tiled
+
+                        pane(terminal, group: group, frame: frame)
+                            .opacity(zoomed == nil || isZoomed ? 1 : 0)
+                            .zIndex(isZoomed ? 1 : 0)
+                            // A pane joining or leaving grows and fades rather
+                            // than appearing at full size, which at four panes is
+                            // the difference between noticing which one arrived
+                            // and not.
+                            .transition(.scale(scale: 0.97).combined(with: .opacity))
+                    }
+                }
+                .animation(motion, value: group.layout)
+                .animation(motion, value: group.share)
+                .animation(motion, value: group.terminals)
+                .animation(zoomMotion, value: group.zoomed)
+            }
+        }
+    }
+
+    private func pane(_ terminal: Terminal, group: PaneGroup, frame: CGRect) -> some View {
         let isFocused = group.focused == terminal.id
 
         return TilePane(
@@ -142,6 +196,10 @@ private struct TilePane: View {
             }
         }
         .paneCard(focused: isFocused)
+        // Its own, faster animation: which pane has the keyboard has to read as
+        // immediate, and a border easing in over the same third of a second as
+        // the panes moving would lag the keystroke that caused it.
+        .animation(.smooth(duration: 0.12), value: isFocused)
     }
 
     /// One line, and only what a pane needs that a single terminal does not.

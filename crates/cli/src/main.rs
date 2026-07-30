@@ -111,9 +111,34 @@ enum LayoutCmd {
         /// even-horizontal, even-vertical, main-vertical, main-horizontal, tiled.
         #[arg(long)]
         preset: Option<String>,
+        /// Which group, by number or short id. Defaults to the one on screen.
+        #[arg(long)]
+        group: Option<String>,
     },
-    /// Add terminals to the group without disturbing the rest.
-    Add { workspace: String, terminals: Vec<String> },
+    /// Put terminals in a NEW group of their own, and show it.
+    ///
+    /// The two-sets-of-tiles command. `layout tile` replaces what is on screen;
+    /// this leaves the existing group alone and gives these terminals their own,
+    /// which is what "tile 5 and 6 together, and only 5 and 6" means.
+    Split {
+        workspace: String,
+        terminals: Vec<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        preset: Option<String>,
+    },
+    /// Add terminals to a group without disturbing the rest.
+    ///
+    /// A terminal is in at most one group, so adding it to another MOVES it —
+    /// which is how you split five tiled terminals into two sets.
+    Add {
+        workspace: String,
+        terminals: Vec<String>,
+        /// Which group, by number or short id. Defaults to the one on screen.
+        #[arg(long)]
+        group: Option<String>,
+    },
     /// Take terminals off screen. They keep running.
     Drop { workspace: String, terminals: Vec<String> },
     /// Set the arrangement, the main-pane share, or the group's name.
@@ -836,7 +861,7 @@ async fn events(host: Option<&str>) -> Fallible {
 // ---------------------------------------------------------------------------
 
 async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
-    use overnight_daemon::layout::{parse_preset, preset_name};
+    use overnight_daemon::layout::parse_preset;
     use overnight_protocol::v1::LayoutUpdate;
 
     let mut link = connect_to(host).await?;
@@ -846,6 +871,8 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         match cmd {
             LayoutCmd::Show { .. } => "layout.list",
             LayoutCmd::Tile { .. } => "layout.tile",
+            // Two calls, so the verb is decided where it runs.
+            LayoutCmd::Split { .. } => "layout.tile",
             LayoutCmd::Add { .. } => "layout.add",
             LayoutCmd::Drop { .. } => "layout.drop",
             LayoutCmd::Preset { .. } => "layout.preset",
@@ -864,6 +891,7 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     let workspace_arg = match &cmd {
         LayoutCmd::Show { workspace }
         | LayoutCmd::Tile { workspace, .. }
+        | LayoutCmd::Split { workspace, .. }
         | LayoutCmd::Add { workspace, .. }
         | LayoutCmd::Drop { workspace, .. }
         | LayoutCmd::Preset { workspace, .. }
@@ -883,7 +911,8 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
 
     // Terminals are named by short id, so they have to be resolved against the
     // workspace before anything can be said about them.
-    let terminals = list_terminals(&mut link, Some(workspace_id)).await?;
+    let terminals_of = list_terminals(&mut link, Some(workspace_id)).await?;
+    let terminals = &terminals_of;
     let pick = |given: &str| -> Result<bytes::Bytes, String> {
         resolve(&terminals, given, |t| &t.id, "terminal").map(|t| t.id.clone())
     };
@@ -891,17 +920,85 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         given.iter().map(|g| pick(g)).collect()
     };
 
+    // Groups are named by the number you count on screen, or by short id for a
+    // script. Resolved once, here, because three commands accept one.
+    let group_named = |given: &Option<String>,
+                       existing: &[overnight_protocol::v1::PaneGroup]|
+     -> Result<Option<bytes::Bytes>, String> {
+        let Some(given) = given else { return Ok(None) };
+        match given.parse::<usize>() {
+            Ok(n) if n >= 1 && n <= existing.len() => Ok(Some(existing[n - 1].id.clone())),
+            _ => resolve(existing, given, |g| &g.id, "group").map(|g| Some(g.id.clone())),
+        }
+    };
+
+    // `layout split` is two calls: make a group, then fill it. Kept out of the
+    // daemon because it is a convenience, not a rule — and a rule that only the
+    // CLI could express would not be reachable from the app.
+    if let LayoutCmd::Split { terminals, name, preset, .. } = &cmd {
+        let members = pick_all(terminals)?;
+        if members.is_empty() {
+            return Err("name the terminals that should share the new group".into());
+        }
+        let r = link
+            .call(with(
+                req_for("layout.group.new", workspace_id),
+                request::Payload::LayoutUpdate(LayoutUpdate {
+                    name: name.clone().unwrap_or_default(),
+                    ..Default::default()
+                }),
+            ))
+            .await?;
+        let result::Value::PaneGroupList(list) = expect_value(r.value, "layout")? else {
+            return Err("the daemon returned the wrong resource".into());
+        };
+        let created = list
+            .items
+            .iter()
+            .find(|g| g.active)
+            .map(|g| g.id.clone())
+            .ok_or("the new group did not become the active one")?;
+
+        let r = link
+            .call(with(
+                req_for("layout.tile", workspace_id),
+                request::Payload::LayoutUpdate(LayoutUpdate {
+                    group_id: Some(created),
+                    terminals: members,
+                    preset: match preset {
+                        Some(text) => {
+                            Some(parse_preset(text).ok_or_else(|| unknown_preset(text))? as i32)
+                        }
+                        None => None,
+                    },
+                    ..Default::default()
+                }),
+            ))
+            .await?;
+        let result::Value::PaneGroupList(list) = expect_value(r.value, "layout")? else {
+            return Err("the daemon returned the wrong resource".into());
+        };
+        print_layout(&list, &terminals_of, json);
+        return Ok(());
+    }
+
     let mut update = LayoutUpdate::default();
     match &cmd {
         LayoutCmd::Show { .. } | LayoutCmd::Cycle { .. } => {}
-        LayoutCmd::Tile { terminals, preset, .. } => {
+        LayoutCmd::Split { .. } => unreachable!("handled above"),
+        LayoutCmd::Tile { terminals, preset, group, .. } => {
             update.terminals = pick_all(terminals)?;
             if let Some(text) = preset {
                 update.preset =
                     Some(parse_preset(text).ok_or_else(|| unknown_preset(text))? as i32);
             }
+            update.group_id = group_named(group, &fetch_layout(&mut link, workspace_id).await?)?;
         }
-        LayoutCmd::Add { terminals, .. } | LayoutCmd::Drop { terminals, .. } => {
+        LayoutCmd::Add { terminals, group, .. } => {
+            update.terminals = pick_all(terminals)?;
+            update.group_id = group_named(group, &fetch_layout(&mut link, workspace_id).await?)?;
+        }
+        LayoutCmd::Drop { terminals, .. } => {
             update.terminals = pick_all(terminals)?;
         }
         LayoutCmd::Preset { preset, ratio, name, .. } => {
@@ -932,19 +1029,13 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         LayoutCmd::Group(LayoutGroupCmd::New { name, .. }) => {
             update.name = name.clone().unwrap_or_default();
         }
-        LayoutCmd::Group(LayoutGroupCmd::Select { group, prev, .. }) => match group {
-            Some(given) => {
-                // A group can be named by number, which is what people count on
-                // screen, or by its short id, which is what a script has.
-                let existing = fetch_layout(&mut link, workspace_id).await?;
-                let found = match given.parse::<usize>() {
-                    Ok(n) if n >= 1 && n <= existing.len() => existing[n - 1].id.clone(),
-                    _ => resolve(&existing, given, |g| &g.id, "group")?.id.clone(),
-                };
-                update.group_id = Some(found);
+        LayoutCmd::Group(LayoutGroupCmd::Select { group, prev, .. }) => {
+            let existing = fetch_layout(&mut link, workspace_id).await?;
+            match group_named(group, &existing)? {
+                Some(id) => update.group_id = Some(id),
+                None => update.step = Some(if *prev { -1 } else { 1 }),
             }
-            None => update.step = Some(if *prev { -1 } else { 1 }),
-        },
+        }
         LayoutCmd::Group(LayoutGroupCmd::Close { .. }) => {}
     }
 
@@ -958,19 +1049,31 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         return Err("the daemon returned the wrong resource".into());
     };
 
+    print_layout(&list, &terminals_of, json);
+    Ok(())
+}
+
+fn print_layout(
+    list: &overnight_protocol::v1::PaneGroupList,
+    terminals: &[Terminal],
+    json: bool,
+) {
+    use overnight_daemon::layout::preset_name;
+
     if json {
-        println!("{}", layout_json(&list, &terminals));
-        return Ok(());
+        println!("{}", layout_json(list, terminals));
+        return;
     }
 
     if list.items.is_empty() {
         println!("nothing tiled");
-        return Ok(());
+        return;
     }
-    for group in &list.items {
+    for (position, group) in list.items.iter().enumerate() {
         println!(
-            "{} {}  {}  {} pane{}",
+            "{} {}. {}  {}  {} pane{}",
             if group.active { "*" } else { " " },
+            position + 1,
             group.name,
             preset_name(group.preset()),
             group.members.len(),
@@ -992,7 +1095,6 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
             println!("   {marks} {}  {}  {}", index + 1, short_bytes(member), truncate(&title, 40));
         }
     }
-    Ok(())
 }
 
 fn unknown_preset(text: &str) -> String {
