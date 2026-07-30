@@ -75,15 +75,8 @@ struct TileView: View {
         .onAppear { prefix.tiledPanes = panes.count }
         .onChange(of: panes.count) { _, count in prefix.tiledPanes = count }
         .onDisappear { prefix.tiledPanes = 0 }
-        .navigationTitle(title)
-        .navigationSubtitle("\(workspace.task) · \(workspace.branch)")
-    }
-
-    private var title: String {
-        guard let focused = group.focused,
-            let terminal = panes.first(where: { $0.id == focused })
-        else { return workspace.task }
-        return terminal.title
+        .navigationTitle(workspace.windowTitle)
+        .navigationSubtitle(workspace.windowSubtitle)
     }
 
     private func pane(_ terminal: Terminal, frame: CGRect) -> some View {

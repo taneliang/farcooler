@@ -49,8 +49,8 @@ struct TerminalPane: View {
                 topTrailingRadius: 0))
         // The window's own title bar, which macOS already draws. Free, native,
         // and it costs the content no vertical space.
-        .navigationTitle(terminal.title)
-        .navigationSubtitle("\(workspace.task) · \(workspace.branch)")
+        .navigationTitle(workspace.windowTitle)
+        .navigationSubtitle(workspace.windowSubtitle)
     }
 
     /// The only state left that needs saying out loud.
@@ -79,7 +79,7 @@ struct TerminalPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
-        .navigationTitle(terminal.title)
-        .navigationSubtitle("\(workspace.task) · \(workspace.branch)")
+        .navigationTitle(workspace.windowTitle)
+        .navigationSubtitle(workspace.windowSubtitle)
     }
 }

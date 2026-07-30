@@ -52,6 +52,25 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// Terminals wanting the user, across this worktree.
     var attention: [Terminal] { terminals.filter(\.status.wantsAttention) }
 
+    /// What the window says you are looking at.
+    ///
+    /// The task, then the project and branch beneath it. Not the focused
+    /// terminal: with several panes on screen each one already names itself in
+    /// its own header, so a title repeating one of them says less than nothing —
+    /// it makes the window claim to be a terminal when it is a worktree. The
+    /// place you are is the worktree, and that is true whether one pane is
+    /// showing or four.
+    var windowTitle: String { task }
+
+    var windowSubtitle: String {
+        // Host only where it disambiguates, same rule as the sidebar: on a fleet
+        // of one machine, saying which machine is noise.
+        [repository, branch, (host?.isEmpty ?? true) ? nil : host]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
     /// A one-line summary for a collapsed row.
     ///
     /// A collapsed worktree still has to answer "is anything happening here?"
