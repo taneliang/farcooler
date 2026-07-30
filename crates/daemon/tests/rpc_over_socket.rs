@@ -25,12 +25,52 @@ use overnight_transport::{Client, ClientError, HandshakeConfig, UnixListenerServ
 struct Harness {
     _dir: tempfile::TempDir,
     socket: std::path::PathBuf,
+    /// Held for the test's life. See `TMUX_SERVERS`.
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    /// The private tmux socket this harness started a server on.
+    tmux_socket: String,
 }
 
+/// Take the tmux server down with the test that started it.
+///
+/// Every harness starts its own server and nothing used to stop it, so a suite
+/// run left one behind per tmux-using test. They accumulate across runs — a few
+/// hundred after an afternoon — and eventually new ones stop starting, at which
+/// point `terminal.create` fails with `tmux is unavailable` and the suite appears
+/// to have broken in whichever test drew the short straw.
+///
+/// Synchronous because `Drop` is: it is one `kill-server` against a socket
+/// nothing else uses.
+impl Drop for Harness {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("tmux")
+            .args(["-L", &self.tmux_socket, "kill-server"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
+/// How many of these tests may own a live tmux server at once.
+///
+/// Every harness starts its OWN server, on its own socket, which is what keeps
+/// them isolated. Starting twenty at the same instant is a different matter: the
+/// ones that lose the race get `tmux is unavailable` from a server that has not
+/// finished coming up, and the failure lands on whichever test happened to be
+/// unlucky — so the suite failed somewhere different every run and looked like a
+/// bug in the code under test.
+///
+/// Four is enough to keep the suite quick and few enough that none of them
+/// starve.
+static TMUX_SERVERS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
+
 async fn start(scope: Scope) -> Harness {
+    let permit = TMUX_SERVERS.clone().acquire_owned().await.expect("permit");
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("overnightd.sock");
     let service = Arc::new(Service::open_in(dir.path().to_path_buf()).await.expect("service"));
+    let tmux_socket = service.tmux.socket().to_string();
     let server = UnixListenerServer::bind(&socket).expect("bind");
 
     // The watcher is constructed but not run: these tests are about dispatch,
@@ -45,7 +85,7 @@ async fn start(scope: Scope) -> Harness {
     // The listener is bound before serve() is spawned, so a connect cannot race
     // it — but give the task a turn so the first accept is already pending.
     tokio::task::yield_now().await;
-    Harness { _dir: dir, socket }
+    Harness { _dir: dir, socket, _permit: permit, tmux_socket }
 }
 
 #[derive(Clone)]
@@ -593,6 +633,25 @@ async fn a_terminal(
     ));
     let result = client.call(create).await.expect("terminal.create");
     let Some(result::Value::Terminal(terminal)) = result.value else { panic!("wrong result") };
+
+    // Fix the window's size before anything is asserted about geometry.
+    //
+    // A window inherits the session's dimensions, and under a parallel test run
+    // that arrived late often enough to make the split assertions flaky — a
+    // narrow window splits into panes whose left edges tie, and `fresh.left <
+    // original.left` is then false for a split that in fact worked. Stating the
+    // size makes the arithmetic deterministic rather than dependent on when tmux
+    // got round to it.
+    let mut viewport = request("layout.viewport");
+    viewport.target_resource_id = Some(workspace.clone());
+    viewport.payload = Some(request::Payload::LayoutUpdate(
+        overnight_protocol::v1::LayoutUpdate {
+            columns: Some(120),
+            rows: Some(40),
+            ..Default::default()
+        },
+    ));
+    client.call(viewport).await.expect("layout.viewport");
     terminal
 }
 
