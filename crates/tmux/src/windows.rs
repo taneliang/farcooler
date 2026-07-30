@@ -683,6 +683,16 @@ impl TmuxServer {
         Ok(window_id)
     }
 
+    /// Kill one pane.
+    ///
+    /// Distinct from `kill_terminal_window`, which took the whole window. That
+    /// was equivalent while every window held one pane; now a window is a layout
+    /// and killing it would take every terminal arranged in it.
+    pub async fn kill_pane(&self, pane_id: &str) -> Result<bool> {
+        let out = self.run(&["kill-pane", "-t", pane_id]).await?;
+        Ok(out.ok())
+    }
+
     /// Give a layout a name, which is what a client shows in its tab.
     pub async fn rename_layout(&self, window_id: &str, name: &str) -> Result<()> {
         self.expect(&["rename-window", "-t", window_id, name], "rename-window").await

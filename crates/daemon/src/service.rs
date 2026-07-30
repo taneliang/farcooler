@@ -454,12 +454,12 @@ impl Service {
         // Take the retained dead pane with it. `remain-on-exit` keeps one so a
         // clean exit is distinguishable from a loss; once the record is gone
         // there is nothing left for it to prove.
-        let _ = self.tmux.kill_terminal_window(id).await;
-        // Off screen before out of the database. The membership row would
-        // cascade away on its own, but a group still pointing at this terminal
-        // as zoomed or focused would render as a blank pane — so the layout has
-        // to be told, not merely cleaned up after.
-        let _ = self.layout_drop(record.workspace_id, &[id]).await;
+        //
+        // Nothing else to clean up: the layout IS the panes, so killing the pane
+        // removes it from the arrangement, and tmux collapses the split. The old
+        // model needed a separate step here to stop a stored group pointing at a
+        // terminal that no longer existed.
+        let _ = self.kill_pane(id).await;
         self.store.delete_terminal(id, record.resource_version)
     }
 
@@ -616,10 +616,89 @@ impl Service {
         Ok(term)
     }
 
-    /// Stop a terminal. Signals the daemon-owned window, then records intent.
+    /// A new terminal in an existing layout, beside a pane already there.
+    ///
+    /// The same act as `create_terminal` except for where the pane lands: a split
+    /// of an existing one rather than a window of its own. That difference is the
+    /// whole of `%`, `"`, and dropping something on a pane's edge.
+    ///
+    /// Deliberately shares the create-then-verify order with `create_terminal`:
+    /// the durable record goes in first with intent RUNNING and unconfirmed, the
+    /// pane is made, and only a fresh query proving a live tagged pane marks it
+    /// confirmed. A split that fails leaves a record the derivation reports
+    /// honestly rather than one that claims to be running.
+    pub async fn split_terminal(
+        &self,
+        workspace_id: Uuid,
+        target: Uuid,
+        side: overnight_protocol::v1::SplitSide,
+        title: &str,
+        command_preset: &str,
+    ) -> Result<models::Terminal> {
+        validate::display_name(title)?;
+        validate::command_preset(command_preset)?;
+
+        let ws = self.store.get_workspace(workspace_id)?;
+        let pane = self.pane_of(target).await?;
+        let (axis, before) = crate::layout::split_args(side);
+
+        let term = self.store.create_terminal(
+            workspace_id,
+            title,
+            command_preset,
+            TerminalIntent::Running,
+            120,
+            40,
+        )?;
+
+        let command = preset_command(command_preset);
+        let created = self
+            .tmux
+            .split_pane(&pane.pane_id, axis, term.id, &ws.worktree_path, &command, before)
+            .await;
+
+        let pane_id = match created {
+            Ok(id) => id,
+            Err(e) => {
+                let _ = self.store.update_terminal(
+                    term.id,
+                    term.resource_version,
+                    terminal_update(&term, |u| u.intent = TerminalIntent::Failed),
+                );
+                return Err(e);
+            }
+        };
+
+        // The new pane takes the keyboard: you split in order to type in it.
+        let _ = self.tmux.select_pane(&pane_id).await;
+
+        let snapshot = self.inventory.refresh().await;
+        if snapshot.claimants(term.id).iter().any(|p| p.proves_life()) {
+            return self.store.update_terminal(
+                term.id,
+                term.resource_version,
+                terminal_update(&term, |u| u.runtime_confirmed = true),
+            );
+        }
+
+        tracing::warn!(terminal = %term.id, "split pane did not verify");
+        Ok(term)
+    }
+
+    /// Kill exactly this terminal's pane.
+    ///
+    /// A pane, not a window: a window is now a whole layout, and killing one
+    /// would take every other terminal in it. That was safe only while each
+    /// window held a single pane.
+    async fn kill_pane(&self, id: Uuid) -> Result<bool> {
+        let Ok(pane) = self.pane_of(id).await else { return Ok(false) };
+        self.tmux.kill_pane(&pane.pane_id).await
+    }
+
+    /// Stop a terminal. Signals the daemon-owned pane, then records intent.
     pub async fn stop_terminal(&self, id: Uuid) -> Result<models::Terminal> {
         let term = self.store.get_terminal(id)?;
-        self.tmux.kill_terminal_window(id).await?;
+        self.kill_pane(id).await?;
         self.inventory.refresh().await;
 
         self.store.update_terminal(

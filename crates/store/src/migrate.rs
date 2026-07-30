@@ -11,8 +11,11 @@ use crate::error::map_err;
 
 type Migration = fn(&Transaction) -> rusqlite::Result<()>;
 
-const MIGRATIONS: &[Migration] =
-    &[migration_0001_initial_schema, migration_0002_pane_groups];
+const MIGRATIONS: &[Migration] = &[
+    migration_0001_initial_schema,
+    migration_0002_pane_groups,
+    migration_0003_drop_pane_groups,
+];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
 
@@ -159,6 +162,32 @@ fn migration_0002_pane_groups(tx: &Transaction) -> rusqlite::Result<()> {
     )
 }
 
+/// Tiling stopped being stored.
+///
+/// 0002 added a durable split model — groups, membership, five preset
+/// arrangements — and it was the wrong half of the split between what tmux owns
+/// and what this database owns. tmux already has split trees, named layouts,
+/// dividers and zoom, and it is already the authority for what is running; an
+/// arrangement of live processes is runtime, not intent. Keeping a second copy
+/// meant a third in every client that drew it.
+///
+/// Nothing is migrated because nothing can be: the rows described panes in a tmux
+/// server that has almost certainly been restarted since, and a layout whose
+/// processes are gone is not a layout. Dropped rather than left in place, so the
+/// schema does not describe a model the code no longer has.
+///
+/// 0002 is kept above it. Migrations are forward-only and a database that has
+/// never seen 0002 still has to reach the same schema as one that has, which
+/// means creating the tables and then dropping them.
+fn migration_0003_drop_pane_groups(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS pane_members;
+        DROP TABLE IF EXISTS pane_groups;
+        "#,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,11 +241,15 @@ mod tests {
             "terminals",
             "idempotency",
             "meta",
-            "pane_groups",
-            "pane_members",
         ]
         {
             assert!(names.iter().any(|n| n == expected), "missing table {expected}");
+        }
+        for gone in ["pane_groups", "pane_members"] {
+            assert!(
+                !names.iter().any(|n| n == gone),
+                "{gone} was dropped: tiling is tmux's, not ours"
+            );
         }
     }
 }

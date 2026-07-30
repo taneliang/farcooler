@@ -122,7 +122,7 @@ impl Watcher {
     /// discovered by the loop. It still goes through the watcher because the
     /// broadcast channel is here, and one sender means one place where "only
     /// changes are sent" stays true.
-    pub fn publish_layout(&self, workspace: Uuid, groups: &[overnight_store::PaneGroup]) {
+    pub fn publish_layout(&self, workspace: Uuid, groups: &[crate::layout::LayoutView]) {
         let _ = self.events.send(Event {
             event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
             sequence: 0,

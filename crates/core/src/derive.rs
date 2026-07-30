@@ -160,6 +160,11 @@ mod tests {
             dead: false,
             dead_status: None,
             command: "zsh".into(),
+            left: 0,
+            top: 0,
+            window_active: true,
+            pane_active: true,
+            zoomed: false,
         }
     }
 

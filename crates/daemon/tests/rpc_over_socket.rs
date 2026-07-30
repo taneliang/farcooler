@@ -474,39 +474,6 @@ async fn a_workspace_starts_with_nothing_tiled() {
 }
 
 #[tokio::test]
-async fn tiling_with_no_terminals_named_takes_every_live_one() {
-    let h = start(Scope::HostAdmin).await;
-    let mut client = connect(&h).await;
-    let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-
-    let mut made = Vec::new();
-    for title in ["one", "two", "three"] {
-        let mut create = request("terminal.create");
-        create.target_resource_id = Some(workspace.id.clone());
-        create.payload = Some(request::Payload::TerminalCreate(
-            overnight_protocol::v1::TerminalCreate {
-                title: title.into(),
-                command_preset: "shell".into(),
-                join_active_group: false,
-            },
-        ));
-        let result = client.call(create).await.expect("terminal.create");
-        let Some(result::Value::Terminal(t)) = result.value else { panic!("wrong result") };
-        made.push(t.id);
-    }
-
-    let list =
-        layout_call(&mut client, "layout.tile", &workspace.id, Default::default()).await;
-    assert_eq!(list.items.len(), 1, "one group appears to hold them");
-    let group = &list.items[0];
-    assert!(group.active);
-    assert_eq!(group.members.len(), made.len());
-    assert_eq!(group.focused.as_ref(), Some(&group.members[0]), "something must be focused");
-    assert_eq!(group.zoomed, None, "you asked to see several things");
-}
-
-#[tokio::test]
 async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
     // The deliberate divergence from tmux, and the reason zoom is useful with
     // more than one agent: moving on keeps you zoomed instead of dropping you
@@ -516,46 +483,9 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = a_workspace(&mut client, dir.path()).await;
 
-    for title in ["one", "two"] {
-        let mut create = request("terminal.create");
-        create.target_resource_id = Some(workspace.id.clone());
-        create.payload = Some(request::Payload::TerminalCreate(
-            overnight_protocol::v1::TerminalCreate {
-                title: title.into(),
-                command_preset: "shell".into(),
-                join_active_group: false,
-            },
-        ));
-        client.call(create).await.expect("terminal.create");
-    }
-    let list = layout_call(&mut client, "layout.tile", &workspace.id, Default::default()).await;
-    let first = list.items[0].members[0].clone();
-    let second = list.items[0].members[1].clone();
-
-    let zoomed = layout_call(&mut client, "layout.zoom", &workspace.id, Default::default()).await;
-    assert_eq!(zoomed.items[0].zoomed.as_ref(), Some(&first));
-
-    let moved = layout_call(
-        &mut client,
-        "layout.focus",
-        &workspace.id,
-        overnight_protocol::v1::LayoutUpdate { step: Some(1), ..Default::default() },
-    )
-    .await;
-    assert_eq!(moved.items[0].focused.as_ref(), Some(&second));
-    assert_eq!(moved.items[0].zoomed.as_ref(), Some(&second), "the zoom came along");
-
-    let out = layout_call(&mut client, "layout.zoom", &workspace.id, Default::default()).await;
-    assert_eq!(out.items[0].zoomed, None, "prefix z is still the way out");
-}
-
-#[tokio::test]
-async fn a_pane_moved_into_another_group_leaves_no_empty_one_behind() {
-    let h = start(Scope::HostAdmin).await;
-    let mut client = connect(&h).await;
-    let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-
+    // Two terminals in ONE layout means creating one and splitting it. Creating
+    // twice would make two layouts, because a terminal is a pane and a fresh
+    // terminal gets a window of its own.
     let mut create = request("terminal.create");
     create.target_resource_id = Some(workspace.id.clone());
     create.payload = Some(request::Payload::TerminalCreate(
@@ -566,32 +496,53 @@ async fn a_pane_moved_into_another_group_leaves_no_empty_one_behind() {
         },
     ));
     let result = client.call(create).await.expect("terminal.create");
-    let Some(result::Value::Terminal(terminal)) = result.value else { panic!("wrong result") };
+    let Some(result::Value::Terminal(one)) = result.value else { panic!("wrong result") };
 
-    layout_call(&mut client, "layout.tile", &workspace.id, Default::default()).await;
-    let two = layout_call(
+    let list = layout_call(
         &mut client,
-        "layout.group.new",
-        &workspace.id,
-        overnight_protocol::v1::LayoutUpdate { name: "scratch".into(), ..Default::default() },
-    )
-    .await;
-    assert_eq!(two.items.len(), 2, "a new group is empty on purpose");
-
-    // Move the only pane into the new group. The first group is now a ghost.
-    let after = layout_call(
-        &mut client,
-        "layout.add",
+        "layout.split",
         &workspace.id,
         overnight_protocol::v1::LayoutUpdate {
-            terminals: vec![terminal.id.clone()],
+            target: Some(one.id.clone()),
+            side: overnight_protocol::v1::SplitSide::Right as i32,
+            command_preset: "shell".into(),
             ..Default::default()
         },
     )
     .await;
-    assert_eq!(after.items.len(), 1, "the emptied group is gone");
-    assert_eq!(after.items[0].name, "scratch");
-    assert_eq!(after.items[0].members, vec![terminal.id]);
+    let first = one.id.clone();
+    let second = list.items[0]
+        .panes
+        .iter()
+        .find(|p| p.terminal_id != first)
+        .expect("the split pane")
+        .terminal_id
+        .clone();
+
+    // Zoom whatever is focused, then check the FOCUSED pane is the zoomed one.
+    let zoomed = layout_call(
+        &mut client,
+        "layout.zoom",
+        &workspace.id,
+        overnight_protocol::v1::LayoutUpdate { zoom: Some(first.clone()), ..Default::default() },
+    )
+    .await;
+    let pane = zoomed.items[0].panes.iter().find(|p| p.terminal_id == first).expect("first");
+    assert!(pane.zoomed && pane.focused);
+
+    let moved = layout_call(
+        &mut client,
+        "layout.focus",
+        &workspace.id,
+        overnight_protocol::v1::LayoutUpdate { step: Some(1), ..Default::default() },
+    )
+    .await;
+    let now = moved.items[0].panes.iter().find(|p| p.terminal_id == second).expect("second");
+    assert!(now.focused, "focus moved");
+    assert!(now.zoomed, "and the zoom came along, which tmux alone would not do");
+
+    let out = layout_call(&mut client, "layout.zoom", &workspace.id, Default::default()).await;
+    assert!(!out.items[0].panes.iter().any(|p| p.zoomed), "prefix z is still the way out");
 }
 
 #[tokio::test]
@@ -613,7 +564,7 @@ async fn tiling_needs_control_and_reading_a_layout_does_not() {
         other => panic!("unexpected {other:?}"),
     }
 
-    let mut tile = request("layout.tile");
+    let mut tile = request("layout.split");
     tile.target_resource_id =
         Some(bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()));
     tile.payload = Some(request::Payload::LayoutUpdate(Default::default()));
@@ -623,4 +574,233 @@ async fn tiling_needs_control_and_reading_a_layout_does_not() {
         }
         other => panic!("expected SCOPE_DENIED, got {other:?}"),
     }
+}
+
+/// One terminal, made the ordinary way, and where it ends up.
+async fn a_terminal(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+    workspace: &bytes::Bytes,
+    title: &str,
+) -> overnight_protocol::v1::Terminal {
+    let mut create = request("terminal.create");
+    create.target_resource_id = Some(workspace.clone());
+    create.payload = Some(request::Payload::TerminalCreate(
+        overnight_protocol::v1::TerminalCreate {
+            title: title.into(),
+            command_preset: "shell".into(),
+            join_active_group: false,
+        },
+    ));
+    let result = client.call(create).await.expect("terminal.create");
+    let Some(result::Value::Terminal(terminal)) = result.value else { panic!("wrong result") };
+    terminal
+}
+
+fn split(target: &bytes::Bytes, side: overnight_protocol::v1::SplitSide) -> overnight_protocol::v1::LayoutUpdate {
+    overnight_protocol::v1::LayoutUpdate {
+        target: Some(target.clone()),
+        side: side as i32,
+        command_preset: "shell".into(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn a_terminal_is_a_pane_in_a_layout_from_the_moment_it_exists() {
+    // There is no untiled state any more, and that is the point: an untiled
+    // terminal was one no navigation command could reach. A terminal IS a tmux
+    // pane, and a pane is always in some window.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let terminal = a_terminal(&mut client, &workspace.id, "one").await;
+
+    let list = layout_call(&mut client, "layout.list", &workspace.id, Default::default()).await;
+    assert_eq!(list.items.len(), 1, "one terminal, one layout");
+    let group = &list.items[0];
+    assert_eq!(group.panes.len(), 1);
+    assert_eq!(group.panes[0].terminal_id, terminal.id);
+    assert!(group.panes[0].focused, "the only pane holds the keyboard");
+    // Geometry that came from tmux rather than from a default.
+    assert!(group.columns > 0 && group.rows > 0, "tmux reported a size: {group:?}");
+}
+
+#[tokio::test]
+async fn splitting_right_puts_the_new_pane_on_the_right() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &workspace.id, "one").await;
+
+    let after = layout_call(
+        &mut client,
+        "layout.split",
+        &workspace.id,
+        split(&first.id, overnight_protocol::v1::SplitSide::Right),
+    )
+    .await;
+
+    assert_eq!(after.items.len(), 1, "a split stays in the same layout");
+    let group = &after.items[0];
+    assert_eq!(group.panes.len(), 2, "{group:?}");
+    let original = group.panes.iter().find(|p| p.terminal_id == first.id).expect("original");
+    let fresh = group.panes.iter().find(|p| p.terminal_id != first.id).expect("new pane");
+    assert!(fresh.left > original.left, "to the right: {group:?}");
+    assert_eq!(fresh.top, original.top, "and on the same row");
+    assert!(fresh.focused, "you split in order to type in the new pane");
+}
+
+#[tokio::test]
+async fn splitting_left_puts_the_new_pane_on_the_left() {
+    // The `-b` half of the vocabulary, and the reason four drop edges need only
+    // two axes: left is right with the new pane placed first.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &workspace.id, "one").await;
+
+    let after = layout_call(
+        &mut client,
+        "layout.split",
+        &workspace.id,
+        split(&first.id, overnight_protocol::v1::SplitSide::Left),
+    )
+    .await;
+    let group = &after.items[0];
+    let original = group.panes.iter().find(|p| p.terminal_id == first.id).expect("original");
+    let fresh = group.panes.iter().find(|p| p.terminal_id != first.id).expect("new pane");
+    assert!(fresh.left < original.left, "to the left: {group:?}");
+}
+
+#[tokio::test]
+async fn splitting_downwards_stacks_rather_than_sitting_beside() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &workspace.id, "one").await;
+
+    let after = layout_call(
+        &mut client,
+        "layout.split",
+        &workspace.id,
+        split(&first.id, overnight_protocol::v1::SplitSide::Bottom),
+    )
+    .await;
+    let group = &after.items[0];
+    let original = group.panes.iter().find(|p| p.terminal_id == first.id).expect("original");
+    let fresh = group.panes.iter().find(|p| p.terminal_id != first.id).expect("new pane");
+    assert!(fresh.top > original.top, "below: {group:?}");
+    assert_eq!(fresh.left, original.left, "and in the same column");
+}
+
+#[tokio::test]
+async fn a_pane_splits_at_any_depth() {
+    // The claim the old preset model could not make. Splitting a pane that is
+    // itself half of a split has to nest, not flatten — which it does, because
+    // tmux keeps the tree and Overnight does not.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &workspace.id, "one").await;
+
+    let after = layout_call(
+        &mut client,
+        "layout.split",
+        &workspace.id,
+        split(&first.id, overnight_protocol::v1::SplitSide::Right),
+    )
+    .await;
+    let second = after.items[0]
+        .panes
+        .iter()
+        .find(|p| p.terminal_id != first.id)
+        .expect("second")
+        .terminal_id
+        .clone();
+
+    // Split the RIGHT-hand pane downwards: three panes, and the two on the right
+    // share a column that the left one does not.
+    let after = layout_call(
+        &mut client,
+        "layout.split",
+        &workspace.id,
+        split(&second, overnight_protocol::v1::SplitSide::Bottom),
+    )
+    .await;
+
+    let group = &after.items[0];
+    assert_eq!(group.panes.len(), 3, "{group:?}");
+    let left = group.panes.iter().find(|p| p.terminal_id == first.id).expect("left");
+    let upper = group.panes.iter().find(|p| p.terminal_id == second).expect("upper right");
+    let lower = group
+        .panes
+        .iter()
+        .find(|p| p.terminal_id != first.id && p.terminal_id != second)
+        .expect("lower right");
+
+    assert_eq!(upper.left, lower.left, "the two on the right share a column");
+    assert!(upper.left > left.left, "and that column is right of the first pane");
+    assert!(lower.top > upper.top, "the new one is below the pane it split");
+    assert_eq!(left.rows, group.rows, "the left pane still spans the full height");
+}
+
+#[tokio::test]
+async fn breaking_a_pane_out_makes_a_layout_and_dropping_it_back_puts_it_where_asked() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &workspace.id, "one").await;
+
+    let after = layout_call(
+        &mut client,
+        "layout.split",
+        &workspace.id,
+        split(&first.id, overnight_protocol::v1::SplitSide::Right),
+    )
+    .await;
+    let second = after.items[0]
+        .panes
+        .iter()
+        .find(|p| p.terminal_id != first.id)
+        .expect("second")
+        .terminal_id
+        .clone();
+
+    let broken = layout_call(
+        &mut client,
+        "layout.break",
+        &workspace.id,
+        overnight_protocol::v1::LayoutUpdate {
+            target: Some(second.clone()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(broken.items.len(), 2, "a pane pulled out is a layout of its own");
+
+    // And dragged back, onto the left edge of the first — which is the whole of
+    // drag and drop: one command, and the pane leaves the layout it was in.
+    let rejoined = layout_call(
+        &mut client,
+        "layout.move",
+        &workspace.id,
+        overnight_protocol::v1::LayoutUpdate {
+            terminals: vec![second.clone()],
+            target: Some(first.id.clone()),
+            side: overnight_protocol::v1::SplitSide::Left as i32,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(rejoined.items.len(), 1, "joining leaves one layout");
+    let group = &rejoined.items[0];
+    let moved = group.panes.iter().find(|p| p.terminal_id == second).expect("moved");
+    let anchor = group.panes.iter().find(|p| p.terminal_id == first.id).expect("anchor");
+    assert!(moved.left < anchor.left, "dropped left, so it is on the left: {group:?}");
 }

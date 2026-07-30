@@ -252,30 +252,42 @@ mod tests {
 
 /// A workspace's tiling, whole.
 ///
-/// Sent whole and never as a diff. Layout is edited from the app, the CLI, and
-/// agents driving the CLI at the same time, so a client that missed one event has
-/// to converge on the next rather than apply a delta to a state it may not hold.
+/// Sent whole and never as a diff. Layout is edited by the app, by the CLI, by
+/// agents driving the CLI, and by anyone attached to the tmux session directly —
+/// so a client that missed one event converges on the next rather than applying a
+/// delta to a state it may not hold.
 pub fn pane_group_list(
     workspace: Uuid,
-    groups: &[overnight_store::PaneGroup],
+    layouts: &[crate::layout::LayoutView],
 ) -> overnight_protocol::v1::PaneGroupList {
     overnight_protocol::v1::PaneGroupList {
         workspace_id: id_bytes(workspace),
-        items: groups.iter().map(pane_group).collect(),
+        items: layouts.iter().map(pane_group).collect(),
     }
 }
 
-pub fn pane_group(group: &overnight_store::PaneGroup) -> overnight_protocol::v1::PaneGroup {
+pub fn pane_group(view: &crate::layout::LayoutView) -> overnight_protocol::v1::PaneGroup {
+    let (columns, rows) = view.size();
     overnight_protocol::v1::PaneGroup {
-        id: id_bytes(group.id),
-        resource_version: group.resource_version,
-        workspace_id: id_bytes(group.workspace_id),
-        name: group.name.clone(),
-        preset: group.preset as i32,
-        ratio: group.ratio,
-        members: group.members.iter().copied().map(id_bytes).collect(),
-        zoomed: group.zoomed.map(id_bytes),
-        focused: group.focused.map(id_bytes),
-        active: group.active,
+        id: view.window.window_id.clone(),
+        workspace_id: id_bytes(view.window.workspace_id),
+        name: view.window.name.clone(),
+        active: view.window.active,
+        columns,
+        rows,
+        layout: view.window.layout.clone(),
+        panes: view
+            .panes
+            .iter()
+            .map(|p| overnight_protocol::v1::PaneRect {
+                terminal_id: id_bytes(p.terminal_id),
+                left: p.left,
+                top: p.top,
+                columns: p.columns,
+                rows: p.rows,
+                focused: p.pane_active,
+                zoomed: p.zoomed,
+            })
+            .collect(),
     }
 }

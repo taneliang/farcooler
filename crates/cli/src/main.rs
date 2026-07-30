@@ -91,66 +91,43 @@ enum Command {
     HostCmd(HostCmd),
 }
 
-/// Tiling, in tmux's vocabulary.
+/// Tiling, in tmux's vocabulary — because it IS tmux.
 ///
-/// The names are tmux's on purpose. A great many people already know that `z`
-/// zooms and that a layout is called `main-vertical`, and inventing a second
-/// vocabulary for the same five arrangements would have cost them that for
-/// nothing.
+/// A window is a layout and a pane is a terminal, so every one of these is a
+/// tmux command with the identity bookkeeping done for you. The names are tmux's
+/// on purpose: a great many people already know that `z` zooms and that a layout
+/// is called `main-vertical`.
 #[derive(Subcommand)]
 enum LayoutCmd {
-    /// Show a workspace's groups and which panes are in them.
+    /// Show a workspace's layouts and where tmux has put every pane.
     Show { workspace: String },
-    /// Put terminals on screen together, replacing what was there.
+    /// Split a pane, running something in the new half.
     ///
-    /// With no terminals named, tiles every live terminal in the workspace —
-    /// the one-word version of the whole feature.
-    Tile {
-        workspace: String,
-        terminals: Vec<String>,
-        /// even-horizontal, even-vertical, main-vertical, main-horizontal, tiled.
-        #[arg(long)]
-        preset: Option<String>,
-        /// Which group, by number or short id. Defaults to the one on screen.
-        #[arg(long)]
-        group: Option<String>,
-    },
-    /// Put terminals in a NEW group of their own, and show it.
-    ///
-    /// The two-sets-of-tiles command. `layout tile` replaces what is on screen;
-    /// this leaves the existing group alone and gives these terminals their own,
-    /// which is what "tile 5 and 6 together, and only 5 and 6" means.
+    /// The arbitrary-split primitive: any edge of any pane, at any depth.
     Split {
         workspace: String,
-        terminals: Vec<String>,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        preset: Option<String>,
+        /// The pane to split. Defaults to the focused one.
+        terminal: Option<String>,
+        /// left, right, top, or bottom.
+        #[arg(long, default_value = "right")]
+        side: String,
+        /// What to run. Defaults to your shell.
+        #[arg(long, default_value = "shell")]
+        preset: String,
     },
-    /// Add terminals to a group without disturbing the rest.
+    /// Move an existing pane against another, on an edge.
     ///
-    /// A terminal is in at most one group, so adding it to another MOVES it —
-    /// which is how you split five tiled terminals into two sets.
-    Add {
+    /// A drag and drop. Works across layouts: the pane leaves the one it was in.
+    Move {
         workspace: String,
-        terminals: Vec<String>,
-        /// Which group, by number or short id. Defaults to the one on screen.
-        #[arg(long)]
-        group: Option<String>,
+        terminal: String,
+        onto: String,
+        #[arg(long, default_value = "right")]
+        side: String,
     },
-    /// Take terminals off screen. They keep running.
-    Drop { workspace: String, terminals: Vec<String> },
-    /// Set the arrangement, the main-pane share, or the group's name.
-    Preset {
-        workspace: String,
-        preset: Option<String>,
-        /// Fraction of the long axis for the main pane, 0.15 to 0.85.
-        #[arg(long)]
-        ratio: Option<f64>,
-        #[arg(long)]
-        name: Option<String>,
-    },
+    /// Set the arrangement: even-horizontal, even-vertical, main-vertical,
+    /// main-horizontal, tiled.
+    Preset { workspace: String, preset: String },
     /// Next arrangement of the same panes. tmux's `prefix Space`.
     Cycle { workspace: String },
     /// Move focus: a terminal, `--next`, `--prev`, or `--pane N`.
@@ -161,15 +138,10 @@ enum LayoutCmd {
         next: bool,
         #[arg(long)]
         prev: bool,
-        /// One-based, the way `prefix 1` reads.
         #[arg(long, value_name = "N")]
-        pane: Option<usize>,
+        pane: Option<u32>,
     },
-    /// Fill the group with one pane. tmux's `prefix z`.
-    ///
-    /// With no terminal, toggles on whatever is focused. While zoomed, moving
-    /// focus keeps the zoom and brings the new pane forward — which is the point
-    /// of zooming when you have four agents rather than one.
+    /// Fill the layout with one pane. tmux's `prefix z`.
     Zoom {
         workspace: String,
         terminal: Option<String>,
@@ -178,22 +150,22 @@ enum LayoutCmd {
     },
     /// Exchange two panes' positions.
     Swap { workspace: String, a: String, b: String },
-    /// Move the focused pane one place along. tmux's `prefix {` and `}`.
-    Shift {
+    /// Move a divider, in cells.
+    Resize {
         workspace: String,
-        #[arg(long)]
-        back: bool,
+        terminal: String,
+        #[arg(long, default_value = "right")]
+        side: String,
+        #[arg(long, default_value_t = 2)]
+        cells: i32,
     },
-    /// Several layouts per workspace, one on screen. tmux's windows.
-    #[command(subcommand)]
-    Group(LayoutGroupCmd),
-}
-
-#[derive(Subcommand)]
-enum LayoutGroupCmd {
-    /// A new, empty group, and show it.
-    New { workspace: String, name: Option<String> },
-    /// Show a group by name, by number, or the next one.
+    /// Pull a pane out into a layout of its own. tmux's `break-pane`.
+    Break { workspace: String, terminal: Option<String> },
+    /// Name a layout.
+    Rename { workspace: String, name: String },
+    /// Tell tmux the size of the viewport showing this layout, in cells.
+    Viewport { workspace: String, columns: u32, rows: u32 },
+    /// Show a different layout: by number, by name, or the next one.
     Select {
         workspace: String,
         group: Option<String>,
@@ -202,8 +174,6 @@ enum LayoutGroupCmd {
         #[arg(long)]
         prev: bool,
     },
-    /// Stop showing a group. Its terminals keep running, backgrounded.
-    Close { workspace: String },
 }
 
 #[derive(Subcommand)]
@@ -933,16 +903,19 @@ async fn events(host: Option<&str>) -> Fallible {
                 "kind": "layout",
                 "workspace": uuid_of(&l.workspace_id).to_string(),
                 "groups": l.items.iter().map(|g| serde_json::json!({
-                    "id": uuid_of(&g.id).to_string(),
-                    "short": short_bytes(&g.id),
+                    "id": g.id,
                     "name": g.name,
-                    "preset": overnight_daemon::layout::preset_name(g.preset()),
-                    "ratio": g.ratio,
                     "active": g.active,
-                    "zoomed": g.zoomed.as_ref().map(|z| uuid_of(z).to_string()),
-                    "focused": g.focused.as_ref().map(|f| uuid_of(f).to_string()),
-                    "members": g.members.iter()
-                        .map(|m| uuid_of(m).to_string()).collect::<Vec<_>>(),
+                    "columns": g.columns,
+                    "rows": g.rows,
+                    "layout": g.layout,
+                    "panes": g.panes.iter().map(|p| serde_json::json!({
+                        "id": uuid_of(&p.terminal_id).to_string(),
+                        "short": short_bytes(&p.terminal_id),
+                        "left": p.left, "top": p.top,
+                        "columns": p.columns, "rows": p.rows,
+                        "focused": p.focused, "zoomed": p.zoomed,
+                    })).collect::<Vec<_>>(),
                 })).collect::<Vec<_>>(),
             }),
             // Other resources have no events yet. Skipping is right: a client
@@ -967,156 +940,72 @@ async fn events(host: Option<&str>) -> Fallible {
 
 async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     use overnight_daemon::layout::parse_preset;
-    use overnight_protocol::v1::LayoutUpdate;
+    use overnight_protocol::v1::{LayoutUpdate, SplitSide};
 
     let mut link = connect_to(host).await?;
     let workspaces = list_workspaces(&mut link).await?;
 
-    let name_of = |cmd: &LayoutCmd| -> &'static str {
-        match cmd {
-            LayoutCmd::Show { .. } => "layout.list",
-            LayoutCmd::Tile { .. } => "layout.tile",
-            // Two calls, so the verb is decided where it runs.
-            LayoutCmd::Split { .. } => "layout.tile",
-            LayoutCmd::Add { .. } => "layout.add",
-            LayoutCmd::Drop { .. } => "layout.drop",
-            LayoutCmd::Preset { .. } => "layout.preset",
-            LayoutCmd::Cycle { .. } => "layout.cycle",
-            LayoutCmd::Focus { .. } => "layout.focus",
-            LayoutCmd::Zoom { .. } => "layout.zoom",
-            LayoutCmd::Swap { .. } => "layout.swap",
-            LayoutCmd::Shift { .. } => "layout.shift",
-            LayoutCmd::Group(LayoutGroupCmd::New { .. }) => "layout.group.new",
-            LayoutCmd::Group(LayoutGroupCmd::Select { .. }) => "layout.group.select",
-            LayoutCmd::Group(LayoutGroupCmd::Close { .. }) => "layout.group.close",
-        }
-    };
-    let method = name_of(&cmd);
-
     let workspace_arg = match &cmd {
         LayoutCmd::Show { workspace }
-        | LayoutCmd::Tile { workspace, .. }
         | LayoutCmd::Split { workspace, .. }
-        | LayoutCmd::Add { workspace, .. }
-        | LayoutCmd::Drop { workspace, .. }
+        | LayoutCmd::Move { workspace, .. }
         | LayoutCmd::Preset { workspace, .. }
         | LayoutCmd::Cycle { workspace }
         | LayoutCmd::Focus { workspace, .. }
         | LayoutCmd::Zoom { workspace, .. }
         | LayoutCmd::Swap { workspace, .. }
-        | LayoutCmd::Shift { workspace, .. }
-        | LayoutCmd::Group(
-            LayoutGroupCmd::New { workspace, .. }
-            | LayoutGroupCmd::Select { workspace, .. }
-            | LayoutGroupCmd::Close { workspace },
-        ) => workspace.clone(),
+        | LayoutCmd::Resize { workspace, .. }
+        | LayoutCmd::Break { workspace, .. }
+        | LayoutCmd::Rename { workspace, .. }
+        | LayoutCmd::Viewport { workspace, .. }
+        | LayoutCmd::Select { workspace, .. } => workspace.clone(),
     };
     let ws = resolve(&workspaces, &workspace_arg, |w| &w.id, "workspace")?;
     let workspace_id = uuid_of(&ws.id);
 
-    // Terminals are named by short id, so they have to be resolved against the
-    // workspace before anything can be said about them.
-    let terminals_of = list_terminals(&mut link, Some(workspace_id)).await?;
-    let terminals = &terminals_of;
+    let terminals = list_terminals(&mut link, Some(workspace_id)).await?;
     let pick = |given: &str| -> Result<bytes::Bytes, String> {
         resolve(&terminals, given, |t| &t.id, "terminal").map(|t| t.id.clone())
     };
-    let pick_all = |given: &[String]| -> Result<Vec<bytes::Bytes>, String> {
-        given.iter().map(|g| pick(g)).collect()
+
+    let method = match &cmd {
+        LayoutCmd::Show { .. } => "layout.list",
+        LayoutCmd::Split { .. } => "layout.split",
+        LayoutCmd::Move { .. } => "layout.move",
+        LayoutCmd::Preset { .. } => "layout.preset",
+        LayoutCmd::Cycle { .. } => "layout.cycle",
+        LayoutCmd::Focus { .. } => "layout.focus",
+        LayoutCmd::Zoom { .. } => "layout.zoom",
+        LayoutCmd::Swap { .. } => "layout.swap",
+        LayoutCmd::Resize { .. } => "layout.resize",
+        LayoutCmd::Break { .. } => "layout.break",
+        LayoutCmd::Rename { .. } => "layout.rename",
+        LayoutCmd::Viewport { .. } => "layout.viewport",
+        LayoutCmd::Select { .. } => "layout.group.select",
     };
-
-    // Groups are named by the number you count on screen, or by short id for a
-    // script. Resolved once, here, because three commands accept one.
-    let group_named = |given: &Option<String>,
-                       existing: &[overnight_protocol::v1::PaneGroup]|
-     -> Result<Option<bytes::Bytes>, String> {
-        let Some(given) = given else { return Ok(None) };
-        match given.parse::<usize>() {
-            Ok(n) if n >= 1 && n <= existing.len() => Ok(Some(existing[n - 1].id.clone())),
-            _ => resolve(existing, given, |g| &g.id, "group").map(|g| Some(g.id.clone())),
-        }
-    };
-
-    // `layout split` is two calls: make a group, then fill it. Kept out of the
-    // daemon because it is a convenience, not a rule — and a rule that only the
-    // CLI could express would not be reachable from the app.
-    if let LayoutCmd::Split { terminals, name, preset, .. } = &cmd {
-        let members = pick_all(terminals)?;
-        if members.is_empty() {
-            return Err("name the terminals that should share the new group".into());
-        }
-        let r = link
-            .call(with(
-                req_for("layout.group.new", workspace_id),
-                request::Payload::LayoutUpdate(LayoutUpdate {
-                    name: name.clone().unwrap_or_default(),
-                    ..Default::default()
-                }),
-            ))
-            .await?;
-        let result::Value::PaneGroupList(list) = expect_value(r.value, "layout")? else {
-            return Err("the daemon returned the wrong resource".into());
-        };
-        let created = list
-            .items
-            .iter()
-            .find(|g| g.active)
-            .map(|g| g.id.clone())
-            .ok_or("the new group did not become the active one")?;
-
-        let r = link
-            .call(with(
-                req_for("layout.tile", workspace_id),
-                request::Payload::LayoutUpdate(LayoutUpdate {
-                    group_id: Some(created),
-                    terminals: members,
-                    preset: match preset {
-                        Some(text) => {
-                            Some(parse_preset(text).ok_or_else(|| unknown_preset(text))? as i32)
-                        }
-                        None => None,
-                    },
-                    ..Default::default()
-                }),
-            ))
-            .await?;
-        let result::Value::PaneGroupList(list) = expect_value(r.value, "layout")? else {
-            return Err("the daemon returned the wrong resource".into());
-        };
-        print_layout(&list, &terminals_of, json);
-        return Ok(());
-    }
 
     let mut update = LayoutUpdate::default();
     match &cmd {
         LayoutCmd::Show { .. } | LayoutCmd::Cycle { .. } => {}
-        LayoutCmd::Split { .. } => unreachable!("handled above"),
-        LayoutCmd::Tile { terminals, preset, group, .. } => {
-            update.terminals = pick_all(terminals)?;
-            if let Some(text) = preset {
-                update.preset =
-                    Some(parse_preset(text).ok_or_else(|| unknown_preset(text))? as i32);
+        LayoutCmd::Split { terminal, side, preset, .. } => {
+            update.side = parse_side(side)? as i32;
+            update.command_preset = preset.clone();
+            if let Some(given) = terminal {
+                update.target = Some(pick(given)?);
             }
-            update.group_id = group_named(group, &fetch_layout(&mut link, workspace_id).await?)?;
         }
-        LayoutCmd::Add { terminals, group, .. } => {
-            update.terminals = pick_all(terminals)?;
-            update.group_id = group_named(group, &fetch_layout(&mut link, workspace_id).await?)?;
+        LayoutCmd::Move { terminal, onto, side, .. } => {
+            update.terminals = vec![pick(terminal)?];
+            update.target = Some(pick(onto)?);
+            update.side = parse_side(side)? as i32;
         }
-        LayoutCmd::Drop { terminals, .. } => {
-            update.terminals = pick_all(terminals)?;
-        }
-        LayoutCmd::Preset { preset, ratio, name, .. } => {
-            if let Some(text) = preset {
-                update.preset =
-                    Some(parse_preset(text).ok_or_else(|| unknown_preset(text))? as i32);
-            }
-            update.ratio = *ratio;
-            update.name = name.clone().unwrap_or_default();
+        LayoutCmd::Preset { preset, .. } => {
+            update.preset =
+                Some(parse_preset(preset).ok_or_else(|| unknown_preset(preset))? as i32);
         }
         LayoutCmd::Focus { terminal, prev, pane, .. } => match (terminal, pane) {
             (Some(given), _) => update.focus = Some(pick(given)?),
-            (None, Some(n)) => update.pane = Some(*n as u32),
+            (None, Some(n)) => update.pane = Some(*n),
             (None, None) => update.step = Some(if *prev { -1 } else { 1 }),
         },
         LayoutCmd::Zoom { terminal, off, .. } => {
@@ -1128,20 +1017,36 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         LayoutCmd::Swap { a, b, .. } => {
             update.terminals = vec![pick(a)?, pick(b)?];
         }
-        LayoutCmd::Shift { back, .. } => {
-            update.step = Some(if *back { -1 } else { 1 });
+        LayoutCmd::Resize { terminal, side, cells, .. } => {
+            update.target = Some(pick(terminal)?);
+            update.side = parse_side(side)? as i32;
+            update.resize = Some(*cells);
         }
-        LayoutCmd::Group(LayoutGroupCmd::New { name, .. }) => {
-            update.name = name.clone().unwrap_or_default();
-        }
-        LayoutCmd::Group(LayoutGroupCmd::Select { group, prev, .. }) => {
-            let existing = fetch_layout(&mut link, workspace_id).await?;
-            match group_named(group, &existing)? {
-                Some(id) => update.group_id = Some(id),
-                None => update.step = Some(if *prev { -1 } else { 1 }),
+        LayoutCmd::Break { terminal, .. } => {
+            if let Some(given) = terminal {
+                update.target = Some(pick(given)?);
             }
         }
-        LayoutCmd::Group(LayoutGroupCmd::Close { .. }) => {}
+        LayoutCmd::Rename { name, .. } => update.name = name.clone(),
+        LayoutCmd::Viewport { columns, rows, .. } => {
+            update.columns = Some(*columns);
+            update.rows = Some(*rows);
+        }
+        LayoutCmd::Select { group, prev, .. } => match group {
+            Some(given) => {
+                let existing = fetch_layout(&mut link, workspace_id).await?;
+                let found = match given.parse::<usize>() {
+                    Ok(n) if n >= 1 && n <= existing.len() => existing[n - 1].id.clone(),
+                    _ => existing
+                        .iter()
+                        .find(|g| g.name.eq_ignore_ascii_case(given) || g.id == *given)
+                        .map(|g| g.id.clone())
+                        .ok_or_else(|| format!("no layout matching \"{given}\""))?,
+                };
+                update.group_id = found;
+            }
+            None => update.step = Some(if *prev { -1 } else { 1 }),
+        },
     }
 
     let request = if matches!(cmd, LayoutCmd::Show { .. }) {
@@ -1154,8 +1059,22 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         return Err("the daemon returned the wrong resource".into());
     };
 
-    print_layout(&list, &terminals_of, json);
+    // Re-read: a split creates a terminal the first listing did not have.
+    let terminals = list_terminals(&mut link, Some(workspace_id)).await?;
+    print_layout(&list, &terminals, json);
     Ok(())
+}
+
+/// A drop edge by name.
+fn parse_side(text: &str) -> Result<overnight_protocol::v1::SplitSide, String> {
+    use overnight_protocol::v1::SplitSide;
+    Ok(match text.trim().to_ascii_lowercase().as_str() {
+        "left" | "l" => SplitSide::Left,
+        "right" | "r" => SplitSide::Right,
+        "top" | "up" | "u" | "above" => SplitSide::Top,
+        "bottom" | "down" | "d" | "below" => SplitSide::Bottom,
+        other => return Err(format!("unknown side `{other}`; try left, right, top or bottom")),
+    })
 }
 
 fn print_layout(
@@ -1163,41 +1082,46 @@ fn print_layout(
     terminals: &[Terminal],
     json: bool,
 ) {
-    use overnight_daemon::layout::preset_name;
-
     if json {
         println!("{}", layout_json(list, terminals));
         return;
     }
-
     if list.items.is_empty() {
         println!("nothing tiled");
         return;
     }
     for (position, group) in list.items.iter().enumerate() {
         println!(
-            "{} {}. {}  {}  {} pane{}",
+            "{} {}. {}  {}x{}  {} pane{}",
             if group.active { "*" } else { " " },
             position + 1,
             group.name,
-            preset_name(group.preset()),
-            group.members.len(),
-            if group.members.len() == 1 { "" } else { "s" },
+            group.columns,
+            group.rows,
+            group.panes.len(),
+            if group.panes.len() == 1 { "" } else { "s" },
         );
-        for (index, member) in group.members.iter().enumerate() {
+        for (index, pane) in group.panes.iter().enumerate() {
             let title = terminals
                 .iter()
-                .find(|t| t.id == *member)
+                .find(|t| t.id == pane.terminal_id)
                 .map(label)
                 .unwrap_or_else(|| "?".into());
-            // Zoom and focus are shown as marks rather than columns: they are
-            // one pane each, and a column of blanks reads as missing data.
             let marks = format!(
                 "{}{}",
-                if group.focused.as_ref() == Some(member) { ">" } else { " " },
-                if group.zoomed.as_ref() == Some(member) { "z" } else { " " },
+                if pane.focused { ">" } else { " " },
+                if pane.zoomed { "z" } else { " " },
             );
-            println!("   {marks} {}  {}  {}", index + 1, short_bytes(member), truncate(&title, 40));
+            println!(
+                "   {marks} {}  {}  {:>3},{:<3} {:>3}x{:<3}  {}",
+                index + 1,
+                short_bytes(&pane.terminal_id),
+                pane.left,
+                pane.top,
+                pane.columns,
+                pane.rows,
+                truncate(&title, 30)
+            );
         }
     }
 }
@@ -1224,22 +1148,22 @@ fn layout_json(
     list: &overnight_protocol::v1::PaneGroupList,
     terminals: &[Terminal],
 ) -> serde_json::Value {
-    use overnight_daemon::layout::preset_name;
     serde_json::json!({
         "workspace": uuid_of(&list.workspace_id).to_string(),
         "groups": list.items.iter().map(|g| serde_json::json!({
-            "id": uuid_of(&g.id).to_string(),
-            "short": short_bytes(&g.id),
+            "id": g.id,
             "name": g.name,
-            "preset": preset_name(g.preset()),
-            "ratio": g.ratio,
             "active": g.active,
-            "zoomed": g.zoomed.as_ref().map(|z| uuid_of(z).to_string()),
-            "focused": g.focused.as_ref().map(|f| uuid_of(f).to_string()),
-            "members": g.members.iter().map(|m| serde_json::json!({
-                "id": uuid_of(m).to_string(),
-                "short": short_bytes(m),
-                "title": terminals.iter().find(|t| t.id == *m).map(label),
+            "columns": g.columns,
+            "rows": g.rows,
+            "layout": g.layout,
+            "panes": g.panes.iter().map(|p| serde_json::json!({
+                "id": uuid_of(&p.terminal_id).to_string(),
+                "short": short_bytes(&p.terminal_id),
+                "left": p.left, "top": p.top,
+                "columns": p.columns, "rows": p.rows,
+                "focused": p.focused, "zoomed": p.zoomed,
+                "title": terminals.iter().find(|t| t.id == p.terminal_id).map(label),
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     })

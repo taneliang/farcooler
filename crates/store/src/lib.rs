@@ -13,7 +13,6 @@
 
 mod backup;
 mod error;
-pub mod layout;
 mod migrate;
 pub mod models;
 mod store;
@@ -21,5 +20,4 @@ mod store;
 pub use models::{
     IdempotencyRecord, Repository, RepositoryRoot, Terminal, TerminalUpdate, Workspace,
 };
-pub use layout::{DEFAULT_RATIO, PaneGroup};
 pub use store::{IDEMPOTENCY_RETENTION_MILLIS, Store};

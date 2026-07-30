@@ -1,58 +1,63 @@
-//! Tiling policy: what a layout change *means*.
+//! Tiling, delegated to tmux.
 //!
-//! The store reads and writes rows. This file holds the rules, and there are
-//! only a handful of them, but each one is the difference between tiling that
-//! feels like tmux and tiling that feels like a bug:
+//! A tmux **window** is a layout and a tmux **pane** is a terminal. That is the
+//! whole model, and everything else follows from it:
 //!
-//! - **Zoom follows focus.** In tmux, moving to another pane while zoomed
-//!   un-zooms. Here it does not: you stay zoomed and the new pane fills the
-//!   screen instead. That is a deliberate divergence — a zoomed agent is a
-//!   reading posture, and cycling between four agents each at full size is the
-//!   thing people actually want when they zoom. `prefix z` is still the way out.
+//! - Splitting a pane arbitrarily is `split-window -h|-v [-b]`, so a drop on any
+//!   edge of any pane is one command and there is no tree here to maintain.
+//! - The five named arrangements are `select-layout`, under tmux's own names.
+//! - Dividers move with `resize-pane`. Zoom is `resize-pane -Z`.
+//! - Moving a pane between layouts is `join-pane`; pulling one out is
+//!   `break-pane`.
+//! - Where every pane sits comes from `list-panes`, in cells, computed by tmux.
 //!
-//! - **Nothing tiles by default.** A terminal belongs to a group only because
-//!   someone put it there. Four agents in a worktree with three on screen is the
-//!   stated case, and it only works if membership is opt-in.
+//! Overnight stores none of it, and that is the same rule the rest of the daemon
+//! already follows: tmux is the authority for live runtime, and an arrangement of
+//! live processes is runtime. If the server dies the panes die with it, and there
+//! is no arrangement left to restore them into.
 //!
-//! - **Un-tiling never kills.** Dropping a pane backgrounds its terminal.
-//!   Closing a group backgrounds all of them. If closing a layout could stop an
-//!   agent, nobody would ever close one.
+//! What the daemon still owns is identity — which pane is which terminal, tagged
+//! on the pane itself, so a window holding four panes reports four terminals.
 //!
-//! - **A group that empties behind your back disappears.** Moving three panes
-//!   into another group leaves the first one empty, and an empty layout you did
-//!   not ask for is a ghost the next `tile` has to reason about. The group you
-//!   are looking at is exempt: `group new` deliberately makes an empty one, and
-//!   dropping the last pane out of the group in front of you leaves somewhere to
-//!   tile into rather than silently un-tiling.
-//!
-//! All of it is durable and all of it is reachable from the CLI, which is the
-//! same requirement stated twice: an agent that can open a terminal but not
-//! place it on screen is only half automatable.
+//! This replaces a durable split model in SQLite with five preset arrangements, a
+//! geometry function in the daemon, and a second geometry function in every client
+//! that drew it: three implementations of one question, and the preset model could
+//! not express an arbitrary split at all.
 
+use overnight_core::inventory::TaggedPane;
 use overnight_core::{DomainError, Result};
-use overnight_protocol::v1::{LayoutPreset, TerminalState};
-use overnight_store::PaneGroup;
+use overnight_protocol::v1::{LayoutPreset, SplitSide};
+use overnight_tmux::windows::{Axis, ManagedLayout, Preset};
 use uuid::Uuid;
 
 use crate::service::Service;
 
-/// The presets `layout.cycle` walks, in order.
-///
-/// tmux's `prefix Space` order, so the muscle memory transfers. Ends back at the
-/// start, because a cycle that stops is a list.
-const CYCLE: [LayoutPreset; 5] = [
-    LayoutPreset::EvenHorizontal,
-    LayoutPreset::EvenVertical,
-    LayoutPreset::MainVertical,
-    LayoutPreset::MainHorizontal,
-    LayoutPreset::Tiled,
-];
+/// A layout and the panes tmux placed in it.
+#[derive(Debug, Clone)]
+pub struct LayoutView {
+    pub window: ManagedLayout,
+    /// Left to right, top to bottom — the order a person counts panes on screen,
+    /// and the order `prefix 1..9` selects them in.
+    pub panes: Vec<TaggedPane>,
+}
 
-/// Parse a preset from the name tmux uses for it.
-///
-/// The tmux spellings are the canonical ones, plus the obvious short forms,
-/// because `overnight layout preset grid` is what someone types before they
-/// remember it is called `tiled`.
+impl LayoutView {
+    /// The window's size in cells.
+    ///
+    /// Derived from the panes rather than queried separately: a window's size is
+    /// exactly the extent of its panes, and a second round trip could disagree
+    /// with the first.
+    pub fn size(&self) -> (u32, u32) {
+        let columns = self.panes.iter().map(|p| p.left + p.columns).max().unwrap_or(0);
+        let rows = self.panes.iter().map(|p| p.top + p.rows).max().unwrap_or(0);
+        (columns, rows)
+    }
+
+    pub fn focused(&self) -> Option<&TaggedPane> {
+        self.panes.iter().find(|p| p.pane_active)
+    }
+}
+
 pub fn parse_preset(text: &str) -> Option<LayoutPreset> {
     Some(match text.trim().to_ascii_lowercase().replace('_', "-").as_str() {
         "even-horizontal" | "columns" | "cols" | "row" => LayoutPreset::EvenHorizontal,
@@ -65,430 +70,335 @@ pub fn parse_preset(text: &str) -> Option<LayoutPreset> {
 }
 
 pub fn preset_name(preset: LayoutPreset) -> &'static str {
+    tmux_preset(preset).as_str()
+}
+
+fn tmux_preset(preset: LayoutPreset) -> Preset {
     match preset {
-        LayoutPreset::EvenHorizontal => "even-horizontal",
-        LayoutPreset::EvenVertical => "even-vertical",
-        LayoutPreset::MainVertical => "main-vertical",
-        LayoutPreset::MainHorizontal => "main-horizontal",
-        LayoutPreset::Tiled | LayoutPreset::Unspecified => "tiled",
+        LayoutPreset::EvenHorizontal => Preset::EvenHorizontal,
+        LayoutPreset::EvenVertical => Preset::EvenVertical,
+        LayoutPreset::MainVertical => Preset::MainVertical,
+        LayoutPreset::MainHorizontal => Preset::MainHorizontal,
+        LayoutPreset::Tiled | LayoutPreset::Unspecified => Preset::Tiled,
     }
 }
 
-fn next_preset(current: LayoutPreset) -> LayoutPreset {
-    let at = CYCLE.iter().position(|p| *p == current).unwrap_or(CYCLE.len() - 1);
-    CYCLE[(at + 1) % CYCLE.len()]
+/// A drop edge, as tmux's split arguments.
+///
+/// Four sides need only two axes and a flag: left is right with `-b`, and top is
+/// bottom with `-b`, because `-b` means "put the new pane first". That is the
+/// entire vocabulary of an arbitrary directional split, which is why delegating
+/// leaves nothing here to maintain.
+pub fn split_args(side: SplitSide) -> (Axis, bool) {
+    match side {
+        SplitSide::Left => (Axis::Horizontal, true),
+        SplitSide::Top => (Axis::Vertical, true),
+        SplitSide::Bottom => (Axis::Vertical, false),
+        // A caller that did not say meant `prefix %`.
+        SplitSide::Right | SplitSide::Unspecified => (Axis::Horizontal, false),
+    }
 }
 
 impl Service {
-    /// Every group in a workspace, in order.
-    pub fn layout(&self, workspace: Uuid) -> Result<Vec<PaneGroup>> {
-        self.store.pane_groups(workspace)
-    }
+    /// Every layout in a workspace, in window order, with tmux's geometry.
+    pub async fn layout(&self, workspace: Uuid) -> Result<Vec<LayoutView>> {
+        let panes = self.tmux.list_tagged_panes().await?;
+        let mut windows: Vec<ManagedLayout> = self
+            .tmux
+            .list_layouts()
+            .await?
+            .into_iter()
+            .filter(|w| w.workspace_id == workspace)
+            .collect();
+        windows.sort_by_key(|w| w.index);
 
-    /// What every mutation returns: the workspace's groups, minus the ghosts.
-    ///
-    /// A pane joining another group leaves the one it was in, and if it was the
-    /// last one that group is now an empty layout nobody asked for. The active
-    /// group is spared, because there an empty layout IS the request — `group
-    /// new` makes one on purpose, and emptying the group in front of you should
-    /// leave somewhere to tile into rather than quietly turning tiling off.
-    fn finish(&self, workspace: Uuid) -> Result<Vec<PaneGroup>> {
-        for group in self.store.pane_groups(workspace)? {
-            if group.members.is_empty() && !group.active {
-                self.store.delete_pane_group(group.id)?;
-            }
-        }
-        self.layout(workspace)
-    }
-
-    /// The group being acted on: the one named, or the workspace's active one.
-    ///
-    /// "The active one" is what a person means by "here" and what an agent means
-    /// when it does not say, so omitting the id is the common case rather than
-    /// an error.
-    fn resolve_group(&self, workspace: Uuid, group: Option<Uuid>) -> Result<PaneGroup> {
-        match group {
-            Some(id) => {
-                let found = self.store.pane_group(id)?;
-                if found.workspace_id != workspace {
-                    return Err(DomainError::NotFound);
-                }
-                Ok(found)
-            }
-            None => self.store.active_pane_group(workspace)?.ok_or(DomainError::NotFound),
-        }
-    }
-
-    /// The group to act on, creating one if the workspace has none.
-    ///
-    /// Only for the calls that are unambiguously "put this on screen". A focus
-    /// or a zoom against a workspace with no layout is a mistake, not a request
-    /// to invent one.
-    async fn group_or_create(&self, workspace: Uuid, group: Option<Uuid>) -> Result<PaneGroup> {
-        match self.resolve_group(workspace, group) {
-            Ok(found) => Ok(found),
-            Err(DomainError::NotFound) if group.is_none() => {
-                self.store.create_pane_group(
-                    Uuid::now_v7(),
-                    workspace,
-                    "1",
-                    LayoutPreset::Tiled,
-                )
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Put a set of terminals on screen together, replacing what was there.
-    ///
-    /// An empty list means every live terminal in the workspace, which is the
-    /// one-word version of the whole feature: `overnight layout tile <ws>` and
-    /// the worktree you are in is now four panes.
-    pub async fn layout_tile(
-        &self,
-        workspace: Uuid,
-        group: Option<Uuid>,
-        terminals: &[Uuid],
-        preset: Option<LayoutPreset>,
-    ) -> Result<Vec<PaneGroup>> {
-        let target = self.group_or_create(workspace, group).await?;
-        let members = if terminals.is_empty() {
-            self.live_terminals(workspace).await?
-        } else {
-            self.verify_members(workspace, terminals).await?
-        };
-
-        if members.is_empty() {
-            // Nothing to show. Tiling an empty workspace leaving an empty group
-            // behind would mean the next tile has a ghost to reason about.
-            self.store.delete_pane_group(target.id)?;
-            return self.layout(workspace);
-        }
-
-        let mut saved = self.store.set_pane_members(target.id, &members)?;
-        saved.focused = Some(match saved.focused {
-            Some(existing) if members.contains(&existing) => existing,
-            _ => members[0],
-        });
-        // Re-tiling drops zoom. You asked to see several things.
-        saved.zoomed = None;
-        if let Some(preset) = preset {
-            if preset != LayoutPreset::Unspecified {
-                saved.preset = preset;
-            }
-        }
-        self.store.save_pane_group(&saved)?;
-        self.finish(workspace)
-    }
-
-    /// Add terminals to a group without disturbing the ones already in it.
-    pub async fn layout_add(
-        &self,
-        workspace: Uuid,
-        group: Option<Uuid>,
-        terminals: &[Uuid],
-    ) -> Result<Vec<PaneGroup>> {
-        let target = self.group_or_create(workspace, group).await?;
-        let incoming = self.verify_members(workspace, terminals).await?;
-        if incoming.is_empty() {
-            return self.layout(workspace);
-        }
-
-        let mut members = target.members.clone();
-        members.retain(|m| !incoming.contains(m));
-        members.extend(incoming.iter().copied());
-
-        let mut saved = self.store.set_pane_members(target.id, &members)?;
-        // Focus the newest arrival: adding a pane is how you make a pane you
-        // intend to type in.
-        saved.focused = incoming.last().copied();
-        // A pane arriving while another is zoomed would otherwise be invisible.
-        saved.zoomed = saved.zoomed.and(saved.focused);
-        self.store.save_pane_group(&saved)?;
-        self.finish(workspace)
-    }
-
-    /// Take terminals off screen. They keep running.
-    pub async fn layout_drop(&self, workspace: Uuid, terminals: &[Uuid]) -> Result<Vec<PaneGroup>> {
-        // Which groups are affected has to be read before the membership rows
-        // are gone, or there is nothing left to point at.
-        let mut touched = Vec::new();
-        for terminal in terminals {
-            if let Some(group) = self.store.pane_group_of(*terminal)? {
-                if !touched.contains(&group) {
-                    touched.push(group);
-                }
-            }
-        }
-        self.store.drop_pane_members(terminals)?;
-
-        for id in touched {
-            let group = self.store.pane_group(id)?;
-            if group.members.is_empty() {
-                self.store.delete_pane_group(id)?;
-                continue;
-            }
-            if group.focused.is_none() {
-                // The focused pane left, so focus has to land somewhere or the
-                // next keystroke has nothing to act on.
-                let mut fixed = group.clone();
-                fixed.focused = group.members.first().copied();
-                self.store.save_pane_group(&fixed)?;
-            }
-        }
-        self.finish(workspace)
-    }
-
-    /// Change how a group is arranged.
-    pub async fn layout_configure(
-        &self,
-        workspace: Uuid,
-        group: Option<Uuid>,
-        preset: Option<LayoutPreset>,
-        ratio: Option<f64>,
-        name: Option<&str>,
-    ) -> Result<Vec<PaneGroup>> {
-        let mut target = self.resolve_group(workspace, group)?;
-        if let Some(preset) = preset {
-            if preset != LayoutPreset::Unspecified {
-                target.preset = preset;
-            }
-        }
-        if let Some(ratio) = ratio {
-            // Clamped rather than rejected: a main pane at 2% is not a layout,
-            // and an agent that computed 0.98 meant "mostly this one".
-            if !ratio.is_finite() {
-                return Err(DomainError::InvalidArgument { what: "ratio" });
-            }
-            target.ratio = ratio.clamp(0.15, 0.85);
-        }
-        if let Some(name) = name {
-            let trimmed = name.trim();
-            if !trimmed.is_empty() {
-                target.name = trimmed.chars().take(48).collect();
-            }
-        }
-        self.store.save_pane_group(&target)?;
-        self.finish(workspace)
-    }
-
-    /// tmux's `prefix Space`: the next arrangement of the same panes.
-    pub async fn layout_cycle(&self, workspace: Uuid, group: Option<Uuid>) -> Result<Vec<PaneGroup>> {
-        let mut target = self.resolve_group(workspace, group)?;
-        target.preset = next_preset(target.preset);
-        self.store.save_pane_group(&target)?;
-        self.finish(workspace)
-    }
-
-    /// Focus a specific pane.
-    ///
-    /// If the group is zoomed, the zoom moves with the focus. That is the
-    /// divergence from tmux described at the top of this file, and it is the
-    /// behaviour that makes zoom useful with more than one agent.
-    pub async fn layout_focus(&self, workspace: Uuid, terminal: Uuid) -> Result<Vec<PaneGroup>> {
-        let group_id = self.store.pane_group_of(terminal)?.ok_or(DomainError::NotFound)?;
-        let mut target = self.resolve_group(workspace, Some(group_id))?;
-        target.focused = Some(terminal);
-        if target.zoomed.is_some() {
-            target.zoomed = Some(terminal);
-        }
-        self.store.save_pane_group(&target)?;
-
-        // Focusing a pane shows its layout. Anything else is incoherent: a pane
-        // cannot hold the keyboard while a different arrangement is on screen.
-        //
-        // This is also what makes "go to that terminal" work from a client. It
-        // used to take two calls — activate the group, then focus the pane — and
-        // the group activation alone told the client the layout's REMEMBERED
-        // focus, which promptly overrode the terminal that had been asked for.
-        // One call cannot disagree with itself.
-        if !target.active {
-            self.store.activate_pane_group(target.id)?;
-        }
-        self.finish(workspace)
-    }
-
-    /// Move focus by position: `+1` is tmux's `prefix o`, `-1` its `prefix ;`.
-    ///
-    /// Wraps, because a pane cycle that stops at the end makes you look at the
-    /// screen to find out whether pressing it again will do anything.
-    pub async fn layout_focus_step(
-        &self,
-        workspace: Uuid,
-        group: Option<Uuid>,
-        delta: i64,
-    ) -> Result<Vec<PaneGroup>> {
-        let target = self.resolve_group(workspace, group)?;
-        if target.members.is_empty() {
-            return self.layout(workspace);
-        }
-        let count = target.members.len() as i64;
-        let at = target
-            .focused
-            .and_then(|f| target.members.iter().position(|m| *m == f))
-            .unwrap_or(0) as i64;
-        let next = ((at + delta) % count + count) % count;
-        self.layout_focus(workspace, target.members[next as usize]).await
-    }
-
-    /// Focus the Nth pane, one-based, the way `prefix 1` reads.
-    pub async fn layout_focus_index(
-        &self,
-        workspace: Uuid,
-        group: Option<Uuid>,
-        index: usize,
-    ) -> Result<Vec<PaneGroup>> {
-        let target = self.resolve_group(workspace, group)?;
-        let Some(terminal) = index.checked_sub(1).and_then(|i| target.members.get(i)).copied()
-        else {
-            return Err(DomainError::InvalidArgument { what: "pane index" });
-        };
-        self.layout_focus(workspace, terminal).await
-    }
-
-    /// Zoom a pane, or clear the zoom.
-    ///
-    /// `None` toggles on whatever is focused, which is what a keystroke means.
-    /// An explicit terminal also focuses it, since a zoomed pane you cannot type
-    /// in is a screenshot.
-    pub async fn layout_zoom(
-        &self,
-        workspace: Uuid,
-        group: Option<Uuid>,
-        terminal: Option<Uuid>,
-        off: bool,
-    ) -> Result<Vec<PaneGroup>> {
-        let mut target = self.resolve_group(workspace, group)?;
-        if off {
-            target.zoomed = None;
-        } else if let Some(terminal) = terminal {
-            if !target.members.contains(&terminal) {
-                return Err(DomainError::NotFound);
-            }
-            target.zoomed = Some(terminal);
-            target.focused = Some(terminal);
-        } else {
-            let focused = target.focused.or_else(|| target.members.first().copied());
-            target.zoomed = if target.zoomed.is_some() { None } else { focused };
-            target.focused = focused;
-        }
-        self.store.save_pane_group(&target)?;
-        self.finish(workspace)
-    }
-
-    /// Exchange two panes' positions, tmux's `prefix {` and `prefix }`.
-    pub async fn layout_swap(&self, workspace: Uuid, a: Uuid, b: Uuid) -> Result<Vec<PaneGroup>> {
-        let target = self.resolve_group(workspace, self.store.pane_group_of(a)?)?;
-        let (Some(i), Some(j)) = (
-            target.members.iter().position(|m| *m == a),
-            target.members.iter().position(|m| *m == b),
-        ) else {
-            return Err(DomainError::NotFound);
-        };
-        let mut members = target.members.clone();
-        members.swap(i, j);
-        self.store.set_pane_members(target.id, &members)?;
-        self.finish(workspace)
-    }
-
-    /// Move the focused pane one place along, carrying focus with it.
-    ///
-    /// The rotation people actually use: `prefix {` to promote the agent you
-    /// care about into the main slot without naming either pane.
-    pub async fn layout_shift(
-        &self,
-        workspace: Uuid,
-        group: Option<Uuid>,
-        delta: i64,
-    ) -> Result<Vec<PaneGroup>> {
-        let target = self.resolve_group(workspace, group)?;
-        if target.members.len() < 2 {
-            return self.layout(workspace);
-        }
-        let count = target.members.len() as i64;
-        let at = target
-            .focused
-            .and_then(|f| target.members.iter().position(|m| *m == f))
-            .unwrap_or(0) as i64;
-        let to = ((at + delta) % count + count) % count;
-        let mut members = target.members.clone();
-        members.swap(at as usize, to as usize);
-        self.store.set_pane_members(target.id, &members)?;
-        self.finish(workspace)
-    }
-
-    /// A new, empty group, and it becomes the one on screen.
-    ///
-    /// Empty is correct: this is tmux's `prefix c` for layouts, and what follows
-    /// is putting things in it. Nothing is destroyed — the previous group's panes
-    /// are still running, still in that group, one keystroke away.
-    pub async fn layout_group_new(&self, workspace: Uuid, name: &str) -> Result<Vec<PaneGroup>> {
-        let existing = self.store.pane_groups(workspace)?;
-        let name = match name.trim() {
-            "" => (existing.len() + 1).to_string(),
-            given => given.chars().take(48).collect(),
-        };
-        self.store.create_pane_group(Uuid::now_v7(), workspace, &name, LayoutPreset::Tiled)?;
-        self.finish(workspace)
-    }
-
-    /// Show a different group.
-    pub async fn layout_group_select(&self, workspace: Uuid, group: Uuid) -> Result<Vec<PaneGroup>> {
-        let target = self.resolve_group(workspace, Some(group))?;
-        self.store.activate_pane_group(target.id)?;
-        self.finish(workspace)
-    }
-
-    /// Show the next or previous group, wrapping. tmux's `prefix n` and `p`.
-    pub async fn layout_group_step(&self, workspace: Uuid, delta: i64) -> Result<Vec<PaneGroup>> {
-        let groups = self.store.pane_groups(workspace)?;
-        if groups.len() < 2 {
-            return Ok(groups);
-        }
-        let count = groups.len() as i64;
-        let at = groups.iter().position(|g| g.active).unwrap_or(0) as i64;
-        let next = ((at + delta) % count + count) % count;
-        self.store.activate_pane_group(groups[next as usize].id)?;
-        self.finish(workspace)
-    }
-
-    /// Stop showing a group. Its terminals keep running, backgrounded.
-    pub async fn layout_group_close(
-        &self,
-        workspace: Uuid,
-        group: Option<Uuid>,
-    ) -> Result<Vec<PaneGroup>> {
-        let target = self.resolve_group(workspace, group)?;
-        self.store.delete_pane_group(target.id)?;
-        self.finish(workspace)
-    }
-
-    /// The terminals in a workspace that are worth putting on screen.
-    async fn live_terminals(&self, workspace: Uuid) -> Result<Vec<Uuid>> {
-        let ws = self.store.get_workspace(workspace)?;
-        let view = self.workspace_view(&ws).await?;
-        Ok(view
-            .terminals
-            .iter()
-            .filter(|t| matches!(t.state(), TerminalState::Running | TerminalState::Starting))
-            .map(|t| t.terminal.id)
+        Ok(windows
+            .into_iter()
+            .map(|window| {
+                let mut mine: Vec<TaggedPane> =
+                    panes.iter().filter(|p| p.window_id == window.window_id).cloned().collect();
+                mine.sort_by_key(|p| (p.top, p.left));
+                LayoutView { window, panes: mine }
+            })
+            // A window with no tagged panes is not ours to show.
+            .filter(|view| !view.panes.is_empty())
             .collect())
     }
 
-    /// Keep only terminals that belong to this workspace.
+    /// The layout on screen for a workspace.
     ///
-    /// Silently, rather than by refusing the whole call: an agent asking to tile
-    /// four terminals when one has just exited meant the other three, and a hard
-    /// error there turns a race into a failure.
-    async fn verify_members(&self, workspace: Uuid, terminals: &[Uuid]) -> Result<Vec<Uuid>> {
-        let mut kept = Vec::new();
-        for id in terminals {
-            let Ok(record) = self.store.get_terminal(*id) else { continue };
-            if record.workspace_id == workspace && !kept.contains(id) {
-                kept.push(*id);
+    /// tmux marks one window active per SESSION, and the session spans every
+    /// workspace — so "active" is read within the workspace, and a workspace whose
+    /// windows are all inactive still has to show something.
+    pub async fn active_layout(&self, workspace: Uuid) -> Result<Option<LayoutView>> {
+        let layouts = self.layout(workspace).await?;
+        Ok(layouts.iter().find(|l| l.window.active).or_else(|| layouts.first()).cloned())
+    }
+
+    /// The layout being acted on: the one named, or the active one.
+    async fn resolve(&self, workspace: Uuid, group: Option<&str>) -> Result<LayoutView> {
+        match group {
+            Some(id) if !id.is_empty() => self
+                .layout(workspace)
+                .await?
+                .into_iter()
+                .find(|l| l.window.window_id == id)
+                .ok_or(DomainError::NotFound),
+            _ => self.active_layout(workspace).await?.ok_or(DomainError::NotFound),
+        }
+    }
+
+    /// The pane a terminal lives in.
+    pub async fn pane_of(&self, terminal: Uuid) -> Result<TaggedPane> {
+        self.tmux
+            .list_tagged_panes()
+            .await?
+            .into_iter()
+            .find(|p| p.terminal_id == terminal)
+            .ok_or(DomainError::NotFound)
+    }
+
+    /// Move an existing pane against another, on a given edge.
+    ///
+    /// A directional drag and drop, in one command — and it works across layouts,
+    /// because `join-pane` does: dropping a pane from one arrangement onto another
+    /// moves it there.
+    pub async fn layout_move(
+        &self,
+        workspace: Uuid,
+        dragged: Uuid,
+        target: Uuid,
+        side: SplitSide,
+    ) -> Result<Vec<LayoutView>> {
+        if dragged == target {
+            return self.layout(workspace).await;
+        }
+        let source = self.pane_of(dragged).await?;
+        let destination = self.pane_of(target).await?;
+        let (axis, before) = split_args(side);
+
+        self.tmux.join_pane(&source.pane_id, &destination.pane_id, axis, before).await?;
+        self.tmux.select_pane(&source.pane_id).await?;
+        self.layout(workspace).await
+    }
+
+    /// Rearrange a layout into one of tmux's five.
+    pub async fn layout_preset(
+        &self,
+        workspace: Uuid,
+        group: Option<&str>,
+        preset: LayoutPreset,
+    ) -> Result<Vec<LayoutView>> {
+        let view = self.resolve(workspace, group).await?;
+        self.tmux.select_preset(&view.window.window_id, tmux_preset(preset)).await?;
+        self.layout(workspace).await
+    }
+
+    /// tmux's `prefix Space`.
+    pub async fn layout_cycle(
+        &self,
+        workspace: Uuid,
+        group: Option<&str>,
+    ) -> Result<Vec<LayoutView>> {
+        let view = self.resolve(workspace, group).await?;
+        self.tmux.next_preset(&view.window.window_id).await?;
+        self.layout(workspace).await
+    }
+
+    /// Focus a pane, which is also what puts its layout on screen.
+    ///
+    /// One call, because a pane cannot hold the keyboard while a different
+    /// arrangement is showing. Two calls could disagree about which pane you
+    /// asked for, and did.
+    pub async fn layout_focus(&self, workspace: Uuid, terminal: Uuid) -> Result<Vec<LayoutView>> {
+        let pane = self.pane_of(terminal).await?;
+        // Was anything zoomed before we moved? tmux drops zoom when the active
+        // pane changes, which is right for one pane at a time and wrong here.
+        //
+        // Zooming a single pane is a way to see more of it; zooming across four
+        // agents is a reading posture, and being dropped back into the grid
+        // between each one is not what anyone meant. So the zoom is re-applied to
+        // wherever focus landed. This is the one place Overnight overrides tmux's
+        // own behaviour rather than borrowing it, and it is deliberate.
+        let was_zoomed = self
+            .tmux
+            .list_tagged_panes()
+            .await?
+            .iter()
+            .any(|p| p.window_id == pane.window_id && p.zoomed);
+
+        self.tmux.select_window(&pane.window_id).await?;
+        self.tmux.select_pane(&pane.pane_id).await?;
+        if was_zoomed {
+            self.tmux.unzoom(&pane.window_id).await?;
+            self.tmux.toggle_zoom(&pane.pane_id).await?;
+        }
+        self.layout(workspace).await
+    }
+
+    /// Move focus by position, wrapping. `+1` is `prefix o`.
+    pub async fn layout_focus_step(
+        &self,
+        workspace: Uuid,
+        group: Option<&str>,
+        delta: i64,
+    ) -> Result<Vec<LayoutView>> {
+        let view = self.resolve(workspace, group).await?;
+        if view.panes.is_empty() {
+            return self.layout(workspace).await;
+        }
+        let count = view.panes.len() as i64;
+        let at = view.panes.iter().position(|p| p.pane_active).unwrap_or(0) as i64;
+        let next = ((at + delta) % count + count) % count;
+        self.layout_focus(workspace, view.panes[next as usize].terminal_id).await
+    }
+
+    /// Focus the Nth pane, one-based.
+    pub async fn layout_focus_index(
+        &self,
+        workspace: Uuid,
+        group: Option<&str>,
+        index: usize,
+    ) -> Result<Vec<LayoutView>> {
+        let view = self.resolve(workspace, group).await?;
+        let Some(pane) = index.checked_sub(1).and_then(|i| view.panes.get(i)) else {
+            return Err(DomainError::InvalidArgument { what: "pane index" });
+        };
+        self.layout_focus(workspace, pane.terminal_id).await
+    }
+
+    /// Zoom a pane, or clear the zoom. `None` toggles the focused one.
+    pub async fn layout_zoom(
+        &self,
+        workspace: Uuid,
+        group: Option<&str>,
+        terminal: Option<Uuid>,
+        off: bool,
+    ) -> Result<Vec<LayoutView>> {
+        let view = self.resolve(workspace, group).await?;
+        if off {
+            self.tmux.unzoom(&view.window.window_id).await?;
+            return self.layout(workspace).await;
+        }
+        match terminal {
+            Some(id) => {
+                let pane = self.pane_of(id).await?;
+                // Focus first: a zoomed pane you cannot type in is a screenshot.
+                self.tmux.select_pane(&pane.pane_id).await?;
+                // Naming a pane that is already zoomed means "zoom THIS one", not
+                // "turn zoom off" — otherwise asking twice undoes itself.
+                if !pane.zoomed {
+                    self.tmux.toggle_zoom(&pane.pane_id).await?;
+                }
+            }
+            None => {
+                let pane = view.focused().ok_or(DomainError::NotFound)?;
+                self.tmux.toggle_zoom(&pane.pane_id).await?;
             }
         }
-        Ok(kept)
+        self.layout(workspace).await
+    }
+
+    /// Exchange two panes' positions.
+    pub async fn layout_swap(&self, workspace: Uuid, a: Uuid, b: Uuid) -> Result<Vec<LayoutView>> {
+        let first = self.pane_of(a).await?;
+        let second = self.pane_of(b).await?;
+        self.tmux.swap_panes(&first.pane_id, &second.pane_id).await?;
+        self.layout(workspace).await
+    }
+
+    /// Move a divider, in cells.
+    pub async fn layout_resize(
+        &self,
+        workspace: Uuid,
+        terminal: Uuid,
+        side: SplitSide,
+        cells: i32,
+    ) -> Result<Vec<LayoutView>> {
+        let pane = self.pane_of(terminal).await?;
+        let (axis, _) = split_args(side);
+        self.tmux.resize_pane(&pane.pane_id, axis, cells).await?;
+        self.layout(workspace).await
+    }
+
+    /// Pull a pane out into a layout of its own.
+    pub async fn layout_break(&self, workspace: Uuid, terminal: Uuid) -> Result<Vec<LayoutView>> {
+        let pane = self.pane_of(terminal).await?;
+        self.tmux.break_pane(&pane.pane_id, workspace).await?;
+        self.layout(workspace).await
+    }
+
+    /// Show the next or previous layout, wrapping.
+    pub async fn layout_group_step(&self, workspace: Uuid, delta: i64) -> Result<Vec<LayoutView>> {
+        let layouts = self.layout(workspace).await?;
+        if layouts.len() < 2 {
+            return Ok(layouts);
+        }
+        let count = layouts.len() as i64;
+        let at = layouts.iter().position(|l| l.window.active).unwrap_or(0) as i64;
+        let next = ((at + delta) % count + count) % count;
+        self.show(&layouts[next as usize]).await?;
+        self.layout(workspace).await
+    }
+
+    /// Show a specific layout.
+    pub async fn layout_group_select(
+        &self,
+        workspace: Uuid,
+        group: &str,
+    ) -> Result<Vec<LayoutView>> {
+        let view = self.resolve(workspace, Some(group)).await?;
+        self.show(&view).await?;
+        self.layout(workspace).await
+    }
+
+    /// Put a layout on screen, keyboard included.
+    ///
+    /// Focus follows the layout, or the keyboard stays behind in the one you just
+    /// left — which is the same fault as switching layouts and landing on the
+    /// wrong pane, one level down.
+    async fn show(&self, view: &LayoutView) -> Result<()> {
+        self.tmux.select_window(&view.window.window_id).await?;
+        if let Some(pane) = view.focused().or(view.panes.first()) {
+            self.tmux.select_pane(&pane.pane_id).await?;
+        }
+        Ok(())
+    }
+
+    /// Name a layout, which is what a client shows in its tab.
+    pub async fn layout_rename(
+        &self,
+        workspace: Uuid,
+        group: Option<&str>,
+        name: &str,
+    ) -> Result<Vec<LayoutView>> {
+        let view = self.resolve(workspace, group).await?;
+        let trimmed: String = name.trim().chars().take(48).collect();
+        if !trimmed.is_empty() {
+            self.tmux.rename_layout(&view.window.window_id, &trimmed).await?;
+        }
+        self.layout(workspace).await
+    }
+
+    /// Size a layout to the viewport actually showing it.
+    ///
+    /// tmux lays out for the window's size, so a client with a 200-column view has
+    /// to say so before asking where the panes are — otherwise it gets an
+    /// arrangement computed for whatever size the window last had.
+    pub async fn layout_resize_window(
+        &self,
+        workspace: Uuid,
+        group: Option<&str>,
+        columns: u32,
+        rows: u32,
+    ) -> Result<Vec<LayoutView>> {
+        let view = self.resolve(workspace, group).await?;
+        // A window smaller than this cannot hold a usable pane, and tmux refuses
+        // sizes it cannot satisfy anyway.
+        if columns >= 20 && rows >= 5 {
+            self.tmux.resize_window(&view.window.window_id, columns, rows).await?;
+        }
+        self.layout(workspace).await
     }
 }
 
@@ -498,7 +408,13 @@ mod tests {
 
     #[test]
     fn tmux_names_parse_and_round_trip() {
-        for preset in CYCLE {
+        for preset in [
+            LayoutPreset::EvenHorizontal,
+            LayoutPreset::EvenVertical,
+            LayoutPreset::MainVertical,
+            LayoutPreset::MainHorizontal,
+            LayoutPreset::Tiled,
+        ] {
             assert_eq!(parse_preset(preset_name(preset)), Some(preset), "{preset:?}");
         }
     }
@@ -508,28 +424,21 @@ mod tests {
         assert_eq!(parse_preset("grid"), Some(LayoutPreset::Tiled));
         assert_eq!(parse_preset("main"), Some(LayoutPreset::MainVertical));
         assert_eq!(parse_preset("COLUMNS"), Some(LayoutPreset::EvenHorizontal));
-        assert_eq!(parse_preset("main_horizontal"), Some(LayoutPreset::MainHorizontal));
         assert_eq!(parse_preset("diagonal"), None);
     }
 
     #[test]
-    fn cycling_visits_every_layout_and_returns() {
-        let mut seen = vec![CYCLE[0]];
-        let mut at = CYCLE[0];
-        for _ in 0..CYCLE.len() {
-            at = next_preset(at);
-            if !seen.contains(&at) {
-                seen.push(at);
-            }
-        }
-        assert_eq!(seen.len(), CYCLE.len(), "cycling must reach all of them");
-        assert_eq!(at, CYCLE[0], "and come back");
+    fn four_drop_edges_are_two_axes_and_a_flag() {
+        // Which is the whole reason an arbitrary directional drop needs no tree
+        // of our own: tmux already expresses all four.
+        assert_eq!(split_args(SplitSide::Left), (Axis::Horizontal, true));
+        assert_eq!(split_args(SplitSide::Right), (Axis::Horizontal, false));
+        assert_eq!(split_args(SplitSide::Top), (Axis::Vertical, true));
+        assert_eq!(split_args(SplitSide::Bottom), (Axis::Vertical, false));
     }
 
     #[test]
-    fn an_unknown_preset_cycles_to_the_first_rather_than_sticking() {
-        // A database written by a newer version could hold a preset this build
-        // does not know. Cycling out of it has to work.
-        assert_eq!(next_preset(LayoutPreset::Unspecified), CYCLE[0]);
+    fn an_unsaid_side_splits_the_way_prefix_percent_does() {
+        assert_eq!(split_args(SplitSide::Unspecified), (Axis::Horizontal, false));
     }
 }

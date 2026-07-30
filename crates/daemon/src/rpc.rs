@@ -71,18 +71,18 @@ fn required_scope(method: &str) -> Option<Scope> {
         // no process — the worst a wrong one does is show you the wrong pane —
         // and it has to be reachable by an agent for any of this to be
         // automatable.
-        "layout.tile"
-        | "layout.add"
-        | "layout.drop"
+        "layout.split"
+        | "layout.move"
+        | "layout.resize"
+        | "layout.break"
+        | "layout.rename"
+        | "layout.viewport"
         | "layout.preset"
         | "layout.cycle"
         | "layout.focus"
         | "layout.zoom"
         | "layout.swap"
-        | "layout.shift"
-        | "layout.group.new"
-        | "layout.group.select"
-        | "layout.group.close" => Scope::Control,
+        | "layout.group.select" => Scope::Control,
         "repository_root.list"
         | "repository_root.add"
         | "repository_root.remove"
@@ -376,13 +376,6 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let term = svc.create_terminal(workspace, &p.title, &p.command_preset).await?;
-                if p.join_active_group {
-                    // A no-op when the workspace has no layout, which is what
-                    // makes it safe to pass unconditionally from a `%` binding.
-                    if let Ok(groups) = svc.layout_add(workspace, None, &[term.id]).await {
-                        self.watcher.publish_layout(workspace, &groups);
-                    }
-                }
                 self.terminal_result(term.id).await
             }
 
@@ -444,7 +437,7 @@ impl Rpc {
                 let workspace = Self::target(&req)?;
                 Ok(result::Value::PaneGroupList(wire::pane_group_list(
                     workspace,
-                    &svc.layout(workspace)?,
+                    &svc.layout(workspace).await?,
                 )))
             }
 
@@ -452,35 +445,56 @@ impl Rpc {
                 let workspace = Self::target(&req)?;
                 let p = match req.payload {
                     Some(request::Payload::LayoutUpdate(p)) => p,
-                    // An empty payload is legal for the verbs that need no
-                    // arguments: cycle, zoom-toggle, group-close.
+                    // Legal for the verbs that need no arguments.
                     Some(request::Payload::Empty(_)) | None => Default::default(),
                     _ => return Err(DomainError::InvalidArgument { what: "payload" }),
                 };
-                let group = p.group_id.as_deref().and_then(wire::parse_id);
+                let group = (!p.group_id.is_empty()).then_some(p.group_id.as_str());
+                let step = p.step.unwrap_or(1) as i64;
+                let side = p.side();
                 let terminals: Vec<Uuid> =
                     p.terminals.iter().filter_map(|t| wire::parse_id(t)).collect();
-                let preset = p.preset.and_then(|raw| {
-                    overnight_protocol::v1::LayoutPreset::try_from(raw).ok()
-                });
-
-                let step = p.step.unwrap_or(1) as i64;
+                let target = p.target.as_deref().and_then(wire::parse_id);
 
                 let groups = match method {
-                    "layout.tile" => {
-                        svc.layout_tile(workspace, group, &terminals, preset).await?
+                    // A new pane beside an existing one: `%`, `"`, and a drop on
+                    // an edge. The only layout verb that creates a terminal.
+                    "layout.split" => {
+                        let preset = if p.command_preset.is_empty() {
+                            "shell"
+                        } else {
+                            p.command_preset.as_str()
+                        };
+                        let anchor = match target {
+                            Some(id) => id,
+                            None => svc
+                                .active_layout(workspace)
+                                .await?
+                                .and_then(|l| l.focused().map(|f| f.terminal_id))
+                                .ok_or(DomainError::NotFound)?,
+                        };
+                        let title = if p.name.is_empty() { preset } else { p.name.as_str() };
+                        svc.split_terminal(workspace, anchor, side, title, preset).await?;
+                        svc.layout(workspace).await?
                     }
-                    "layout.add" => svc.layout_add(workspace, group, &terminals).await?,
-                    "layout.drop" => svc.layout_drop(workspace, &terminals).await?,
+                    // An existing pane moved against another, on an edge. The
+                    // drag half of drag and drop, and it works across layouts.
+                    "layout.move" => {
+                        let [dragged] = terminals.as_slice() else {
+                            return Err(DomainError::InvalidArgument { what: "one terminal" });
+                        };
+                        let onto = target.ok_or(DomainError::InvalidArgument { what: "target" })?;
+                        svc.layout_move(workspace, *dragged, onto, side).await?
+                    }
                     "layout.preset" => {
-                        let name = (!p.name.is_empty()).then_some(p.name.as_str());
-                        svc.layout_configure(workspace, group, preset, p.ratio, name).await?
+                        let preset = p
+                            .preset
+                            .and_then(|raw| overnight_protocol::v1::LayoutPreset::try_from(raw).ok())
+                            .unwrap_or(overnight_protocol::v1::LayoutPreset::Tiled);
+                        svc.layout_preset(workspace, group, preset).await?
                     }
                     "layout.cycle" => svc.layout_cycle(workspace, group).await?,
-                    "layout.focus" => match (
-                        p.focus.as_deref().and_then(wire::parse_id),
-                        p.pane,
-                    ) {
+                    "layout.focus" => match (p.focus.as_deref().and_then(wire::parse_id), p.pane) {
                         (Some(terminal), _) => svc.layout_focus(workspace, terminal).await?,
                         (None, Some(index)) => {
                             svc.layout_focus_index(workspace, group, index as usize).await?
@@ -497,22 +511,46 @@ impl Rpc {
                         };
                         svc.layout_swap(workspace, *a, *b).await?
                     }
-                    "layout.shift" => svc.layout_shift(workspace, group, step).await?,
-                    "layout.group.new" => svc.layout_group_new(workspace, &p.name).await?,
+                    "layout.resize" => {
+                        let terminal = target.ok_or(DomainError::InvalidArgument {
+                            what: "target",
+                        })?;
+                        svc.layout_resize(workspace, terminal, side, p.resize.unwrap_or(2)).await?
+                    }
+                    // Out into a layout of its own, tmux's break-pane.
+                    "layout.break" => {
+                        let terminal = match target.or(terminals.first().copied()) {
+                            Some(id) => id,
+                            None => svc
+                                .active_layout(workspace)
+                                .await?
+                                .and_then(|l| l.focused().map(|f| f.terminal_id))
+                                .ok_or(DomainError::NotFound)?,
+                        };
+                        svc.layout_break(workspace, terminal).await?
+                    }
+                    "layout.rename" => svc.layout_rename(workspace, group, &p.name).await?,
                     "layout.group.select" => match group {
                         Some(id) => svc.layout_group_select(workspace, id).await?,
                         None => svc.layout_group_step(workspace, step).await?,
                     },
-                    "layout.group.close" => svc.layout_group_close(workspace, group).await?,
+                    // The viewport, so tmux lays out for the size actually on
+                    // screen rather than for whatever the window last had.
+                    "layout.viewport" => {
+                        svc.layout_resize_window(
+                            workspace,
+                            group,
+                            p.columns.unwrap_or(0),
+                            p.rows.unwrap_or(0),
+                        )
+                        .await?
+                    }
                     other => {
                         tracing::error!(method = %other, "layout method has no handler");
                         return Err(DomainError::NotFound);
                     }
                 };
 
-                // Announced from here rather than from each service method: the
-                // service is also called by tests and by the local CLI path,
-                // neither of which has a client to tell.
                 self.watcher.publish_layout(workspace, &groups);
                 Ok(result::Value::PaneGroupList(wire::pane_group_list(workspace, &groups)))
             }
@@ -610,18 +648,18 @@ mod tests {
             "terminal.dismiss_lost",
             "terminal.restart",
             "layout.list",
-            "layout.tile",
-            "layout.add",
-            "layout.drop",
+            "layout.split",
+            "layout.move",
+            "layout.resize",
+            "layout.break",
+            "layout.rename",
+            "layout.viewport",
             "layout.preset",
             "layout.cycle",
             "layout.focus",
             "layout.zoom",
             "layout.swap",
-            "layout.shift",
-            "layout.group.new",
             "layout.group.select",
-            "layout.group.close",
         ] {
             assert!(required_scope(method).is_some(), "{method} has no declared scope");
         }
@@ -652,7 +690,7 @@ mod tests {
     fn tiling_is_control_not_admin() {
         // An agent has to be able to place its own panes, and none of this
         // touches a file or stops a process.
-        for method in ["layout.tile", "layout.zoom", "layout.group.new"] {
+        for method in ["layout.split", "layout.zoom", "layout.move"] {
             assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
         }
         assert_eq!(required_scope("layout.list"), Some(Scope::Read));

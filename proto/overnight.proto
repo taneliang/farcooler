@@ -353,38 +353,52 @@ message ExitStatus {
   optional int32 signal = 2;
 }
 
-// A set of terminals shown side by side, and how.
+// A layout: terminals shown together, as tmux has arranged them.
 //
-// tmux's window, kept deliberately close to it: the same five layouts under the
-// same names, the same idea of a zoomed pane, and one group active at a time
-// out of several. People arrive already knowing this model, and the alternative
-// was inventing a worse one.
+// A tmux WINDOW is a layout and a tmux PANE is a terminal. Overnight stores none
+// of this and computes none of it — tmux has had split trees, five named
+// layouts, resizable dividers, zoom and pane movement between windows for twenty
+// years, and it is already the authority for what is running. Keeping a second
+// tree in the daemon meant a third copy of the geometry in every client that
+// drew it, which is three chances to disagree about where a pane is.
 //
-// Durable, and it has to be. Tiling is edited by the app, by the CLI, and by
-// agents driving the CLI, so a layout held in a view would be invisible to two
-// of the three. It is intent, not runtime: which terminals a person wants to
-// see together is a decision, and nothing about tmux can be asked for it.
+// Nothing here is durable, and that is right: panes are processes, and if the
+// server they live in dies there is no arrangement left to restore them into.
 message PaneGroup {
-  bytes id = 1;
-  uint64 resource_version = 2;
-  bytes workspace_id = 3;
-  string name = 4;
-  LayoutPreset preset = 5;
-  // Fraction of the long axis given to the main pane. Ignored by the even and
-  // tiled layouts, which have no main pane.
-  double ratio = 6;
-  // Terminals in display order. A terminal is in at most one group; the rest
-  // are backgrounded, which is the ordinary case and the reason nothing tiles
-  // until asked.
-  repeated bytes members = 7;
-  // The pane filling the group on its own, tmux's `prefix z`.
-  optional bytes zoomed = 8;
-  optional bytes focused = 9;
-  // Shown when this workspace is open. Exactly one group per workspace is.
-  bool active = 10;
+  // The tmux window id, `@7`. Stable for the window's life, which is exactly as
+  // long as the layout exists.
+  string id = 1;
+  bytes workspace_id = 2;
+  string name = 3;
+  bool active = 4;
+  // The window's size in cells. A client scales these to pixels with its own
+  // cell metrics; it never decides the arrangement.
+  uint32 columns = 5;
+  uint32 rows = 6;
+  repeated PaneRect panes = 7;
+  // tmux's own layout description, carried opaquely.
+  //
+  // Never parsed here. It is tmux's format, tmux is the only thing that has to
+  // understand it, and a parser in Overnight would be a copy of tmux's tree free
+  // to drift from it. Handed straight back to `select-layout` to restore an
+  // arrangement.
+  string layout = 8;
 }
 
-// Ordered by position, which is what `layout.group.select 2` counts.
+// Where one terminal sits inside its layout, in cells, as tmux placed it.
+message PaneRect {
+  bytes terminal_id = 1;
+  uint32 left = 2;
+  uint32 top = 3;
+  uint32 columns = 4;
+  uint32 rows = 5;
+  // Holds the keyboard. tmux's active pane, so it cannot disagree with where
+  // typing actually goes.
+  bool focused = 6;
+  bool zoomed = 7;
+}
+
+// Ordered by window index, which is what `layout group select 2` counts.
 message PaneGroupList {
   bytes workspace_id = 1;
   repeated PaneGroup items = 2;
@@ -398,6 +412,18 @@ enum LayoutPreset {
   LAYOUT_PRESET_MAIN_VERTICAL = 3;   // one big pane left, rest stacked right
   LAYOUT_PRESET_MAIN_HORIZONTAL = 4; // one big pane top, rest in a row below
   LAYOUT_PRESET_TILED = 5;           // grid
+}
+
+// Which edge of a pane something was dropped on.
+//
+// The whole vocabulary of an arbitrary split, and it maps onto tmux exactly:
+// left and right are `-h`, top and bottom are `-v`, and left and top add `-b`.
+enum SplitSide {
+  SPLIT_SIDE_UNSPECIFIED = 0;
+  SPLIT_SIDE_LEFT = 1;
+  SPLIT_SIDE_RIGHT = 2;
+  SPLIT_SIDE_TOP = 3;
+  SPLIT_SIDE_BOTTOM = 4;
 }
 
 message Operation {
@@ -535,32 +561,33 @@ message TerminalAttach {
 }
 
 // One payload for every layout mutation; the METHOD says which.
-//
-// `layout.tile` replaces the members, `layout.add` appends, `layout.drop`
-// removes, `layout.swap` takes exactly two. Splitting this into a dozen
-// messages would have been a dozen ways to spell the same three fields.
 message LayoutUpdate {
-  // The group to act on. Empty means the workspace's active group, which is
-  // what a person or an agent means by "here" almost every time.
-  optional bytes group_id = 1;
+  // The layout to act on, as a tmux window id. Empty means the workspace's
+  // active one, which is what a person or an agent means by "here" almost every
+  // time.
+  string group_id = 1;
   optional LayoutPreset preset = 2;
-  optional double ratio = 3;
-  repeated bytes terminals = 4;
-  optional bytes focus = 5;
-  optional bytes zoom = 6;
-  // Zoom carries a terminal or clears; a bool is needed because "no terminal"
-  // is a meaningful value rather than an omission.
-  bool unzoom = 7;
-  string name = 8;
-  // Relative movement: -1 and +1 are the whole vocabulary, for focus, for
-  // shifting a pane along, and for switching group.
-  optional int32 step = 9;
+  repeated bytes terminals = 3;
+  optional bytes focus = 4;
+  optional bytes zoom = 5;
+  bool unzoom = 6;
+  string name = 7;
+  // Relative movement: -1 and +1 are the whole vocabulary.
+  optional int32 step = 8;
   // Absolute pane, one-based, the way `prefix 1` reads.
-  //
-  // Separate from `step` because they overlap: +1 as a step means "the next
-  // one" and 1 as a position means "the first one", and a single field cannot
-  // be both — which is exactly the bug that shipping this as one field caused.
-  optional uint32 pane = 10;
+  optional uint32 pane = 9;
+  // For a split or a drop: which edge of `target`.
+  SplitSide side = 10;
+  // The pane being split or dropped onto. Empty means the focused one.
+  optional bytes target = 11;
+  // What to run in a pane this call creates.
+  string command_preset = 12;
+  // Cells to move a divider by, signed.
+  optional int32 resize = 13;
+  // The window's size in cells, so tmux lays out for the viewport actually on
+  // screen rather than for whatever the last client asked for.
+  optional uint32 columns = 14;
+  optional uint32 rows = 15;
 }
 
 message TerminalAttachResult {
