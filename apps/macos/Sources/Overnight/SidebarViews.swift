@@ -67,6 +67,8 @@ struct WorkspaceSection: View {
     /// layout is one action and reads as what it is.
     var layouts: [PaneGroup] = []
     var onMoveToLayout: (Terminal, Int?) -> Void = { _, _ in }
+    /// Dropping one terminal on another tiles the two together.
+    var onDropTogether: (_ dragged: String, _ onto: Terminal) -> Void = { _, _ in }
     /// The terminals currently on screen together, if any.
     ///
     /// Passed in rather than looked up, because the sidebar's job is to show
@@ -103,6 +105,7 @@ struct WorkspaceSection: View {
                         isTiled: tiled.contains(t.id),
                         layouts: layouts,
                         onMoveToLayout: { onMoveToLayout(t, $0) },
+                        onDropTogether: { onDropTogether($0, t) },
                         onAction: { onTerminalAction(t, $0) }
                     )
                 }
@@ -244,9 +247,11 @@ struct TerminalRow: View {
     var layouts: [PaneGroup] = []
     /// `nil` means a new layout of its own.
     var onMoveToLayout: (Int?) -> Void = { _ in }
+    var onDropTogether: (String) -> Void = { _ in }
     let onAction: (TerminalAction) -> Void
 
     @State private var hovering = false
+    @State private var targeted = false
 
     private var status: Status { terminal.status }
 
@@ -297,10 +302,38 @@ struct TerminalRow: View {
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Color.primary.opacity(0.08) : (hovering ? Color.primary.opacity(0.04) : .clear))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.accentColor, lineWidth: targeted ? 2 : 0))
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
+        // Drag one terminal onto another and the two become a layout. Direct
+        // manipulation for the thing the menu spells out in words: "tile these
+        // two, and only these two" is awkward to describe and obvious to do.
+        .draggable(terminal.id)
+        .dropDestination(for: String.self) { items, _ in
+            guard let dragged = items.first, dragged != terminal.id else { return false }
+            onDropTogether(dragged)
+            return true
+        } isTargeted: { targeted = $0 }
+        .contextMenu {
+            Button("Tile on its own") { onMoveToLayout(nil) }
+            if !layouts.isEmpty {
+                Divider()
+                ForEach(Array(layouts.enumerated()), id: \.element.id) { index, group in
+                    Button(layoutLabel(group, position: index + 1)) {
+                        onMoveToLayout(index + 1)
+                    }
+                    .disabled(group.terminals.contains(terminal.id))
+                }
+            }
+            if isTiled {
+                Divider()
+                Button("Take off screen") { onMoveToLayout(-1) }
+            }
+        }
     }
 }
 

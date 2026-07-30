@@ -68,6 +68,7 @@ enum Shortcut {
                 Item(keys: "h j k l", action: "The same, without leaving home row"),
                 Item(keys: "1 … 9", action: "Focus pane by number"),
                 Item(keys: "%  /  \"", action: "Split right / down — a new pane here"),
+                Item(keys: "a", action: "Add this terminal to the layout"),
                 Item(keys: "!", action: "Move the focused pane out of the layout"),
                 Item(keys: "{  /  }", action: "Move the focused pane along"),
                 Item(keys: "x", action: "Close the focused pane's terminal"),

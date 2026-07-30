@@ -100,6 +100,7 @@ struct OvernightCommands: Commands {
             Divider()
             Button("Split Right  ⌃B %") { TileCommand.splitRight.post() }
             Button("Split Down  ⌃B \"") { TileCommand.splitDown.post() }
+            Button("Add to Layout  ⌃B a") { TileCommand.join.post() }
             Button("Move Pane Out  ⌃B !") { TileCommand.breakPane.post() }
             Divider()
             // The prefix-less ones, and the only tiling bindings that get a real

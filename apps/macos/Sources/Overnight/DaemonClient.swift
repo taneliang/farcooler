@@ -252,6 +252,18 @@ final class DaemonClient: ObservableObject {
         return await layout(workspace, ["split"], rest)
     }
 
+    /// Set a group's members, in this exact order.
+    ///
+    /// One call for both halves of a drag: reordering panes inside a layout and
+    /// pulling an outside terminal into one are the same operation once you have
+    /// the list you want, and `tile` takes a list.
+    @discardableResult
+    func retile(_ ordered: [String], in workspace: Workspace, groupPosition: Int)
+        async -> [PaneGroup]
+    {
+        await layout(workspace, ["tile"], ordered + ["--group", "\(groupPosition)"])
+    }
+
     /// Move a terminal into a group. A terminal is in at most one, so this moves it.
     @discardableResult
     func move(_ terminal: String, toGroup position: Int, in workspace: Workspace)

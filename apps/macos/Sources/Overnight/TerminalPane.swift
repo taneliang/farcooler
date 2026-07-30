@@ -43,6 +43,9 @@ struct TerminalPane: View {
         // pretend to have the window's corner. See `Pane`.
         .paneCard()
         .paneCanvas()
+        // The prefix works here too — ⌃B t is how a worktree gets tiled at all —
+        // so the hint has to be visible here.
+        .prefixHint()
         // The window's own title bar, which macOS already draws. Free, native,
         // and it costs the content no vertical space.
         .navigationTitle(workspace.windowTitle)

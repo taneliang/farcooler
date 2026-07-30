@@ -22,6 +22,7 @@ enum TileCommand: Equatable {
     case nextGroup
     case previousGroup
     case closeGroup
+    case join
     case help
 
     static let notification = Notification.Name("overnight.tile")
@@ -191,6 +192,7 @@ final class PrefixMode: ObservableObject {
         // in the layout you are looking at.
         case "%": return .splitRight
         case "\"": return .splitDown
+        case "a": return .join
         case "t": return .tile
         // Capital T rather than another letter: the opposite of `t`, and it
         // reads as such without being looked up.
@@ -210,6 +212,16 @@ final class PrefixMode: ObservableObject {
 }
 
 extension View {
+    /// The prefix hint, over any terminal.
+    ///
+    /// On the tiled view AND the single one. `⌃B` has always worked from a terminal
+    /// that is not tiled — `⌃B t` is how you tile in the first place — but the hint
+    /// only rendered inside the tiled view, so from a solo terminal the prefix
+    /// appeared to do nothing at all.
+    func prefixHint() -> some View {
+        modifier(PrefixHintOverlay())
+    }
+
     func onTileCommand(_ perform: @escaping (TileCommand) -> Void) -> some View {
         onReceive(NotificationCenter.default.publisher(for: TileCommand.notification)) { note in
             guard let box = note.object as? TileCommand.Box else { return }
@@ -278,5 +290,26 @@ struct PrefixHint: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
         .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+    }
+}
+
+
+/// Shows what the armed prefix is waiting for.
+private struct PrefixHintOverlay: ViewModifier {
+    @ObservedObject private var prefix = PrefixMode.shared
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottom) {
+                if prefix.armed {
+                    PrefixHint()
+                        .padding(.bottom, 14)
+                        .transition(
+                            .opacity.combined(with: .move(edge: .bottom))
+                                .combined(with: .scale(scale: 0.96)))
+                }
+            }
+            // A chip arriving on a keystroke, so the bouncier preset.
+            .animation(.snappy(duration: 0.22, extraBounce: 0.08), value: prefix.armed)
     }
 }

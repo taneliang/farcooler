@@ -20,6 +20,8 @@ struct TileView: View {
     let environment: [String: String]
     let onFocus: (String) -> Void
     let onSelectGroup: (PaneGroup) -> Void
+    /// A terminal dropped onto a pane: put it where that pane is.
+    let onDropOnPane: (_ dragged: String, _ onto: String) -> Void
     let onResize: (String, Int, Int) async -> Void
 
     @ObservedObject private var prefix = PrefixMode.shared
@@ -51,18 +53,7 @@ struct TileView: View {
             panels
         }
         .paneCanvas()
-        .overlay(alignment: .bottom) {
-            if prefix.armed {
-                PrefixHint()
-                    .padding(.bottom, 14)
-                    .transition(
-                        .opacity.combined(with: .move(edge: .bottom))
-                            .combined(with: .scale(scale: 0.96)))
-            }
-        }
-        // The hint is a chip that appears on a keystroke, so it gets the bouncier
-        // preset: it is arriving, not rearranging.
-        .animation(.snappy(duration: 0.22, extraBounce: 0.08), value: prefix.armed)
+        .prefixHint()
         // Told from here, because this is the only place that knows a layout is
         // actually on screen. It gates the prefix-less ⌃hjkl bindings: while a
         // single terminal is showing, ⌃L has to still clear it.
@@ -145,7 +136,8 @@ struct TileView: View {
             index: (group.terminals.firstIndex(of: terminal.id) ?? 0) + 1,
             onResize: { columns, rows in
                 await onResize(terminal.short, columns, rows)
-            }
+            },
+            onDrop: { dragged in onDropOnPane(dragged, terminal.id) }
         )
         .frame(width: max(frame.width, 1), height: max(frame.height, 1))
         .offset(x: frame.minX, y: frame.minY)
@@ -168,8 +160,10 @@ private struct TilePane: View {
     let isZoomed: Bool
     let index: Int
     let onResize: (Int, Int) async -> Void
+    let onDrop: (String) -> Void
 
     @ObservedObject private var preferences = Preferences.shared
+    @State private var targeted = false
 
     private var isLive: Bool {
         let kind = StateKind.parse(terminal.state)
@@ -195,11 +189,27 @@ private struct TilePane: View {
                 }
             }
         }
-        .paneCard(focused: isFocused)
+        .paneCard(focused: isFocused || targeted)
         // Its own, faster animation: which pane has the keyboard has to read as
         // immediate, and a border easing in over the same third of a second as
         // the panes moving would lag the keystroke that caused it.
         .animation(.smooth(duration: 0.12), value: isFocused)
+        // Dragging a pane onto another puts it in that position, and dragging a
+        // terminal in from the sidebar puts it there too. One gesture for
+        // rearranging a layout and for growing one.
+        .draggable(terminal.id)
+        .dropDestination(for: String.self) { items, _ in
+            guard let dragged = items.first, dragged != terminal.id else { return false }
+            onDrop(dragged)
+            return true
+        } isTargeted: { targeted = $0 }
+        .overlay {
+            if targeted {
+                RoundedRectangle(cornerRadius: Pane.radius)
+                    .fill(Color.accentColor.opacity(0.10))
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     /// One line, and only what a pane needs that a single terminal does not.

@@ -201,6 +201,9 @@ struct ContentView: View {
                                     onMoveToLayout: { term, position in
                                         moveToLayout(term, in: ws, position: position)
                                     },
+                                    onDropTogether: { dragged, onto in
+                                        tileTogether(dragged, onto.id, in: ws)
+                                    },
                                     tiled: Set(client.activeGroup(ws.id)?.terminals ?? [])
                                 )
                             }
@@ -469,6 +472,9 @@ struct ContentView: View {
                             }
                         }
                     },
+                    onDropOnPane: { dragged, target in
+                        placePane(dragged, before: target, in: ws)
+                    },
                     onResize: { short, cols, rows in
                         await client.resize(terminal: short, columns: cols, rows: rows)
                     }
@@ -517,6 +523,9 @@ struct ContentView: View {
                                 selection = .terminal(workspace: wsID, terminal: focused)
                             }
                         }
+                    },
+                    onDropOnPane: { dragged, target in
+                        placePane(dragged, before: target, in: ws)
                     },
                     onResize: { short, cols, rows in
                         await client.resize(terminal: short, columns: cols, rows: rows)
@@ -730,13 +739,29 @@ struct ContentView: View {
             run(.closeTerminal)
 
         case .newGroup:
-            await client.layout(workspace, ["group", "new"])
+            reveal(await client.layout(workspace, ["group", "new"]), in: workspace)
         case .nextGroup:
-            await client.layout(workspace, ["group", "select"], ["--next"])
+            // Landing in the new layout is the point of switching to it. Without
+            // this the selection stayed on a pane from the OLD group, which the
+            // detail view then showed on its own — so ⌃B n looked like it opened a
+            // random terminal and came back.
+            reveal(await client.layout(workspace, ["group", "select"], ["--next"]), in: workspace)
         case .previousGroup:
-            await client.layout(workspace, ["group", "select"], ["--prev"])
+            reveal(await client.layout(workspace, ["group", "select"], ["--prev"]), in: workspace)
         case .closeGroup:
-            await client.layout(workspace, ["group", "close"])
+            reveal(await client.layout(workspace, ["group", "close"]), in: workspace)
+
+        case .join:
+            // tmux's join-pane: bring the terminal you are looking at into the
+            // layout. The answer to "I am on terminal 7, which is not tiled — how
+            // do I tile it with something else".
+            guard case .terminal(_, let id) = selection,
+                let terminal = workspace.terminals.first(where: { $0.id == id })
+            else { return }
+            reveal(
+                await client.layout(workspace, ["add"], [terminal.short]),
+                in: workspace,
+                preferring: id)
 
         case .help:
             showShortcuts = true
@@ -760,6 +785,68 @@ struct ContentView: View {
             }
             selection = .terminal(workspace: workspace.id, terminal: terminal.id)
         }
+    }
+
+    /// Drop a terminal onto a pane: it takes that pane's place in the layout.
+    ///
+    /// The same gesture covers both things you want to do by hand — reordering
+    /// panes inside a layout, and pulling a terminal that was not tiled into one —
+    /// because once the desired order is known they are the same write.
+    private func placePane(_ dragged: String, before target: String, in workspace: Workspace) {
+        guard let groups = client.layouts[workspace.id],
+            let index = groups.firstIndex(where: { $0.isActive })
+        else { return }
+
+        var members = groups[index].terminals
+        members.removeAll { $0 == dragged }
+        // The target's index is taken AFTER the removal, so dragging a pane
+        // rightwards lands it where it was dropped rather than one short.
+        guard let at = members.firstIndex(of: target) else { return }
+        members.insert(dragged, at: at)
+
+        let shorts = members.compactMap { id in
+            workspace.terminals.first { $0.id == id }?.short
+        }
+        guard shorts.count == members.count else { return }
+        Task {
+            await client.retile(shorts, in: workspace, groupPosition: index + 1)
+            selection = .terminal(workspace: workspace.id, terminal: dragged)
+        }
+    }
+
+    /// Drop one sidebar row onto another: the two become a layout of their own.
+    private func tileTogether(_ dragged: String, _ onto: String, in workspace: Workspace) {
+        let shorts = [onto, dragged].compactMap { id in
+            workspace.terminals.first { $0.id == id }?.short
+        }
+        guard shorts.count == 2 else { return }
+        Task {
+            reveal(await client.splitOff(shorts, in: workspace), in: workspace, preferring: dragged)
+        }
+    }
+
+    /// Select the active layout's focused pane after a layout command.
+    ///
+    /// Every command that changes which group is on screen goes through this, so
+    /// "the thing I am looking at" and "the thing the layout says is focused" cannot
+    /// disagree. `preferring` is for the cases where the command was about a
+    /// specific terminal and that terminal should win.
+    private func reveal(
+        _ groups: [PaneGroup], in workspace: Workspace, preferring: String? = nil
+    ) {
+        guard let active = groups.first(where: { $0.isActive }) ?? groups.first else {
+            // No groups left: nothing is tiled, so fall back to the worktree.
+            selection = .workspace(workspace.id)
+            return
+        }
+        let target = preferring.flatMap { active.terminals.contains($0) ? $0 : nil }
+            ?? active.focused
+            ?? active.terminals.first
+        guard let target else {
+            selection = .workspace(workspace.id)
+            return
+        }
+        selection = .terminal(workspace: workspace.id, terminal: target)
     }
 
     /// Follow the layout's focus when something else moved it.
