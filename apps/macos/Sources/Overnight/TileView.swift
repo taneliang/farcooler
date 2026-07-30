@@ -179,7 +179,8 @@ private struct TilePane: View {
                     binary: binary,
                     environment: environment,
                     onResize: onResize,
-                    fontRevision: preferences.revision
+                    fontRevision: preferences.revision,
+                    isFocused: isFocused
                 )
                 .id(terminal.id)
             } else {

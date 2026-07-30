@@ -85,7 +85,10 @@ struct OvernightCommands: Commands {
         // sequence in the title, because a menu item with no key equivalent
         // teaches nothing about a prefix.
         CommandMenu("Layout") {
-            Button("Tile All Terminals  ⌃B t") { TileCommand.tile.post() }
+            // No key equivalent: gathering every terminal replaces the
+            // arrangement you built and empties your other layouts, which is not
+            // something a keystroke should be able to do by accident.
+            Button("Tile All Terminals") { TileCommand.tile.post() }
             Button("Un-tile  ⌃B T") { TileCommand.untile.post() }
             Divider()
             Button("Zoom Pane  ⌃B z") { TileCommand.zoom.post() }

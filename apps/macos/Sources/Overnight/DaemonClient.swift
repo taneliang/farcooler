@@ -426,6 +426,32 @@ final class DaemonClient: ObservableObject {
         _ = await run(["terminal", "resize", terminal, "\(columns)", "\(rows)"])
     }
 
+    /// Create a terminal and return it, identified by difference.
+    ///
+    /// The create call does not report which record it made, and comparing whole
+    /// `Terminal` values does not work — any of them changing activity between the
+    /// two reads also looks new. Ids are stable, so the id set is the diff.
+    @discardableResult
+    func createTerminal(
+        in workspace: Workspace, preset: String, title: String, tile: Bool = false
+    ) async -> Terminal? {
+        let before = Set(workspace.terminals.map(\.id))
+        await createTerminal(
+            workspace: workspace.short, preset: preset, title: title, tile: tile)
+
+        // Creation is a tmux window opening, so the record can lag the call.
+        for _ in 0..<20 {
+            if let found = fleet.workspaces.first(where: { $0.id == workspace.id })?
+                .terminals.first(where: { !before.contains($0.id) })
+            {
+                return found
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+            await refresh()
+        }
+        return nil
+    }
+
     func createTerminal(
         workspace: String, preset: String, title: String, tile: Bool = false
     ) async {

@@ -57,6 +57,21 @@ struct ContentView: View {
             healSelection()
         }
         .onChange(of: selection) { _, new in
+            // Selecting a pane that belongs to another layout switches to that
+            // layout. Done here rather than in `detail`, because activating a
+            // group is a write and a view must not perform one while it is being
+            // evaluated.
+            if case .terminal(let wsID, let termID) = new,
+                let workspace = client.fleet.workspaces.first(where: { $0.id == wsID }),
+                let holder = client.group(holding: termID, in: wsID),
+                !holder.isActive
+            {
+                Task {
+                    await client.layout(
+                        workspace, ["group", "select"], [holder.short ?? holder.id])
+                }
+            }
+
             // Opening a terminal is what ends `done`. Being listed is not being
             // read, so this is deliberately tied to selection.
             if case .terminal(_, let id) = new,
@@ -445,12 +460,17 @@ struct ContentView: View {
     private var detail: some View {
         switch selection {
         case .terminal(let wsID, let termID):
-            // Tiled or solo, decided by whether the selected terminal is in the
-            // group on screen. Selecting a backgrounded terminal shows it alone,
-            // which is what makes the fourth agent reachable without disturbing
-            // the three you have arranged.
-            if let ws = workspace(wsID), let group = client.activeGroup(wsID),
-                group.terminals.contains(termID)
+            // Tiled or solo, decided by whether the terminal belongs to a layout
+            // at all — not by whether that layout is the active one.
+            //
+            // It used to check the active group, so selecting a pane belonging to
+            // a different layout showed it on its own, and the view bounced
+            // between arrangement and single terminal as you clicked down the
+            // sidebar. A terminal that is part of an arrangement is only
+            // meaningful inside it; solo is for terminals in no layout, which is
+            // what keeps a backgrounded agent reachable.
+            if let ws = workspace(wsID), client.group(holding: termID, in: wsID) != nil,
+                let group = client.activeGroup(wsID)
             {
                 TileView(
                     groups: client.layouts[wsID] ?? [group],
@@ -704,23 +724,35 @@ struct ContentView: View {
             await client.layout(workspace, ["preset"], [preset.rawValue])
 
         case .splitRight, .splitDown:
-            // A split is a new terminal in the layout you are looking at. The
-            // direction is the arrangement's business, so `%` and `"` set the
-            // preset and then add a pane, which is what tmux's own splits amount
-            // to once a layout is applied.
-            let preset: TilePreset = command == .splitRight ? .mainVertical : .mainHorizontal
-            if group == nil {
-                // Nothing tiled yet: tile what is here first, or the new pane
-                // would be alone in a group and look like nothing happened.
-                await client.layout(workspace, ["tile"])
+            // A split makes a new terminal beside the one you are looking at.
+            //
+            // It used to tile the entire worktree first when nothing was tiled,
+            // which is how splitting one terminal produced a ten-pane grid. A
+            // split concerns two panes: this one, and the new one.
+            guard case .terminal(_, let id) = selection,
+                let here = workspace.terminals.first(where: { $0.id == id })
+            else { return }
+
+            let arrangement: TilePreset =
+                command == .splitRight ? .evenHorizontal : .evenVertical
+            let existing = client.group(holding: id, in: workspace.id)
+
+            guard
+                let made = await client.createTerminal(
+                    in: workspace,
+                    preset: "shell",
+                    title: "Terminal \(workspace.terminals.count + 1)",
+                    // Joins the layout in the same call when there is one to join.
+                    tile: existing != nil)
+            else { return }
+
+            if existing == nil {
+                // Not tiled yet: the two of them become a layout, and only those
+                // two.
+                await client.splitOff([here.short, made.short], in: workspace)
             }
-            await client.layout(workspace, ["preset"], [preset.rawValue])
-            await client.createTerminal(
-                workspace: workspace.short,
-                preset: "shell",
-                title: "Terminal \(workspace.terminals.count + 1)",
-                tile: true)
-            await client.refreshLayout(workspace)
+            await client.layout(workspace, ["preset"], [arrangement.rawValue])
+            selection = .terminal(workspace: workspace.id, terminal: made.id)
 
         case .breakPane:
             guard let focused = group?.focused else { return }
@@ -739,7 +771,18 @@ struct ContentView: View {
             run(.closeTerminal)
 
         case .newGroup:
-            reveal(await client.layout(workspace, ["group", "new"]), in: workspace)
+            // A new layout with a terminal in it, the way tmux's `c` opens a
+            // window with a shell. An empty layout showed the worktree overview,
+            // which looks like the command did something else entirely.
+            await client.layout(workspace, ["group", "new"])
+            guard
+                let made = await client.createTerminal(
+                    in: workspace,
+                    preset: "shell",
+                    title: "Terminal \(workspace.terminals.count + 1)",
+                    tile: true)
+            else { return }
+            selection = .terminal(workspace: workspace.id, terminal: made.id)
         case .nextGroup:
             // Landing in the new layout is the point of switching to it. Without
             // this the selection stayed on a pane from the OLD group, which the
@@ -965,38 +1008,19 @@ struct ContentView: View {
     /// type in it, and leaving the selection where it was means a second click
     /// to get to the thing you just asked for.
     private func newTerminal(in workspace: Workspace) {
-        // The ids that existed before, so the new one can be identified by
-        // difference. Comparing whole `Terminal` values did not work: any of
-        // them changing activity between the two reads also looked "new", so
-        // the selection sometimes landed on a terminal the user did not create.
-        let before = Set(workspace.terminals.map(\.id))
-        let existing = workspace.terminals.count
-
         Task {
-            await client.createTerminal(
-                workspace: workspace.short,
-                preset: "shell",
-                title: "Terminal \(existing + 1)")
             expanded.insert(workspace.id)
-
-            // Creation is a tmux window opening, so the record can lag the
-            // call. Poll briefly rather than reading once and giving up —
-            // reading once is why this silently did nothing.
-            for _ in 0..<20 {
-                await client.refresh()
-                if let created = client.fleet.workspaces
-                    .first(where: { $0.id == workspace.id })?
-                    .terminals
-                    .first(where: { !before.contains($0.id) })
-                {
-                    selection = .terminal(workspace: workspace.id, terminal: created.id)
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(150))
-            }
+            guard
+                let created = await client.createTerminal(
+                    in: workspace,
+                    preset: "shell",
+                    title: "Terminal \(workspace.terminals.count + 1)")
+            else { return }
+            selection = .terminal(workspace: workspace.id, terminal: created.id)
         }
     }
 
+    /// The workspace the selection is in, or the first one.
     private var currentWorkspace: Workspace? {
         switch selection {
         case .workspace(let id): return client.fleet.workspaces.first { $0.id == id }

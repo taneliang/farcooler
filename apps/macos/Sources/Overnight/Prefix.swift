@@ -193,9 +193,17 @@ final class PrefixMode: ObservableObject {
         case "%": return .splitRight
         case "\"": return .splitDown
         case "a": return .join
-        case "t": return .tile
-        // Capital T rather than another letter: the opposite of `t`, and it
-        // reads as such without being looked up.
+        // No binding tiles the whole worktree.
+        //
+        // `⌃B t` used to, and it was the wrong shape of command twice over: it
+        // replaced the arrangement you had built, and it pulled panes out of your
+        // other layouts to do it — because membership is exclusive, so gathering
+        // every terminal necessarily empties every other group.
+        //
+        // tmux has no such verb either. What it has, and what is here now, are the
+        // incremental ones: `a` brings this terminal in, `!` sends one out, `%`
+        // and `"` make a new one. "Tile all" survives as a button in the worktree
+        // overview, where the count is visible before you press it.
         case "T": return .untile
         case "!": return .breakPane
         case "}": return .shiftForward

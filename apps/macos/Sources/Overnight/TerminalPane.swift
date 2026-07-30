@@ -31,7 +31,9 @@ struct TerminalPane: View {
                     binary: binary,
                     environment: environment,
                     onResize: onGeometry,
-                    fontRevision: preferences.revision
+                    fontRevision: preferences.revision,
+                    // One pane, so it always owns the keyboard.
+                    isFocused: true
                 )
                 .id(terminal.id)
             } else {

@@ -101,7 +101,16 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         let link = displayLink(target: self, selector: #selector(tick))
         link.add(to: .main, forMode: .common)
         displayLink = link
-        claimKeyboard()
+        // Deliberately does NOT claim the keyboard.
+        //
+        // It used to, and with four panes that meant whichever mounted last owned
+        // every keystroke — regardless of which pane the layout said was focused,
+        // and regardless of which one had the focus ring drawn round it. Moving
+        // focus moved the border and nothing else, so you typed into a pane you
+        // were not looking at.
+        //
+        // Who holds the keyboard is a property of the LAYOUT now, and the surface
+        // is told. A single terminal is the same rule with one pane in the list.
     }
 
     @objc private func tick() {

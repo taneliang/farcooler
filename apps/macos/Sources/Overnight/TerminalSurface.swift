@@ -21,6 +21,7 @@ struct TerminalSurface: NSViewRepresentable {
         var attached: String?
         var started = false
         var fontRevision = 0
+        var focused: Bool?
         var pendingGeometry: Task<Void, Never>?
 
         func stop() {
@@ -37,6 +38,12 @@ struct TerminalSurface: NSViewRepresentable {
     /// Bumped by preferences, so a font change reaches a live terminal.
     var fontRevision: Int = 0
 
+    /// Whether this pane should own the keyboard.
+    ///
+    /// Driven by the layout's focus, so the pane with the ring round it is the
+    /// pane that receives keystrokes. There is exactly one true at a time.
+    var isFocused: Bool = true
+
     func makeNSView(context: Context) -> TerminalRenderView {
         let view = TerminalRenderView()
         attach(view, context: context)
@@ -52,6 +59,15 @@ struct TerminalSurface: NSViewRepresentable {
         if context.coordinator.fontRevision != fontRevision {
             context.coordinator.fontRevision = fontRevision
             view.applyPreferences()
+        }
+        // Claimed on becoming focused, never on merely existing. Re-asserted on
+        // every update because a pane can gain focus long after it mounted — a
+        // ⌃B o, a click on another pane, or `overnight layout focus` from a script.
+        if isFocused, context.coordinator.focused != true {
+            context.coordinator.focused = true
+            view.claimKeyboard()
+        } else if !isFocused {
+            context.coordinator.focused = false
         }
     }
 
@@ -81,7 +97,7 @@ struct TerminalSurface: NSViewRepresentable {
         if let binary { input.start(binary: binary, terminal: terminal, environment: environment) }
         coord.input = input
         view.onInput = { bytes in input.send(bytes) }
-        view.claimKeyboard()
+        coord.focused = nil
 
         let box = MainActorBox(view)
 
