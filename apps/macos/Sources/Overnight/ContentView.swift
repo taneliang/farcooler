@@ -22,6 +22,8 @@ struct ContentView: View {
     /// the palette arrives in the panel that acts on it. See `perform`.
     @AppStorage("tasks.draft") private var taskDraft = ""
     @State private var showImportWorktrees = false
+    /// One divider resize at a time. See `resizeDivider`.
+    @State private var resizingDivider = false
 
     /// What the detail pane is showing.
     enum Selection: Hashable {
@@ -614,6 +616,9 @@ struct ContentView: View {
             },
             onViewport: { columns, rows in
                 await client.viewport(columns: columns, rows: rows, in: ws)
+            },
+            onResizeDivider: { terminal, side, cells in
+                resizeDivider(terminal, side: side, cells: cells, in: ws)
             }
         )
     }
@@ -828,6 +833,31 @@ struct ContentView: View {
     /// express "before" and "after", which is why dropping on the left half of a
     /// pane and on its right half used to do the same thing.
     ///
+    /// Move a divider, in cells.
+    ///
+    /// Serialised rather than queued. A drag produces one of these per cell
+    /// crossed and each is a round trip, so a fast drag across a wide pane would
+    /// stack up dozens of requests that land after the pointer has stopped and
+    /// walk the divider past where it was let go.
+    ///
+    /// Dropping the ones that arrive while another is in flight is safe because
+    /// the handle sends the difference from what it has ASKED for rather than
+    /// from the last thing that got through — so the next request carries
+    /// everything still owed, and the divider ends where the pointer did.
+    private func resizeDivider(
+        _ terminal: String, side: TileDirection, cells: Int, in workspace: Workspace
+    ) {
+        guard cells != 0, !resizingDivider else { return }
+        guard let pane = client.group(holding: terminal, in: workspace.id)?.pane(terminal) else {
+            return
+        }
+        resizingDivider = true
+        Task {
+            await client.resizePane(pane.short, side: side, cells: cells, in: workspace)
+            resizingDivider = false
+        }
+    }
+
     /// Works across layouts too: the pane leaves whichever one it was in.
     private func placePane(
         _ dragged: String, onto target: String, side: TileDirection, in workspace: Workspace

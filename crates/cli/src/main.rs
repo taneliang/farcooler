@@ -150,7 +150,13 @@ enum LayoutCmd {
     },
     /// Exchange two panes' positions.
     Swap { workspace: String, a: String, b: String },
-    /// Move a divider, in cells.
+    /// Move a divider, in cells. Negative moves it the other way.
+    ///
+    /// `allow_negative_numbers`, because half of every drag is negative and clap
+    /// otherwise reads `--cells -5` as an unknown flag called `-5`. That failed
+    /// silently through the app: dragging a divider right worked and dragging it
+    /// left did nothing at all.
+    #[command(allow_negative_numbers = true)]
     Resize {
         workspace: String,
         terminal: String,

@@ -36,6 +36,8 @@ struct TileView: View {
     let onDropOnPane: (_ dragged: String, _ onto: String, _ side: TileDirection) -> Void
     /// How big this view is, in cells. tmux lays out into it.
     let onViewport: (Int, Int) async -> Void
+    /// A divider dragged: which pane's border, and by how many cells.
+    let onResizeDivider: (String, TileDirection, Int) -> Void
 
     @ObservedObject private var prefix = PrefixMode.shared
     @ObservedObject private var preferences = Preferences.shared
@@ -113,6 +115,11 @@ struct TileView: View {
                                 .transition(.scale(scale: 0.97).combined(with: .opacity))
                         }
                     }
+
+                    // Over the panes rather than between them: a divider belongs
+                    // to two cards, and drawing it on either would put the hit
+                    // area at the mercy of which one is on top.
+                    PaneDividers(group: group, size: size, onResize: onResizeDivider)
                 }
                 // tmux's own layout string, which changes exactly when the
                 // arrangement does and never when it does not. Animating against
@@ -304,12 +311,6 @@ private struct TilePane: View {
         // the panes moving would lag the keystroke that caused it.
         .animation(.smooth(duration: 0.12), value: isFocused)
         .overlay { dropIndicator }
-        // The drag source. `.onDrag` rather than `.draggable`, because the id has
-        // to be readable synchronously when the drop lands — see `PaneDrag`.
-        .onDrag {
-            MainActor.assumeIsolated { PaneDrag.shared.begin(terminal.id) }
-            return NSItemProvider(object: terminal.id as NSString)
-        }
         // A delegate rather than `dropDestination`, for one reason: the indicator
         // has to follow the pointer, and only a delegate is told where the pointer
         // is while the drag is still in progress. `isTargeted:` answers "is it over
@@ -351,7 +352,27 @@ private struct TilePane: View {
     /// nothing does — so each pane names itself, carries the number `prefix N`
     /// selects, and shows its own status dot. That is the whole header; anything
     /// more would be four copies of chrome.
+    /// The header is the grab handle, not the whole card.
+    ///
+    /// Dragging anywhere on a pane used to move it, which put the gesture in
+    /// direct competition with two others that live in the same pixels: selecting
+    /// text in the terminal, and dragging the divider along its edge. A drag
+    /// starting a few points inside a pane moved the pane when it was meant to
+    /// move the boundary, and the arrangement rearranged itself under the hand.
+    ///
+    /// A title bar is what you drag to move a window everywhere else, so this is
+    /// also the thing people already try.
     private var header: some View {
+        headerContent
+            // `.onDrag` rather than `.draggable`, because the id has to be
+            // readable synchronously when the drop lands — see `PaneDrag`.
+            .onDrag {
+                MainActor.assumeIsolated { PaneDrag.shared.begin(terminal.id) }
+                return NSItemProvider(object: terminal.id as NSString)
+            }
+    }
+
+    private var headerContent: some View {
         HStack(spacing: 6) {
             Text("\(index)")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
