@@ -177,7 +177,7 @@ impl Service {
         let destination = self.pane_of(target).await?;
         let (axis, before) = split_args(side);
 
-        self.tmux.join_pane(&source.pane_id, &destination.pane_id, axis, before).await?;
+        self.tmux.join_pane(&source.pane_id, &destination.pane_id, axis, before, dragged).await?;
         self.tmux.select_pane(&source.pane_id).await?;
         self.layout(workspace).await
     }
@@ -324,7 +324,7 @@ impl Service {
     /// Pull a pane out into a layout of its own.
     pub async fn layout_break(&self, workspace: Uuid, terminal: Uuid) -> Result<Vec<LayoutView>> {
         let pane = self.pane_of(terminal).await?;
-        self.tmux.break_pane(&pane.pane_id, workspace).await?;
+        self.tmux.break_pane(&pane.pane_id, workspace, terminal).await?;
         self.layout(workspace).await
     }
 

@@ -16,12 +16,22 @@ struct GroupBar: View {
     let onSelect: (PaneGroup) -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-                pill(group, position: index + 1)
+        // Scrolls, because a worktree now has as many layouts as it has terminals.
+        // A layout used to be something you made on purpose and there were two or
+        // three; a terminal IS a tmux window and a window IS a layout, so twelve
+        // shells means twelve pills. In a fixed row SwiftUI compressed them until
+        // the names ran vertically, one letter per line, which is the state this
+        // was found in — a bar naming twelve layouts and legible for none of them.
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                    pill(group, position: index + 1)
+                }
             }
-            Spacer(minLength: 0)
         }
+        // The row is one line of text tall whatever happens. Without this the
+        // scroll view claims whatever height it is offered and the panes lose it.
+        .frame(height: 22)
         .padding(.bottom, Pane.inset)
         .animation(.smooth(duration: 0.2), value: groups.map(\.isActive))
     }
@@ -34,10 +44,17 @@ struct GroupBar: View {
             HStack(spacing: 5) {
                 Text(label(group, position: position))
                     .font(.system(size: 11, weight: active ? .medium : .regular))
-                Text("\(group.members.count)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                // Only where it says something. Every layout has at least one pane,
+                // so "1" beside eleven of twelve pills is a column of noise hiding
+                // the one that reads "3".
+                if group.panes.count > 1 {
+                    Text("\(group.panes.count)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
             }
+            .fixedSize()
             .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             .padding(.horizontal, 9)
             .padding(.vertical, 4)

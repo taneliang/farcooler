@@ -69,7 +69,7 @@ final class DaemonClient: ObservableObject {
             },
             onLayout: { [weak self] event in
                 Task { @MainActor in
-                    self?.layouts[event.workspace] = event.groups.map(\.group)
+                    self?.layouts[event.workspace] = event.groups
                 }
             },
             onEnd: { [weak self] in
@@ -240,37 +240,108 @@ final class DaemonClient: ObservableObject {
         (layouts[workspace] ?? []).first { $0.terminals.contains(terminal) }
     }
 
-    /// Put terminals in a group of their own, leaving the existing one alone.
-    ///
-    /// The two-sets-of-tiles operation. `tile` replaces what is on screen; this
-    /// adds a second arrangement beside it.
+    // MARK: - Layout commands
+    //
+    // One method per CLI subcommand, and nothing more. Each is a single line over
+    // `layout(_:_:_:)`, which exists so the reply — always the workspace's whole
+    // layout — is applied in exactly one place. The value of naming them anyway is
+    // that the argument order and the flag spellings live here rather than being
+    // written out at each call site, which is where the last set of them drifted.
+
+    /// A new terminal beside an existing pane. tmux's `split-window`.
     @discardableResult
-    func splitOff(_ terminals: [String], in workspace: Workspace, name: String = "")
-        async -> [PaneGroup]
-    {
-        var rest = terminals
-        if !name.isEmpty { rest += ["--name", name] }
+    func split(
+        _ workspace: Workspace, beside terminal: String?, side: TileDirection,
+        preset: String = "shell"
+    ) async -> [PaneGroup] {
+        var rest = terminal.map { [$0] } ?? []
+        rest += ["--side", side.rawValue, "--preset", preset]
         return await layout(workspace, ["split"], rest)
     }
 
-    /// Set a group's members, in this exact order.
+    /// Move a pane against another, on an edge. The drag and drop.
     ///
-    /// One call for both halves of a drag: reordering panes inside a layout and
-    /// pulling an outside terminal into one are the same operation once you have
-    /// the list you want, and `tile` takes a list.
+    /// Works across layouts — the pane leaves the one it was in — which is why
+    /// this single call covers both halves of the gesture: rearranging panes
+    /// within a layout and pulling a terminal in from another one.
     @discardableResult
-    func retile(_ ordered: [String], in workspace: Workspace, groupPosition: Int)
-        async -> [PaneGroup]
-    {
-        await layout(workspace, ["tile"], ordered + ["--group", "\(groupPosition)"])
+    func movePane(
+        _ terminal: String, onto target: String, side: TileDirection, in workspace: Workspace
+    ) async -> [PaneGroup] {
+        await layout(workspace, ["move"], [terminal, target, "--side", side.rawValue])
     }
 
-    /// Move a terminal into a group. A terminal is in at most one, so this moves it.
     @discardableResult
-    func move(_ terminal: String, toGroup position: Int, in workspace: Workspace)
+    func applyPreset(_ preset: TilePreset, in workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["preset"], [preset.rawValue])
+    }
+
+    @discardableResult
+    func cycleLayout(_ workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["cycle"])
+    }
+
+    /// Focus a pane, which also brings its layout to the front.
+    @discardableResult
+    func focusPane(_ terminal: String, in workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["focus"], [terminal])
+    }
+
+    @discardableResult
+    func focusPane(step: String, in workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["focus"], [step])
+    }
+
+    @discardableResult
+    func focusPane(number: Int, in workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["focus"], ["--pane", "\(number)"])
+    }
+
+    @discardableResult
+    func zoomPane(_ terminal: String?, in workspace: Workspace, off: Bool = false)
         async -> [PaneGroup]
     {
-        await layout(workspace, ["add"], [terminal, "--group", "\(position)"])
+        await layout(workspace, ["zoom"], (terminal.map { [$0] } ?? []) + (off ? ["--off"] : []))
+    }
+
+    @discardableResult
+    func swapPanes(_ a: String, _ b: String, in workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["swap"], [a, b])
+    }
+
+    @discardableResult
+    func resizePane(
+        _ terminal: String, side: TileDirection, cells: Int, in workspace: Workspace
+    ) async -> [PaneGroup] {
+        await layout(
+            workspace, ["resize"], [terminal, "--side", side.rawValue, "--cells", "\(cells)"])
+    }
+
+    /// Pull a pane into a layout of its own. tmux's `break-pane`.
+    @discardableResult
+    func breakPane(_ terminal: String?, in workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["break"], terminal.map { [$0] } ?? [])
+    }
+
+    @discardableResult
+    func renameLayout(_ name: String, in workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["rename"], [name])
+    }
+
+    /// Tell tmux how big the view showing this layout is, in cells.
+    ///
+    /// The one thing the app is authoritative about, because it is the only thing
+    /// tmux cannot see: how much screen there is. Everything else flows back the
+    /// other way — tmux lays out into this and reports where the panes landed.
+    @discardableResult
+    func viewport(columns: Int, rows: Int, in workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["viewport"], ["\(columns)", "\(rows)"])
+    }
+
+    /// Show a different layout: by tmux window id, by name, by number, or `--next`.
+    @discardableResult
+    func selectLayout(_ group: String, in workspace: Workspace) async -> [PaneGroup] {
+        await layout(workspace, ["select"], [group])
     }
 
     func refreshLayout(_ workspace: Workspace) async {
@@ -281,7 +352,7 @@ final class DaemonClient: ObservableObject {
 
     /// Every layout the fleet has, read once.
     ///
-    /// One call per workspace rather than one for the fleet: `layout.list` is
+    /// One call per workspace rather than one for the fleet: `layout show` is
     /// scoped to a workspace, and a fleet-wide read would be a method that exists
     /// only for a first paint. Events carry every change after this.
     func refreshLayouts() async {
@@ -294,9 +365,9 @@ final class DaemonClient: ObservableObject {
     ///
     /// `path` is the subcommand, `rest` its arguments; the workspace goes between
     /// them, which is where every one of these commands wants it. Spelled out
-    /// rather than inserted at a fixed index — the previous version inserted it at
-    /// position 2, which is right for `layout zoom <ws>` and wrong for
-    /// `layout group new <ws>`, so every group command silently failed.
+    /// rather than inserted at a fixed index — a previous version inserted it at
+    /// position 2, which is right for a one-word subcommand and wrong for a
+    /// two-word one, so half the commands silently acted on the wrong thing.
     ///
     /// The reply is the workspace's whole layout, so the local copy is replaced
     /// rather than patched — and the event that follows says the same thing,
@@ -442,6 +513,13 @@ final class DaemonClient: ObservableObject {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
+    /// Size one terminal to a viewer's grid.
+    ///
+    /// Only for a terminal being shown ALONE. A pane's size is a property of the
+    /// layout it is in, so calling this on one pane of several resizes the whole
+    /// window to that pane's grid and the other panes shrink to fit inside it —
+    /// which is what happened, once, when each pane reported its own geometry.
+    /// The tiled view calls `viewport` instead, exactly once for the whole view.
     func resize(terminal: String, columns: Int, rows: Int) async {
         _ = await run(["terminal", "resize", terminal, "\(columns)", "\(rows)"])
     }
@@ -453,11 +531,10 @@ final class DaemonClient: ObservableObject {
     /// two reads also looks new. Ids are stable, so the id set is the diff.
     @discardableResult
     func createTerminal(
-        in workspace: Workspace, preset: String, title: String, tile: Bool = false
+        in workspace: Workspace, preset: String, title: String
     ) async -> Terminal? {
         let before = Set(workspace.terminals.map(\.id))
-        await createTerminal(
-            workspace: workspace.short, preset: preset, title: title, tile: tile)
+        await createTerminal(workspace: workspace.short, preset: preset, title: title)
 
         // Creation is a tmux window opening, so the record can lag the call.
         for _ in 0..<20 {
@@ -472,14 +549,14 @@ final class DaemonClient: ObservableObject {
         return nil
     }
 
-    func createTerminal(
-        workspace: String, preset: String, title: String, tile: Bool = false
-    ) async {
-        var command = ["terminal", "create", workspace, "--preset", preset, "--title", title]
-        // One call rather than create-then-add: `prefix %` is one keystroke and
-        // a pane that appears a beat after the split reads as a stutter.
-        if tile { command.append("--tile") }
-        _ = await run(command)
+    /// A terminal, which is a tmux window, which is a layout of its own.
+    ///
+    /// No `--tile` flag any more. Splitting used to be create-then-join, and that
+    /// flag was how the join happened in the same call; `layout split` now creates
+    /// the terminal itself, so the only remaining caller is the one that wants a
+    /// fresh layout — which is what plain create already does.
+    func createTerminal(workspace: String, preset: String, title: String) async {
+        _ = await run(["terminal", "create", workspace, "--preset", preset, "--title", title])
         await refresh()
     }
 

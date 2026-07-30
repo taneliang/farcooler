@@ -68,6 +68,11 @@ async fn run() -> Result<(), i32> {
         1
     })?);
 
+    // Repair identity on any pane still carrying it at window level. See
+    // `backfill_pane_tags`: those panes read correctly until something moves
+    // them, and then stop being identifiable at all.
+    service.backfill_pane_tags().await;
+
     // One watcher for the host, shared by every connection. Deriving activity
     // once and pushing it is the whole point: N clients must not mean N
     // processes reading the same screens.

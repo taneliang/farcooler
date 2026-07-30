@@ -74,13 +74,10 @@ struct ContentView: View {
             if case .terminal(let wsID, let termID) = new,
                 let workspace = client.fleet.workspaces.first(where: { $0.id == wsID }),
                 let holder = client.group(holding: termID, in: wsID),
-                !holder.isActive || holder.focused != termID
+                let pane = holder.pane(termID),
+                !holder.isActive || !pane.focused
             {
-                Task {
-                    guard let terminal = workspace.terminals.first(where: { $0.id == termID })
-                    else { return }
-                    await client.layout(workspace, ["focus"], [terminal.short])
-                }
+                Task { await client.focusPane(pane.short, in: workspace) }
             }
 
             // Opening a terminal is what ends `done`. Being listed is not being
@@ -277,11 +274,11 @@ struct ContentView: View {
                                         Task { await run(action, on: term) }
                                     },
                                     layouts: client.layouts[ws.id] ?? [],
-                                    onMoveToLayout: { term, position in
-                                        moveToLayout(term, in: ws, position: position)
+                                    onMoveToLayout: { term, group in
+                                        moveToLayout(term, in: ws, group: group)
                                     },
                                     onDropTogether: { dragged, onto in
-                                        tileTogether(dragged, onto.id, in: ws)
+                                        placePane(dragged, onto: onto.id, side: .right, in: ws)
                                     },
                                     tiled: Set(client.activeGroup(ws.id)?.terminals ?? [])
                                 )
@@ -526,45 +523,22 @@ struct ContentView: View {
     private var detail: some View {
         switch selection {
         case .terminal(let wsID, let termID):
-            // Tiled or solo, decided by whether the terminal belongs to a layout
-            // at all — not by whether that layout is the active one.
+            // Every terminal is in a layout now — it IS a tmux window, and a
+            // window IS a layout — so the second branch is reached only in the
+            // seconds before the first `layout show` comes back, and after that
+            // never. It is kept because "we have not read the layouts yet" and
+            // "this terminal is in no layout" look identical from here, and
+            // showing the terminal is the right answer to both.
             //
-            // It used to check the active group, so selecting a pane belonging to
-            // a different layout showed it on its own, and the view bounced
-            // between arrangement and single terminal as you clicked down the
-            // sidebar. A terminal that is part of an arrangement is only
-            // meaningful inside it; solo is for terminals in no layout, which is
-            // what keeps a backgrounded agent reachable.
+            // The condition deliberately asks whether the terminal is in ANY
+            // layout rather than in the ACTIVE one. It used to ask the latter, so
+            // selecting a pane belonging to a different layout showed it on its
+            // own and the view bounced between arrangement and single terminal as
+            // you clicked down the sidebar.
             if let ws = workspace(wsID), client.group(holding: termID, in: wsID) != nil,
                 let group = client.activeGroup(wsID)
             {
-                TileView(
-                    groups: client.layouts[wsID] ?? [group],
-                    workspace: ws,
-                    binary: client.cliPath,
-                    environment: client.cliEnvironment,
-                    onFocus: { id in
-                        selection = .terminal(workspace: wsID, terminal: id)
-                        Task { await client.layout(ws, ["focus"], [id]) }
-                    },
-                    onSelectGroup: { chosen in
-                        Task {
-                            let groups = await client.layout(
-                                ws, ["group", "select"], [chosen.short ?? chosen.id])
-                            // Land in the layout you just chose, not on whatever
-                            // pane the previous one had focused.
-                            if let focused = groups.first(where: { $0.isActive })?.focused {
-                                selection = .terminal(workspace: wsID, terminal: focused)
-                            }
-                        }
-                    },
-                    onDropOnPane: { dragged, target in
-                        placePane(dragged, before: target, in: ws)
-                    },
-                    onResize: { short, cols, rows in
-                        await client.resize(terminal: short, columns: cols, rows: rows)
-                    }
-                )
+                tiled(ws, group: group)
             } else if let ws = workspace(wsID),
                 let term = ws.terminals.first(where: { $0.id == termID })
             {
@@ -590,37 +564,10 @@ struct ContentView: View {
             if let ws = workspace(wsID), let group = client.activeGroup(wsID),
                 !group.terminals.isEmpty
             {
-                TileView(
-                    groups: client.layouts[wsID] ?? [group],
-                    workspace: ws,
-                    binary: client.cliPath,
-                    environment: client.cliEnvironment,
-                    onFocus: { id in
-                        selection = .terminal(workspace: wsID, terminal: id)
-                        Task { await client.layout(ws, ["focus"], [id]) }
-                    },
-                    onSelectGroup: { chosen in
-                        Task {
-                            let groups = await client.layout(
-                                ws, ["group", "select"], [chosen.short ?? chosen.id])
-                            // Land in the layout you just chose, not on whatever
-                            // pane the previous one had focused.
-                            if let focused = groups.first(where: { $0.isActive })?.focused {
-                                selection = .terminal(workspace: wsID, terminal: focused)
-                            }
-                        }
-                    },
-                    onDropOnPane: { dragged, target in
-                        placePane(dragged, before: target, in: ws)
-                    },
-                    onResize: { short, cols, rows in
-                        await client.resize(terminal: short, columns: cols, rows: rows)
-                    }
-                )
+                tiled(ws, group: group)
             } else if let ws = workspace(wsID) {
                 WorkspaceDetail(
                     workspace: ws,
-                    onTile: { Task { await tile(.tile) } },
                     onNewTerminal: { newTerminal(in: ws) },
                     onArchive: { Task { await client.archiveWorkspace(ws.short) } },
                     onRemove: { removeWorkspace = ws },
@@ -635,6 +582,40 @@ struct ContentView: View {
         case nil:
             placeholder
         }
+    }
+
+    /// The layout, wired up.
+    ///
+    /// One builder for both selections. Selecting a pane and selecting the
+    /// worktree it is in put the same view on screen with the same six callbacks,
+    /// and while they were written out twice they drifted: the drag handler was
+    /// fixed in one copy and not the other, so dropping a pane behaved differently
+    /// depending on which sidebar row you had clicked last.
+    private func tiled(_ ws: Workspace, group: PaneGroup) -> some View {
+        TileView(
+            groups: client.layouts[ws.id] ?? [group],
+            workspace: ws,
+            binary: client.cliPath,
+            environment: client.cliEnvironment,
+            onFocus: { id in
+                selection = .terminal(workspace: ws.id, terminal: id)
+                guard let pane = client.group(holding: id, in: ws.id)?.pane(id) else { return }
+                Task { await client.focusPane(pane.short, in: ws) }
+            },
+            onSelectGroup: { chosen in
+                Task {
+                    // Land in the layout you just chose, not on whatever pane the
+                    // previous one had focused.
+                    reveal(await client.selectLayout(chosen.id, in: ws), in: ws)
+                }
+            },
+            onDropOnPane: { dragged, target, side in
+                placePane(dragged, onto: target, side: side, in: ws)
+            },
+            onViewport: { columns, rows in
+                await client.viewport(columns: columns, rows: rows, in: ws)
+            }
+        )
     }
 
     private var placeholder: some View {
@@ -728,107 +709,64 @@ struct ContentView: View {
 
     /// Carry out a `⌃B`-prefixed command.
     ///
-    /// Every one of them is a `layout` call and the reply is the workspace's
-    /// whole layout, so there is nothing to reconcile here: the daemon decides
-    /// what a zoom or a focus means, and it decides the same way for the CLI and
-    /// for an agent. The only thing this file adds is geometry, for the two
-    /// commands that need it.
+    /// Every one of them is a single `layout` call whose reply is the workspace's
+    /// whole layout, so there is nothing to reconcile here: tmux decides what a
+    /// zoom or a split means, and it decides the same way for this app, for the
+    /// CLI and for an agent driving the CLI.
+    ///
+    /// This file no longer contributes geometry. Directional focus used to be
+    /// worked out here from a recomputed arrangement; it is now read off the
+    /// rectangles tmux reported, which is the only copy.
     private func tile(_ command: TileCommand) async {
         guard let workspace = tileTarget else { return }
         let group = client.activeGroup(workspace.id)
+        /// The pane a keystroke acts on: the selected one, else whatever tmux says
+        /// is focused.
+        let here: PaneRect? = {
+            if case .terminal(_, let id) = selection, let pane = group?.pane(id) { return pane }
+            return group?.panes.first(where: \.focused)
+        }()
 
         switch command {
-        case .tile:
-            let groups = await client.layout(workspace, ["tile"])
-            // Land on the layout you just made rather than leaving the selection
-            // pointing at a terminal that is now one pane of it.
-            if let focused = groups.first(where: { $0.isActive })?.focused {
-                selection = .terminal(workspace: workspace.id, terminal: focused)
-            }
-
-        case .untile:
-            // Every pane out, which deletes the group. The terminals keep
-            // running: un-tiling four agents must never be a way to stop four
-            // agents.
-            guard let group, !group.terminals.isEmpty else { return }
-            await client.layout(workspace, ["drop"], group.terminals)
-
         case .zoom:
-            await client.layout(workspace, ["zoom"])
+            await client.zoomPane(nil, in: workspace)
 
         case .focusNext:
-            await client.layout(workspace, ["focus"], ["--next"])
+            await client.focusPane(step: "--next", in: workspace)
         case .focusPrevious:
-            await client.layout(workspace, ["focus"], ["--prev"])
+            await client.focusPane(step: "--prev", in: workspace)
 
         case .focus(let direction):
-            // The one place the client's geometry is authoritative, because it
-            // is the only place that knows where the panes actually are. The
-            // daemon is then told a plain terminal id, so there is no second
-            // copy of the layout maths on the host to disagree with this one.
-            guard let group, let from = group.focused,
-                let index = group.terminals.firstIndex(of: from)
+            guard let group, let from = here,
+                let next = group.neighbour(of: from.id, direction)
             else { return }
-            let frames = TileGeometry.frames(
-                count: group.terminals.count,
-                preset: group.layout,
-                ratio: group.share,
-                in: CGRect(x: 0, y: 0, width: 1000, height: 700))
-            guard
-                let next = TileGeometry.neighbour(
-                    of: index, direction: direction, frames: frames)
-            else { return }
-            await client.layout(workspace, ["focus"], [group.terminals[next]])
+            await client.focusPane(next.short, in: workspace)
 
         case .focusIndex(let n):
-            await client.layout(workspace, ["focus"], ["--pane", "\(n)"])
+            await client.focusPane(number: n, in: workspace)
 
         case .cycle:
-            await client.layout(workspace, ["cycle"])
+            await client.cycleLayout(workspace)
 
         case .preset(let preset):
-            await client.layout(workspace, ["preset"], [preset.rawValue])
+            await client.applyPreset(preset, in: workspace)
 
         case .splitRight, .splitDown:
-            // A split makes a new terminal beside the one you are looking at.
-            //
-            // It used to tile the entire worktree first when nothing was tiled,
-            // which is how splitting one terminal produced a ten-pane grid. A
-            // split concerns two panes: this one, and the new one.
-            guard case .terminal(_, let id) = selection,
-                let here = workspace.terminals.first(where: { $0.id == id })
-            else { return }
-
-            let arrangement: TilePreset =
-                command == .splitRight ? .evenHorizontal : .evenVertical
-            let existing = client.group(holding: id, in: workspace.id)
-
-            guard
-                let made = await client.createTerminal(
-                    in: workspace,
-                    preset: "shell",
-                    title: "Terminal \(workspace.terminals.count + 1)",
-                    // Joins the layout in the same call when there is one to join.
-                    tile: existing != nil)
-            else { return }
-
-            if existing == nil {
-                // Not tiled yet: the two of them become a layout, and only those
-                // two.
-                await client.splitOff([here.short, made.short], in: workspace)
-            }
-            await client.layout(workspace, ["preset"], [arrangement.rawValue])
-            selection = .terminal(workspace: workspace.id, terminal: made.id)
+            // One call. It used to be create-then-join-then-apply-a-preset, three
+            // round trips whose only way of saying WHERE the new pane went was to
+            // re-arrange every pane in the layout — so splitting the third pane of
+            // four rebuilt the other three as well. `layout split` splits the pane
+            // you name, on the side you name, and leaves the rest alone.
+            let side: TileDirection = command == .splitRight ? .right : .bottom
+            let groups = await client.split(workspace, beside: here?.short, side: side)
+            // Land in the pane that was just made, which is the one tmux focuses.
+            reveal(groups, in: workspace)
 
         case .breakPane:
-            guard let focused = group?.focused else { return }
-            await client.layout(workspace, ["drop"], [focused])
-            selection = .terminal(workspace: workspace.id, terminal: focused)
-
-        case .shiftForward:
-            await client.layout(workspace, ["shift"])
-        case .shiftBack:
-            await client.layout(workspace, ["shift"], ["--back"])
+            guard let here else { return }
+            reveal(
+                await client.breakPane(here.short, in: workspace),
+                in: workspace, preferring: here.id)
 
         case .closePane:
             // tmux's `x`, and it means the same thing: the pane's process ends.
@@ -841,48 +779,35 @@ struct ContentView: View {
 
         case .nextGroup:
             // Landing in the new layout is the point of switching to it. Without
-            // this the selection stayed on a pane from the OLD group, which the
+            // this the selection stayed on a pane from the OLD layout, which the
             // detail view then showed on its own — so ⌃B n looked like it opened a
             // random terminal and came back.
-            reveal(await client.layout(workspace, ["group", "select"], ["--next"]), in: workspace)
+            reveal(await client.selectLayout("--next", in: workspace), in: workspace)
         case .previousGroup:
-            reveal(await client.layout(workspace, ["group", "select"], ["--prev"]), in: workspace)
-        case .closeGroup:
-            reveal(await client.layout(workspace, ["group", "close"]), in: workspace)
-
-        case .join:
-            // tmux's join-pane: bring the terminal you are looking at into the
-            // layout. The answer to "I am on terminal 7, which is not tiled — how
-            // do I tile it with something else".
-            guard case .terminal(_, let id) = selection,
-                let terminal = workspace.terminals.first(where: { $0.id == id })
-            else { return }
-            reveal(
-                await client.layout(workspace, ["add"], [terminal.short]),
-                in: workspace,
-                preferring: id)
+            reveal(await client.selectLayout("--prev", in: workspace), in: workspace)
 
         case .help:
             showShortcuts = true
         }
     }
 
-    /// Send a terminal to a layout, to a new one, or off screen.
+    /// Send a terminal to another layout, or to one of its own.
     ///
-    /// `nil` means a layout of its own — the two-sets-of-tiles case, and the one
-    /// the keyboard made you spell out in two steps. `-1` takes it off screen,
-    /// which stops it being drawn and does not stop the process.
-    private func moveToLayout(_ terminal: Terminal, in workspace: Workspace, position: Int?) {
+    /// `nil` is `break-pane`: a layout with just this in it. Naming a layout moves
+    /// the pane against that layout's focused pane, because "which layout" is only
+    /// half an instruction — tmux has to be told which pane and which edge, and the
+    /// menu has no way to ask. Dragging is how you say the other half, and the drop
+    /// indicator is why that is easier than answering a dialog about it.
+    private func moveToLayout(_ terminal: Terminal, in workspace: Workspace, group: PaneGroup?) {
         Task {
-            switch position {
-            case nil:
-                await client.splitOff([terminal.short], in: workspace)
-            case -1:
-                await client.layout(workspace, ["drop"], [terminal.short])
-            case .some(let index):
-                await client.move(terminal.short, toGroup: index, in: workspace)
+            let groups: [PaneGroup]
+            if let group, let onto = group.panes.first(where: \.focused) ?? group.panes.first {
+                groups = await client.movePane(
+                    terminal.short, onto: onto.short, side: .right, in: workspace)
+            } else {
+                groups = await client.breakPane(terminal.short, in: workspace)
             }
-            selection = .terminal(workspace: workspace.id, terminal: terminal.id)
+            reveal(groups, in: workspace, preferring: terminal.id)
         }
     }
 
@@ -894,41 +819,27 @@ struct ContentView: View {
         showImportWorktrees = true
     }
 
-    /// Drop a terminal onto a pane: it takes that pane's place in the layout.
+    /// Drop a terminal on an edge of a pane: it splits that pane on that edge.
     ///
-    /// The same gesture covers both things you want to do by hand — reordering
-    /// panes inside a layout, and pulling a terminal that was not tiled into one —
-    /// because once the desired order is known they are the same write.
-    private func placePane(_ dragged: String, before target: String, in workspace: Workspace) {
-        guard let groups = client.layouts[workspace.id],
-            let index = groups.firstIndex(where: { $0.isActive })
-        else { return }
-
-        var members = groups[index].terminals
-        members.removeAll { $0 == dragged }
-        // The target's index is taken AFTER the removal, so dragging a pane
-        // rightwards lands it where it was dropped rather than one short.
-        guard let at = members.firstIndex(of: target) else { return }
-        members.insert(dragged, at: at)
-
-        let shorts = members.compactMap { id in
-            workspace.terminals.first { $0.id == id }?.short
-        }
-        guard shorts.count == members.count else { return }
-        Task {
-            await client.retile(shorts, in: workspace, groupPosition: index + 1)
-            selection = .terminal(workspace: workspace.id, terminal: dragged)
-        }
-    }
-
-    /// Drop one sidebar row onto another: the two become a layout of their own.
-    private func tileTogether(_ dragged: String, _ onto: String, in workspace: Workspace) {
-        let shorts = [onto, dragged].compactMap { id in
+    /// One write for every drag in the app — a pane onto a pane, a sidebar row
+    /// onto a pane, a sidebar row onto another row — because they all say the same
+    /// thing: this terminal, against that one, on this side. It was three
+    /// operations while a layout was an ordered list, and the list could only
+    /// express "before" and "after", which is why dropping on the left half of a
+    /// pane and on its right half used to do the same thing.
+    ///
+    /// Works across layouts too: the pane leaves whichever one it was in.
+    private func placePane(
+        _ dragged: String, onto target: String, side: TileDirection, in workspace: Workspace
+    ) {
+        let shorts = [dragged, target].compactMap { id in
             workspace.terminals.first { $0.id == id }?.short
         }
         guard shorts.count == 2 else { return }
         Task {
-            reveal(await client.splitOff(shorts, in: workspace), in: workspace, preferring: dragged)
+            reveal(
+                await client.movePane(shorts[0], onto: shorts[1], side: side, in: workspace),
+                in: workspace, preferring: dragged)
         }
     }
 
@@ -942,7 +853,8 @@ struct ContentView: View {
         _ groups: [PaneGroup], in workspace: Workspace, preferring: String? = nil
     ) {
         guard let active = groups.first(where: { $0.isActive }) ?? groups.first else {
-            // No groups left: nothing is tiled, so fall back to the worktree.
+            // No layouts left, which now means no terminals left. Fall back to
+            // the worktree rather than to a pane that no longer exists.
             selection = .workspace(workspace.id)
             return
         }
@@ -1121,25 +1033,22 @@ struct ContentView: View {
     /// A new terminal, in a layout of its own.
     ///
     /// Every way of making a terminal goes through this — the sidebar button, ⌘T,
-    /// the palette's action, ⌃B c — because a terminal that belongs to no layout
-    /// is a thing you cannot reach. ⌃B n and p walk layouts, so an untiled
-    /// terminal was invisible to every navigation command in the app; the only way
-    /// back to it was finding its row in the sidebar.
+    /// the palette's action, ⌃B c.
     ///
-    /// tmux's `c` opens a window with a shell in it, and a window is a layout. So
-    /// does this.
+    /// One call now, where it used to be two. A terminal IS a tmux window and a
+    /// window IS a layout, so creating one already produces the layout; the
+    /// separate "make a group, then put it in the group" step was describing a
+    /// distinction that no longer exists.
+    ///
+    /// tmux's `c` opens a window with a shell in it. So does this.
     @discardableResult
     private func openTerminalInNewLayout(_ workspace: Workspace) async -> Terminal? {
         expanded.insert(workspace.id)
-        // The group first, so the terminal can join it as it is created rather
-        // than existing outside one for a beat.
-        await client.layout(workspace, ["group", "new"])
         guard
             let created = await client.createTerminal(
                 in: workspace,
                 preset: "shell",
-                title: "Terminal \(workspace.terminals.count + 1)",
-                tile: true)
+                title: "Terminal \(workspace.terminals.count + 1)")
         else { return nil }
         selection = .terminal(workspace: workspace.id, terminal: created.id)
         return created

@@ -2,9 +2,13 @@ import AppKit
 import SwiftUI
 
 /// Everything tiling can be asked to do from the keyboard.
+///
+/// Shorter than it was, because the model underneath it got smaller. There is no
+/// tile-all, un-tile, join or shift any more: those existed to manage membership
+/// of a hand-built list, and a pane's membership is now simply which tmux window
+/// it is in. What is left maps one-to-one onto `overnight layout`, which is the
+/// same set of verbs tmux itself has.
 enum TileCommand: Equatable {
-    case tile
-    case untile
     case zoom
     case focusNext
     case focusPrevious
@@ -15,14 +19,10 @@ enum TileCommand: Equatable {
     case splitRight
     case splitDown
     case breakPane
-    case shiftForward
-    case shiftBack
     case closePane
     case newGroup
     case nextGroup
     case previousGroup
-    case closeGroup
-    case join
     case help
 
     static let notification = Notification.Name("overnight.tile")
@@ -145,8 +145,8 @@ final class PrefixMode: ObservableObject {
         guard flags == .control else { return nil }
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "h": return .left
-        case "j": return .down
-        case "k": return .up
+        case "j": return .bottom
+        case "k": return .top
         case "l": return .right
         default: return nil
         }
@@ -166,8 +166,8 @@ final class PrefixMode: ObservableObject {
         switch event.keyCode {
         case 123: return .focus(.left)
         case 124: return .focus(.right)
-        case 126: return .focus(.up)
-        case 125: return .focus(.down)
+        case 126: return .focus(.top)
+        case 125: return .focus(.bottom)
         case 53: return nil  // Esc: cancel, already disarmed above
         default: break
         }
@@ -186,33 +186,22 @@ final class PrefixMode: ObservableObject {
         case ";": return .focusPrevious
         case "h": return .focus(.left)
         case "l": return .focus(.right)
-        case "k": return .focus(.up)
-        case "j": return .focus(.down)
-        // tmux's split bindings, and they mean the same thing here: another pane
-        // in the layout you are looking at.
+        case "k": return .focus(.top)
+        case "j": return .focus(.bottom)
+        // tmux's split bindings, and they mean the same thing here: a new pane
+        // beside the one you are looking at, in the layout you are looking at.
         case "%": return .splitRight
         case "\"": return .splitDown
-        case "a": return .join
-        // No binding tiles the whole worktree.
-        //
-        // `⌃B t` used to, and it was the wrong shape of command twice over: it
-        // replaced the arrangement you had built, and it pulled panes out of your
-        // other layouts to do it — because membership is exclusive, so gathering
-        // every terminal necessarily empties every other group.
-        //
-        // tmux has no such verb either. What it has, and what is here now, are the
-        // incremental ones: `a` brings this terminal in, `!` sends one out, `%`
-        // and `"` make a new one. "Tile all" survives as a button in the worktree
-        // overview, where the count is visible before you press it.
-        case "T": return .untile
+        // tmux's break-pane. There is no matching join binding any more: a pane is
+        // in a layout by being in that tmux window, so the way to put one beside
+        // another is to say which one — a drag, or `layout move`. `⌃B a` used to
+        // mean "bring this into the current layout", which could only ever append
+        // it to the end and never say where.
         case "!": return .breakPane
-        case "}": return .shiftForward
-        case "{": return .shiftBack
         case "x": return .closePane
         case "c": return .newGroup
         case "n": return .nextGroup
         case "p": return .previousGroup
-        case "&": return .closeGroup
         case "?": return .help
         default: return nil
         }
@@ -256,11 +245,11 @@ struct PrefixHint: View {
             // prefix-LESS movement instead: it is the binding used most and the
             // one least likely to be guessed.
             ("z", "zoom"), ("o", "next"), ("\u{2303}hjkl", "move"),
-            ("space", "layout"), ("%", "split"), ("t", "tile all"), ("!", "un-tile"),
-            ("c", "group"), ("?", "all keys"),
+            ("space", "layout"), ("%", "split"), ("\"", "split down"), ("!", "pop out"),
+            ("c", "new"), ("?", "all keys"),
         ],
         [
-            ("z", "zoom"), ("o", "next"), ("space", "layout"), ("t", "tile all"),
+            ("z", "zoom"), ("o", "next"), ("space", "layout"), ("%", "split"),
             ("?", "all keys"),
         ],
         [("z", "zoom"), ("space", "layout"), ("?", "all keys")],

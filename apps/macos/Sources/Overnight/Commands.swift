@@ -86,15 +86,15 @@ struct OvernightCommands: Commands {
         // sequence in the title, because a menu item with no key equivalent
         // teaches nothing about a prefix.
         CommandMenu("Layout") {
-            // No key equivalent: gathering every terminal replaces the
-            // arrangement you built and empties your other layouts, which is not
-            // something a keystroke should be able to do by accident.
-            Button("Tile All Terminals") { TileCommand.tile.post() }
-            Button("Un-tile  ⌃B T") { TileCommand.untile.post() }
+            // Splitting leads, because it is now the only way a layout grows and
+            // the one thing every other item here presupposes.
+            Button("Split Right  ⌃B %") { TileCommand.splitRight.post() }
+            Button("Split Down  ⌃B \"") { TileCommand.splitDown.post() }
+            Button("Move Pane Out  ⌃B !") { TileCommand.breakPane.post() }
             Divider()
             Button("Zoom Pane  ⌃B z") { TileCommand.zoom.post() }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
-            Button("Next Layout  ⌃B space") { TileCommand.cycle.post() }
+            Button("Next Arrangement  ⌃B space") { TileCommand.cycle.post() }
                 .keyboardShortcut(.space, modifiers: [.command, .shift])
             Menu("Arrangement") {
                 ForEach(TilePreset.allCases) { preset in
@@ -102,26 +102,20 @@ struct OvernightCommands: Commands {
                 }
             }
             Divider()
-            Button("Split Right  ⌃B %") { TileCommand.splitRight.post() }
-            Button("Split Down  ⌃B \"") { TileCommand.splitDown.post() }
-            Button("Add to Layout  ⌃B a") { TileCommand.join.post() }
-            Button("Move Pane Out  ⌃B !") { TileCommand.breakPane.post() }
-            Divider()
             // The prefix-less ones, and the only tiling bindings that get a real
             // key equivalent here: they are used constantly, and a menu item is
             // how someone finds out they exist.
             Button("Pane Left  ⌃H") { TileCommand.focus(.left).post() }
             Button("Pane Right  ⌃L") { TileCommand.focus(.right).post() }
-            Button("Pane Above  ⌃K") { TileCommand.focus(.up).post() }
-            Button("Pane Below  ⌃J") { TileCommand.focus(.down).post() }
+            Button("Pane Above  ⌃K") { TileCommand.focus(.top).post() }
+            Button("Pane Below  ⌃J") { TileCommand.focus(.bottom).post() }
             Divider()
             Button("Next Pane  ⌃B o") { TileCommand.focusNext.post() }
             Button("Previous Pane  ⌃B ;") { TileCommand.focusPrevious.post() }
             Divider()
-            Button("New Group  ⌃B c") { TileCommand.newGroup.post() }
-            Button("Next Group  ⌃B n") { TileCommand.nextGroup.post() }
-            Button("Previous Group  ⌃B p") { TileCommand.previousGroup.post() }
-            Button("Close Group  ⌃B &") { TileCommand.closeGroup.post() }
+            Button("New Layout  ⌃B c") { TileCommand.newGroup.post() }
+            Button("Next Layout  ⌃B n") { TileCommand.nextGroup.post() }
+            Button("Previous Layout  ⌃B p") { TileCommand.previousGroup.post() }
         }
 
         CommandGroup(after: .sidebar) {

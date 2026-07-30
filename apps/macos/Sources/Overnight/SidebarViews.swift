@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The sidebar's layout grid.
 ///
@@ -66,15 +67,16 @@ struct WorkspaceSection: View {
     let onArchive: () -> Void
     let onRemove: () -> Void
     let onTerminalAction: (Terminal, TerminalAction) -> Void
-    /// Where a terminal can be sent: each existing layout, plus a new one.
+    /// Where a terminal can be sent: each existing layout, plus one of its own.
     ///
-    /// The answer to "how do I tile these two together, and only these two". The
-    /// keyboard can do it — ⌃B c then ⌃B a — but that is two steps in an order you
-    /// have to know, and nothing on screen said groups existed. Moving a pane to a
-    /// layout is one action and reads as what it is.
+    /// The answer to "how do I put these two together, and only these two", for
+    /// people who would rather not drag. Dragging is the better gesture — it says
+    /// which pane and which edge, which a menu cannot ask — so this is the coarse
+    /// version of it, and deliberately so.
     var layouts: [PaneGroup] = []
-    var onMoveToLayout: (Terminal, Int?) -> Void = { _, _ in }
-    /// Dropping one terminal on another tiles the two together.
+    /// `nil` means a layout of its own.
+    var onMoveToLayout: (Terminal, PaneGroup?) -> Void = { _, _ in }
+    /// Dropping one terminal on another puts them side by side.
     var onDropTogether: (_ dragged: String, _ onto: Terminal) -> Void = { _, _ in }
     /// The terminals currently on screen together, if any.
     ///
@@ -242,7 +244,7 @@ struct ProjectHeader: View {
 /// a run of similar rectangles.
 /// A layout's name, or its number when the name IS its number.
 private func layoutLabel(_ group: PaneGroup, position: Int) -> String {
-    group.name == "\(position)" ? "Move to layout \(position)" : "Move to \(group.name)"
+    group.name == "\(position)" ? "Move to layout \(position)" : "Move to \u{201c}\(group.name)\u{201d}"
 }
 
 struct TerminalRow: View {
@@ -253,7 +255,7 @@ struct TerminalRow: View {
     var isTiled: Bool = false
     var layouts: [PaneGroup] = []
     /// `nil` means a new layout of its own.
-    var onMoveToLayout: (Int?) -> Void = { _ in }
+    var onMoveToLayout: (PaneGroup?) -> Void = { _ in }
     var onDropTogether: (String) -> Void = { _ in }
     let onAction: (TerminalAction) -> Void
 
@@ -316,29 +318,35 @@ struct TerminalRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
-        // Drag one terminal onto another and the two become a layout. Direct
-        // manipulation for the thing the menu spells out in words: "tile these
-        // two, and only these two" is awkward to describe and obvious to do.
-        .draggable(terminal.id)
-        .dropDestination(for: String.self) { items, _ in
-            guard let dragged = items.first, dragged != terminal.id else { return false }
+        // A row is a drag source for the panes as well as for other rows, so the
+        // same gesture grows a layout and rearranges one.
+        //
+        // `.onDrag` rather than `.draggable`: the pane a row is dropped on has to
+        // know which terminal is coming while the pointer is still moving, so it
+        // can show which half it would land in, and reading that back out of an
+        // item provider is asynchronous. See `PaneDrag`.
+        .onDrag {
+            MainActor.assumeIsolated { PaneDrag.shared.begin(terminal.id) }
+            return NSItemProvider(object: terminal.id as NSString)
+        }
+        .onDrop(of: [.text], isTargeted: $targeted) { _ in
+            guard let dragged = PaneDrag.shared.terminal, dragged != terminal.id else {
+                return false
+            }
+            PaneDrag.shared.end()
             onDropTogether(dragged)
             return true
-        } isTargeted: { targeted = $0 }
+        }
         .contextMenu {
-            Button("Tile on its own") { onMoveToLayout(nil) }
+            Button("Move to its own layout") { onMoveToLayout(nil) }
             if !layouts.isEmpty {
                 Divider()
                 ForEach(Array(layouts.enumerated()), id: \.element.id) { index, group in
                     Button(layoutLabel(group, position: index + 1)) {
-                        onMoveToLayout(index + 1)
+                        onMoveToLayout(group)
                     }
                     .disabled(group.terminals.contains(terminal.id))
                 }
-            }
-            if isTiled {
-                Divider()
-                Button("Take off screen") { onMoveToLayout(-1) }
             }
         }
     }
@@ -374,8 +382,6 @@ struct WorkspaceDot: View {
 /// footnote you can copy when you want it.
 struct WorkspaceDetail: View {
     let workspace: Workspace
-    /// Put every terminal here on screen together.
-    var onTile: () -> Void = {}
     let onNewTerminal: () -> Void
     let onArchive: () -> Void
     let onRemove: () -> Void
@@ -433,15 +439,12 @@ struct WorkspaceDetail: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut("t", modifiers: .command)
 
-                // The way in that is not a keystroke. Tiling is keyboard-first
-                // and the prefix is the fast path, but a feature reachable only
-                // by a binding you have to be told about does not exist for
-                // anyone who has not been told.
-                if workspace.terminals.count > 1 {
-                    Button(action: onTile) {
-                        Label("Tile all", systemImage: "square.split.2x2")
-                    }
-                }
+                // No "Tile all" any more. It gathered every terminal into one
+                // arrangement, which was possible only while membership was a list
+                // this app maintained; a terminal is a tmux window now, and putting
+                // twelve of them in one window means twelve nested splits nobody
+                // asked for. Panes come together one drag at a time, where you can
+                // see what you are making.
 
                 Spacer()
 

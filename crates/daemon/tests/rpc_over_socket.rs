@@ -804,3 +804,60 @@ async fn breaking_a_pane_out_makes_a_layout_and_dropping_it_back_puts_it_where_a
     let anchor = group.panes.iter().find(|p| p.terminal_id == first.id).expect("anchor");
     assert!(moved.left < anchor.left, "dropped left, so it is on the left: {group:?}");
 }
+
+#[tokio::test]
+async fn moving_a_pane_that_is_alone_in_its_window_keeps_its_identity() {
+    // The bug this test exists for: a terminal's id can rest on its WINDOW rather
+    // than its pane — which is what every terminal created before identity moved
+    // to the pane looks like, and the only arrangement possible while a window
+    // held exactly one pane. Joining that pane to another window makes it inherit
+    // the destination's options instead, so the id vanishes, the record derives as
+    // `lost`, and its workspace as `error`.
+    //
+    // Two terminals in separate layouts, then one dragged onto the other, is the
+    // ordinary drag-and-drop path — so this was reachable by dragging almost any
+    // real terminal.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+
+    let first = a_terminal(&mut client, &workspace.id, "one").await;
+    let second = a_terminal(&mut client, &workspace.id, "two").await;
+
+    let before = layout_call(&mut client, "layout.list", &workspace.id, Default::default()).await;
+    assert_eq!(before.items.len(), 2, "two terminals, two layouts");
+
+    let after = layout_call(
+        &mut client,
+        "layout.move",
+        &workspace.id,
+        overnight_protocol::v1::LayoutUpdate {
+            terminals: vec![second.id.clone()],
+            target: Some(first.id.clone()),
+            side: overnight_protocol::v1::SplitSide::Bottom as i32,
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert_eq!(after.items.len(), 1, "the emptied window is gone");
+    let group = &after.items[0];
+    assert_eq!(group.panes.len(), 2, "both terminals are panes of it: {group:?}");
+    assert!(
+        group.panes.iter().any(|p| p.terminal_id == second.id),
+        "the moved terminal still knows which terminal it is: {group:?}"
+    );
+
+    // And the record agrees: still running, not lost.
+    let mut list = request("terminal.list");
+    list.target_resource_id = Some(workspace.id.clone());
+    let result = client.call(list).await.expect("terminal.list");
+    let Some(result::Value::TerminalList(terminals)) = result.value else { panic!("wrong result") };
+    let moved = terminals.items.iter().find(|t| t.id == second.id).expect("moved terminal");
+    assert_eq!(
+        moved.state(),
+        overnight_protocol::v1::TerminalState::Running,
+        "a moved terminal is running, not lost"
+    );
+}

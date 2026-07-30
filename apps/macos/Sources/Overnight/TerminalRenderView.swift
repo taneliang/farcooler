@@ -2,6 +2,31 @@ import AppKit
 import COvernightVT
 import CoreText
 
+/// The cell grid a font produces, and the insets a pane draws inside.
+///
+/// Lifted out of the render view because two places now need it and they must
+/// not disagree. The view sizes its own grid from this; the tiled view sizes the
+/// whole VIEWPORT from it, in cells, and hands that to tmux — so if the two
+/// measured cells differently, tmux would lay out for a grid the renderer cannot
+/// draw and every pane would be a column or two out.
+enum TerminalMetrics {
+    /// Insets so glyphs do not touch the pane edges.
+    static let padding = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+
+    /// One cell, measured rather than assumed: the user's font and size change it.
+    static func cell(_ font: NSFont) -> CGSize {
+        // Every cell is the same box, so one advance defines the grid.
+        var glyph = CGGlyph()
+        var ch: UniChar = 0x4D  // "M"
+        CTFontGetGlyphsForCharacters(font, &ch, &glyph, 1)
+        var advance = CGSize.zero
+        CTFontGetAdvancesForGlyphs(font, .horizontal, &glyph, &advance, 1)
+        return CGSize(
+            width: advance.width,
+            height: (font.ascender - font.descender + font.leading).rounded(.up))
+    }
+}
+
 /// Draws the terminal and routes input to it.
 ///
 /// The whole of this view's job is pixels and events. It does not parse an
@@ -31,7 +56,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     private var baselineOffset: CGFloat = 4
 
     /// Insets so glyphs do not touch the pane edges.
-    private let padding = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+    private let padding = TerminalMetrics.padding
 
     // MARK: - Selection
 
@@ -66,16 +91,9 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     private func measure() {
-        // Every cell is the same box, so one advance defines the grid. Measured
-        // rather than assumed, because the user's font size changes it.
-        var glyph = CGGlyph()
-        var ch: UniChar = 0x4D  // "M"
-        CTFontGetGlyphsForCharacters(font, &ch, &glyph, 1)
-        var advance = CGSize.zero
-        CTFontGetAdvancesForGlyphs(font, .horizontal, &glyph, &advance, 1)
-
-        cellWidth = advance.width
-        cellHeight = (font.ascender - font.descender + font.leading).rounded(.up)
+        let cell = TerminalMetrics.cell(font)
+        cellWidth = cell.width
+        cellHeight = cell.height
         baselineOffset = -font.descender + font.leading / 2
     }
 

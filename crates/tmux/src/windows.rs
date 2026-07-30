@@ -648,13 +648,27 @@ impl TmuxServer {
         target_pane: &str,
         axis: Axis,
         before: bool,
+        terminal_id: Uuid,
     ) -> Result<()> {
         let mut args: Vec<&str> =
             vec!["join-pane", axis.flag(), "-s", source_pane, "-t", target_pane];
         if before {
             args.push("-b");
         }
-        self.expect(&args, "join-pane").await
+        self.expect(&args, "join-pane").await?;
+        // Re-tagged, because a pane that changes window changes which window's
+        // options it inherits.
+        //
+        // A terminal whose id was recorded as a WINDOW option — which is every
+        // terminal created before identity moved to the pane, and the only
+        // arrangement that existed while a window held exactly one pane — loses
+        // that id the instant it is joined somewhere else. The pane survives, the
+        // process survives, and the daemon can no longer tell which terminal it
+        // is, so the record derives as `lost` and its workspace as `error`.
+        //
+        // Setting it here makes the move self-healing: whatever the pane's
+        // identity rested on before, it rests on the pane afterwards.
+        self.tag_pane(source_pane, terminal_id).await
     }
 
     /// Swap two panes' positions without changing the arrangement.
@@ -666,7 +680,12 @@ impl TmuxServer {
     ///
     /// Returns the new window. `-d` leaves the current layout on screen, because
     /// breaking a pane out is usually tidying rather than navigation.
-    pub async fn break_pane(&self, pane_id: &str, workspace_id: Uuid) -> Result<String> {
+    pub async fn break_pane(
+        &self,
+        pane_id: &str,
+        workspace_id: Uuid,
+        terminal_id: Uuid,
+    ) -> Result<String> {
         let out = self
             .run(&["break-pane", "-d", "-P", "-F", "#{window_id}", "-s", pane_id])
             .await?;
@@ -678,9 +697,20 @@ impl TmuxServer {
         if window_id.is_empty() {
             return Err(DomainError::TmuxUnavailable);
         }
-        // A new window carries none of the old one's options.
+        // A new window carries none of the old one's options, so both halves of
+        // the identity have to be restated: the window's, and — for the same
+        // reason as `join_pane` — the pane's.
         self.tag_window(&window_id, workspace_id).await?;
+        self.tag_pane(pane_id, terminal_id).await?;
         Ok(window_id)
+    }
+
+    /// Set a pane's terminal tag from outside the crate.
+    ///
+    /// Exposed only for the startup repair: everything else that needs it does so
+    /// as part of an operation that already owns the pane.
+    pub async fn tag_pane_public(&self, pane_id: &str, terminal_id: Uuid) -> Result<()> {
+        self.tag_pane(pane_id, terminal_id).await
     }
 
     /// Kill one pane.

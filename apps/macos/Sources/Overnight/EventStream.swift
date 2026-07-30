@@ -32,29 +32,16 @@ struct TerminalEvent: Sendable, Decodable {
 /// through: layout is changed by this app, by the CLI, and by agents driving the
 /// CLI at the same time, so a client that missed one event converges on the next
 /// instead of applying a delta to a state it may not hold.
+/// The pushed form is the read form.
+///
+/// There used to be a second shape here — member ids instead of member objects —
+/// with a conversion between them, and the conversion was where a group arrived
+/// with no idea which pane was focused. The daemon now pushes exactly what
+/// `layout show` returns, so this decodes the same type and there is nothing to
+/// convert or to get wrong.
 struct LayoutEvent: Sendable, Decodable {
     var workspace: String
-    var groups: [PaneGroupEvent]
-}
-
-/// The event form, which carries member ids rather than member objects.
-struct PaneGroupEvent: Sendable, Decodable {
-    var id: String
-    var short: String?
-    var name: String
-    var preset: String
-    var ratio: Double?
-    var active: Bool?
-    var zoomed: String?
-    var focused: String?
-    var members: [String]
-
-    var group: PaneGroup {
-        PaneGroup(
-            id: id, short: short, name: name, preset: preset, ratio: ratio, active: active,
-            zoomed: zoomed, focused: focused,
-            members: members.map { PaneMember(id: $0, short: nil, title: nil) })
-    }
+    var groups: [PaneGroup]
 }
 
 /// Which resource a line is about.

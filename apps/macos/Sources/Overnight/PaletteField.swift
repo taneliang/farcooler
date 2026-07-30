@@ -133,11 +133,26 @@ final class PaletteTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard string.isEmpty, !placeholder.isEmpty else { return }
-        placeholder.draw(
-            at: NSPoint(x: textContainerInset.width + 5, y: textContainerInset.height),
-            withAttributes: [
-                .font: font ?? .systemFont(ofSize: 14),
-                .foregroundColor: NSColor.tertiaryLabelColor,
-            ])
+
+        // Drawn inside the view's own appearance, and in `secondaryLabelColor`.
+        //
+        // It was `tertiaryLabelColor`, which is about a quarter opaque — enough
+        // against a solid background and not against the translucent material
+        // this panel floats on, where whatever is behind the window shows through
+        // and the hint disappears into it.
+        //
+        // The appearance matters as much as the colour: these are dynamic colours
+        // resolved against whatever appearance is current when they are drawn, and
+        // an `NSView` hosted inside a SwiftUI overlay is not reliably drawn with
+        // its own. Setting it explicitly is what stops a light-mode placeholder
+        // being painted in the dark-mode colour.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            placeholder.draw(
+                at: NSPoint(x: textContainerInset.width + 5, y: textContainerInset.height),
+                withAttributes: [
+                    .font: font ?? .systemFont(ofSize: 14),
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                ])
+        }
     }
 }
