@@ -53,7 +53,10 @@ final class VTCore {
             VTSnapshot(
                 cells: UnsafeBufferPointer(start: cells, count: count),
                 columns: Int(raw.columns),
-                rows: Int(raw.rows)
+                rows: Int(raw.rows),
+                cursorRow: Int(raw.cursor_row),
+                cursorColumn: Int(raw.cursor_column),
+                cursorVisible: raw.cursor_visible
             )
         )
     }
@@ -83,6 +86,18 @@ struct VTSnapshot {
     let cells: UnsafeBufferPointer<OvernightVtCell>
     let columns: Int
     let rows: Int
+    /// Where the emulator itself has the caret, after every byte it has been
+    /// given.
+    ///
+    /// Worth taking over the host's answer to `terminal.cursor` whenever there
+    /// is one: that is a second round trip whose answer is true at a different
+    /// instant than the screen it is drawn on, so a fast-moving caret is drawn
+    /// a poll behind the text it is supposed to be sitting in. This one cannot
+    /// disagree with the screen beside it, because the same bytes put both
+    /// where they are.
+    let cursorRow: Int
+    let cursorColumn: Int
+    let cursorVisible: Bool
 
     subscript(row: Int, column: Int) -> OvernightVtCell {
         cells[row * columns + column]

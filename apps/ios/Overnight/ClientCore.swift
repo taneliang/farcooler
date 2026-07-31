@@ -16,6 +16,17 @@ actor ClientCore {
     private var handle: UnsafeMutableRawPointer?
     private var waiting: [UInt64: CheckedContinuation<Data, Error>] = [:]
     private var pump: Task<Void, Never>?
+    private var streams: [String: Stream] = [:]
+
+    /// What a live terminal stream reports back. Not a continuation, because a
+    /// stream is not an answer to anything: it produces bytes until the pane
+    /// ends or someone stops watching.
+    private struct Stream {
+        let onChunk: @Sendable ([UInt8]) -> Void
+        /// Nil means the pane ended; a string is the reason it could not be
+        /// read. Either way this stream is over and has been forgotten here.
+        let onEnd: @Sendable (String?) -> Void
+    }
 
     enum CoreError: LocalizedError {
         case notStarted
@@ -61,6 +72,41 @@ actor ClientCore {
         return overnight_client_connected(handle)
     }
 
+    /// Watch a terminal's output as it happens.
+    ///
+    /// The core opens a second ssh channel carrying nothing but this pane's
+    /// bytes — the same bytes tmux writes, in the order it writes them — so
+    /// what arrives here is what a terminal emulator eats, not a snapshot of
+    /// the screen after it settled. Cursor motion, redraws and animation exist
+    /// on the wire again, and the delay is one network round trip rather than
+    /// however long until the next poll.
+    ///
+    /// Returns false when there is no ssh session to open a channel on, which
+    /// is a real answer and not an error: the caller falls back to polling.
+    func startStream(
+        _ terminal: String,
+        onChunk: @escaping @Sendable ([UInt8]) -> Void,
+        onEnd: @escaping @Sendable (String?) -> Void
+    ) -> Bool {
+        guard let handle else { return false }
+        startPumping()
+        // Registered before starting, not after: the first chunk can be
+        // delivered by a pump tick that lands between the two, and a stream
+        // nothing is listening for yet would drop the replay of the screen —
+        // the one chunk whose loss is visible, because it is the whole screen.
+        streams[terminal] = Stream(onChunk: onChunk, onEnd: onEnd)
+        let started = terminal.withCString { overnight_client_stream_start(handle, $0) }
+        if !started { streams[terminal] = nil }
+        return started
+    }
+
+    /// Stop watching. Safe when nothing is running.
+    func stopStream(_ terminal: String) {
+        streams[terminal] = nil
+        guard let handle else { return }
+        terminal.withCString { overnight_client_stream_stop(handle, $0) }
+    }
+
     private func submit(
         _ start: (UnsafeMutableRawPointer) -> UInt64
     ) async throws -> Data {
@@ -84,9 +130,24 @@ actor ClientCore {
         pump = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.drain()
-                try? await Task.sleep(for: .milliseconds(20))
+                guard let interval = await self?.pumpInterval else { return }
+                try? await Task.sleep(for: interval)
             }
         }
+    }
+
+    /// How often to look, which is not the same question while a stream is
+    /// open.
+    ///
+    /// 20 ms is nothing next to a round trip to a host, so it is the right
+    /// price for noticing that a request finished. It is not nothing next to a
+    /// keystroke echoing back in 6 ms, though — a fixed 20 ms tick would be
+    /// most of the latency of the fast path it is sitting in front of, and
+    /// would make the stream feel like the polling it replaced. So the pump
+    /// runs hot exactly while something is streaming, and settles back the
+    /// moment nothing is.
+    private var pumpInterval: Duration {
+        streams.isEmpty ? .milliseconds(20) : .milliseconds(4)
     }
 
     private func drain() {
@@ -95,7 +156,16 @@ actor ClientCore {
             let json = String(cString: raw)
             guard
                 let data = json.data(using: .utf8),
-                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+
+            // A stream line carries no ticket, because nothing asked for it.
+            if let terminal = object["stream"] as? String {
+                deliver(terminal, object)
+                continue
+            }
+
+            guard
                 let ticket = object["ticket"] as? UInt64,
                 let continuation = waiting.removeValue(forKey: ticket)
             else { continue }
@@ -112,6 +182,24 @@ actor ClientCore {
                 continuation.resume(throwing: CoreError.rejected(message))
             }
         }
+    }
+
+    /// Hand one stream line to whoever is watching that terminal.
+    ///
+    /// Called from inside `drain`, so chunks reach the handler in exactly the
+    /// order the host produced them — which is the one property a byte stream
+    /// cannot do without. What the handler does with that ordering afterwards
+    /// is its own problem; see `TerminalSession.Inbox`.
+    private func deliver(_ terminal: String, _ line: [String: Any]) {
+        guard let stream = streams[terminal] else { return }
+        if let chunk = line["chunk"] as? String {
+            if let bytes = Data(base64Encoded: chunk) { stream.onChunk([UInt8](bytes)) }
+            return
+        }
+        // Anything that is not a chunk ends the stream: the pane finished, or
+        // it could not be opened at all.
+        streams[terminal] = nil
+        stream.onEnd(line["error"] as? String)
     }
 }
 

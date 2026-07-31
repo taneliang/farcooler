@@ -4,13 +4,19 @@ import SwiftUI
 
 /// One terminal's screen, kept live while a `TerminalView` is on screen.
 ///
-/// The wire carries a full screen, not a diff — `terminal.screen` is a
-/// snapshot, the way `fleet` is a snapshot. So each poll gets a fresh
-/// `VTCore` rather than feeding into the last one: a persistent core would
-/// need the dump to be self-clearing to stay correct, and "assume every
-/// capture starts by wiping the grid" is a fact about the host's tmux version,
-/// not something this file should have to trust. Recreating is one allocation
-/// a second and buys freedom from that assumption entirely.
+/// Streams, and polls only when it cannot stream. The two are genuinely
+/// different pictures of the same pane, not two speeds of the same one: a
+/// stream carries the bytes tmux wrote, in order, so the emulator here sees
+/// exactly what one on the host would — cursor motion, partial redraws, a
+/// spinner actually spinning. A poll carries the screen after it settled,
+/// which is the same thing a photograph is to a film. Everything that made
+/// this app feel remote came from the second one, and the fix was not to
+/// photograph faster.
+///
+/// The polling path below is kept, and is not dead code: `startStream`
+/// answers false when there is no ssh session to open a second channel on,
+/// and a screen that updates once a second is enormously better than a screen
+/// that says it cannot be shown.
 ///
 /// This never decides whether a terminal is "live" — the host does, the same
 /// way `Connection` never computes a workspace's state. An unreadable screen
@@ -37,10 +43,40 @@ final class TerminalSession: ObservableObject {
     /// anything actually changed. See `poll()` for what that buys.
     private var lastScreen: ScreenResponse?
 
-    // MARK: - Adaptive polling
+    // MARK: - Streaming
+
+    /// True once a second ssh channel is carrying this pane's bytes.
+    private var streaming = false
+    /// Bytes waiting to be fed, filled from off the main actor. See `Inbox`.
+    private var inbox: Inbox?
+    /// Watches for someone else resizing this pane. See `checkGeometry`.
+    private var geometry: Task<Void, Never>?
+    /// The size the emulator was built at, which is the pane's size as of the
+    /// last time anything looked.
+    private var paneSize: (columns: Int, rows: Int)?
+    /// The revision of the last screen seen, so the geometry check can be
+    /// answered in a hundred bytes when nothing moved.
+    private var revision: UInt64 = 0
+    /// Consecutive stream attaches that produced nothing before ending.
+    /// Reset by the first byte through. See `streamEnded`.
+    private var failedAttaches = 0
+    private var started = false
+
+    /// How often to ask the host how big this pane is now.
+    ///
+    /// The stream carries content and says nothing about geometry, which is
+    /// correct — it is a byte stream, and inventing a frame format to carry a
+    /// column count would make it something else. But the pane belongs to
+    /// whoever else is looking at it, and someone splitting a window on the
+    /// Mac resizes it out from under this screen. So geometry is asked for on
+    /// its own slow schedule, and because the ask carries the revision this
+    /// device already holds, the usual answer is a hundred bytes saying
+    /// "still 80×24, still unchanged".
+    private static let geometryInterval: Double = 2.0
+
+    // MARK: - Adaptive polling (fallback only)
     //
-    // NOT streaming. The daemon has no push channel for a terminal's screen —
-    // that is protocol work being done separately — so "adaptive" here means
+    // Reached when there is no ssh session to stream over. "Adaptive" means
     // choosing how often to ask, cheaply, rather than changing what is asked
     // for. A capture costs the host about 16ms; at a fixed 1000ms interval
     // that 16ms was rounding error next to 984ms of the phone doing nothing
@@ -70,29 +106,40 @@ final class TerminalSession: ObservableObject {
         self.core = core
     }
 
-    deinit { poller?.cancel() }
+    deinit {
+        poller?.cancel()
+        geometry?.cancel()
+        // The core's stream task outlives this object — it belongs to the ssh
+        // session, not to whoever was watching — so it has to be told, not
+        // just dropped. `nonisolated` capture of the id and the core is the
+        // whole reason both are stored rather than passed around.
+        let id = terminalID
+        let core = self.core
+        Task.detached { await core.stopStream(id) }
+    }
 
     /// Point this same session at a different terminal — what the tab strip
     /// calls when you tap a sibling.
     ///
-    /// A new `TerminalSession` per tap would work too, but it would tear down
-    /// and restart the poller `Task` for no reason: the loop already just
-    /// asks for whatever `terminalID` currently is on every tick, so
-    /// retargeting it here is enough. The screen is cleared immediately
-    /// rather than left showing the outgoing terminal until the next tick,
-    /// which would make the tap look like it did nothing. `lastScreen` is
-    /// cleared for the same reason `grid` is: it describes the terminal being
-    /// left, and comparing the new one's first capture against it would read
-    /// as "unchanged" by coincidence and back off a screen nobody has shown
-    /// yet.
+    /// A new `TerminalSession` per tap would work too, but this screen keeps
+    /// one for its lifetime, so retargeting is what a tap actually means.
+    /// Everything describing the outgoing terminal goes at once — its
+    /// emulator, its screen, its stream — because every one of them would
+    /// otherwise be read as belonging to the incoming one: a stale `grid`
+    /// makes the tap look like it did nothing, and a stale `lastScreen` makes
+    /// the new terminal's first capture compare equal by coincidence.
     func switchTo(_ id: String) {
         guard id != terminalID else { return }
+        teardown()
         terminalID = id
         vt = nil
         grid = nil
         lastScreen = nil
+        revision = 0
+        paneSize = nil
         phase = .connecting
-        wake()
+        started = true
+        Task { await open() }
     }
 
     /// Reflow the pane to the size this screen would like.
@@ -111,7 +158,14 @@ final class TerminalSession: ObservableObject {
         // compare equal and the redraw would wait for the next backed-off
         // tick instead of showing the new dimensions immediately.
         lastScreen = nil
-        wake()
+        // Reopened rather than waiting for the geometry check to notice what
+        // this method just did: the emulator is still the old size, and the
+        // redraw tmux is sending right now would be wrapped to it.
+        if streaming {
+            await open()
+        } else {
+            wake()
+        }
     }
 
     /// Start polling. Deliberately does NOT resize the pane.
@@ -134,16 +188,155 @@ final class TerminalSession: ObservableObject {
     func configure(columns: Int, rows: Int) async {
         guard columns > 0, rows > 0 else { return }
         lastRequestedSize = (columns, rows)
-        guard poller == nil else { return }
-        startLoop()
+        guard !started else { return }
+        started = true
+        await open()
     }
 
-    /// Stop polling. Called from `.onDisappear` — a backgrounded terminal view
-    /// has no business spending the host's SSH round trips or this phone's
-    /// battery on a screen nobody is reading.
+    /// Stop watching. Called from `.onDisappear` — a backgrounded terminal
+    /// view has no business holding an ssh channel open, or spending this
+    /// phone's battery on a screen nobody is reading.
     func stop() {
+        teardown()
+        started = false
+    }
+
+    private func teardown() {
         poller?.cancel()
         poller = nil
+        geometry?.cancel()
+        geometry = nil
+        inbox = nil
+        if streaming {
+            streaming = false
+            let id = terminalID
+            Task { await core.stopStream(id) }
+        }
+    }
+
+    // MARK: - Opening
+
+    /// Show this terminal and keep it live, by whichever means the connection
+    /// supports.
+    ///
+    /// The screen call first is not just for something to look at: the stream
+    /// carries no geometry, and an emulator has to be built at some size
+    /// before a single byte can be fed to it. It is also the one call that
+    /// reports a pane that is not running, which a stream can only express by
+    /// failing to open.
+    private func open() async {
+        teardown()
+        guard await prime() else { return }
+        if await attach() {
+            watchGeometry()
+        } else {
+            startLoop()
+        }
+    }
+
+    /// One screen, for geometry and a first paint.
+    private func prime() async -> Bool {
+        do {
+            let data = try await core.call("terminal.screen", ["terminal": terminalID])
+            let response = try JSONDecoder().decode(ScreenResponse.self, from: data)
+            render(response)
+            return true
+        } catch {
+            report(error)
+            return false
+        }
+    }
+
+    /// Open the byte stream, and say whether it opened.
+    private func attach() async -> Bool {
+        let inbox = Inbox()
+        self.inbox = inbox
+
+        let opened = await core.startStream(
+            terminalID,
+            onChunk: { [weak self] bytes in
+                // Buffered here, on whatever thread the core drained on, and
+                // consumed on the main actor. Feeding directly from a hop per
+                // chunk would put the emulator's input at the mercy of the
+                // order unstructured tasks happen to run in, and bytes that
+                // arrive out of order are not a slightly wrong screen — they
+                // are an escape sequence cut in half.
+                inbox.append(bytes)
+                Task { @MainActor in self?.consume() }
+            },
+            onEnd: { [weak self] error in
+                Task { @MainActor in self?.streamEnded(error) }
+            })
+
+        streaming = opened
+        if !opened { self.inbox = nil }
+        return opened
+    }
+
+    /// Feed everything that has arrived, in order, and redraw once.
+    private func consume() {
+        guard let inbox, let vt else { return }
+        let bytes = inbox.take()
+        guard !bytes.isEmpty else { return }
+        failedAttaches = 0
+        vt.feed(bytes)
+        publish()
+    }
+
+    /// The stream stopped. Try again, then settle for polling.
+    ///
+    /// A stream ends for two very different reasons: the pane finished, or the
+    /// channel did. Only the host can tell those apart, so this asks it — by
+    /// reopening, which begins with the screen call that reports a pane that
+    /// is no longer running. A channel that drops repeatedly without ever
+    /// delivering a byte is a connection that cannot carry a stream, and
+    /// retrying it forever would be a worse screen than the polling that
+    /// definitely works.
+    private func streamEnded(_ error: String?) {
+        guard streaming else { return }
+        streaming = false
+        failedAttaches += 1
+        guard failedAttaches < 3 else {
+            if let error { phase = .failed(error) }
+            startLoop()
+            return
+        }
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            await self?.open()
+        }
+    }
+
+    // MARK: - Geometry
+
+    private func watchGeometry() {
+        geometry?.cancel()
+        geometry = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.geometryInterval))
+                guard !Task.isCancelled else { return }
+                await self?.checkGeometry()
+            }
+        }
+    }
+
+    /// Notice someone else resizing this pane, and rebuild if they did.
+    ///
+    /// Rebuilding rather than calling `VTCore.resize`: tmux answers a resize by
+    /// making the program redraw itself, and those bytes are already on their
+    /// way down a stream whose emulator is still the old width. Reopening
+    /// replays the screen at the size it is actually being drawn at now, which
+    /// is the same recovery the stream performs when it first attaches.
+    private func checkGeometry() async {
+        guard streaming, let size = paneSize else { return }
+        guard
+            let data = try? await core.call(
+                "terminal.screen", ["terminal": terminalID, "knownRevision": revision]),
+            let response = try? JSONDecoder().decode(ScreenResponse.self, from: data)
+        else { return }
+        revision = response.revision
+        guard response.columns != size.columns || response.rows != size.rows else { return }
+        await open()
     }
 
     /// Cancel and restart the loop at the fast interval — "poll right now,
@@ -188,35 +381,64 @@ final class TerminalSession: ObservableObject {
             }
             lastScreen = response
             interval = Self.fastInterval
-
-            guard let bytes = Data(base64Encoded: response.contents) else {
-                phase = .failed("The host sent a screen this device could not decode.")
-                return
-            }
-
-            let core = VTCore(columns: response.columns, rows: response.rows)
-            core.feed([UInt8](bytes))
-            vt = core
-            grid = core.withSnapshot {
-                TerminalGrid(
-                    snapshot: $0,
-                    cursorRow: response.cursorRow,
-                    cursorColumn: response.cursorColumn)
-            }
-            phase = .live
+            render(response)
         } catch {
-            // "resource not found" is the host's answer for a terminal that is
-            // not currently a live pane — restarted, stopped, never started.
-            // Everything else is a real failure, and the two must read
-            // differently: one is "come back later", the other is "something
-            // is wrong".
-            let message = error.localizedDescription
-            phase = message == "resource not found" ? .notLive : .failed(message)
+            report(error)
             // Back off on a persistent error too — a terminal that keeps
             // failing to load has no "changing" to detect, and retrying it
             // every 100ms would hammer a host that has already said no.
             interval = min(interval * Self.backoffFactor, Self.slowInterval)
         }
+    }
+
+    // MARK: - Drawing
+
+    /// Build an emulator from a captured screen and show it.
+    ///
+    /// A fresh `VTCore` per capture rather than feeding into the last one: a
+    /// capture is a whole screen, not a continuation of one, and a persistent
+    /// core would need the dump to be self-clearing to stay correct. "Assume
+    /// every capture starts by wiping the grid" is a fact about the host's
+    /// tmux version, not something this file should have to trust. The
+    /// streaming path is the opposite by nature — its bytes ARE a
+    /// continuation — which is why it keeps whatever core this built.
+    private func render(_ response: ScreenResponse) {
+        revision = response.revision
+        guard let bytes = Data(base64Encoded: response.contents) else {
+            phase = .failed("The host sent a screen this device could not decode.")
+            return
+        }
+        let emulator = VTCore(columns: response.columns, rows: response.rows)
+        emulator.feed([UInt8](bytes))
+        vt = emulator
+        paneSize = (response.columns, response.rows)
+        // The host's cursor, not the emulator's: a capture is text, so feeding
+        // it leaves the caret wherever the last character landed — the bottom
+        // left — rather than at the prompt someone is typing into. The stream
+        // has no such gap, and `publish` uses the emulator's own.
+        grid = emulator.withSnapshot {
+            TerminalGrid(
+                snapshot: $0,
+                cursorRow: response.cursorRow,
+                cursorColumn: response.cursorColumn)
+        }
+        phase = .live
+    }
+
+    /// Show what the emulator currently holds, cursor included.
+    private func publish() {
+        guard let vt else { return }
+        grid = vt.withSnapshot { TerminalGrid(snapshot: $0) }
+        phase = .live
+    }
+
+    /// "resource not found" is the host's answer for a terminal that is not
+    /// currently a live pane — restarted, stopped, never started. Everything
+    /// else is a real failure, and the two must read differently: one is
+    /// "come back later", the other is "something is wrong".
+    private func report(_ error: Error) {
+        let message = error.localizedDescription
+        phase = message == "resource not found" ? .notLive : .failed(message)
     }
 
     /// Send typed text. Each scalar is encoded on its own so a Ctrl modifier —
@@ -240,12 +462,40 @@ final class TerminalSession: ObservableObject {
         guard !bytes.isEmpty else { return }
         let hex = bytes.map { String(format: "%02x", $0) }.joined()
         _ = try? await core.call("terminal.write", ["terminal": terminalID, "hex": hex])
-        // The moment a key is sent is the moment staleness is least
-        // acceptable — the user is looking right at this screen waiting to
-        // see what they typed. Snap back to the fast interval and poll now
-        // rather than waiting out however long a quiet screen had backed off
-        // to.
-        wake()
+        // Nothing to prompt when streaming: the echo is already on its way
+        // back down the same channel, and asking for a screen would only race
+        // it. Polling has no such luxury — the moment a key is sent is the
+        // moment staleness is least acceptable, so snap back to the fast
+        // interval rather than waiting out however long a quiet screen had
+        // backed off to.
+        if !streaming { wake() }
+    }
+}
+
+/// Bytes handed over from off the main actor, in the order they arrived.
+///
+/// The core delivers chunks in order — it drains its queue in one place — but
+/// the emulator lives on the main actor, and hopping per chunk hands the
+/// ordering to the scheduler, which makes no promise about it. So chunks are
+/// appended here under a lock and taken in one piece, and however many hops
+/// end up racing each other, the first one to arrive carries everything and
+/// the rest find nothing to do.
+private final class Inbox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes: [UInt8] = []
+
+    func append(_ chunk: [UInt8]) {
+        lock.lock()
+        bytes += chunk
+        lock.unlock()
+    }
+
+    func take() -> [UInt8] {
+        lock.lock()
+        defer { lock.unlock() }
+        let out = bytes
+        bytes.removeAll(keepingCapacity: true)
+        return out
     }
 }
 
@@ -255,6 +505,11 @@ private struct ScreenResponse: Decodable, Equatable {
     var rows: Int
     var cursorColumn: Int
     var cursorRow: Int
+    /// A hash of the screen and cursor, handed back on the next ask so the
+    /// host can answer "unchanged" in a hundred bytes instead of resending a
+    /// capture nothing did anything with.
+    var revision: UInt64
+    var unchanged: Bool
 }
 
 /// A plain-data copy of one screen, safe to publish and hold past the moment
@@ -271,6 +526,15 @@ struct TerminalGrid {
     var cells: [TerminalCell]
     var cursorRow: Int
     var cursorColumn: Int
+
+    /// The emulator's own caret, which is the right one whenever the bytes
+    /// that moved it are the same bytes that drew the screen around it.
+    init(snapshot: VTSnapshot) {
+        self.init(
+            snapshot: snapshot,
+            cursorRow: snapshot.cursorRow,
+            cursorColumn: snapshot.cursorColumn)
+    }
 
     init(snapshot: VTSnapshot, cursorRow: Int, cursorColumn: Int) {
         columns = snapshot.columns
