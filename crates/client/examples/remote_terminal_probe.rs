@@ -15,6 +15,7 @@ use std::ffi::CString;
 // for it.
 use overnight_client::ffi::{
     overnight_client_call, overnight_client_connect, overnight_client_new, overnight_client_poll,
+    overnight_client_stream_start, overnight_client_stream_stop,
 };
 
 fn poll_for(handle: *mut std::ffi::c_void, ticket: u64) -> serde_json::Value {
@@ -107,7 +108,75 @@ fn main() {
             .into_owned();
     assert!(text.contains(&marker), "what was typed has to appear on the screen");
     println!("typed `echo {marker}` and read it back");
+
+    // The data plane: a second ssh channel carrying the pane's bytes.
+    let term = CString::new(terminal.as_str()).unwrap();
+    assert!(
+        unsafe { overnight_client_stream_start(handle, term.as_ptr()) },
+        "a stream needs an ssh session"
+    );
+
+    // Drain the replayed screen first, so what is measured is a keystroke's
+    // round trip rather than the backlog that arrives on attach.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let mut replayed = 0usize;
+    while std::time::Instant::now() < deadline {
+        if let Some(chunk) = next_chunk(handle) {
+            replayed += chunk.len();
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+    println!("stream attached, replayed {replayed} bytes");
+    assert!(replayed > 0, "attaching replays the visible screen");
+
+    let live = format!("LIVE_{}", std::process::id());
+    let hex: String = format!("echo {live}\r").bytes().map(|b| format!("{b:02x}")).collect();
+    let start = std::time::Instant::now();
+
+    // Fired without waiting for its answer, because waiting means draining the
+    // same queue the stream arrives on — and `call` discards what is not its
+    // own ticket, which would eat the echo being measured.
+    let method = CString::new("terminal.write").unwrap();
+    let payload = CString::new(
+        serde_json::json!({ "terminal": terminal, "hex": hex }).to_string(),
+    )
+    .unwrap();
+    unsafe { overnight_client_call(handle, method.as_ptr(), payload.as_ptr()) };
+
+    let mut seen = None;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut accumulated = String::new();
+    while std::time::Instant::now() < deadline {
+        if let Some(chunk) = next_chunk(handle) {
+            accumulated.push_str(&String::from_utf8_lossy(&chunk));
+            if accumulated.contains(&live) {
+                seen = Some(start.elapsed());
+                break;
+            }
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+    unsafe { overnight_client_stream_stop(handle, term.as_ptr()) };
+
+    let elapsed = seen.expect("what was typed has to come back down the stream");
+    println!("keystroke echoed through the stream in {} ms", elapsed.as_millis());
+    assert!(elapsed.as_millis() < 500, "a stream is not a poll: {elapsed:?}");
+
     println!("PROBE PASSED");
+}
+
+/// The next streamed chunk, if one has arrived.
+fn next_chunk(handle: *mut std::ffi::c_void) -> Option<Vec<u8>> {
+    let raw = unsafe { overnight_client_poll(handle) };
+    if raw.is_null() {
+        return None;
+    }
+    let text = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let encoded = value.get("chunk")?.as_str()?;
+    decode_base64(encoded)
 }
 
 fn decode_base64(text: &str) -> Option<Vec<u8>> {

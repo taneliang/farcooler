@@ -148,6 +148,25 @@ size_t overnight_client_generate_key(const char *comment, uint8_t *out, size_t c
  */
 size_t overnight_client_public_key(const char *private_key, uint8_t *out, size_t capacity);
 
+/**
+ * Start streaming a terminal's live output.
+ *
+ * Chunks arrive through `overnight_client_poll` as
+ * `{"stream": "<terminal>", "chunk": "<base64>"}` — no ticket, because a stream
+ * is not an answer to anything. `{"stream": ..., "ended": true}` closes it, and
+ * `{"stream": ..., "error": "..."}` reports why it never started.
+ *
+ * A separate ssh channel, not the control connection: that connection answers
+ * one request at a time, so a stream sharing it would sit behind every fleet
+ * refresh. The latency floor is the network round trip.
+ *
+ * Returns false when the client has no ssh session to open a channel on.
+ */
+bool overnight_client_stream_start(void *handle, const char *terminal);
+
+/** Stop streaming. Safe when nothing is running for that terminal. */
+void overnight_client_stream_stop(void *handle, const char *terminal);
+
 #ifdef __cplusplus
 }
 #endif

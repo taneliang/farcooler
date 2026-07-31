@@ -39,6 +39,9 @@ pub struct ClientHandle {
     /// Whatever the last call returned that the caller has not taken yet, held
     /// so the pointer stays valid until the following call.
     scratch: Option<std::ffi::CString>,
+    /// Running terminal streams, by terminal id, so a second attach replaces the
+    /// first rather than pumping the same bytes twice.
+    streams: Arc<Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 /// Create a client. Free with `overnight_client_free`.
@@ -61,6 +64,7 @@ pub extern "C" fn overnight_client_new() -> *mut c_void {
         finished: Arc::new(Mutex::new(VecDeque::new())),
         next_ticket: Arc::new(Mutex::new(1)),
         scratch: None,
+        streams: Arc::new(Mutex::new(std::collections::HashMap::new())),
     });
     Box::into_raw(handle) as *mut c_void
 }
@@ -196,6 +200,83 @@ pub unsafe extern "C" fn overnight_client_generate_key(
     }
     unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
     bytes.len()
+}
+
+/// Start streaming a terminal's output. Chunks arrive through `poll`.
+///
+/// Each chunk is `{"stream": "<terminal>", "chunk": "<base64>"}` — no ticket,
+/// because a stream is not an answer to anything. A client feeds the bytes to
+/// its own emulator, which is the same one the daemon would have used.
+///
+/// Returns false if the client is not connected over ssh.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn overnight_client_stream_start(
+    handle: *mut c_void,
+    terminal: *const c_char,
+) -> bool {
+    let Some(h) = (unsafe { as_handle(handle) }) else { return false };
+    let Some(terminal) = (unsafe { read_str(terminal) }) else { return false };
+    let Ok(id) = terminal.parse::<uuid::Uuid>() else { return false };
+
+    let session = h.session.clone();
+    let finished = h.finished.clone();
+    let streams = h.streams.clone();
+    let key = terminal.clone();
+
+    let task = h.runtime.spawn(async move {
+        use tokio::io::AsyncReadExt;
+
+        let reader = {
+            let mut guard = session.lock().await;
+            let Some(session) = guard.as_mut() else { return };
+            match session.open_stream(id).await {
+                Ok(reader) => reader,
+                Err(e) => {
+                    push_line(
+                        &finished,
+                        json!({ "stream": key, "error": e.to_string() }).to_string(),
+                    );
+                    return;
+                }
+            }
+            // The lock is released here, deliberately: the stream reads for as
+            // long as the pane lives, and holding the session for that long
+            // would block every other call on this client forever.
+        };
+
+        let mut reader = reader;
+        let mut buf = vec![0u8; 16 * 1024];
+        loop {
+            match reader.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => push_line(
+                    &finished,
+                    json!({ "stream": key, "chunk": base64(&buf[..n]) }).to_string(),
+                ),
+                Err(_) => break,
+            }
+        }
+        push_line(&finished, json!({ "stream": key, "ended": true }).to_string());
+    });
+
+    let mut running = streams.lock().expect("streams");
+    if let Some(previous) = running.insert(terminal, task) {
+        previous.abort();
+    }
+    true
+}
+
+/// Stop streaming a terminal. Safe to call when nothing is running.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn overnight_client_stream_stop(
+    handle: *mut c_void,
+    terminal: *const c_char,
+) {
+    let Some(h) = (unsafe { as_handle(handle) }) else { return };
+    let Some(terminal) = (unsafe { read_str(terminal) }) else { return };
+    if let Some(task) = h.streams.lock().expect("streams").remove(&terminal) {
+        task.abort();
+    }
 }
 
 /// The public key belonging to a private key.
@@ -395,6 +476,11 @@ fn parse_destination(config: &str) -> Result<Destination, String> {
         passphrase: text("passphrase"),
         host_key,
     })
+}
+
+/// Queue a line that is not an answer to any request.
+fn push_line(queue: &Arc<Mutex<VecDeque<String>>>, line: String) {
+    queue.lock().expect("queue").push_back(line);
 }
 
 fn push(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value, String>) {

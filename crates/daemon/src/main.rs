@@ -46,6 +46,29 @@ async fn run() -> Result<(), i32> {
         return serve_stdio_session().await;
     }
 
+    // `overnightd --stream <terminal>` is the data plane, and it is deliberately
+    // not the control plane.
+    //
+    // Screens used to reach a phone by polling a request/response method, which
+    // put the latency floor at the poll interval — a second, where the capture
+    // itself costs sixteen milliseconds. Everything else was already fast; the
+    // waiting was ours.
+    //
+    // This is a separate ssh channel carrying nothing but the pane's bytes, so
+    // the floor becomes the network's round trip and nothing else. It is a
+    // second channel rather than frames multiplexed onto the control connection
+    // because that connection serialises calls: a stream sharing it would sit
+    // behind every fleet refresh, and a fleet refresh behind every byte. ssh
+    // already multiplexes channels, so the simplest correct answer is to let it.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(index) = args.iter().position(|a| a == "--stream") {
+        let Some(terminal) = args.get(index + 1) else {
+            eprintln!("--stream needs a terminal id");
+            return Err(2);
+        };
+        return stream_terminal(terminal).await;
+    }
+
     let socket = paths::socket_path().map_err(|e| {
         eprintln!("cannot determine the socket path: {e}");
         1
@@ -131,6 +154,25 @@ async fn run() -> Result<(), i32> {
 /// a process. It opens its own `Service`, which is the one place a second
 /// SQLite handle exists — brief, single-threaded, and gone when the ssh session
 /// ends. Long-lived state stays in tmux, which is shared safely by design.
+/// Write one terminal's live output to stdout until the pane goes away.
+async fn stream_terminal(terminal: &str) -> Result<(), i32> {
+    let Ok(id) = terminal.parse::<uuid::Uuid>() else {
+        eprintln!("--stream needs a terminal uuid");
+        return Err(2);
+    };
+    let service = Service::open().await.map_err(|e| {
+        eprintln!("cannot open the service: {e}");
+        1
+    })?;
+    // The inventory has to be fresh, or the pane this id names is looked up in a
+    // snapshot taken before the process started.
+    service.inventory.refresh().await;
+    service.runtime().stream(id).await.map_err(|e| {
+        eprintln!("cannot stream that terminal: {e}");
+        1
+    })
+}
+
 async fn serve_stdio_session() -> Result<(), i32> {
     // Nothing may be printed to stdout: it is the wire.
     let service = Arc::new(Service::open().await.map_err(|e| {
