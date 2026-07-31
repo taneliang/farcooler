@@ -19,6 +19,11 @@ SOURCES = [
     "FleetView.swift",
     "Model.swift",
     "Store.swift",
+    "QuickTask.swift",
+    "TaskComposer.swift",
+    "VTCore.swift",
+    "TerminalSession.swift",
+    "TerminalView.swift",
 ]
 FRAMEWORKS = ["overnight_vt.xcframework", "overnight_client.xcframework"]
 

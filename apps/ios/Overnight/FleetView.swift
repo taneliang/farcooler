@@ -14,6 +14,7 @@ struct FleetView: View {
 
     @StateObject private var connection = Connection()
     @State private var showNewWorkspace = false
+    @State private var showQuickTask = false
 
     var body: some View {
         Group {
@@ -40,6 +41,12 @@ struct FleetView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if connection.phase == .connected {
+                // Sparkles for "describe it" (QuickTaskView), plain plus for
+                // "fill in the form" (NewWorkspaceView) — same two flows the
+                // Mac keeps side by side, kept apart here by icon rather than
+                // by picking a winner, since a phone's one-sentence flow is
+                // new and unproven next to a form that already works.
+                Button { showQuickTask = true } label: { Image(systemName: "sparkles") }
                 Button { showNewWorkspace = true } label: { Image(systemName: "plus") }
             }
         }
@@ -47,6 +54,12 @@ struct FleetView: View {
             NewWorkspaceView(repositories: connection.repositories) { repository, task, branch in
                 await connection.createWorkspace(repository: repository, task: task, branch: branch)
             }
+        }
+        .sheet(isPresented: $showQuickTask) {
+            TaskComposerView(connection: connection)
+        }
+        .navigationDestination(for: Terminal.self) { terminal in
+            TerminalView(terminal: terminal, core: connection.core)
         }
         .task { await connection.start(host: host) }
         .refreshable { await connection.refresh() }
@@ -121,8 +134,10 @@ struct FleetView: View {
                     ForEach(workspace.terminals.sorted { a, b in
                         a.agent.wantsAttention && !b.agent.wantsAttention
                     }) { terminal in
-                        TerminalRow(terminal: terminal) { action in
-                            Task { await connection.act(action, on: terminal) }
+                        NavigationLink(value: terminal) {
+                            TerminalRow(terminal: terminal) { action in
+                                Task { await connection.act(action, on: terminal) }
+                            }
                         }
                     }
                     if workspace.terminals.isEmpty {

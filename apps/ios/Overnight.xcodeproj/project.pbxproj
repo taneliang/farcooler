@@ -12,6 +12,11 @@
 		3CB766C82CEA5109A2AA4C8E /* FleetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF27428554395E3898D3722A; };
 		84CD1507E8FC591EB0F90F4B /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC8223110EB551FAAB056EB; };
 		255E0E0A6E6F5519A9B56104 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CA58826B13541AAD8DB092; };
+		20A16A50D87D593E8BA3B034 /* QuickTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D8F8D255CA54ED9DC7430A; };
+		B532AA76377D539EB74A0CD6 /* TaskComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C165FAE6C3559DC828DEFE8; };
+		A07A9DAE756D5B1BA121F39D /* VTCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00777507DE6B5ED1A2FBCDD6; };
+		D0E0DA3007C95208AA0B6A03 /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0353D1B9C0F35087BA4FC7CD; };
+		A6EB0FF568D45F8D9BE28255 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238580CBF1FE54CCA5613A08; };
 		FECA7427E1AD5FCCA209AB94 /* overnight_vt.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5FA5EC59B6750A5905DB67D; };
 		2E99CD1866A95EFDAC853396 /* overnight_client.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA8286B4C4C155E1B03E0475; };
 /* End PBXBuildFile section */
@@ -23,6 +28,11 @@
 		DF27428554395E3898D3722A /* FleetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetView.swift; sourceTree = "<group>"; };
 		9BC8223110EB551FAAB056EB /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
 		A5CA58826B13541AAD8DB092 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		C6D8F8D255CA54ED9DC7430A /* QuickTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTask.swift; sourceTree = "<group>"; };
+		0C165FAE6C3559DC828DEFE8 /* TaskComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskComposer.swift; sourceTree = "<group>"; };
+		00777507DE6B5ED1A2FBCDD6 /* VTCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VTCore.swift; sourceTree = "<group>"; };
+		0353D1B9C0F35087BA4FC7CD /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
+		238580CBF1FE54CCA5613A08 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		C5FA5EC59B6750A5905DB67D /* overnight_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_vt.xcframework; path = Frameworks/overnight_vt.xcframework; sourceTree = "<group>"; };
 		FA8286B4C4C155E1B03E0475 /* overnight_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_client.xcframework; path = Frameworks/overnight_client.xcframework; sourceTree = "<group>"; };
 		C406B4C87D4D5001A4F23C30 /* Overnight.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Overnight.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -59,6 +69,11 @@
 				DF27428554395E3898D3722A /* FleetView.swift */,
 				9BC8223110EB551FAAB056EB /* Model.swift */,
 				A5CA58826B13541AAD8DB092 /* Store.swift */,
+				C6D8F8D255CA54ED9DC7430A /* QuickTask.swift */,
+				0C165FAE6C3559DC828DEFE8 /* TaskComposer.swift */,
+				00777507DE6B5ED1A2FBCDD6 /* VTCore.swift */,
+				0353D1B9C0F35087BA4FC7CD /* TerminalSession.swift */,
+				238580CBF1FE54CCA5613A08 /* TerminalView.swift */,
 			);
 			path = Overnight;
 			sourceTree = "<group>";
@@ -143,6 +158,11 @@
 				3CB766C82CEA5109A2AA4C8E /* FleetView.swift in Sources */,
 				84CD1507E8FC591EB0F90F4B /* Model.swift in Sources */,
 				255E0E0A6E6F5519A9B56104 /* Store.swift in Sources */,
+				20A16A50D87D593E8BA3B034 /* QuickTask.swift in Sources */,
+				B532AA76377D539EB74A0CD6 /* TaskComposer.swift in Sources */,
+				A07A9DAE756D5B1BA121F39D /* VTCore.swift in Sources */,
+				D0E0DA3007C95208AA0B6A03 /* TerminalSession.swift in Sources */,
+				A6EB0FF568D45F8D9BE28255 /* TerminalView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

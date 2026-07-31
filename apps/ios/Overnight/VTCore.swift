@@ -1,0 +1,112 @@
+import Foundation
+import OvernightVT
+
+/// Swift's view of the Rust terminal core.
+///
+/// A thin, safe wrapper: it owns the handle's lifetime, converts between Swift
+/// and C types, and nothing else. Every decision about what bytes mean — what
+/// colour an escape sequence produces, what an arrow key encodes to under the
+/// program's current mode — lives on the other side of this boundary. That is
+/// what let the Mac app's renderer and this one answer to the same handle
+/// without agreeing on a single line of emulator logic between them.
+///
+/// Not thread-safe by design — the core is confined to the main actor, which
+/// is where drawing happens anyway, and is the same discipline the header
+/// documents for every platform.
+@MainActor
+final class VTCore {
+    /// The pointer is just an address — it carries no isolated state of its
+    /// own. The discipline that matters is that only the main actor ever calls
+    /// through it, and deinit is by definition the last thing that does.
+    nonisolated(unsafe) private var handle: UnsafeMutableRawPointer?
+
+    init(columns: Int, rows: Int) {
+        handle = overnight_vt_new(UInt16(clamping: columns), UInt16(clamping: rows))
+    }
+
+    deinit {
+        if let handle { overnight_vt_free(handle) }
+    }
+
+    func feed(_ bytes: [UInt8]) {
+        guard let handle, !bytes.isEmpty else { return }
+        bytes.withUnsafeBufferPointer { overnight_vt_feed(handle, $0.baseAddress, $0.count) }
+    }
+
+    func resize(columns: Int, rows: Int) {
+        guard let handle else { return }
+        overnight_vt_resize(handle, UInt16(clamping: columns), UInt16(clamping: rows))
+    }
+
+    /// Read the screen and hand it to `body`.
+    ///
+    /// Scoped rather than returned: the cell buffer belongs to the core and is
+    /// only valid until the next call on this handle. Handing it out directly
+    /// would invite a dangling read the moment a poll fed new bytes; a closure
+    /// makes the lifetime the compiler's problem instead of a bug report.
+    func withSnapshot<T>(_ body: (VTSnapshot) -> T) -> T? {
+        guard let handle else { return nil }
+        var raw = OvernightVtSnapshot()
+        guard overnight_vt_snapshot(handle, &raw), let cells = raw.cells else { return nil }
+        let count = Int(raw.rows) * Int(raw.columns)
+        return body(
+            VTSnapshot(
+                cells: UnsafeBufferPointer(start: cells, count: count),
+                columns: Int(raw.columns),
+                rows: Int(raw.rows)
+            )
+        )
+    }
+
+    /// Encode a keystroke for the program currently running.
+    ///
+    /// The core answers because the answer depends on modes it holds: an arrow
+    /// key is different bytes under application cursor mode, and a Ctrl
+    /// modifier turns a printable scalar into a control code (Ctrl-C is `c`
+    /// with `.control`, not a separate key). Neither is this file's to decide.
+    func encode(key: UInt32, modifiers: VTModifiers) -> [UInt8] {
+        guard let handle else { return [] }
+        var buffer = [UInt8](repeating: 0, count: 16)
+        let n = buffer.withUnsafeMutableBufferPointer {
+            overnight_vt_encode_key(handle, key, modifiers.rawValue, $0.baseAddress, $0.count)
+        }
+        return Array(buffer[0..<n])
+    }
+
+    func encode(scalar: Unicode.Scalar, modifiers: VTModifiers) -> [UInt8] {
+        encode(key: scalar.value, modifiers: modifiers)
+    }
+}
+
+/// A borrowed view of the screen. Valid only inside `withSnapshot`.
+struct VTSnapshot {
+    let cells: UnsafeBufferPointer<OvernightVtCell>
+    let columns: Int
+    let rows: Int
+
+    subscript(row: Int, column: Int) -> OvernightVtCell {
+        cells[row * columns + column]
+    }
+}
+
+struct VTModifiers: OptionSet {
+    let rawValue: UInt32
+    static let shift = VTModifiers(rawValue: UInt32(OVERNIGHT_VT_MOD_SHIFT))
+    static let alt = VTModifiers(rawValue: UInt32(OVERNIGHT_VT_MOD_ALT))
+    static let control = VTModifiers(rawValue: UInt32(OVERNIGHT_VT_MOD_CTRL))
+}
+
+extension OvernightVtCell {
+    var isBold: Bool { flags & UInt16(OVERNIGHT_VT_FLAG_BOLD) != 0 }
+    var isInverse: Bool { flags & UInt16(OVERNIGHT_VT_FLAG_INVERSE) != 0 }
+    /// A double-width character. The next column is its spacer; a renderer
+    /// that draws both would show the glyph twice.
+    var isWide: Bool { flags & UInt16(OVERNIGHT_VT_FLAG_WIDE) != 0 }
+
+    /// Nil for a blank cell, so a renderer can skip drawing rather than
+    /// measuring and painting an empty glyph four thousand times a frame.
+    var character: Character? {
+        guard let scalar = Unicode.Scalar(ch), scalar != " " else { return nil }
+        return Character(scalar)
+    }
+}

@@ -24,7 +24,10 @@ final class Connection: ObservableObject {
     @Published private(set) var fleet: Fleet = .empty
     @Published private(set) var repositories: [Repository] = []
 
-    private let core = ClientCore()
+    // Not private: a pushed `TerminalView` talks to the same host through this
+    // same core, rather than opening a second SSH session just to poll one
+    // terminal's screen.
+    let core = ClientCore()
     private var poller: Task<Void, Never>?
 
     deinit { poller?.cancel() }
@@ -119,5 +122,57 @@ final class Connection: ObservableObject {
             "workspace.create",
             ["repository": repository, "task": task, "branch": branch])
         await refresh()
+    }
+
+    // MARK: - Quick Task
+    //
+    // Three thin, throwing calls rather than one method that does the whole
+    // "describe it and an agent starts" flow, unlike the Mac's
+    // `DaemonClient.startTask`. That one method can afford to be silent about
+    // which step failed because it prints one banner; QuickTaskView has a
+    // progress row to keep honest ("creating worktree" vs. "starting agent"),
+    // and it cannot narrate steps it was never told about individually. The
+    // fire-and-refresh `createWorkspace` above stays as it is, unchanged, for
+    // the manual form next to it — that flow only needs the new row to show up.
+
+    private struct IdentifiedReply: Decodable { var id: String }
+
+    /// Create a workspace and hand back its id.
+    ///
+    /// Throws instead of swallowing the error, because the caller has nothing
+    /// to create a terminal in if this fails and needs to say so rather than
+    /// press on silently.
+    func createWorkspace(repository: String, task: String, branch: String, base: String)
+        async throws -> String
+    {
+        let data = try await core.call(
+            "workspace.create",
+            ["repository": repository, "task": task, "branch": branch, "base": base])
+        return try JSONDecoder().decode(IdentifiedReply.self, from: data).id
+    }
+
+    /// Create a terminal and hand back its id, the same way.
+    func createTerminal(workspace: String, title: String, preset: String) async throws -> String {
+        let data = try await core.call(
+            "terminal.create", ["workspace": workspace, "title": title, "preset": preset])
+        return try JSONDecoder().decode(IdentifiedReply.self, from: data).id
+    }
+
+    /// Send exact bytes to a terminal. `hex` must already be lowercase hex —
+    /// this does no encoding of its own, because the one caller that exists
+    /// (QuickTaskView) needs the sentence and the carriage return sent as two
+    /// separate calls, not two strings joined into one payload here.
+    func writeRaw(terminal: String, hex: String) async throws {
+        _ = try await core.call("terminal.write", ["terminal": terminal, "hex": hex])
+    }
+
+    /// The terminal a Quick Task just created, read back out of the fleet.
+    ///
+    /// `terminal.create`'s reply is only an id — the daemon's answer to
+    /// `fleet` is the one place `activity` lives, which is what the waiting
+    /// loop polls. Looked up rather than cached, because each poll needs the
+    /// freshest copy.
+    func terminal(_ id: String, in workspace: String) -> Terminal? {
+        fleet.workspaces.first { $0.id == workspace }?.terminals.first { $0.id == id }
     }
 }
