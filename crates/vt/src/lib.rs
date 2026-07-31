@@ -425,6 +425,27 @@ mod tests {
     }
 
     #[test]
+    fn a_replayed_mouse_mode_makes_the_wheel_the_program_s() {
+        // The other half of the daemon's mode replay: tmux reports that a pane
+        // wants any-event tracking with SGR encoding, the replay states it, and
+        // a fresh emulator has to come out of that believing the program wants
+        // the wheel. Without it the emulator declines every mouse event and the
+        // client scrolls a scrollback that a full-screen program does not have,
+        // which is what a dead scroll area inside a TUI actually is.
+        let mut t = Terminal::new(80, 24);
+        assert!(
+            t.encode_mouse(input::MouseButton::WheelUp, input::MouseAction::Press, 3, 4, input::Modifiers::default())
+                .is_none(),
+            "a program that asked for nothing gets nothing"
+        );
+        t.feed(b"\x1b[?1049h\x1b[?1003h\x1b[?1006h");
+        let report = t
+            .encode_mouse(input::MouseButton::WheelUp, input::MouseAction::Press, 3, 4, input::Modifiers::default())
+            .expect("the program asked for the mouse, so it gets the event");
+        assert!(report.starts_with(b"\x1b[<"), "SGR encoding was requested: {report:?}");
+    }
+
+    #[test]
     fn a_line_exactly_as_wide_as_the_screen_does_not_consume_two_rows() {
         // Writing the last column leaves the caret pending at the edge rather
         // than on the next row; the line feed that follows is what moves it.

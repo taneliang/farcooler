@@ -238,6 +238,27 @@ impl TmuxServer {
         Ok(out.stdout)
     }
 
+    /// The modes a pane's program has turned on.
+    ///
+    /// A captured screen is contents without modes, and modes are what a
+    /// program set once, long before any of this session's clients attached.
+    /// So a client that replays a capture believes the program wants no mouse,
+    /// is not on the alternate screen, and sends ordinary arrow keys — and is
+    /// wrong about all three for every full-screen program there is. tmux knows,
+    /// because tmux is the emulator that parsed those sequences; this is asking
+    /// it, so a replay can put a fresh emulator into the state the program
+    /// believes it is talking to.
+    pub async fn pane_modes(&self, pane_id: &str) -> Result<PaneModes> {
+        let format = "#{alternate_on}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t\
+                      #{mouse_any_flag}\t#{mouse_sgr_flag}\t#{mouse_utf8_flag}\t\
+                      #{cursor_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}";
+        let out = self.run(&["display-message", "-p", "-t", pane_id, format]).await?;
+        if !out.ok() {
+            return Err(DomainError::TmuxUnavailable);
+        }
+        parse_modes(&out.stdout).ok_or(DomainError::TmuxUnavailable)
+    }
+
     /// Where the cursor is in the pane, zero-based as (column, row).
     ///
     /// A captured screen is text: it carries no cursor. Without asking tmux
@@ -362,6 +383,79 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
     })
 }
 
+/// The modes a pane's program has turned on, as tmux reports them.
+///
+/// Deliberately the flags rather than the escape sequences that set them: this
+/// is what tmux knows, and turning it into sequences is the replay's job, not
+/// the inventory's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PaneModes {
+    pub alternate_screen: bool,
+    pub mouse_standard: bool,
+    pub mouse_button: bool,
+    pub mouse_any: bool,
+    pub mouse_sgr: bool,
+    pub mouse_utf8: bool,
+    pub cursor_visible: bool,
+    pub application_cursor_keys: bool,
+    pub application_keypad: bool,
+    pub wrap: bool,
+}
+
+impl PaneModes {
+    /// The sequences that put a fresh emulator into this state.
+    ///
+    /// The alternate screen comes first and everything else follows, because
+    /// switching screens is what decides which screen the replay's clear and
+    /// contents land on. Modes that are off are written as explicitly off
+    /// rather than omitted: an emulator being reused for a second terminal
+    /// would otherwise keep the first one's modes.
+    pub fn restore_sequence(&self) -> String {
+        let mut out = String::new();
+        // Without ?1049h a full-screen program's redraws pile into the primary
+        // screen's scrollback instead of replacing the screen, which is a
+        // history that grows forever and a caret that jumps to the end of it.
+        out.push_str(if self.alternate_screen { "\x1b[?1049h" } else { "\x1b[?1049l" });
+        for (on, code) in [
+            (self.mouse_standard, "1000"),
+            (self.mouse_button, "1002"),
+            (self.mouse_any, "1003"),
+            (self.mouse_utf8, "1005"),
+            (self.mouse_sgr, "1006"),
+            (self.application_cursor_keys, "1"),
+            (self.wrap, "7"),
+            (self.cursor_visible, "25"),
+        ] {
+            out.push_str(&format!("\x1b[?{code}{}", if on { "h" } else { "l" }));
+        }
+        // Application keypad has no private-mode form; it is its own pair.
+        out.push_str(if self.application_keypad { "\x1b=" } else { "\x1b>" });
+        out
+    }
+}
+
+/// Parse the tab-separated flags `pane_modes` asks for.
+fn parse_modes(text: &str) -> Option<PaneModes> {
+    let line = text.lines().next()?;
+    let f: Vec<&str> = line.split('\t').map(str::trim).collect();
+    if f.len() < 10 {
+        return None;
+    }
+    let on = |i: usize| f[i] == "1";
+    Some(PaneModes {
+        alternate_screen: on(0),
+        mouse_standard: on(1),
+        mouse_button: on(2),
+        mouse_any: on(3),
+        mouse_sgr: on(4),
+        mouse_utf8: on(5),
+        cursor_visible: on(6),
+        application_cursor_keys: on(7),
+        application_keypad: on(8),
+        wrap: on(9),
+    })
+}
+
 /// Parse `display-message -p "#{cursor_x}\t#{cursor_y}"`.
 fn parse_cursor(text: &str) -> Option<(u32, u32)> {
     let line = text.lines().next()?;
@@ -372,6 +466,44 @@ fn parse_cursor(text: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pane_modes_are_parsed_in_order() {
+        let m = parse_modes("1\t0\t0\t1\t1\t0\t1\t0\t0\t1\n").expect("parsed");
+        assert!(m.alternate_screen);
+        assert!(m.mouse_any, "any-event tracking is what a modern TUI asks for");
+        assert!(m.mouse_sgr);
+        assert!(!m.mouse_standard);
+        assert!(m.cursor_visible);
+        assert!(m.wrap);
+    }
+
+    #[test]
+    fn a_short_mode_reply_is_rejected() {
+        // Guessing would put an emulator into modes the program never asked
+        // for, which is worse than replaying none of them.
+        assert_eq!(parse_modes("1\t0"), None);
+        assert_eq!(parse_modes(""), None);
+    }
+
+    #[test]
+    fn restoring_modes_switches_screens_before_anything_else() {
+        let m = PaneModes { alternate_screen: true, mouse_any: true, mouse_sgr: true, ..Default::default() };
+        let s = m.restore_sequence();
+        assert!(s.starts_with("\x1b[?1049h"), "the screen has to be chosen first: {s:?}");
+        assert!(s.contains("\x1b[?1003h"));
+        assert!(s.contains("\x1b[?1006h"));
+    }
+
+    #[test]
+    fn modes_that_are_off_are_stated_rather_than_omitted() {
+        // An emulator pointed at a second terminal would otherwise keep the
+        // first one's modes and report mouse events nobody asked for.
+        let s = PaneModes::default().restore_sequence();
+        assert!(s.contains("\x1b[?1049l"));
+        assert!(s.contains("\x1b[?1003l"));
+        assert!(s.contains("\x1b>"));
+    }
 
     #[test]
     fn cursor_position_is_parsed() {

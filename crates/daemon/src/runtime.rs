@@ -152,6 +152,22 @@ impl Runtime {
         // settled before the capture.
         tokio::time::sleep(std::time::Duration::from_millis(120)).await;
 
+        // The modes first, because a capture is contents and modes are not
+        // contents. Whether the program wants the mouse, whether it is on the
+        // alternate screen, whether an arrow key should send an application
+        // sequence — all of it was decided by escape sequences the program sent
+        // once, before any of today's clients existed. A client that replays
+        // only the screen is therefore wrong about every one of them, which is
+        // what made a full-screen program's own scroll area dead on both the
+        // Mac and the phone: the emulator believed no one wanted the wheel, so
+        // it scrolled a scrollback that an alternate screen does not have.
+        //
+        // Emitted before the clear, because switching to the alternate screen
+        // is what decides which screen the clear and the contents land on.
+        if let Ok(modes) = self.tmux.pane_modes(&pane.pane_id).await {
+            let _ = stdout.write_all(modes.restore_sequence().as_bytes()).await;
+        }
+
         if let Ok(screen) = self.tmux.capture_screen(&pane.pane_id).await {
             // Home the cursor and clear, so the replay paints a clean screen.
             let _ = stdout.write_all(b"\x1b[H\x1b[2J").await;
