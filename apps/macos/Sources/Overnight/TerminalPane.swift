@@ -15,6 +15,7 @@ struct TerminalPane: View {
     let workspace: Workspace
     let binary: String?
     let environment: [String: String]
+    let hostArguments: [String]
     let onGeometry: (Int, Int) async -> Void
     let onAction: (TerminalAction) -> Void
 
@@ -30,6 +31,7 @@ struct TerminalPane: View {
                     terminal: terminal.short,
                     binary: binary,
                     environment: environment,
+                    hostArguments: hostArguments,
                     onResize: onGeometry,
                     fontRevision: preferences.revision,
                     // One pane, so it always owns the keyboard.

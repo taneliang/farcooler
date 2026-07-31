@@ -30,6 +30,7 @@ struct TileView: View {
     let workspace: Workspace
     let binary: String?
     let environment: [String: String]
+    let hostArguments: [String]
     let onFocus: (String) -> Void
     let onSelectGroup: (PaneGroup) -> Void
     /// A terminal dropped on an edge of a pane: put it there.
@@ -167,6 +168,7 @@ struct TileView: View {
             terminal: terminal,
             binary: binary,
             environment: environment,
+            hostArguments: hostArguments,
             isFocused: isFocused,
             isZoomed: rect.zoomed,
             index: (group.panes.firstIndex(of: rect) ?? 0) + 1,
@@ -259,6 +261,7 @@ private struct TilePane: View {
     let terminal: Terminal
     let binary: String?
     let environment: [String: String]
+    let hostArguments: [String]
     let isFocused: Bool
     let isZoomed: Bool
     let index: Int
@@ -287,6 +290,7 @@ private struct TilePane: View {
                     terminal: terminal.short,
                     binary: binary,
                     environment: environment,
+                    hostArguments: hostArguments,
                     // Deliberately empty. A pane's size is a property of the layout
                     // it is in, so a pane reporting its own grid would resize the
                     // whole tmux window to fit itself and squash its neighbours —

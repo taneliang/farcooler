@@ -191,17 +191,55 @@ impl Runtime {
         let mut reader = self.attach_to_fanout(&pane.pane_id).await?;
         let mut buf = vec![0u8; 16 * 1024];
 
+        // Stop when whoever asked for this stops listening.
+        //
+        // A write failing is the obvious signal and it is not enough: a quiet
+        // pane produces nothing to write, so a stream whose ssh channel closed
+        // hours ago would sit in `read` forever with nothing to discover. Two
+        // of those were found still running from sessions whose app had been
+        // relaunched, and under the fanout they are worse than untidy — a
+        // watcher that never leaves keeps the pane's pipe alive for nobody.
+        //
+        // Closed stdin is how the other end says it is gone. ssh closes it when
+        // the channel ends, and nothing writes to this process's stdin
+        // otherwise, so there is no other meaning to compete with.
+        //
+        // Only when stdin is a pipe or a socket, though, which is what makes
+        // this safe. A terminal would mean a person ran this command in their
+        // shell, and reading it would swallow the keystrokes they typed at the
+        // shell instead. `/dev/null` — what a GUI application hands a child it
+        // did not mean to talk to — is at end of stream from the very first
+        // read, and treating that as a hangup would end every stream instantly.
+        // Neither carries the "my peer is gone" meaning that a pipe does.
+        let mut hangup = Box::pin(async {
+            use tokio::io::AsyncReadExt;
+            if !Self::stdin_can_hang_up() {
+                // Never resolves, so the select below is left with one arm.
+                std::future::pending::<()>().await;
+            }
+            let mut ignored = [0u8; 64];
+            let mut stdin = tokio::io::stdin();
+            loop {
+                match stdin.read(&mut ignored).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) => continue,
+                }
+            }
+        });
+
         loop {
             use tokio::io::AsyncReadExt;
-            match reader.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    if stdout.write_all(&buf[..n]).await.is_err() {
-                        break;
+            tokio::select! {
+                read = reader.read(&mut buf) => match read {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if stdout.write_all(&buf[..n]).await.is_err() {
+                            break;
+                        }
+                        let _ = stdout.flush().await;
                     }
-                    let _ = stdout.flush().await;
-                }
-                Err(_) => break,
+                },
+                _ = &mut hangup => break,
             }
         }
 
@@ -209,6 +247,26 @@ impl Runtime {
         // serving whoever else is watching, and which ends itself once nobody
         // is — a watcher leaving must not take the others' output with it.
         Ok(())
+    }
+
+    /// Whether closed stdin would mean anything here.
+    ///
+    /// True for a pipe or a socket, which is what an ssh channel and a parent
+    /// process's pipe both are, and where end of stream genuinely means the
+    /// other end is gone. False for everything else — a terminal, where reading
+    /// would take a person's keystrokes, and `/dev/null`, which is at end of
+    /// stream before it is ever read.
+    fn stdin_can_hang_up() -> bool {
+        // SAFETY: a zeroed stat is a valid out parameter, and fd 0 is always a
+        // valid descriptor number to ask about — fstat reports if it is closed.
+        unsafe {
+            let mut info: libc::stat = std::mem::zeroed();
+            if libc::fstat(0, &mut info) != 0 {
+                return false;
+            }
+            let kind = info.st_mode & libc::S_IFMT;
+            kind == libc::S_IFIFO || kind == libc::S_IFSOCK
+        }
     }
 
     /// Get a connection to this pane's fanout, starting one if there is none.

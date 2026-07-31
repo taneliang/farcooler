@@ -9,6 +9,9 @@ struct TerminalSurface: NSViewRepresentable {
     let terminal: String
     let binary: String?
     let environment: [String: String]
+    /// Put in front of every launch, to aim it at another machine. See
+    /// `DaemonClient.cliHostArguments`.
+    let hostArguments: [String]
     /// Resize the pane. Must complete before the stream replays history.
     let onResize: (Int, Int) async -> Void
 
@@ -91,10 +94,14 @@ struct TerminalSurface: NSViewRepresentable {
         let terminal = self.terminal
         let binary = self.binary
         let environment = self.environment
+        let hostArguments = self.hostArguments
         let onResize = self.onResize
 
         let input = TerminalInput()
-        if let binary { input.start(binary: binary, terminal: terminal, environment: environment) }
+        if let binary {
+            input.start(
+                binary: binary, terminal: terminal, environment: environment, host: hostArguments)
+        }
         coord.input = input
         view.onInput = { bytes in input.send(bytes) }
         coord.focused = nil
@@ -124,7 +131,9 @@ struct TerminalSurface: NSViewRepresentable {
                         MainActor.assumeIsolated { box.value.feed(bytes) }
                     }
                 })
-                stream.start(binary: binary, terminal: terminal, environment: environment)
+                stream.start(
+                    binary: binary, terminal: terminal, environment: environment,
+                    host: hostArguments)
                 coord.stream = stream
             }
         }

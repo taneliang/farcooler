@@ -69,6 +69,21 @@ final class Preferences: ObservableObject {
     /// process launch.
     @AppStorage("tasks.defaultAgent") var defaultAgent = "claude"
 
+    /// The machine this window is driving, as `user@host` or an ssh config
+    /// alias. Empty means this one.
+    ///
+    /// The app drives the `overnight` CLI, and the CLI already knows how to
+    /// operate another machine over ssh — including streaming a terminal,
+    /// which it proxies as the byte pipe it is. So making this window a remote
+    /// one is a matter of saying which machine, not of building a second
+    /// client: everything below this setting is the same code path either way,
+    /// which is the only version of remote support worth having. There is no
+    /// Overnight listener anywhere; a host reachable by ssh is reachable by
+    /// Overnight, and one that is not, is not.
+    @AppStorage("host.remote") var remoteHost = "" {
+        didSet { revision += 1 }
+    }
+
     /// Notify when an agent needs you, or finishes.
     @AppStorage("notifications.enabled") var notifyOnAttention = true
     /// Also notify when an agent finishes, not only when it is blocked.
@@ -136,6 +151,18 @@ struct SettingsView: View {
     /// information about the fleet.
     private var host: some View {
         Form {
+            Section {
+                TextField("Drive another machine", text: $preferences.remoteHost)
+                    .autocorrectionDisabled()
+                Text(
+                    "A user@host or an ssh config alias. Empty means this Mac. Overnight "
+                    + "reaches the other machine over ssh — there is no Overnight listener "
+                    + "to set up anywhere."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
             Section {
                 switch service.state {
                 case .registered:

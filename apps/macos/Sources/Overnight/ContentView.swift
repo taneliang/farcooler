@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var client = DaemonClient()
     @StateObject private var service = ServiceRegistration()
+    @ObservedObject private var preferences = Preferences.shared
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
     @State private var pollTask: Task<Void, Never>?
@@ -51,6 +52,10 @@ struct ContentView: View {
             client.startEvents()
         }
         .onDisappear { client.stopEvents() }
+        // The event stream is a long-lived process pointed at a machine when
+        // it starts, so changing which machine this window drives has to
+        // restart it rather than let it go on listening to the old one.
+        .onChange(of: preferences.remoteHost) { _, _ in Task { await client.hostChanged() } }
         .onCommand { command in run(command) }
         .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in selectTerminal(at: index) }
@@ -549,6 +554,7 @@ struct ContentView: View {
                     workspace: ws,
                     binary: client.cliPath,
                     environment: client.cliEnvironment,
+                    hostArguments: client.cliHostArguments,
                     onGeometry: { cols, rows in
                         await client.resize(terminal: term.short, columns: cols, rows: rows)
                     },
@@ -599,6 +605,7 @@ struct ContentView: View {
             workspace: ws,
             binary: client.cliPath,
             environment: client.cliEnvironment,
+            hostArguments: client.cliHostArguments,
             onFocus: { id in
                 selection = .terminal(workspace: ws.id, terminal: id)
                 guard let pane = client.group(holding: id, in: ws.id)?.pane(id) else { return }

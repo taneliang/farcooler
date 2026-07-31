@@ -12,12 +12,14 @@ final class TerminalInput {
     private var stdin: FileHandle?
     private let lock = NSLock()
 
-    func start(binary: String, terminal: String, environment: [String: String]) {
+    func start(
+        binary: String, terminal: String, environment: [String: String], host: [String] = []
+    ) {
         stop()
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: binary)
-        p.arguments = ["terminal", "input", terminal]
+        p.arguments = host + ["terminal", "input", terminal]
         p.environment = environment
 
         let inPipe = Pipe()

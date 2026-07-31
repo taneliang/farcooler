@@ -65,12 +65,12 @@ final class EventStream {
         self.onEnd = onEnd
     }
 
-    func start(binary: String, environment: [String: String]) {
+    func start(binary: String, environment: [String: String], host: [String] = []) {
         stop()
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: binary)
-        p.arguments = ["events"]
+        p.arguments = host + ["events"]
         p.environment = environment
 
         let out = Pipe()

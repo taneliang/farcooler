@@ -24,6 +24,16 @@ final class DaemonClient: ObservableObject {
 
     var cliEnvironment: [String: String] { environment }
 
+    /// What to put in front of every CLI invocation to aim it at another
+    /// machine. Empty when this window is driving the machine it is running on.
+    ///
+    /// Before the subcommand, not after: `--host` is a top-level option, and
+    /// clap will not see it once a subcommand has been named.
+    var cliHostArguments: [String] {
+        let target = Preferences.shared.remoteHost.trimmingCharacters(in: .whitespaces)
+        return target.isEmpty ? [] : ["--host", target]
+    }
+
     private var binary: String? {
         var candidates: [String] = []
 
@@ -84,13 +94,28 @@ final class DaemonClient: ObservableObject {
                     self?.startEvents()
                 }
             })
-        stream.start(binary: binary, environment: environment)
+        stream.start(binary: binary, environment: environment, host: cliHostArguments)
         eventStream = stream
     }
 
     func stopEvents() {
         eventStream?.stop()
         eventStream = nil
+    }
+
+    /// Point every live connection at whichever machine `remoteHost` now names.
+    ///
+    /// The subprocess-per-command calls already read the preference fresh on
+    /// every call, but the event stream is a long-lived process started once —
+    /// changing the preference under it would leave it listening to the machine
+    /// it was pointed at when it started. Only the stream needs restarting, but
+    /// the fleet it was populating belongs to the old machine too, so that goes
+    /// back to empty rather than showing stale rows until the next event lands.
+    func hostChanged() async {
+        stopEvents()
+        fleet = .empty
+        await refresh()
+        startEvents()
     }
 
     /// Fold one pushed change into the fleet.
@@ -618,11 +643,12 @@ final class DaemonClient: ObservableObject {
         }
 
         let env = environment
+        let host = cliHostArguments
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: bin)
-                process.arguments = args
+                process.arguments = host + args
                 process.environment = env
 
                 let out = Pipe()
