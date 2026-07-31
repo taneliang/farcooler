@@ -6,6 +6,15 @@ struct OvernightApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                // Dark everywhere, not just over the terminal.
+                //
+                // Half the app was already forced dark because a terminal is
+                // dark whatever the phone is set to, and the light chrome around
+                // it did not survive the join: a white list handing off to a
+                // black screen, and back, looked like two applications. Choosing
+                // one is better than reconciling two, and for a tool whose
+                // content is terminals the choice makes itself.
+                .preferredColorScheme(.dark)
         }
     }
 }

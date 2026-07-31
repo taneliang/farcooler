@@ -40,6 +40,19 @@ final class TerminalSession: ObservableObject {
 
     deinit { poller?.cancel() }
 
+    /// Reflow the pane to the size this screen would like.
+    ///
+    /// Separate from opening the terminal, and that separation is the point: a
+    /// pane belongs to whoever else is looking at it too, so this is something
+    /// you ask for rather than something that happens because you tapped a row.
+    func fitPaneToViewport() async {
+        guard let size = lastRequestedSize else { return }
+        _ = try? await core.call(
+            "terminal.resize",
+            ["terminal": terminalID, "columns": size.columns, "rows": size.rows])
+        await poll()
+    }
+
     /// Start polling. Deliberately does NOT resize the pane.
     ///
     /// It used to, and that was wrong in a way only visible with two clients: a
