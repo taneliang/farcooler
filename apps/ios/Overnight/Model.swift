@@ -26,6 +26,28 @@ struct Workspace: Decodable, Identifiable, Hashable {
     var worktree: String?
     var state: String
     var terminals: [Terminal]
+
+    /// Which of several identically-labelled terminals each one is, keyed by
+    /// terminal id.
+    ///
+    /// Ported from the Mac app's `WorkspaceSection.ordinals`. Two `claude`
+    /// panes in one workspace are genuinely alike, so they get `1` and `2` —
+    /// but only when there is something to tell apart, or a lone `shell`
+    /// would be numbered for no reason. Shared by the fleet list, the
+    /// terminal screen's title, and its tab strip, so the same terminal is
+    /// never numbered differently depending on which screen is showing it.
+    func ordinals() -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for terminal in terminals { counts[terminal.label, default: 0] += 1 }
+        var seen: [String: Int] = [:]
+        var out: [String: Int] = [:]
+        for terminal in terminals where counts[terminal.label, default: 0] > 1 {
+            let next = (seen[terminal.label] ?? 0) + 1
+            seen[terminal.label] = next
+            out[terminal.id] = next
+        }
+        return out
+    }
 }
 
 struct Terminal: Decodable, Identifiable, Hashable {
@@ -41,6 +63,43 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var epoch: Int
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
+
+    /// What to call this terminal.
+    ///
+    /// Ported from the Mac app's `Terminal.label`, verbatim: derived, never
+    /// stored, because a terminal IS the thing running in it. `preset`
+    /// already carries what tmux reports is running — `claude`, `codex`,
+    /// `zsh` — resolved on the host, because only the host has a screen to
+    /// look at. The stored `title` used to be shown instead, and on a phone
+    /// it read the same as on the Mac: "Terminal 12" with a counter that
+    /// repeated after any removal, sitting next to the running command
+    /// anyway — the only informative half of the row.
+    var label: String { Self.name(of: preset) }
+
+    /// `label`, plus its ordinal when it has one.
+    ///
+    /// The one place "claude" and "claude 2" are assembled into the single
+    /// string a navigation title or a tab strip chip needs — `FleetView`
+    /// keeps the two halves as separate `Text` views so it can dim the
+    /// number, but a title bar and a tab chip have nowhere to hang a second
+    /// view, so they get the joined form.
+    func displayName(ordinal: Int?) -> String {
+        guard let ordinal else { return label }
+        return "\(label) \(ordinal)"
+    }
+
+    /// One word for one thing, wherever a running command is shown.
+    static func name(of command: String) -> String {
+        let running = command.trimmingCharacters(in: .whitespaces).lowercased()
+        if running.isEmpty { return "shell" }
+        // The host reports whatever tmux sees running, so the same plain
+        // shell arrives as `zsh` from a pane the watcher has looked at and as
+        // `shell` from one it has not. Normalising both to `shell` is what
+        // keeps two identical shells from reading as different things.
+        return shells.contains(running) ? "shell" : running
+    }
+
+    private static let shells: Set<String> = ["sh", "zsh", "bash", "fish", "dash", "ksh", "-zsh"]
 }
 
 /// What a coding agent is doing, as distinct from whether its process is alive.

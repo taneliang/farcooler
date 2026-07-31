@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Checked in rather than GENERATE_INFOPLIST_FILE, and UIAppFonts is the
+         reason: INFOPLIST_KEY_<key> build settings only round-trip a flat
+         string per key, and UIAppFonts is an array. Every other key here is
+         one GENERATE_INFOPLIST_FILE was already synthesizing (see the
+         Debug-iphonesimulator build's own Info.plist for the values this
+         mirrors) — a real file loses nothing on those and gains the one
+         thing an array needs: a place to write it down literally. -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Overnight</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+    </dict>
+    <!-- The whole reason this file exists instead of a generated one. Each
+         name is the .ttf's filename as bundled at the app's root — not its
+         PostScript name, not its family name — which is what CoreText scans
+         at launch to register the font before anything can ask for it by
+         name. Get this filename wrong and the font silently fails to
+         register: see FontRegistry.iosevkaIsRegistered in Settings.swift for
+         the runtime check that exists because of exactly that failure mode. -->
+    <key>UIAppFonts</key>
+    <array>
+        <string>IosevkaNerdFontMono-Regular.ttf</string>
+        <string>IosevkaNerdFontMono-Bold.ttf</string>
+    </array>
+</dict>
+</plist>

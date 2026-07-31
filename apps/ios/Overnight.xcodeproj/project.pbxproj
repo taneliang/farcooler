@@ -11,14 +11,18 @@
 		07D87E54DCF4532A9432BCE2 /* Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF154E462EB1532396A5C5F3; };
 		3CB766C82CEA5109A2AA4C8E /* FleetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF27428554395E3898D3722A; };
 		84CD1507E8FC591EB0F90F4B /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC8223110EB551FAAB056EB; };
+		7865842DB5A55B828CCEE878 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D44DE2A6CF82570B8E7F2A14; };
 		255E0E0A6E6F5519A9B56104 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CA58826B13541AAD8DB092; };
 		20A16A50D87D593E8BA3B034 /* QuickTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D8F8D255CA54ED9DC7430A; };
 		B532AA76377D539EB74A0CD6 /* TaskComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C165FAE6C3559DC828DEFE8; };
 		A07A9DAE756D5B1BA121F39D /* VTCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00777507DE6B5ED1A2FBCDD6; };
 		D0E0DA3007C95208AA0B6A03 /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0353D1B9C0F35087BA4FC7CD; };
+		ADEC346FDDA9577BB1EC6EB2 /* TerminalTabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 058CF2821E1351E18C243532; };
 		A6EB0FF568D45F8D9BE28255 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238580CBF1FE54CCA5613A08; };
 		FECA7427E1AD5FCCA209AB94 /* overnight_vt.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5FA5EC59B6750A5905DB67D; };
 		2E99CD1866A95EFDAC853396 /* overnight_client.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA8286B4C4C155E1B03E0475; };
+		66A4FE2A05E7590399E9A7A6 /* IosevkaNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B095B065814650EDB0579652; };
+		EDEC488F7CDA5A4EA755CE62 /* IosevkaNerdFontMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E3BA59DB5605401A271C324; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,14 +31,18 @@
 		CF154E462EB1532396A5C5F3 /* Connection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Connection.swift; sourceTree = "<group>"; };
 		DF27428554395E3898D3722A /* FleetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetView.swift; sourceTree = "<group>"; };
 		9BC8223110EB551FAAB056EB /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
+		D44DE2A6CF82570B8E7F2A14 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		A5CA58826B13541AAD8DB092 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
 		C6D8F8D255CA54ED9DC7430A /* QuickTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTask.swift; sourceTree = "<group>"; };
 		0C165FAE6C3559DC828DEFE8 /* TaskComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskComposer.swift; sourceTree = "<group>"; };
 		00777507DE6B5ED1A2FBCDD6 /* VTCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VTCore.swift; sourceTree = "<group>"; };
 		0353D1B9C0F35087BA4FC7CD /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
+		058CF2821E1351E18C243532 /* TerminalTabStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabStrip.swift; sourceTree = "<group>"; };
 		238580CBF1FE54CCA5613A08 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		C5FA5EC59B6750A5905DB67D /* overnight_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_vt.xcframework; path = Frameworks/overnight_vt.xcframework; sourceTree = "<group>"; };
 		FA8286B4C4C155E1B03E0475 /* overnight_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_client.xcframework; path = Frameworks/overnight_client.xcframework; sourceTree = "<group>"; };
+		B095B065814650EDB0579652 /* IosevkaNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Regular.ttf; sourceTree = "<group>"; };
+		5E3BA59DB5605401A271C324 /* IosevkaNerdFontMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Bold.ttf; sourceTree = "<group>"; };
 		C406B4C87D4D5001A4F23C30 /* Overnight.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Overnight.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -68,14 +76,26 @@
 				CF154E462EB1532396A5C5F3 /* Connection.swift */,
 				DF27428554395E3898D3722A /* FleetView.swift */,
 				9BC8223110EB551FAAB056EB /* Model.swift */,
+				D44DE2A6CF82570B8E7F2A14 /* Settings.swift */,
 				A5CA58826B13541AAD8DB092 /* Store.swift */,
 				C6D8F8D255CA54ED9DC7430A /* QuickTask.swift */,
 				0C165FAE6C3559DC828DEFE8 /* TaskComposer.swift */,
 				00777507DE6B5ED1A2FBCDD6 /* VTCore.swift */,
 				0353D1B9C0F35087BA4FC7CD /* TerminalSession.swift */,
+				058CF2821E1351E18C243532 /* TerminalTabStrip.swift */,
 				238580CBF1FE54CCA5613A08 /* TerminalView.swift */,
+				A6660D768374543B806DC1FF /* Fonts */,
 			);
 			path = Overnight;
+			sourceTree = "<group>";
+		};
+		A6660D768374543B806DC1FF /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				B095B065814650EDB0579652 /* IosevkaNerdFontMono-Regular.ttf */,
+				5E3BA59DB5605401A271C324 /* IosevkaNerdFontMono-Bold.ttf */,
+			);
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 		5FD0074FA69A5B7790E1CFAF /* Frameworks */ = {
@@ -142,7 +162,10 @@
 		E7D9730917215D49871E8A60 = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+				66A4FE2A05E7590399E9A7A6 /* IosevkaNerdFontMono-Regular.ttf in Resources */,
+				EDEC488F7CDA5A4EA755CE62 /* IosevkaNerdFontMono-Bold.ttf in Resources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -157,11 +180,13 @@
 				07D87E54DCF4532A9432BCE2 /* Connection.swift in Sources */,
 				3CB766C82CEA5109A2AA4C8E /* FleetView.swift in Sources */,
 				84CD1507E8FC591EB0F90F4B /* Model.swift in Sources */,
+				7865842DB5A55B828CCEE878 /* Settings.swift in Sources */,
 				255E0E0A6E6F5519A9B56104 /* Store.swift in Sources */,
 				20A16A50D87D593E8BA3B034 /* QuickTask.swift in Sources */,
 				B532AA76377D539EB74A0CD6 /* TaskComposer.swift in Sources */,
 				A07A9DAE756D5B1BA121F39D /* VTCore.swift in Sources */,
 				D0E0DA3007C95208AA0B6A03 /* TerminalSession.swift in Sources */,
+				ADEC346FDDA9577BB1EC6EB2 /* TerminalTabStrip.swift in Sources */,
 				A6EB0FF568D45F8D9BE28255 /* TerminalView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -203,10 +228,7 @@
 			buildSettings = {
 				PRODUCT_NAME = Overnight;
 				PRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Overnight;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_FILE = Overnight/Info.plist;
 				CODE_SIGN_STYLE = Manual;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGNING_ALLOWED = YES;
@@ -224,10 +246,7 @@
 			buildSettings = {
 				PRODUCT_NAME = Overnight;
 				PRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Overnight;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_FILE = Overnight/Info.plist;
 				CODE_SIGN_STYLE = Manual;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGNING_ALLOWED = YES;

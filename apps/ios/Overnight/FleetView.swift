@@ -59,7 +59,7 @@ struct FleetView: View {
             TaskComposerView(connection: connection)
         }
         .navigationDestination(for: Terminal.self) { terminal in
-            TerminalView(terminal: terminal, core: connection.core)
+            TerminalView(terminal: terminal, connection: connection)
         }
         .task { await connection.start(host: host) }
         .refreshable { await connection.refresh() }
@@ -127,6 +127,7 @@ struct FleetView: View {
             }
 
             ForEach(connection.fleet.workspaces) { workspace in
+                let numbering = workspace.ordinals()
                 Section {
                     // Anything waiting on you comes first. On a phone you see
                     // four rows at a time, and scrolling to find the one that
@@ -135,7 +136,7 @@ struct FleetView: View {
                         a.agent.wantsAttention && !b.agent.wantsAttention
                     }) { terminal in
                         NavigationLink(value: terminal) {
-                            TerminalRow(terminal: terminal) { action in
+                            TerminalRow(terminal: terminal, ordinal: numbering[terminal.id]) { action in
                                 Task { await connection.act(action, on: terminal) }
                             }
                         }
@@ -174,16 +175,27 @@ struct FleetView: View {
 
 struct TerminalRow: View {
     let terminal: Terminal
+    /// Which of several identically-labelled siblings this is, from
+    /// `Workspace.ordinals()`, or nil when its label is unique in the
+    /// workspace and numbering it would answer a question nobody asked.
+    var ordinal: Int?
     let onAction: (Connection.Action) -> Void
 
     private var kind: StateKind { StateKind.parse(terminal.state) }
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle().fill(colour).frame(width: 8, height: 8)
+            Circle().fill(processColour(kind)).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
-                Text(terminal.title).font(.body)
-                Text("\(terminal.preset) · \(terminal.state.lowercased())")
+                HStack(spacing: 4) {
+                    Text(terminal.label).font(.body)
+                    if let ordinal {
+                        Text("\(ordinal)")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Text(terminal.state.lowercased())
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -195,7 +207,7 @@ struct TerminalRow: View {
                 Label(terminal.agent.label, systemImage: terminal.agent.symbol)
                     .labelStyle(.iconOnly)
                     .font(.system(size: 13, weight: terminal.agent.wantsAttention ? .semibold : .regular))
-                    .foregroundStyle(activityColour)
+                    .foregroundStyle(attentionColour(terminal.agent))
                     .accessibilityLabel(terminal.agent.label)
             }
         }
@@ -209,24 +221,29 @@ struct TerminalRow: View {
             }
         }
     }
+}
 
-    private var activityColour: Color {
-        switch terminal.agent {
-        case .blocked: return .orange
-        case .done: return .green
-        default: return .secondary
-        }
+/// The dot colour for "is the process alive" — shared by the fleet list and
+/// the terminal tab strip (`TerminalTabStrip`), so the same terminal cannot
+/// read green in one screen and red in the other.
+func processColour(_ kind: StateKind) -> Color {
+    switch kind {
+    case .running: return .green
+    case .starting: return .yellow
+    case .exited: return .secondary
+    // The one state that means Overnight does not know what happened.
+    case .lost, .error: return .red
+    case .unknown: return .secondary
     }
+}
 
-    private var colour: Color {
-        switch kind {
-        case .running: return .green
-        case .starting: return .yellow
-        case .exited: return .secondary
-        // The one state that means Overnight does not know what happened.
-        case .lost, .error: return .red
-        case .unknown: return .secondary
-        }
+/// The colour behind an agent's activity glyph, shared with the tab strip for
+/// the same reason as `processColour` above.
+func attentionColour(_ agent: AgentActivity) -> Color {
+    switch agent {
+    case .blocked: return .orange
+    case .done: return .green
+    default: return .secondary
     }
 }
 

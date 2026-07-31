@@ -27,11 +27,43 @@ final class TerminalSession: ObservableObject {
     @Published private(set) var phase: Phase = .connecting
     @Published private(set) var grid: TerminalGrid?
 
-    private let terminalID: String
+    private var terminalID: String
     private let core: ClientCore
     private var vt: VTCore?
     private var poller: Task<Void, Never>?
     private var lastRequestedSize: (columns: Int, rows: Int)?
+
+    /// The last screen decoded, kept so the next poll can tell whether
+    /// anything actually changed. See `poll()` for what that buys.
+    private var lastScreen: ScreenResponse?
+
+    // MARK: - Adaptive polling
+    //
+    // NOT streaming. The daemon has no push channel for a terminal's screen —
+    // that is protocol work being done separately — so "adaptive" here means
+    // choosing how often to ask, cheaply, rather than changing what is asked
+    // for. A capture costs the host about 16ms; at a fixed 1000ms interval
+    // that 16ms was rounding error next to 984ms of the phone doing nothing
+    // but waiting for its own clock. Polling faster while the screen is
+    // actually moving, and backing off once it stops, spends that budget
+    // where a human would notice it — mid-keystroke — instead of evenly
+    // wherever a plain interval happens to land.
+
+    /// The busiest a poll loop gets: about as fast as a human can perceive a
+    /// screen redrawing, and comfortably above the host's own ~16ms capture
+    /// cost — polling faster than the capture itself would just queue up SSH
+    /// round trips the host cannot answer any quicker.
+    private static let fastInterval: Double = 0.1
+    /// The idle cadence a quiet terminal settles into. Still fast enough that
+    /// "nothing happened in the last second" reads as current, not stale.
+    private static let slowInterval: Double = 1.0
+    /// How quickly an unchanging screen backs off. Geometric rather than a
+    /// fixed step, so a screen that goes quiet coasts to the slow interval in
+    /// a handful of polls rather than taking as long to slow down as it took
+    /// to speed up.
+    private static let backoffFactor: Double = 1.6
+
+    private var interval: Double = TerminalSession.fastInterval
 
     init(terminalID: String, core: ClientCore) {
         self.terminalID = terminalID
@@ -39,6 +71,29 @@ final class TerminalSession: ObservableObject {
     }
 
     deinit { poller?.cancel() }
+
+    /// Point this same session at a different terminal — what the tab strip
+    /// calls when you tap a sibling.
+    ///
+    /// A new `TerminalSession` per tap would work too, but it would tear down
+    /// and restart the poller `Task` for no reason: the loop already just
+    /// asks for whatever `terminalID` currently is on every tick, so
+    /// retargeting it here is enough. The screen is cleared immediately
+    /// rather than left showing the outgoing terminal until the next tick,
+    /// which would make the tap look like it did nothing. `lastScreen` is
+    /// cleared for the same reason `grid` is: it describes the terminal being
+    /// left, and comparing the new one's first capture against it would read
+    /// as "unchanged" by coincidence and back off a screen nobody has shown
+    /// yet.
+    func switchTo(_ id: String) {
+        guard id != terminalID else { return }
+        terminalID = id
+        vt = nil
+        grid = nil
+        lastScreen = nil
+        phase = .connecting
+        wake()
+    }
 
     /// Reflow the pane to the size this screen would like.
     ///
@@ -50,7 +105,13 @@ final class TerminalSession: ObservableObject {
         _ = try? await core.call(
             "terminal.resize",
             ["terminal": terminalID, "columns": size.columns, "rows": size.rows])
-        await poll()
+        // The resize itself changes the screen, but not in a way this
+        // terminal has captured yet — without clearing it, a resize to
+        // exactly the content already on screen (rare, but possible) would
+        // compare equal and the redraw would wait for the next backed-off
+        // tick instead of showing the new dimensions immediately.
+        lastScreen = nil
+        wake()
     }
 
     /// Start polling. Deliberately does NOT resize the pane.
@@ -74,12 +135,7 @@ final class TerminalSession: ObservableObject {
         guard columns > 0, rows > 0 else { return }
         lastRequestedSize = (columns, rows)
         guard poller == nil else { return }
-        poller = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.poll()
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
+        startLoop()
     }
 
     /// Stop polling. Called from `.onDisappear` — a backgrounded terminal view
@@ -90,10 +146,49 @@ final class TerminalSession: ObservableObject {
         poller = nil
     }
 
+    /// Cancel and restart the loop at the fast interval — "poll right now,
+    /// then resume at full speed" — without ending up with two loops running.
+    ///
+    /// A plain `Task { await poll() }` fired alongside the existing loop would
+    /// work for the one poll, but the existing loop's own `Task.sleep` would
+    /// still be counting down on the OLD interval underneath it, so the next
+    /// scheduled tick would still land late. Restarting the loop is what
+    /// actually changes the cadence rather than just sneaking in one extra
+    /// poll ahead of it.
+    private func wake() {
+        interval = Self.fastInterval
+        poller?.cancel()
+        startLoop()
+    }
+
+    private func startLoop() {
+        poller = Task { [weak self] in
+            while let self, !Task.isCancelled {
+                await self.poll()
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: .seconds(self.interval))
+            }
+        }
+    }
+
     private func poll() async {
         do {
             let data = try await core.call("terminal.screen", ["terminal": terminalID])
             let response = try JSONDecoder().decode(ScreenResponse.self, from: data)
+
+            // The cheap compare that makes backing off free: `ScreenResponse`
+            // carries the still-base64 payload, so this is a byte compare of
+            // exactly what the host sent, before any of the more expensive
+            // work — base64 decoding, feeding a fresh `VTCore`, copying a
+            // snapshot into cells SwiftUI will diff — runs on a screen that
+            // has not moved. Most polls of an idle terminal end right here.
+            guard response != lastScreen else {
+                interval = min(interval * Self.backoffFactor, Self.slowInterval)
+                return
+            }
+            lastScreen = response
+            interval = Self.fastInterval
+
             guard let bytes = Data(base64Encoded: response.contents) else {
                 phase = .failed("The host sent a screen this device could not decode.")
                 return
@@ -117,6 +212,10 @@ final class TerminalSession: ObservableObject {
             // is wrong".
             let message = error.localizedDescription
             phase = message == "resource not found" ? .notLive : .failed(message)
+            // Back off on a persistent error too — a terminal that keeps
+            // failing to load has no "changing" to detect, and retrying it
+            // every 100ms would hammer a host that has already said no.
+            interval = min(interval * Self.backoffFactor, Self.slowInterval)
         }
     }
 
@@ -141,10 +240,16 @@ final class TerminalSession: ObservableObject {
         guard !bytes.isEmpty else { return }
         let hex = bytes.map { String(format: "%02x", $0) }.joined()
         _ = try? await core.call("terminal.write", ["terminal": terminalID, "hex": hex])
+        // The moment a key is sent is the moment staleness is least
+        // acceptable — the user is looking right at this screen waiting to
+        // see what they typed. Snap back to the fast interval and poll now
+        // rather than waiting out however long a quiet screen had backed off
+        // to.
+        wake()
     }
 }
 
-private struct ScreenResponse: Decodable {
+private struct ScreenResponse: Decodable, Equatable {
     var contents: String
     var columns: Int
     var rows: Int

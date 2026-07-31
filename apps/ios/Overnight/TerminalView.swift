@@ -31,33 +31,73 @@ private enum TerminalMetrics {
 /// key sends, matching the contract the C header states for every renderer.
 @MainActor
 struct TerminalView: View {
-    let terminal: Terminal
+    @ObservedObject var connection: Connection
 
     @StateObject private var session: TerminalSession
+    /// The terminal this screen is showing right now.
+    ///
+    /// A `@State` copy rather than a stored `let`, because the tab strip lets
+    /// this screen point at a different terminal without ever leaving it —
+    /// see `TerminalTabStrip`. Everything below that used to read `terminal`
+    /// reads `current` instead, so switching tabs updates the title, the
+    /// empty-state copy and the drawn grid together rather than leaving any
+    /// of them talking about the terminal you tapped away from.
+    @State private var current: Terminal
     @State private var ctrlArmed = false
     @State private var focusRequest = 0
 
-    // Fixed rather than user-configurable: a terminal's whole value here is
-    // showing exactly what the host would show, and a resizable font would
-    // mean the column count this view negotiates with the host is a moving
-    // target the two constantly have to re-agree on.
-    private static let fontSize: CGFloat = 13
-    private static let measuringFont = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-    private static let cellSize = TerminalMetrics.cell(measuringFont)
-    private static let regularFont = Font.system(size: fontSize, weight: .regular, design: .monospaced)
-    private static let boldFont = Font.system(size: fontSize, weight: .semibold, design: .monospaced)
+    // User-configurable, unlike the Mac's fixed terminal font: see
+    // Settings.swift. Read directly from the same `UserDefaults` key
+    // `SettingsView`'s controls write to, so a change there is picked up the
+    // next time SwiftUI redraws this screen — no delegate, no notification,
+    // nothing to keep in sync by hand.
+    @AppStorage(TerminalSettings.fontKey) private var fontChoice: TerminalFontChoice = .iosevka
+    @AppStorage(TerminalSettings.fontSizeKey) private var fontSize: Double = TerminalSettings.defaultFontSize
 
-    init(terminal: Terminal, core: ClientCore) {
-        self.terminal = terminal
-        _session = StateObject(wrappedValue: TerminalSession(terminalID: terminal.id, core: core))
+    /// The cell grid the CURRENT font and size produce.
+    ///
+    /// Computed, not cached: a cached size is exactly what went stale the
+    /// moment the settings screen changed either `@AppStorage` value out from
+    /// under it, and a stale cell size is a grid that no longer lines up with
+    /// what `columns(for:)`/`rows(for:)` and `draw(grid:into:size:)` assume
+    /// about it.
+    private var cellSize: CGSize {
+        TerminalMetrics.cell(.terminal(fontChoice, size: fontSize))
     }
+
+    init(terminal: Terminal, connection: Connection) {
+        self.connection = connection
+        _session = StateObject(wrappedValue: TerminalSession(terminalID: terminal.id, core: connection.core))
+        _current = State(initialValue: terminal)
+    }
+
+    /// Which of several identically-labelled siblings `current` is, looked up
+    /// in whichever workspace actually contains it — the same numbering
+    /// `FleetView` and `TerminalTabStrip` use, so a terminal reads as
+    /// "claude 2" everywhere or nowhere.
+    private var currentOrdinal: Int? {
+        connection.fleet.workspaces
+            .first { $0.terminals.contains { $0.id == current.id } }?
+            .ordinals()[current.id]
+    }
+
+    private var currentName: String { current.displayName(ordinal: currentOrdinal) }
 
     var body: some View {
         VStack(spacing: 0) {
+            // Above the grid rather than below the key row: it is a way of
+            // choosing WHICH terminal you are looking at, which belongs with
+            // the title bar it effectively extends, not down with the keys
+            // that type into whichever one is already open.
+            TerminalTabStrip(workspaces: connection.fleet.workspaces, current: current) { tapped in
+                guard tapped.id != current.id else { return }
+                current = tapped
+                session.switchTo(tapped.id)
+            }
             GeometryReader { geo in
                 phaseContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .task(id: GridSize(width: geo.size.width, height: geo.size.height)) {
+                    .task(id: GridSize(width: geo.size.width, height: geo.size.height, cell: cellSize)) {
                         await session.configure(
                             columns: columns(for: geo.size), rows: rows(for: geo.size))
                     }
@@ -74,7 +114,7 @@ struct TerminalView: View {
         // host doesn't know or care whether this device is in Light Mode, and
         // neither should the screen showing its output.
         .preferredColorScheme(.dark)
-        .navigationTitle(terminal.title)
+        .navigationTitle(currentName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -97,18 +137,18 @@ struct TerminalView: View {
     private var phaseContent: some View {
         switch session.phase {
         case .connecting:
-            status(spinner: true, title: "Loading \(terminal.title)…")
+            status(spinner: true, title: "Loading \(currentName)…")
         case .notLive:
             status(
                 symbol: "moon.zzz", title: "Not live",
-                message: "\(terminal.title) has no running pane right now.")
+                message: "\(currentName) has no running pane right now.")
         case .failed(let message):
             status(symbol: "exclamationmark.triangle", title: "Could not load", message: message)
         case .live:
             if let grid = session.grid {
                 live(grid: grid)
             } else {
-                status(spinner: true, title: "Loading \(terminal.title)…")
+                status(spinner: true, title: "Loading \(currentName)…")
             }
         }
     }
@@ -162,30 +202,48 @@ struct TerminalView: View {
     private func draw(grid: TerminalGrid, into context: GraphicsContext, size: CGSize) {
         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(TerminalPalette.background))
         let padding = TerminalMetrics.padding
-        let cell = Self.cellSize
+        let cell = cellSize
 
-        // Scaled so the whole grid is on screen.
+        // Scaled by hand — every position and font size below is multiplied
+        // by `scale` directly — rather than through `GraphicsContext.scaleBy`.
         //
         // The cell size comes from a fixed font, which is right for a Mac window
         // sized to its own terminal and wrong here: the phone renders whatever
         // grid the HOST has — 75 columns is normal — and at 13pt that is far
-        // wider than any phone. Nothing fitted, and the parts that did were the
-        // top-left corner of the screen.
+        // wider than any phone. `scaleBy` looks like the right tool and reads
+        // as one, but it does not touch glyphs drawn through `context.draw(_
+        // text: Text, at:anchor:)`: only `size` and `content` were logged
+        // against a live 40-column pane, and a scale of 0.69 was computed
+        // correctly and applied to the context on every frame while the
+        // glyphs kept landing at their full, untransformed size — the CTM
+        // reached the `Path`-based fills below but never the text. So the
+        // fills and the text now agree by construction: both are laid out in
+        // coordinates that already have `scale` baked in, which is correct
+        // regardless of which drawing calls a given `GraphicsContext` happens
+        // to honour its own transform for.
         //
         // Scaling down rather than reflowing, because reflowing means resizing
         // the pane, and the pane is shared: making it fit here made everyone
         // else's layout collapse. Small but complete beats large and cropped —
         // and `Fit pane to phone` is there for when you do want it reflowed.
-        var context = context
         let content = CGSize(
             width: padding.left + padding.right + CGFloat(grid.columns) * cell.width,
             height: padding.top + padding.bottom + CGFloat(grid.rows) * cell.height)
         guard content.width > 0, content.height > 0 else { return }
         let scale = min(size.width / content.width, size.height / content.height, 1)
-        context.scaleBy(x: scale, y: scale)
+
+        let scaledCell = CGSize(width: cell.width * scale, height: cell.height * scale)
+        let originX = padding.left * scale
+        let originY = padding.top * scale
+        // The chosen typeface, not a hard-coded system one — see
+        // Settings.swift. Scaled the same way the cell itself is: a font
+        // built at the unscaled `fontSize` would draw glyphs too big for the
+        // very cell `scale` just shrank to make everything fit.
+        let regularFont = Font.terminal(fontChoice, size: fontSize * scale)
+        let boldFont = Font.terminal(fontChoice, size: fontSize * scale, bold: true)
 
         for row in 0..<grid.rows {
-            let y = padding.top + CGFloat(row) * cell.height
+            let y = originY + CGFloat(row) * scaledCell.height
 
             // Background first, batched into runs: a wide stretch of the
             // terminal's own default background is the common case, and
@@ -198,8 +256,8 @@ struct TerminalView: View {
                 while end < grid.columns, grid[row, end].background == background { end += 1 }
                 if background != TerminalPalette.background {
                     let rect = CGRect(
-                        x: padding.left + CGFloat(column) * cell.width, y: y,
-                        width: CGFloat(end - column) * cell.width, height: cell.height)
+                        x: originX + CGFloat(column) * scaledCell.width, y: y,
+                        width: CGFloat(end - column) * scaledCell.width, height: scaledCell.height)
                     context.fill(Path(rect), with: .color(background))
                 }
                 column = end
@@ -209,10 +267,10 @@ struct TerminalView: View {
             while column < grid.columns {
                 let occupant = grid[row, column]
                 if let character = occupant.character {
-                    let point = CGPoint(x: padding.left + CGFloat(column) * cell.width, y: y)
+                    let point = CGPoint(x: originX + CGFloat(column) * scaledCell.width, y: y)
                     context.draw(
                         Text(String(character))
-                            .font(occupant.bold ? Self.boldFont : Self.regularFont)
+                            .font(occupant.bold ? boldFont : regularFont)
                             .foregroundColor(occupant.foreground),
                         at: point, anchor: .topLeading)
                 }
@@ -226,14 +284,14 @@ struct TerminalView: View {
         guard grid.cursorRow < grid.rows, grid.cursorColumn < grid.columns else { return }
         let cursorCell = grid[grid.cursorRow, grid.cursorColumn]
         let cursorRect = CGRect(
-            x: padding.left + CGFloat(grid.cursorColumn) * cell.width,
-            y: padding.top + CGFloat(grid.cursorRow) * cell.height,
-            width: cursorCell.wide ? cell.width * 2 : cell.width,
-            height: cell.height)
+            x: originX + CGFloat(grid.cursorColumn) * scaledCell.width,
+            y: originY + CGFloat(grid.cursorRow) * scaledCell.height,
+            width: cursorCell.wide ? scaledCell.width * 2 : scaledCell.width,
+            height: scaledCell.height)
         context.fill(Path(cursorRect), with: .color(TerminalPalette.cursor))
         if let character = cursorCell.character {
             context.draw(
-                Text(String(character)).font(Self.regularFont).foregroundColor(TerminalPalette.background),
+                Text(String(character)).font(regularFont).foregroundColor(TerminalPalette.background),
                 at: cursorRect.origin, anchor: .topLeading)
         }
     }
@@ -243,13 +301,13 @@ struct TerminalView: View {
     private func columns(for size: CGSize) -> Int {
         let padding = TerminalMetrics.padding
         let usable = size.width - padding.left - padding.right
-        return max(1, Int((usable / Self.cellSize.width).rounded(.down)))
+        return max(1, Int((usable / cellSize.width).rounded(.down)))
     }
 
     private func rows(for size: CGSize) -> Int {
         let padding = TerminalMetrics.padding
         let usable = size.height - padding.top - padding.bottom
-        return max(1, Int((usable / Self.cellSize.height).rounded(.down)))
+        return max(1, Int((usable / cellSize.height).rounded(.down)))
     }
 
     // MARK: - Input
@@ -286,9 +344,17 @@ struct TerminalView: View {
         return ctrlArmed ? .control : []
     }
 
+    /// What `columns(for:)`/`rows(for:)` depend on — the view's own size, AND
+    /// the cell a font produces. `cell` is here so a font or size change in
+    /// Settings re-runs `session.configure`, not just the drawing: a viewport
+    /// that fit 80 columns at 13pt fits fewer at 18pt, and the pane this
+    /// screen would ask to be sized to on a future `fitPaneToViewport` should
+    /// reflect the font actually on screen, not whatever it was measured at
+    /// when this screen first appeared.
     private struct GridSize: Equatable {
         var width: Double
         var height: Double
+        var cell: CGSize
     }
 }
 

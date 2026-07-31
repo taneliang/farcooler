@@ -30,6 +30,7 @@ func UIDeviceName() -> String {
 struct RootView: View {
     @StateObject private var hosts = HostStore()
     @State private var showAddHost = false
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
@@ -82,10 +83,26 @@ struct RootView: View {
                 FleetView(host: host, store: hosts)
             }
             .toolbar {
-                Button { showAddHost = true } label: { Image(systemName: "plus") }
+                // A sheet, not a pushed `NavigationLink` — deliberately, after
+                // a `NavigationLink` placed directly in a `ToolbarItem` turned
+                // out not to respond reliably to taps here. `AddHostView`
+                // already uses the sheet pattern for exactly this kind of "one
+                // more screen, not part of the drill-down into a host"
+                // navigation, so Settings follows it rather than being the one
+                // screen in the app that pushes.
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                        .accessibilityLabel("Settings")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAddHost = true } label: { Image(systemName: "plus") }
+                }
             }
             .sheet(isPresented: $showAddHost) {
                 AddHostView { hosts.add($0) }
+            }
+            .sheet(isPresented: $showSettings) {
+                NavigationStack { SettingsView() }
             }
         }
     }

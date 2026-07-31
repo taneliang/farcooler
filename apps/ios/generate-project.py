@@ -18,18 +18,31 @@ SOURCES = [
     "Connection.swift",
     "FleetView.swift",
     "Model.swift",
+    "Settings.swift",
     "Store.swift",
     "QuickTask.swift",
     "TaskComposer.swift",
     "VTCore.swift",
     "TerminalSession.swift",
+    "TerminalTabStrip.swift",
     "TerminalView.swift",
 ]
 FRAMEWORKS = ["overnight_vt.xcframework", "overnight_client.xcframework"]
 
+# Bundled rather than downloaded — see Fonts/README.md for why a terminal
+# app cannot treat its own typeface as optional. Basenames only: they sit in
+# their own `fontsGroup` below (path "Fonts"), which is what supplies the
+# directory part. `Info.plist`'s `UIAppFonts` lists the same two filenames —
+# the name CoreText scans the bundle root for at launch — and the two lists
+# have to agree or a font that "shipped" never actually registers.
+FONTS = [
+    "IosevkaNerdFontMono-Regular.ttf",
+    "IosevkaNerdFontMono-Bold.ttf",
+]
+
 KEYS = [
     "project", "target", "mainGroup", "productsGroup", "sourcesGroup",
-    "frameworksGroup", "product", "sourcesPhase", "frameworksPhase",
+    "frameworksGroup", "fontsGroup", "product", "sourcesPhase", "frameworksPhase",
     "resourcesPhase", "buildConfigList", "targetConfigList",
     "debug", "release", "targetDebug", "targetRelease",
 ]
@@ -40,8 +53,8 @@ def oid(seed):
     return uuid.uuid5(uuid.NAMESPACE_URL, "overnight-ios/" + seed).hex[:24].upper()
 
 
-ids = {name: oid(name) for name in SOURCES + FRAMEWORKS}
-build_ids = {name: oid("build/" + name) for name in SOURCES + FRAMEWORKS}
+ids = {name: oid(name) for name in SOURCES + FRAMEWORKS + FONTS}
+build_ids = {name: oid("build/" + name) for name in SOURCES + FRAMEWORKS + FONTS}
 P = {key: oid(key) for key in KEYS}
 
 
@@ -57,6 +70,11 @@ def file_refs():
             f"\t\t{ids[name]} /* {name} */ = {{isa = PBXFileReference; "
             f"lastKnownFileType = wrapper.xcframework; name = {name}; "
             f"path = Frameworks/{name}; sourceTree = \"<group>\"; }};"
+        )
+    for name in FONTS:
+        lines.append(
+            f"\t\t{ids[name]} /* {name} */ = {{isa = PBXFileReference; "
+            f"lastKnownFileType = file; path = {name}; sourceTree = \"<group>\"; }};"
         )
     lines.append(
         f"\t\t{P['product']} /* Overnight.app */ = {{isa = PBXFileReference; "
@@ -78,13 +96,20 @@ def build_files():
             f"\t\t{build_ids[name]} /* {name} in Frameworks */ = {{isa = PBXBuildFile; "
             f"fileRef = {ids[name]}; }};"
         )
+    for name in FONTS:
+        lines.append(
+            f"\t\t{build_ids[name]} /* {name} in Resources */ = {{isa = PBXBuildFile; "
+            f"fileRef = {ids[name]}; }};"
+        )
     return "\n".join(lines)
 
 
 source_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Sources */," for n in SOURCES)
 framework_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Frameworks */," for n in FRAMEWORKS)
+resource_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Resources */," for n in FONTS)
 source_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in SOURCES)
 framework_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FRAMEWORKS)
+font_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FONTS)
 
 COMMON = """\t\t\t\tCLANG_ENABLE_MODULES = YES;
 \t\t\t\tSWIFT_VERSION = 5.0;
@@ -98,12 +123,15 @@ COMMON = """\t\t\t\tCLANG_ENABLE_MODULES = YES;
 # no signature, therefore no entitlements, therefore every keychain write failed
 # with errSecMissingEntitlement and the device could never keep its own key.
 # A device build overrides this, which is where a real identity is required.
+# A checked-in Info.plist, not GENERATE_INFOPLIST_FILE — the bundled fonts are
+# why. INFOPLIST_KEY_<key> settings round-trip one scalar string per key, and
+# UIAppFonts is an array of two filenames; there is no INFOPLIST_KEY_ that
+# expresses that. Overnight/Info.plist says it directly, and every other key
+# it carries is only what GENERATE_INFOPLIST_FILE was already synthesizing —
+# nothing lost switching, one array gained.
 TARGET_COMMON = """\t\t\t\tPRODUCT_NAME = Overnight;
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
-\t\t\t\tGENERATE_INFOPLIST_FILE = YES;
-\t\t\t\tINFOPLIST_KEY_UILaunchScreen_Generation = YES;
-\t\t\t\tINFOPLIST_KEY_CFBundleDisplayName = Overnight;
-\t\t\t\tINFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+\t\t\t\tINFOPLIST_FILE = Overnight/Info.plist;
 \t\t\t\tCODE_SIGN_STYLE = Manual;
 \t\t\t\tCODE_SIGN_IDENTITY = "-";
 \t\t\t\tCODE_SIGNING_ALLOWED = YES;
@@ -154,8 +182,17 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tisa = PBXGroup;
 \t\t\tchildren = (
 {source_children}
+\t\t\t\t{P['fontsGroup']} /* Fonts */,
 \t\t\t);
 \t\t\tpath = Overnight;
+\t\t\tsourceTree = "<group>";
+\t\t}};
+\t\t{P['fontsGroup']} /* Fonts */ = {{
+\t\t\tisa = PBXGroup;
+\t\t\tchildren = (
+{font_children}
+\t\t\t);
+\t\t\tpath = Fonts;
 \t\t\tsourceTree = "<group>";
 \t\t}};
 \t\t{P['frameworksGroup']} /* Frameworks */ = {{
@@ -221,7 +258,9 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t{P['resourcesPhase']} = {{
 \t\t\tisa = PBXResourcesBuildPhase;
 \t\t\tbuildActionMask = 2147483647;
-\t\t\tfiles = ();
+\t\t\tfiles = (
+{resource_list}
+\t\t\t);
 \t\t\trunOnlyForDeploymentPostprocessing = 0;
 \t\t}};
 /* End PBXResourcesBuildPhase section */
