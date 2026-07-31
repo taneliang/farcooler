@@ -16,7 +16,6 @@ use overnight_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
 use crate::paths;
-use crate::service::make_fifo;
 
 /// A handle to the live runtime, with no database behind it.
 ///
@@ -184,35 +183,12 @@ impl Runtime {
             let _ = stdout.flush().await;
         }
 
-        // 2. Live bytes through a fifo. tmux writes, we forward.
-        let fifo = std::env::temp_dir().join(format!("overnight-stream-{}.fifo", Uuid::now_v7()));
-        let fifo_str = fifo.to_string_lossy().to_string();
-        make_fifo(&fifo_str)?;
-
-        self.tmux
-            .pipe_pane_start(&pane.pane_id, &format!("cat > '{fifo_str}'"))
-            .await?;
-
-        // Open the fifo READ-WRITE, not read-only.
+        // 2. Live bytes, shared with every other watcher of this pane.
         //
-        // A read-only fifo reader gets EOF the instant the last writer closes,
-        // and tmux's `cat` opens lazily, so a read-only open ends the stream
-        // immediately on an idle terminal. Holding a write handle ourselves
-        // means there is always at least one writer, so reads block for more
-        // data instead of reporting end of stream.
-        let file = tokio::task::spawn_blocking({
-            let fifo = fifo.clone();
-            move || std::fs::OpenOptions::new().read(true).write(true).open(&fifo)
-        })
-        .await
-        .map_err(|_| DomainError::OperationFailed)?
-        .map_err(|e| {
-            tracing::warn!(error = %e, "could not open stream fifo");
-            DomainError::OperationFailed
-        })?;
-        let file = tokio::fs::File::from_std(file);
-
-        let mut reader = tokio::io::BufReader::new(file);
+        // Subscribing rather than starting a pipe of our own: tmux allows one
+        // `pipe-pane` per pane, so a second watcher used to replace the first
+        // one's pipe and silently end its stream. See `fanout`.
+        let mut reader = self.attach_to_fanout(&pane.pane_id).await?;
         let mut buf = vec![0u8; 16 * 1024];
 
         loop {
@@ -229,9 +205,41 @@ impl Runtime {
             }
         }
 
-        let _ = self.tmux.pipe_pane_stop(&pane.pane_id).await;
-        let _ = std::fs::remove_file(&fifo);
+        // Nothing to stop. The pipe belongs to the fanout, which is still
+        // serving whoever else is watching, and which ends itself once nobody
+        // is — a watcher leaving must not take the others' output with it.
         Ok(())
+    }
+
+    /// Get a connection to this pane's fanout, starting one if there is none.
+    ///
+    /// Connect first, ask questions later: a running fanout is the common case
+    /// once anything is watching, and a connection succeeding is a better test
+    /// that one is alive than any amount of asking tmux, which would happily
+    /// report a pipe into a process that has since died.
+    async fn attach_to_fanout(&self, pane_id: &str) -> Result<tokio::net::UnixStream> {
+        if let Some(socket) = crate::fanout::subscribe(pane_id).await {
+            return Ok(socket);
+        }
+
+        let exe = std::env::current_exe().map_err(|e| {
+            tracing::warn!(error = %e, "cannot find this executable to pipe into");
+            DomainError::OperationFailed
+        })?;
+        let command = format!("'{}' --fanout '{pane_id}'", exe.to_string_lossy());
+        self.tmux.pipe_pane_start(pane_id, &command).await?;
+
+        // Retried rather than slept through: the fanout has a process to spawn
+        // and a socket to bind before it can be connected to, and how long that
+        // takes belongs to the machine, not to a number chosen here.
+        for _ in 0..100 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            if let Some(socket) = crate::fanout::subscribe(pane_id).await {
+                return Ok(socket);
+            }
+        }
+        tracing::warn!(pane = pane_id, "the pane fanout never came up");
+        Err(DomainError::OperationFailed)
     }
 
     /// Persistent input channel: read hex byte-runs from stdin, forward each.

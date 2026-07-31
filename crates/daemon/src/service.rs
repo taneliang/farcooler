@@ -1012,18 +1012,6 @@ mod tests {
     }
 }
 
-/// Create a fifo. tmux writes into it, the daemon reads and forwards.
-pub(crate) fn make_fifo(path: &str) -> Result<()> {
-    let c = std::ffi::CString::new(path).map_err(|_| DomainError::OperationFailed)?;
-    // SAFETY: c is a valid NUL terminated path for the duration of the call.
-    let rc = unsafe { libc::mkfifo(c.as_ptr(), 0o600) };
-    if rc != 0 {
-        tracing::warn!(path, "mkfifo failed");
-        return Err(DomainError::OperationFailed);
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod preset_tests {
     use super::*;

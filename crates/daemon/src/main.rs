@@ -69,6 +69,23 @@ async fn run() -> Result<(), i32> {
         return stream_terminal(terminal).await;
     }
 
+    // `overnightd --fanout <pane>` is what tmux pipes a pane into, so that every
+    // watcher of that pane can have the same bytes.
+    //
+    // Not a mode a human runs. tmux allows one `pipe-pane` per pane, so before
+    // this existed the second watcher of a terminal replaced the first one's
+    // pipe and ended its stream without either of them being told. See `fanout`.
+    if let Some(index) = args.iter().position(|a| a == "--fanout") {
+        let Some(pane) = args.get(index + 1) else {
+            eprintln!("--fanout needs a pane id");
+            return Err(2);
+        };
+        return overnight_daemon::fanout::serve(pane).await.map_err(|e| {
+            eprintln!("cannot serve that pane: {e}");
+            1
+        });
+    }
+
     let socket = paths::socket_path().map_err(|e| {
         eprintln!("cannot determine the socket path: {e}");
         1
