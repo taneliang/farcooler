@@ -131,6 +131,9 @@ final class TerminalSession: ObservableObject {
     func switchTo(_ id: String) {
         guard id != terminalID else { return }
         teardown()
+        // The outgoing terminal, named before it stops being the current one.
+        let leaving = terminalID
+        Task { await stopStream(leaving) }
         terminalID = id
         vt = nil
         grid = nil
@@ -199,19 +202,38 @@ final class TerminalSession: ObservableObject {
     func stop() {
         teardown()
         started = false
+        let id = terminalID
+        Task { await stopStream(id) }
     }
 
+    /// Stop everything that paints, and everything that feeds what paints.
+    ///
+    /// The stream is stopped whether or not this object believes it is
+    /// streaming. It used to be conditional, which read as an optimisation and
+    /// was a leak: `streamEnded` sets the flag false before anything tears
+    /// down, so the one path that most needed the stream stopped was the one
+    /// path that skipped it, and an ssh channel went on delivering into an
+    /// emulator nothing was showing. `stopStream` is documented as safe when
+    /// nothing is running, which is what makes the unconditional version the
+    /// simpler one as well as the correct one.
     private func teardown() {
         poller?.cancel()
         poller = nil
         geometry?.cancel()
         geometry = nil
         inbox = nil
-        if streaming {
-            streaming = false
-            let id = terminalID
-            Task { await core.stopStream(id) }
-        }
+        streaming = false
+    }
+
+    /// Stop the stream and wait for the stop to land.
+    ///
+    /// Awaited wherever anything follows it, because stop and start go through
+    /// the same actor in the order they are asked: a stop left in flight
+    /// arrives after the next start and cancels the stream that start just
+    /// opened. What that looks like is a session that believes it is streaming,
+    /// attached to nothing — a screen that stops updating and never says why.
+    private func stopStream(_ id: String) async {
+        await core.stopStream(id)
     }
 
     // MARK: - Opening
@@ -219,31 +241,54 @@ final class TerminalSession: ObservableObject {
     /// Show this terminal and keep it live, by whichever means the connection
     /// supports.
     ///
-    /// The screen call first is not just for something to look at: the stream
-    /// carries no geometry, and an emulator has to be built at some size
-    /// before a single byte can be fed to it. It is also the one call that
-    /// reports a pane that is not running, which a stream can only express by
-    /// failing to open.
+    /// The screen call first is not for something to look at: the stream
+    /// carries no geometry, and an emulator has to be built at some size before
+    /// a single byte can be fed to it. It is also the one call that reports a
+    /// pane that is not running, which a stream can only express by failing to
+    /// open.
+    ///
+    /// Which is why it does not paint when a stream is coming. A capture and a
+    /// stream disagree about the same screen — tmux hands out captures with
+    /// bare line feeds, so `render` has to repair them, and even repaired they
+    /// are a screen re-flowed rather than the bytes that drew it. Painting one
+    /// and then being repainted by the stream's own replay a moment later is
+    /// visible, and it was: every reopen flashed a differently-wrapped screen
+    /// before settling. A spinner for that moment is honest; a wrong screen is
+    /// not.
     private func open() async {
         teardown()
-        guard await prime() else { return }
-        if await attach() {
-            watchGeometry()
-        } else {
-            startLoop()
-        }
+        // Awaited, unlike the fire-and-forget stop `teardown` does for callers
+        // that cannot wait. Both stop and start go through the same actor, and
+        // a stop that had not landed yet would arrive after the start below and
+        // cancel the stream this call just opened — leaving a session that
+        // believes it is streaming attached to nothing, which is a screen that
+        // stops updating and never says why.
+        await stopStream(terminalID)
+        guard let screen = await prime() else { return }
+        if await attach() { return watchGeometry() }
+        render(screen)
+        startLoop()
     }
 
-    /// One screen, for geometry and a first paint.
-    private func prime() async -> Bool {
+    /// One screen: the pane's size, whether it is running at all, and — only
+    /// if nothing better is coming — something to draw.
+    private func prime() async -> ScreenResponse? {
         do {
             let data = try await core.call("terminal.screen", ["terminal": terminalID])
             let response = try JSONDecoder().decode(ScreenResponse.self, from: data)
-            render(response)
-            return true
+            revision = response.revision
+            paneSize = (response.columns, response.rows)
+            // An emulator at the pane's size, empty. Built here rather than by
+            // whoever paints first, because the streaming path never paints a
+            // capture and still has to have something to feed: the bytes start
+            // arriving the moment the channel opens, and a chunk with no
+            // emulator to receive it is simply lost. It stays empty because the
+            // stream's first act is to clear the screen and replay it.
+            vt = VTCore(columns: response.columns, rows: response.rows)
+            return response
         } catch {
             report(error)
-            return false
+            return nil
         }
     }
 
@@ -298,6 +343,15 @@ final class TerminalSession: ObservableObject {
         failedAttaches += 1
         guard failedAttaches < 3 else {
             if let error { phase = .failed(error) }
+            // Everything the streaming path set up goes before the polling path
+            // starts, and that is the whole fix for a screen that flashed a
+            // wrong layout once a second. Falling back used to start the poll
+            // loop and leave the rest running, so a stream that was still
+            // delivering fed the emulator correct bytes while the poll repainted
+            // a capture over the top of them — two painters, disagreeing, one of
+            // them every second. A fallback has to be a handover, not an
+            // addition.
+            teardown()
             startLoop()
             return
         }
@@ -409,7 +463,15 @@ final class TerminalSession: ObservableObject {
             return
         }
         let emulator = VTCore(columns: response.columns, rows: response.rows)
-        emulator.feed([UInt8](bytes))
+        // A capture separates its lines with a bare line feed, which to a
+        // terminal means "down one row" and nothing about which column. Fed
+        // straight in, every line starts where the previous one ended and the
+        // screen arrives as a staircase — text broken mid-word at a different
+        // place on each row, which is what a wrong screen looked like here.
+        // The daemon repairs this for the replay it sends down a stream, for
+        // exactly the same reason; a capture arriving by any other route needs
+        // the same repair. Live pty bytes never do — a pty already emits both.
+        emulator.feed(carriageReturned([UInt8](bytes)))
         vt = emulator
         paneSize = (response.columns, response.rows)
         // The host's cursor, not the emulator's: a capture is text, so feeding
@@ -423,6 +485,21 @@ final class TerminalSession: ObservableObject {
                 cursorColumn: response.cursorColumn)
         }
         phase = .live
+    }
+
+    /// Give every bare line feed the carriage return a captured screen left
+    /// out. One that already has one is left alone, so this is safe to apply
+    /// to anything.
+    private func carriageReturned(_ bytes: [UInt8]) -> [UInt8] {
+        var out: [UInt8] = []
+        out.reserveCapacity(bytes.count + bytes.count / 40)
+        var previous: UInt8 = 0
+        for byte in bytes {
+            if byte == 0x0A, previous != 0x0D { out.append(0x0D) }
+            out.append(byte)
+            previous = byte
+        }
+        return out
     }
 
     /// Show what the emulator currently holds, cursor included.

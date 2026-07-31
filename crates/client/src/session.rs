@@ -55,6 +55,25 @@ impl From<ClientError> for SessionError {
 type Reader = Box<dyn AsyncRead + Unpin + Send>;
 type Writer = Box<dyn AsyncWrite + Unpin + Send>;
 
+/// A terminal stream: the bytes, plus the write half that keeps it open.
+///
+/// The writer is never written to and exists only to not be dropped. See
+/// `Session::open_stream` for what dropping it does.
+struct StreamReader {
+    reader: ssh::ChannelReader,
+    _writer: std::pin::Pin<Box<dyn AsyncWrite + Send>>,
+}
+
+impl AsyncRead for StreamReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.reader).poll_read(cx, buf)
+    }
+}
+
 /// A connected Overnight host.
 pub struct Session {
     client: Client<Reader, Writer>,
@@ -98,7 +117,17 @@ impl Session {
             SessionError::Protocol("streaming needs an ssh session".into())
         })?;
         let streams = ssh.exec(&format!("overnightd --stream {terminal}")).await?;
-        Ok(Box::new(streams.reader))
+        // The write half is kept, though nothing is ever written to it.
+        //
+        // Dropping it closes that side of the channel, and ssh reports a closed
+        // stdin to the far end — which the daemon reads, correctly, as "nobody
+        // is watching any more" and exits. So a stream that dropped its writer
+        // ended a second or two after it opened, every time, and did it with a
+        // clean end-of-file that looked exactly like a pane finishing.
+        //
+        // Held open, the same closure means what it should: this stream ends
+        // when the session holding it goes away.
+        Ok(Box::new(StreamReader { reader: streams.reader, _writer: streams.writer }))
     }
 
     /// Connect to a daemon on this machine. Used by tests and by any desktop

@@ -56,8 +56,10 @@ const BACKLOG: usize = 1024;
 /// the pane: a terminal that gets restarted is a new pane, and its watchers
 /// must not be handed the old one's bytes.
 pub fn socket_path(pane_id: &str) -> PathBuf {
-    // Pane ids are `%17`, and `%` is fine in a filename but noisy in the logs
-    // and error messages this path shows up in.
+    // Stripped, so `%17` and `17` name the same socket. That is not cosmetic:
+    // tmux expands `%` when it runs the pipe command, so the fanout is started
+    // with the bare number while the watcher subscribing to it holds the whole
+    // id. Both have to arrive at the same path or they never meet.
     let name = pane_id.trim_start_matches('%');
     std::env::temp_dir().join(format!("overnight-pane-{name}.sock"))
 }
@@ -234,5 +236,13 @@ mod tests {
     fn each_pane_gets_its_own_socket() {
         assert_ne!(socket_path("%1"), socket_path("%2"));
         assert!(socket_path("%17").to_string_lossy().contains("17"));
+    }
+
+    /// The watcher holds `%17` and the fanout is started with `17`, because
+    /// tmux ate the `%` on the way. They have to meet at one path.
+    #[test]
+    fn a_pane_id_and_its_number_name_the_same_socket() {
+        assert_eq!(socket_path("%17"), socket_path("17"));
+        assert_eq!(socket_path("%0"), socket_path("0"));
     }
 }

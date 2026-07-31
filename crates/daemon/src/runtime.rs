@@ -284,7 +284,17 @@ impl Runtime {
             tracing::warn!(error = %e, "cannot find this executable to pipe into");
             DomainError::OperationFailed
         })?;
-        let command = format!("'{}' --fanout '{pane_id}'", exe.to_string_lossy());
+        // The pane NUMBER, not the pane id, because tmux expands this command
+        // as a format string before running it and `%` starts an expansion
+        // there. A pane id is `%0`, so passing one whole handed tmux an escape
+        // sequence: `%15` arrived as `15` by luck, and `%0` arrived as an
+        // environment variable's contents. The fanout then listened on a socket
+        // named after nonsense, the watcher that started it could never
+        // connect, and after a second of trying the stream gave up and exited —
+        // which a client cannot tell apart from a pane that finished. The
+        // socket name strips `%` on both sides, so the number is the whole id.
+        let command =
+            format!("'{}' --fanout '{}'", exe.to_string_lossy(), pane_id.trim_start_matches('%'));
         self.tmux.pipe_pane_start(pane_id, &command).await?;
 
         // Retried rather than slept through: the fanout has a process to spawn
