@@ -65,6 +65,7 @@ message Request {
     LayoutUpdate layout_update = 29;
     WorktreeImport worktree_import = 30;
     TerminalWrite terminal_write = 31;
+    TerminalScreenRequest terminal_screen_request = 32;
   }
 }
 
@@ -570,11 +571,22 @@ message TerminalStop {
 // phone renders colour, cursor position and all — a plain-text capture would
 // arrive already flattened and could never be anything but grey.
 message TerminalScreen {
+  // Empty when `unchanged` is set, so an idle pane costs a few bytes instead of
+  // a few kilobytes on every poll.
   bytes contents = 1;
   uint32 columns = 2;
   uint32 rows = 3;
   uint32 cursor_column = 4;
   uint32 cursor_row = 5;
+  // A cheap identity for this screen. Hand it back on the next request and the
+  // host will say `unchanged` rather than resend a screen you already hold.
+  //
+  // A phone polls a terminal several times a second and most of those screens
+  // are identical — an agent thinking, a shell at a prompt. Sending the whole
+  // capture each time is bandwidth spent to learn nothing, and on a phone that
+  // is battery.
+  uint64 revision = 6;
+  bool unchanged = 7;
 }
 
 // Exact bytes for a pane's input.
@@ -584,6 +596,12 @@ message TerminalScreen {
 // the way would have to know the terminal's mode to get them right.
 message TerminalWrite {
   bytes payload = 1;
+}
+
+// Ask for a screen, saying which one you already have.
+message TerminalScreenRequest {
+  // The `revision` from the last screen received. Zero means "send it whatever".
+  uint64 known_revision = 1;
 }
 
 message TerminalAttach {

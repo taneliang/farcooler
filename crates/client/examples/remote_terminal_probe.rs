@@ -73,6 +73,19 @@ fn main() {
     println!("fleet: {count} workspaces");
 
     let screen = call(handle, "terminal.screen", serde_json::json!({ "terminal": terminal }));
+    let revision = screen["revision"].as_u64().unwrap_or(0);
+
+    // Asking again with what we hold has to come back empty, or a phone polling
+    // several times a second is downloading the same screen over and over.
+    let again = call(
+        handle,
+        "terminal.screen",
+        serde_json::json!({ "terminal": terminal, "knownRevision": revision }),
+    );
+    assert_eq!(again["unchanged"], serde_json::json!(true), "an unchanged screen is not resent");
+    assert_eq!(again["contents"].as_str().unwrap_or(""), "", "and carries no contents");
+    println!("unchanged screens are answered in {} bytes", again.to_string().len());
+
     let decoded = decode_base64(screen["contents"].as_str().expect("contents")).expect("base64");
     println!(
         "screen: {}x{} cursor {},{} - {} bytes, {} escape sequences",

@@ -243,11 +243,18 @@ impl Session {
     }
 
     /// A terminal's visible screen, with escapes intact.
+    ///
+    /// `known_revision` is the last one received; the host answers `unchanged`
+    /// rather than resending a screen already held. Pass 0 to always get one.
     pub async fn screen(
         &mut self,
         terminal: Uuid,
+        known_revision: u64,
     ) -> Result<overnight_protocol::v1::TerminalScreen, SessionError> {
-        match self.value("terminal.screen", Some(terminal), None).await? {
+        let payload = request::Payload::TerminalScreenRequest(
+            overnight_protocol::v1::TerminalScreenRequest { known_revision },
+        );
+        match self.value("terminal.screen", Some(terminal), Some(payload)).await? {
             result::Value::TerminalScreen(s) => Ok(s),
             other => Err(wrong("terminal_screen", &other)),
         }

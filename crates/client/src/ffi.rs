@@ -334,13 +334,19 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         // string that would arrive already flattened, and the client has a real
         // emulator waiting for exactly these bytes.
         "terminal.screen" => {
-            let screen = session.screen(id("terminal")?).await.map_err(|e| e.to_string())?;
+            let known = args.get("knownRevision").and_then(|v| v.as_u64()).unwrap_or(0);
+            let screen =
+                session.screen(id("terminal")?, known).await.map_err(|e| e.to_string())?;
             Ok(json!({
+                // Absent when unchanged, so an idle pane costs a few bytes on
+                // the wire instead of a whole capture several times a second.
                 "contents": base64(&screen.contents),
                 "columns": screen.columns,
                 "rows": screen.rows,
                 "cursorColumn": screen.cursor_column,
                 "cursorRow": screen.cursor_row,
+                "revision": screen.revision,
+                "unchanged": screen.unchanged,
             }))
         }
 

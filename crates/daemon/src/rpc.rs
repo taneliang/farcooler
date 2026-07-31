@@ -394,14 +394,40 @@ impl Rpc {
             // terminals and act on them but never show one.
             "terminal.screen" => {
                 let id = Self::target(&req)?;
+                let known = match req.payload {
+                    Some(request::Payload::TerminalScreenRequest(p)) => p.known_revision,
+                    _ => 0,
+                };
+
                 let (contents, columns, rows) = svc.screen(id).await?;
                 let (cursor_column, cursor_row) = svc.cursor(id).await.unwrap_or((0, 0));
+
+                // The cursor is part of the identity, not just the contents: a
+                // caret moving along a line changes nothing else on screen, and a
+                // client told "unchanged" would draw it in the old cell.
+                let revision = screen_revision(&contents, cursor_column, cursor_row);
+                if known != 0 && known == revision {
+                    return Ok(result::Value::TerminalScreen(
+                        overnight_protocol::v1::TerminalScreen {
+                            contents: bytes::Bytes::new(),
+                            columns,
+                            rows,
+                            cursor_column,
+                            cursor_row,
+                            revision,
+                            unchanged: true,
+                        },
+                    ));
+                }
+
                 Ok(result::Value::TerminalScreen(overnight_protocol::v1::TerminalScreen {
                     contents: bytes::Bytes::from(contents.into_bytes()),
                     columns,
                     rows,
                     cursor_column,
                     cursor_row,
+                    revision,
+                    unchanged: false,
                 }))
             }
 
@@ -740,6 +766,60 @@ mod tests {
     fn reads_never_require_more_than_read() {
         for method in ["host.get", "daemon.version", "workspace.list", "terminal.list"] {
             assert_eq!(required_scope(method), Some(Scope::Read), "{method}");
+        }
+    }
+}
+
+
+/// A cheap identity for a screen.
+///
+/// FNV-1a over the capture and the cursor. Not a checksum anyone relies on for
+/// correctness — a collision means one stale frame until the next change, which
+/// is a redraw, not corruption — and it is compared only against a value this
+/// same host produced moments earlier.
+fn screen_revision(contents: &str, cursor_column: u32, cursor_row: u32) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |bytes: &[u8]| {
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x1000_0000_01b3);
+        }
+    };
+    eat(contents.as_bytes());
+    eat(&cursor_column.to_le_bytes());
+    eat(&cursor_row.to_le_bytes());
+    // Zero means "I have nothing" on the wire, so it must never be a real value.
+    if hash == 0 { 1 } else { hash }
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::screen_revision;
+
+    #[test]
+    fn the_same_screen_has_the_same_revision() {
+        assert_eq!(screen_revision("hello", 1, 2), screen_revision("hello", 1, 2));
+    }
+
+    #[test]
+    fn a_moved_cursor_is_a_different_screen() {
+        // Nothing else changed, and a client told "unchanged" would leave the
+        // caret in the wrong cell.
+        assert_ne!(screen_revision("hello", 1, 2), screen_revision("hello", 2, 2));
+        assert_ne!(screen_revision("hello", 1, 2), screen_revision("hello", 1, 3));
+    }
+
+    #[test]
+    fn different_contents_differ() {
+        assert_ne!(screen_revision("hello", 0, 0), screen_revision("hellp", 0, 0));
+    }
+
+    #[test]
+    fn zero_is_never_a_real_revision() {
+        // The wire uses it to mean "I hold nothing", so a screen that hashed to
+        // it would be resent forever.
+        for text in ["", "a", "the quick brown fox"] {
+            assert_ne!(screen_revision(text, 0, 0), 0);
         }
     }
 }
