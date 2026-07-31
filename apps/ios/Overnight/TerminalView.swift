@@ -32,6 +32,7 @@ private enum TerminalMetrics {
 @MainActor
 struct TerminalView: View {
     @ObservedObject var connection: Connection
+    @Environment(\.scenePhase) private var scenePhase
 
     @StateObject private var session: TerminalSession
     /// The terminal this screen is showing right now.
@@ -95,7 +96,7 @@ struct TerminalView: View {
                 session.switchTo(tapped.id)
             }
             GeometryReader { geo in
-                phaseContent
+                phaseContent(size: geo.size)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .task(id: GridSize(width: geo.size.width, height: geo.size.height, cell: cellSize)) {
                         await session.configure(
@@ -116,25 +117,20 @@ struct TerminalView: View {
         .preferredColorScheme(.dark)
         .navigationTitle(currentName)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                // Deliberate, and labelled as what it is. Resizing a pane
-                // reflows it for everyone looking at it, so it is an action you
-                // take rather than something that happens because you opened a
-                // screen.
-                Button {
-                    Task { await session.fitPaneToViewport() }
-                } label: {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                }
-                .accessibilityLabel("Fit pane to this screen")
-            }
-        }
         .onDisappear { session.stop() }
+        // Returning to the foreground carries no geometry of its own — this
+        // screen's size has not changed — but the pane is shared, and someone
+        // on the Mac could have resized the shared window while this device
+        // was backgrounded and not watching. `reassertSize` re-asks for the
+        // size already on file rather than computing a new one.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            session.reassertSize()
+        }
     }
 
     @ViewBuilder
-    private var phaseContent: some View {
+    private func phaseContent(size: CGSize) -> some View {
         switch session.phase {
         case .connecting:
             status(spinner: true, title: "Loading \(currentName)…")
@@ -146,7 +142,7 @@ struct TerminalView: View {
             status(symbol: "exclamationmark.triangle", title: "Could not load", message: message)
         case .live:
             if let grid = session.grid {
-                live(grid: grid)
+                live(grid: grid, size: size)
             } else {
                 status(spinner: true, title: "Loading \(currentName)…")
             }
@@ -173,9 +169,9 @@ struct TerminalView: View {
         }
     }
 
-    private func live(grid: TerminalGrid) -> some View {
+    private func live(grid: TerminalGrid, size: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
-            Canvas { context, size in draw(grid: grid, into: context, size: size) }
+            Canvas { context, canvasSize in draw(grid: grid, into: context, size: canvasSize) }
             // A UIKit view whose only job is to be the thing the software
             // keyboard is attached to. It carries no visible state of its
             // own — every character it reports goes straight to the host and
@@ -190,19 +186,80 @@ struct TerminalView: View {
             // reach it. Sizing it to the area it represents makes it an ordinary
             // view that can be tapped and focused, and it is still invisible
             // because it draws nothing.
-            KeystrokeField(focusRequest: focusRequest, onInsertText: insert, onDeleteBackward: {
-                sendKey(UInt32(OVERNIGHT_VT_KEY_BACKSPACE))
-            })
+            //
+            // It also carries the scroll gesture, for the same reason: it is
+            // the view that already owns every touch landing on the terminal.
+            // A `DragGesture` layered on top in SwiftUI would be racing this
+            // view's own `UITapGestureRecognizer` for the same touches rather
+            // than cooperating with it, so the pan recognizer lives on the
+            // same UIView and the tap is told to lose that race explicitly —
+            // see `KeystrokeSink.setup()`.
+            KeystrokeField(
+                focusRequest: focusRequest,
+                cellHeight: gridLayout(for: grid, in: size).cell.height,
+                onInsertText: insert,
+                onDeleteBackward: { sendKey(UInt32(OVERNIGHT_VT_KEY_BACKSPACE)) },
+                onScroll: { lines, point in
+                    let target = cell(at: point, grid: grid, size: size)
+                    Task { await session.scroll(lines: lines, column: target.column, row: target.row) }
+                }
+            )
         }
         .onAppear { focusRequest += 1 }
     }
 
     // MARK: - Drawing
 
-    private func draw(grid: TerminalGrid, into context: GraphicsContext, size: CGSize) {
-        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(TerminalPalette.background))
+    /// Where the grid sits inside the canvas, and at what scale — the same
+    /// numbers `draw(grid:into:size:)` lays glyphs out with, and what
+    /// `cell(at:grid:size:)` inverts to turn a touch back into a column and
+    /// row. Kept as one calculation because the two had a habit of drifting
+    /// apart the moment they were two.
+    private struct GridLayout {
+        var scale: CGFloat
+        var cell: CGSize
+        var origin: CGPoint
+    }
+
+    /// Almost never a straight reflow: the pane resizes itself to roughly fit
+    /// (see `TerminalSession.configure`), but the two round trips that takes —
+    /// asking the host, the host reflowing tmux — leave a gap where the grid
+    /// on screen is still the OLD size, and this scales that leftover
+    /// mismatch down rather than cropping it. `scale` is 1 the rest of the
+    /// time.
+    private func gridLayout(for grid: TerminalGrid, in size: CGSize) -> GridLayout {
         let padding = TerminalMetrics.padding
         let cell = cellSize
+        let content = CGSize(
+            width: padding.left + padding.right + CGFloat(grid.columns) * cell.width,
+            height: padding.top + padding.bottom + CGFloat(grid.rows) * cell.height)
+        guard content.width > 0, content.height > 0 else {
+            return GridLayout(scale: 1, cell: cell, origin: .zero)
+        }
+        let scale = min(size.width / content.width, size.height / content.height, 1)
+        return GridLayout(
+            scale: scale,
+            cell: CGSize(width: cell.width * scale, height: cell.height * scale),
+            origin: CGPoint(x: padding.left * scale, y: padding.top * scale))
+    }
+
+    /// The grid cell under a point in the canvas's own coordinates, clamped
+    /// onto the grid so a touch a pixel past the last row still lands
+    /// somewhere real rather than off the edge of `grid`'s backing array.
+    private func cell(at point: CGPoint, grid: TerminalGrid, size: CGSize) -> (column: Int, row: Int) {
+        let layout = gridLayout(for: grid, in: size)
+        guard layout.cell.width > 0, layout.cell.height > 0 else { return (0, 0) }
+        let column = Int(((point.x - layout.origin.x) / layout.cell.width).rounded(.down))
+        let row = Int(((point.y - layout.origin.y) / layout.cell.height).rounded(.down))
+        return (
+            min(max(column, 0), max(grid.columns - 1, 0)),
+            min(max(row, 0), max(grid.rows - 1, 0))
+        )
+    }
+
+    private func draw(grid: TerminalGrid, into context: GraphicsContext, size: CGSize) {
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(TerminalPalette.background))
+        let layout = gridLayout(for: grid, in: size)
 
         // Scaled by hand — every position and font size below is multiplied
         // by `scale` directly — rather than through `GraphicsContext.scaleBy`.
@@ -221,20 +278,11 @@ struct TerminalView: View {
         // coordinates that already have `scale` baked in, which is correct
         // regardless of which drawing calls a given `GraphicsContext` happens
         // to honour its own transform for.
-        //
-        // Scaling down rather than reflowing, because reflowing means resizing
-        // the pane, and the pane is shared: making it fit here made everyone
-        // else's layout collapse. Small but complete beats large and cropped —
-        // and `Fit pane to phone` is there for when you do want it reflowed.
-        let content = CGSize(
-            width: padding.left + padding.right + CGFloat(grid.columns) * cell.width,
-            height: padding.top + padding.bottom + CGFloat(grid.rows) * cell.height)
-        guard content.width > 0, content.height > 0 else { return }
-        let scale = min(size.width / content.width, size.height / content.height, 1)
-
-        let scaledCell = CGSize(width: cell.width * scale, height: cell.height * scale)
-        let originX = padding.left * scale
-        let originY = padding.top * scale
+        guard layout.cell.width > 0, layout.cell.height > 0 else { return }
+        let scale = layout.scale
+        let scaledCell = layout.cell
+        let originX = layout.origin.x
+        let originY = layout.origin.y
         // The chosen typeface, not a hard-coded system one — see
         // Settings.swift. Scaled the same way the cell itself is: a font
         // built at the unscaled `fontSize` would draw glyphs too big for the
@@ -348,9 +396,9 @@ struct TerminalView: View {
     /// the cell a font produces. `cell` is here so a font or size change in
     /// Settings re-runs `session.configure`, not just the drawing: a viewport
     /// that fit 80 columns at 13pt fits fewer at 18pt, and the pane this
-    /// screen would ask to be sized to on a future `fitPaneToViewport` should
-    /// reflect the font actually on screen, not whatever it was measured at
-    /// when this screen first appeared.
+    /// screen asks the host to resize to should reflect the font actually on
+    /// screen, not whatever it was measured at when this screen first
+    /// appeared.
     private struct GridSize: Equatable {
         var width: Double
         var height: Double
@@ -403,8 +451,14 @@ private struct TerminalKeyRow: View {
 /// terminal grid is the only place any of those are ever drawn.
 private struct KeystrokeField: UIViewRepresentable {
     var focusRequest: Int
+    /// The height, in points, one terminal row is actually drawn at right
+    /// now — what a drag on this view is converted to lines against. Passed
+    /// in rather than measured here, because only `TerminalView` knows the
+    /// current font, size and scale that produced it.
+    var cellHeight: CGFloat
     var onInsertText: (String) -> Void
     var onDeleteBackward: () -> Void
+    var onScroll: (Int, CGPoint) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -412,17 +466,17 @@ private struct KeystrokeField: UIViewRepresentable {
         let view = KeystrokeSink()
         view.onInsertText = onInsertText
         view.onDeleteBackward = onDeleteBackward
+        view.onScroll = onScroll
+        view.cellHeight = cellHeight
         view.backgroundColor = .clear
-        // Handled here rather than by a SwiftUI gesture above it: the view that
-        // wants the keyboard is the one that should hear the tap asking for it.
-        view.addGestureRecognizer(
-            UITapGestureRecognizer(target: view, action: #selector(KeystrokeSink.focus)))
         return view
     }
 
     func updateUIView(_ uiView: KeystrokeSink, context: Context) {
         uiView.onInsertText = onInsertText
         uiView.onDeleteBackward = onDeleteBackward
+        uiView.onScroll = onScroll
+        uiView.cellHeight = cellHeight
 
         // `updateUIView` runs on every poll, not just on a tap — the grid it
         // sits beside changes every second. Only actually re-focus when
@@ -441,11 +495,56 @@ private struct KeystrokeField: UIViewRepresentable {
 private final class KeystrokeSink: UIView, UIKeyInput {
     var onInsertText: ((String) -> Void)?
     var onDeleteBackward: (() -> Void)?
+    var onScroll: ((Int, CGPoint) -> Void)?
+    var cellHeight: CGFloat = 16
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setup()
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Both gesture recognizers this view carries, wired together here so the
+    /// relationship between them is set up in exactly one place.
+    ///
+    /// The tap is what asks for the keyboard; the pan is what scrolls. Both
+    /// live on this view — the one thing on screen that already owns every
+    /// touch landing on the terminal — rather than the pan being a SwiftUI
+    /// `DragGesture` layered above it, which would be racing this view's own
+    /// recognizer for the same touches instead of cooperating with it.
+    /// `require(toFail:)` is what keeps a drag that scrolls from also being
+    /// read as the tap that raises the keyboard: the tap does not fire until
+    /// the pan has definitively not started.
+    private func setup() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(focus))
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        tap.require(toFail: pan)
+        addGestureRecognizer(tap)
+        addGestureRecognizer(pan)
+    }
 
     override var canBecomeFirstResponder: Bool { true }
     var hasText: Bool { true }
 
     @objc func focus() { becomeFirstResponder() }
+
+    /// Convert the drag to whole lines and report each crossing.
+    ///
+    /// `setTranslation` puts back only the fractional remainder after each
+    /// callback, so a slow drag accumulates towards the next line instead of
+    /// being rounded away — the touchscreen equivalent of the Mac's
+    /// `wheelTicks`, using the recognizer's own accumulated translation as
+    /// the running total instead of a separately stored property.
+    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        guard cellHeight > 0 else { return }
+        let translation = recognizer.translation(in: self)
+        let lines = Int((translation.y / cellHeight).rounded(.towardZero))
+        guard lines != 0 else { return }
+        recognizer.setTranslation(
+            CGPoint(x: translation.x, y: translation.y - CGFloat(lines) * cellHeight), in: self)
+        onScroll?(lines, recognizer.location(in: self))
+    }
 
     func insertText(_ text: String) { onInsertText?(text) }
     func deleteBackward() { onDeleteBackward?() }

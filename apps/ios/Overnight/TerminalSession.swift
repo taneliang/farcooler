@@ -37,7 +37,29 @@ final class TerminalSession: ObservableObject {
     private let core: ClientCore
     private var vt: VTCore?
     private var poller: Task<Void, Never>?
+    /// The size this screen would like the pane to be, kept even while
+    /// nothing is happening about it so a later trigger — the app returning
+    /// to the foreground, say — has something to re-assert.
     private var lastRequestedSize: (columns: Int, rows: Int)?
+    /// The size the host was last actually asked to become. Doubles as "the
+    /// pane's size as far as this screen currently knows it", since `prime`
+    /// seeds it from the host's own answer — which is what lets a resize
+    /// request be skipped entirely when the pane already happens to be the
+    /// right shape.
+    private var lastResizeSent: (columns: Int, rows: Int)?
+    /// The size a pending debounce is going to ask for, distinct from
+    /// `lastResizeSent`. Without this, a `configure` that keeps re-arriving
+    /// with the same unchanged size — sub-pixel jitter in a `GeometryReader`
+    /// during layout is enough — would cancel and restart the debounce timer
+    /// forever and the resize would never actually fire.
+    private var pendingResizeSize: (columns: Int, rows: Int)?
+    private var resizeDebounce: Task<Void, Never>?
+    /// How long to wait for a burst of size changes to settle before asking
+    /// the host to reflow. A keyboard sliding up and a rotation each produce
+    /// several `configure` calls within a couple of hundred milliseconds;
+    /// this is long enough to coalesce a whole one of those into a single
+    /// request.
+    private static let resizeDebounceDelay: Duration = .milliseconds(200)
 
     /// The last screen decoded, kept so the next poll can tell whether
     /// anything actually changed. See `poll()` for what that buys.
@@ -109,6 +131,7 @@ final class TerminalSession: ObservableObject {
     deinit {
         poller?.cancel()
         geometry?.cancel()
+        resizeDebounce?.cancel()
         // The core's stream task outlives this object — it belongs to the ssh
         // session, not to whoever was watching — so it has to be told, not
         // just dropped. `nonisolated` capture of the id and the core is the
@@ -142,16 +165,66 @@ final class TerminalSession: ObservableObject {
         paneSize = nil
         phase = .connecting
         started = true
+        // The size this device would like has not changed — the screen did
+        // not resize, only what it is showing did — but `lastResizeSent`
+        // described the OUTGOING terminal's pane, and comparing the new
+        // terminal's shape against it would just be wrong. Clearing it makes
+        // `scheduleResize` re-evaluate from scratch once `open` has asked the
+        // incoming terminal what shape it actually is.
+        lastResizeSent = nil
         Task { await open() }
+        scheduleResize()
     }
 
-    /// Reflow the pane to the size this screen would like.
+    /// Debounce and dedupe a request to reflow the pane to `lastRequestedSize`.
     ///
-    /// Separate from opening the terminal, and that separation is the point: a
-    /// pane belongs to whoever else is looking at it too, so this is something
-    /// you ask for rather than something that happens because you tapped a row.
-    func fitPaneToViewport() async {
+    /// Every trigger that thinks the pane might need refitting — the screen
+    /// appearing, a rotation, the keyboard showing, the tab strip switching
+    /// terminals, the app returning to the foreground — funnels through here
+    /// rather than calling the host directly, for two reasons. First, several
+    /// of those triggers fire in a burst: a keyboard animation alone produces
+    /// a `configure` call on close to every frame while it slides, and each
+    /// one is a request the host would otherwise have to answer. Second, most
+    /// calls into this method ask for a size the pane is already at, and
+    /// asking again would just be a round trip that reflows a pane other
+    /// people may be looking at for no visible change.
+    ///
+    /// `pendingResizeSize` exists because `lastRequestedSize` re-arriving
+    /// unchanged is common — a `GeometryReader` can report the same size
+    /// several times during one layout pass — and restarting the sleep below
+    /// on every one of those would mean the debounce never actually elapses.
+    /// Only a genuine change to the target restarts the clock.
+    private func scheduleResize() {
+        // Tuples are not `Equatable`, so the comparisons below unwrap by hand
+        // rather than comparing the optionals directly.
         guard let size = lastRequestedSize else { return }
+        if let sent = lastResizeSent, sent == size { return }
+        if let pending = pendingResizeSize, pending == size { return }
+        pendingResizeSize = size
+        resizeDebounce?.cancel()
+        resizeDebounce = Task { [weak self] in
+            try? await Task.sleep(for: Self.resizeDebounceDelay)
+            guard !Task.isCancelled else { return }
+            await self?.resizePane()
+        }
+    }
+
+    /// Actually ask the host to reflow the pane to `lastRequestedSize`, once
+    /// `scheduleResize`'s debounce has settled on a value nothing has since
+    /// superseded.
+    ///
+    /// A tmux pane is shared: resizing it reflows it for every other client
+    /// attached to that window, the Mac included, not just for this phone.
+    /// Doing this automatically, rather than behind the explicit button this
+    /// method used to sit behind, is a deliberate trade the user asked for —
+    /// unreadably tiny text on a pane sized for a laptop was judged worse than
+    /// occasionally reflowing someone else's terminal. It is still a real
+    /// cost, just one that is now paid by default instead of on request.
+    private func resizePane() async {
+        guard let size = lastRequestedSize else { return }
+        if let sent = lastResizeSent, sent == size { return }
+        pendingResizeSize = nil
+        lastResizeSent = size
         _ = try? await core.call(
             "terminal.resize",
             ["terminal": terminalID, "columns": size.columns, "rows": size.rows])
@@ -171,29 +244,38 @@ final class TerminalSession: ObservableObject {
         }
     }
 
-    /// Start polling. Deliberately does NOT resize the pane.
+    /// Learn the size this screen would like the pane to be, open the
+    /// terminal on the first call, and — after `scheduleResize`'s debounce —
+    /// ask the host to reflow the pane to that size.
     ///
-    /// It used to, and that was wrong in a way only visible with two clients: a
-    /// pane is not private to whoever is looking at it. Opening a terminal on the
-    /// phone reflowed the shared window down to phone width — 81 columns became
-    /// 43 — so every pane in that layout was squeezed on the Mac at the same
-    /// moment, and stayed squeezed after the phone was put down. A viewer must
-    /// not reshape what it is viewing.
-    ///
-    /// So the phone renders the grid the host has, scaled to fit. A wide pane on
-    /// a narrow screen is small, which is honest; the alternative — everyone
-    /// else's layout collapsing because someone glanced at their phone — is not
-    /// a trade worth making.
-    ///
-    /// The size is still accepted here because the view knows it, and a future
-    /// version can use it to offer a deliberate "resize this pane to my screen"
-    /// — an explicit act, not a side effect of looking.
+    /// This used to only record the size and leave resizing to an explicit
+    /// tap on a toolbar button: a pane belongs to whoever else is looking at
+    /// it too, and reflowing the shared window just because a phone glanced
+    /// at it once squeezed every pane in that layout down to phone width for
+    /// everyone, Mac included. The trade-off has not gone away — see
+    /// `resizePane` — but the user's verdict was that unreadably tiny text on
+    /// a pane sized for a laptop is the worse failure, so this now asks for
+    /// real rather than waiting to be asked.
     func configure(columns: Int, rows: Int) async {
         guard columns > 0, rows > 0 else { return }
         lastRequestedSize = (columns, rows)
-        guard !started else { return }
-        started = true
-        await open()
+        if !started {
+            started = true
+            await open()
+        }
+        scheduleResize()
+    }
+
+    /// Re-assert the size this screen already wants, without anything having
+    /// told it a new one.
+    ///
+    /// For triggers where the risk is not that this screen's own size
+    /// changed but that the pane drifted while nothing here was watching it —
+    /// chiefly the app returning to the foreground, where someone on the Mac
+    /// could have resized the shared window while this device was
+    /// backgrounded.
+    func reassertSize() {
+        scheduleResize()
     }
 
     /// Stop watching. Called from `.onDisappear` — a backgrounded terminal
@@ -221,6 +303,9 @@ final class TerminalSession: ObservableObject {
         poller = nil
         geometry?.cancel()
         geometry = nil
+        resizeDebounce?.cancel()
+        resizeDebounce = nil
+        pendingResizeSize = nil
         inbox = nil
         streaming = false
     }
@@ -278,6 +363,11 @@ final class TerminalSession: ObservableObject {
             let response = try JSONDecoder().decode(ScreenResponse.self, from: data)
             revision = response.revision
             paneSize = (response.columns, response.rows)
+            // The pane's actual shape, straight from the host, seeds the
+            // baseline `scheduleResize` compares against — so a `configure`
+            // that asks for the size the pane already happens to be does not
+            // spend a round trip saying so.
+            lastResizeSent = (response.columns, response.rows)
             // An emulator at the pane's size, empty. Built here rather than by
             // whoever paints first, because the streaming path never paints a
             // capture and still has to have something to feed: the bytes start
@@ -471,7 +561,7 @@ final class TerminalSession: ObservableObject {
         // The daemon repairs this for the replay it sends down a stream, for
         // exactly the same reason; a capture arriving by any other route needs
         // the same repair. Live pty bytes never do — a pty already emits both.
-        emulator.feed(carriageReturned([UInt8](bytes)))
+        emulator.feed(carriageReturned(withoutTrailingNewlines([UInt8](bytes))))
         vt = emulator
         paneSize = (response.columns, response.rows)
         // The host's cursor, not the emulator's: a capture is text, so feeding
@@ -485,6 +575,23 @@ final class TerminalSession: ObservableObject {
                 cursorColumn: response.cursorColumn)
         }
         phase = .live
+    }
+
+    /// Drop the newline a captured screen ends with.
+    ///
+    /// A capture is as many lines as the screen is tall, so feeding the last
+    /// one's line feed moves the caret off the bottom row and scrolls the whole
+    /// screen up by one: the top line goes into history and every remaining row
+    /// is drawn one higher than it belongs. The caret then comes from the host,
+    /// which knows nothing about that scroll, so it lands a row below the text
+    /// it should be sitting in — which is exactly what a caret one row off
+    /// looks like. The daemon drops this same newline before replaying a screen
+    /// down a stream, and says why; a capture arriving by any other route needs
+    /// the same treatment.
+    private func withoutTrailingNewlines(_ bytes: [UInt8]) -> [UInt8] {
+        var end = bytes.count
+        while end > 0, bytes[end - 1] == 0x0A || bytes[end - 1] == 0x0D { end -= 1 }
+        return Array(bytes[..<end])
     }
 
     /// Give every bare line feed the carriage return a captured screen left
@@ -523,6 +630,7 @@ final class TerminalSession: ObservableObject {
     /// them, matching how a physical Ctrl key behaves.
     func send(text: String, modifiers: VTModifiers) async {
         guard let vt else { return }
+        jumpToBottom(vt)
         var bytes: [UInt8] = []
         for (index, scalar) in text.unicodeScalars.enumerated() {
             bytes += vt.encode(scalar: scalar, modifiers: index == 0 ? modifiers : [])
@@ -532,7 +640,49 @@ final class TerminalSession: ObservableObject {
 
     func send(key: UInt32, modifiers: VTModifiers = []) async {
         guard let vt else { return }
+        jumpToBottom(vt)
         await write(vt.encode(key: key, modifiers: modifiers))
+    }
+
+    /// Typing means "act on the live screen", so it always returns there
+    /// first — the same rule the Mac's `keyDown` follows. Unlike the Mac,
+    /// this does not guard on whether the view was actually scrolled: there
+    /// is no per-frame redraw loop here to spare the cost of an unnecessary
+    /// one, so the guard would only add a branch without saving anything.
+    private func jumpToBottom(_ vt: VTCore) {
+        vt.scrollToBottom()
+        publish()
+    }
+
+    /// Scroll by `lines`, positive back into history. Mirrors the Mac's
+    /// `scrollWheel(with:)` exactly, because that policy is the correct one
+    /// on any platform: ask the core to encode a wheel event for the program
+    /// running in this pane first. A full-screen program — `less`, an
+    /// agent's TUI — gets mouse reports instead, because from inside an
+    /// alternate screen a wheel means something to the program that this
+    /// device's own scrollback cannot express. Only once the core says the
+    /// program does not want the event does this fall back to scrolling the
+    /// emulator's own history and redrawing locally, which sends nothing to
+    /// the host at all.
+    func scroll(lines: Int, column: Int, row: Int) async {
+        guard let vt, lines != 0 else { return }
+        let button: UInt32 =
+            lines > 0 ? UInt32(OVERNIGHT_VT_MOUSE_WHEEL_UP) : UInt32(OVERNIGHT_VT_MOUSE_WHEEL_DOWN)
+
+        var bytes: [UInt8] = []
+        for _ in 0..<abs(lines) {
+            guard
+                let chunk = vt.encode(
+                    mouse: button, action: UInt32(OVERNIGHT_VT_MOUSE_PRESS),
+                    column: column, row: row, modifiers: [])
+            else {
+                vt.scroll(lines: Int32(lines))
+                publish()
+                return
+            }
+            bytes.append(contentsOf: chunk)
+        }
+        await write(bytes)
     }
 
     private func write(_ bytes: [UInt8]) async {

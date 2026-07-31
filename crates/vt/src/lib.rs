@@ -423,4 +423,16 @@ mod tests {
         t.feed(b"\x1b[?1049l"); // leave
         assert_eq!(render(&t)[0], "primary", "the primary screen must be restored");
     }
+
+    #[test]
+    fn a_line_exactly_as_wide_as_the_screen_does_not_consume_two_rows() {
+        // Writing the last column leaves the caret pending at the edge rather
+        // than on the next row; the line feed that follows is what moves it.
+        // An emulator that advanced eagerly would spend two rows on one line,
+        // and a screen replayed into it would arrive scrolled — which is how a
+        // caret ends up a row away from the text it belongs to.
+        let mut t = Terminal::new(10, 4);
+        t.feed(b"0123456789\r\nsecond");
+        assert_eq!(snapshot(&t).cursor_row, 1);
+    }
 }

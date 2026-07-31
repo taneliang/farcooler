@@ -38,6 +38,19 @@ final class VTCore {
         overnight_vt_resize(handle, UInt16(clamping: columns), UInt16(clamping: rows))
     }
 
+    /// Scroll the view. Positive goes back into history.
+    func scroll(lines: Int32) {
+        guard let handle else { return }
+        overnight_vt_scroll(handle, lines)
+    }
+
+    /// Jump back to the live screen. Call this on input: typing into a
+    /// scrolled-back view would show the user nothing of what they typed.
+    func scrollToBottom() {
+        guard let handle else { return }
+        overnight_vt_scroll_to_bottom(handle)
+    }
+
     /// Read the screen and hand it to `body`.
     ///
     /// Scoped rather than returned: the cell buffer belongs to the core and is
@@ -78,6 +91,32 @@ final class VTCore {
 
     func encode(scalar: Unicode.Scalar, modifiers: VTModifiers) -> [UInt8] {
         encode(key: scalar.value, modifiers: modifiers)
+    }
+
+    /// Encode a mouse event, or nil when the program does not want it — in
+    /// which case the event is ours to handle locally.
+    func encode(
+        mouse button: UInt32,
+        action: UInt32,
+        column: Int,
+        row: Int,
+        modifiers: VTModifiers
+    ) -> [UInt8]? {
+        guard let handle else { return nil }
+        var buffer = [UInt8](repeating: 0, count: 32)
+        let n = buffer.withUnsafeMutableBufferPointer {
+            overnight_vt_encode_mouse(
+                handle,
+                button,
+                action,
+                UInt16(clamping: column),
+                UInt16(clamping: row),
+                modifiers.rawValue,
+                $0.baseAddress,
+                $0.count
+            )
+        }
+        return n > 0 ? Array(buffer[0..<n]) : nil
     }
 }
 
