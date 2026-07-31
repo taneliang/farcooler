@@ -136,6 +136,18 @@ bool overnight_client_connected(void *handle);
  */
 size_t overnight_client_generate_key(const char *comment, uint8_t *out, size_t capacity);
 
+/**
+ * The public key belonging to a private key, as one OpenSSH line.
+ *
+ * Derived rather than stored: a device has one identity, and keeping the public
+ * half somewhere else means two facts that can disagree — which they do, because
+ * a keychain and a preferences file do not have the same lifetime.
+ *
+ * Returns the number of bytes needed; nothing is written if that exceeds
+ * `capacity`. Returns 0 if the private key could not be read.
+ */
+size_t overnight_client_public_key(const char *private_key, uint8_t *out, size_t capacity);
+
 #ifdef __cplusplus
 }
 #endif

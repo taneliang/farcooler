@@ -40,18 +40,26 @@ final class TerminalSession: ObservableObject {
 
     deinit { poller?.cancel() }
 
-    /// Tell the host the view's size, then (re)start polling.
+    /// Start polling. Deliberately does NOT resize the pane.
     ///
-    /// Resize is idempotent on the wire and cheap on the host, so this is
-    /// safe to call every time SwiftUI recomputes the available size — the
-    /// guard below just skips the round trip when nothing actually changed.
+    /// It used to, and that was wrong in a way only visible with two clients: a
+    /// pane is not private to whoever is looking at it. Opening a terminal on the
+    /// phone reflowed the shared window down to phone width — 81 columns became
+    /// 43 — so every pane in that layout was squeezed on the Mac at the same
+    /// moment, and stayed squeezed after the phone was put down. A viewer must
+    /// not reshape what it is viewing.
+    ///
+    /// So the phone renders the grid the host has, scaled to fit. A wide pane on
+    /// a narrow screen is small, which is honest; the alternative — everyone
+    /// else's layout collapsing because someone glanced at their phone — is not
+    /// a trade worth making.
+    ///
+    /// The size is still accepted here because the view knows it, and a future
+    /// version can use it to offer a deliberate "resize this pane to my screen"
+    /// — an explicit act, not a side effect of looking.
     func configure(columns: Int, rows: Int) async {
         guard columns > 0, rows > 0 else { return }
-        if lastRequestedSize?.columns != columns || lastRequestedSize?.rows != rows {
-            lastRequestedSize = (columns, rows)
-            _ = try? await core.call(
-                "terminal.resize", ["terminal": terminalID, "columns": columns, "rows": rows])
-        }
+        lastRequestedSize = (columns, rows)
         guard poller == nil else { return }
         poller = Task { [weak self] in
             while !Task.isCancelled {

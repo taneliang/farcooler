@@ -59,6 +59,16 @@ struct RootView: View {
                 }
             }
             .navigationTitle("Overnight")
+            // Generate the device key at launch rather than the first time
+            // something asks for it.
+            //
+            // It used to appear only when the "Authorise" screen was opened,
+            // which put a several-hundred-millisecond keygen behind a tap and,
+            // worse, meant a host could be added and connected to before this
+            // device had an identity to offer. Doing it here costs one keygen on
+            // first run and nothing on every run after — `privateKey()` returns
+            // the stored one.
+            .task { _ = Identity.publicKey }
             .navigationDestination(for: Host.self) { host in
                 FleetView(host: host, store: hosts)
             }

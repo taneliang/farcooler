@@ -198,6 +198,36 @@ pub unsafe extern "C" fn overnight_client_generate_key(
     bytes.len()
 }
 
+/// The public key belonging to a private key.
+///
+/// Derived on demand rather than stored beside it. A device has exactly one
+/// identity, and keeping the public half in a second place meant two sources for
+/// one fact: clear one and they disagree silently, which is what happened — an
+/// app whose keychain survived a reinstall but whose preferences did not went on
+/// offering a key it no longer knew the name of, and reported a stale one to the
+/// human trying to authorise it.
+///
+/// Returns the number of bytes needed, as `overnight_client_generate_key` does.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn overnight_client_public_key(
+    private_key: *const c_char,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    use russh::keys::ssh_key::PrivateKey;
+
+    let Some(text) = (unsafe { read_str(private_key) }) else { return 0 };
+    let Ok(key) = text.parse::<PrivateKey>() else { return 0 };
+    let Ok(public) = key.public_key().to_openssh() else { return 0 };
+
+    let bytes = public.as_bytes();
+    if out.is_null() || bytes.len() > capacity {
+        return bytes.len();
+    }
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+    bytes.len()
+}
+
 /// Take the oldest finished result, or NULL if none is ready.
 ///
 /// The returned pointer is owned by the handle and stays valid until the next
@@ -582,5 +612,51 @@ mod encoding_tests {
         assert_eq!(decode_hex(""), Some(vec![]));
         assert_eq!(decode_hex("abc"), None, "odd length is not a byte string");
         assert_eq!(decode_hex("zz"), None);
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use std::ffi::CString;
+
+    /// A generated key and the public key derived from it have to agree, or the
+    /// device offers one identity and shows a human another.
+    #[test]
+    fn the_derived_public_key_matches_the_generated_one() {
+        let comment = CString::new("test").unwrap();
+        let mut buf = vec![0u8; 4096];
+        let n = unsafe {
+            super::overnight_client_generate_key(comment.as_ptr(), buf.as_mut_ptr(), buf.len())
+        };
+        assert!(n > 0 && n <= buf.len());
+
+        let pair: serde_json::Value = serde_json::from_slice(&buf[..n]).unwrap();
+        let private = pair["private_key"].as_str().unwrap();
+        let generated = pair["public_key"].as_str().unwrap();
+
+        let key = CString::new(private).unwrap();
+        let mut out = vec![0u8; 2048];
+        let n = unsafe {
+            super::overnight_client_public_key(key.as_ptr(), out.as_mut_ptr(), out.len())
+        };
+        assert!(n > 0 && n <= out.len());
+        let derived = String::from_utf8_lossy(&out[..n]).into_owned();
+
+        // The comment is not part of the key, and `to_openssh` on a parsed key
+        // keeps it, so compare the parts that identify it.
+        let fields = |line: &str| -> String {
+            line.split_whitespace().take(2).collect::<Vec<_>>().join(" ")
+        };
+        assert_eq!(fields(&derived), fields(generated));
+    }
+
+    #[test]
+    fn nonsense_is_refused_rather_than_guessed_at() {
+        let junk = CString::new("not a key").unwrap();
+        let mut out = vec![0u8; 256];
+        assert_eq!(
+            unsafe { super::overnight_client_public_key(junk.as_ptr(), out.as_mut_ptr(), out.len()) },
+            0
+        );
     }
 }

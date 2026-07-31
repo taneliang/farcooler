@@ -93,17 +93,22 @@ COMMON = """\t\t\t\tCLANG_ENABLE_MODULES = YES;
 \t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";
 \t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;"""
 
-# CODE_SIGNING_ALLOWED = NO so a simulator build needs no developer account.
-# A device build overrides it, which is where a real identity is required.
+# Signed ad-hoc, which needs no developer account and still produces the
+# entitlements the keychain requires. It used to be CODE_SIGNING_ALLOWED = NO —
+# no signature, therefore no entitlements, therefore every keychain write failed
+# with errSecMissingEntitlement and the device could never keep its own key.
+# A device build overrides this, which is where a real identity is required.
 TARGET_COMMON = """\t\t\t\tPRODUCT_NAME = Overnight;
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
 \t\t\t\tGENERATE_INFOPLIST_FILE = YES;
 \t\t\t\tINFOPLIST_KEY_UILaunchScreen_Generation = YES;
 \t\t\t\tINFOPLIST_KEY_CFBundleDisplayName = Overnight;
 \t\t\t\tINFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-\t\t\t\tCODE_SIGN_STYLE = Automatic;
-\t\t\t\tCODE_SIGNING_ALLOWED = NO;
+\t\t\t\tCODE_SIGN_STYLE = Manual;
+\t\t\t\tCODE_SIGN_IDENTITY = "-";
+\t\t\t\tCODE_SIGNING_ALLOWED = YES;
 \t\t\t\tCODE_SIGNING_REQUIRED = NO;
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = Overnight/Overnight.entitlements;
 \t\t\t\tENABLE_USER_SCRIPT_SANDBOXING = NO;
 \t\t\t\tOTHER_LDFLAGS = "-lc++";
 \t\t\t\tSWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
