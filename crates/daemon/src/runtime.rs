@@ -110,6 +110,18 @@ impl Runtime {
         Ok((text, pane.columns, pane.rows))
     }
 
+    /// Where the cursor sits, so a remote client can draw it in the right cell.
+    ///
+    /// Asked for separately from the screen because `capture-pane` does not carry
+    /// it: the capture is what the pane HAS, and the cursor is where it is about
+    /// to write. A client that guessed from the last non-blank cell would put it
+    /// in the wrong place on any screen with trailing output.
+    pub async fn cursor(&self, id: Uuid) -> Result<(u32, u32)> {
+        let snapshot = self.inventory.snapshot();
+        let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
+        self.tmux.cursor_position(&pane.pane_id).await
+    }
+
     /// Stream a terminal's live output to this process's stdout.
     ///
     /// Emits the retained history first so the client opens onto the session as

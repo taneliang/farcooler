@@ -66,7 +66,15 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "terminal.dismiss_lost"
         | "terminal.restart"
         | "terminal.seen"
-        | "terminal.remove" => Scope::Control,
+        | "terminal.remove"
+        // Reading a screen is `control`, not `read`.
+        //
+        // A screen is the most sensitive thing this protocol carries — it is
+        // whatever the agent has on it, which routinely includes source, paths
+        // and tokens — and `read` is the scope handed to something that should
+        // only see the shape of the fleet.
+        | "terminal.screen"
+        | "terminal.write" => Scope::Control,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
         // no process — the worst a wrong one does is show you the wrong pane —
         // and it has to be reachable by an agent for any of this to be
@@ -379,6 +387,33 @@ impl Rpc {
                 self.terminal_result(term.id).await
             }
 
+            // A screen, for clients that cannot read tmux themselves.
+            //
+            // The CLI and the Mac app go straight to tmux because they are on the
+            // host; a phone over ssh cannot, so without this it can list
+            // terminals and act on them but never show one.
+            "terminal.screen" => {
+                let id = Self::target(&req)?;
+                let (contents, columns, rows) = svc.screen(id).await?;
+                let (cursor_column, cursor_row) = svc.cursor(id).await.unwrap_or((0, 0));
+                Ok(result::Value::TerminalScreen(overnight_protocol::v1::TerminalScreen {
+                    contents: bytes::Bytes::from(contents.into_bytes()),
+                    columns,
+                    rows,
+                    cursor_column,
+                    cursor_row,
+                }))
+            }
+
+            "terminal.write" => {
+                let id = Self::target(&req)?;
+                let Some(request::Payload::TerminalWrite(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                svc.send_bytes(id, &p.payload).await?;
+                self.terminal_result(id).await
+            }
+
             "terminal.resize" => {
                 let id = Self::target(&req)?;
                 let Some(request::Payload::TerminalResize(p)) = req.payload else {
@@ -647,6 +682,8 @@ mod tests {
             "terminal.stop",
             "terminal.dismiss_lost",
             "terminal.restart",
+            "terminal.screen",
+            "terminal.write",
             "layout.list",
             "layout.split",
             "layout.move",
@@ -667,7 +704,10 @@ mod tests {
 
     #[test]
     fn an_unknown_method_is_refused_rather_than_defaulted() {
-        assert_eq!(required_scope("terminal.write"), None);
+        // Deliberately a name nothing will ever take: this used to be
+        // `terminal.write`, which became real, and a test asserting a method does
+        // not exist has to name one that cannot.
+        assert_eq!(required_scope("terminal.telepathy"), None);
         // The `layout.` handler arm is prefix-matched, so an unlisted layout
         // method must still be stopped by the table before it gets there.
         assert_eq!(required_scope("layout.nonsense"), None);

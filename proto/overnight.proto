@@ -64,6 +64,7 @@ message Request {
     TerminalAttach terminal_attach = 28;
     LayoutUpdate layout_update = 29;
     WorktreeImport worktree_import = 30;
+    TerminalWrite terminal_write = 31;
   }
 }
 
@@ -98,6 +99,7 @@ message Result {
     BranchList branch_list = 13;
     PaneGroupList pane_group_list = 14;
     WorktreeList worktree_list = 15;
+    TerminalScreen terminal_screen = 16;
   }
 }
 
@@ -553,6 +555,35 @@ message TerminalResize {
 message TerminalStop {
   bool force = 1;
   optional string typed_confirmation = 2;
+}
+
+// A pane's visible screen, escapes and all.
+//
+// For clients that cannot reach tmux themselves, which is every remote one: the
+// CLI and the Mac app read screens straight from tmux because they are on the
+// host, and a phone over ssh has no such option. Without this the phone can list
+// terminals and act on them but never show one, which is most of what it is for
+// at 3am.
+//
+// Escape sequences are preserved rather than stripped. The client has the same
+// emulator the daemon does, so what travels is what tmux would have sent and the
+// phone renders colour, cursor position and all — a plain-text capture would
+// arrive already flattened and could never be anything but grey.
+message TerminalScreen {
+  bytes contents = 1;
+  uint32 columns = 2;
+  uint32 rows = 3;
+  uint32 cursor_column = 4;
+  uint32 cursor_row = 5;
+}
+
+// Exact bytes for a pane's input.
+//
+// Bytes, not text: a key is not always a character. Arrows, Ctrl-C and a
+// bracketed paste are all byte sequences, and anything that re-encoded them on
+// the way would have to know the terminal's mode to get them right.
+message TerminalWrite {
+  bytes payload = 1;
 }
 
 message TerminalAttach {

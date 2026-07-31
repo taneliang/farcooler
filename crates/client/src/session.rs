@@ -242,6 +242,26 @@ impl Session {
         self.value("terminal.dismiss_lost", Some(terminal), None).await.map(|_| ())
     }
 
+    /// A terminal's visible screen, with escapes intact.
+    pub async fn screen(
+        &mut self,
+        terminal: Uuid,
+    ) -> Result<overnight_protocol::v1::TerminalScreen, SessionError> {
+        match self.value("terminal.screen", Some(terminal), None).await? {
+            result::Value::TerminalScreen(s) => Ok(s),
+            other => Err(wrong("terminal_screen", &other)),
+        }
+    }
+
+    /// Send exact bytes to a terminal.
+    pub async fn write(&mut self, terminal: Uuid, bytes: Vec<u8>) -> Result<(), SessionError> {
+        let payload = request::Payload::TerminalWrite(overnight_protocol::v1::TerminalWrite {
+            payload: bytes.into(),
+        });
+        self.value("terminal.write", Some(terminal), Some(payload)).await?;
+        Ok(())
+    }
+
     pub async fn resize_terminal(
         &mut self,
         terminal: Uuid,
@@ -295,6 +315,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::BranchList(_) => "branch_list",
         result::Value::PaneGroupList(_) => "pane_group_list",
         result::Value::WorktreeList(_) => "worktree_list",
+        result::Value::TerminalScreen(_) => "terminal_screen",
     }
 }
 

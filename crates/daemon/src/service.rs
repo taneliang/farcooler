@@ -820,6 +820,21 @@ impl Service {
         self.runtime().resize_terminal(id, columns, rows).await
     }
 
+    /// Where the cursor is, so a client can draw it in the right cell.
+    pub async fn cursor(&self, id: Uuid) -> Result<(u32, u32)> {
+        self.runtime().cursor(id).await
+    }
+
+    /// Send exact bytes to a terminal.
+    ///
+    /// Bytes rather than text, because a key is not always a character: arrows,
+    /// Ctrl-C and a bracketed paste are byte sequences, and anything re-encoding
+    /// them on the way would need to know the terminal's mode to get them right.
+    pub async fn send_bytes(&self, id: Uuid, payload: &[u8]) -> Result<()> {
+        let hex: String = payload.iter().map(|b| format!("{b:02x}")).collect();
+        self.runtime().send_bytes_hex(id, &hex).await
+    }
+
     pub async fn capture(&self, id: Uuid, lines: u32) -> Result<String> {
         self.runtime().capture(id, lines).await
     }

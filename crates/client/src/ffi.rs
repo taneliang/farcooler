@@ -297,6 +297,32 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             session.dismiss_lost(id("terminal")?).await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         }
+        // The screen, base64 so it survives JSON.
+        //
+        // A capture carries escape sequences and arbitrary bytes; JSON carries
+        // text. Encoding is the honest way through — the alternative is a lossy
+        // string that would arrive already flattened, and the client has a real
+        // emulator waiting for exactly these bytes.
+        "terminal.screen" => {
+            let screen = session.screen(id("terminal")?).await.map_err(|e| e.to_string())?;
+            Ok(json!({
+                "contents": base64(&screen.contents),
+                "columns": screen.columns,
+                "rows": screen.rows,
+                "cursorColumn": screen.cursor_column,
+                "cursorRow": screen.cursor_row,
+            }))
+        }
+
+        // Input, as hex. A key is not always a character — arrows, Ctrl-C and a
+        // bracketed paste are byte sequences — so nothing here re-encodes.
+        "terminal.write" => {
+            let hex = text("hex");
+            let bytes = decode_hex(&hex).ok_or("input must be hex")?;
+            session.write(id("terminal")?, bytes).await.map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
+
         "terminal.resize" => {
             let columns = args.get("columns").and_then(|v| v.as_u64()).unwrap_or(80) as u32;
             let rows = args.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u32;
@@ -495,5 +521,66 @@ mod tests {
             assert_eq!(overnight_client_call(handle, std::ptr::null(), std::ptr::null()), 0);
             overnight_client_free(handle);
         }
+    }
+}
+
+
+/// Standard base64, without pulling in a crate for twenty lines.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ALPHABET[(n >> (18 - i * 6) & 0x3F) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn decode_hex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok())
+        .collect()
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::*;
+
+    #[test]
+    fn base64_matches_the_standard_including_padding() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foob"), "Zm9vYg==");
+        assert_eq!(base64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn base64_survives_bytes_that_are_not_text() {
+        // Which is the point: a screen is escape sequences, not a string.
+        assert_eq!(base64(&[0x1b, 0x5b, 0x33, 0x31, 0x6d]), "G1szMW0=");
+        assert_eq!(base64(&[0xff, 0x00, 0xfe]), "/wD+");
+    }
+
+    #[test]
+    fn hex_round_trips_and_rejects_what_is_not_hex() {
+        assert_eq!(decode_hex("00ff1b"), Some(vec![0x00, 0xff, 0x1b]));
+        assert_eq!(decode_hex(""), Some(vec![]));
+        assert_eq!(decode_hex("abc"), None, "odd length is not a byte string");
+        assert_eq!(decode_hex("zz"), None);
     }
 }
