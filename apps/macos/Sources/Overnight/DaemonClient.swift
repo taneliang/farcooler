@@ -105,6 +105,15 @@ final class DaemonClient: ObservableObject {
 
             fleet.workspaces[w].terminals[t].state = event.state
             fleet.workspaces[w].terminals[t].activity = event.activity
+            // What is RUNNING, which is also what the terminal is CALLED.
+            //
+            // This was missed, and the omission was invisible until the name
+            // started being derived from it: the daemon broadcasts the moment a
+            // pane's command changes, the app applied the state and the activity
+            // out of that event and dropped the command — so a shell you had just
+            // run `node` in stayed labelled `shell` until something forced a full
+            // re-read. The whole point of pushing events is not needing one.
+            fleet.workspaces[w].terminals[t].preset = event.preset
 
             let terminal = fleet.workspaces[w].terminals[t]
             Notifier.shared.report(terminal: terminal, workspace: fleet.workspaces[w].task)
