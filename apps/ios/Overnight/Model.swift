@@ -143,6 +143,22 @@ enum AgentActivity: String {
     }
 }
 
+extension Fleet {
+    /// The terminal a host lands on when its worktree list is skipped — see
+    /// `FleetView`. An agent waiting on you outranks everything else, because
+    /// that is the whole reason to have opened the app; short of that, the
+    /// first terminal already running is a better first screen than an
+    /// arbitrary one that has exited or never started. `nil` only when the
+    /// host has no terminals at all, which is what sends `FleetView` back to
+    /// showing its list instead.
+    var landingTerminal: Terminal? {
+        let all = workspaces.flatMap(\.terminals)
+        if let attention = all.first(where: { $0.agent.wantsAttention }) { return attention }
+        if let running = all.first(where: { StateKind.parse($0.state) == .running }) { return running }
+        return all.first
+    }
+}
+
 struct Repository: Decodable, Identifiable, Hashable {
     var id: String
     var short: String

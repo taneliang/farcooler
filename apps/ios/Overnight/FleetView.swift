@@ -2,19 +2,38 @@ import SwiftUI
 
 /// The fleet on one host.
 ///
-/// This is the 3am screen: what is running, what needs attention, and what to
-/// do about it. Every state shown here is DERIVED by the daemon at the moment
-/// of asking — the phone never computes a terminal's state, because a client
-/// that re-derives can disagree with the daemon and with the Mac about the same
-/// terminal.
+/// Was the screen between a host and a terminal; now it is mostly a
+/// hand-off. A host with a terminal already running goes straight to it
+/// (`landing`, decided once per connection — see below) and this screen is
+/// what a host with nothing running shows instead, and what `TerminalView`'s
+/// switcher sheet reuses to list every worktree. Every state shown here is
+/// still DERIVED by the daemon at the moment of asking — the phone never
+/// computes a terminal's state, because a client that re-derives can
+/// disagree with the daemon and with the Mac about the same terminal.
 @MainActor
 struct FleetView: View {
     let host: Host
     let store: HostStore
 
     @StateObject private var connection = Connection()
-    @State private var showNewWorkspace = false
-    @State private var showQuickTask = false
+
+    /// Which terminal to open automatically, decided once per connection
+    /// attempt and then left alone.
+    ///
+    /// Recomputing this on every poll would mean a terminal finishing its
+    /// work while this screen is open — an ordinary thing to happen while
+    /// someone is reading it — yanks them onto a different pane mid-read.
+    /// `nil` with `landingDecided` true means the fleet genuinely has no
+    /// terminals, which is what falls back to `list` below; `nil` with it
+    /// false means a connection attempt hasn't finished yet.
+    @State private var landing: Terminal?
+    @State private var landingDecided = false
+
+    /// Pushed when a terminal is tapped in the fallback list — the only
+    /// place this screen still pushes, since the landing terminal above
+    /// takes the direct route and the switcher sheet (`WorkspaceListView`
+    /// from `TerminalView`) selects in place instead of navigating.
+    @State private var pushed: Terminal?
 
     var body: some View {
         Group {
@@ -26,43 +45,54 @@ struct FleetView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
+                .navigationTitle(host.label)
+                .navigationBarTitleDisplayMode(.inline)
 
             case .needsApproval(let fingerprint):
                 approval(fingerprint)
+                    .navigationTitle(host.label)
+                    .navigationBarTitleDisplayMode(.inline)
 
             case .failed(let message):
                 failure(message)
+                    .navigationTitle(host.label)
+                    .navigationBarTitleDisplayMode(.inline)
 
             case .connected:
-                fleet
+                connected
             }
         }
-        .navigationTitle(host.label)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if connection.phase == .connected {
-                // Sparkles for "describe it" (QuickTaskView), plain plus for
-                // "fill in the form" (NewWorkspaceView) — same two flows the
-                // Mac keeps side by side, kept apart here by icon rather than
-                // by picking a winner, since a phone's one-sentence flow is
-                // new and unproven next to a form that already works.
-                Button { showQuickTask = true } label: { Image(systemName: "sparkles") }
-                Button { showNewWorkspace = true } label: { Image(systemName: "plus") }
-            }
-        }
-        .sheet(isPresented: $showNewWorkspace) {
-            NewWorkspaceView(repositories: connection.repositories) { repository, task, branch in
-                await connection.createWorkspace(repository: repository, task: task, branch: branch)
-            }
-        }
-        .sheet(isPresented: $showQuickTask) {
-            TaskComposerView(connection: connection)
-        }
-        .navigationDestination(for: Terminal.self) { terminal in
+        .navigationDestination(item: $pushed) { terminal in
             TerminalView(terminal: terminal, connection: connection)
         }
-        .task { await connection.start(host: host) }
-        .refreshable { await connection.refresh() }
+        .task { await connect(host) }
+    }
+
+    @ViewBuilder
+    private var connected: some View {
+        if let landing {
+            TerminalView(terminal: landing, connection: connection)
+        } else if landingDecided {
+            WorkspaceListView(connection: connection, onSelect: { pushed = $0 })
+                .navigationTitle(host.label)
+                .navigationBarTitleDisplayMode(.inline)
+        } else {
+            ProgressView()
+                .navigationTitle(host.label)
+                .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    /// Connect, then decide `landing` from whatever fleet that connection
+    /// produced. Shared by the initial `.task` and every retry below — the
+    /// approval screen's "Trust this host" and the failure screen's "Try
+    /// again" each start a fresh connection of their own, and each one needs
+    /// the same decision made afterwards, not the one left over from a
+    /// connection attempt that never got this far.
+    private func connect(_ target: Host) async {
+        await connection.start(host: target)
+        landing = connection.fleet.landingTerminal
+        landingDecided = true
     }
 
     // MARK: - Phases
@@ -90,11 +120,9 @@ struct FleetView: View {
 
             Button("Trust this host") {
                 store.trust(host, fingerprint: fingerprint)
-                Task {
-                    var trusted = host
-                    trusted.fingerprint = fingerprint
-                    await connection.start(host: trusted)
-                }
+                var trusted = host
+                trusted.fingerprint = fingerprint
+                Task { await connect(trusted) }
             }
             .buttonStyle(.borderedProminent)
             Spacer()
@@ -113,20 +141,81 @@ struct FleetView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .textSelection(.enabled)
-            Button("Try again") { Task { await connection.start(host: host) } }
+            Button("Try again") { Task { await connect(host) } }
                 .buttonStyle(.bordered)
         }
         .padding()
     }
+}
 
-    private var fleet: some View {
+/// The worktree list plus what it takes to act on it: quick task, new
+/// workspace, pull-to-refresh. Shown two places — as `FleetView`'s own
+/// fallback when a host has no terminal to land on, and inside the sheet
+/// `TerminalView` opens to switch terminals — so a task started from either
+/// one works the same way and neither loses a capability the other has.
+struct WorkspaceListView: View {
+    @ObservedObject var connection: Connection
+    let onSelect: (Terminal) -> Void
+    /// Non-nil only in the sheet: what "Done" calls. `FleetView`'s own use
+    /// leaves this nil because a pushed screen already has a back button.
+    var onDismiss: (() -> Void)?
+
+    @State private var showNewWorkspace = false
+    @State private var showQuickTask = false
+
+    var body: some View {
+        FleetList(fleet: connection.fleet, onSelect: onSelect) { action, terminal in
+            Task { await connection.act(action, on: terminal) }
+        }
+        .refreshable { await connection.refresh() }
+        .toolbar {
+            // Sparkles for "describe it" (QuickTaskView), plain plus for
+            // "fill in the form" (NewWorkspaceView) — same two flows the
+            // Mac keeps side by side, kept apart here by icon rather than
+            // by picking a winner, since a phone's one-sentence flow is
+            // new and unproven next to a form that already works.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showQuickTask = true } label: { Image(systemName: "sparkles") }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showNewWorkspace = true } label: { Image(systemName: "plus") }
+            }
+            if let onDismiss {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", action: onDismiss)
+                }
+            }
+        }
+        .sheet(isPresented: $showNewWorkspace) {
+            NewWorkspaceView(repositories: connection.repositories) { repository, task, branch in
+                await connection.createWorkspace(repository: repository, task: task, branch: branch)
+            }
+        }
+        .sheet(isPresented: $showQuickTask) {
+            TaskComposerView(connection: connection)
+        }
+    }
+}
+
+/// The rows themselves: every workspace on a host, its terminals, and the
+/// swipe actions on each. Split out of `WorkspaceListView` because the two
+/// places that view is shown agree on everything except the frame around the
+/// list — a `NavigationStack` with a title and a "Done" button in the sheet,
+/// nothing of the kind when it's `FleetView`'s own fallback content — and
+/// `List` content itself carries no opinion about what encloses it.
+struct FleetList: View {
+    let fleet: Fleet
+    let onSelect: (Terminal) -> Void
+    let onAction: (Connection.Action, Terminal) -> Void
+
+    var body: some View {
         List {
-            if connection.fleet.workspaces.isEmpty {
+            if fleet.workspaces.isEmpty {
                 Text("No workspaces on this host.")
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(connection.fleet.workspaces) { workspace in
+            ForEach(fleet.workspaces) { workspace in
                 let numbering = workspace.ordinals()
                 Section {
                     // Anything waiting on you comes first. On a phone you see
@@ -135,11 +224,12 @@ struct FleetView: View {
                     ForEach(workspace.terminals.sorted { a, b in
                         a.agent.wantsAttention && !b.agent.wantsAttention
                     }) { terminal in
-                        NavigationLink(value: terminal) {
+                        Button { onSelect(terminal) } label: {
                             TerminalRow(terminal: terminal, ordinal: numbering[terminal.id]) { action in
-                                Task { await connection.act(action, on: terminal) }
+                                onAction(action, terminal)
                             }
                         }
+                        .buttonStyle(.plain)
                     }
                     if workspace.terminals.isEmpty {
                         Text("No terminals").font(.callout).foregroundStyle(.secondary)
@@ -158,11 +248,11 @@ struct FleetView: View {
             Section {
                 HStack {
                     Circle()
-                        .fill(connection.fleet.runtimeHealthy ? .green : .orange)
+                        .fill(fleet.runtimeHealthy ? .green : .orange)
                         .frame(width: 8, height: 8)
                     Text(
-                        connection.fleet.runtimeHealthy
-                            ? "\(connection.fleet.livePanes) live"
+                        fleet.runtimeHealthy
+                            ? "\(fleet.livePanes) live"
                             : "tmux unavailable on this host"
                     )
                     .font(.caption)

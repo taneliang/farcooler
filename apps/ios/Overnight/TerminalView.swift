@@ -46,6 +46,7 @@ struct TerminalView: View {
     @State private var current: Terminal
     @State private var ctrlArmed = false
     @State private var focusRequest = 0
+    @State private var showWorkspaceList = false
 
     // User-configurable, unlike the Mac's fixed terminal font: see
     // Settings.swift. Read directly from the same `UserDefaults` key
@@ -72,14 +73,19 @@ struct TerminalView: View {
         _current = State(initialValue: terminal)
     }
 
-    /// Which of several identically-labelled siblings `current` is, looked up
-    /// in whichever workspace actually contains it — the same numbering
-    /// `FleetView` and `TerminalTabStrip` use, so a terminal reads as
-    /// "claude 2" everywhere or nowhere.
+    /// The workspace `current` actually lives in, looked up fresh each time
+    /// rather than carried in from wherever `current` was set — a workspace
+    /// the tab strip or the switcher sheet points at is only ever known to
+    /// this screen by its terminal's id.
+    private var currentWorkspace: Workspace? {
+        connection.fleet.workspaces.first { $0.terminals.contains { $0.id == current.id } }
+    }
+
+    /// Which of several identically-labelled siblings `current` is — the
+    /// same numbering `FleetView` and `TerminalTabStrip` use, so a terminal
+    /// reads as "claude 2" everywhere or nowhere.
     private var currentOrdinal: Int? {
-        connection.fleet.workspaces
-            .first { $0.terminals.contains { $0.id == current.id } }?
-            .ordinals()[current.id]
+        currentWorkspace?.ordinals()[current.id]
     }
 
     private var currentName: String { current.displayName(ordinal: currentOrdinal) }
@@ -90,11 +96,7 @@ struct TerminalView: View {
             // choosing WHICH terminal you are looking at, which belongs with
             // the title bar it effectively extends, not down with the keys
             // that type into whichever one is already open.
-            TerminalTabStrip(workspaces: connection.fleet.workspaces, current: current) { tapped in
-                guard tapped.id != current.id else { return }
-                current = tapped
-                session.switchTo(tapped.id)
-            }
+            TerminalTabStrip(workspaces: connection.fleet.workspaces, current: current, onSelect: select)
             GeometryReader { geo in
                 phaseContent(size: geo.size)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -115,8 +117,53 @@ struct TerminalView: View {
         // host doesn't know or care whether this device is in Light Mode, and
         // neither should the screen showing its output.
         .preferredColorScheme(.dark)
-        .navigationTitle(currentName)
+        // The task and its branch, not `currentName` — that's already the tab
+        // strip chip directly below, and repeating it here would waste the
+        // one line of title bar a phone has on something already on screen.
+        // Same reasoning as the Mac's `Workspace.windowTitle`/`windowSubtitle`
+        // (apps/macos/Sources/Overnight/Model.swift): the place you are is
+        // the workspace, and that's true regardless of which of its
+        // terminals is focused. The host itself is left out — unlike the
+        // Mac, this screen is already scoped to one host by the time you're
+        // looking at it, so naming it again would answer a question nobody
+        // is asking here.
+        .navigationTitle(currentWorkspace?.task ?? currentName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 0) {
+                    Text(currentWorkspace?.task ?? currentName)
+                        .font(.headline)
+                        .lineLimit(1)
+                    if let branch = currentWorkspace?.branch {
+                        Text(branch)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showWorkspaceList = true } label: {
+                    Image(systemName: "square.stack")
+                }
+                .accessibilityLabel("Switch terminal")
+            }
+        }
+        .sheet(isPresented: $showWorkspaceList) {
+            NavigationStack {
+                WorkspaceListView(
+                    connection: connection,
+                    onSelect: { terminal in
+                        select(terminal)
+                        showWorkspaceList = false
+                    },
+                    onDismiss: { showWorkspaceList = false }
+                )
+                .navigationTitle("Worktrees")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
         .onDisappear { session.stop() }
         // Returning to the foreground carries no geometry of its own — this
         // screen's size has not changed — but the pane is shared, and someone
@@ -358,6 +405,15 @@ struct TerminalView: View {
         return max(1, Int((usable / cellSize.height).rounded(.down)))
     }
 
+    /// Point this screen at a different terminal without leaving it — what
+    /// both the tab strip and the switcher sheet's rows do on a tap, kept in
+    /// one place so the two never disagree about what "switching" means.
+    private func select(_ terminal: Terminal) {
+        guard terminal.id != current.id else { return }
+        current = terminal
+        session.switchTo(terminal.id)
+    }
+
     // MARK: - Input
 
     /// Route one burst of typed text, special-casing the newline the
@@ -407,39 +463,93 @@ struct TerminalView: View {
 }
 
 /// The row of keys a terminal needs and a phone's keyboard does not have.
+///
+/// Styled as a keyboard accessory, not a strip of custom chrome: system
+/// materials and button styles rather than a hand-picked grey and hand-rolled
+/// pressed states, so it reads as part of iOS rather than as a widget
+/// floating on top of it. `.bordered`/`.borderedProminent` are what give
+/// every key its pressed-state animation for free — there is no
+/// `isPressed`-driven fill anywhere here.
 private struct TerminalKeyRow: View {
     let ctrlArmed: Bool
     let onToggleCtrl: () -> Void
     let onKey: (UInt32) -> Void
 
+    /// A key is a full touch target tall and only as wide as it needs to be.
+    ///
+    /// Both halves matter. Height is where accuracy actually comes from with a
+    /// thumb, so it is the full 44pt. Width cannot also be 44: nine keys at
+    /// that width need more room than a phone is wide, and the last attempt at
+    /// it did not overflow visibly — it wrapped the labels, so `esc` came out
+    /// as two lines reading "es" and "c".
+    private static let keyHeight: CGFloat = 44
+    private static let keyWidth: CGFloat = 34
+
     var body: some View {
-        HStack(spacing: 6) {
-            key("esc") { onKey(UInt32(OVERNIGHT_VT_KEY_ESCAPE)) }
-            key("tab") { onKey(UInt32(OVERNIGHT_VT_KEY_TAB)) }
-            key("ctrl", armed: ctrlArmed, action: onToggleCtrl)
+        HStack(spacing: 5) {
+            textKey("esc") { onKey(UInt32(OVERNIGHT_VT_KEY_ESCAPE)) }
+            textKey("tab") { onKey(UInt32(OVERNIGHT_VT_KEY_TAB)) }
+            textKey("ctrl", armed: ctrlArmed, action: onToggleCtrl)
             Spacer(minLength: 2)
-            key("←") { onKey(UInt32(OVERNIGHT_VT_KEY_LEFT)) }
-            key("↓") { onKey(UInt32(OVERNIGHT_VT_KEY_DOWN)) }
-            key("↑") { onKey(UInt32(OVERNIGHT_VT_KEY_UP)) }
-            key("→") { onKey(UInt32(OVERNIGHT_VT_KEY_RIGHT)) }
+            symbolKey("arrow.left") { onKey(UInt32(OVERNIGHT_VT_KEY_LEFT)) }
+            symbolKey("arrow.down") { onKey(UInt32(OVERNIGHT_VT_KEY_DOWN)) }
+            symbolKey("arrow.up") { onKey(UInt32(OVERNIGHT_VT_KEY_UP)) }
+            symbolKey("arrow.right") { onKey(UInt32(OVERNIGHT_VT_KEY_RIGHT)) }
             Spacer(minLength: 2)
-            key("⏎") { onKey(UInt32(OVERNIGHT_VT_KEY_ENTER)) }
+            symbolKey("return") { onKey(UInt32(OVERNIGHT_VT_KEY_ENTER)) }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(Color(white: 0.1))
+        // The bar's own background reaches the screen edge, under the home
+        // indicator, the way a real keyboard accessory does — only the keys
+        // themselves are kept clear of it, by the padding above rather than by
+        // the background stopping short. `.bar` rather than a colour chosen by
+        // hand, so it goes on looking native beside whichever system surface it
+        // finds itself above.
+        .background(.bar, ignoresSafeAreaEdges: .bottom)
     }
 
-    private func key(_ label: String, armed: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(.callout, design: .monospaced))
-                .frame(minWidth: 30, minHeight: 30)
-                .foregroundStyle(armed ? Color.black : Color.white)
-                .background(armed ? Color.white : Color.white.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+    /// Ctrl is the only key with a state, and it says so the way the system
+    /// does — a filled button rather than a colour invented here to mean the
+    /// same thing. See `ctrlArmed`/`consumeCtrl`: it applies to exactly the
+    /// next key and then clears itself.
+    ///
+    /// The two styles are written out rather than chosen from a variable
+    /// because `buttonStyle` takes a concrete type, and the alternative is a
+    /// type-erasing wrapper that costs more to read than this repetition does.
+    @ViewBuilder
+    private func textKey(
+        _ text: String, armed: Bool = false, action: @escaping () -> Void
+    ) -> some View {
+        if armed {
+            Button(action: action) { keyLabel(text) }
+                .buttonStyle(.borderedProminent)
+        } else {
+            Button(action: action) { keyLabel(text) }
+                .buttonStyle(.bordered)
+                .tint(.primary)
         }
-        .buttonStyle(.plain)
+    }
+
+    private func keyLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(.footnote, design: .monospaced))
+            // Never wrapped and never shrunk to fit: a key legend that reflows
+            // is unreadable, and one that scales is unrecognisable beside its
+            // neighbours.
+            .lineLimit(1)
+            .fixedSize()
+            .frame(minWidth: Self.keyWidth, minHeight: Self.keyHeight)
+    }
+
+    private func symbolKey(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.footnote.weight(.medium))
+                .frame(minWidth: Self.keyWidth, minHeight: Self.keyHeight)
+        }
+        .buttonStyle(.bordered)
+        .tint(.primary)
     }
 }
 

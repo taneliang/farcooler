@@ -873,6 +873,36 @@ impl TmuxServer {
         self.expect(&["resize-pane", "-t", pane_id, direction, &cells], "resize-pane").await
     }
 
+    /// How big a window currently is, as (columns, rows).
+    ///
+    /// Asked for rather than derived from the panes, because a layout's panes
+    /// do not add up to their window: the dividers between them are columns and
+    /// rows too, and reconstructing that arithmetic here would be a second,
+    /// worse copy of the layout tree tmux already holds.
+    pub async fn window_size(&self, window_id: &str) -> Result<(u32, u32)> {
+        let out = self
+            .run(&["display-message", "-p", "-t", window_id, "#{window_width}\t#{window_height}"])
+            .await?;
+        if !out.ok() {
+            return Err(DomainError::TmuxUnavailable);
+        }
+        parse_cursor(&out.stdout).ok_or(DomainError::TmuxUnavailable)
+    }
+
+    /// Set a pane to an exact size, taking the difference from its siblings.
+    ///
+    /// The relative form above is what a human dragging a divider wants; this
+    /// is what a client asking for a viewport wants, and the two are different
+    /// enough that computing one from the other at every call site would just
+    /// be this function written badly several times.
+    pub async fn set_pane_size(&self, pane_id: &str, columns: u32, rows: u32) -> Result<()> {
+        self.expect(
+            &["resize-pane", "-t", pane_id, "-x", &columns.to_string(), "-y", &rows.to_string()],
+            "resize-pane to an exact size",
+        )
+        .await
+    }
+
     /// Run a command that is expected to succeed, and say so if it does not.
     async fn expect(&self, args: &[&str], what: &str) -> Result<()> {
         let out = self.run(args).await?;

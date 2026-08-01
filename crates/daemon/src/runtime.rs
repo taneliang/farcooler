@@ -377,6 +377,17 @@ impl Runtime {
         if pane.columns == columns && pane.rows == rows {
             return Ok(());
         }
+
+        // Still the WINDOW, and still wrong for a window holding more than
+        // one pane — a client asking for 55 columns of a four-pane window gets
+        // a pane of about eight, which is where the unreadable slivers come
+        // from. Sizing the pane instead cannot be done one pane at a time:
+        // `resize-pane` takes the difference from whichever sibling is next to
+        // it, so honouring one client's viewport squashed two neighbours from
+        // eight columns to one and three. A window's panes have to be solved
+        // together, from every viewer's viewport at once, which is what the
+        // per-client sizing work does. `window_size` and `set_pane_size` exist
+        // for it; this stays as it was until it can be done correctly.
         self.tmux.resize_window(&pane.window_id, columns, rows).await
     }
 
