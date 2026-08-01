@@ -18,7 +18,7 @@ use overnight_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
 use crate::runtime::Runtime;
-use crate::{git, paths};
+use crate::{agent_supervisor, git, paths, session_discovery};
 
 /// Launch presets. Coding agents run through the user's configured shell so
 /// startup files, version managers, direnv, and aliases behave like a
@@ -97,6 +97,10 @@ pub struct Service {
     /// happens when two tests run in parallel, and would happen in production
     /// the first time anything set the variable after startup.
     root: PathBuf,
+    /// Every terminal's agent session: activity, cursor, and the fast-attach
+    /// event window. See `agent_supervisor` for why the transcript itself is
+    /// not here.
+    agents: agent_supervisor::AgentSupervisor,
 }
 
 /// A workspace plus its derived state and terminals.
@@ -140,7 +144,12 @@ impl Service {
         let inventory = LiveInventory::new(tmux.clone());
         inventory.refresh().await;
 
-        Ok(Self { store, tmux, inventory, host_id, root })
+        Ok(Self { store, tmux, inventory, host_id, root, agents: agent_supervisor::AgentSupervisor::new() })
+    }
+
+    /// The supervisor for every terminal's agent session.
+    pub fn agents(&self) -> &agent_supervisor::AgentSupervisor {
+        &self.agents
     }
 
     /// Where managed worktrees are created, one directory per workspace.
@@ -810,6 +819,85 @@ impl Service {
                 u.epoch = term.epoch + 1;
             }),
         )
+    }
+
+    /// Toggle a terminal between hosting a TUI and hosting an ACP agent.
+    ///
+    /// The pane is respawned rather than replaced, so the terminal keeps its
+    /// id, its tag and its rectangle, and a chat opening in one tile of four
+    /// does not rearrange the other three.
+    pub async fn set_pane_mode(
+        &self,
+        id: Uuid,
+        pane_mode: models::PaneMode,
+        force: bool,
+    ) -> Result<models::Terminal> {
+        let term = self.store.get_terminal(id)?;
+        let ws = self.store.get_workspace(term.workspace_id)?;
+
+        // `ConfirmationRequired` rather than a new code: a turn in flight is
+        // exactly the existing "tell the user what this destroys and ask", and
+        // `force` is the confirmation coming back.
+        agent_supervisor::guard_toggle(self.agents.activity(id), force)
+            .map_err(|_| DomainError::ConfirmationRequired)?;
+
+        let snapshot = self.inventory.refresh().await;
+        let pane = snapshot
+            .claimants(id)
+            .into_iter()
+            .find(|p| p.proves_life())
+            .ok_or(DomainError::NotFound)?;
+
+        // A session id already declared at launch is reused; a hand-started
+        // agent is looked up, and an ambiguous lookup refuses rather than
+        // attaching a chat to the wrong conversation.
+        let session_id = match term.agent_session_id.clone() {
+            Some(existing) => Some(existing),
+            None => {
+                let home = directories::UserDirs::new()
+                    .map(|d| d.home_dir().to_path_buf())
+                    .ok_or(DomainError::NotFound)?;
+                session_discovery::discover_claude_session(
+                    &home,
+                    Path::new(&ws.worktree_path),
+                    std::time::SystemTime::UNIX_EPOCH,
+                )
+                .ok()
+            }
+        };
+
+        let command = match pane_mode {
+            models::PaneMode::Terminal => {
+                let sid = session_id.clone().unwrap_or_default();
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+                if Uuid::parse_str(&sid).is_ok() {
+                    format!("{shell} -ilc 'claude --resume {sid}'")
+                } else {
+                    preset_command(&term.command_preset, None)
+                }
+            }
+            models::PaneMode::Agent => {
+                let binary = std::env::current_exe()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "overnight".to_string());
+                // `root`, not a second `runtime_dir` field: it is already where
+                // this daemon's socket-bearing runtime state lives, and a
+                // parallel field would only ever be able to agree with it or be
+                // a bug.
+                let socket = agent_supervisor::socket_path(&self.root, id).display().to_string();
+                let session = session_id
+                    .as_deref()
+                    .map(|s| format!(" --session {s}"))
+                    .unwrap_or_default();
+                format!(
+                    "{binary} agent-host --terminal {id} --socket {socket} --worktree {} {session}",
+                    ws.worktree_path
+                )
+            }
+        };
+
+        self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
+        self.store.set_pane_mode(id, term.resource_version, pane_mode, session_id)
     }
 
     // ---- runtime ----

@@ -1452,6 +1452,7 @@ dependencies = [
  "bytes",
  "directories",
  "libc",
+ "overnight-agent",
  "overnight-core",
  "overnight-protocol",
  "overnight-store",
