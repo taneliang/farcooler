@@ -37,11 +37,15 @@ private struct MessageRow: View {
             HStack {
                 Spacer(minLength: 32)
                 Text(text)
-                    .font(.system(size: 13))
+                    .font(.body)
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                    // `quaternary` rather than a hand-mixed opacity: it is the
+                    // fill AppKit uses for exactly this — a grouped surface
+                    // that must stay legible in both appearances without
+                    // anyone picking two numbers and hoping.
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
             }
 
         case .agent:
@@ -49,8 +53,9 @@ private struct MessageRow: View {
             // one that should cost the eye nothing extra to read.
             HStack {
                 Text(text)
-                    .font(.system(size: 13))
+                    .font(.body)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 32)
             }
 
@@ -113,15 +118,29 @@ private struct ToolRowView: View {
             // second one invented for this row.
             StatusGlyph(status: status, size: 7)
             Text(tool.title)
-                .font(.system(size: 12, weight: .medium))
+                .font(.callout.weight(.medium))
+                // One line, always. An adapter puts the whole absolute path in
+                // the title, which wrapped to six lines in a narrow pane and
+                // turned a one-line status row into the largest thing on
+                // screen.
+                .lineLimit(1)
+                .truncationMode(.middle)
             if let location = tool.locations.first {
                 Text(location)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
             }
             Spacer(minLength: 4)
         }
+        // Inset on a faint fill so a tool call reads as machinery rather than
+        // as something the agent said. Without it the transcript is one
+        // undifferentiated column of text and the eye cannot find the prose.
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 7))
     }
 
     private var status: Status {

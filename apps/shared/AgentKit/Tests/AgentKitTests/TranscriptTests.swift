@@ -130,3 +130,26 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     let json = #"{"CommandsAvailable":{"commands":["init"]}}"#
     #expect(try AgentEvent.decode(from: json) == .commandsAvailable(commands: ["init"]))
 }
+
+@Test func aNewTurnStartsANewRowRatherThanJoiningTheLastReply() {
+    // Two turns' replies are both `.agent` and adjacent, so plain coalescing
+    // glues them into one paragraph — "…prints hi to the console.Hello! I'm
+    // Claude Code…" — with no seam where a whole turn began.
+    var t = Transcript()
+    t.apply([
+        Sequenced(seq: 0, event: .message(role: .agent, text: "First reply.")),
+        Sequenced(seq: 1, event: .turnEnded(reason: "EndTurn")),
+        Sequenced(seq: 2, event: .message(role: .agent, text: "Second reply.")),
+    ])
+    #expect(t.rows.count == 2)
+}
+
+@Test func chunksWithinOneTurnStillCoalesce() {
+    // The guard must not defeat the streaming case it sits next to.
+    var t = Transcript()
+    t.apply([
+        Sequenced(seq: 0, event: .message(role: .agent, text: "Hello, ")),
+        Sequenced(seq: 1, event: .message(role: .agent, text: "world")),
+    ])
+    #expect(t.rows.count == 1)
+}

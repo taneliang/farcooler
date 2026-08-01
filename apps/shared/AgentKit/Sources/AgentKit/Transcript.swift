@@ -45,6 +45,15 @@ public struct Transcript: Sendable {
     /// The seq to ask for on reconnect: one past the highest seen.
     public private(set) var cursor: UInt64 = 0
 
+    /// Whether the next message must start a new row rather than joining the
+    /// last one.
+    ///
+    /// Set at a turn boundary. Without it two consecutive turns' replies
+    /// coalesce — they are both `.agent` and adjacent — and the transcript
+    /// renders "…prints hi to the console.Hello! I'm Claude Code…" as one
+    /// paragraph, with no seam where a whole turn began.
+    private var breakBeforeNextMessage = false
+
     public init() {}
 
     public mutating func apply(_ events: [Sequenced]) {
@@ -66,11 +75,14 @@ public struct Transcript: Sendable {
         case let .message(role, text):
             // Chunks of one message coalesce. One row per chunk would render a
             // streamed sentence as a column of one-word paragraphs.
-            if case let .message(lastRole, lastText) = rows.last, lastRole == role {
+            if case let .message(lastRole, lastText) = rows.last, lastRole == role,
+                !breakBeforeNextMessage
+            {
                 rows[rows.count - 1] = .message(role: role, text: lastText + text)
             } else {
                 rows.append(.message(role: role, text: text))
             }
+            breakBeforeNextMessage = false
 
         case let .toolCall(id, title, kind, status, locations):
             rows.append(.tool(ToolRow(
@@ -115,9 +127,9 @@ public struct Transcript: Sendable {
             agentMode = mode
 
         case .turnEnded:
-            // Nothing to draw. The row's activity badge is the daemon's to
-            // decide and arrives on the terminal, not here.
-            break
+            // Nothing to DRAW, but it is a seam: the next message begins a new
+            // turn and must not be glued onto the tail of this one.
+            breakBeforeNextMessage = true
 
         case let .gap(reason):
             // Never merged, never dropped. A gap that could be swallowed by a

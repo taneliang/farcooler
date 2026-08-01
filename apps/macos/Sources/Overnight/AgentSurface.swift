@@ -73,7 +73,19 @@ struct AgentSurface: View {
                     searchFiles: searchFiles)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: Palette.background))
+            // The native content background, NOT `Palette.background`.
+            //
+            // That constant is the VT grid's own near-black, and it is right
+            // for a terminal because a terminal draws its own colours into
+            // every cell. A chat draws none: it uses `.primary` and
+            // `.secondary`, which resolve against the SYSTEM appearance. So
+            // painting the VT colour under them put black text on a near-black
+            // panel in light mode — unreadable, and sitting in the middle of an
+            // otherwise light window like a hole.
+            //
+            // `textBackgroundColor` is what every native document surface uses,
+            // so this follows the appearance the rest of the app already does.
+            .background(Color(nsColor: .textBackgroundColor))
             // Debounced by `.task(id:)` cancelling its predecessor, the same
             // trick `TileView.panels` uses against a window drag producing
             // one of these per frame.
@@ -99,13 +111,18 @@ struct AgentSurface: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(stream.transcript.rows) { row in
                         AgentRowView(row: row)
                             .id(row.id)
                     }
                 }
-                .padding(12)
+                // Roomier than a terminal, on purpose. A VT grid is dense
+                // because every cell is addressable; prose is read, and the
+                // line spacing a terminal wants makes a paragraph a wall.
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Pinned to the bottom: a chat is read at its most recent line,
             // the same reason a terminal scrolls to follow its own output.
