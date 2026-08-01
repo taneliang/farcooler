@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/protocol",
     "crates/core",
+    "crates/agent",
     "crates/store",
     "crates/tmux",
     "crates/transport",
@@ -21,6 +22,7 @@ license = "MIT"
 [workspace.dependencies]
 overnight-protocol = { path = "crates/protocol" }
 overnight-core = { path = "crates/core" }
+overnight-agent = { path = "crates/agent" }
 overnight-store = { path = "crates/store" }
 overnight-tmux = { path = "crates/tmux" }
 overnight-transport = { path = "crates/transport" }
@@ -40,6 +42,7 @@ uuid = { version = "1", features = ["v7", "serde"] }
 clap = { version = "4", features = ["derive"] }
 bytes = "1"
 directories = "5"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 libc = "0.2"
 
