@@ -32,6 +32,7 @@ pub enum DaemonMessage {
     Prompt { text: String },
     Answer { request_id: String, option_id: String },
     SetMode { agent_mode: String },
+    SetModel { model: String },
     Cancel,
 }
 

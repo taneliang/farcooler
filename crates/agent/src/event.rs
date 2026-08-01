@@ -39,6 +39,19 @@ pub struct PlanEntry {
     pub status: String,
 }
 
+/// One selectable option an agent offers: a mode, or a model.
+///
+/// Carries the human `name` as well as the `id`. Only the id was captured at
+/// first, so the picker listed `acceptEdits` and `bypassPermissions` — the
+/// wire's identifiers — at a user who never chose those words.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AgentChoice {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PermissionOption {
     pub id: String,
@@ -70,7 +83,13 @@ pub enum AgentEvent {
     SessionStarted {
         session_id: String,
         agent_mode: Option<String>,
-        available_modes: Vec<String>,
+        available_modes: Vec<AgentChoice>,
+        /// The model in use, and what else this agent offers.
+        ///
+        /// Both live in the `session/new` result beside the modes. Not
+        /// capturing them meant the UI had no model picker to build at all.
+        model: Option<String>,
+        available_models: Vec<AgentChoice>,
         available_commands: Vec<String>,
     },
     Message {

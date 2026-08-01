@@ -7,7 +7,9 @@ use tokio::sync::mpsc;
 use crate::acp::conn::{AcpConnection, AcpError, AcpWriter, Incoming};
 use crate::acp::normalize::update_to_events;
 use crate::acp::wire::Rpc;
-use crate::event::{AgentEvent, AgentGapReason, Diff, EndReason, PermissionOption, ToolStatus};
+use crate::event::{
+    AgentChoice, AgentEvent, AgentGapReason, Diff, EndReason, PermissionOption, ToolStatus,
+};
 use crate::fs_guard::confine;
 
 #[derive(Debug, thiserror::Error)]
@@ -76,11 +78,36 @@ pub fn load_unsupported_event() -> AgentEvent {
     AgentEvent::Gap { reason: AgentGapReason::LoadUnsupported }
 }
 
-/// The mode ids an agent offers, from a `session/new` or `session/load` result.
-pub fn modes_from(session_result: &serde_json::Value) -> Vec<String> {
-    session_result["modes"]["availableModes"]
-        .as_array()
-        .map(|m| m.iter().filter_map(|v| v["id"].as_str().map(String::from)).collect())
+/// The modes an agent offers, from a `session/new` or `session/load` result.
+///
+/// Id AND name. An id is what the protocol needs; a name is what a person
+/// reads, and a picker offering `acceptEdits` is offering wire vocabulary.
+pub fn modes_from(session_result: &serde_json::Value) -> Vec<AgentChoice> {
+    choices(&session_result["modes"]["availableModes"], "id")
+}
+
+/// The models an agent offers. Same shape, different key for the identifier —
+/// the adapter names it `modelId` here and `id` for modes.
+pub fn models_from(session_result: &serde_json::Value) -> Vec<AgentChoice> {
+    choices(&session_result["models"]["availableModels"], "modelId")
+}
+
+fn choices(list: &serde_json::Value, id_key: &str) -> Vec<AgentChoice> {
+    list.as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| {
+                    let id = v[id_key].as_str()?.to_string();
+                    // Falls back to the id rather than showing an empty row:
+                    // an unnamed option a user cannot see is worse than a
+                    // technical one they can.
+                    let name = v["name"].as_str().unwrap_or(&id).to_string();
+                    let description = v["description"].as_str().unwrap_or_default().to_string();
+                    Some(AgentChoice { id, name, description })
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -192,8 +219,10 @@ impl AgentSession {
             }
         };
 
-        let available_modes: Vec<String> = modes_from(&session_result);
+        let available_modes = modes_from(&session_result);
         let agent_mode = session_result["modes"]["currentModeId"].as_str().map(String::from);
+        let available_models = models_from(&session_result);
+        let model = session_result["models"]["currentModelId"].as_str().map(String::from);
 
         prelude.insert(
             0,
@@ -201,6 +230,8 @@ impl AgentSession {
                 session_id: session_id.clone(),
                 agent_mode,
                 available_modes: available_modes.clone(),
+                model,
+                available_models,
                 available_commands: Vec::new(),
             },
         );
@@ -209,7 +240,11 @@ impl AgentSession {
             Self {
                 conn,
                 session_id,
-                available_modes,
+                // Ids only here: this field feeds the proto's
+                // `available_agent_modes`, which is a repeated string. The
+                // human names ride on the SessionStarted event, which is what
+                // the pickers actually read.
+                available_modes: available_modes.iter().map(|m| m.id.clone()).collect(),
                 available_commands: Vec::new(),
                 pending_prompt: None,
             },
@@ -345,6 +380,25 @@ impl RunningSession {
             .notify(
                 "session/set_mode",
                 serde_json::json!({ "sessionId": self.session_id, "modeId": agent_mode }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Switch the model this session uses.
+    ///
+    /// `session/set_model`, verified against a live adapter rather than assumed:
+    /// ACP has since stabilised `session/set_config_option` as the general form
+    /// (categories `mode`, `model`, `model_config`, `thought_level`) and says
+    /// the dedicated methods will eventually go, but the adapter in use answers
+    /// `Method not found` to the new one and `OK` to this. When an agent starts
+    /// advertising `configOptions`, that is the branch to add — not a
+    /// replacement, since both will be in the wild at once.
+    pub async fn set_model(&mut self, model: &str) -> Result<(), SessionError> {
+        self.writer
+            .notify(
+                "session/set_model",
+                serde_json::json!({ "sessionId": self.session_id, "modelId": model }),
             )
             .await?;
         Ok(())
@@ -583,7 +637,17 @@ mod tests {
                 ]
             }
         });
-        assert_eq!(modes_from(&session_result), vec!["default", "acceptEdits", "plan"]);
+        let modes = modes_from(&session_result);
+        assert_eq!(
+            modes.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["default", "acceptEdits", "plan"]
+        );
+        // The names are the point: a picker offering `acceptEdits` is offering
+        // the wire's vocabulary to someone who never chose those words.
+        assert_eq!(
+            modes.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+            vec!["Default", "Accept Edits", "Plan Mode"]
+        );
 
         // And the shape the bug assumed yields nothing, which is what made the
         // failure invisible rather than loud.

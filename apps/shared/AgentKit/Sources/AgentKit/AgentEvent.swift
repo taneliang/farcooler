@@ -49,6 +49,22 @@ public struct PlanEntry: Decodable, Sendable, Equatable {
     }
 }
 
+/// One selectable option: a mode, or a model.
+///
+/// Carries the human `name` as well as the `id`. A picker built from ids alone
+/// offers `acceptEdits` and `bypassPermissions` — the wire's words, not anyone's.
+public struct AgentChoice: Decodable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let name: String
+    public let description: String
+
+    public init(id: String, name: String, description: String = "") {
+        self.id = id
+        self.name = name
+        self.description = description
+    }
+}
+
 public struct PermissionOption: Decodable, Sendable, Equatable, Identifiable {
     public let id: String
     public let name: String
@@ -62,7 +78,9 @@ public struct PermissionOption: Decodable, Sendable, Equatable, Identifiable {
 }
 
 public enum AgentEvent: Sendable, Equatable {
-    case sessionStarted(sessionID: String, agentMode: String?, availableModes: [String], availableCommands: [String])
+    case sessionStarted(
+        sessionID: String, agentMode: String?, availableModes: [AgentChoice],
+        model: String?, availableModels: [AgentChoice], availableCommands: [String])
     case message(role: Role, text: String)
     case toolCall(id: String, title: String, kind: String, status: ToolStatus, locations: [String])
     case toolUpdate(id: String, status: ToolStatus, content: String?, diff: Diff?)
@@ -125,7 +143,9 @@ extension AgentEvent {
                 let p = try outer.decode(SessionStartedPayload.self, forKey: key)
                 event = .sessionStarted(
                     sessionID: p.sessionID, agentMode: p.agentMode,
-                    availableModes: p.availableModes, availableCommands: p.availableCommands)
+                    availableModes: p.availableModes, model: p.model,
+                    availableModels: p.availableModels,
+                    availableCommands: p.availableCommands)
             case "Message":
                 let p = try outer.decode(MessagePayload.self, forKey: key)
                 event = .message(role: p.role, text: p.text)
@@ -167,12 +187,16 @@ extension AgentEvent {
     private struct SessionStartedPayload: Decodable {
         let sessionID: String
         let agentMode: String?
-        let availableModes: [String]
+        let availableModes: [AgentChoice]
+        let model: String?
+        let availableModels: [AgentChoice]
         let availableCommands: [String]
         enum CodingKeys: String, CodingKey {
             case sessionID = "session_id"
             case agentMode = "agent_mode"
             case availableModes = "available_modes"
+            case model
+            case availableModels = "available_models"
             case availableCommands = "available_commands"
         }
     }

@@ -404,6 +404,9 @@ enum TerminalCmd {
     /// Switch the running agent's own mode (e.g. a permission mode), not the
     /// pane's mode — see `SetPaneMode` for that.
     AgentSetMode { terminal: String, agent_mode: String },
+
+    /// Switch the model an agent session uses.
+    AgentSetModel { terminal: String, model: String },
     /// Cancel the agent's current turn.
     AgentCancel { terminal: String },
 }
@@ -1427,6 +1430,19 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             ))
             .await?;
             println!("set {} to agent mode {agent_mode}", short(id));
+        }
+
+        TerminalCmd::AgentSetModel { terminal, model } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(with(
+                req("terminal.agent_set_model"),
+                request::Payload::AgentSetModel(overnight_protocol::v1::AgentSetModel {
+                    terminal_id: id_bytes(id),
+                    model: model.clone(),
+                }),
+            ))
+            .await?;
+            println!("set {} to agent mode {model}", short(id));
         }
 
         TerminalCmd::AgentCancel { terminal } => {

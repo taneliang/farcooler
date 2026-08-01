@@ -110,7 +110,15 @@ final class AgentStream: ObservableObject {
     }
 
     func send(_ text: String) async {
+        // Shown before it is sent, not after. The adapter echoes user text
+        // only when replaying a loaded session, so waiting for it back means
+        // the message disappears the moment you press return.
+        transcript.appendLocalUserMessage(text)
         _ = try? await runCLI(["terminal", "agent-prompt", terminal, text])
+    }
+
+    func setModel(_ model: String) async {
+        _ = try? await runCLI(["terminal", "agent-set-model", terminal, model])
     }
 
     func answer(_ requestID: String, _ optionID: String) async {

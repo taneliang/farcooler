@@ -10,17 +10,21 @@ public struct ToolRow: Sendable, Equatable, Identifiable {
     public var diff: Diff?
 }
 
-public enum TranscriptRow: Sendable, Equatable, Identifiable {
-    case message(role: Role, text: String)
-    case tool(ToolRow)
-    case gap(GapReason)
+/// One row, with an identity of its own.
+///
+/// The id is assigned when the row is created, NOT derived from its contents.
+/// Deriving it meant asking the same question twice produced two rows with the
+/// same id, and `ForEach` over duplicate ids does not merely look odd — it
+/// renders blank bands and repeats rows in the wrong places. Content is not
+/// identity: two identical messages are two messages.
+public struct TranscriptRow: Sendable, Equatable, Identifiable {
+    public let id: Int
+    public var kind: Kind
 
-    public var id: String {
-        switch self {
-        case let .tool(t): "tool-\(t.id)"
-        case let .message(role, text): "msg-\(role.rawValue)-\(text.hashValue)"
-        case let .gap(reason): "gap-\(reason.rawValue)"
-        }
+    public enum Kind: Sendable, Equatable {
+        case message(role: Role, text: String)
+        case tool(ToolRow)
+        case gap(GapReason)
     }
 }
 
@@ -40,7 +44,9 @@ public struct Transcript: Sendable {
     public private(set) var plan: [PlanEntry] = []
     public private(set) var pendingPermission: PendingPermission?
     public private(set) var agentMode: String?
-    public private(set) var availableModes: [String] = []
+    public private(set) var availableModes: [AgentChoice] = []
+    public private(set) var model: String?
+    public private(set) var availableModels: [AgentChoice] = []
     public private(set) var availableCommands: [String] = []
     /// The seq to ask for on reconnect: one past the highest seen.
     public private(set) var cursor: UInt64 = 0
@@ -54,6 +60,9 @@ public struct Transcript: Sendable {
     /// paragraph, with no seam where a whole turn began.
     private var breakBeforeNextMessage = false
 
+    /// The id the next row will take. Monotonic, never reused.
+    private var nextRowID = 0
+
     public init() {}
 
     public mutating func apply(_ events: [Sequenced]) {
@@ -63,11 +72,32 @@ public struct Transcript: Sendable {
         }
     }
 
+    private mutating func append(_ kind: TranscriptRow.Kind) {
+        rows.append(TranscriptRow(id: nextRowID, kind: kind))
+        nextRowID += 1
+    }
+
+    /// Show what the user just sent, before the agent says anything.
+    ///
+    /// The adapter echoes a `user_message_chunk` only when replaying a loaded
+    /// session, never during a live turn — so without this a message vanishes
+    /// the moment it is sent and does not reappear until the pane is reopened.
+    /// A chat that swallows your own words reads as broken even when the turn
+    /// underneath it is running perfectly.
+    public mutating func appendLocalUserMessage(_ text: String) {
+        append(.message(role: .user, text: text))
+        // The agent's reply is a new turn's worth of speech, not a
+        // continuation of what the user just typed.
+        breakBeforeNextMessage = true
+    }
+
     private mutating func apply(_ event: AgentEvent) {
         switch event {
-        case let .sessionStarted(_, mode, modes, commands):
+        case let .sessionStarted(_, mode, modes, currentModel, models, commands):
             agentMode = mode
             availableModes = modes
+            model = currentModel
+            if !models.isEmpty { availableModels = models }
             // Only replace when the session actually offered some. A later
             // event carrying an empty list would otherwise empty the picker.
             if !commands.isEmpty { availableCommands = commands }
@@ -75,17 +105,17 @@ public struct Transcript: Sendable {
         case let .message(role, text):
             // Chunks of one message coalesce. One row per chunk would render a
             // streamed sentence as a column of one-word paragraphs.
-            if case let .message(lastRole, lastText) = rows.last, lastRole == role,
+            if case let .message(lastRole, lastText) = rows.last?.kind, lastRole == role,
                 !breakBeforeNextMessage
             {
-                rows[rows.count - 1] = .message(role: role, text: lastText + text)
+                rows[rows.count - 1].kind = .message(role: role, text: lastText + text)
             } else {
-                rows.append(.message(role: role, text: text))
+                append(.message(role: role, text: text))
             }
             breakBeforeNextMessage = false
 
         case let .toolCall(id, title, kind, status, locations):
-            rows.append(.tool(ToolRow(
+            append(.tool(ToolRow(
                 id: id, title: title, kind: kind, status: status,
                 locations: locations, content: nil, diff: nil)))
 
@@ -93,19 +123,19 @@ public struct Transcript: Sendable {
             // Mutate the call in place. Appending would fill the transcript
             // with duplicates of one tool reporting progress.
             guard let index = rows.lastIndex(where: {
-                if case let .tool(t) = $0 { return t.id == id }
+                if case let .tool(t) = $0.kind { return t.id == id }
                 return false
             }) else {
-                rows.append(.tool(ToolRow(
+                append(.tool(ToolRow(
                     id: id, title: id, kind: "", status: status,
                     locations: [], content: content, diff: diff)))
                 return
             }
-            guard case var .tool(tool) = rows[index] else { return }
+            guard case var .tool(tool) = rows[index].kind else { return }
             tool.status = status
             if let content { tool.content = content }
             if let diff { tool.diff = diff }
-            rows[index] = .tool(tool)
+            rows[index].kind = .tool(tool)
 
         case let .plan(entries):
             // Wholesale, because the daemon sends the whole plan each time.
@@ -135,7 +165,7 @@ public struct Transcript: Sendable {
             // Never merged, never dropped. A gap that could be swallowed by a
             // neighbouring message would leave the user believing a transcript
             // is complete when it is not.
-            rows.append(.gap(reason))
+            append(.gap(reason))
         }
     }
 }

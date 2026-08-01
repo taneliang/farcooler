@@ -35,25 +35,45 @@ struct AgentComposer: View {
             if pickerOpen { picker }
             if !attachments.isEmpty { attachmentStrip }
             Divider()
-            HStack(alignment: .bottom, spacing: 8) {
-                attachButton
-                AgentComposerField(
-                    text: $text,
-                    cursor: $cursor,
-                    placeholder: "Message \(terminal.label)",
-                    isFocused: isFocused,
-                    pickerOpen: pickerOpen,
-                    onNavigate: navigate,
-                    onAccept: acceptHighlighted,
-                    onSubmit: send,
-                    onDismissPicker: { suggestions = [] },
-                    onPasteImage: { attach(image: $0) }
-                )
-                .frame(minHeight: 22, maxHeight: 140)
-                modeMenu
+            VStack(alignment: .leading, spacing: 7) {
+                activity
+                // The field, in a bordered well. Bare on a material it read as
+                // a caption floating in the chrome rather than as somewhere to
+                // type — there was nothing to say where the input was.
+                HStack(alignment: .bottom, spacing: 8) {
+                    AgentComposerField(
+                        text: $text,
+                        cursor: $cursor,
+                        placeholder: "Message \(terminal.label)",
+                        isFocused: isFocused,
+                        pickerOpen: pickerOpen,
+                        onNavigate: navigate,
+                        onAccept: acceptHighlighted,
+                        onSubmit: send,
+                        onDismissPicker: { suggestions = [] },
+                        onPasteImage: { attach(image: $0) }
+                    )
+                    .frame(minHeight: 20, maxHeight: 140)
+                    sendButton
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(.quaternary, lineWidth: 1)
+                }
+
+                HStack(spacing: 10) {
+                    attachButton
+                    modeMenu
+                    modelMenu
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.vertical, 9)
         }
         .background(.thinMaterial)
         // Debounced by `.task(id:)` itself: a token that changes on every
@@ -298,28 +318,113 @@ struct AgentComposer: View {
     /// names for three distinct things; see the plan's global constraints.
     @ViewBuilder
     private var modeMenu: some View {
-        if !stream.transcript.availableModes.isEmpty {
+        choiceMenu(
+            choices: stream.transcript.availableModes,
+            current: stream.transcript.agentMode,
+            fallback: "Mode"
+        ) { id in await stream.setMode(id) }
+    }
+
+    /// The model picker.
+    ///
+    /// `session/set_model`, verified working against a live adapter. ACP has
+    /// since stabilised `session/set_config_option` as the general form, but
+    /// the adapter in use answers `Method not found` to it — when agents start
+    /// advertising `configOptions`, this becomes one selector among several
+    /// rather than a special case.
+    @ViewBuilder
+    private var modelMenu: some View {
+        choiceMenu(
+            choices: stream.transcript.availableModels,
+            current: stream.transcript.model,
+            fallback: "Model"
+        ) { id in await stream.setModel(id) }
+    }
+
+    /// One picker over a list of things an agent offers.
+    ///
+    /// Shows `name`, sends `id`. Built from ids alone it read `acceptEdits` and
+    /// `bypassPermissions` at a user who never chose those words.
+    @ViewBuilder
+    private func choiceMenu(
+        choices: [AgentChoice], current: String?, fallback: String,
+        select: @escaping (String) async -> Void
+    ) -> some View {
+        if !choices.isEmpty {
             Menu {
-                ForEach(stream.transcript.availableModes, id: \.self) { mode in
+                ForEach(choices) { choice in
                     Button {
-                        Task { await stream.setMode(mode) }
+                        Task { await select(choice.id) }
                     } label: {
-                        if mode == stream.transcript.agentMode {
-                            Label(mode, systemImage: "checkmark")
+                        // The description is the useful half — "Opus 4.6 ·
+                        // Most capable for complex work" says more than the
+                        // name it sits under.
+                        if choice.description.isEmpty {
+                            Text(choice.name)
                         } else {
-                            Text(mode)
+                            Text("\(choice.name) — \(choice.description)")
                         }
                     }
                 }
             } label: {
-                Text(stream.transcript.agentMode ?? "mode")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                Text(choices.first { $0.id == current }?.name ?? fallback)
+                    .font(.caption)
                     .lineLimit(1)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
         }
+    }
+
+    /// What the agent is doing right now, in words.
+    ///
+    /// The daemon already derives this and every other surface renders it — the
+    /// sidebar dot, the fleet row, the notification. A chat that showed nothing
+    /// while a turn ran left the user with a blank panel and no way to tell a
+    /// thinking agent from a broken one.
+    private var activity: some View {
+        // Always shown, idle included.
+        //
+        // `StatusGlyph`'s silence-by-default rule is right for a fleet list,
+        // where most rows are quiet and an icon on every one is an icon on
+        // none. A chat is the opposite situation: there is exactly one agent
+        // here and the whole question is what it is doing right now, so saying
+        // nothing reads as the app having lost track of it.
+        let state = terminal.agent
+        return HStack(spacing: 5) {
+            switch state {
+            case .working:
+                ProgressView().controlSize(.mini)
+                Text("Working…")
+            case .blocked:
+                StatusGlyph(status: .blocked, size: 6)
+                Text("Waiting for you")
+            case .done:
+                StatusGlyph(status: .done, size: 6)
+                Text("Done")
+            default:
+                StatusGlyph(status: .idle, size: 6)
+                Text("Idle")
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    /// Return sends; this is for the people who look for a button.
+    @ViewBuilder
+    private var sendButton: some View {
+        let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && attachments.isEmpty
+        Button(action: send) {
+            Image(systemName: "arrow.up.circle.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(empty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.accentColor))
+        }
+        .buttonStyle(.plain)
+        .disabled(empty)
+        .help("Send (return)")
     }
 
     // MARK: - Send

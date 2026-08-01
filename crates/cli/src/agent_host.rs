@@ -195,6 +195,7 @@ pub async fn run(
                                 running.answer(id, &option_id).await
                             }
                             DaemonMessage::SetMode { agent_mode } => running.set_mode(&agent_mode).await,
+                            DaemonMessage::SetModel { model } => running.set_model(&model).await,
                             DaemonMessage::Cancel => running.cancel().await,
                             // The daemon-link loop answers `Subscribe` itself
                             // by reading the ring directly; it never reaches

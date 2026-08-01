@@ -282,7 +282,11 @@ impl AgentSupervisor {
                             entry.agent_mode = agent_mode.clone();
                         }
                         if !available_modes.is_empty() {
-                            entry.available_modes = available_modes.clone();
+                            // Ids only: this feeds the proto's repeated-string
+                            // field. The human names ride on the event itself,
+                            // which is what the pickers read.
+                            entry.available_modes =
+                                available_modes.iter().map(|m| m.id.clone()).collect();
                         }
                     }
                     AgentEvent::ModeSet { agent_mode } => {
@@ -296,7 +300,21 @@ impl AgentSupervisor {
 
         if let Ok(mut recent) = self.recent.lock() {
             let entry = recent.entry(terminal).or_default();
-            entry.extend(batch.iter().cloned());
+            // Only what we have not already seen.
+            //
+            // A shim replays from a cursor whenever it reconnects, and a
+            // daemon restart or a second connection means the same seqs arrive
+            // twice. Appending blindly put the whole conversation in the
+            // transcript two and three times over — visibly, since seq is
+            // monotonic and authoritative, so a repeat is always a replay
+            // rather than new speech.
+            let already = entry.last().map(|e| e.seq);
+            entry.extend(
+                batch
+                    .iter()
+                    .filter(|e| already.is_none_or(|last| e.seq > last))
+                    .cloned(),
+            );
             // Oldest first, so trimming the front keeps the most recent
             // `RECENT_WINDOW` — the same "drop the oldest" the shim's ring
             // does, just at a smaller size and without a Gap: the shim's ring
@@ -365,5 +383,39 @@ mod tests {
         ));
         assert!(guard_toggle(AgentActivity::Working, true).is_ok());
         assert!(guard_toggle(AgentActivity::Idle, false).is_ok());
+    }
+
+    #[test]
+    fn a_replayed_batch_does_not_land_in_the_window_twice() {
+        // A shim replays from a cursor on every reconnect, so the same seqs
+        // arrive again after a daemon restart or a second connection.
+        // Appending blindly put the whole conversation into the transcript two
+        // and three times over. seq is monotonic and authoritative, so a
+        // repeat is always a replay rather than new speech.
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        let batch: Vec<Sequenced> = (0..3)
+            .map(|seq| Sequenced {
+                seq,
+                event: AgentEvent::Message { role: Role::Agent, text: format!("m{seq}") },
+            })
+            .collect();
+
+        supervisor.apply(terminal, ShimMessage::Events { events: batch.clone() }, &|_, _| {});
+        supervisor.apply(terminal, ShimMessage::Events { events: batch.clone() }, &|_, _| {});
+        assert_eq!(supervisor.replay(terminal, 0).len(), 3);
+
+        // And genuinely new events still land.
+        supervisor.apply(
+            terminal,
+            ShimMessage::Events {
+                events: vec![Sequenced {
+                    seq: 3,
+                    event: AgentEvent::Message { role: Role::Agent, text: "new".into() },
+                }],
+            },
+            &|_, _| {},
+        );
+        assert_eq!(supervisor.replay(terminal, 0).len(), 4);
     }
 }

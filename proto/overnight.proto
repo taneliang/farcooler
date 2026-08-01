@@ -73,6 +73,7 @@ message Request {
     AgentSetMode agent_set_mode = 37;
     AgentCancel agent_cancel = 38;
     WorktreeFileSearch worktree_file_search = 39;
+    AgentSetModel agent_set_model = 40;
   }
 }
 
@@ -164,6 +165,11 @@ message AgentAnswer {
 message AgentSetMode {
   bytes terminal_id = 1;
   string agent_mode = 2;
+}
+
+message AgentSetModel {
+  bytes terminal_id = 1;
+  string model = 2;
 }
 
 message AgentCancel { bytes terminal_id = 1; }

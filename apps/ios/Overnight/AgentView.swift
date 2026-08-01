@@ -136,7 +136,7 @@ private struct AgentRowView: View {
     let row: TranscriptRow
 
     var body: some View {
-        switch row {
+        switch row.kind {
         case let .message(role, text):
             MessageRow(role: role, text: text)
         case let .tool(tool):

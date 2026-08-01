@@ -12,7 +12,7 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
         seq(1, .message(role: .agent, text: "world")),
     ])
     #expect(t.rows.count == 1)
-    guard case let .message(role, text) = t.rows[0] else {
+    guard case let .message(role, text) = t.rows[0].kind else {
         Issue.record("expected one message row")
         return
     }
@@ -38,7 +38,7 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
         seq(1, .toolUpdate(id: "t1", status: .completed, content: nil, diff: nil)),
     ])
     #expect(t.rows.count == 1)
-    guard case let .tool(tool) = t.rows[0] else {
+    guard case let .tool(tool) = t.rows[0].kind else {
         Issue.record("expected a tool row")
         return
     }
@@ -52,7 +52,7 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
         seq(0, .toolCall(id: "t1", title: "Edit", kind: "edit", status: .pending, locations: [])),
         seq(1, .toolUpdate(id: "t1", status: .completed, content: nil, diff: diff)),
     ])
-    guard case let .tool(tool) = t.rows[0] else {
+    guard case let .tool(tool) = t.rows[0].kind else {
         Issue.record("expected a tool row")
         return
     }
@@ -70,7 +70,7 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
         seq(2, .message(role: .agent, text: "b")),
     ])
     #expect(t.rows.count == 3)
-    guard case .gap = t.rows[1] else {
+    guard case .gap = t.rows[1].kind else {
         Issue.record("the gap must survive as its own row")
         return
     }
@@ -152,4 +152,33 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
         Sequenced(seq: 1, event: .message(role: .agent, text: "world")),
     ])
     #expect(t.rows.count == 1)
+}
+
+@Test func askingTheSameThingTwiceMakesTwoRowsWithDifferentIds() {
+    // Identity was derived from content, so a repeated question produced two
+    // rows sharing an id. ForEach over duplicate ids does not merely look odd:
+    // it renders blank bands and repeats rows in the wrong places, which is
+    // exactly what a user sees when they scroll back.
+    var t = Transcript()
+    t.appendLocalUserMessage("what does main.rs do?")
+    t.apply([Sequenced(seq: 0, event: .turnEnded(reason: "EndTurn"))])
+    t.appendLocalUserMessage("what does main.rs do?")
+
+    #expect(t.rows.count == 2)
+    #expect(t.rows[0].id != t.rows[1].id)
+    #expect(Set(t.rows.map(\.id)).count == t.rows.count)
+}
+
+@Test func aSentMessageAppearsImmediatelyRatherThanVanishing() {
+    // The adapter echoes user text only when replaying a loaded session, never
+    // during a live turn. Without a local echo the message disappears the
+    // instant it is sent.
+    var t = Transcript()
+    t.appendLocalUserMessage("hello")
+    guard case let .message(role, text) = t.rows.first?.kind else {
+        Issue.record("expected the user's own message")
+        return
+    }
+    #expect(role == .user)
+    #expect(text == "hello")
 }

@@ -121,12 +121,23 @@ struct AgentSurface: View {
                 // because every cell is addressable; prose is read, and the
                 // line spacing a terminal wants makes a paragraph a wall.
                 .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                .padding(.top, 14)
+                // Room under the last line. Text ending flush against the
+                // composer reads as clipped — as though there is more you
+                // cannot reach.
+                .padding(.bottom, 18)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Pinned to the bottom: a chat is read at its most recent line,
             // the same reason a terminal scrolls to follow its own output.
-            .onChange(of: stream.transcript.rows.count) { _, _ in
+            // Keyed on the CURSOR, not the row count.
+            //
+            // A streamed reply arrives as chunks that coalesce into the row
+            // already on screen, so the count does not change and a
+            // count-keyed scroll sits still while text grows off the bottom.
+            // The cursor moves for every event, which is exactly when there is
+            // something new to see.
+            .onChange(of: stream.transcript.cursor) { _, _ in
                 guard let last = stream.transcript.rows.last else { return }
                 withAnimation(.easeOut(duration: 0.15)) {
                     proxy.scrollTo(last.id, anchor: .bottom)
