@@ -147,6 +147,11 @@ pub enum SessionUpdate {
         content: Vec<ToolContent>,
         #[serde(default)]
         locations: Vec<Location>,
+        /// The tool's own arguments. Carried for the few tools whose title
+        /// says nothing on its own — `Skill` is "Skill" until you look at
+        /// which skill.
+        #[serde(rename = "rawInput", default)]
+        raw_input: serde_json::Value,
     },
     Plan {
         #[serde(default)]

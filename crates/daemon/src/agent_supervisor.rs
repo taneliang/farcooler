@@ -254,7 +254,22 @@ impl AgentSupervisor {
             writers.insert(terminal, tx);
         }
 
-        let subscribe = encode_line(&DaemonMessage::Subscribe { from_seq: cursor })
+        // From the beginning, every time, and the window is dropped first.
+        //
+        // `seq` is a position in a SHIM's ring, not in the conversation, so a
+        // respawned pane starts counting at zero again with a shorter ring.
+        // Asking it to resume from a cursor this daemon remembered — 40, say,
+        // into a ring that now holds 30 — returns nothing at all, and every
+        // message sent before the toggle simply disappeared. A connection is a
+        // new stream; the only honest cursor for one is 0.
+        if let Ok(mut recent) = self.recent.lock() {
+            recent.remove(&terminal);
+        }
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.entry(terminal).or_default().cursor = 0;
+        }
+        let _ = cursor;
+        let subscribe = encode_line(&DaemonMessage::Subscribe { from_seq: 0 })
             .unwrap_or_else(|_| "\n".to_string());
         write_half.write_all(subscribe.as_bytes()).await?;
 
@@ -520,5 +535,39 @@ mod tests {
 
         let replayed = supervisor.replay(terminal, 0);
         assert_eq!(replayed.len(), 1, "the new stream must not be deduped away");
+    }
+
+    #[test]
+    fn a_reconnect_asks_from_the_beginning_rather_than_a_remembered_cursor() {
+        // The window is dropped on connect so a fresh stream refills it. Asking
+        // a respawned shim to resume from a cursor past the end of its new,
+        // shorter ring returned nothing, and every message sent before the
+        // toggle vanished.
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        let batch = |n: u64| ShimMessage::Events {
+            events: (0..n)
+                .map(|seq| Sequenced {
+                    seq,
+                    event: AgentEvent::Message { role: Role::Agent, text: format!("m{seq}") },
+                })
+                .collect(),
+        };
+
+        supervisor.apply(terminal, batch(40), &|_, _| {});
+        assert_eq!(supervisor.replay(terminal, 0).len(), 40);
+
+        // A respawn: fewer events, numbered from zero again.
+        supervisor.apply(
+            terminal,
+            ShimMessage::Established { session_id: "s".into(), available_modes: Vec::new() },
+            &|_, _| {},
+        );
+        supervisor.apply(terminal, batch(5), &|_, _| {});
+        assert_eq!(
+            supervisor.replay(terminal, 0).len(),
+            5,
+            "the new stream must replace the old, not be filtered against it"
+        );
     }
 }

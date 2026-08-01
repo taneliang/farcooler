@@ -1,30 +1,6 @@
 import AgentKit
 import SwiftUI
 
-/// Agent prose, as markdown.
-///
-/// Agents write markdown — backticks, bold, lists, links — and rendering it
-/// literally puts the punctuation on screen instead of the emphasis it stands
-/// for. `AttributedString`'s inline parsing covers what a chat reply actually
-/// uses; anything it cannot parse falls back to the original text rather than
-/// disappearing.
-///
-/// `.full` grammar rather than inline-only, so a line beginning `- ` reads as
-/// a list rather than as a hyphen.
-func renderedMarkdown(_ text: String) -> AttributedString {
-    let options = AttributedString.MarkdownParsingOptions(
-        allowsExtendedAttributes: true,
-        interpretedSyntax: .full,
-        failurePolicy: .returnPartiallyParsedIfPossible
-    )
-    return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
-}
-
-/// One row of a rendered agent transcript.
-///
-/// A thin switch, deliberately: `Transcript` already decided what happened
-/// (coalesced chunks, mutated a tool in place, kept a gap as its own row) —
-/// this only decides how each of the three shapes it can hand back gets drawn.
 struct AgentRowView: View {
     let row: TranscriptRow
     /// Whether this is the newest row, which is what makes a thought "live".
@@ -78,10 +54,7 @@ private struct MessageRow: View {
             // Plain body text, full width. This is the common case and the
             // one that should cost the eye nothing extra to read.
             HStack {
-                Text(renderedMarkdown(text))
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                MarkdownText(text: text)
                 Spacer(minLength: 32)
             }
 
@@ -108,7 +81,7 @@ private struct ThoughtRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(.snappy) { expanded.toggle() }
+                withAnimation(Motion.snap) { expanded.toggle() }
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.right")
@@ -123,13 +96,17 @@ private struct ThoughtRow: View {
             .buttonStyle(.plain)
 
             if showing {
-                DetailBox(text: text, monospaced: false)
+                // Reasoning is markdown too — agents write lists and code in
+                // their thinking, and a wall of literal asterisks is no easier
+                // to read there than in a reply.
+                MarkdownText(text: text, secondary: true)
+                    .padding(.leading, 2)
             }
         }
         // Driven by the model, not by a timer: a thought stops being live the
         // instant something follows it, and the fold should follow that.
-        .animation(.snappy, value: isLive)
-        .animation(.snappy, value: text)
+        .animation(Motion.snap, value: isLive)
+        .animation(Motion.snap, value: text)
     }
 
     /// Open while live unless the reader has closed it; closed after unless
@@ -175,7 +152,7 @@ private struct ToolRowView: View {
         VStack(alignment: .leading, spacing: 6) {
             if expandable {
                 Button {
-                    withAnimation(.snappy) { expanded.toggle() }
+                    withAnimation(Motion.snap) { expanded.toggle() }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.right")
@@ -202,7 +179,7 @@ private struct ToolRowView: View {
                 }
             }
         }
-        .animation(.snappy, value: expanded)
+        .animation(Motion.snap, value: expanded)
     }
 
     private var label: some View {

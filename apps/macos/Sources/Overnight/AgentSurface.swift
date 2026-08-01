@@ -125,15 +125,18 @@ struct AgentSurface: View {
                 .padding(.bottom, 18)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                // Room to scroll past the end.
+                // Room to scroll past the end — but only while a turn is
+                // running.
                 //
-                // Two jobs. It stops the last line sitting flush against the
-                // composer, which reads as content clipped rather than content
-                // finished. And it is what makes "put my question at the top"
-                // possible at all: without space below, a short exchange
-                // cannot scroll far enough for its first line to reach the
-                // top of the view.
-                Color.clear.frame(height: max(120, viewportHeight * 0.45))
+                // It exists so a message just sent can reach the TOP of the
+                // view with the answer streaming into the space below it. A
+                // fixed spacer did that and then stayed, which is why a
+                // finished conversation looked like it had been squeezed into
+                // the upper half of the pane. It collapses when the turn ends,
+                // leaving only the breathing room below the last line.
+                if stream.pinnedRow != nil {
+                    Color.clear.frame(height: viewportHeight * 0.75)
+                }
             }
             // Pinned to the bottom: a chat is read at its most recent line,
             // the same reason a terminal scrolls to follow its own output.
@@ -152,14 +155,18 @@ struct AgentSurface: View {
                 // chasing the bottom of a growing reply moves the text you are
                 // trying to read.
                 if let pinned = stream.pinnedRow {
-                    withAnimation(.snappy) { proxy.scrollTo(pinned, anchor: .top) }
+                    // Pinned to the top and left there: the reply fills the
+                    // space beneath it rather than dragging the question off
+                    // screen. Only the first placement animates; re-anchoring
+                    // on every chunk would jitter.
+                    proxy.scrollTo(pinned, anchor: .top)
                     return
                 }
                 guard let last = stream.transcript.rows.last else { return }
                 // Not `.bottom`: that puts the final line flush against the
-                // composer. Just above it, so the text has somewhere to sit.
-                withAnimation(.snappy) {
-                    proxy.scrollTo(last.id, anchor: UnitPoint(x: 0, y: 0.88))
+                // composer, which reads as clipped rather than finished.
+                withAnimation(Motion.snap) {
+                    proxy.scrollTo(last.id, anchor: UnitPoint(x: 0, y: 0.9))
                 }
             }
             .onAppear {

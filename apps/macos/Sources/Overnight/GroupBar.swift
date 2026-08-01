@@ -36,7 +36,7 @@ struct GroupBar: View {
         // Spring rather than a fixed curve: see `TileView.motion`. A tab
         // strip that takes the same 200ms whether one tab changed or five
         // reads as lag, not as motion.
-        .animation(.snappy(duration: 0.18), value: groups.map(\.isActive))
+        .animation(Motion.snap, value: groups.map(\.isActive))
     }
 
     private func pill(_ group: PaneGroup, position: Int) -> some View {

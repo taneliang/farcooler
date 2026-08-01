@@ -24,6 +24,24 @@ fn plan_entry(e: &WirePlanEntry) -> PlanEntry {
 /// deliberate exception is `AvailableCommandsUpdate` — see its arm below for
 /// why an empty vec there is correct rather than an oversight.
 
+/// A title that says what the tool is doing, not merely what kind it is.
+///
+/// Most tools name themselves usefully once resolved — a Bash call becomes
+/// its command. A few do not: `Skill` stays "Skill" however many skills there
+/// are, and the one thing a reader wants is which. The argument that carries
+/// it is the tool's own, so the lookup is by the names those tools actually
+/// use rather than a general rule.
+fn detail(title: &str, raw_input: &serde_json::Value) -> String {
+    for key in ["skill", "name", "command", "pattern", "description"] {
+        if let Some(value) = raw_input.get(key).and_then(|v| v.as_str()) {
+            if !value.is_empty() && !title.contains(value) {
+                return format!("{title}: {value}");
+            }
+        }
+    }
+    title.to_string()
+}
+
 /// A tool's output, as one readable string.
 ///
 /// The adapter fences console output as markdown (```console …```), which is
@@ -109,11 +127,21 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
             }))
             .collect()
         }
-        SessionUpdate::ToolCallUpdate { tool_call_id, status: s, title, content, locations } => {
+        SessionUpdate::ToolCallUpdate {
+            tool_call_id,
+            status: s,
+            title,
+            content,
+            locations,
+            raw_input,
+        } => {
             vec![AgentEvent::ToolUpdate {
                 id: tool_call_id.clone(),
                 status: status(s),
-                title: title.clone().filter(|t| !t.is_empty()),
+                title: title
+                    .clone()
+                    .filter(|t| !t.is_empty())
+                    .map(|t| detail(&t, raw_input)),
                 content: tool_text(content),
                 diff: tool_diff(content),
                 locations: locations.iter().map(|l| l.path.clone()).collect(),
@@ -234,5 +262,32 @@ mod tests {
         // Unfenced: the fence is markdown for a renderer that speaks it, and
         // noise in a monospace block.
         assert_eq!(content.as_deref(), Some("hello\nmain.rs"));
+    }
+
+    #[test]
+    fn a_skill_call_says_which_skill() {
+        // Most tools name themselves once resolved — a Bash call becomes its
+        // command. `Skill` stays "Skill" however many skills exist, and the
+        // one thing a reader wants from that row is which one ran.
+        let raw = r#"{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed",
+            "title":"Skill","rawInput":{"skill":"superpowers:brainstorming"}}"#;
+        let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
+        let AgentEvent::ToolUpdate { title, .. } = &update_to_events(&update)[0] else {
+            panic!("expected a tool update")
+        };
+        assert_eq!(title.as_deref(), Some("Skill: superpowers:brainstorming"));
+    }
+
+    #[test]
+    fn a_title_that_already_says_it_is_left_alone() {
+        // A Bash call is renamed to its command, so appending the command
+        // again would read "echo hi: echo hi".
+        let raw = r#"{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed",
+            "title":"echo hi","rawInput":{"command":"echo hi"}}"#;
+        let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
+        let AgentEvent::ToolUpdate { title, .. } = &update_to_events(&update)[0] else {
+            panic!("expected a tool update")
+        };
+        assert_eq!(title.as_deref(), Some("echo hi"));
     }
 }

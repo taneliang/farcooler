@@ -83,7 +83,7 @@ struct TileView: View {
     /// divider nudged a few points took as long as one thrown across the
     /// window and the whole app felt slow. A spring settles in proportion to
     /// the distance it has to cover, which is what "snappy" actually means.
-    private var motion: Animation { .snappy(duration: 0.22) }
+    private var motion: Animation { Motion.snap }
 
     /// Zoom gets the tiny bit of energy `.smooth` deliberately lacks.
     ///
@@ -91,7 +91,7 @@ struct TileView: View {
     /// posture, and a trace of overshoot is what makes it feel like the pane came
     /// forward rather than being swapped. `extraBounce` is kept small — this is one
     /// pane arriving, not a notification.
-    private var zoomMotion: Animation { .snappy(duration: 0.24, extraBounce: 0.08) }
+    private var zoomMotion: Animation { Motion.arrive }
 
     @ViewBuilder
     private var panels: some View {
@@ -359,7 +359,7 @@ private struct TilePane: View {
         // Its own, faster animation: which pane has the keyboard has to read as
         // immediate, and a border easing in over the same third of a second as
         // the panes moving would lag the keystroke that caused it.
-        .animation(.snappy(duration: 0.12), value: isFocused)
+        .animation(Motion.snap, value: isFocused)
         .overlay { dropIndicator }
         // A delegate rather than `dropDestination`, for one reason: the indicator
         // has to follow the pointer, and only a delegate is told where the pointer
