@@ -172,7 +172,7 @@ impl Watcher {
                     })
                     .or_else(|| pane.map(|p| p.command.clone()))
                     .unwrap_or_default();
-                live.push((id, command, terminal.state()));
+                live.push((id, command, terminal.state(), terminal.terminal.pane_mode));
             }
         }
 
@@ -180,16 +180,33 @@ impl Watcher {
         // inherit the activity of the process it replaced.
         {
             let mut state = self.state.lock().await;
-            let ids: std::collections::HashSet<Uuid> = live.iter().map(|(id, _, _)| *id).collect();
+            let ids: std::collections::HashSet<Uuid> = live.iter().map(|(id, _, _, _)| *id).collect();
             state.retain(|id, _| ids.contains(id));
         }
 
-        for (id, command, terminal_state) in live {
+        for (id, command, terminal_state, pane_mode) in live {
             // The screen is read for any live terminal, not only one whose
             // process name we recognise. That is the point: Claude Code renames
             // itself to its version, so a pane reporting `2.1.220` is an agent
             // that process matching alone would never find.
-            let (label, observed) = if matches!(terminal_state, TerminalState::Running) {
+            let (label, observed) = if !matches!(terminal_state, TerminalState::Running) {
+                (activity::describe(&command, ""), AgentActivity::None)
+            } else if pane_mode == overnight_store::models::PaneMode::Agent {
+                // The protocol, not the screen. An agent-mode pane shows the
+                // shim's status log, which matches no agent signature, so the
+                // classifier would report `None` and this row would never say
+                // it needs you — the one failure the whole feature exists to
+                // prevent. The supervisor already folded these through
+                // `activity::advance`, so `Done` means what it always means.
+                (
+                    "agent".to_string(),
+                    self.service.agents().activity(id),
+                )
+            } else {
+                // The screen is read for any live terminal, not only one whose
+                // process name we recognise: Claude Code renames itself to its
+                // version, so a pane reporting `2.1.220` is an agent that
+                // process matching alone would never find.
                 match runtime.screen(id).await {
                     Ok((screen, _, _)) => (
                         activity::describe(&command, &screen),
@@ -197,8 +214,6 @@ impl Watcher {
                     ),
                     Err(_) => (activity::describe(&command, ""), AgentActivity::Unspecified),
                 }
-            } else {
-                (activity::describe(&command, ""), AgentActivity::None)
             };
             // Resolved here, and sent resolved. A client has no screen to
             // inspect, so working out what an agent is called has to happen on

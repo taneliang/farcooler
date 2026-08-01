@@ -22,6 +22,12 @@ pub enum AcpError {
     Closed,
     #[error("malformed frame from the ACP adapter")]
     Malformed,
+    /// The adapter answered with a JSON-RPC error.
+    ///
+    /// Carries the adapter's own message, because the caller usually cannot
+    /// say anything more useful than the agent already did.
+    #[error("the ACP adapter refused: {0}")]
+    Refused(String),
 }
 
 /// A frame from the adapter that the caller has to deal with.
@@ -201,8 +207,21 @@ impl AcpConnection {
         loop {
             let frame = self.read_frame().await?;
             let rpc: Rpc = serde_json::from_str(&frame).map_err(|_| AcpError::Malformed)?;
-            if rpc.id.as_ref().and_then(|v| v.as_u64()) == Some(id) && rpc.result.is_some() {
-                return Ok(rpc.result.unwrap_or(serde_json::Value::Null));
+            if rpc.id.as_ref().and_then(|v| v.as_u64()) == Some(id) {
+                if let Some(error) = rpc.error {
+                    // Without this arm the loop waits for a `result` that is
+                    // never coming and the whole session hangs — a refusal
+                    // presenting as a hang, which is the hardest kind of
+                    // failure to attribute. Seen for real: `session/load`
+                    // answering "Session not found" for an id whose transcript
+                    // does not exist yet.
+                    return Err(AcpError::Refused(
+                        error["message"].as_str().unwrap_or("the adapter refused").to_string(),
+                    ));
+                }
+                if rpc.result.is_some() {
+                    return Ok(rpc.result.unwrap_or(serde_json::Value::Null));
+                }
             }
             self.queue(rpc);
         }
@@ -376,6 +395,7 @@ mod tests {
             params: Some(serde_json::json!({ "sessionId": "s" })),
             id: None,
             result: None,
+            error: None,
         });
         assert_eq!(conn.pending_incoming.len(), 1);
         assert!(matches!(conn.pending_incoming[0], Incoming::Notification { .. }));
@@ -395,6 +415,7 @@ mod tests {
             params: None,
             id: Some(serde_json::json!(7)),
             result: Some(serde_json::json!({ "stopReason": "end_turn" })),
+            error: None,
         });
         let Some(Incoming::Response { id, result }) = conn.pending_incoming.pop() else {
             panic!("a response must be surfaced")
@@ -415,7 +436,37 @@ mod tests {
             params: None,
             id: Some(serde_json::json!(1)),
             result: Some(serde_json::json!({})),
+            error: None,
         });
         assert!(!conn.pending_incoming.iter().any(|i| matches!(i, Incoming::Request { .. })));
+    }
+
+    #[tokio::test]
+    async fn an_error_reply_is_returned_rather_than_waited_on_forever() {
+        // The bug this pins presented as a hang, not as an error: `request`
+        // looped for a `result` that an error reply never carries, so a
+        // refusal the adapter stated plainly looked like a wedged agent with a
+        // blank pane. Seen for real when `session/load` answered "Session not
+        // found" for an id whose transcript did not exist yet.
+        let program = "/bin/sh".to_string();
+        let args = vec![
+            "-c".to_string(),
+            r#"read line; printf '{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Session not found"}}\n'"#
+                .to_string(),
+        ];
+        let mut conn =
+            AcpConnection::spawn(&program, &args, std::env::temp_dir()).await.expect("spawn");
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            conn.request("session/load", serde_json::json!({})),
+        )
+        .await
+        .expect("must not hang");
+
+        match outcome {
+            Err(AcpError::Refused(message)) => assert!(message.contains("Session not found")),
+            other => panic!("expected the adapter's own refusal, got {other:?}"),
+        }
     }
 }

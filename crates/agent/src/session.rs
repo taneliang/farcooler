@@ -140,13 +140,37 @@ impl AgentSession {
         // offer. Measured in the Gate 1 spike.
         let (session_id, session_result) = match resume {
             Some(id) if can_load => {
-                let result = conn
+                let loaded = conn
                     .request(
                         "session/load",
                         serde_json::json!({ "sessionId": id, "cwd": cwd, "mcpServers": [] }),
                     )
-                    .await?;
-                (id, result)
+                    .await;
+                match loaded {
+                    Ok(result) => (id, result),
+                    // A declared session id whose transcript does not exist yet
+                    // is the COMMON case, not an exotic one: Overnight hands
+                    // every claude terminal a `--session-id` at launch, and a
+                    // terminal switched to agent mode before anyone typed into
+                    // it has no transcript to load. Failing here killed agent
+                    // mode outright for exactly the path the product steers
+                    // people down.
+                    //
+                    // Starting fresh is right, and the gap is the honest part:
+                    // whatever the old id referred to is not being shown.
+                    Err(e) => {
+                        tracing::info!(error = %e, "no session to load; starting a new one");
+                        prelude.push(load_unsupported_event());
+                        let result = conn
+                            .request(
+                                "session/new",
+                                serde_json::json!({ "cwd": cwd, "mcpServers": [] }),
+                            )
+                            .await?;
+                        let new_id = result["sessionId"].as_str().unwrap_or(&id).to_string();
+                        (new_id, result)
+                    }
+                }
             }
             Some(id) => {
                 // Honest rather than convenient: the conversation continues, but
@@ -451,7 +475,7 @@ impl RunningSession {
                 Ok(vec![permission_event(&request_id, &params)])
             }
             ("session/update", _) => {
-                let rpc = Rpc { method: Some(method), params: Some(params), id: None, result: None };
+                let rpc = Rpc { method: Some(method), params: Some(params), id: None, result: None, error: None };
                 Ok(rpc
                     .session_notification()
                     .map(|n| update_to_events(&n.update))

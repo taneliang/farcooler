@@ -10,7 +10,7 @@
 //! window only — the shim's ring, not this one, is what a client falls back on
 //! when it asks for history older than this holds.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -85,6 +85,12 @@ pub struct AgentSupervisor {
     /// The fast-attach window described at the top of this file. Bounded to
     /// `RECENT_WINDOW` per terminal, oldest first.
     recent: Arc<Mutex<HashMap<Uuid, Vec<Sequenced>>>>,
+    /// Terminals whose socket is already bound.
+    ///
+    /// Without this, a second `set_pane_mode` would bind the same path again
+    /// and the shim's reconnect would land on whichever listener won — so a
+    /// session's events would arrive at a supervisor nobody is reading.
+    listening: Arc<Mutex<HashSet<Uuid>>>,
 }
 
 impl AgentSupervisor {
@@ -144,6 +150,36 @@ impl AgentSupervisor {
     /// `on_events` is how the daemon fans out; it is a callback rather than a
     /// channel so that the existing event bus stays the only fanout in the
     /// process.
+    /// Start accepting this terminal's shim, once.
+    ///
+    /// Nothing worked until this existed. `listen` was written, tested and
+    /// never called, so the socket was never bound: every shim retried
+    /// `connect` forever, no events reached the daemon, and a client polling
+    /// `agent_subscribe` got an empty batch from a session that was in fact
+    /// running perfectly. The whole feature was inert and nothing said so.
+    ///
+    /// Idempotent, because both the pane-mode switch and daemon startup
+    /// legitimately want to guarantee a listener exists.
+    pub fn ensure_listening(&self, runtime_dir: &Path, terminal: Uuid) {
+        {
+            let Ok(mut listening) = self.listening.lock() else { return };
+            if !listening.insert(terminal) {
+                return;
+            }
+        }
+        let this = self.clone();
+        let dir = runtime_dir.to_path_buf();
+        tokio::spawn(async move {
+            if let Err(e) = this.listen(&dir, terminal, |_, _| {}).await {
+                tracing::warn!(terminal = %terminal, error = %e, "agent listener stopped");
+            }
+            // Released so a later switch back into agent mode can bind again.
+            if let Ok(mut listening) = this.listening.lock() {
+                listening.remove(&terminal);
+            }
+        });
+    }
+
     pub async fn listen<F>(
         &self,
         runtime_dir: &Path,

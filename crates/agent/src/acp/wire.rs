@@ -19,6 +19,13 @@ pub struct Rpc {
     pub id: Option<serde_json::Value>,
     #[serde(default)]
     pub result: Option<serde_json::Value>,
+    /// A JSON-RPC error reply.
+    ///
+    /// Modelled because ignoring it is not a small omission: a caller waiting
+    /// for `result` on this id waits forever, and the failure presents as a
+    /// hang rather than as an error anyone can read.
+    #[serde(default)]
+    pub error: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -705,6 +705,24 @@ impl Service {
     ///
     /// Idempotent, and cheap enough to run unconditionally: setting a pane option
     /// to the value it already has is one tmux call per live pane, once.
+    /// Re-open a socket for every terminal already in agent pane mode.
+    ///
+    /// A daemon restart must not cost a conversation. The shims survived it —
+    /// they live in tmux panes, which is the whole reason they are there — and
+    /// they are sitting in their reconnect loop. Without this they dial a
+    /// socket nobody is listening on, forever, and every agent pane goes
+    /// permanently silent after the first daemon restart while still looking
+    /// perfectly healthy.
+    pub fn resume_agent_listeners(&self) {
+        let Ok(workspaces) = self.list_workspaces() else { return };
+        for ws in workspaces {
+            let Ok(terminals) = self.store.list_terminals_for_workspace(ws.id) else { continue };
+            for t in terminals.iter().filter(|t| t.pane_mode == models::PaneMode::Agent) {
+                self.agents.ensure_listening(&self.root, t.id);
+            }
+        }
+    }
+
     pub async fn backfill_pane_tags(&self) {
         let Ok(panes) = self.tmux.list_tagged_panes().await else { return };
         let mut repaired = 0;
@@ -936,6 +954,14 @@ impl Service {
                 )
             }
         };
+
+        // Bound BEFORE the pane is respawned. The shim dials on startup and
+        // retries, so a later bind would still be found — but only after a
+        // backoff the user spends staring at an empty chat, and only if the
+        // retry loop outlives the gap.
+        if pane_mode == models::PaneMode::Agent {
+            self.agents.ensure_listening(&self.root, id);
+        }
 
         self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
         self.store.set_pane_mode(id, term.resource_version, pane_mode, session_id)

@@ -13,3 +13,4 @@ apps/macos/Sources/COvernightVT/overnight_vt.h
 apps/ios/Frameworks/
 apps/ios/build/
 dist/
+apps/shared/AgentKit/.build/

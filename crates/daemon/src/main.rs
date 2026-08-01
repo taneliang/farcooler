@@ -112,6 +112,9 @@ async fn run() -> Result<(), i32> {
     // `backfill_pane_tags`: those panes read correctly until something moves
     // them, and then stop being identifiable at all.
     service.backfill_pane_tags().await;
+    // Shims outlive a daemon restart; without this they dial a socket nobody
+    // is listening on and every agent pane goes silent while looking healthy.
+    service.resume_agent_listeners();
 
     // One watcher for the host, shared by every connection. Deriving activity
     // once and pushing it is the whole point: N clients must not mean N
