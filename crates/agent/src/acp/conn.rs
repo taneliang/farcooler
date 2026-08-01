@@ -23,18 +23,26 @@ pub enum AcpError {
     Malformed,
 }
 
-/// A frame the ADAPTER sent us that is not a response to our request.
+/// A frame from the adapter that the caller has to deal with.
 ///
-/// `id` is `Some` for a request we must answer (`fs/*`,
-/// `session/request_permission`) and `None` for a notification
-/// (`session/update`). Both have to reach the caller: answering only requests
-/// deadlocks nothing but loses the entire transcript, and reading only
-/// notifications hangs the agent on its first question.
+/// All three kinds have to reach the caller, and leaving any one out breaks
+/// something specific:
+///
+/// - dropping `Request` hangs the agent on its first permission prompt;
+/// - dropping `Notification` keeps the agent's questions and discards
+///   everything it actually said;
+/// - dropping `Response` loses `stopReason`, which is the ONLY place a turn's
+///   end is reported. Without it activity never returns to idle, `Done` never
+///   happens, and no notification is ever sent — which is the entire reason
+///   this feature exists.
 #[derive(Debug)]
-pub struct Incoming {
-    pub id: Option<serde_json::Value>,
-    pub method: String,
-    pub params: serde_json::Value,
+pub enum Incoming {
+    /// The adapter is asking us something and is blocked until we answer.
+    Request { id: serde_json::Value, method: String, params: serde_json::Value },
+    /// One-way. `session/update` is all of these.
+    Notification { method: String, params: serde_json::Value },
+    /// The answer to a request we sent and deliberately did not wait for.
+    Response { id: serde_json::Value, result: serde_json::Value },
 }
 
 /// One frame, as it goes on the wire.
@@ -136,21 +144,51 @@ impl AcpConnection {
         }
     }
 
-    /// Queue anything the adapter initiated.
+    /// Queue a frame that is not the response `request` is waiting for.
     ///
-    /// Keyed on `method`, not on `id`: a `session/update` notification carries
-    /// no id, so filtering on id here would keep only the agent's questions and
-    /// throw away everything it actually said.
+    /// Sorted by shape rather than by id. An earlier version filtered on id
+    /// alone and therefore kept only the agent's questions: `session/update`
+    /// carries no id, so the whole transcript went in the bin.
     fn queue(&mut self, rpc: Rpc) {
-        let Some(method) = rpc.method.clone() else { return };
-        if rpc.result.is_some() {
-            return;
+        match (rpc.method.clone(), rpc.id.clone(), rpc.result.clone()) {
+            // A response to something we sent and did not block on — in
+            // practice `session/prompt`, whose result carries `stopReason`.
+            (None, Some(id), Some(result)) => {
+                self.pending_incoming.push(Incoming::Response { id, result })
+            }
+            (Some(method), Some(id), None) => self.pending_incoming.push(Incoming::Request {
+                id,
+                method,
+                params: rpc.params.unwrap_or(serde_json::Value::Null),
+            }),
+            (Some(method), None, _) => self.pending_incoming.push(Incoming::Notification {
+                method,
+                params: rpc.params.unwrap_or(serde_json::Value::Null),
+            }),
+            // An error frame, or something with no method and no result. There
+            // is nothing to act on and nothing to report.
+            _ => {}
         }
-        self.pending_incoming.push(Incoming {
-            id: rpc.id.clone(),
-            method,
-            params: rpc.params.unwrap_or(serde_json::Value::Null),
-        });
+    }
+
+    /// Send a request without waiting for its answer.
+    ///
+    /// `session/prompt` has to go this way. Blocking on it would mean not
+    /// pumping while the turn runs, and the turn cannot finish because the
+    /// agent is waiting on an `fs/write_text_file` or a permission prompt that
+    /// nobody is reading — a deadlock that looks exactly like a hung agent.
+    pub async fn request_no_wait(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<u64, AcpError> {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.write(
+            serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
+        )
+        .await?;
+        Ok(id)
     }
 
     async fn read_frame(&mut self) -> Result<String, AcpError> {
@@ -217,14 +255,35 @@ mod tests {
             result: None,
         });
         assert_eq!(conn.pending_incoming.len(), 1);
-        assert!(conn.pending_incoming[0].id.is_none());
+        assert!(matches!(conn.pending_incoming[0], Incoming::Notification { .. }));
     }
 
     #[tokio::test]
-    async fn a_response_to_our_own_request_is_not_queued_as_incoming() {
-        // Otherwise every answer we asked for would come back a second time as
-        // a request we are expected to answer, and the agent would wait forever
-        // for a reply to something it never sent.
+    async fn a_response_we_did_not_block_on_is_surfaced_not_dropped() {
+        // `session/prompt` is sent without waiting, and its response is the
+        // ONLY place `stopReason` appears. Dropping it here means a turn never
+        // reports its end, activity never returns to idle, Done never happens
+        // and no notification is ever sent.
+        let (program, args) = fake_adapter();
+        let mut conn =
+            AcpConnection::spawn(&program, &args, std::env::temp_dir()).await.expect("spawn");
+        conn.queue(Rpc {
+            method: None,
+            params: None,
+            id: Some(serde_json::json!(7)),
+            result: Some(serde_json::json!({ "stopReason": "end_turn" })),
+        });
+        let Some(Incoming::Response { id, result }) = conn.pending_incoming.pop() else {
+            panic!("a response must be surfaced")
+        };
+        assert_eq!(id, serde_json::json!(7));
+        assert_eq!(result["stopReason"], "end_turn");
+    }
+
+    #[tokio::test]
+    async fn a_response_is_never_mistaken_for_a_request_we_must_answer() {
+        // Answering a response would send the agent a reply to something it
+        // never asked, and leave whatever it IS waiting on unanswered.
         let (program, args) = fake_adapter();
         let mut conn =
             AcpConnection::spawn(&program, &args, std::env::temp_dir()).await.expect("spawn");
@@ -234,6 +293,6 @@ mod tests {
             id: Some(serde_json::json!(1)),
             result: Some(serde_json::json!({})),
         });
-        assert!(conn.pending_incoming.is_empty());
+        assert!(!conn.pending_incoming.iter().any(|i| matches!(i, Incoming::Request { .. })));
     }
 }

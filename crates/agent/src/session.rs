@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::acp::conn::{AcpConnection, AcpError, Incoming};
 use crate::acp::normalize::update_to_events;
 use crate::acp::wire::Rpc;
-use crate::event::{AgentEvent, AgentGapReason, Diff, PermissionOption, ToolStatus};
+use crate::event::{AgentEvent, AgentGapReason, Diff, EndReason, PermissionOption, ToolStatus};
 use crate::fs_guard::confine;
 
 #[derive(Debug, thiserror::Error)]
@@ -74,11 +74,38 @@ pub fn load_unsupported_event() -> AgentEvent {
     AgentEvent::Gap { reason: AgentGapReason::LoadUnsupported }
 }
 
+/// The mode ids an agent offers, from a `session/new` or `session/load` result.
+pub fn modes_from(session_result: &serde_json::Value) -> Vec<String> {
+    session_result["modes"]["availableModes"]
+        .as_array()
+        .map(|m| m.iter().filter_map(|v| v["id"].as_str().map(String::from)).collect())
+        .unwrap_or_default()
+}
+
+/// A turn's `stopReason`, as the reason it ended.
+///
+/// An unrecognised reason is `EndTurn` rather than an error: the turn IS over
+/// whatever the adapter chose to call it, and refusing to admit that would
+/// leave the row stuck on `Working` forever.
+pub fn end_reason(stop_reason: &str) -> EndReason {
+    match stop_reason {
+        "cancelled" => EndReason::Cancelled,
+        "refusal" => EndReason::Refusal,
+        "max_tokens" | "max_tokens_reached" => EndReason::MaxTokens,
+        _ => EndReason::EndTurn,
+    }
+}
+
 pub struct AgentSession {
     conn: AcpConnection,
     pub session_id: String,
     pub available_modes: Vec<String>,
     pub available_commands: Vec<String>,
+    /// The id of the `session/prompt` we are waiting to see answered.
+    ///
+    /// Without this a response cannot be told apart from any other, and the
+    /// one frame that reports a turn's end goes unrecognised.
+    pending_prompt: Option<u64>,
 }
 
 impl AgentSession {
@@ -104,60 +131,79 @@ impl AgentSession {
         let mut prelude = Vec::new();
         let cwd = conn.worktree.display().to_string();
 
-        let session_id = match resume {
+        // The session result, not the initialize result, is where the modes
+        // are. `initialize` advertises `loadSession` and the prompt
+        // capabilities and nothing about modes at all — reading them from there
+        // yielded an empty list forever, so the mode switcher had nothing to
+        // offer. Measured in the Gate 1 spike.
+        let (session_id, session_result) = match resume {
             Some(id) if can_load => {
-                conn.request(
-                    "session/load",
-                    serde_json::json!({ "sessionId": id, "cwd": cwd, "mcpServers": [] }),
-                )
-                .await?;
-                id
+                let result = conn
+                    .request(
+                        "session/load",
+                        serde_json::json!({ "sessionId": id, "cwd": cwd, "mcpServers": [] }),
+                    )
+                    .await?;
+                (id, result)
             }
             Some(id) => {
                 // Honest rather than convenient: the conversation continues, but
                 // the history before this point cannot be shown.
                 prelude.push(load_unsupported_event());
-                conn.request(
-                    "session/new",
-                    serde_json::json!({ "cwd": cwd, "mcpServers": [] }),
-                )
-                .await?["sessionId"]
-                    .as_str()
-                    .unwrap_or(&id)
-                    .to_string()
+                let result = conn
+                    .request("session/new", serde_json::json!({ "cwd": cwd, "mcpServers": [] }))
+                    .await?;
+                let new_id = result["sessionId"].as_str().unwrap_or(&id).to_string();
+                (new_id, result)
             }
-            None => conn
-                .request("session/new", serde_json::json!({ "cwd": cwd, "mcpServers": [] }))
-                .await?["sessionId"]
-                .as_str()
-                .ok_or(SessionError::Rejected)?
-                .to_string(),
+            None => {
+                let result = conn
+                    .request("session/new", serde_json::json!({ "cwd": cwd, "mcpServers": [] }))
+                    .await?;
+                let new_id =
+                    result["sessionId"].as_str().ok_or(SessionError::Rejected)?.to_string();
+                (new_id, result)
+            }
         };
 
-        let available_modes: Vec<String> = init["agentCapabilities"]["availableModes"]
-            .as_array()
-            .map(|m| m.iter().filter_map(|v| v["id"].as_str().map(String::from)).collect())
-            .unwrap_or_default();
+        let available_modes: Vec<String> = modes_from(&session_result);
+        let agent_mode = session_result["modes"]["currentModeId"].as_str().map(String::from);
 
         prelude.insert(
             0,
             AgentEvent::SessionStarted {
                 session_id: session_id.clone(),
-                agent_mode: init["agentCapabilities"]["currentModeId"].as_str().map(String::from),
+                agent_mode,
                 available_modes: available_modes.clone(),
                 available_commands: Vec::new(),
             },
         );
 
         Ok((
-            Self { conn, session_id, available_modes, available_commands: Vec::new() },
+            Self {
+                conn,
+                session_id,
+                available_modes,
+                available_commands: Vec::new(),
+                pending_prompt: None,
+            },
             prelude,
         ))
     }
 
+    /// Start a turn.
+    ///
+    /// Sent as a REQUEST, but not waited on. Its response is the only place a
+    /// turn's end is reported (`stopReason`), so sending it as a notification
+    /// meant `TurnEnded` never fired: activity stayed `Working` forever, `Done`
+    /// never happened, and nothing ever notified anyone — the failure that
+    /// makes the whole feature pointless. Waiting on it instead would deadlock,
+    /// because the turn cannot finish while nobody is answering the agent's
+    /// `fs/*` and permission requests.
     pub async fn prompt(&mut self, text: &str) -> Result<(), SessionError> {
-        self.conn
-            .notify(
+        let id = self
+            .conn
+            .request_no_wait(
                 "session/prompt",
                 serde_json::json!({
                     "sessionId": self.session_id,
@@ -165,6 +211,7 @@ impl AgentSession {
                 }),
             )
             .await?;
+        self.pending_prompt = Some(id);
         Ok(())
     }
 
@@ -201,9 +248,24 @@ impl AgentSession {
 
     /// Read one frame and turn it into events, answering capabilities inline.
     pub async fn pump(&mut self) -> Result<Vec<AgentEvent>, SessionError> {
-        let Some(Incoming { id, method, params }) = self.conn.next_incoming().await? else {
+        let Some(incoming) = self.conn.next_incoming().await? else {
             return Ok(Vec::new());
         };
+
+        let (method, id, params) = match incoming {
+            Incoming::Request { id, method, params } => (method, Some(id), params),
+            Incoming::Notification { method, params } => (method, None, params),
+            Incoming::Response { id, result } => {
+                // The turn's end, and the only place it is reported.
+                if id.as_u64() == self.pending_prompt {
+                    self.pending_prompt = None;
+                    let reason = end_reason(result["stopReason"].as_str().unwrap_or_default());
+                    return Ok(vec![AgentEvent::TurnEnded { reason }]);
+                }
+                return Ok(Vec::new());
+            }
+        };
+
         let worktree = self.conn.worktree.clone();
         match (method.as_str(), id) {
             ("fs/read_text_file", Some(id)) => {
@@ -297,5 +359,45 @@ mod tests {
             load_unsupported_event(),
             AgentEvent::Gap { reason: AgentGapReason::LoadUnsupported }
         );
+    }
+
+    #[test]
+    fn modes_come_from_the_session_result_not_from_initialize() {
+        // Measured in the Gate 1 spike against a real adapter: `initialize`
+        // advertises `loadSession` and prompt capabilities and says nothing
+        // about modes. Reading them there gave an empty list forever, so the
+        // mode switcher had nothing to offer and silently did nothing.
+        let session_result = serde_json::json!({
+            "sessionId": "s",
+            "modes": {
+                "currentModeId": "default",
+                "availableModes": [
+                    { "id": "default", "name": "Default" },
+                    { "id": "acceptEdits", "name": "Accept Edits" },
+                    { "id": "plan", "name": "Plan Mode" }
+                ]
+            }
+        });
+        assert_eq!(modes_from(&session_result), vec!["default", "acceptEdits", "plan"]);
+
+        // And the shape the bug assumed yields nothing, which is what made the
+        // failure invisible rather than loud.
+        let initialize_result = serde_json::json!({
+            "agentCapabilities": { "loadSession": true }
+        });
+        assert!(modes_from(&initialize_result).is_empty());
+    }
+
+    #[test]
+    fn a_stop_reason_ends_the_turn_and_an_unfamiliar_one_still_ends_it() {
+        // The turn is over whatever the adapter chose to call it. Refusing to
+        // admit that would leave the row on `Working` forever, which is exactly
+        // the state that never becomes `Done` and never notifies.
+        assert_eq!(end_reason("end_turn"), EndReason::EndTurn);
+        assert_eq!(end_reason("cancelled"), EndReason::Cancelled);
+        assert_eq!(end_reason("refusal"), EndReason::Refusal);
+        assert_eq!(end_reason("max_tokens"), EndReason::MaxTokens);
+        assert_eq!(end_reason("something_a_later_adapter_invented"), EndReason::EndTurn);
+        assert_eq!(end_reason(""), EndReason::EndTurn);
     }
 }

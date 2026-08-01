@@ -43,7 +43,16 @@ pub fn discover_claude_session(
     worktree: &Path,
     started_after: SystemTime,
 ) -> Result<String, DiscoveryError> {
-    let dir: PathBuf = home.join(".claude/projects").join(project_dir_name(worktree));
+    // The REALPATH, not the path as written. Claude Code munges the resolved
+    // cwd, so on macOS a worktree under `/tmp` lands in `-private-tmp-...` and
+    // looking under `-tmp-...` finds an empty directory and reports NotFound
+    // for a session that exists. Measured in the Gate 1 spike, not guessed.
+    //
+    // A path that cannot be resolved is used as written: the only caller passes
+    // a worktree that exists, and failing here would turn a missing directory
+    // into a confusing error about a different one.
+    let resolved = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
+    let dir: PathBuf = home.join(".claude/projects").join(project_dir_name(&resolved));
     let entries = std::fs::read_dir(&dir).map_err(|_| DiscoveryError::NotFound)?;
 
     let mut candidates: Vec<String> = Vec::new();
@@ -122,6 +131,31 @@ mod tests {
         let err = discover_claude_session(&home, worktree, SystemTime::UNIX_EPOCH).unwrap_err();
         let DiscoveryError::Ambiguous { candidates } = err else { panic!("expected refusal") };
         assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    fn a_worktree_reached_through_a_symlink_finds_its_real_project_directory() {
+        // The bug the Gate 1 spike caught: on macOS `/tmp` is a symlink to
+        // `/private/tmp`, and Claude Code munges the RESOLVED cwd. Looking
+        // under the unresolved name finds nothing and reports NotFound for a
+        // session that is sitting right there.
+        let home = scratch("symlink-home");
+        let real = scratch("symlink-real");
+        let link = std::env::temp_dir().join(format!("overnight-disc-link-{}", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        // The session file lives under the REAL path's munged name.
+        let dir = home
+            .join(".claude/projects")
+            .join(project_dir_name(&std::fs::canonicalize(&real).unwrap()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sess-real.jsonl"), "{}").unwrap();
+
+        // Asking with the symlinked path must still find it.
+        let found = discover_claude_session(&home, &link, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(found, "sess-real");
     }
 
     #[test]
