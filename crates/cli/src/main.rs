@@ -700,6 +700,15 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                                     "activity": activity_label(t.activity),
                                     "activitySince": activity_since(&t),
                                     "epoch": t.epoch,
+                                    // The Mac app decodes THIS, not the JSON
+                                    // `crates/client` builds for iOS. Leaving
+                                    // these out here left `isAgentPane` false
+                                    // forever, so an agent pane silently drew
+                                    // a terminal and chat mode looked missing.
+                                    "paneMode": pane_mode_label(t.pane_mode),
+                                    "agentSessionId": t.agent_session_id,
+                                    "agentMode": t.agent_mode,
+                                    "availableAgentModes": t.available_agent_modes,
                                 }))
                                 .collect::<Vec<_>>(),
                         })
@@ -976,7 +985,14 @@ async fn events(host: Option<&str>) -> Fallible {
                 "preset": label(&t),
                 "state": terminal_label(t.state()),
                 "activity": activity_label(t.activity),
-                                    "activitySince": activity_since(&t),
+                "activitySince": activity_since(&t),
+                // Watched as well as listed. A pane mode that only arrived on
+                // a full refresh would mean toggling to chat did nothing until
+                // something else happened to reload the fleet.
+                "paneMode": pane_mode_label(t.pane_mode),
+                "agentSessionId": t.agent_session_id,
+                "agentMode": t.agent_mode,
+                "availableAgentModes": t.available_agent_modes,
             }),
             overnight_protocol::v1::event::Payload::WorkspaceChanged(w) => serde_json::json!({
                 "kind": "workspace",
@@ -1699,6 +1715,19 @@ fn truncate(s: &str, n: usize) -> String {
 /// Distinct from `state`, which is about the process. A Claude Code sitting at
 /// a permission prompt and one halfway through a file edit are both `running`;
 /// the difference between them is the reason to look at a fleet at all.
+/// The pane mode, as a word rather than a number.
+///
+/// Same reason `activity_label` exists: a client switching on an integer would
+/// hold a second copy of the enum and drift from it silently. An unknown or
+/// unspecified mode is `terminal` — the mode that needs no ACP adapter and
+/// always works, which is the right guess for an older daemon.
+fn pane_mode_label(mode: i32) -> &'static str {
+    match overnight_protocol::v1::PaneMode::try_from(mode) {
+        Ok(overnight_protocol::v1::PaneMode::Agent) => "agent",
+        _ => "terminal",
+    }
+}
+
 fn activity_label(a: i32) -> &'static str {
     use overnight_protocol::v1::AgentActivity;
     match AgentActivity::try_from(a).unwrap_or(AgentActivity::Unspecified) {
