@@ -475,81 +475,70 @@ private struct TerminalKeyRow: View {
     let onToggleCtrl: () -> Void
     let onKey: (UInt32) -> Void
 
-    /// A key is a full touch target tall and only as wide as it needs to be.
+    /// Keys share the width rather than each claiming their own.
     ///
-    /// Both halves matter. Height is where accuracy actually comes from with a
-    /// thumb, so it is the full 44pt. Width cannot also be 44: nine keys at
-    /// that width need more room than a phone is wide, and the last attempt at
-    /// it did not overflow visibly — it wrapped the labels, so `esc` came out
-    /// as two lines reading "es" and "c".
-    private static let keyHeight: CGFloat = 44
-    private static let keyWidth: CGFloat = 34
+    /// This is the whole shape of the row, and getting it wrong cost more than
+    /// the row itself. Nine keys sized from their own content overflowed a
+    /// phone — a bordered button pads whatever you hand it, so a 34pt legend
+    /// became a 58pt key and nine of those wanted about 580pt of a 402pt
+    /// screen. The row did not clip on its own: it widened the stack it was
+    /// in, so the terminal ABOVE it was laid out too wide and lost characters
+    /// off both edges. `maxWidth: .infinity` on every key makes overflow
+    /// impossible to express.
+    private static let keyHeight: CGFloat = 40
 
     var body: some View {
         HStack(spacing: 5) {
-            textKey("esc") { onKey(UInt32(OVERNIGHT_VT_KEY_ESCAPE)) }
-            textKey("tab") { onKey(UInt32(OVERNIGHT_VT_KEY_TAB)) }
-            textKey("ctrl", armed: ctrlArmed, action: onToggleCtrl)
-            Spacer(minLength: 2)
-            symbolKey("arrow.left") { onKey(UInt32(OVERNIGHT_VT_KEY_LEFT)) }
-            symbolKey("arrow.down") { onKey(UInt32(OVERNIGHT_VT_KEY_DOWN)) }
-            symbolKey("arrow.up") { onKey(UInt32(OVERNIGHT_VT_KEY_UP)) }
-            symbolKey("arrow.right") { onKey(UInt32(OVERNIGHT_VT_KEY_RIGHT)) }
-            Spacer(minLength: 2)
-            symbolKey("return") { onKey(UInt32(OVERNIGHT_VT_KEY_ENTER)) }
+            key { onKey(UInt32(OVERNIGHT_VT_KEY_ESCAPE)) } label: { legend("esc") }
+            key { onKey(UInt32(OVERNIGHT_VT_KEY_TAB)) } label: { legend("tab") }
+            key(filled: ctrlArmed, action: onToggleCtrl) { legend("ctrl") }
+            key { onKey(UInt32(OVERNIGHT_VT_KEY_LEFT)) } label: { glyph("chevron.left") }
+            key { onKey(UInt32(OVERNIGHT_VT_KEY_DOWN)) } label: { glyph("chevron.down") }
+            key { onKey(UInt32(OVERNIGHT_VT_KEY_UP)) } label: { glyph("chevron.up") }
+            key { onKey(UInt32(OVERNIGHT_VT_KEY_RIGHT)) } label: { glyph("chevron.right") }
+            key { onKey(UInt32(OVERNIGHT_VT_KEY_ENTER)) } label: { glyph("return") }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .padding(.vertical, 6)
-        // The bar's own background reaches the screen edge, under the home
-        // indicator, the way a real keyboard accessory does — only the keys
-        // themselves are kept clear of it, by the padding above rather than by
-        // the background stopping short. `.bar` rather than a colour chosen by
-        // hand, so it goes on looking native beside whichever system surface it
-        // finds itself above.
+        // The background reaches the screen edge, under the home indicator, the
+        // way a real keyboard accessory does; only the keys are held clear of
+        // it, by the padding above rather than by the background stopping
+        // short.
         .background(.bar, ignoresSafeAreaEdges: .bottom)
     }
 
-    /// Ctrl is the only key with a state, and it says so the way the system
-    /// does — a filled button rather than a colour invented here to mean the
-    /// same thing. See `ctrlArmed`/`consumeCtrl`: it applies to exactly the
-    /// next key and then clears itself.
-    ///
-    /// The two styles are written out rather than chosen from a variable
-    /// because `buttonStyle` takes a concrete type, and the alternative is a
-    /// type-erasing wrapper that costs more to read than this repetition does.
-    @ViewBuilder
-    private func textKey(
-        _ text: String, armed: Bool = false, action: @escaping () -> Void
+    /// One key: a rounded rectangle, because that is what a key on this
+    /// platform looks like. The system's own bordered style rounds to a
+    /// capsule at these proportions, which reads as a row of pills rather than
+    /// a keyboard, so the shape is drawn here instead of inherited.
+    private func key<Label: View>(
+        filled: Bool = false,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Label
     ) -> some View {
-        if armed {
-            Button(action: action) { keyLabel(text) }
-                .buttonStyle(.borderedProminent)
-        } else {
-            Button(action: action) { keyLabel(text) }
-                .buttonStyle(.bordered)
-                .tint(.primary)
-        }
-    }
-
-    private func keyLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(.footnote, design: .monospaced))
-            // Never wrapped and never shrunk to fit: a key legend that reflows
-            // is unreadable, and one that scales is unrecognisable beside its
-            // neighbours.
-            .lineLimit(1)
-            .fixedSize()
-            .frame(minWidth: Self.keyWidth, minHeight: Self.keyHeight)
-    }
-
-    private func symbolKey(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.footnote.weight(.medium))
-                .frame(minWidth: Self.keyWidth, minHeight: Self.keyHeight)
+            label()
+                .frame(maxWidth: .infinity, minHeight: Self.keyHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(filled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.fill.tertiary))
+                )
+                .foregroundStyle(filled ? Color.white : Color.primary)
         }
-        .buttonStyle(.bordered)
-        .tint(.primary)
+        .buttonStyle(.plain)
+    }
+
+    private func legend(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium, design: .monospaced))
+            // A legend that reflows is unreadable and one that shrinks is
+            // unrecognisable beside its neighbours; if the width ever gets
+            // that tight, the right answer is fewer keys.
+            .lineLimit(1)
+    }
+
+    private func glyph(_ symbol: String) -> some View {
+        Image(systemName: symbol).font(.system(size: 14, weight: .semibold))
     }
 }
 
