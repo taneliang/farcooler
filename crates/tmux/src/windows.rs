@@ -856,6 +856,27 @@ impl TmuxServer {
         Ok(out.ok())
     }
 
+    /// Replace the process in a pane, keeping the pane.
+    ///
+    /// This is how pane mode is toggled. `kill-pane` plus `new-window` would
+    /// give the terminal a new pane id — losing its tag, and its position in
+    /// whatever layout the user had built — so a chat opening in one tile of
+    /// four would rearrange the other three.
+    ///
+    /// `-k` kills whatever is running first; without it tmux refuses on a live
+    /// pane. The working directory goes through tmux's validated `-c` rather
+    /// than as `cd` text, for the same reason as `create_terminal_window`.
+    pub async fn respawn_pane(&self, pane_id: &str, worktree: &str, command: &str) -> Result<()> {
+        let out = self
+            .run(&["respawn-pane", "-k", "-t", pane_id, "-c", worktree, command])
+            .await?;
+        if !out.ok() {
+            tracing::warn!(pane = %pane_id, stderr = %out.stderr, "respawn-pane failed");
+            return Err(DomainError::TmuxUnavailable);
+        }
+        Ok(())
+    }
+
     /// Give a layout a name, which is what a client shows in its tab.
     pub async fn rename_layout(&self, window_id: &str, name: &str) -> Result<()> {
         self.expect(&["rename-window", "-t", window_id, name], "rename-window").await

@@ -15,6 +15,21 @@ fn unique_server() -> TmuxServer {
     TmuxServer::new(&install, Uuid::now_v7())
 }
 
+/// A fresh, isolated server, or `None` if there is no live tmux to test
+/// against.
+///
+/// These are integration tests against a real tmux binary, which is not a
+/// given everywhere this suite runs. A missing tmux has to make the test a
+/// skip, never a failure, or CI images without tmux installed would be red
+/// for a reason that has nothing to do with the code under test.
+async fn live_server() -> Option<TmuxServer> {
+    let has_tmux = tokio::process::Command::new("tmux").arg("-V").output().await.is_ok();
+    if !has_tmux {
+        return None;
+    }
+    Some(unique_server())
+}
+
 #[tokio::test]
 async fn creates_a_tagged_window_and_proves_its_identity() {
     let srv = unique_server();
@@ -158,4 +173,35 @@ async fn resize_and_capture_target_the_exact_window() {
     srv.capture_pane(&win.pane_id, 100).await.unwrap();
 
     srv.kill_server().await.unwrap();
+}
+
+#[tokio::test]
+async fn respawning_a_pane_keeps_its_id_its_tag_and_its_place() {
+    // The toggle's whole correctness argument. If the pane id changed, the
+    // terminal would become unidentifiable and derive as `lost`; if the
+    // rectangle changed, a four-tile layout would reflow every time someone
+    // opened a chat.
+    let Some(server) = live_server().await else { return };
+    let workspace = Uuid::now_v7();
+    let terminal = Uuid::now_v7();
+    let window = server
+        .create_terminal_window(workspace, terminal, "respawn", "/tmp", "/bin/sh -c 'sleep 300'")
+        .await
+        .expect("window");
+
+    let before = server.list_tagged_panes().await.expect("panes");
+    let pane = before.iter().find(|p| p.terminal_id == terminal).expect("tagged pane");
+    let pane_id = pane.pane_id.clone();
+
+    server
+        .respawn_pane(&pane_id, "/tmp", "/bin/sh -c 'sleep 300'")
+        .await
+        .expect("respawn succeeds");
+
+    let after = server.list_tagged_panes().await.expect("panes");
+    let same = after.iter().find(|p| p.terminal_id == terminal).expect("still tagged");
+    assert_eq!(same.pane_id, pane_id, "pane identity must survive a respawn");
+
+    let _ = server.kill_terminal_window(terminal).await;
+    let _ = window;
 }
