@@ -1,0 +1,104 @@
+//! ACP frames, deserialized only as far as the normalizer needs.
+//!
+//! Deliberately lenient: unknown fields are ignored and unknown update kinds
+//! deserialize to `Unknown` rather than failing the frame. A strict decoder
+//! would turn every adapter release into an outage, and the honest response to
+//! an update we do not understand is a visible `Gap` — not a dropped
+//! connection, and never a silently shorter transcript.
+
+use serde::Deserialize;
+
+/// One JSON-RPC frame from the adapter.
+#[derive(Debug, Deserialize)]
+pub struct Rpc {
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
+    #[serde(default)]
+    pub id: Option<serde_json::Value>,
+    #[serde(default)]
+    pub result: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SessionNotification {
+    #[serde(rename = "sessionId", default)]
+    pub session_id: String,
+    pub update: SessionUpdate,
+}
+
+impl Rpc {
+    /// The frame as a `session/update` notification, if that is what it is.
+    pub fn session_notification(&self) -> Option<SessionNotification> {
+        if self.method.as_deref() != Some("session/update") {
+            return None;
+        }
+        serde_json::from_value(self.params.clone()?).ok()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ContentBlock {
+    #[serde(default)]
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WirePlanEntry {
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub priority: String,
+    #[serde(default)]
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Location {
+    #[serde(default)]
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "sessionUpdate", rename_all = "snake_case")]
+pub enum SessionUpdate {
+    AgentMessageChunk {
+        content: ContentBlock,
+    },
+    UserMessageChunk {
+        content: ContentBlock,
+    },
+    AgentThoughtChunk {
+        content: ContentBlock,
+    },
+    ToolCall {
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        kind: String,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        locations: Vec<Location>,
+    },
+    ToolCallUpdate {
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+        #[serde(default)]
+        status: String,
+    },
+    Plan {
+        #[serde(default)]
+        entries: Vec<WirePlanEntry>,
+    },
+    CurrentModeUpdate {
+        #[serde(rename = "currentModeId")]
+        current_mode_id: String,
+    },
+    /// Anything this version does not know. Becomes a visible `Gap`.
+    #[serde(other)]
+    Unknown,
+}
