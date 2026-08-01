@@ -74,6 +74,7 @@ enum Shortcut {
                 Item(keys: "c", action: "New group — several layouts per worktree"),
                 Item(keys: "n  /  p", action: "Next / previous group"),
                 Item(keys: "&", action: "Close this group"),
+                Item(keys: "a", action: "Toggle the focused pane between terminal and chat"),
                 Item(keys: "⌃B", action: "Send a literal ⌃B to the program"),
             ]
         ),

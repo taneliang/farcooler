@@ -73,7 +73,16 @@ struct CommandPalette: View {
     private var entries: [PaletteEntry] {
         isSwitcher
             ? PaletteIndex.recent(in: workspaces)
-            : PaletteIndex.matching(query, in: workspaces, current: currentWorkspace)
+            : PaletteIndex.matching(
+                query, in: workspaces, current: currentWorkspace,
+                currentTerminal: selectedTerminalRecord)
+    }
+
+    /// The `Terminal` record behind `currentTerminal`, so the palette can
+    /// offer to toggle ITS mode rather than only knowing its id.
+    private var selectedTerminalRecord: Terminal? {
+        guard let currentTerminal else { return nil }
+        return workspaces.lazy.flatMap(\.terminals).first { $0.id == currentTerminal }
     }
 
     private var currentWorkspace: String? {

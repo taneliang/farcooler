@@ -116,6 +116,12 @@ struct OvernightCommands: Commands {
             Button("New Layout  ⌃B c") { TileCommand.newGroup.post() }
             Button("Next Layout  ⌃B n") { TileCommand.nextGroup.post() }
             Button("Previous Layout  ⌃B p") { TileCommand.previousGroup.post() }
+            Divider()
+            // Not really a layout verb — nothing about the arrangement
+            // changes — but it is scoped to the focused pane exactly the way
+            // zoom and the splits are, and there is no chrome on the pane
+            // itself left to put a button on.
+            Button("Terminal ⟷ Chat  ⌃B a") { TileCommand.toggleAgentPane.post() }
         }
 
         CommandGroup(after: .sidebar) {

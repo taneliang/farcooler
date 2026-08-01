@@ -40,6 +40,8 @@ struct TileView: View {
     /// A divider dragged: which pane's border, and by how many cells. Returns
     /// whether it was accepted — a refused request has to be re-offered, not lost.
     let onResizeDivider: (String, TileDirection, Int) -> Bool
+    /// The worktree file search behind an agent pane's `@` picker.
+    let onSearchFiles: (String) async -> [String]
 
     @ObservedObject private var prefix = PrefixMode.shared
     @ObservedObject private var preferences = Preferences.shared
@@ -173,7 +175,8 @@ struct TileView: View {
             isZoomed: rect.zoomed,
             index: (group.panes.firstIndex(of: rect) ?? 0) + 1,
             size: size,
-            onDrop: { dragged, side in onDropOnPane(dragged, terminal.id, side) }
+            onDrop: { dragged, side in onDropOnPane(dragged, terminal.id, side) },
+            onSearchFiles: onSearchFiles
         )
         .onTapGesture { if !isFocused { onFocus(terminal.id) } }
     }
@@ -268,6 +271,7 @@ private struct TilePane: View {
     /// The pane's own size, so a drop can be placed against its edges.
     let size: CGSize
     let onDrop: (String, TileDirection) -> Void
+    let onSearchFiles: (String) async -> [String]
 
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var drag = PaneDrag.shared
@@ -285,7 +289,26 @@ private struct TilePane: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            if isLive {
+            if isLive, terminal.isAgentPane {
+                // Same empty `onResize` as the terminal case just below, and
+                // for the identical reason: `TileView.send(viewport:for:)`
+                // already tells tmux the WHOLE window's grid once, from the
+                // view's own pixel size and the same font metrics this pane
+                // would use — it does not consult what any one pane draws.
+                // An agent pane reporting its own geometry here would be
+                // exactly the bug the terminal case's comment describes,
+                // just for a chat instead of a VT grid.
+                AgentSurface(
+                    terminal: terminal,
+                    binary: binary,
+                    environment: environment,
+                    hostArguments: hostArguments,
+                    isFocused: isFocused,
+                    searchFiles: onSearchFiles,
+                    onResize: { _, _ in }
+                )
+                .id(terminal.id)
+            } else if isLive {
                 TerminalSurface(
                     terminal: terminal.short,
                     binary: binary,

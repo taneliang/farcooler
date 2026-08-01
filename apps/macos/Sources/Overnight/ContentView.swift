@@ -25,11 +25,24 @@ struct ContentView: View {
     @State private var showImportWorktrees = false
     /// One divider resize at a time. See `resizeDivider`.
     @State private var resizingDivider = false
+    /// Set when `setPaneMode` comes back `confirmationRequired` — a turn is in
+    /// flight and switching would cancel it. Drives a sheet the same way
+    /// `removeWorkspace` does, rather than a banner: this refusal has an
+    /// answer ("cancel it anyway?") a banner cannot offer.
+    @State private var pendingPaneModeSwitch: PaneModeConfirmation?
 
     /// What the detail pane is showing.
     enum Selection: Hashable {
         case workspace(String)
         case terminal(workspace: String, terminal: String)
+    }
+
+    /// What confirming a pane-mode switch would do, and to which pane.
+    struct PaneModeConfirmation: Identifiable {
+        let id = UUID()
+        let terminal: String
+        let mode: String
+        let message: String
     }
 
     var body: some View {
@@ -216,6 +229,11 @@ struct ContentView: View {
             ) { typed in
                 await client.removeWorktree(ws.short, confirm: typed)
                 if case .terminal(let w, _) = selection, w == ws.id { selection = nil }
+            }
+        }
+        .sheet(item: $pendingPaneModeSwitch) { pending in
+            PaneModeConfirmSheet(message: pending.message) {
+                await client.setPaneMode(pending.terminal, mode: pending.mode, force: true)
             }
         }
     }
@@ -558,6 +576,7 @@ struct ContentView: View {
                     onGeometry: { cols, rows in
                         await client.resize(terminal: term.short, columns: cols, rows: rows)
                     },
+                    onSearchFiles: { query in await client.searchFiles(in: ws, query: query) },
                     onAction: { action in Task { await run(action, on: term) } }
                 )
             } else {
@@ -626,7 +645,8 @@ struct ContentView: View {
             },
             onResizeDivider: { terminal, side, cells in
                 resizeDivider(terminal, side: side, cells: cells, in: ws)
-            }
+            },
+            onSearchFiles: { query in await client.searchFiles(in: ws, query: query) }
         )
     }
 
@@ -798,8 +818,37 @@ struct ContentView: View {
         case .previousGroup:
             reveal(await client.selectLayout("--prev", in: workspace), in: workspace)
 
+        case .toggleAgentPane:
+            // Falls back to the plain selection when there is no tmux group
+            // yet — the few seconds `detail`'s own comment describes, before
+            // the first `layout show` has come back, where `here` is nil but
+            // a terminal is still very much selected.
+            let target =
+                here.flatMap { rect in workspace.terminals.first { $0.id == rect.id } }
+                ?? selectedTerminal?.terminal
+            guard let target else { return }
+            await togglePaneMode(target)
+
         case .help:
             showShortcuts = true
+        }
+    }
+
+    /// Ask the daemon to flip a pane between its terminal and its agent chat.
+    ///
+    /// One call, and the daemon is the one deciding whether that is even
+    /// possible — a client guessing "this preset can't be an agent" would be
+    /// exactly the kind of state the design says clients never derive.
+    private func togglePaneMode(_ terminal: Terminal) async {
+        let target = terminal.isAgentPane ? "terminal" : "agent"
+        switch await client.setPaneMode(terminal.short, mode: target) {
+        case .ok, .failed:
+            // A failure already reached `client.lastError`, which the banner
+            // already shows — nothing further to do from here.
+            break
+        case let .confirmationRequired(message):
+            pendingPaneModeSwitch = PaneModeConfirmation(
+                terminal: terminal.short, mode: target, message: message)
         }
     }
 
@@ -1018,6 +1067,13 @@ struct ContentView: View {
             // thing someone opened the palette to go and look something up for.
             if !described.isEmpty, taskDraft.isEmpty { taskDraft = described }
             showQuickCreate = true
+
+        case .togglePaneMode(let workspace, let terminal):
+            guard
+                let target = client.fleet.workspaces.first(where: { $0.id == workspace })?
+                    .terminals.first(where: { $0.id == terminal })
+            else { return }
+            Task { await togglePaneMode(target) }
         }
     }
 

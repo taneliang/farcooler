@@ -14,6 +14,10 @@ enum PaletteAction: Hashable {
     /// Carries what was typed, because in this panel the query IS the task
     /// description far more often than it is a search for one.
     case newTask(String)
+    /// Terminal ⟷ chat, for one specific pane. The palette is one of the two
+    /// places the plan names for this toggle — the other is `⌃B a` — because
+    /// the pane itself grew no button for it.
+    case togglePaneMode(workspace: String, terminal: String)
 }
 
 /// One row, already resolved into the handful of things a row can draw.
@@ -126,7 +130,8 @@ enum PaletteIndex {
     /// answers the question: with no worktree matched, "new terminal" still has
     /// an obvious place to go, and offering it there beats offering nothing.
     static func matching(
-        _ query: String, in workspaces: [Workspace], current: String? = nil, limit: Int = 20
+        _ query: String, in workspaces: [Workspace], current: String? = nil,
+        currentTerminal: Terminal? = nil, limit: Int = 20
     ) -> [PaletteEntry] {
         var scored: [(entry: PaletteEntry, score: Int)] = []
         var bestWorkspace: (workspace: Workspace, score: Int)?
@@ -166,6 +171,27 @@ enum PaletteIndex {
         // process — going somewhere is free and undoable, starting an agent is
         // neither.
         var actions: [PaletteEntry] = []
+
+        // Scoped to the pane actually being looked at, so it never floats
+        // free of the terminal it would act on — unlike "new terminal" and
+        // "new task" below, which have an obvious home even with nothing
+        // selected, this one has none without a terminal to name.
+        if let currentTerminal, let owner = workspaces.first(where: { workspace in
+            workspace.terminals.contains { $0.id == currentTerminal.id }
+        }) {
+            actions.append(
+                PaletteEntry(
+                    id: "toggle-pane-mode:\(currentTerminal.id)",
+                    action: .togglePaneMode(workspace: owner.id, terminal: currentTerminal.id),
+                    title: currentTerminal.isAgentPane
+                        ? "Switch \(currentTerminal.label) to Terminal"
+                        : "Switch \(currentTerminal.label) to Chat",
+                    detail: owner.task,
+                    symbol: currentTerminal.isAgentPane
+                        ? "terminal" : "bubble.left.and.bubble.right",
+                    kind: "action"))
+        }
+
         let target = bestWorkspace?.workspace
             ?? workspaces.first { $0.id == current }
         if let target {

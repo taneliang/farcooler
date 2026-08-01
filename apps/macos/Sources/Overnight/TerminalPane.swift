@@ -17,6 +17,7 @@ struct TerminalPane: View {
     let environment: [String: String]
     let hostArguments: [String]
     let onGeometry: (Int, Int) async -> Void
+    let onSearchFiles: (String) async -> [String]
     let onAction: (TerminalAction) -> Void
 
     private var isLive: Bool {
@@ -26,7 +27,23 @@ struct TerminalPane: View {
 
     var body: some View {
         Group {
-            if isLive {
+            if isLive, terminal.isAgentPane {
+                // Same rectangle, same lifecycle, a chat drawn into it instead
+                // of a VT grid. See `AgentSurface`'s own doc comment for why
+                // it still owes `onGeometry` an honest answer even though it
+                // draws no grid of its own.
+                AgentSurface(
+                    terminal: terminal,
+                    binary: binary,
+                    environment: environment,
+                    hostArguments: hostArguments,
+                    // One pane, so it always owns the keyboard.
+                    isFocused: true,
+                    searchFiles: onSearchFiles,
+                    onResize: onGeometry
+                )
+                .id(terminal.id)
+            } else if isLive {
                 TerminalSurface(
                     terminal: terminal.short,
                     binary: binary,

@@ -23,6 +23,13 @@ enum TileCommand: Equatable {
     case newGroup
     case nextGroup
     case previousGroup
+    /// Terminal ⟷ chat, for the focused pane. Not a layout verb — nothing
+    /// about the arrangement changes — but it lives here anyway, with tmux's
+    /// other pane-scoped bindings, because that is where the plan puts it:
+    /// "no new permanent chrome on a pane" means this has to be a command
+    /// reachable from the keyboard and the palette, not a button drawn on
+    /// the pane itself.
+    case toggleAgentPane
     case help
 
     static let notification = Notification.Name("overnight.tile")
@@ -182,6 +189,7 @@ final class PrefixMode: ObservableObject {
         switch first {
         case " ": return .cycle
         case "z": return .zoom
+        case "a": return .toggleAgentPane
         case "o": return .focusNext
         case ";": return .focusPrevious
         case "h": return .focus(.left)
@@ -246,7 +254,7 @@ struct PrefixHint: View {
             // one least likely to be guessed.
             ("z", "zoom"), ("o", "next"), ("\u{2303}hjkl", "move"),
             ("space", "layout"), ("%", "split"), ("\"", "split down"), ("!", "pop out"),
-            ("c", "new"), ("?", "all keys"),
+            ("a", "chat"), ("c", "new"), ("?", "all keys"),
         ],
         [
             ("z", "zoom"), ("o", "next"), ("space", "layout"), ("%", "split"),

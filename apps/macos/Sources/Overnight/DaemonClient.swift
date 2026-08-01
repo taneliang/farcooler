@@ -558,6 +558,69 @@ final class DaemonClient: ObservableObject {
         _ = await run(["terminal", "resize", terminal, "\(columns)", "\(rows)"])
     }
 
+    /// Files in a worktree matching a partial path, for the composer's `@`
+    /// picker.
+    ///
+    /// DEVIATION, recorded the same way `AgentStream` records its own:
+    /// `crates/cli` has no `workspace file-search` subcommand yet, so this is
+    /// written against the shape the feature needs — a query in, matching
+    /// paths out — and is inert until that subcommand lands. Empty on any
+    /// failure rather than surfacing `lastError`: a mention picker that
+    /// cannot search is a picker with nothing to show, not a reason to put a
+    /// banner over someone's half-typed message.
+    func searchFiles(in workspace: Workspace, query: String) async -> [String] {
+        guard !query.isEmpty else { return [] }
+        guard
+            let data = await run([
+                "workspace", "file-search", workspace.short, query, "--json",
+            ])
+        else { return [] }
+        struct Result: Decodable { var paths: [String] }
+        return (try? JSONDecoder().decode(Result.self, from: data))?.paths ?? []
+    }
+
+    /// What asking the daemon to switch a pane's mode came back with.
+    enum PaneModeResult {
+        case ok
+        /// A turn is in flight; switching would cancel it. Carries the
+        /// daemon's own description of what that turn is, so the confirmation
+        /// shown for it says something true rather than a generic warning.
+        case confirmationRequired(String)
+        case failed(String)
+    }
+
+    /// Switch a pane between showing its terminal and showing its agent chat.
+    ///
+    /// DEVIATION, same shape as `searchFiles` above: `crates/cli` has no
+    /// `terminal set-pane-mode` subcommand yet. This is written against the
+    /// daemon's own contract for it — a plain success, or a refusal naming
+    /// what is in flight — so the confirmation flow above it (`ContentView`)
+    /// can be built and reviewed now rather than after the CLI catches up.
+    /// The exact wording the daemon will use for a refusal is not settled
+    /// either, so the detection here is a case-insensitive substring match
+    /// against "confirmation" — a best guess against an undefined wire
+    /// format, not a parsed error code, and worth tightening once the real
+    /// shape exists.
+    @discardableResult
+    func setPaneMode(_ terminal: String, mode: String, force: Bool = false) async -> PaneModeResult {
+        var args = ["terminal", "set-pane-mode", terminal, mode]
+        if force { args.append("--force") }
+
+        let before = lastError
+        guard await run(args) != nil else {
+            let message = lastError ?? "command failed"
+            if message.localizedCaseInsensitiveContains("confirmation") {
+                // Leave the banner clean: this refusal becomes a sheet, not a
+                // banner, in `ContentView`.
+                lastError = before
+                return .confirmationRequired(message)
+            }
+            return .failed(message)
+        }
+        await refresh()
+        return .ok
+    }
+
     /// Create a terminal and return it, identified by difference.
     ///
     /// The create call does not report which record it made, and comparing whole

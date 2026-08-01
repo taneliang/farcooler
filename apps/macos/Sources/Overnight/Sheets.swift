@@ -205,6 +205,43 @@ struct RemoveWorkspaceSheet: View {
     }
 }
 
+/// Confirms cancelling an in-flight turn to switch a pane's mode.
+///
+/// `DaemonClient.setPaneMode` answers `confirmationRequired` rather than just
+/// failing precisely so this can exist: a flat refusal would leave switching
+/// to terminal mode mid-turn simply impossible from the keyboard, and forcing
+/// it through with no confirmation would cancel an agent's work with the same
+/// keystroke that opens the layout menu.
+struct PaneModeConfirmSheet: View {
+    /// The daemon's own description of what is in flight, so this says
+    /// something true about the specific turn rather than a generic warning.
+    let message: String
+    let onConfirm: () async -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var working = false
+
+    var body: some View {
+        SheetFrame(
+            title: "Cancel the current turn?",
+            confirmTitle: "Cancel Turn and Switch",
+            confirmRole: .destructive,
+            canConfirm: !working,
+            working: working,
+            error: nil,
+            onCancel: { dismiss() },
+            onConfirm: {
+                working = true
+                await onConfirm()
+                working = false
+                dismiss()
+            }
+        ) {
+            Callout(icon: "exclamationmark.triangle.fill", tone: .warning, text: message)
+        }
+    }
+}
+
 // MARK: - Shared chrome
 
 /// One frame for every sheet, so padding, button order and rhythm match.
