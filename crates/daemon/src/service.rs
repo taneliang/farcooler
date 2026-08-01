@@ -705,6 +705,25 @@ impl Service {
     ///
     /// Idempotent, and cheap enough to run unconditionally: setting a pane option
     /// to the value it already has is one tmux call per live pane, once.
+
+    /// Whether this pane currently has a coding agent in it.
+    ///
+    /// Adoption only makes sense for a pane that IS an agent — a shell has no
+    /// conversation to continue, and letting one adopt a session is how a
+    /// terminal ends up showing somebody else's transcript.
+    ///
+    /// Screen as well as process name, for the reason `activity::identify`
+    /// exists: Claude Code renames itself to its version, so `2.1.220` is an
+    /// agent that process matching alone would never find.
+    async fn pane_runs_an_agent(&self, id: Uuid) -> bool {
+        let snapshot = self.inventory.snapshot();
+        let Some(pane) = snapshot.panes.iter().find(|p| p.terminal_id == id) else {
+            return false;
+        };
+        let screen = self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default();
+        overnight_core::activity::identify(&pane.command, &screen).is_some()
+    }
+
     /// Re-open a socket for every terminal already in agent pane mode.
     ///
     /// A daemon restart must not cost a conversation. The shims survived it —
@@ -907,17 +926,52 @@ impl Service {
         // attaching a chat to the wrong conversation.
         let session_id = match term.agent_session_id.clone() {
             Some(existing) => Some(existing),
-            None => {
+            // Adoption, and it has to be earned rather than assumed.
+            //
+            // This used to search unconditionally with a start time of the
+            // UNIX epoch, which defeated the staleness guard entirely, and
+            // then swallowed the ambiguity refusal with `.ok()`. So a SHELL
+            // pane switching to agent mode quietly adopted whatever single
+            // session happened to exist in the worktree — routinely the
+            // conversation belonging to a different pane, which then showed
+            // the same transcript under two identities.
+            None if self.pane_runs_an_agent(id).await => {
                 let home = directories::UserDirs::new()
                     .map(|d| d.home_dir().to_path_buf())
                     .ok_or(DomainError::NotFound)?;
-                session_discovery::discover_claude_session(
+                // Anything another terminal already claims is not ours to
+                // take. Two panes rendering one conversation is worse than a
+                // pane starting a fresh one.
+                let claimed: Vec<String> = self
+                    .store
+                    .list_terminals_for_workspace(term.workspace_id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|t| t.id != id)
+                    .filter_map(|t| t.agent_session_id)
+                    .collect();
+                match session_discovery::discover_claude_session(
                     &home,
                     Path::new(&ws.worktree_path),
                     std::time::SystemTime::UNIX_EPOCH,
-                )
-                .ok()
+                ) {
+                    Ok(found) if !claimed.contains(&found) => Some(found),
+                    Ok(found) => {
+                        tracing::info!(
+                            session = %found,
+                            "the only session here belongs to another terminal; starting a new one"
+                        );
+                        None
+                    }
+                    // Ambiguous or absent: start fresh rather than guess which
+                    // of several conversations this pane meant.
+                    Err(e) => {
+                        tracing::info!(error = %e, "no session to adopt; starting a new one");
+                        None
+                    }
+                }
             }
+            None => None,
         };
 
         let command = match pane_mode {

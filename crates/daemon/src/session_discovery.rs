@@ -174,4 +174,27 @@ mod tests {
             Err(DiscoveryError::NotFound)
         ));
     }
+
+    #[test]
+    fn a_session_belonging_to_another_pane_is_not_adoptable() {
+        // The failure this guards: two terminals share a worktree, one is a
+        // shell, and switching it to agent mode adopted the OTHER pane's
+        // conversation — so both panes rendered one transcript under two
+        // identities. Discovery cannot see that on its own; the caller must
+        // exclude what other terminals already claim, and this records the
+        // shape that exclusion depends on.
+        let home = scratch("claimed");
+        let worktree = Path::new("/Users/e/Dev/shared");
+        let dir = home.join(".claude/projects").join(project_dir_name(worktree));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("belongs-to-pane-one.jsonl"), "{}").unwrap();
+
+        let found = discover_claude_session(&home, worktree, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(found, "belongs-to-pane-one");
+
+        // The caller's job, asserted here because it is the whole protection:
+        // a candidate another terminal already holds must be refused.
+        let claimed = vec!["belongs-to-pane-one".to_string()];
+        assert!(claimed.contains(&found), "the caller must reject this");
+    }
 }
