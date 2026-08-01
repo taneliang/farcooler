@@ -10,6 +10,7 @@ name = "overnight"
 path = "src/main.rs"
 
 [dependencies]
+overnight-agent.workspace = true
 overnight-core.workspace = true
 overnight-protocol.workspace = true
 overnight-daemon.workspace = true

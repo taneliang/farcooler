@@ -17,6 +17,7 @@
 //! Every state printed here is DERIVED at the moment you ask. Nothing reads a
 //! stored "running" flag, because none exists.
 
+mod agent_host;
 mod daemon_link;
 mod host_install;
 mod remote;
@@ -89,6 +90,23 @@ enum Command {
     /// Install or inspect Overnight on a Linux host over ssh.
     #[command(subcommand, name = "host")]
     HostCmd(HostCmd),
+    /// Host a headless coding agent in this pane. Started by the daemon.
+    ///
+    /// Not a command a user types. It is the process a pane runs in agent pane
+    /// mode, and it is a subcommand rather than a second binary so that shim
+    /// and daemon can never be different versions.
+    AgentHost {
+        #[arg(long)]
+        terminal: uuid::Uuid,
+        #[arg(long)]
+        socket: std::path::PathBuf,
+        #[arg(long)]
+        worktree: std::path::PathBuf,
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        adapter: Option<String>,
+    },
 }
 
 /// Tiling, in tmux's vocabulary — because it IS tmux.
@@ -374,6 +392,9 @@ async fn run() -> Fallible {
             host_install::install(&target, from.as_deref()).await
         }
         Command::HostCmd(HostCmd::Status { target }) => host_install::status(&target).await,
+        Command::AgentHost { terminal, socket, worktree, session, adapter } => {
+            agent_host::run(terminal, socket, worktree, session, adapter).await
+        }
     }
 }
 

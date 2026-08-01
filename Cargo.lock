@@ -1403,6 +1403,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "clap",
+ "overnight-agent",
  "overnight-core",
  "overnight-daemon",
  "overnight-protocol",

@@ -157,6 +157,26 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         activity: wire::AgentActivity::Unspecified as i32,
         activity_changed_at: None,
         current_command: String::new(),
+        pane_mode: pane_mode(t.pane_mode),
+        agent_session_id: t.agent_session_id.clone(),
+        // Left unset here for the same reason as `activity`: both describe a
+        // live ACP session, and only the supervisor holding that session knows
+        // them. A converter that guessed would report a mode the agent is not
+        // in.
+        agent_mode: None,
+        available_agent_modes: Vec::new(),
+    }
+}
+
+/// Durable intent to the wire.
+///
+/// `UNSPECIFIED` is never produced: a client that cannot tell which mode a
+/// pane is in would not know which surface to draw, so every terminal names
+/// one.
+pub fn pane_mode(mode: models::PaneMode) -> i32 {
+    match mode {
+        models::PaneMode::Terminal => wire::PaneMode::Terminal as i32,
+        models::PaneMode::Agent => wire::PaneMode::Agent as i32,
     }
 }
 
