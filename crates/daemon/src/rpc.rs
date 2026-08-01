@@ -401,6 +401,10 @@ impl Rpc {
 
                 let (contents, columns, rows) = svc.screen(id).await?;
                 let (cursor_column, cursor_row) = svc.cursor(id).await.unwrap_or((0, 0));
+                // Sent with every screen, including an unchanged one: a client
+                // that rebuilt its emulator needs these even when the contents
+                // it already holds are still current.
+                let modes = svc.pane_modes(id).await.unwrap_or_default();
 
                 // The cursor is part of the identity, not just the contents: a
                 // caret moving along a line changes nothing else on screen, and a
@@ -416,6 +420,7 @@ impl Rpc {
                             cursor_row,
                             revision,
                             unchanged: true,
+                            modes: modes.clone(),
                         },
                     ));
                 }
@@ -428,6 +433,7 @@ impl Rpc {
                     cursor_row,
                     revision,
                     unchanged: false,
+                    modes,
                 }))
             }
 

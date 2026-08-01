@@ -109,6 +109,13 @@ impl Runtime {
         Ok((text, pane.columns, pane.rows))
     }
 
+    /// The pane's modes, as the sequences that restore them.
+    pub async fn pane_modes(&self, id: Uuid) -> Result<String> {
+        let snapshot = self.inventory.snapshot();
+        let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
+        Ok(self.tmux.pane_modes(&pane.pane_id).await?.restore_sequence())
+    }
+
     /// Where the cursor sits, so a remote client can draw it in the right cell.
     ///
     /// Asked for separately from the screen because `capture-pane` does not carry

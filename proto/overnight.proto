@@ -587,6 +587,18 @@ message TerminalScreen {
   // is battery.
   uint64 revision = 6;
   bool unchanged = 7;
+  // The escape sequences that put a fresh emulator into the modes the pane's
+  // program is actually in — alternate screen, mouse tracking and its
+  // encoding, application cursor keys, wrap, caret visibility.
+  //
+  // A capture is contents; modes are not contents. They were set once, by
+  // sequences the program emitted long before any client attached, so a client
+  // that builds an emulator from a capture is wrong about all of them. The
+  // stream's replay states them too, but a client cannot depend on that: a
+  // stream that ends and reattaches rebuilds the emulator, and whichever
+  // replay carried the modes may have gone into one that was then discarded.
+  // Sent with the screen, they arrive with the state they describe.
+  string modes = 8;
 }
 
 // Exact bytes for a pane's input.

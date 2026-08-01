@@ -820,6 +820,12 @@ impl Service {
         self.runtime().resize_terminal(id, columns, rows).await
     }
 
+    /// The escape sequences that put a fresh emulator into the modes this
+    /// pane's program is in. See `TerminalScreen.modes`.
+    pub async fn pane_modes(&self, id: Uuid) -> Result<String> {
+        self.runtime().pane_modes(id).await
+    }
+
     /// Where the cursor is, so a client can draw it in the right cell.
     pub async fn cursor(&self, id: Uuid) -> Result<(u32, u32)> {
         self.runtime().cursor(id).await

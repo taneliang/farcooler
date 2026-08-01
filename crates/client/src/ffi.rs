@@ -428,6 +428,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
                 "cursorRow": screen.cursor_row,
                 "revision": screen.revision,
                 "unchanged": screen.unchanged,
+                "modes": screen.modes,
             }))
         }
 

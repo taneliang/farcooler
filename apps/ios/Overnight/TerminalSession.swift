@@ -429,7 +429,9 @@ final class TerminalSession: ObservableObject {
             // arriving the moment the channel opens, and a chunk with no
             // emulator to receive it is simply lost. It stays empty because the
             // stream's first act is to clear the screen and replay it.
-            vt = VTCore(columns: response.columns, rows: response.rows)
+            let emulator = VTCore(columns: response.columns, rows: response.rows)
+            applyModes(response.modes, to: emulator)
+            vt = emulator
             return response
         } catch {
             report(error)
@@ -624,6 +626,24 @@ final class TerminalSession: ObservableObject {
     /// tmux version, not something this file should have to trust. The
     /// streaming path is the opposite by nature — its bytes ARE a
     /// continuation — which is why it keeps whatever core this built.
+    /// Tell a fresh emulator what the program has already asked for.
+    ///
+    /// Without this the emulator is built believing the program wants no
+    /// mouse, is not on the alternate screen and sends ordinary arrow keys —
+    /// wrong for every full-screen program there is. The stream's replay says
+    /// the same thing, and depending on it was the bug: a stream that ends and
+    /// reattaches rebuilds the emulator, and the replay carrying the modes had
+    /// gone into the one that was discarded. What survived declined every
+    /// wheel event, so scrolling silently stopped working — and stayed stopped,
+    /// because nothing else ever mentions modes again.
+    ///
+    /// Arriving with the screen, they cannot be missed by whichever stream
+    /// happens to win.
+    private func applyModes(_ modes: String?, to emulator: VTCore) {
+        guard let modes, !modes.isEmpty else { return }
+        emulator.feed([UInt8](modes.utf8))
+    }
+
     private func render(_ response: ScreenResponse) {
         revision = response.revision
         guard let bytes = Data(base64Encoded: response.contents) else {
@@ -631,6 +651,7 @@ final class TerminalSession: ObservableObject {
             return
         }
         let emulator = VTCore(columns: response.columns, rows: response.rows)
+        applyModes(response.modes, to: emulator)
         // A capture separates its lines with a bare line feed, which to a
         // terminal means "down one row" and nothing about which column. Fed
         // straight in, every line starts where the previous one ended and the
@@ -815,6 +836,9 @@ private struct ScreenResponse: Decodable, Equatable {
     /// capture nothing did anything with.
     var revision: UInt64
     var unchanged: Bool
+    /// The escape sequences that put a fresh emulator into the modes the
+    /// program is in. See `applyModes`.
+    var modes: String?
 }
 
 /// A plain-data copy of one screen, safe to publish and hold past the moment
