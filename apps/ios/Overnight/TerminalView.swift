@@ -45,6 +45,7 @@ struct TerminalView: View {
     /// of them talking about the terminal you tapped away from.
     @State private var current: Terminal
     @State private var ctrlArmed = false
+    @State private var altArmed = false
     @State private var focusRequest = 0
     @State private var showWorkspaceList = false
 
@@ -92,11 +93,6 @@ struct TerminalView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Above the grid rather than below the key row: it is a way of
-            // choosing WHICH terminal you are looking at, which belongs with
-            // the title bar it effectively extends, not down with the keys
-            // that type into whichever one is already open.
-            TerminalTabStrip(workspaces: connection.fleet.workspaces, current: current, onSelect: select)
             GeometryReader { geo in
                 phaseContent(size: geo.size)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,10 +101,16 @@ struct TerminalView: View {
                             columns: columns(for: geo.size), rows: rows(for: geo.size))
                     }
             }
-            Divider().overlay(Color.white.opacity(0.15))
+            // Both bars live at the bottom, in thumb reach. The tab strip used
+            // to sit under the title, which put the one control you use
+            // constantly — switching terminal — at the far end of the screen
+            // from the hand holding the phone.
+            TerminalTabStrip(workspaces: connection.fleet.workspaces, current: current, onSelect: select)
             TerminalKeyRow(
                 ctrlArmed: ctrlArmed,
+                altArmed: altArmed,
                 onToggleCtrl: { ctrlArmed.toggle() },
+                onToggleAlt: { altArmed.toggle() },
                 onKey: sendKey
             )
         }
@@ -117,9 +119,10 @@ struct TerminalView: View {
         // host doesn't know or care whether this device is in Light Mode, and
         // neither should the screen showing its output.
         .preferredColorScheme(.dark)
-        // The task and its branch, not `currentName` — that's already the tab
-        // strip chip directly below, and repeating it here would waste the
-        // one line of title bar a phone has on something already on screen.
+        // The task and its branch, not `currentName` — the terminal already
+        // names itself in its tab strip chip, and repeating it here would
+        // waste the one line of title bar a phone has on something already on
+        // screen.
         // Same reasoning as the Mac's `Workspace.windowTitle`/`windowSubtitle`
         // (apps/macos/Sources/Overnight/Model.swift): the place you are is
         // the workspace, and that's true regardless of which of its
@@ -430,12 +433,12 @@ struct TerminalView: View {
             sendKey(UInt32(OVERNIGHT_VT_KEY_ENTER))
             return
         }
-        let modifiers = consumeCtrl()
+        let modifiers = consumeModifiers()
         Task { await session.send(text: text, modifiers: modifiers) }
     }
 
     private func sendKey(_ key: UInt32) {
-        let modifiers = consumeCtrl()
+        let modifiers = consumeModifiers()
         Task { await session.send(key: key, modifiers: modifiers) }
     }
 
@@ -443,9 +446,19 @@ struct TerminalView: View {
     /// that behaves like holding a modifier down. So it applies to exactly
     /// the next key and then clears itself, the same shape as Shift-lock on
     /// a physical keyboard with only one hand.
-    private func consumeCtrl() -> VTModifiers {
-        defer { ctrlArmed = false }
-        return ctrlArmed ? .control : []
+    /// Ctrl and Alt are toggles, not held keys — there is nothing on a
+    /// touchscreen that behaves like holding a modifier down. So each applies
+    /// to exactly the next key and then clears itself, the same shape as
+    /// Shift-lock on a physical keyboard with only one hand.
+    private func consumeModifiers() -> VTModifiers {
+        defer {
+            ctrlArmed = false
+            altArmed = false
+        }
+        var mods: VTModifiers = []
+        if ctrlArmed { mods.insert(.control) }
+        if altArmed { mods.insert(.alt) }
+        return mods
     }
 
     /// What `columns(for:)`/`rows(for:)` depend on — the view's own size, AND
@@ -472,73 +485,91 @@ struct TerminalView: View {
 /// `isPressed`-driven fill anywhere here.
 private struct TerminalKeyRow: View {
     let ctrlArmed: Bool
+    let altArmed: Bool
     let onToggleCtrl: () -> Void
+    let onToggleAlt: () -> Void
     let onKey: (UInt32) -> Void
 
     /// Keys share the width rather than each claiming their own.
     ///
-    /// This is the whole shape of the row, and getting it wrong cost more than
-    /// the row itself. Nine keys sized from their own content overflowed a
-    /// phone — a bordered button pads whatever you hand it, so a 34pt legend
-    /// became a 58pt key and nine of those wanted about 580pt of a 402pt
-    /// screen. The row did not clip on its own: it widened the stack it was
-    /// in, so the terminal ABOVE it was laid out too wide and lost characters
-    /// off both edges. `maxWidth: .infinity` on every key makes overflow
-    /// impossible to express.
+    /// Nine keys sized from their own content overflowed a phone once — a
+    /// bordered button pads whatever you hand it, so a 34pt legend became a
+    /// 58pt key. The row did not clip on its own: it widened the stack it was
+    /// in, so the terminal ABOVE it lost characters off both edges.
+    /// `maxWidth: .infinity` makes overflow impossible to express.
     private static let keyHeight: CGFloat = 40
 
     var body: some View {
         HStack(spacing: 5) {
-            key { onKey(UInt32(OVERNIGHT_VT_KEY_ESCAPE)) } label: { legend("esc") }
-            key { onKey(UInt32(OVERNIGHT_VT_KEY_TAB)) } label: { legend("tab") }
-            key(filled: ctrlArmed, action: onToggleCtrl) { legend("ctrl") }
-            key { onKey(UInt32(OVERNIGHT_VT_KEY_LEFT)) } label: { glyph("chevron.left") }
-            key { onKey(UInt32(OVERNIGHT_VT_KEY_DOWN)) } label: { glyph("chevron.down") }
-            key { onKey(UInt32(OVERNIGHT_VT_KEY_UP)) } label: { glyph("chevron.up") }
-            key { onKey(UInt32(OVERNIGHT_VT_KEY_RIGHT)) } label: { glyph("chevron.right") }
-            key { onKey(UInt32(OVERNIGHT_VT_KEY_ENTER)) } label: { glyph("return") }
+            key { onKey(UInt32(OVERNIGHT_VT_KEY_ESCAPE)) } label: { glyph("escape") }
+            key { onKey(UInt32(OVERNIGHT_VT_KEY_TAB)) } label: { glyph("arrow.right.to.line") }
+            key(filled: ctrlArmed, action: onToggleCtrl) { glyph("control") }
+            key(filled: altArmed, action: onToggleAlt) { glyph("option") }
+            // Held, each arrow becomes the jump it is the small version of.
+            // A phone has no room for eight more keys and no modifier to hide
+            // them behind, and holding a direction to go further in it is the
+            // gesture people already have for exactly this.
+            // Solid arrows rather than chevrons, because `control` IS a
+            // chevron: ⌃ beside a chevron-up meant two keys with the same
+            // glyph sitting four apart in the same row.
+            arrow("arrow.left", tap: OVERNIGHT_VT_KEY_LEFT, hold: OVERNIGHT_VT_KEY_HOME)
+            arrow("arrow.down", tap: OVERNIGHT_VT_KEY_DOWN, hold: OVERNIGHT_VT_KEY_PAGE_DOWN)
+            arrow("arrow.up", tap: OVERNIGHT_VT_KEY_UP, hold: OVERNIGHT_VT_KEY_PAGE_UP)
+            arrow("arrow.right", tap: OVERNIGHT_VT_KEY_RIGHT, hold: OVERNIGHT_VT_KEY_END)
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 6)
-        // The background reaches the screen edge, under the home indicator, the
-        // way a real keyboard accessory does; only the keys are held clear of
-        // it, by the padding above rather than by the background stopping
-        // short.
-        .background(.bar, ignoresSafeAreaEdges: .bottom)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
+        // No Return key. The software keyboard already has one, and the row's
+        // whole job is the keys a phone keyboard does not have.
+        //
+        // The keyboard's own backdrop, not a material of this row's choosing.
+        // The keys already match the keyboard's keys, so matching the surface
+        // behind them is what makes this read as the keyboard's top row rather
+        // than a lighter slab balanced on it.
+        //
+        // A seam remains where the keyboard's panel rounds its top corners and
+        // this row does not. The complete answer is for this to BE the
+        // keyboard's `inputAccessoryView`, which iOS draws as part of the
+        // keyboard and corners to match; that also means it would disappear
+        // whenever the keyboard did, which is a behaviour change rather than a
+        // colour, so it is not being made quietly here.
+        .background(Color(uiColor: .secondarySystemBackground), ignoresSafeAreaEdges: .bottom)
     }
 
-    /// One key: a rounded rectangle, because that is what a key on this
-    /// platform looks like. The system's own bordered style rounds to a
-    /// capsule at these proportions, which reads as a row of pills rather than
-    /// a keyboard, so the shape is drawn here instead of inherited.
+    /// An arrow that means one thing tapped and a bigger version of the same
+    /// thing held.
+    private func arrow(_ symbol: String, tap: UInt32, hold: UInt32) -> some View {
+        key(action: { onKey(tap) }, onHold: { onKey(hold) }) { glyph(symbol) }
+    }
+
+    /// One key: a rounded rectangle, because that is what a key looks like
+    /// here. The system's bordered style rounds to a capsule at these
+    /// proportions, which reads as a row of pills rather than a keyboard.
     private func key<Label: View>(
         filled: Bool = false,
         action: @escaping () -> Void,
+        onHold: (() -> Void)? = nil,
         @ViewBuilder label: () -> Label
     ) -> some View {
         Button(action: action) {
             label()
                 .frame(maxWidth: .infinity, minHeight: Self.keyHeight)
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(filled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.fill.tertiary))
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(filled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color(uiColor: .systemGray3)))
                 )
                 .foregroundStyle(filled ? Color.white : Color.primary)
         }
         .buttonStyle(.plain)
-    }
-
-    private func legend(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 13, weight: .medium, design: .monospaced))
-            // A legend that reflows is unreadable and one that shrinks is
-            // unrecognisable beside its neighbours; if the width ever gets
-            // that tight, the right answer is fewer keys.
-            .lineLimit(1)
+        // A long press that fires once, rather than a repeat: these send a
+        // jump, and a jump that repeats while your thumb rests on it would
+        // scroll somewhere nobody asked to be.
+        .onLongPressGesture(minimumDuration: 0.35) { onHold?() }
     }
 
     private func glyph(_ symbol: String) -> some View {
-        Image(systemName: symbol).font(.system(size: 14, weight: .semibold))
+        Image(systemName: symbol).font(.system(size: 15, weight: .medium))
     }
 }
 
