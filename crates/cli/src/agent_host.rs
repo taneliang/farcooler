@@ -9,6 +9,8 @@
 //! attachable, so this log is what a user sees when they go looking.
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use overnight_agent::acp::conn::AcpConnection;
 use overnight_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
@@ -16,6 +18,7 @@ use overnight_agent::ring::{AgentReplay, AgentRing};
 use overnight_agent::session::AgentSession;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
+use tokio::sync::{Notify, mpsc};
 use uuid::Uuid;
 
 /// The error type every command in this binary already uses: a boxed
@@ -73,32 +76,136 @@ pub async fn run(
         }
     };
 
-    let (mut agent, prelude) = AgentSession::start(conn, session).await?;
+    let (agent, prelude) = AgentSession::start(conn, session).await?;
     println!("{}", status_line(&Status::Connected { session_id: agent.session_id.clone() }));
 
-    let mut ring = AgentRing::new();
-    for event in prelude {
-        ring.push(event);
+    // Captured before `into_running()` consumes `agent`: `RunningSession`
+    // does not carry these, since nothing after startup needs to send them
+    // anywhere but the `Established` message a fresh daemon connection wants.
+    let session_id = agent.session_id.clone();
+    let available_modes = agent.available_modes.clone();
+
+    let ring = Arc::new(Mutex::new(AgentRing::new()));
+    {
+        let mut ring = ring.lock().expect("ring mutex");
+        for event in prelude {
+            ring.push(event);
+        }
     }
 
-    // The daemon may restart under us. Reconnect forever; the ring is what
-    // makes that free.
+    // The daemon has nobody to answer `fs/*` and permission requests while it
+    // is down or reconnecting, so pumping cannot live inside the daemon-link
+    // loop below — that loop reconnects and can be entirely absent for
+    // arbitrary stretches, and the agent must keep working through all of
+    // them. This task is the ONLY place `RunningSession` is touched, and it
+    // runs independent of whether anyone is subscribed to the ring.
+    let mut running = agent.into_running();
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+    // Signals the daemon-link loop that the ring has new events, so a
+    // connected daemon does not have to poll. `notify_one` (not
+    // `notify_waiters`) because a permit must survive the daemon being
+    // disconnected at push time — the very case Bug 2 is about — and be
+    // delivered to whichever `serve` call is listening when it reconnects.
+    let notify = Arc::new(Notify::new());
+
+    {
+        let ring = ring.clone();
+        let notify = notify.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    // Both branches are `mpsc` receives and NOTHING ELSE. That
+                    // is the whole point, and it is not a stylistic choice.
+                    //
+                    // `recv_frame` only receives; the frame is handled below,
+                    // outside the select, where nothing can cancel it. Racing
+                    // `next_events` here instead would reintroduce the bug this
+                    // structure exists to kill: it awaits `respond` after
+                    // `handle_fs_write` has already touched the disk, so losing
+                    // the race leaves the file written and the agent waiting
+                    // forever for an answer that never comes.
+                    frame = running.recv_frame() => {
+                        let frame = match frame {
+                            Ok(frame) => frame,
+                            Err(e) => {
+                                tracing::warn!(terminal = %terminal, error = %e, "agent adapter closed; nothing left to pump");
+                                return;
+                            }
+                        };
+                        // Handled to completion, uncancellable by construction.
+                        match running.handle(frame).await {
+                            Ok(events) => {
+                                if events.is_empty() { continue; }
+                                let mut ring = ring.lock().expect("ring mutex");
+                                for event in events {
+                                    ring.push(event);
+                                }
+                                drop(ring);
+                                notify.notify_one();
+                            }
+                            Err(e) => {
+                                tracing::warn!(terminal = %terminal, error = %e, "agent adapter closed; nothing left to pump");
+                                return;
+                            }
+                        }
+                    }
+                    cmd = cmd_rx.recv() => {
+                        let Some(cmd) = cmd else { return }; // every sender (all daemon-link tasks) is gone: shim is shutting down
+                        let result = match cmd {
+                            DaemonMessage::Prompt { text } => running.prompt(&text).await,
+                            DaemonMessage::Answer { request_id, option_id } => {
+                                let id: serde_json::Value = serde_json::from_str(&request_id)
+                                    .unwrap_or(serde_json::Value::String(request_id));
+                                running.answer(id, &option_id).await
+                            }
+                            DaemonMessage::SetMode { agent_mode } => running.set_mode(&agent_mode).await,
+                            DaemonMessage::Cancel => running.cancel().await,
+                            // The daemon-link loop answers `Subscribe` itself
+                            // by reading the ring directly; it never reaches
+                            // this channel.
+                            DaemonMessage::Subscribe { .. } => Ok(()),
+                        };
+                        if let Err(e) = result {
+                            tracing::warn!(terminal = %terminal, error = %e, "a daemon command could not reach the agent");
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // The daemon may restart under us, or simply not be up yet. Reconnect
+    // forever; the ring plus `notify` is what makes that free — nothing
+    // above this loop depends on a connection existing.
+    let mut cursor = 0u64;
     loop {
         let Ok(stream) = UnixStream::connect(&socket).await else {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
             continue;
         };
-        if let Err(e) = serve(&mut agent, &mut ring, stream, terminal).await {
+        if let Err(e) =
+            serve(&session_id, &available_modes, &ring, &notify, &cmd_tx, stream, &mut cursor).await
+        {
             tracing::warn!(terminal = %terminal, error = %e, "daemon link dropped; will reconnect");
         }
     }
 }
 
+/// One daemon connection's lifetime.
+///
+/// This function never touches `RunningSession` — it only reads the shared
+/// ring and forwards commands over `cmd_tx` to the task that owns the
+/// session. That is what lets a daemon reconnect (a brand new call to this
+/// function, with a brand new socket) without any risk of two places racing
+/// to write to the agent's stdin at once.
 async fn serve(
-    agent: &mut AgentSession,
-    ring: &mut AgentRing,
+    session_id: &str,
+    available_modes: &[String],
+    ring: &Arc<Mutex<AgentRing>>,
+    notify: &Notify,
+    cmd_tx: &mpsc::UnboundedSender<DaemonMessage>,
     stream: UnixStream,
-    terminal: Uuid,
+    cursor: &mut u64,
 ) -> Fallible {
     let (read_half, mut write_half) = stream.into_split();
     let mut lines = BufReader::new(read_half).lines();
@@ -106,14 +213,12 @@ async fn serve(
     write_half
         .write_all(
             encode_line(&ShimMessage::Established {
-                session_id: agent.session_id.clone(),
-                available_modes: agent.available_modes.clone(),
+                session_id: session_id.to_string(),
+                available_modes: available_modes.to_vec(),
             })?
             .as_bytes(),
         )
         .await?;
-
-    let mut cursor = 0u64;
 
     loop {
         tokio::select! {
@@ -121,38 +226,43 @@ async fn serve(
                 let Some(line) = line? else { return Ok(()) };
                 match decode_line::<DaemonMessage>(&line)? {
                     DaemonMessage::Subscribe { from_seq } => {
-                        cursor = from_seq;
-                        let message = match ring.since(from_seq) {
-                            AgentReplay::At { events } => ShimMessage::Events { events },
-                            AgentReplay::Gap { resumed_at, dropped, events } =>
-                                ShimMessage::Trimmed { resumed_at, dropped, events },
+                        let message = {
+                            let ring = ring.lock().expect("ring mutex");
+                            let message = match ring.since(from_seq) {
+                                AgentReplay::At { events } => ShimMessage::Events { events },
+                                AgentReplay::Gap { resumed_at, dropped, events } =>
+                                    ShimMessage::Trimmed { resumed_at, dropped, events },
+                            };
+                            *cursor = ring.next_seq();
+                            message
                         };
-                        cursor = ring.next_seq();
                         write_half.write_all(encode_line(&message)?.as_bytes()).await?;
                     }
-                    DaemonMessage::Prompt { text } => agent.prompt(&text).await?,
-                    DaemonMessage::Answer { request_id, option_id } => {
-                        let id: serde_json::Value = serde_json::from_str(&request_id)
-                            .unwrap_or(serde_json::Value::String(request_id.clone()));
-                        agent.answer(id, &option_id).await?;
+                    // Prompt/Answer/SetMode/Cancel all need `RunningSession`,
+                    // which only the session task in `run` is allowed to
+                    // touch — forwarding rather than handling inline is what
+                    // keeps a reconnect from ever racing that task.
+                    other => {
+                        let _ = cmd_tx.send(other);
                     }
-                    DaemonMessage::SetMode { agent_mode } => agent.set_mode(&agent_mode).await?,
-                    DaemonMessage::Cancel => agent.cancel().await?,
                 }
             }
-            pumped = agent.pump() => {
-                let events = pumped?;
-                if events.is_empty() { continue }
-                let mut batch = Vec::with_capacity(events.len());
-                for event in events {
-                    let seq = ring.push(event.clone());
-                    batch.push(overnight_agent::event::Sequenced { seq, event });
-                }
-                cursor = ring.next_seq();
-                let _ = terminal;
-                write_half
-                    .write_all(encode_line(&ShimMessage::Events { events: batch })?.as_bytes())
-                    .await?;
+            _ = notify.notified() => {
+                let message = {
+                    let ring = ring.lock().expect("ring mutex");
+                    match ring.since(*cursor) {
+                        AgentReplay::At { events } => {
+                            if events.is_empty() { continue }
+                            *cursor = ring.next_seq();
+                            ShimMessage::Events { events }
+                        }
+                        AgentReplay::Gap { resumed_at, dropped, events } => {
+                            *cursor = ring.next_seq();
+                            ShimMessage::Trimmed { resumed_at, dropped, events }
+                        }
+                    }
+                };
+                write_half.write_all(encode_line(&message)?.as_bytes()).await?;
             }
         }
     }

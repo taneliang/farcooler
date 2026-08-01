@@ -1,8 +1,10 @@
 //! One ACP session: the conversation, the capability answers, and the events.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::acp::conn::{AcpConnection, AcpError, Incoming};
+use tokio::sync::mpsc;
+
+use crate::acp::conn::{AcpConnection, AcpError, AcpWriter, Incoming};
 use crate::acp::normalize::update_to_events;
 use crate::acp::wire::Rpc;
 use crate::event::{AgentEvent, AgentGapReason, Diff, EndReason, PermissionOption, ToolStatus};
@@ -246,12 +248,153 @@ impl AgentSession {
         Ok(())
     }
 
-    /// Read one frame and turn it into events, answering capabilities inline.
-    pub async fn pump(&mut self) -> Result<Vec<AgentEvent>, SessionError> {
-        let Some(incoming) = self.conn.next_incoming().await? else {
-            return Ok(Vec::new());
-        };
+    /// Hand off to the running form used once startup is over.
+    ///
+    /// `start` above still calls `AcpConnection::request` sequentially and
+    /// that is fine — nothing races it. Once the daemon link and the agent's
+    /// own `fs/*`/permission requests both need to be answered concurrently,
+    /// the connection has to be split so the read side can live in a task
+    /// that is never cancelled. See `AcpConnection::split` for why.
+    pub fn into_running(self) -> RunningSession {
+        let worktree = self.conn.worktree.clone();
+        let (writer, incoming) = self.conn.split();
+        RunningSession {
+            writer,
+            incoming,
+            session_id: self.session_id,
+            pending_prompt: self.pending_prompt,
+            worktree,
+        }
+    }
+}
 
+/// An `AgentSession` after startup, with its connection split.
+///
+/// Every method here either awaits `self.incoming.recv()` (an mpsc receiver,
+/// cancellation safe) or writes to stdin without reading anything back — no
+/// method on this type contains a `read_line`. That is what makes it sound to
+/// put `next_events` in a `tokio::select!` with commands arriving from a
+/// daemon link that can connect and disconnect at any time.
+pub struct RunningSession {
+    writer: AcpWriter,
+    incoming: mpsc::UnboundedReceiver<Incoming>,
+    pub session_id: String,
+    /// See the field of the same name on `AgentSession`.
+    pending_prompt: Option<u64>,
+    worktree: PathBuf,
+}
+
+impl RunningSession {
+    /// Start a turn. See `AgentSession::prompt` for why this cannot wait on
+    /// its response.
+    pub async fn prompt(&mut self, text: &str) -> Result<(), SessionError> {
+        let id = self
+            .writer
+            .request_no_wait(
+                "session/prompt",
+                serde_json::json!({
+                    "sessionId": self.session_id,
+                    "prompt": [{ "type": "text", "text": text }]
+                }),
+            )
+            .await?;
+        self.pending_prompt = Some(id);
+        Ok(())
+    }
+
+    pub async fn answer(
+        &mut self,
+        request_id: serde_json::Value,
+        option_id: &str,
+    ) -> Result<(), SessionError> {
+        self.writer
+            .respond(
+                request_id,
+                serde_json::json!({ "outcome": { "outcome": "selected", "optionId": option_id } }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn set_mode(&mut self, agent_mode: &str) -> Result<(), SessionError> {
+        self.writer
+            .notify(
+                "session/set_mode",
+                serde_json::json!({ "sessionId": self.session_id, "modeId": agent_mode }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn cancel(&mut self) -> Result<(), SessionError> {
+        self.writer
+            .notify("session/cancel", serde_json::json!({ "sessionId": self.session_id }))
+            .await?;
+        Ok(())
+    }
+
+    /// Wait for the next frame and turn it into events, answering
+    /// capabilities inline.
+    ///
+    /// Cancellation-safe: the only await that can be pending for an
+    /// unbounded time — the adapter decides when the next frame arrives — is
+    /// `self.incoming.recv()`, and `recv` is documented cancellation safe:
+    /// dropping it before it resolves leaves the message in the channel for
+    /// the next call. That is the same property `read_line` lacked, which is
+    /// why `read_line` was moved into `AcpConnection::split`'s reader task
+    /// instead of living here.
+    ///
+    /// Everything from here on is bounded, local work this process controls
+    /// the pace of: `handle_fs_write` is synchronous, and the `respond` that
+    /// follows it writes a few dozen bytes to a pipe with a much larger OS
+    /// buffer, so it resolves in the same scheduler turn rather than
+    /// genuinely suspending. That is what keeps the old failure mode — the
+    /// file lands but the answer never does — closed in practice: nothing
+    /// unrelated to this exchange (in particular, the high-frequency daemon
+    /// socket read that used to race `pump()` directly) can preempt it
+    /// mid-write anymore. What CAN still preempt this call is a command
+    /// arriving on the daemon link's own `mpsc` channel, and that channel is
+    /// low-frequency by nature — one message per human action, not one per
+    /// socket byte.
+    /// Wait for one frame, and do nothing else.
+    ///
+    /// This is the ONLY thing that may appear as a `select!` branch. It awaits
+    /// an mpsc receive and returns — it performs no file writes and sends no
+    /// responses, so losing the race costs nothing.
+    ///
+    /// `next_events` must never be used in a `select!`: it awaits `respond`
+    /// after `handle_fs_write` has already touched the disk, so being cancelled
+    /// between them leaves the file written and the agent waiting forever on an
+    /// answer that is never coming. Splitting the receive from the handling is
+    /// what makes that impossible rather than merely rare.
+    pub async fn recv_frame(&mut self) -> Result<Incoming, SessionError> {
+        self.incoming.recv().await.ok_or_else(|| {
+            // The reader task spawned by `split` only exits by dropping its
+            // sender, and it only does that when the adapter's stdout closed
+            // or sent something unparseable — either way the adapter is gone.
+            // Reporting "nothing happened yet" instead would spin a caller
+            // forever on a channel that can never produce again.
+            SessionError::Acp(AcpError::Closed)
+        })
+    }
+
+    /// Receive one frame and handle it.
+    ///
+    /// Convenience for callers that are not racing anything. A `select!` must
+    /// use `recv_frame` and then `handle` the result outside the select — see
+    /// `recv_frame`.
+    pub async fn next_events(&mut self) -> Result<Vec<AgentEvent>, SessionError> {
+        let incoming = self.recv_frame().await?;
+        self.handle(incoming).await
+    }
+
+    /// Act on one frame: answer capabilities, and report what happened.
+    ///
+    /// Awaits, and must therefore run to completion outside any `select!`.
+    pub async fn handle(
+        &mut self,
+        incoming: Incoming,
+    ) -> Result<Vec<AgentEvent>, SessionError> {
         let (method, id, params) = match incoming {
             Incoming::Request { id, method, params } => (method, Some(id), params),
             Incoming::Notification { method, params } => (method, None, params),
@@ -266,26 +409,35 @@ impl AgentSession {
             }
         };
 
-        let worktree = self.conn.worktree.clone();
+        let worktree = self.worktree.clone();
         match (method.as_str(), id) {
             ("fs/read_text_file", Some(id)) => {
                 let path = params["path"].as_str().unwrap_or_default();
                 match handle_fs_read(&worktree, path) {
                     Ok(content) => {
-                        self.conn.respond(id, serde_json::json!({ "content": content })).await?
+                        self.writer.respond(id, serde_json::json!({ "content": content })).await?
                     }
                     // Answered rather than left hanging: an unanswered request
                     // stalls the agent forever, and a refusal it can see is
                     // better than a turn that never ends.
-                    Err(_) => self.conn.respond(id, serde_json::json!({ "content": "" })).await?,
+                    Err(_) => self.writer.respond(id, serde_json::json!({ "content": "" })).await?,
                 }
                 Ok(Vec::new())
             }
             ("fs/write_text_file", Some(id)) => {
                 let path = params["path"].as_str().unwrap_or_default();
                 let content = params["content"].as_str().unwrap_or_default();
+                // The write and its paired response used to straddle the
+                // `select!` that raced `pump()` against every line on the
+                // daemon socket — a socket that could produce a new line far
+                // more often than an adapter answers a turn. Cancellation
+                // there left the file written with the agent still blocked
+                // on an answer that would never come. That racing partner is
+                // gone now: this call is only reachable from `next_events`,
+                // which nothing but a daemon command can preempt, and that is
+                // orders of magnitude rarer than "the daemon sent a byte".
                 let outcome = handle_fs_write(&worktree, path, content);
-                self.conn.respond(id, serde_json::json!({})).await?;
+                self.writer.respond(id, serde_json::json!({})).await?;
                 match outcome {
                     Ok(event) => Ok(vec![event]),
                     Err(_) => Ok(vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }]),
@@ -314,6 +466,35 @@ impl AgentSession {
 mod tests {
     use super::*;
     use crate::event::{AgentEvent, AgentGapReason};
+
+    #[tokio::test]
+    async fn next_events_on_a_closed_connection_reports_closure_not_a_hang() {
+        // The bug this guards against: `pump()`'s `read_line` was not
+        // cancellation safe, so an `mpsc` receiver replaced it. If closure
+        // showed up as `Ok(vec![])` instead of an error, a caller `select!`ing
+        // on this would treat it as "nothing happened yet" and loop forever
+        // on a channel that can never produce again — a hang indistinguishable
+        // from the agent being merely slow.
+        let program = "/bin/sh".to_string();
+        let args = vec!["-c".to_string(), "exit 0".to_string()];
+        let conn = AcpConnection::spawn(&program, &args, std::env::temp_dir())
+            .await
+            .expect("spawn a fake adapter that exits immediately");
+        let worktree = conn.worktree.clone();
+        let (writer, incoming) = conn.split();
+        let mut session = RunningSession {
+            writer,
+            incoming,
+            session_id: "s".to_string(),
+            pending_prompt: None,
+            worktree,
+        };
+
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), session.next_events())
+            .await
+            .expect("next_events must not hang waiting on an adapter that already exited");
+        assert!(outcome.is_err(), "closure must be a reported error, not a silently empty batch");
+    }
 
     #[test]
     fn an_fs_write_becomes_a_diff_carrying_what_was_there_before() {

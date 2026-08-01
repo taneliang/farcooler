@@ -10,6 +10,7 @@ use std::process::Stdio;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::sync::mpsc;
 
 use crate::acp::wire::Rpc;
 
@@ -48,6 +49,84 @@ pub enum Incoming {
 /// One frame, as it goes on the wire.
 pub fn encode_frame(value: &serde_json::Value) -> String {
     format!("{value}\n")
+}
+
+/// Sort a decoded frame by shape rather than by id. An earlier version
+/// filtered on id alone and therefore kept only the agent's questions:
+/// `session/update` carries no id, so the whole transcript went in the bin.
+///
+/// Shared by `AcpConnection::queue` (pre-split, used only during startup) and
+/// the reader task `split` spawns, so the two can never classify a frame
+/// differently.
+fn classify_incoming(rpc: Rpc) -> Option<Incoming> {
+    match (rpc.method, rpc.id, rpc.result) {
+        // A response to something we sent and did not block on — in
+        // practice `session/prompt`, whose result carries `stopReason`.
+        (None, Some(id), Some(result)) => Some(Incoming::Response { id, result }),
+        (Some(method), Some(id), None) => {
+            Some(Incoming::Request { id, method, params: rpc.params.unwrap_or(serde_json::Value::Null) })
+        }
+        (Some(method), None, _) => {
+            Some(Incoming::Notification { method, params: rpc.params.unwrap_or(serde_json::Value::Null) })
+        }
+        // An error frame, or something with no method and no result. There is
+        // nothing to act on and nothing to report.
+        _ => None,
+    }
+}
+
+/// The write half of a split `AcpConnection`, plus the process handle.
+///
+/// Writing to stdin is not the unsafe half of this protocol — only
+/// `read_line` on stdout is — so `notify`/`respond`/`request_no_wait` stay
+/// simple `&mut self` methods here exactly as they were on `AcpConnection`.
+pub struct AcpWriter {
+    stdin: ChildStdin,
+    next_id: u64,
+    pub worktree: PathBuf,
+    /// Kept so the adapter process is not reaped out from under the reader
+    /// task `split` spawned. That task still owns stdout and expects frames
+    /// for as long as a turn is in flight; dropping `Child` here would kill
+    /// the subprocess and turn a live turn into a spurious `Closed`.
+    _child: Child,
+}
+
+impl AcpWriter {
+    async fn write(&mut self, value: serde_json::Value) -> Result<(), AcpError> {
+        self.stdin
+            .write_all(encode_frame(&value).as_bytes())
+            .await
+            .map_err(|_| AcpError::Closed)?;
+        self.stdin.flush().await.map_err(|_| AcpError::Closed)
+    }
+
+    pub async fn notify(&mut self, method: &str, params: serde_json::Value) -> Result<(), AcpError> {
+        self.write(serde_json::json!({ "jsonrpc": "2.0", "method": method, "params": params })).await
+    }
+
+    pub async fn respond(
+        &mut self,
+        id: serde_json::Value,
+        result: serde_json::Value,
+    ) -> Result<(), AcpError> {
+        self.write(serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })).await
+    }
+
+    /// Send a request without waiting for its answer. See the identical
+    /// method on `AcpConnection` for why `session/prompt` has to go this way.
+    pub async fn request_no_wait(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<u64, AcpError> {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.write(
+            serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
+        )
+        .await?;
+        Ok(id)
+    }
 }
 
 pub struct AcpConnection {
@@ -145,29 +224,9 @@ impl AcpConnection {
     }
 
     /// Queue a frame that is not the response `request` is waiting for.
-    ///
-    /// Sorted by shape rather than by id. An earlier version filtered on id
-    /// alone and therefore kept only the agent's questions: `session/update`
-    /// carries no id, so the whole transcript went in the bin.
     fn queue(&mut self, rpc: Rpc) {
-        match (rpc.method.clone(), rpc.id.clone(), rpc.result.clone()) {
-            // A response to something we sent and did not block on — in
-            // practice `session/prompt`, whose result carries `stopReason`.
-            (None, Some(id), Some(result)) => {
-                self.pending_incoming.push(Incoming::Response { id, result })
-            }
-            (Some(method), Some(id), None) => self.pending_incoming.push(Incoming::Request {
-                id,
-                method,
-                params: rpc.params.unwrap_or(serde_json::Value::Null),
-            }),
-            (Some(method), None, _) => self.pending_incoming.push(Incoming::Notification {
-                method,
-                params: rpc.params.unwrap_or(serde_json::Value::Null),
-            }),
-            // An error frame, or something with no method and no result. There
-            // is nothing to act on and nothing to report.
-            _ => {}
+        if let Some(incoming) = classify_incoming(rpc) {
+            self.pending_incoming.push(incoming);
         }
     }
 
@@ -189,6 +248,70 @@ impl AcpConnection {
         )
         .await?;
         Ok(id)
+    }
+
+    /// Split into a writer and a task-fed stream of incoming frames.
+    ///
+    /// Used after startup. `BufReader::read_line` is documented by tokio as
+    /// NOT cancellation safe: a `select!` branch that races it against
+    /// anything else drops whatever was partially read the moment the other
+    /// branch wins. `AgentSession::pump` used to do exactly that, and worse —
+    /// `handle_fs_write` performed the write and only then awaited `respond`,
+    /// so a cancellation between the two left the file on disk with the agent
+    /// never answered, hanging forever on its own request.
+    ///
+    /// The fix is to give `read_line` a task that owns it exclusively and is
+    /// never cancelled, and to hand callers an `mpsc::UnboundedReceiver`
+    /// instead — `recv` IS cancellation safe, so it is the only thing safe to
+    /// put in a `select!` branch. Do not fold this back into a `select!` over
+    /// `read_line`; that is precisely the bug this method exists to close.
+    pub fn split(self) -> (AcpWriter, mpsc::UnboundedReceiver<Incoming>) {
+        let Self { child, stdin, mut stdout, next_id, pending_incoming, worktree } = self;
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        // Frames `request()` already read past while waiting for its own
+        // response (a permission prompt seen during startup, say) must reach
+        // the caller before anything the reader task reads next, or they
+        // would be delivered out of order.
+        for incoming in pending_incoming {
+            if tx.send(incoming).is_err() {
+                break;
+            }
+        }
+
+        tokio::spawn(async move {
+            loop {
+                let mut line = String::new();
+                let read = stdout.read_line(&mut line).await;
+                match read {
+                    // EOF or a broken pipe: the adapter is gone. Dropping `tx`
+                    // here — not sending a value — is the signal; it is what
+                    // makes the receiver's next `recv()` resolve instead of
+                    // hanging on a channel that will never produce again.
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                let Ok(rpc) = serde_json::from_str::<Rpc>(&line) else {
+                    // A malformed frame breaks the JSON-RPC framing itself —
+                    // there is no safe way to resync mid-stream — so this is
+                    // treated the same as a closed pipe rather than skipped.
+                    break;
+                };
+                match classify_incoming(rpc) {
+                    Some(incoming) => {
+                        if tx.send(incoming).is_err() {
+                            break; // nobody is listening anymore
+                        }
+                    }
+                    // An error frame, or something with no method and no
+                    // result: nothing to act on, so read the next line rather
+                    // than surfacing an empty batch to the caller.
+                    None => continue,
+                }
+            }
+        });
+
+        (AcpWriter { stdin, next_id, worktree, _child: child }, rx)
     }
 
     async fn read_frame(&mut self) -> Result<String, AcpError> {
