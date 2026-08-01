@@ -34,31 +34,24 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
         SessionUpdate::AgentThoughtChunk { content } => {
             vec![AgentEvent::Message { role: Role::Thought, text: content.text.clone() }]
         }
-        SessionUpdate::AvailableCommandsUpdate { .. } => {
-            // A `Gap` means "history is missing here" — a client renders a
-            // visible break and tells the user their transcript may be
-            // incomplete. That would be a lie: nothing about the
-            // conversation was lost, an agent just resent its slash-command
-            // menu, which fires once per turn regardless of whether anyone
-            // asked for it. Treating this as unparsed input (the old
-            // behavior, via `Unknown`) turned every single turn into a false
-            // "history missing" break.
+        SessionUpdate::AvailableCommandsUpdate { available_commands } => {
+            // Its own event, for two reasons it is worth being explicit about.
             //
-            // The alternative considered was reusing
-            // `AgentEvent::SessionStarted { available_commands, .. }`, whose
-            // field exists for exactly this data. Rejected here: this
-            // function has no session id, mode, or available-modes list to
-            // fill the rest of that event with, and emitting a second
-            // `SessionStarted` mid-turn would tell every consumer of this
-            // stream — which reasonably assumes a session starts once —
-            // that the session restarted. Wiring the real command list into
-            // the real `SessionStarted` belongs in the session driver
-            // (`session.rs`), which owns the session's identity and prelude
-            // and can merge this update into it before the first event ever
-            // reaches a client. Until that wiring exists, the honest thing
-            // this function can do is nothing: no event, and definitely not
-            // a `Gap`.
-            vec![]
+            // Not a `Gap`: a gap means "history is missing here" and draws a
+            // visible break telling the user their transcript is incomplete.
+            // Nothing was lost — an agent resent its slash-command menu, which
+            // it does once per turn whether or not anyone asked. The old
+            // behaviour routed this through `Unknown` and turned every single
+            // turn into a false "history missing" break.
+            //
+            // Not a second `SessionStarted` either, even though that event has
+            // an `available_commands` field meant for exactly this data. A
+            // consumer is entitled to assume a session starts once, so a
+            // repeat reads as a restart and resets everything derived from the
+            // first one.
+            vec![AgentEvent::CommandsAvailable {
+                commands: available_commands.iter().map(|c| c.name.clone()).collect(),
+            }]
         }
         SessionUpdate::ToolCall { tool_call_id, title, kind, status: s, locations } => {
             vec![AgentEvent::ToolCall {

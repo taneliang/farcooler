@@ -105,6 +105,16 @@ pub enum AgentEvent {
     ModeSet {
         agent_mode: String,
     },
+    /// The slash-command menu, which an agent resends once per turn.
+    ///
+    /// Its own event rather than a second `SessionStarted`, because a consumer
+    /// is entitled to assume a session starts exactly once — a repeat would
+    /// read as a restart and reset everything built from the first one. And
+    /// not a `Gap`, because nothing was lost: that would draw a "history
+    /// missing" break on every turn for a menu nobody asked for.
+    CommandsAvailable {
+        commands: Vec<String>,
+    },
     TurnEnded {
         reason: EndReason,
     },

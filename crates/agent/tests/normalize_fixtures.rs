@@ -72,3 +72,27 @@ fn no_frame_in_a_real_fixture_produces_a_spurious_gap() {
         assert!(gaps.is_empty(), "{fixture} produced a spurious Gap: {gaps:#?}");
     }
 }
+
+#[test]
+fn a_real_capture_yields_the_slash_commands_a_picker_needs() {
+    // The menu is the only source the composer's `/` picker has. Parsing the
+    // update but dropping its contents would leave the picker permanently
+    // empty — a failure that looks like "this agent has no commands" rather
+    // than like a bug.
+    let commands: Vec<String> = events_from("session_basic.jsonl")
+        .into_iter()
+        .filter_map(|e| match e {
+            AgentEvent::CommandsAvailable { commands } => Some(commands),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+
+    assert!(!commands.is_empty(), "a real capture carried no commands");
+    // Named rather than merely counted: a list of empty strings would satisfy
+    // a length check and still render a menu of blank rows.
+    assert!(
+        commands.iter().all(|c| !c.trim().is_empty()),
+        "every command needs a name to show: {commands:?}"
+    );
+}

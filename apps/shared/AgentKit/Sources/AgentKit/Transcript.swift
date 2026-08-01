@@ -105,6 +105,12 @@ public struct Transcript: Sendable {
         case let .resolved(id, _):
             if pendingPermission?.id == id { pendingPermission = nil }
 
+        case let .commandsAvailable(commands):
+            // Resent every turn, so this arrives repeatedly with the same
+            // contents. Replacing is right; appending would grow the picker
+            // without bound.
+            availableCommands = commands
+
         case let .modeSet(mode):
             agentMode = mode
 

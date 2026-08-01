@@ -113,3 +113,20 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     #expect(t.rows.count == 1)
     #expect(t.rows.isEmpty == false)
 }
+
+@Test func commandsArriveOnTheirOwnEventAndReplaceRatherThanAccumulate() throws {
+    // The agent resends its whole menu every turn. Appending would grow the
+    // picker without bound, showing every command several times over.
+    var t = Transcript()
+    t.apply([Sequenced(seq: 0, event: .commandsAvailable(commands: ["init", "review"]))])
+    t.apply([Sequenced(seq: 1, event: .commandsAvailable(commands: ["init", "review"]))])
+    #expect(t.availableCommands == ["init", "review"])
+
+    // And it is not a gap: nothing was lost, so nothing should be drawn.
+    #expect(t.rows.isEmpty)
+}
+
+@Test func aCommandsEventDecodesRatherThanBecomingAGap() throws {
+    let json = #"{"CommandsAvailable":{"commands":["init"]}}"#
+    #expect(try AgentEvent.decode(from: json) == .commandsAvailable(commands: ["init"]))
+}

@@ -70,6 +70,8 @@ public enum AgentEvent: Sendable, Equatable {
     case permission(id: String, toolCall: String, options: [PermissionOption])
     case resolved(id: String, chosen: String)
     case modeSet(agentMode: String)
+    /// The slash-command menu, resent once per turn. Feeds the `/` picker.
+    case commandsAvailable(commands: [String])
     case turnEnded(reason: String)
     case gap(GapReason)
 }
@@ -144,6 +146,9 @@ extension AgentEvent {
             case "Resolved":
                 let p = try outer.decode(ResolvedPayload.self, forKey: key)
                 event = .resolved(id: p.id, chosen: p.chosen)
+            case "CommandsAvailable":
+                let p = try outer.decode(CommandsAvailablePayload.self, forKey: key)
+                event = .commandsAvailable(commands: p.commands)
             case "ModeSet":
                 let p = try outer.decode(ModeSetPayload.self, forKey: key)
                 event = .modeSet(agentMode: p.agentMode)
@@ -185,6 +190,7 @@ extension AgentEvent {
         enum CodingKeys: String, CodingKey { case id, options, toolCall = "tool_call" }
     }
     private struct ResolvedPayload: Decodable { let id: String; let chosen: String }
+    private struct CommandsAvailablePayload: Decodable { let commands: [String] }
     private struct ModeSetPayload: Decodable {
         let agentMode: String
         enum CodingKeys: String, CodingKey { case agentMode = "agent_mode" }
