@@ -646,14 +646,20 @@ final class DaemonClient: ObservableObject {
         return nil
     }
 
-    /// A terminal, which is a tmux window, which is a layout of its own.
+    /// A new terminal, in the layout you are looking at.
     ///
-    /// No `--tile` flag any more. Splitting used to be create-then-join, and that
-    /// flag was how the join happened in the same call; `layout split` now creates
-    /// the terminal itself, so the only remaining caller is the one that wants a
-    /// fresh layout — which is what plain create already does.
+    /// `--tile`, and the reasoning it replaces was wrong about what a person
+    /// expects. It argued that `layout split` covers tiling so plain create
+    /// should always make a fresh layout — true of the CALL, but "New terminal"
+    /// is pressed while looking at a tiled workspace, and having the pane
+    /// appear in some other layout reads as the button having failed.
+    ///
+    /// It stays a no-op when the workspace has no layout yet, so the first
+    /// terminal still creates one rather than needing a different path.
     func createTerminal(workspace: String, preset: String, title: String) async {
-        _ = await run(["terminal", "create", workspace, "--preset", preset, "--title", title])
+        _ = await run([
+            "terminal", "create", workspace, "--preset", preset, "--title", title, "--tile",
+        ])
         await refresh()
     }
 

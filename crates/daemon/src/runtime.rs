@@ -303,8 +303,8 @@ impl Runtime {
             return Ok(socket);
         }
 
-        let exe = std::env::current_exe().map_err(|e| {
-            tracing::warn!(error = %e, "cannot find this executable to pipe into");
+        let exe = fanout_binary().ok_or_else(|| {
+            tracing::warn!("cannot find overnightd to pipe this pane into");
             DomainError::OperationFailed
         })?;
         // The pane NUMBER, not the pane id, because tmux expands this command
@@ -317,7 +317,7 @@ impl Runtime {
         // which a client cannot tell apart from a pane that finished. The
         // socket name strips `%` on both sides, so the number is the whole id.
         let command =
-            format!("'{}' --fanout '{}'", exe.to_string_lossy(), pane_id.trim_start_matches('%'));
+            format!("'{}' --fanout '{}'", exe.display(), pane_id.trim_start_matches('%'));
         self.tmux.pipe_pane_start(pane_id, &command).await?;
 
         // Retried rather than slept through: the fanout has a process to spawn
@@ -435,4 +435,25 @@ impl Runtime {
             .clone();
         self.tmux.capture_pane(&pane, lines).await
     }
+}
+
+/// The binary that serves a pane fanout: `overnightd`, never `overnight`.
+///
+/// NOT `current_exe()`. `--fanout` is the daemon's flag, but this code also
+/// runs inside the CLI — `overnight terminal stream` opens a Runtime of its
+/// own — so `current_exe()` there is the CLI, which pipes the pane into
+/// `overnight --fanout N`, gets "unexpected argument", and never binds the
+/// socket. The stream then times out after a second and exits, which a client
+/// cannot tell apart from a pane that finished: keystrokes land, the pane
+/// changes, and the screen simply never updates.
+///
+/// Same shape as `service::shim_binary`, and for the same reason: two binaries
+/// come out of this workspace and only one of them answers any given flag.
+pub fn fanout_binary() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    if exe.file_name().is_some_and(|n| n == "overnightd") {
+        return Some(exe);
+    }
+    let sibling = exe.parent()?.join("overnightd");
+    sibling.exists().then_some(sibling)
 }
