@@ -255,6 +255,16 @@ struct TerminalView: View {
                 }
             )
         }
+        // Bounded to the terminal, and clipped to it.
+        //
+        // `KeystrokeSink` is an invisible `UIView` with no intrinsic size, so
+        // nothing stops it being handed more room than the grid it belongs to —
+        // and it owns every touch that lands on it. That was harmless while the
+        // tab strip sat above the terminal, and became a bug the moment the
+        // strip moved below: the sink covered the chips, so tapping a terminal
+        // to switch to it did nothing at all.
+        .frame(width: size.width, height: size.height)
+        .clipped()
         .onAppear { focusRequest += 1 }
     }
 

@@ -378,17 +378,43 @@ impl Runtime {
             return Ok(());
         }
 
-        // Still the WINDOW, and still wrong for a window holding more than
-        // one pane — a client asking for 55 columns of a four-pane window gets
-        // a pane of about eight, which is where the unreadable slivers come
-        // from. Sizing the pane instead cannot be done one pane at a time:
-        // `resize-pane` takes the difference from whichever sibling is next to
-        // it, so honouring one client's viewport squashed two neighbours from
-        // eight columns to one and three. A window's panes have to be solved
-        // together, from every viewer's viewport at once, which is what the
-        // per-client sizing work does. `window_size` and `set_pane_size` exist
-        // for it; this stays as it was until it can be done correctly.
-        self.tmux.resize_window(&pane.window_id, columns, rows).await
+        // Size the PANE, not the window.
+        //
+        // A window's layout divides it between its panes, so resizing the
+        // window to a client's viewport gave a client showing one pane of a
+        // six-pane window a pane of 27x8 — a quarter of what it asked for. The
+        // viewport a client describes is the area it will draw ONE terminal
+        // into, and that is a pane.
+        //
+        // Which means the window has to grow by whatever the pane gains, and
+        // the siblings have to be put back afterwards. `resize-pane` takes the
+        // difference from whichever sibling is adjacent, so sizing the target
+        // alone squashed two neighbours from eight columns to one and three.
+        // Restoring the siblings first and sizing the target last spends the
+        // window's new space on the pane that asked for it and leaves everyone
+        // else where they were.
+        //
+        // Nobody renders a tmux window — clients render panes — so a window
+        // wider than any one screen costs nothing.
+        let siblings: Vec<_> = snapshot
+            .panes
+            .iter()
+            .filter(|p| p.window_id == pane.window_id && p.pane_id != pane.pane_id)
+            .map(|p| (p.pane_id.clone(), p.columns, p.rows))
+            .collect();
+
+        let window = self.tmux.window_size(&pane.window_id).await?;
+        self.tmux
+            .resize_window(
+                &pane.window_id,
+                (window.0 + columns).saturating_sub(pane.columns).max(columns),
+                (window.1 + rows).saturating_sub(pane.rows).max(rows),
+            )
+            .await?;
+        for (id, was_columns, was_rows) in siblings {
+            let _ = self.tmux.set_pane_size(&id, was_columns, was_rows).await;
+        }
+        self.tmux.set_pane_size(&pane.pane_id, columns, rows).await
     }
 
     pub async fn capture(&self, id: Uuid, lines: u32) -> Result<String> {
