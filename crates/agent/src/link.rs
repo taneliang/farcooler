@@ -1,3 +1,48 @@
+//! The private channel between a shim and its daemon.
+//!
+//! JSON lines rather than protobuf, and that is a deliberate exception to the
+//! project's protocol rule rather than an oversight: the shim IS the daemon
+//! binary under another subcommand, so the two can never disagree about a
+//! schema. There is no compatibility surface here to protect.
+
+use serde::{Deserialize, Serialize};
+
+use crate::event::{Seq, Sequenced};
+
+/// Shim to daemon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ShimMessage {
+    /// Events at and after the subscribed cursor.
+    Events { events: Vec<Sequenced> },
+    /// The subscriber's cursor had been trimmed. A `Gap` is already the first
+    /// entry in `events`; this carries the accounting for logs.
+    Trimmed { resumed_at: Seq, dropped: u64, events: Vec<Sequenced> },
+    /// The session is established and this is its id, for durable intent.
+    Established { session_id: String, available_modes: Vec<String> },
+    /// The adapter could not be started. Terminal-mode fallback remains.
+    Failed { reason: String },
+}
+
+/// Daemon to shim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DaemonMessage {
+    Subscribe { from_seq: Seq },
+    Prompt { text: String },
+    Answer { request_id: String, option_id: String },
+    SetMode { agent_mode: String },
+    Cancel,
+}
+
+pub fn encode_line<T: Serialize>(value: &T) -> Result<String, serde_json::Error> {
+    Ok(format!("{}\n", serde_json::to_string(value)?))
+}
+
+pub fn decode_line<T: for<'de> Deserialize<'de>>(line: &str) -> Result<T, serde_json::Error> {
+    serde_json::from_str(line)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
