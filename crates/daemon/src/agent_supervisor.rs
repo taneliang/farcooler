@@ -41,9 +41,28 @@ pub enum ToggleRefusal {
 ///
 /// Per terminal and per runtime directory, so two daemons on one host never
 /// collide and a stale socket never adopts a new session.
+///
+/// SHORT, and that is not tidiness. A Unix socket path cannot exceed
+/// `sun_path` — 104 bytes on macOS — and the default runtime directory is
+/// `~/Library/Application Support/com.overnight.Overnight`, which is already
+/// 66 of them. A full uuid took the total to 113: `bind` failed, the daemon
+/// never listened, the shim dialled a socket nobody was on, and the chat sat
+/// blank forever with the pane cheerfully reporting "connected". It worked in
+/// every test because test runtime directories are short.
+///
+/// The last 12 hex digits of a v7 uuid are its random tail — the same bytes
+/// `short` shows a user — so this is as collision-resistant as the ids people
+/// already type at the CLI, in 18 characters instead of 47.
 pub fn socket_path(runtime_dir: &Path, terminal: Uuid) -> PathBuf {
-    runtime_dir.join(format!("agent-{terminal}.sock"))
+    let hex = terminal.simple().to_string();
+    runtime_dir.join(format!("a-{}.sock", &hex[hex.len() - 12..]))
 }
+
+/// The longest path `bind` will accept, minus a byte for the NUL.
+///
+/// Named rather than inlined so the test that guards it and the code it
+/// guards cannot drift apart.
+pub const MAX_SOCKET_PATH: usize = 103;
 
 /// Apply one event to a terminal's activity.
 ///
@@ -191,7 +210,19 @@ impl AgentSupervisor {
     {
         let path = socket_path(runtime_dir, terminal);
         let _ = std::fs::remove_file(&path);
-        let listener = UnixListener::bind(&path)?;
+        let listener = UnixListener::bind(&path).inspect_err(|e| {
+            // Loud, because the symptom is silence. A failed bind here leaves
+            // the shim dialling a socket nobody is on, the pane reporting
+            // "connected", and the chat blank — with nothing anywhere saying
+            // why. Path length is the cause worth naming first.
+            tracing::error!(
+                error = %e,
+                path = %path.display(),
+                bytes = path.as_os_str().len(),
+                limit = MAX_SOCKET_PATH,
+                "could not bind the agent socket; this terminal's chat will stay empty"
+            );
+        })?;
 
         loop {
             let (stream, _) = listener.accept().await?;
@@ -417,5 +448,27 @@ mod tests {
             &|_, _| {},
         );
         assert_eq!(supervisor.replay(terminal, 0).len(), 4);
+    }
+
+    #[test]
+    fn a_socket_path_fits_in_a_unix_socket() {
+        // The failure this prevents was invisible: `bind` returns an error the
+        // daemon logs and moves on from, the shim keeps dialling, and the only
+        // symptom is a chat that never fills in. Measured against the real
+        // default runtime directory, which is the one that broke.
+        let real = Path::new("/Users/some-long-user-name/Library/Application Support/com.overnight.Overnight");
+        let path = socket_path(real, Uuid::now_v7());
+        assert!(
+            path.as_os_str().len() <= MAX_SOCKET_PATH,
+            "{} bytes is too long for a unix socket: {}",
+            path.as_os_str().len(),
+            path.display()
+        );
+    }
+
+    #[test]
+    fn two_terminals_do_not_share_a_socket() {
+        let dir = Path::new("/run/overnight");
+        assert_ne!(socket_path(dir, Uuid::now_v7()), socket_path(dir, Uuid::now_v7()));
     }
 }
