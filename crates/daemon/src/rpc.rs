@@ -397,6 +397,38 @@ impl Rpc {
                 let Some(request::Payload::TerminalCreate(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                // Joining the active layout is a SPLIT of the focused pane,
+                // not a new window.
+                //
+                // This used to call `layout_add`, which went away when the
+                // layout model moved into tmux — a window IS a layout and a
+                // pane IS a terminal. The flag survived in the proto and in
+                // the CLI's `--tile`, but nothing honoured it any more, so
+                // every new terminal opened outside the layout it was asked to
+                // join.
+                //
+                // A no-op when there is no layout to join, which is what makes
+                // it safe to pass unconditionally from a `%` binding.
+                if p.join_active_group {
+                    let anchor = svc.layout(workspace).await.ok().and_then(|views| {
+                        let view = views.iter().find(|v| v.window.active).or(views.first())?;
+                        let pane =
+                            view.panes.iter().find(|pane| pane.pane_active).or(view.panes.first())?;
+                        Some(pane.terminal_id)
+                    });
+                    if let Some(anchor) = anchor {
+                        let term = svc
+                            .split_terminal(
+                                workspace,
+                                anchor,
+                                overnight_protocol::v1::SplitSide::Right,
+                                &p.title,
+                                &p.command_preset,
+                            )
+                            .await?;
+                        return self.terminal_result(term.id).await;
+                    }
+                }
                 let term = svc.create_terminal(workspace, &p.title, &p.command_preset).await?;
                 self.terminal_result(term.id).await
             }

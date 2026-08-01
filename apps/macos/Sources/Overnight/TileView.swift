@@ -307,7 +307,15 @@ private struct TilePane: View {
                     searchFiles: onSearchFiles,
                     onResize: { _, _ in }
                 )
-                .id(terminal.id)
+                // Identity includes the PANE MODE, not just the terminal.
+                //
+                // A mode switch respawns the pane: new process, new epoch, new
+                // stream and input channel. With an id that ignores mode,
+                // SwiftUI reuses the existing view, which stays bound to the
+                // process that is gone — so the terminal comes back black and
+                // swallows every keystroke, and only switching layouts (which
+                // rebuilds everything) appears to fix it.
+                .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
             } else if isLive {
                 TerminalSurface(
                     terminal: terminal.short,
@@ -325,7 +333,15 @@ private struct TilePane: View {
                     fontRevision: preferences.revision,
                     isFocused: isFocused
                 )
-                .id(terminal.id)
+                // Identity includes the PANE MODE, not just the terminal.
+                //
+                // A mode switch respawns the pane: new process, new epoch, new
+                // stream and input channel. With an id that ignores mode,
+                // SwiftUI reuses the existing view, which stays bound to the
+                // process that is gone — so the terminal comes back black and
+                // swallows every keystroke, and only switching layouts (which
+                // rebuilds everything) appears to fix it.
+                .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
             } else {
                 ZStack {
                     Color(nsColor: Palette.background)
