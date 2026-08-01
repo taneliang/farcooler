@@ -165,6 +165,12 @@ final class TerminalSession: ObservableObject {
         paneSize = nil
         phase = .connecting
         started = true
+        // The strike count belongs to the terminal being left, not the one
+        // arriving. Carried over, a terminal whose predecessor had already
+        // given up on streaming reached the three-strike fallback on its first
+        // hiccup and showed a failure it had not earned — which is the error
+        // that flashed when switching tabs.
+        failedAttaches = 0
         // The size this device would like has not changed — the screen did
         // not resize, only what it is showing did — but `lastResizeSent`
         // described the OUTGOING terminal's pane, and comparing the new
