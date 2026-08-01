@@ -126,6 +126,22 @@ pub enum SessionUpdate {
         #[serde(rename = "currentModeId")]
         current_mode_id: String,
     },
+    /// A selector changed, possibly because the AGENT changed it. Plan mode
+    /// flipping itself off after producing a plan arrives this way, and a UI
+    /// that ignored it would show the wrong mode until the next reload.
+    ConfigOptionUpdate {
+        #[serde(rename = "configId", default)]
+        config_id: String,
+        #[serde(default)]
+        value: serde_json::Value,
+    },
+    /// Context-window usage, resent as a turn consumes it.
+    UsageUpdate {
+        #[serde(default)]
+        used: u64,
+        #[serde(default)]
+        size: u64,
+    },
     /// Anything this version does not know. Becomes a visible `Gap`.
     #[serde(other)]
     Unknown,

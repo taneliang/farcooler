@@ -25,6 +25,8 @@ pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
         // Bookkeeping. Says nothing about whether the agent needs you.
         AgentEvent::SessionStarted { .. }
         | AgentEvent::ModeSet { .. }
+        | AgentEvent::ConfigSet { .. }
+        | AgentEvent::Usage { .. }
         | AgentEvent::CommandsAvailable { .. }
         | AgentEvent::Gap { .. } => None,
     }

@@ -65,6 +65,46 @@ public struct AgentChoice: Decodable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// One thing a user can change about a session.
+///
+/// ACP's stabilised generic form. The client renders a control per option
+/// rather than knowing in advance that "mode" and "model" exist — which is how
+/// a subagent picker and a thought level arrive with no new code.
+public struct ConfigOption: Decodable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let name: String
+    public let description: String
+    /// `mode`, `model`, `model_config`, `thought_level`, or empty. A hint for
+    /// ordering only — never a reason to special-case one.
+    public let category: String
+    /// `select` or `boolean`.
+    public let kind: String
+    /// An option id for a select; `"true"`/`"false"` for a boolean.
+    public let currentValue: String
+    public let options: [AgentChoice]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, category, kind, options
+        case currentValue = "current_value"
+    }
+
+    public init(
+        id: String, name: String, description: String, category: String, kind: String,
+        currentValue: String, options: [AgentChoice]
+    ) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.category = category
+        self.kind = kind
+        self.currentValue = currentValue
+        self.options = options
+    }
+
+    public var isBoolean: Bool { kind == "boolean" }
+    public var isOn: Bool { currentValue == "true" }
+}
+
 public struct PermissionOption: Decodable, Sendable, Equatable, Identifiable {
     public let id: String
     public let name: String
@@ -80,7 +120,8 @@ public struct PermissionOption: Decodable, Sendable, Equatable, Identifiable {
 public enum AgentEvent: Sendable, Equatable {
     case sessionStarted(
         sessionID: String, agentMode: String?, availableModes: [AgentChoice],
-        model: String?, availableModels: [AgentChoice], availableCommands: [String])
+        model: String?, availableModels: [AgentChoice], configOptions: [ConfigOption],
+        availableCommands: [String])
     case message(role: Role, text: String)
     case toolCall(id: String, title: String, kind: String, status: ToolStatus, locations: [String])
     case toolUpdate(id: String, status: ToolStatus, content: String?, diff: Diff?)
@@ -88,6 +129,10 @@ public enum AgentEvent: Sendable, Equatable {
     case permission(id: String, toolCall: String, options: [PermissionOption])
     case resolved(id: String, chosen: String)
     case modeSet(agentMode: String)
+    /// A selector changed — by the user, or by the agent itself.
+    case configSet(id: String, value: String)
+    /// Context-window usage, resent as a turn consumes it.
+    case usage(used: UInt64, size: UInt64)
     /// The slash-command menu, resent once per turn. Feeds the `/` picker.
     case commandsAvailable(commands: [String])
     case turnEnded(reason: String)
@@ -145,6 +190,7 @@ extension AgentEvent {
                     sessionID: p.sessionID, agentMode: p.agentMode,
                     availableModes: p.availableModes, model: p.model,
                     availableModels: p.availableModels,
+                    configOptions: p.configOptions,
                     availableCommands: p.availableCommands)
             case "Message":
                 let p = try outer.decode(MessagePayload.self, forKey: key)
@@ -169,6 +215,12 @@ extension AgentEvent {
             case "CommandsAvailable":
                 let p = try outer.decode(CommandsAvailablePayload.self, forKey: key)
                 event = .commandsAvailable(commands: p.commands)
+            case "Usage":
+                let p = try outer.decode(UsagePayload.self, forKey: key)
+                event = .usage(used: p.used, size: p.size)
+            case "ConfigSet":
+                let p = try outer.decode(ConfigSetPayload.self, forKey: key)
+                event = .configSet(id: p.id, value: p.value)
             case "ModeSet":
                 let p = try outer.decode(ModeSetPayload.self, forKey: key)
                 event = .modeSet(agentMode: p.agentMode)
@@ -190,6 +242,7 @@ extension AgentEvent {
         let availableModes: [AgentChoice]
         let model: String?
         let availableModels: [AgentChoice]
+        let configOptions: [ConfigOption]
         let availableCommands: [String]
         enum CodingKeys: String, CodingKey {
             case sessionID = "session_id"
@@ -197,6 +250,7 @@ extension AgentEvent {
             case availableModes = "available_modes"
             case model
             case availableModels = "available_models"
+            case configOptions = "config_options"
             case availableCommands = "available_commands"
         }
     }
@@ -215,6 +269,8 @@ extension AgentEvent {
     }
     private struct ResolvedPayload: Decodable { let id: String; let chosen: String }
     private struct CommandsAvailablePayload: Decodable { let commands: [String] }
+    private struct ConfigSetPayload: Decodable { let id: String; let value: String }
+    private struct UsagePayload: Decodable { let used: UInt64; let size: UInt64 }
     private struct ModeSetPayload: Decodable {
         let agentMode: String
         enum CodingKeys: String, CodingKey { case agentMode = "agent_mode" }

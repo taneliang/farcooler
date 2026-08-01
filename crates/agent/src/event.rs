@@ -52,6 +52,36 @@ pub struct AgentChoice {
     pub description: String,
 }
 
+/// One thing a user can change about a session.
+///
+/// ACP's stabilised, generic form: the adapter advertises a list of these and
+/// the client renders one control each, rather than the client knowing in
+/// advance that "mode" and "model" exist. That genericness is the point —
+/// this same list already carries a subagent selector nobody designed a field
+/// for, and a `thought_level` will arrive the same way.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ConfigOption {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// `mode`, `model`, `model_config`, `thought_level`, or absent. A hint for
+    /// ordering and icons only — never a reason to special-case one.
+    #[serde(default)]
+    pub category: String,
+    /// `select` or `boolean`.
+    #[serde(default)]
+    pub kind: String,
+    /// The current value: an option id for a select, `"true"`/`"false"` for a
+    /// boolean. Stringly typed so one field covers both without the client
+    /// branching before it can even render.
+    #[serde(default)]
+    pub current_value: String,
+    /// Empty for a boolean.
+    #[serde(default)]
+    pub options: Vec<AgentChoice>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PermissionOption {
     pub id: String,
@@ -90,6 +120,13 @@ pub enum AgentEvent {
         /// capturing them meant the UI had no model picker to build at all.
         model: Option<String>,
         available_models: Vec<AgentChoice>,
+        /// Every selector the agent offers, generically.
+        ///
+        /// `available_modes` and `available_models` above are derived from
+        /// this for the surfaces that still ask for them by name. New
+        /// selectors — a subagent picker, a thought level — arrive here and
+        /// need no protocol change to be rendered.
+        config_options: Vec<ConfigOption>,
         available_commands: Vec<String>,
     },
     Message {
@@ -123,6 +160,20 @@ pub enum AgentEvent {
     },
     ModeSet {
         agent_mode: String,
+    },
+    /// How much of the context window this session has consumed.
+    ///
+    /// Resent as a turn burns through it. Worth showing: the honest answer to
+    /// "why has it started forgetting things" is a number, and a chat that
+    /// hides it makes the user guess.
+    Usage {
+        used: u64,
+        size: u64,
+    },
+    /// A selector changed, whether the user or the agent changed it.
+    ConfigSet {
+        id: String,
+        value: String,
     },
     /// The slash-command menu, which an agent resends once per turn.
     ///

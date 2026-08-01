@@ -8,7 +8,8 @@ use crate::acp::conn::{AcpConnection, AcpError, AcpWriter, Incoming};
 use crate::acp::normalize::update_to_events;
 use crate::acp::wire::Rpc;
 use crate::event::{
-    AgentChoice, AgentEvent, AgentGapReason, Diff, EndReason, PermissionOption, ToolStatus,
+    AgentChoice, AgentEvent, AgentGapReason, ConfigOption, Diff, EndReason, PermissionOption,
+    ToolStatus,
 };
 use crate::fs_guard::confine;
 
@@ -92,6 +93,69 @@ pub fn models_from(session_result: &serde_json::Value) -> Vec<AgentChoice> {
     choices(&session_result["models"]["availableModels"], "modelId")
 }
 
+/// Every selector the agent advertises.
+///
+/// The stabilised generic form. Older adapters send only `modes`/`models`, so
+/// `config_options_from` synthesises equivalents from those — a client that
+/// renders this list alone therefore works against both without knowing which
+/// it is talking to.
+pub fn config_options_from(session_result: &serde_json::Value) -> Vec<ConfigOption> {
+    if let Some(list) = session_result["configOptions"].as_array() {
+        return list
+            .iter()
+            .filter_map(|o| {
+                Some(ConfigOption {
+                    id: o["id"].as_str()?.to_string(),
+                    name: o["name"].as_str().unwrap_or_default().to_string(),
+                    description: o["description"].as_str().unwrap_or_default().to_string(),
+                    category: o["category"].as_str().unwrap_or_default().to_string(),
+                    kind: o["type"].as_str().unwrap_or("select").to_string(),
+                    current_value: match &o["currentValue"] {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Bool(b) => b.to_string(),
+                        other => other.to_string(),
+                    },
+                    options: choices(&o["options"], "value"),
+                })
+            })
+            .collect();
+    }
+
+    // Fallback for an adapter that predates config options.
+    let mut out = Vec::new();
+    let modes = modes_from(session_result);
+    if !modes.is_empty() {
+        out.push(ConfigOption {
+            id: "mode".into(),
+            name: "Mode".into(),
+            description: String::new(),
+            category: "mode".into(),
+            kind: "select".into(),
+            current_value: session_result["modes"]["currentModeId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            options: modes,
+        });
+    }
+    let models = models_from(session_result);
+    if !models.is_empty() {
+        out.push(ConfigOption {
+            id: "model".into(),
+            name: "Model".into(),
+            description: String::new(),
+            category: "model".into(),
+            kind: "select".into(),
+            current_value: session_result["models"]["currentModelId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            options: models,
+        });
+    }
+    out
+}
+
 fn choices(list: &serde_json::Value, id_key: &str) -> Vec<AgentChoice> {
     list.as_array()
         .map(|items| {
@@ -151,7 +215,13 @@ impl AgentSession {
                 "initialize",
                 serde_json::json!({
                     "protocolVersion": 1,
-                    "clientCapabilities": { "fs": { "readTextFile": true, "writeTextFile": true } }
+                    "clientCapabilities": {
+                        "fs": { "readTextFile": true, "writeTextFile": true },
+                        // Opt in to nested subagent transcripts. Without it the
+                        // adapter flattens a subagent's work into the parent's
+                        // stream and the structure is simply gone.
+                        "_meta": { "subagent-transcript": true }
+                    }
                 }),
             )
             .await?;
@@ -221,8 +291,16 @@ impl AgentSession {
 
         let available_modes = modes_from(&session_result);
         let agent_mode = session_result["modes"]["currentModeId"].as_str().map(String::from);
-        let available_models = models_from(&session_result);
-        let model = session_result["models"]["currentModelId"].as_str().map(String::from);
+        let config_options = config_options_from(&session_result);
+        // Derived from the generic list so both shapes feed one code path.
+        let by_category = |c: &str| config_options.iter().find(|o| o.category == c);
+        let available_models = by_category("model").map(|o| o.options.clone()).unwrap_or_default();
+        let model = by_category("model").map(|o| o.current_value.clone());
+        let available_modes = if available_modes.is_empty() {
+            by_category("mode").map(|o| o.options.clone()).unwrap_or_default()
+        } else {
+            available_modes
+        };
 
         prelude.insert(
             0,
@@ -232,6 +310,7 @@ impl AgentSession {
                 available_modes: available_modes.clone(),
                 model,
                 available_models,
+                config_options,
                 available_commands: Vec::new(),
             },
         );
@@ -380,6 +459,21 @@ impl RunningSession {
             .notify(
                 "session/set_mode",
                 serde_json::json!({ "sessionId": self.session_id, "modeId": agent_mode }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Change one of the agent's advertised selectors.
+    ///
+    /// `configId`, not `optionId` — the adapter rejects the latter with
+    /// "expected string, received undefined", which is the kind of thing only
+    /// trying it tells you.
+    pub async fn set_config_option(&mut self, id: &str, value: &str) -> Result<(), SessionError> {
+        self.writer
+            .notify(
+                "session/set_config_option",
+                serde_json::json!({ "sessionId": self.session_id, "configId": id, "value": value }),
             )
             .await?;
         Ok(())
@@ -535,7 +629,23 @@ impl RunningSession {
                     .map(|n| update_to_events(&n.update))
                     .unwrap_or_else(|| vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }]))
             }
-            _ => Ok(vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }]),
+            (other, id) => {
+                // Named, because a silent gap is untraceable. An adapter that
+                // asks us something we do not implement is blocked until it is
+                // answered, so an unanswered REQUEST is worse than a gap: it
+                // hangs the turn.
+                // Printed, not traced. The pane IS this process's log surface
+                // — see the module doc on `agent_host` — and a `tracing`
+                // subscriber is never installed on this path, so a warning
+                // there goes nowhere at all.
+                println!("overnight: unhandled ACP method `{other}`");
+                if let Some(id) = id {
+                    // Answer anyway. An empty result is a poor answer, but a
+                    // turn that continues beats one that waits forever.
+                    let _ = self.writer.respond(id, serde_json::json!({})).await;
+                }
+                Ok(vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }])
+            }
         }
     }
 }
@@ -668,5 +778,53 @@ mod tests {
         assert_eq!(end_reason("max_tokens"), EndReason::MaxTokens);
         assert_eq!(end_reason("something_a_later_adapter_invented"), EndReason::EndTurn);
         assert_eq!(end_reason(""), EndReason::EndTurn);
+    }
+
+    #[test]
+    fn config_options_come_through_generically() {
+        // The real shape, copied from a live 0.64 adapter. The `agent` selector
+        // is the reason this is generic: nobody designed a field for a subagent
+        // picker, and it arrives here for free alongside mode and model.
+        let result = serde_json::json!({
+            "sessionId": "s",
+            "configOptions": [
+                { "id": "mode", "name": "Mode", "category": "mode", "type": "select",
+                  "currentValue": "default",
+                  "options": [{ "value": "default", "name": "Manual", "description": "Prompts" }] },
+                { "id": "model", "name": "Model", "category": "model", "type": "select",
+                  "currentValue": "haiku",
+                  "options": [
+                    { "value": "opus", "name": "Opus", "description": "Opus 5" },
+                    { "value": "haiku", "name": "Haiku", "description": "Haiku 4.5" }] },
+                { "id": "agent", "name": "Agent", "type": "select", "currentValue": "default",
+                  "options": [{ "value": "default", "name": "Default" }] }
+            ]
+        });
+        let options = config_options_from(&result);
+        assert_eq!(
+            options.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+            vec!["mode", "model", "agent"]
+        );
+        let model = options.iter().find(|o| o.category == "model").expect("a model selector");
+        assert_eq!(model.current_value, "haiku");
+        assert_eq!(model.options[0].name, "Opus");
+    }
+
+    #[test]
+    fn an_adapter_without_config_options_still_offers_its_modes_and_models() {
+        // The older adapter sends `modes`/`models` and no `configOptions`, and
+        // both are in the wild at once. Synthesising here means the client
+        // renders one list and never learns which shape it is talking to.
+        let legacy = serde_json::json!({
+            "sessionId": "s",
+            "modes": { "currentModeId": "plan",
+                       "availableModes": [{ "id": "plan", "name": "Plan Mode" }] },
+            "models": { "currentModelId": "sonnet",
+                        "availableModels": [{ "modelId": "sonnet", "name": "Sonnet" }] }
+        });
+        let options = config_options_from(&legacy);
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].current_value, "plan");
+        assert_eq!(options[1].options[0].name, "Sonnet");
     }
 }

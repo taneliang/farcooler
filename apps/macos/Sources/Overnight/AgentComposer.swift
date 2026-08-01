@@ -66,8 +66,7 @@ struct AgentComposer: View {
 
                 HStack(spacing: 10) {
                     attachButton
-                    modeMenu
-                    modelMenu
+                    configControls
                     Spacer(minLength: 0)
                 }
                 .foregroundStyle(.secondary)
@@ -316,63 +315,49 @@ struct AgentComposer: View {
     /// The agent's own mode — plan vs act, or whatever the agent calls its
     /// equivalent — never the pane's terminal/chat mode. Three distinct
     /// names for three distinct things; see the plan's global constraints.
-    @ViewBuilder
-    private var modeMenu: some View {
-        choiceMenu(
-            choices: stream.transcript.availableModes,
-            current: stream.transcript.agentMode,
-            fallback: "Mode"
-        ) { id in await stream.setMode(id) }
-    }
-
-    /// The model picker.
+    /// One control per selector the agent advertises.
     ///
-    /// `session/set_model`, verified working against a live adapter. ACP has
-    /// since stabilised `session/set_config_option` as the general form, but
-    /// the adapter in use answers `Method not found` to it — when agents start
-    /// advertising `configOptions`, this becomes one selector among several
-    /// rather than a special case.
+    /// Not a mode menu and a model menu written out by hand. ACP's config
+    /// options are deliberately generic, and the payoff is immediate: this
+    /// adapter also advertises a SUBAGENT picker that nobody designed a field
+    /// for, and it renders here for free. A `thought_level` will do the same.
     @ViewBuilder
-    private var modelMenu: some View {
-        choiceMenu(
-            choices: stream.transcript.availableModels,
-            current: stream.transcript.model,
-            fallback: "Model"
-        ) { id in await stream.setModel(id) }
-    }
-
-    /// One picker over a list of things an agent offers.
-    ///
-    /// Shows `name`, sends `id`. Built from ids alone it read `acceptEdits` and
-    /// `bypassPermissions` at a user who never chose those words.
-    @ViewBuilder
-    private func choiceMenu(
-        choices: [AgentChoice], current: String?, fallback: String,
-        select: @escaping (String) async -> Void
-    ) -> some View {
-        if !choices.isEmpty {
-            Menu {
-                ForEach(choices) { choice in
-                    Button {
-                        Task { await select(choice.id) }
-                    } label: {
-                        // The description is the useful half — "Opus 4.6 ·
-                        // Most capable for complex work" says more than the
-                        // name it sits under.
-                        if choice.description.isEmpty {
-                            Text(choice.name)
-                        } else {
-                            Text("\(choice.name) — \(choice.description)")
+    private var configControls: some View {
+        ForEach(stream.transcript.configOptions) { option in
+            if option.isBoolean {
+                Toggle(option.name, isOn: Binding(
+                    get: { option.isOn },
+                    set: { on in Task { await stream.setConfig(option.id, on ? "true" : "false") } }
+                ))
+                .toggleStyle(.checkbox)
+                .font(.caption)
+            } else if !option.options.isEmpty {
+                Menu {
+                    ForEach(option.options) { choice in
+                        Button {
+                            Task { await stream.setConfig(option.id, choice.id) }
+                        } label: {
+                            // The description is the useful half — "Opus 5 ·
+                            // Best for everyday, complex tasks" says more than
+                            // the word it sits under.
+                            if choice.description.isEmpty {
+                                Text(choice.name)
+                            } else {
+                                Text("\(choice.name) — \(choice.description)")
+                            }
                         }
                     }
-                }
-            } label: {
-                Text(choices.first { $0.id == current }?.name ?? fallback)
+                } label: {
+                    Text(
+                        option.options.first { $0.id == option.currentValue }?.name
+                            ?? option.name
+                    )
                     .font(.caption)
                     .lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
         }
     }
 
@@ -407,9 +392,29 @@ struct AgentComposer: View {
                 Text("Idle")
             }
             Spacer(minLength: 0)
+            context
         }
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+
+    /// How full the context window is.
+    ///
+    /// Quiet until it matters. Below half there is nothing to decide, and a
+    /// number on screen at all times is a number nobody reads; past that it is
+    /// the honest answer to "why has it started forgetting things".
+    @ViewBuilder
+    private var context: some View {
+        if let fraction = stream.transcript.contextFraction, fraction >= 0.5 {
+            HStack(spacing: 4) {
+                ProgressView(value: fraction)
+                    .progressViewStyle(.linear)
+                    .frame(width: 34)
+                Text("\(Int(fraction * 100))% context")
+            }
+            .foregroundStyle(fraction >= 0.85 ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+            .help("Context window used")
+        }
     }
 
     /// Return sends; this is for the people who look for a button.

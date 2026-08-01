@@ -47,6 +47,17 @@ public struct Transcript: Sendable {
     public private(set) var availableModes: [AgentChoice] = []
     public private(set) var model: String?
     public private(set) var availableModels: [AgentChoice] = []
+    /// Every selector the agent offers. Render one control each.
+    public private(set) var configOptions: [ConfigOption] = []
+    /// Context-window usage, or nil before the agent has reported any.
+    public private(set) var contextUsed: UInt64?
+    public private(set) var contextSize: UInt64?
+
+    /// How full the context window is, 0...1, or nil if unknown.
+    public var contextFraction: Double? {
+        guard let used = contextUsed, let size = contextSize, size > 0 else { return nil }
+        return min(1, Double(used) / Double(size))
+    }
     public private(set) var availableCommands: [String] = []
     /// The seq to ask for on reconnect: one past the highest seen.
     public private(set) var cursor: UInt64 = 0
@@ -93,11 +104,12 @@ public struct Transcript: Sendable {
 
     private mutating func apply(_ event: AgentEvent) {
         switch event {
-        case let .sessionStarted(_, mode, modes, currentModel, models, commands):
+        case let .sessionStarted(_, mode, modes, currentModel, models, options, commands):
             agentMode = mode
             availableModes = modes
             model = currentModel
             if !models.isEmpty { availableModels = models }
+            if !options.isEmpty { configOptions = options }
             // Only replace when the session actually offered some. A later
             // event carrying an empty list would otherwise empty the picker.
             if !commands.isEmpty { availableCommands = commands }
@@ -152,6 +164,25 @@ public struct Transcript: Sendable {
             // contents. Replacing is right; appending would grow the picker
             // without bound.
             availableCommands = commands
+
+        case let .usage(used, size):
+            // Not a row. It is resent constantly as a turn burns context, and
+            // one line of transcript per report would bury the conversation.
+            contextUsed = used
+            contextSize = size
+
+        case let .configSet(id, value):
+            // Kept in the list rather than in a parallel dictionary, so the
+            // control a user is looking at and the value it shows can never be
+            // two different things.
+            configOptions = configOptions.map { option in
+                guard option.id == id else { return option }
+                return ConfigOption(
+                    id: option.id, name: option.name, description: option.description,
+                    category: option.category, kind: option.kind, currentValue: value,
+                    options: option.options)
+            }
+            if id == "model" { model = value }
 
         case let .modeSet(mode):
             agentMode = mode

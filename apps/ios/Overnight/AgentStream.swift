@@ -102,6 +102,11 @@ final class AgentStream: ObservableObject {
             "terminal.agent_set_model", ["terminal": terminal, "model": model])
     }
 
+    func setConfig(_ id: String, _ value: String) async {
+        _ = try? await core.call(
+            "terminal.agent_set_config", ["terminal": terminal, "configId": id, "value": value])
+    }
+
     func answer(_ requestID: String, _ optionID: String) async {
         _ = try? await core.call(
             "terminal.agent_answer",

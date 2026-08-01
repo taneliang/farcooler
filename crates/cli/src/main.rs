@@ -407,6 +407,9 @@ enum TerminalCmd {
 
     /// Switch the model an agent session uses.
     AgentSetModel { terminal: String, model: String },
+
+    /// Change one of an agent session's selectors: mode, model, subagent.
+    AgentSetConfig { terminal: String, config_id: String, value: String },
     /// Cancel the agent's current turn.
     AgentCancel { terminal: String },
 }
@@ -1443,6 +1446,20 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             ))
             .await?;
             println!("set {} to agent mode {model}", short(id));
+        }
+
+        TerminalCmd::AgentSetConfig { terminal, config_id, value } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(with(
+                req("terminal.agent_set_config"),
+                request::Payload::AgentSetConfig(overnight_protocol::v1::AgentSetConfig {
+                    terminal_id: id_bytes(id),
+                    config_id: config_id.clone(),
+                    value: value.clone(),
+                }),
+            ))
+            .await?;
+            println!("set {} {config_id} to {value}", short(id));
         }
 
         TerminalCmd::AgentCancel { terminal } => {

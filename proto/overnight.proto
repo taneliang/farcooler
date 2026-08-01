@@ -74,6 +74,7 @@ message Request {
     AgentCancel agent_cancel = 38;
     WorktreeFileSearch worktree_file_search = 39;
     AgentSetModel agent_set_model = 40;
+    AgentSetConfig agent_set_config = 41;
   }
 }
 
@@ -170,6 +171,14 @@ message AgentSetMode {
 message AgentSetModel {
   bytes terminal_id = 1;
   string model = 2;
+}
+
+// Change one of the agent's advertised selectors, generically. Mode, model,
+// subagent and whatever an adapter adds next all travel this one way.
+message AgentSetConfig {
+  bytes terminal_id = 1;
+  string config_id = 2;
+  string value = 3;
 }
 
 message AgentCancel { bytes terminal_id = 1; }

@@ -86,7 +86,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "terminal.agent_subscribe"
         | "terminal.agent_prompt"
         | "terminal.agent_answer"
-        | "terminal.agent_set_mode" | "terminal.agent_set_model"
+        | "terminal.agent_set_mode" | "terminal.agent_set_model" | "terminal.agent_set_config"
         | "terminal.agent_cancel"
         | "worktree.file_search" => Scope::Control,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
@@ -589,6 +589,15 @@ impl Rpc {
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 svc.agents().send(id, DaemonMessage::SetModel { model: p.model });
+                self.terminal_result(id).await
+            }
+
+            "terminal.agent_set_config" => {
+                let Some(request::Payload::AgentSetConfig(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                svc.agents().send(id, DaemonMessage::SetConfig { id: p.config_id, value: p.value });
                 self.terminal_result(id).await
             }
 

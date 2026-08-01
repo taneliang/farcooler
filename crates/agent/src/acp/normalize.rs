@@ -73,6 +73,24 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
         SessionUpdate::Plan { entries } => {
             vec![AgentEvent::Plan { entries: entries.iter().map(plan_entry).collect() }]
         }
+        SessionUpdate::UsageUpdate { used, size } => {
+            vec![AgentEvent::Usage { used: *used, size: *size }]
+        }
+        SessionUpdate::ConfigOptionUpdate { config_id, value } => {
+            let value = match value {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                other => other.to_string(),
+            };
+            // Both, deliberately: `ConfigSet` is the general truth, and
+            // `ModeSet` keeps the surfaces that ask about mode by name working
+            // without every one of them learning the generic form first.
+            let mut out = vec![AgentEvent::ConfigSet { id: config_id.clone(), value: value.clone() }];
+            if config_id == "mode" {
+                out.push(AgentEvent::ModeSet { agent_mode: value });
+            }
+            out
+        }
         SessionUpdate::CurrentModeUpdate { current_mode_id } => {
             vec![AgentEvent::ModeSet { agent_mode: current_mode_id.clone() }]
         }

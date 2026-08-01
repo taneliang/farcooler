@@ -121,6 +121,10 @@ final class AgentStream: ObservableObject {
         _ = try? await runCLI(["terminal", "agent-set-model", terminal, model])
     }
 
+    func setConfig(_ id: String, _ value: String) async {
+        _ = try? await runCLI(["terminal", "agent-set-config", terminal, id, value])
+    }
+
     func answer(_ requestID: String, _ optionID: String) async {
         _ = try? await runCLI(["terminal", "agent-answer", terminal, requestID, optionID])
     }

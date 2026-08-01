@@ -33,6 +33,7 @@ pub enum DaemonMessage {
     Answer { request_id: String, option_id: String },
     SetMode { agent_mode: String },
     SetModel { model: String },
+    SetConfig { id: String, value: String },
     Cancel,
 }
 

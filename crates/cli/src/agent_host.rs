@@ -57,11 +57,41 @@ pub fn status_line(status: &Status) -> String {
 }
 
 /// The adapter Overnight uses when preferences name none.
+///
+/// `@agentclientprotocol/claude-agent-acp`, NOT `@zed-industries/claude-code-acp`.
+/// npm reports the latter as renamed and it stopped at 0.16.2 while this one is
+/// at 0.64.x — which is why it advertised Opus 4.6 as a current model. The new
+/// one also carries what the old one had no notion of: `configOptions`, nested
+/// subagent transcripts, and terminals.
 pub fn default_adapter() -> (String, Vec<String>) {
     (
         "npx".to_string(),
-        vec!["-y".to_string(), "@zed-industries/claude-code-acp".to_string()],
+        vec!["-y".to_string(), "@agentclientprotocol/claude-agent-acp".to_string()],
     )
+}
+
+/// Where the Claude Agent SDK should find Claude Code.
+///
+/// Two failures made this necessary, and the second is why it is worth the
+/// code. Without it the SDK reports "Claude native binary not found" — fair
+/// enough. But when a WRAPPER script is first on `PATH` (a `claude` that is
+/// really a shim around the real one), the SDK neither finds the binary nor
+/// reports that it did not: `session/new` simply never answers, and an agent
+/// pane sits blank forever with nothing to read.
+///
+/// So the real executable is resolved here and passed explicitly. An existing
+/// `CLAUDE_CODE_EXECUTABLE` always wins — someone who set it meant it.
+pub fn claude_executable() -> Option<String> {
+    if let Ok(explicit) = std::env::var("CLAUDE_CODE_EXECUTABLE") {
+        if !explicit.trim().is_empty() {
+            return Some(explicit);
+        }
+    }
+    // The installer's own location, preferred over `PATH` precisely because
+    // `PATH` is where the wrapper lives.
+    let home = std::env::var("HOME").ok()?;
+    let candidate = std::path::Path::new(&home).join(".local/bin/claude");
+    candidate.exists().then(|| candidate.display().to_string())
 }
 
 pub async fn run(
@@ -75,6 +105,12 @@ pub async fn run(
         Some(a) => (a, Vec::new()),
         None => default_adapter(),
     };
+
+    if let Some(executable) = claude_executable() {
+        // SAFETY: set before any thread is spawned that reads the environment,
+        // and this process exists to host exactly one adapter.
+        unsafe { std::env::set_var("CLAUDE_CODE_EXECUTABLE", executable) };
+    }
 
     let conn = match AcpConnection::spawn(&program, &args, &worktree).await {
         Ok(c) => c,
@@ -196,6 +232,9 @@ pub async fn run(
                             }
                             DaemonMessage::SetMode { agent_mode } => running.set_mode(&agent_mode).await,
                             DaemonMessage::SetModel { model } => running.set_model(&model).await,
+                            DaemonMessage::SetConfig { id, value } => {
+                                running.set_config_option(&id, &value).await
+                            }
                             DaemonMessage::Cancel => running.cancel().await,
                             // The daemon-link loop answers `Subscribe` itself
                             // by reading the ring directly; it never reaches
@@ -320,10 +359,21 @@ mod tests {
     }
 
     #[test]
-    fn the_default_adapter_is_the_zed_package() {
+    fn the_default_adapter_is_the_maintained_package_not_the_renamed_one() {
+        // npm reports `@zed-industries/claude-code-acp` as renamed, and it
+        // stopped at 0.16.2 while its successor is at 0.64.x. Pointing at the
+        // dead one is not a cosmetic mistake: it advertised Opus 4.6 as a
+        // current model and knew nothing of config options or subagents.
         let (program, args) = default_adapter();
         assert_eq!(program, "npx");
-        assert!(args.iter().any(|a| a.contains("@zed-industries/claude-code-acp")));
+        assert!(
+            args.iter().any(|a| a.contains("@agentclientprotocol/claude-agent-acp")),
+            "{args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a.contains("@zed-industries/")),
+            "the renamed package no longer receives updates: {args:?}"
+        );
     }
 
     #[test]
