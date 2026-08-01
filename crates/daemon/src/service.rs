@@ -38,6 +38,20 @@ use crate::{agent_supervisor, git, paths, session_discovery};
 /// with `--session-id` rather than left to be discovered later from whichever
 /// `.jsonl` file under `~/.claude/projects` turns out to be newest. Only
 /// `claude` understands the flag, so every other preset ignores it.
+/// Wrap a value so a shell treats it as exactly one word.
+///
+/// Single quotes, because inside them a shell interprets nothing at all — no
+/// variable expansion, no globbing, no command substitution. The only character
+/// that needs handling is a single quote itself, which is closed, escaped and
+/// reopened.
+///
+/// This exists for paths that Overnight did not choose: a worktree under
+/// `~/My Projects` splits into two arguments unquoted, which takes agent mode
+/// down entirely for anyone whose directories have spaces in them.
+pub fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
 pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let (agent, model) = match preset.split_once(':') {
@@ -885,13 +899,20 @@ impl Service {
                 // parallel field would only ever be able to agree with it or be
                 // a bug.
                 let socket = agent_supervisor::socket_path(&self.root, id).display().to_string();
+                // Quoted, every one of them. tmux hands this string to a shell,
+                // and a worktree under `~/My Projects` would otherwise split
+                // into two words and take the whole feature down for anyone
+                // whose paths have spaces in them. The binary path and the
+                // socket path are just as capable of containing one.
                 let session = session_id
                     .as_deref()
-                    .map(|s| format!(" --session {s}"))
+                    .map(|s| format!(" --session {}", shell_quote(s)))
                     .unwrap_or_default();
                 format!(
-                    "{binary} agent-host --terminal {id} --socket {socket} --worktree {} {session}",
-                    ws.worktree_path
+                    "{} agent-host --terminal {id} --socket {} --worktree {}{session}",
+                    shell_quote(&binary),
+                    shell_quote(&socket),
+                    shell_quote(&ws.worktree_path),
                 )
             }
         };
@@ -1299,6 +1320,52 @@ mod preset_tests {
         let cmd = preset_command("claude", Some("; rm -rf /"));
         assert!(!cmd.contains("rm -rf"), "{cmd}");
         assert!(!cmd.contains("--session-id"), "{cmd}");
+    }
+
+    #[test]
+    fn a_path_with_a_space_survives_becoming_a_shell_command() {
+        // The failure this prevents is total rather than partial: a worktree
+        // under `~/My Projects` splits into two arguments, `agent-host` is
+        // handed a --worktree it cannot use, and agent mode is simply broken
+        // for that user with nothing on screen explaining why.
+        assert_eq!(shell_quote("/Users/e/My Projects/app"), "'/Users/e/My Projects/app'");
+    }
+
+    #[test]
+    fn a_quote_in_a_path_cannot_end_the_quoting() {
+        // Single quotes protect everything except a single quote, so that one
+        // character has to be closed, escaped and reopened — otherwise a path
+        // containing one ends the quoted run and whatever follows is read as
+        // shell syntax.
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn a_real_shell_reads_back_exactly_what_was_quoted() {
+        // Asserted against a shell rather than against the escaped text,
+        // because the escaped text is not the thing that has to be right — the
+        // shell's reading of it is. An earlier version of this test checked
+        // that the output did not contain `'; rm`, which correct escaping
+        // produces anyway, and so proved nothing.
+        for original in [
+            "/Users/e/My Projects/app",
+            "it's",
+            "/tmp/a'; rm -rf /; echo '",
+            "$HOME/`whoami`",
+            "a\"b",
+            "back\\slash",
+        ] {
+            let out = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(format!("printf %s {}", shell_quote(original)))
+                .output()
+                .expect("run a shell");
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout),
+                original,
+                "a shell did not read back {original:?} unchanged"
+            );
+        }
     }
 }
 
