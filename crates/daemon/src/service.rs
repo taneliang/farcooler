@@ -38,6 +38,28 @@ use crate::{agent_supervisor, git, paths, session_discovery};
 /// with `--session-id` rather than left to be discovered later from whichever
 /// `.jsonl` file under `~/.claude/projects` turns out to be newest. Only
 /// `claude` understands the flag, so every other preset ignores it.
+/// The binary that hosts `agent-host`, next to the daemon that is asking.
+///
+/// NOT `current_exe()`. The daemon is `overnightd` and `agent-host` is a
+/// subcommand of the `overnight` CLI — two binaries from one workspace. Using
+/// the daemon's own path put `overnightd agent-host …` into the pane, where
+/// `overnightd` ignored the arguments, saw a daemon already listening, and
+/// exited 0. The pane then died instantly and the terminal derived as an exit
+/// the user never caused, which is the most confusing possible failure: agent
+/// mode reported success and left nothing behind.
+///
+/// A sibling of the daemon rather than whatever is on `PATH`, so a daemon built
+/// from this workspace runs the CLI built from this workspace. `PATH` is the
+/// fallback for an install that separates them.
+pub fn shim_binary(daemon_exe: Option<&std::path::Path>) -> String {
+    daemon_exe
+        .and_then(|p| p.parent())
+        .map(|dir| dir.join("overnight"))
+        .filter(|p| p.exists())
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "overnight".to_string())
+}
+
 /// Wrap a value so a shell treats it as exactly one word.
 ///
 /// Single quotes, because inside them a shell interprets nothing at all — no
@@ -891,9 +913,7 @@ impl Service {
                 }
             }
             models::PaneMode::Agent => {
-                let binary = std::env::current_exe()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|_| "overnight".to_string());
+                let binary = shim_binary(std::env::current_exe().ok().as_deref());
                 // `root`, not a second `runtime_dir` field: it is already where
                 // this daemon's socket-bearing runtime state lives, and a
                 // parallel field would only ever be able to agree with it or be
@@ -1320,6 +1340,34 @@ mod preset_tests {
         let cmd = preset_command("claude", Some("; rm -rf /"));
         assert!(!cmd.contains("rm -rf"), "{cmd}");
         assert!(!cmd.contains("--session-id"), "{cmd}");
+    }
+
+    #[test]
+    fn the_shim_is_the_cli_beside_the_daemon_not_the_daemon_itself() {
+        // Found end to end, not by a test: the pane ran `overnightd agent-host`,
+        // which ignored its arguments and exited 0. The pane died instantly and
+        // the terminal derived as an exit nobody caused, while set-pane-mode
+        // reported success — agent mode was completely broken and said nothing.
+        let dir = std::env::temp_dir().join(format!("overnight-shim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let daemon = dir.join("overnightd");
+        std::fs::write(&daemon, "").unwrap();
+        std::fs::write(dir.join("overnight"), "").unwrap();
+
+        assert_eq!(shim_binary(Some(&daemon)), dir.join("overnight").display().to_string());
+        assert!(!shim_binary(Some(&daemon)).ends_with("overnightd"));
+    }
+
+    #[test]
+    fn a_daemon_installed_without_its_cli_beside_it_falls_back_to_the_path() {
+        let dir = std::env::temp_dir().join(format!("overnight-shim-alone-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let daemon = dir.join("overnightd");
+        std::fs::write(&daemon, "").unwrap();
+        // No sibling `overnight`: naming a path that does not exist would fail
+        // in the pane with no explanation, so PATH is the better guess.
+        assert_eq!(shim_binary(Some(&daemon)), "overnight");
+        assert_eq!(shim_binary(None), "overnight");
     }
 
     #[test]

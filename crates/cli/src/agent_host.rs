@@ -29,6 +29,9 @@ type Fallible<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 pub enum Status {
     AdapterMissing { program: String },
+    /// Started, then said nothing. Distinct from missing, because the advice is
+    /// different and "it did not start" would be a lie.
+    AdapterSilent { program: String },
     Connected { session_id: String },
 }
 
@@ -38,6 +41,14 @@ pub fn status_line(status: &Status) -> String {
             "overnight: could not start the ACP adapter `{program}`.\n\
              Install it, or switch this terminal back to terminal mode — \
              terminal mode needs no adapter and is unaffected."
+        ),
+        Status::AdapterSilent { program } => format!(
+            "overnight: the ACP adapter `{program}` started but never answered.\n\
+             Nothing is wrong with this terminal — switch it back to terminal mode \
+             and it will work as it always has.\n\
+             One known cause: the Claude SDK refuses to launch inside another \
+             Claude Code session, and neither answers nor exits. Check that the \
+             daemon's environment has no CLAUDECODE variable set."
         ),
         Status::Connected { session_id } => {
             format!("overnight: agent session {session_id} connected. Rendering natively.")
@@ -76,7 +87,32 @@ pub async fn run(
         }
     };
 
-    let (agent, prelude) = AgentSession::start(conn, session).await?;
+    // Bounded, because an adapter that starts but never answers `initialize`
+    // is a real state and it looks like nothing at all: the process is alive,
+    // the pane is `running`, and the screen stays blank forever with no way for
+    // a user to tell whether it is slow or wedged. Observed in practice when
+    // the Claude SDK refuses to launch nested inside another Claude Code
+    // session — it neither answers nor exits.
+    //
+    // Generous, because a cold `npx` genuinely has to fetch a package on first
+    // use, and killing that would be worse than waiting.
+    let started = tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        AgentSession::start(conn, session),
+    )
+    .await;
+
+    let (agent, prelude) = match started {
+        Ok(result) => result?,
+        Err(_) => {
+            println!("{}", status_line(&Status::AdapterSilent { program }));
+            // Alive on purpose, exactly as `AdapterMissing` is: a pane that
+            // exits here derives as an exit nobody caused, and the message the
+            // user needs to read goes with it.
+            std::future::pending::<()>().await;
+            unreachable!()
+        }
+    };
     println!("{}", status_line(&Status::Connected { session_id: agent.session_id.clone() }));
 
     // Captured before `into_running()` consumes `agent`: `RunningSession`
@@ -287,5 +323,16 @@ mod tests {
         let (program, args) = default_adapter();
         assert_eq!(program, "npx");
         assert!(args.iter().any(|a| a.contains("@zed-industries/claude-code-acp")));
+    }
+
+    #[test]
+    fn a_silent_adapter_is_not_reported_as_a_missing_one() {
+        // Different cause, different advice. Telling a user it "could not
+        // start" when it started and went quiet sends them to reinstall a
+        // package that is already there.
+        let silent = status_line(&Status::AdapterSilent { program: "npx".into() });
+        assert!(silent.contains("never answered"), "{silent}");
+        assert!(silent.contains("terminal mode"), "must name the working fallback: {silent}");
+        assert!(!silent.contains("could not start"), "{silent}");
     }
 }
