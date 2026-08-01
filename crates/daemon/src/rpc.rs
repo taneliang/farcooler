@@ -15,11 +15,13 @@
 
 use std::sync::Arc;
 
+use overnight_agent::link::DaemonMessage;
 use overnight_core::{DomainError, Result};
 use overnight_protocol::v1::{
     Empty, Error as WireError, Request, Response, Result as WireResult, Scope, request, response,
     result,
 };
+use overnight_store::models;
 use overnight_transport::Handler;
 use uuid::Uuid;
 
@@ -75,6 +77,18 @@ fn required_scope(method: &str) -> Option<Scope> {
         // only see the shape of the fleet.
         | "terminal.screen"
         | "terminal.write" => Scope::Control,
+        // A pane's agent channel is exactly as sensitive as its screen — it is
+        // the same conversation, just structured — so it sits at the same
+        // scope rather than behind `host_admin`. Search returns
+        // worktree-relative paths only, never a host path, so it belongs here
+        // too rather than beside `worktree.list`.
+        "terminal.set_pane_mode"
+        | "terminal.agent_subscribe"
+        | "terminal.agent_prompt"
+        | "terminal.agent_answer"
+        | "terminal.agent_set_mode"
+        | "terminal.agent_cancel"
+        | "worktree.file_search" => Scope::Control,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
         // no process — the worst a wrong one does is show you the wrong pane —
         // and it has to be reachable by an agent for any of this to be
@@ -495,6 +509,100 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
+            // ---- agent channel ----
+            //
+            // Every payload here names its own `terminal_id` rather than
+            // relying on the envelope's `target_resource_id`. The envelope
+            // convention is for a mutation of an existing versioned resource;
+            // `AgentSubscribe` in particular legitimately targets a terminal
+            // that holds no session yet, which is not that shape.
+            "terminal.set_pane_mode" => {
+                let Some(request::Payload::SetPaneMode(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                let mode = match overnight_protocol::v1::PaneMode::try_from(p.pane_mode) {
+                    Ok(overnight_protocol::v1::PaneMode::Agent) => models::PaneMode::Agent,
+                    Ok(overnight_protocol::v1::PaneMode::Terminal) => models::PaneMode::Terminal,
+                    // A client that sends UNSPECIFIED is asking for a mode
+                    // that does not exist, not for a default — guessing one
+                    // would silently switch a pane nobody asked to switch.
+                    _ => return Err(DomainError::InvalidArgument { what: "pane_mode" }),
+                };
+                svc.set_pane_mode(id, mode, p.force).await?;
+                self.terminal_result(id).await
+            }
+
+            "terminal.agent_subscribe" => {
+                let Some(request::Payload::AgentSubscribe(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                // Accepted even with no session: a client attaches to a PANE,
+                // not to a session, and an empty batch is the honest answer
+                // for one that has not run an agent yet.
+                let events = svc.agents().replay(id, p.from_seq);
+                Ok(result::Value::AgentEventBatch(wire::agent_batch(id, events)))
+            }
+
+            // These four send to the shim and reply with the terminal read
+            // back, the same shape every other terminal mutation replies
+            // with — `Result` has no empty variant, and re-reading also means
+            // a client sees the activity its own send just caused (a prompt
+            // moves the row to `Working`) without a second round trip.
+            "terminal.agent_prompt" => {
+                let Some(request::Payload::AgentPrompt(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                svc.agents().send(id, DaemonMessage::Prompt { text: wire::prompt_text(&p.blocks) });
+                self.terminal_result(id).await
+            }
+
+            "terminal.agent_answer" => {
+                let Some(request::Payload::AgentAnswer(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                svc.agents().send(
+                    id,
+                    DaemonMessage::Answer { request_id: p.request_id, option_id: p.option_id },
+                );
+                // The same call `terminal.seen` makes: answering is only
+                // reachable by having looked, so it ends `Done` the same way.
+                svc.agents().seen(id);
+                self.terminal_result(id).await
+            }
+
+            "terminal.agent_set_mode" => {
+                let Some(request::Payload::AgentSetMode(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                svc.agents().send(id, DaemonMessage::SetMode { agent_mode: p.agent_mode });
+                self.terminal_result(id).await
+            }
+
+            "terminal.agent_cancel" => {
+                let Some(request::Payload::AgentCancel(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                svc.agents().send(id, DaemonMessage::Cancel);
+                self.terminal_result(id).await
+            }
+
+            "worktree.file_search" => {
+                let Some(request::Payload::WorktreeFileSearch(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.workspace_id).ok_or(DomainError::NotFound)?;
+                let paths = svc.search_worktree_files(id, &p.query, p.limit).await?;
+                Ok(result::Value::WorktreeFileList(overnight_protocol::v1::WorktreeFileList {
+                    paths,
+                }))
+            }
+
             // ---- tiling ----
             //
             // The workspace is always the envelope target and the group is
@@ -650,7 +758,7 @@ impl Rpc {
         &self,
         view: &crate::service::TerminalView,
     ) -> overnight_protocol::v1::Terminal {
-        let mut message = wire::terminal(view);
+        let mut message = wire::terminal_with_agent_state(view, self.service.agents());
         let (activity, changed_at) = self.watcher.activity(view.terminal.id).await;
         message.activity = activity as i32;
         message.activity_changed_at = changed_at.map(wire::timestamp);

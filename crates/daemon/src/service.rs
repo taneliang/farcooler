@@ -900,6 +900,53 @@ impl Service {
         self.store.set_pane_mode(id, term.resource_version, pane_mode, session_id)
     }
 
+    /// Files in a workspace's worktree, for the `@`-mention picker.
+    ///
+    /// Substring match on the worktree-relative path, capped. Deliberately not
+    /// a git call: an untracked file the agent just created is exactly the one
+    /// a user wants to mention next.
+    pub async fn search_worktree_files(
+        &self,
+        workspace_id: Uuid,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<String>> {
+        let ws = self.store.get_workspace(workspace_id)?;
+        let root = PathBuf::from(&ws.worktree_path);
+        let needle = query.to_lowercase();
+        let cap = if limit == 0 { 50 } else { limit.min(500) } as usize;
+
+        let mut out = Vec::new();
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                // `.git` is enormous and never mentionable; `target` and
+                // `node_modules` are build output nobody `@`-mentions and
+                // walking them would dwarf the rest of the tree.
+                if name == ".git" || name == "target" || name == "node_modules" {
+                    continue;
+                }
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                let Ok(relative) = path.strip_prefix(&root) else { continue };
+                let relative = relative.display().to_string();
+                if needle.is_empty() || relative.to_lowercase().contains(&needle) {
+                    out.push(relative);
+                    if out.len() >= cap {
+                        return Ok(out);
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     // ---- runtime ----
     //
     // These operate on tmux alone and never touch the database, which is what
@@ -1133,6 +1180,60 @@ mod tests {
     fn sanitize_keeps_paths_predictable() {
         assert_eq!(sanitize("my repo/name"), "my-repo-name");
         assert_eq!(sanitize("ok_name-1"), "ok_name-1");
+    }
+
+    /// A service backed by its own throwaway database.
+    ///
+    /// `keep` rather than letting the `TempDir` drop: the guard would delete
+    /// the directory the instant this function returns, before the caller
+    /// ever opens it.
+    async fn temp_service() -> Service {
+        let dir = tempfile::tempdir().unwrap().keep();
+        Service::open_in(dir).await.unwrap()
+    }
+
+    /// A workspace whose worktree is a real, empty directory a test can write
+    /// into — everything `search_worktree_files` needs and nothing tmux or git
+    /// would add, since this is a store-level fixture rather than a live one.
+    async fn seed_workspace(service: &Service) -> models::Workspace {
+        let worktree = tempfile::tempdir().unwrap().keep();
+        let root = service
+            .store
+            .create_repository_root(service.host_id, "/tmp/worktree-search-root", now_millis())
+            .unwrap();
+        let repo = service
+            .store
+            .create_repository(service.host_id, root.id, "repo", "/tmp/worktree-search-root/.git", "")
+            .unwrap();
+        service
+            .store
+            .create_workspace(repo.id, "task", "branch", &worktree.display().to_string())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn worktree_search_finds_a_file_that_git_has_never_seen() {
+        // The @-mention case that matters: the file the agent just created.
+        let service = temp_service().await;
+        let ws = seed_workspace(&service).await;
+        std::fs::write(
+            std::path::Path::new(&ws.worktree_path).join("brand_new.rs"),
+            "fn main() {}",
+        )
+        .unwrap();
+        let hits = service.search_worktree_files(ws.id, "brand", 10).await.unwrap();
+        assert_eq!(hits, vec!["brand_new.rs".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn worktree_search_never_offers_the_git_directory() {
+        let service = temp_service().await;
+        let ws = seed_workspace(&service).await;
+        let git_dir = std::path::Path::new(&ws.worktree_path).join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main").unwrap();
+        let hits = service.search_worktree_files(ws.id, "", 500).await.unwrap();
+        assert!(!hits.iter().any(|p| p.starts_with(".git/")), "{hits:?}");
     }
 }
 

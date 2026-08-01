@@ -920,3 +920,40 @@ async fn moving_a_pane_that_is_alone_in_its_window_keeps_its_identity() {
         "a moved terminal is running, not lost"
     );
 }
+
+#[tokio::test]
+async fn a_terminal_reports_its_pane_mode_to_a_client() {
+    // Clients render pane mode; they must never infer it from a command line.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let terminal = a_terminal(&mut client, &workspace.id, "claude").await;
+
+    assert_eq!(terminal.pane_mode, overnight_protocol::v1::PaneMode::Terminal as i32);
+}
+
+#[tokio::test]
+async fn an_agent_subscribe_from_a_cursor_is_accepted() {
+    // A client attaches to a PANE, not to a session: subscribing before any
+    // agent has ever run there must be accepted, with nothing to replay,
+    // rather than refused.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let terminal = a_terminal(&mut client, &workspace.id, "claude").await;
+
+    let mut req = request("terminal.agent_subscribe");
+    req.payload = Some(request::Payload::AgentSubscribe(overnight_protocol::v1::AgentSubscribe {
+        terminal_id: terminal.id.clone(),
+        from_seq: 0,
+    }));
+    let result = client.call(req).await;
+    assert!(result.is_ok(), "subscribe must be accepted even before a session exists: {result:?}");
+
+    let Some(result::Value::AgentEventBatch(batch)) = result.unwrap().value else {
+        panic!("wrong result")
+    };
+    assert!(batch.events.is_empty(), "nothing has happened on this pane yet");
+}

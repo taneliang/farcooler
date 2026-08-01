@@ -14,10 +14,12 @@
 //! to write a handler that reports a stale `running` for a pane that died an
 //! hour ago.
 
+use overnight_agent::event::{AgentEvent, AgentGapReason, Sequenced};
 use overnight_protocol::v1::{self as wire, Scope};
 use overnight_store::models;
 use uuid::Uuid;
 
+use crate::agent_supervisor::AgentSupervisor;
 use crate::service::{TerminalView, WorkspaceView};
 
 pub fn id_bytes(id: Uuid) -> bytes::Bytes {
@@ -166,6 +168,73 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         agent_mode: None,
         available_agent_modes: Vec::new(),
     }
+}
+
+/// `terminal`, plus the ACP-facing fields only `AgentSupervisor` knows.
+///
+/// A second function rather than widening `terminal()` itself: `watch::
+/// Watcher`'s broadcast path builds a `Terminal` for every state change on
+/// the host from a bare view, with no supervisor at hand, and giving it one
+/// only to feed two fields it does not yet report is a call site this change
+/// has no cause to touch. `Rpc::with_activity` — the one place terminal
+/// replies and list entries are built — calls this instead.
+pub fn terminal_with_agent_state(view: &TerminalView, agents: &AgentSupervisor) -> wire::Terminal {
+    let mut message = terminal(view);
+    let id = view.terminal.id;
+    message.agent_mode = agents.agent_mode(id);
+    message.available_agent_modes = agents.available_modes(id);
+    message
+}
+
+/// A replay or fast-attach batch, for one terminal.
+///
+/// Each event is JSON because the shape is `overnight_agent::event::
+/// AgentEvent`, the single Rust definition both apps decode; see
+/// `AgentEventFrame` in the proto for why. A value that fails to serialize is
+/// never simply skipped: skipping would leave a hole between two seq numbers
+/// that looks, to a client counting on contiguous history, like a bug in its
+/// own bookkeeping rather than a bad event. Reusing `link::encode_line` here
+/// rather than calling `serde_json` directly keeps the daemon crate off a
+/// dependency it needs for nothing else — the shim already carries it for the
+/// exact same serialization.
+pub fn agent_batch(terminal: Uuid, events: Vec<Sequenced>) -> wire::AgentEventBatch {
+    wire::AgentEventBatch {
+        terminal_id: id_bytes(terminal),
+        events: events
+            .into_iter()
+            .map(|s| {
+                let payload_json = overnight_agent::link::encode_line(&s.event)
+                    .map(|line| line.trim_end().to_string())
+                    .unwrap_or_else(|_| {
+                        overnight_agent::link::encode_line(&AgentEvent::Gap {
+                            reason: AgentGapReason::Unparsed,
+                        })
+                        .map(|line| line.trim_end().to_string())
+                        .expect("a fixed Gap literal always serializes")
+                    });
+                wire::AgentEventFrame { seq: s.seq, payload_json }
+            })
+            .collect(),
+    }
+}
+
+/// The text an ACP `prompt` turn carries, from the blocks a client sent.
+///
+/// A `file_mention` renders as `@path` — the same syntax a user would have
+/// typed by hand, so the adapter needs no separate representation for it. An
+/// `image` block contributes no text: multimodal prompts are a later slice,
+/// and dropping the bytes here rather than inventing placeholder text keeps
+/// that boundary honest instead of pretending the block was handled.
+pub fn prompt_text(blocks: &[wire::AgentPromptBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|b| match &b.content {
+            Some(wire::agent_prompt_block::Content::Text(t)) => Some(t.clone()),
+            Some(wire::agent_prompt_block::Content::FileMention(p)) => Some(format!("@{p}")),
+            Some(wire::agent_prompt_block::Content::Image(_)) | None => None,
+        })
+        .collect::<Vec<_>>()
+        .concat()
 }
 
 /// Durable intent to the wire.
