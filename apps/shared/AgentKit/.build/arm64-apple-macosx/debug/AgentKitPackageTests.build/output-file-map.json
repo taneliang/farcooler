@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/primary.swiftdeps"
+  },
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.derived/runner.swift": {
+    "dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/runner.d",
+    "object": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/runner.dia"
+  }
+}

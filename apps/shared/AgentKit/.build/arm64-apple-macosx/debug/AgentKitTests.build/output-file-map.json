@@ -1,0 +1,26 @@
+{
+  "": {
+    "swift-dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/primary.swiftdeps"
+  },
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/AgentEventTests.swift": {
+    "dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/AgentEventTests.d",
+    "object": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/AgentEventTests.swift.o",
+    "swiftmodule": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/AgentEventTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/AgentEventTests.swiftdeps",
+    "diagnostics": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/AgentEventTests.dia"
+  },
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/ComposerTests.swift": {
+    "dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/ComposerTests.d",
+    "object": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/ComposerTests.swift.o",
+    "swiftmodule": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/ComposerTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/ComposerTests.swiftdeps",
+    "diagnostics": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/ComposerTests.dia"
+  },
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/TranscriptTests.swift": {
+    "dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/TranscriptTests.d",
+    "object": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/TranscriptTests.swift.o",
+    "swiftmodule": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/TranscriptTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/TranscriptTests.swiftdeps",
+    "diagnostics": "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/TranscriptTests.dia"
+  }
+}

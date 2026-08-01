@@ -1,0 +1,112 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "AgentKit-arm64-apple-macosx-debug.module": ["<AgentKit-arm64-apple-macosx-debug.module>"]
+  "AgentKitPackageTests-arm64-apple-macosx-debug.module": ["<AgentKitPackageTests-arm64-apple-macosx-debug.module>"]
+  "AgentKitPackageTests-arm64-apple-macosx-debug.test": ["<AgentKitPackageTests-arm64-apple-macosx-debug.test>"]
+  "AgentKitTests-arm64-apple-macosx-debug.module": ["<AgentKitTests-arm64-apple-macosx-debug.module>"]
+  "PackageStructure": ["<PackageStructure>"]
+  "main": ["<AgentKit-arm64-apple-macosx-debug.module>"]
+  "test": ["<AgentKit-arm64-apple-macosx-debug.module>","<AgentKitPackageTests-arm64-apple-macosx-debug.test>","<AgentKitTests-arm64-apple-macosx-debug.module>"]
+default: "main"
+nodes:
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Sources/AgentKit/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Sources/AgentKit/AgentEvent.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Sources/AgentKit/Composer.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Sources/AgentKit/Transcript.swift"]
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/sources"]
+    description: "Write auxiliary file /Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/sources"
+
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.derived/runner.swift"]
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/sources"]
+    description: "Write auxiliary file /Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/sources"
+
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.derived/runner.swift":
+    tool: test-entry-point-tool
+    inputs: []
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.derived/runner.swift"]
+
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/AgentEvent.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/Composer.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/Transcript.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/runner.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/AgentEventTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/ComposerTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/TranscriptTests.swift.o"]
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.product/Objects.LinkFileList"
+
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/AgentEventTests.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/ComposerTests.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/TranscriptTests.swift"]
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/sources"]
+    description: "Write auxiliary file /Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/sources"
+
+  "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+
+  "<AgentKit-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/AgentEvent.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/Composer.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/Transcript.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKit.swiftmodule"]
+    outputs: ["<AgentKit-arm64-apple-macosx-debug.module>"]
+
+  "<AgentKitPackageTests-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/runner.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKitPackageTests.swiftmodule"]
+    outputs: ["<AgentKitPackageTests-arm64-apple-macosx-debug.module>"]
+
+  "<AgentKitPackageTests-arm64-apple-macosx-debug.test>":
+    tool: phony
+    inputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.xctest/Contents/MacOS/AgentKitPackageTests"]
+    outputs: ["<AgentKitPackageTests-arm64-apple-macosx-debug.test>"]
+
+  "<AgentKitTests-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/AgentEventTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/ComposerTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/TranscriptTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKitTests.swiftmodule"]
+    outputs: ["<AgentKitTests-arm64-apple-macosx-debug.module>"]
+
+  "C.AgentKit-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Sources/AgentKit/AgentEvent.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Sources/AgentKit/Composer.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Sources/AgentKit/Transcript.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/sources"]
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/AgentEvent.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/Composer.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/Transcript.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKit.swiftmodule"]
+    description: "Compiling Swift Module 'AgentKit' (3 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","AgentKit","-emit-dependencies","-emit-module","-emit-module-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKit.swiftmodule","-output-file-map","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/sources","-I","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx14.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-emit-objc-header","-emit-objc-header-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/include/AgentKit-Swift.h","-swift-version","6","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","agentkit"]
+
+  "C.AgentKitPackageTests-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.derived/runner.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKitTests.swiftmodule","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/sources"]
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/runner.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKitPackageTests.swiftmodule"]
+    description: "Compiling Swift Module 'AgentKitPackageTests' (1 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","AgentKitPackageTests","-emit-dependencies","-emit-module","-emit-module-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKitPackageTests.swiftmodule","-output-file-map","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/sources","-I","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx14.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-Xfrontend","-enable-cross-import-overlays","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-emit-objc-header","-emit-objc-header-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/include/AgentKitPackageTests-Swift.h","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","agentkit"]
+
+  "C.AgentKitPackageTests-arm64-apple-macosx-debug.test":
+    tool: shell
+    inputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/AgentEvent.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/Composer.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/Transcript.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/runner.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/AgentEventTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/ComposerTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/TranscriptTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.product/Objects.LinkFileList"]
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.xctest/Contents/MacOS/AgentKitPackageTests"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/AgentKitPackageTests.xctest/Contents/MacOS/AgentKitPackageTests"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug","-o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.xctest/Contents/MacOS/AgentKitPackageTests","-module-name","AgentKitPackageTests","-Xlinker","-no_warn_duplicate_libraries","-Xlinker","-bundle","-Xlinker","-rpath","-Xlinker","@loader_path/../../../","@/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx14.0","-Xlinker","-add_ast_path","-Xlinker","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKit.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKitPackageTests.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKitTests.swiftmodule","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.AgentKitTests-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/AgentEventTests.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/ComposerTests.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/TranscriptTests.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKit.swiftmodule","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/sources"]
+    outputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/AgentEventTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/ComposerTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/TranscriptTests.swift.o","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKitTests.swiftmodule"]
+    description: "Compiling Swift Module 'AgentKitTests' (3 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","AgentKitTests","-emit-dependencies","-emit-module","-emit-module-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules/AgentKitTests.swiftmodule","-output-file-map","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitTests.build/sources","-I","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx14.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-Xfrontend","-enable-cross-import-overlays","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-swift-version","6","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","agentkit"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Sources/AgentKit/","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Tests/AgentKitTests/","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Package.swift","/Users/e-liang/Dev/overnight/apps/shared/AgentKit/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

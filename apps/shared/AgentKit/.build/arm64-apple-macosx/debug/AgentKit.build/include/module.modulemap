@@ -1,0 +1,3 @@
+module AgentKit {
+    header "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.build/include/AgentKit-Swift.h"
+}

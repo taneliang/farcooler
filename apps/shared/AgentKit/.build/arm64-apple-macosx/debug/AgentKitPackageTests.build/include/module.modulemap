@@ -1,0 +1,3 @@
+module AgentKitPackageTests {
+    header "/Users/e-liang/Dev/overnight/apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKitPackageTests.build/include/AgentKitPackageTests-Swift.h"
+}
