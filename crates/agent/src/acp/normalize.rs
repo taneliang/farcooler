@@ -18,9 +18,11 @@ fn plan_entry(e: &WirePlanEntry) -> PlanEntry {
 
 /// One update becomes zero or more events.
 ///
-/// Never an empty vec for an update that carried meaning: an update this
-/// version cannot interpret produces a `Gap`, because a silently dropped
-/// update is a transcript that is wrong without saying so.
+/// Almost never an empty vec for an update that carried meaning: an update
+/// this version cannot interpret produces a `Gap`, because a silently
+/// dropped update is a transcript that is wrong without saying so. The one
+/// deliberate exception is `AvailableCommandsUpdate` — see its arm below for
+/// why an empty vec there is correct rather than an oversight.
 pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
     match update {
         SessionUpdate::AgentMessageChunk { content } => {
@@ -31,6 +33,32 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
         }
         SessionUpdate::AgentThoughtChunk { content } => {
             vec![AgentEvent::Message { role: Role::Thought, text: content.text.clone() }]
+        }
+        SessionUpdate::AvailableCommandsUpdate { .. } => {
+            // A `Gap` means "history is missing here" — a client renders a
+            // visible break and tells the user their transcript may be
+            // incomplete. That would be a lie: nothing about the
+            // conversation was lost, an agent just resent its slash-command
+            // menu, which fires once per turn regardless of whether anyone
+            // asked for it. Treating this as unparsed input (the old
+            // behavior, via `Unknown`) turned every single turn into a false
+            // "history missing" break.
+            //
+            // The alternative considered was reusing
+            // `AgentEvent::SessionStarted { available_commands, .. }`, whose
+            // field exists for exactly this data. Rejected here: this
+            // function has no session id, mode, or available-modes list to
+            // fill the rest of that event with, and emitting a second
+            // `SessionStarted` mid-turn would tell every consumer of this
+            // stream — which reasonably assumes a session starts once —
+            // that the session restarted. Wiring the real command list into
+            // the real `SessionStarted` belongs in the session driver
+            // (`session.rs`), which owns the session's identity and prelude
+            // and can merge this update into it before the first event ever
+            // reaches a client. Until that wiring exists, the honest thing
+            // this function can do is nothing: no event, and definitely not
+            // a `Gap`.
+            vec![]
         }
         SessionUpdate::ToolCall { tool_call_id, title, kind, status: s, locations } => {
             vec![AgentEvent::ToolCall {

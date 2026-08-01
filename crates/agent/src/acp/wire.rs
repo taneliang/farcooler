@@ -60,6 +60,18 @@ pub struct Location {
     pub path: String,
 }
 
+/// One entry of the slash-command menu carried by `available_commands_update`.
+///
+/// Only `name` is captured. `description` and `input` are real fields on the
+/// wire (see the fixtures) but nothing downstream reads them yet, and this
+/// file stays lenient by design — unused fields are left for serde to ignore
+/// rather than modeled speculatively.
+#[derive(Debug, Deserialize)]
+pub struct WireAvailableCommand {
+    #[serde(default)]
+    pub name: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "sessionUpdate", rename_all = "snake_case")]
 pub enum SessionUpdate {
@@ -71,6 +83,15 @@ pub enum SessionUpdate {
     },
     AgentThoughtChunk {
         content: ContentBlock,
+    },
+    /// The full slash-command list, resent once per turn (60+ entries, tens
+    /// of KB in a real capture). Session metadata, not conversation content —
+    /// see `normalize::update_to_events` for why this must not become a
+    /// `Gap`. Without this variant it fell into `Unknown` and every single
+    /// turn produced a spurious "history missing" break in the transcript.
+    AvailableCommandsUpdate {
+        #[serde(rename = "availableCommands", default)]
+        available_commands: Vec<WireAvailableCommand>,
     },
     ToolCall {
         #[serde(rename = "toolCallId")]
