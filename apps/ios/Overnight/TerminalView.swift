@@ -94,13 +94,27 @@ struct TerminalView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            GeometryReader { geo in
-                phaseContent(size: geo.size)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .task(id: GridSize(width: geo.size.width, height: geo.size.height, cell: cellSize)) {
-                        await session.configure(
-                            columns: columns(for: geo.size), rows: rows(for: geo.size))
-                    }
+            // Chosen by `terminal.isAgentPane`, which the daemon sets — never
+            // derived here, the same rule that keeps `activity` and
+            // `agentMode` as reported rather than guessed at. `AgentView` is
+            // given `current.id` as its SwiftUI identity: a tab switch
+            // between two agent panes recreates it rather than retargeting
+            // an existing `AgentStream`, which is simpler than the terminal
+            // side's `TerminalSession.switchTo` and correct here because an
+            // agent session has no live ssh channel to hand off — a fresh
+            // subscribe from seq 0 costs one round trip, not a stream.
+            if current.isAgentPane {
+                AgentView(terminalID: current.id, workspaceID: currentWorkspace?.id, connection: connection)
+                    .id(current.id)
+            } else {
+                GeometryReader { geo in
+                    phaseContent(size: geo.size)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .task(id: GridSize(width: geo.size.width, height: geo.size.height, cell: cellSize)) {
+                            await session.configure(
+                                columns: columns(for: geo.size), rows: rows(for: geo.size))
+                        }
+                }
             }
             // Both bars live at the bottom, in thumb reach. The tab strip used
             // to sit under the title, which put the one control you use
@@ -429,7 +443,17 @@ struct TerminalView: View {
     private func select(_ terminal: Terminal) {
         guard terminal.id != current.id else { return }
         current = terminal
-        session.switchTo(terminal.id)
+        // An agent pane draws nothing from `TerminalSession` — there is no
+        // ssh stream to retarget, and leaving one open on the terminal just
+        // tapped away from would keep a channel alive for a pane nothing is
+        // showing. `stop()` releases it the same way leaving this screen
+        // entirely does in `.onDisappear`; the branch below still runs the
+        // ordinary retarget whenever the newly selected tab is a terminal.
+        if terminal.isAgentPane {
+            session.stop()
+        } else {
+            session.switchTo(terminal.id)
+        }
     }
 
     // MARK: - Input

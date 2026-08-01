@@ -26,6 +26,23 @@ SOURCES = [
     "TerminalSession.swift",
     "TerminalTabStrip.swift",
     "TerminalView.swift",
+    "AgentStream.swift",
+    "AgentView.swift",
+]
+
+# `AgentKit`'s own sources, compiled directly into this target rather than
+# vended as a real module the way `apps/macos/Package.swift` vends it via
+# SwiftPM — iOS has no SwiftPM project here, only this generated one. So
+# `Transcript`, `AgentEvent` and friends simply become part of the "Overnight"
+# module, and nothing under `Overnight/` writes `import AgentKit`. They live
+# outside `Overnight/`, which is why `SOURCES` above — basenames the generator
+# assumes sit in that one directory — cannot hold them; `agentKitGroup` below
+# gives them a group of their own instead, the same way `fontsGroup` does for
+# `Fonts/`.
+AGENTKIT_SOURCES = [
+    "AgentEvent.swift",
+    "Composer.swift",
+    "Transcript.swift",
 ]
 FRAMEWORKS = ["overnight_vt.xcframework", "overnight_client.xcframework"]
 
@@ -42,8 +59,8 @@ FONTS = [
 
 KEYS = [
     "project", "target", "mainGroup", "productsGroup", "sourcesGroup",
-    "frameworksGroup", "fontsGroup", "product", "sourcesPhase", "frameworksPhase",
-    "resourcesPhase", "buildConfigList", "targetConfigList",
+    "frameworksGroup", "fontsGroup", "agentKitGroup", "product", "sourcesPhase",
+    "frameworksPhase", "resourcesPhase", "buildConfigList", "targetConfigList",
     "debug", "release", "targetDebug", "targetRelease",
 ]
 
@@ -53,14 +70,16 @@ def oid(seed):
     return uuid.uuid5(uuid.NAMESPACE_URL, "overnight-ios/" + seed).hex[:24].upper()
 
 
-ids = {name: oid(name) for name in SOURCES + FRAMEWORKS + FONTS}
-build_ids = {name: oid("build/" + name) for name in SOURCES + FRAMEWORKS + FONTS}
+ids = {name: oid(name) for name in SOURCES + AGENTKIT_SOURCES + FRAMEWORKS + FONTS}
+build_ids = {
+    name: oid("build/" + name) for name in SOURCES + AGENTKIT_SOURCES + FRAMEWORKS + FONTS
+}
 P = {key: oid(key) for key in KEYS}
 
 
 def file_refs():
     lines = []
-    for name in SOURCES:
+    for name in SOURCES + AGENTKIT_SOURCES:
         lines.append(
             f"\t\t{ids[name]} /* {name} */ = {{isa = PBXFileReference; "
             f"lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = \"<group>\"; }};"
@@ -86,7 +105,7 @@ def file_refs():
 
 def build_files():
     lines = []
-    for name in SOURCES:
+    for name in SOURCES + AGENTKIT_SOURCES:
         lines.append(
             f"\t\t{build_ids[name]} /* {name} in Sources */ = {{isa = PBXBuildFile; "
             f"fileRef = {ids[name]}; }};"
@@ -104,12 +123,21 @@ def build_files():
     return "\n".join(lines)
 
 
-source_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Sources */," for n in SOURCES)
+source_list = "\n".join(
+    f"\t\t\t\t{build_ids[n]} /* {n} in Sources */," for n in SOURCES + AGENTKIT_SOURCES
+)
 framework_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Frameworks */," for n in FRAMEWORKS)
 resource_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Resources */," for n in FONTS)
 source_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in SOURCES)
 framework_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FRAMEWORKS)
 font_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FONTS)
+agentkit_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in AGENTKIT_SOURCES)
+# `agentKitGroup`'s `path` is "../shared/AgentKit/Sources/AgentKit", which
+# only resolves to the right directory (`apps/shared/AgentKit/Sources/AgentKit`)
+# if the group sits directly under `mainGroup` — a sibling of `sourcesGroup`,
+# not nested inside it. Nested one level deeper, inside "Overnight", the same
+# relative path would land one directory short. See where `P['agentKitGroup']`
+# is added to `mainGroup`'s children below.
 
 COMMON = """\t\t\t\tCLANG_ENABLE_MODULES = YES;
 \t\t\t\tSWIFT_VERSION = 5.0;
@@ -173,6 +201,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tisa = PBXGroup;
 \t\t\tchildren = (
 \t\t\t\t{P['sourcesGroup']} /* Overnight */,
+\t\t\t\t{P['agentKitGroup']} /* AgentKit */,
 \t\t\t\t{P['frameworksGroup']} /* Frameworks */,
 \t\t\t\t{P['productsGroup']} /* Products */,
 \t\t\t);
@@ -193,6 +222,15 @@ PBXPROJ = f"""// !$*UTF8*$!
 {font_children}
 \t\t\t);
 \t\t\tpath = Fonts;
+\t\t\tsourceTree = "<group>";
+\t\t}};
+\t\t{P['agentKitGroup']} /* AgentKit */ = {{
+\t\t\tisa = PBXGroup;
+\t\t\tchildren = (
+{agentkit_children}
+\t\t\t);
+\t\t\tname = AgentKit;
+\t\t\tpath = "../shared/AgentKit/Sources/AgentKit";
 \t\t\tsourceTree = "<group>";
 \t\t}};
 \t\t{P['frameworksGroup']} /* Frameworks */ = {{

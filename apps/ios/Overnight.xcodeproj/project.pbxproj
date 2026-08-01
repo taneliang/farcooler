@@ -19,6 +19,11 @@
 		D0E0DA3007C95208AA0B6A03 /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0353D1B9C0F35087BA4FC7CD; };
 		ADEC346FDDA9577BB1EC6EB2 /* TerminalTabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 058CF2821E1351E18C243532; };
 		A6EB0FF568D45F8D9BE28255 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238580CBF1FE54CCA5613A08; };
+		F73DB02B0CC4510384E94B3B /* AgentStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05FCE944EC2F57FFB5C75C8A; };
+		9B898AB21D66551786167F63 /* AgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40DCF67F1A6B5F36B3EAE754; };
+		4D5329505C1B58D2A13ACF68 /* AgentEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BC817AC621451B592E2D127; };
+		CAC1D60B33465D84ABE1DB49 /* Composer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C953DB8CFB657258C239814; };
+		B30D8C52CF2B5769AE32065E /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE70E4FD4805B5D9BC03EB4; };
 		FECA7427E1AD5FCCA209AB94 /* overnight_vt.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5FA5EC59B6750A5905DB67D; };
 		2E99CD1866A95EFDAC853396 /* overnight_client.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA8286B4C4C155E1B03E0475; };
 		66A4FE2A05E7590399E9A7A6 /* IosevkaNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B095B065814650EDB0579652; };
@@ -39,6 +44,11 @@
 		0353D1B9C0F35087BA4FC7CD /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
 		058CF2821E1351E18C243532 /* TerminalTabStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabStrip.swift; sourceTree = "<group>"; };
 		238580CBF1FE54CCA5613A08 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		05FCE944EC2F57FFB5C75C8A /* AgentStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStream.swift; sourceTree = "<group>"; };
+		40DCF67F1A6B5F36B3EAE754 /* AgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentView.swift; sourceTree = "<group>"; };
+		5BC817AC621451B592E2D127 /* AgentEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentEvent.swift; sourceTree = "<group>"; };
+		1C953DB8CFB657258C239814 /* Composer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Composer.swift; sourceTree = "<group>"; };
+		2BE70E4FD4805B5D9BC03EB4 /* Transcript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcript.swift; sourceTree = "<group>"; };
 		C5FA5EC59B6750A5905DB67D /* overnight_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_vt.xcframework; path = Frameworks/overnight_vt.xcframework; sourceTree = "<group>"; };
 		FA8286B4C4C155E1B03E0475 /* overnight_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_client.xcframework; path = Frameworks/overnight_client.xcframework; sourceTree = "<group>"; };
 		B095B065814650EDB0579652 /* IosevkaNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Regular.ttf; sourceTree = "<group>"; };
@@ -63,6 +73,7 @@
 			isa = PBXGroup;
 			children = (
 				63DD385570A45649B43B8E30 /* Overnight */,
+				50F4998DA8BD5122A1C98AAB /* AgentKit */,
 				5FD0074FA69A5B7790E1CFAF /* Frameworks */,
 				49C89B1CC34B5EBC92D8231C /* Products */,
 			);
@@ -84,6 +95,8 @@
 				0353D1B9C0F35087BA4FC7CD /* TerminalSession.swift */,
 				058CF2821E1351E18C243532 /* TerminalTabStrip.swift */,
 				238580CBF1FE54CCA5613A08 /* TerminalView.swift */,
+				05FCE944EC2F57FFB5C75C8A /* AgentStream.swift */,
+				40DCF67F1A6B5F36B3EAE754 /* AgentView.swift */,
 				A6660D768374543B806DC1FF /* Fonts */,
 			);
 			path = Overnight;
@@ -96,6 +109,17 @@
 				5E3BA59DB5605401A271C324 /* IosevkaNerdFontMono-Bold.ttf */,
 			);
 			path = Fonts;
+			sourceTree = "<group>";
+		};
+		50F4998DA8BD5122A1C98AAB /* AgentKit */ = {
+			isa = PBXGroup;
+			children = (
+				5BC817AC621451B592E2D127 /* AgentEvent.swift */,
+				1C953DB8CFB657258C239814 /* Composer.swift */,
+				2BE70E4FD4805B5D9BC03EB4 /* Transcript.swift */,
+			);
+			name = AgentKit;
+			path = "../shared/AgentKit/Sources/AgentKit";
 			sourceTree = "<group>";
 		};
 		5FD0074FA69A5B7790E1CFAF /* Frameworks */ = {
@@ -188,6 +212,11 @@
 				D0E0DA3007C95208AA0B6A03 /* TerminalSession.swift in Sources */,
 				ADEC346FDDA9577BB1EC6EB2 /* TerminalTabStrip.swift in Sources */,
 				A6EB0FF568D45F8D9BE28255 /* TerminalView.swift in Sources */,
+				F73DB02B0CC4510384E94B3B /* AgentStream.swift in Sources */,
+				9B898AB21D66551786167F63 /* AgentView.swift in Sources */,
+				4D5329505C1B58D2A13ACF68 /* AgentEvent.swift in Sources */,
+				CAC1D60B33465D84ABE1DB49 /* Composer.swift in Sources */,
+				B30D8C52CF2B5769AE32065E /* Transcript.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
