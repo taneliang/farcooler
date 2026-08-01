@@ -53,6 +53,17 @@ final class TerminalSession: ObservableObject {
     /// during layout is enough — would cancel and restart the debounce timer
     /// forever and the resize would never actually fire.
     private var pendingResizeSize: (columns: Int, rows: Int)?
+    /// What the pane looked like before this device reshaped it, so leaving
+    /// can put it back. See `releasePane`.
+    private var shapeBeforeUs: (columns: Int, rows: Int)?
+    /// Whether this device has asked the host to reshape the pane yet.
+    ///
+    /// Gating `shapeBeforeUs` on this rather than on being the first `prime`,
+    /// because the two race: the debounced resize is 200ms and a screen call
+    /// is a round trip to the host, so a `prime` can easily land after the
+    /// resize and record the shape THIS device just imposed as the one to hand
+    /// back. Which made handing back a no-op that looked like it worked.
+    private var hasResized = false
     private var resizeDebounce: Task<Void, Never>?
     /// How long to wait for a burst of size changes to settle before asking
     /// the host to reflow. A keyboard sliding up and a rotation each produce
@@ -156,7 +167,12 @@ final class TerminalSession: ObservableObject {
         teardown()
         // The outgoing terminal, named before it stops being the current one.
         let leaving = terminalID
-        Task { await stopStream(leaving) }
+        let handBack = shapeBeforeUs
+        shapeBeforeUs = nil
+        Task {
+            await stopStream(leaving)
+            await releasePane(leaving, to: handBack)
+        }
         terminalID = id
         vt = nil
         grid = nil
@@ -171,6 +187,7 @@ final class TerminalSession: ObservableObject {
         // hiccup and showed a failure it had not earned — which is the error
         // that flashed when switching tabs.
         failedAttaches = 0
+        hasResized = false
         // The size this device would like has not changed — the screen did
         // not resize, only what it is showing did — but `lastResizeSent`
         // described the OUTGOING terminal's pane, and comparing the new
@@ -231,6 +248,7 @@ final class TerminalSession: ObservableObject {
         if let sent = lastResizeSent, sent == size { return }
         pendingResizeSize = nil
         lastResizeSent = size
+        hasResized = true
         _ = try? await core.call(
             "terminal.resize",
             ["terminal": terminalID, "columns": size.columns, "rows": size.rows])
@@ -291,7 +309,32 @@ final class TerminalSession: ObservableObject {
         teardown()
         started = false
         let id = terminalID
-        Task { await stopStream(id) }
+        let handBack = shapeBeforeUs
+        shapeBeforeUs = nil
+        Task {
+            await stopStream(id)
+            await releasePane(id, to: handBack)
+        }
+    }
+
+    /// Give a pane back the shape it had before this device reshaped it.
+    ///
+    /// A phone reflows a pane to its own narrow viewport, which is right while
+    /// it is the thing looking at it and wrong the moment it is not: whoever
+    /// else has that terminal on screen is left with a column of phone-shaped
+    /// text. So switching tabs, or leaving the terminal screen, hands the pane
+    /// back rather than leaving the last viewer's shape imposed on everyone.
+    ///
+    /// Restoring the remembered size rather than asking who else is watching,
+    /// because nothing here knows that — the host would have to, and a viewer
+    /// registry is a bigger thing than the one case this covers. What it
+    /// cannot survive is this device disappearing without saying so; the pane
+    /// then keeps the phone's shape until something else resizes it.
+    private func releasePane(_ id: String, to shape: (columns: Int, rows: Int)?) async {
+        guard let shape else { return }
+        _ = try? await core.call(
+            "terminal.resize",
+            ["terminal": id, "columns": shape.columns, "rows": shape.rows])
     }
 
     /// Stop everything that paints, and everything that feeds what paints.
@@ -374,6 +417,12 @@ final class TerminalSession: ObservableObject {
             // that asks for the size the pane already happens to be does not
             // spend a round trip saying so.
             lastResizeSent = (response.columns, response.rows)
+            // The shape the pane had before this device asked for anything,
+            // remembered once so it can be handed back on the way out. See
+            // `releasePane`.
+            if shapeBeforeUs == nil, !hasResized {
+                shapeBeforeUs = (response.columns, response.rows)
+            }
             // An emulator at the pane's size, empty. Built here rather than by
             // whoever paints first, because the streaming path never paints a
             // capture and still has to have something to feed: the bytes start
