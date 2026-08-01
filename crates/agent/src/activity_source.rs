@@ -71,8 +71,10 @@ mod tests {
             observe(&AgentEvent::ToolUpdate {
                 id: "t".into(),
                 status: ToolStatus::InProgress,
+                title: None,
                 content: None,
-                diff: None
+                diff: None,
+                locations: Vec::new(),
             }),
             Some(AgentActivity::Working)
         );

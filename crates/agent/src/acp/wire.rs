@@ -61,6 +61,25 @@ pub struct WirePlanEntry {
     pub status: String,
 }
 
+/// One block of a tool call's own output.
+///
+/// Either a nested text block — the console output, fenced as markdown — or a
+/// diff describing an edit. Modelled because a tool row without its output is
+/// a row that says a command ran and refuses to say what happened.
+#[derive(Debug, Deserialize)]
+pub struct ToolContent {
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    #[serde(default)]
+    pub content: Option<ContentBlock>,
+    #[serde(default)]
+    pub path: String,
+    #[serde(rename = "oldText", default)]
+    pub old_text: Option<String>,
+    #[serde(rename = "newText", default)]
+    pub new_text: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Location {
     #[serde(default)]
@@ -111,12 +130,23 @@ pub enum SessionUpdate {
         status: String,
         #[serde(default)]
         locations: Vec<Location>,
+        #[serde(default)]
+        content: Vec<ToolContent>,
     },
     ToolCallUpdate {
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
         #[serde(default)]
         status: String,
+        /// Revised as the call resolves: `Terminal` becomes the command, and
+        /// `Read File` becomes the file. Ignoring it left every row showing
+        /// the generic placeholder it started as.
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        content: Vec<ToolContent>,
+        #[serde(default)]
+        locations: Vec<Location>,
     },
     Plan {
         #[serde(default)]

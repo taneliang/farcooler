@@ -35,7 +35,7 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     var t = Transcript()
     t.apply([
         seq(0, .toolCall(id: "t1", title: "Edit main.rs", kind: "edit", status: .pending, locations: [])),
-        seq(1, .toolUpdate(id: "t1", status: .completed, content: nil, diff: nil)),
+        seq(1, .toolUpdate(id: "t1", status: .completed, title: nil, content: nil, diff: nil, locations: [])),
     ])
     #expect(t.rows.count == 1)
     guard case let .tool(tool) = t.rows[0].kind else {
@@ -50,7 +50,7 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     let diff = Diff(path: "main.rs", oldText: "old", newText: "new")
     t.apply([
         seq(0, .toolCall(id: "t1", title: "Edit", kind: "edit", status: .pending, locations: [])),
-        seq(1, .toolUpdate(id: "t1", status: .completed, content: nil, diff: diff)),
+        seq(1, .toolUpdate(id: "t1", status: .completed, title: nil, content: nil, diff: diff, locations: [])),
     ])
     guard case let .tool(tool) = t.rows[0].kind else {
         Issue.record("expected a tool row")
@@ -190,4 +190,24 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     t.apply([Sequenced(seq: 0, event: .sessionInfo(title: "Say ok."))])
     #expect(t.title == "Say ok.")
     #expect(t.rows.isEmpty)
+}
+
+@Test func aToolCallIsRenamedAsItResolves() {
+    // A Bash call starts life titled "Terminal" and is renamed to the command
+    // it ran; a Read starts as "Read File" and becomes the file. Keeping the
+    // placeholder left every row describing a category instead of an action.
+    var t = Transcript()
+    t.apply([
+        Sequenced(seq: 0, event: .toolCall(
+            id: "t1", title: "Terminal", kind: "execute", status: .pending, locations: [])),
+        Sequenced(seq: 1, event: .toolUpdate(
+            id: "t1", status: .completed, title: "echo hello && ls",
+            content: "hello\nmain.rs", diff: nil, locations: [])),
+    ])
+    guard case let .tool(tool) = t.rows.first?.kind else {
+        Issue.record("expected a tool row")
+        return
+    }
+    #expect(tool.title == "echo hello && ls")
+    #expect(tool.content == "hello\nmain.rs")
 }

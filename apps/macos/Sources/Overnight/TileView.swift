@@ -77,7 +77,13 @@ struct TileView: View {
     /// damped — it settles without overshooting, which is what a terminal needs: a
     /// pane full of text that bounces past its position and comes back reads as a
     /// rendering glitch rather than as motion.
-    private var motion: Animation { .smooth(duration: 0.3) }
+    /// Spring, not a curve on a stopwatch.
+    ///
+    /// `.smooth(duration:)` runs its full time whatever it is animating, so a
+    /// divider nudged a few points took as long as one thrown across the
+    /// window and the whole app felt slow. A spring settles in proportion to
+    /// the distance it has to cover, which is what "snappy" actually means.
+    private var motion: Animation { .snappy(duration: 0.22) }
 
     /// Zoom gets the tiny bit of energy `.smooth` deliberately lacks.
     ///
@@ -85,7 +91,7 @@ struct TileView: View {
     /// posture, and a trace of overshoot is what makes it feel like the pane came
     /// forward rather than being swapped. `extraBounce` is kept small — this is one
     /// pane arriving, not a notification.
-    private var zoomMotion: Animation { .snappy(duration: 0.28, extraBounce: 0.06) }
+    private var zoomMotion: Animation { .snappy(duration: 0.24, extraBounce: 0.08) }
 
     @ViewBuilder
     private var panels: some View {
@@ -353,7 +359,7 @@ private struct TilePane: View {
         // Its own, faster animation: which pane has the keyboard has to read as
         // immediate, and a border easing in over the same third of a second as
         // the panes moving would lag the keystroke that caused it.
-        .animation(.smooth(duration: 0.12), value: isFocused)
+        .animation(.snappy(duration: 0.12), value: isFocused)
         .overlay { dropIndicator }
         // A delegate rather than `dropDestination`, for one reason: the indicator
         // has to follow the pointer, and only a delegate is told where the pointer

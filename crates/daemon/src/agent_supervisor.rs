@@ -288,10 +288,23 @@ impl AgentSupervisor {
                 events
             }
             ShimMessage::Established { session_id, available_modes } => {
+                // A new shim means a new stream, numbered from zero again.
+                //
+                // `seq` belongs to a shim's ring, not to the conversation, so
+                // a respawned pane starts counting at 0 while this window
+                // still holds events numbered far higher. The dedupe below
+                // then discards everything new as "already seen", and a client
+                // reading from its own cursor asks for events past the end of
+                // a stream that just restarted — so a toggle looked like it
+                // erased every message sent before it.
+                if let Ok(mut recent) = self.recent.lock() {
+                    recent.remove(&terminal);
+                }
                 if let Ok(mut sessions) = self.sessions.lock() {
                     let entry = sessions.entry(terminal).or_default();
                     entry.session_id = Some(session_id);
                     entry.available_modes = available_modes;
+                    entry.cursor = 0;
                 }
                 return;
             }
@@ -470,5 +483,42 @@ mod tests {
     fn two_terminals_do_not_share_a_socket() {
         let dir = Path::new("/run/overnight");
         assert_ne!(socket_path(dir, Uuid::now_v7()), socket_path(dir, Uuid::now_v7()));
+    }
+
+    #[test]
+    fn a_respawned_shim_restarts_the_window_rather_than_being_deduped_away() {
+        // `seq` is a shim's ring position, not a place in the conversation, so
+        // a respawn counts from zero again. Without clearing, the dedupe reads
+        // those as already-seen and drops them, and a toggle appears to erase
+        // everything said before it.
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        let batch = |texts: &[&str]| ShimMessage::Events {
+            events: texts
+                .iter()
+                .enumerate()
+                .map(|(i, t)| Sequenced {
+                    seq: i as u64,
+                    event: AgentEvent::Message { role: Role::Agent, text: (*t).into() },
+                })
+                .collect(),
+        };
+
+        supervisor.apply(terminal, batch(&["one", "two", "three"]), &|_, _| {});
+        assert_eq!(supervisor.replay(terminal, 0).len(), 3);
+
+        // The pane is toggled: a new shim announces itself and starts over.
+        supervisor.apply(
+            terminal,
+            ShimMessage::Established {
+                session_id: "s".into(),
+                available_modes: Vec::new(),
+            },
+            &|_, _| {},
+        );
+        supervisor.apply(terminal, batch(&["fresh"]), &|_, _| {});
+
+        let replayed = supervisor.replay(terminal, 0);
+        assert_eq!(replayed.len(), 1, "the new stream must not be deduped away");
     }
 }

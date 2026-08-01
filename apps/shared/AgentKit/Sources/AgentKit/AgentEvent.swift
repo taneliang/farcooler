@@ -124,7 +124,9 @@ public enum AgentEvent: Sendable, Equatable {
         availableCommands: [String])
     case message(role: Role, text: String)
     case toolCall(id: String, title: String, kind: String, status: ToolStatus, locations: [String])
-    case toolUpdate(id: String, status: ToolStatus, content: String?, diff: Diff?)
+    case toolUpdate(
+        id: String, status: ToolStatus, title: String?, content: String?, diff: Diff?,
+        locations: [String])
     case plan(entries: [PlanEntry])
     case permission(id: String, toolCall: String, options: [PermissionOption])
     case resolved(id: String, chosen: String)
@@ -204,7 +206,9 @@ extension AgentEvent {
                     locations: p.locations)
             case "ToolUpdate":
                 let p = try outer.decode(ToolUpdatePayload.self, forKey: key)
-                event = .toolUpdate(id: p.id, status: p.status, content: p.content, diff: p.diff)
+                event = .toolUpdate(
+                    id: p.id, status: p.status, title: p.title, content: p.content,
+                    diff: p.diff, locations: p.locations)
             case "Plan":
                 let p = try outer.decode(PlanPayload.self, forKey: key)
                 event = .plan(entries: p.entries)
@@ -265,7 +269,12 @@ extension AgentEvent {
         let status: ToolStatus; let locations: [String]
     }
     private struct ToolUpdatePayload: Decodable {
-        let id: String; let status: ToolStatus; let content: String?; let diff: Diff?
+        let id: String
+        let status: ToolStatus
+        let title: String?
+        let content: String?
+        let diff: Diff?
+        let locations: [String]
     }
     private struct PlanPayload: Decodable { let entries: [PlanEntry] }
     private struct PermissionPayload: Decodable {

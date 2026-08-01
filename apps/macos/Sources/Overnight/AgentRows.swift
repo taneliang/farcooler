@@ -1,6 +1,25 @@
 import AgentKit
 import SwiftUI
 
+/// Agent prose, as markdown.
+///
+/// Agents write markdown — backticks, bold, lists, links — and rendering it
+/// literally puts the punctuation on screen instead of the emphasis it stands
+/// for. `AttributedString`'s inline parsing covers what a chat reply actually
+/// uses; anything it cannot parse falls back to the original text rather than
+/// disappearing.
+///
+/// `.full` grammar rather than inline-only, so a line beginning `- ` reads as
+/// a list rather than as a hyphen.
+func renderedMarkdown(_ text: String) -> AttributedString {
+    let options = AttributedString.MarkdownParsingOptions(
+        allowsExtendedAttributes: true,
+        interpretedSyntax: .full,
+        failurePolicy: .returnPartiallyParsedIfPossible
+    )
+    return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+}
+
 /// One row of a rendered agent transcript.
 ///
 /// A thin switch, deliberately: `Transcript` already decided what happened
@@ -8,11 +27,17 @@ import SwiftUI
 /// this only decides how each of the three shapes it can hand back gets drawn.
 struct AgentRowView: View {
     let row: TranscriptRow
+    /// Whether this is the newest row, which is what makes a thought "live".
+    ///
+    /// A thought is still being written exactly while nothing has followed it.
+    /// That needs no extra state in the model: the transcript already knows
+    /// the order, and asking "is anything after me" is the same question.
+    var isLast: Bool = false
 
     var body: some View {
         switch row.kind {
         case let .message(role, text):
-            MessageRow(role: role, text: text)
+            MessageRow(role: role, text: text, isLive: isLast)
         case let .tool(tool):
             ToolRowView(tool: tool)
         case let .gap(reason):
@@ -27,6 +52,7 @@ struct AgentRowView: View {
 private struct MessageRow: View {
     let role: Role
     let text: String
+    var isLive: Bool = false
 
     var body: some View {
         switch role {
@@ -52,7 +78,7 @@ private struct MessageRow: View {
             // Plain body text, full width. This is the common case and the
             // one that should cost the eye nothing extra to read.
             HStack {
-                Text(text)
+                Text(renderedMarkdown(text))
                     .font(.body)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -60,22 +86,78 @@ private struct MessageRow: View {
             }
 
         case .thought:
-            // Collapsed by default: a thought is the agent's scratch work,
-            // useful when something went wrong and noise the rest of the
-            // time. `DisclosureGroup` with no binding starts closed, which is
-            // exactly the state most sessions never need to leave.
-            DisclosureGroup {
-                Text(text)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .padding(.top, 2)
+            // Open while it is being written, closed once it is done.
+            //
+            // Watching an agent think is the interesting part, and a
+            // permanently collapsed row hides the only thing happening during
+            // a long turn. But a finished thought is scratch work, and a
+            // transcript of them is unreadable — so it folds itself away the
+            // moment anything follows it.
+            ThoughtRow(text: text, isLive: isLive)
+        }
+    }
+}
+
+/// The agent's reasoning: streaming while it happens, folded away after.
+private struct ThoughtRow: View {
+    let text: String
+    let isLive: Bool
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.snappy) { expanded.toggle() }
             } label: {
-                Text("Thought")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .rotationEffect(.degrees(showing ? 90 : 0))
+                    Text(isLive ? "Thinking…" : "Thought")
+                        .font(.caption.weight(.medium))
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showing {
+                DetailBox(text: text, monospaced: false)
             }
         }
+        // Driven by the model, not by a timer: a thought stops being live the
+        // instant something follows it, and the fold should follow that.
+        .animation(.snappy, value: isLive)
+        .animation(.snappy, value: text)
+    }
+
+    /// Open while live unless the reader has closed it; closed after unless
+    /// the reader has opened it.
+    private var showing: Bool { expanded || isLive }
+}
+
+/// A bounded, scrollable block of output.
+///
+/// Bounded because a tool can return a thousand lines and a transcript is not
+/// a place to page through them; scrollable because truncating to a preview
+/// throws away the half you needed. The same box serves reasoning, console
+/// output and file contents, so they are not three inventions.
+struct DetailBox: View {
+    let text: String
+    var monospaced: Bool = true
+
+    var body: some View {
+        ScrollView {
+            Text(text)
+                .font(monospaced ? .caption.monospaced() : .caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+        }
+        .frame(maxHeight: 220)
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 7))
     }
 }
 
@@ -87,27 +169,40 @@ private struct ToolRowView: View {
 
     private var expandable: Bool { tool.content != nil || tool.diff != nil }
 
+    @State private var expanded = false
+
     var body: some View {
-        if expandable {
-            DisclosureGroup {
+        VStack(alignment: .leading, spacing: 6) {
+            if expandable {
+                Button {
+                    withAnimation(.snappy) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                        label
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                label
+            }
+
+            if expanded {
                 VStack(alignment: .leading, spacing: 8) {
                     if let content = tool.content, !content.isEmpty {
-                        Text(content)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                        DetailBox(text: content)
                     }
                     if let diff = tool.diff {
                         DiffView(diff: diff)
                     }
                 }
-                .padding(.top, 4)
-            } label: {
-                label
             }
-        } else {
-            label
         }
+        .animation(.snappy, value: expanded)
     }
 
     private var label: some View {

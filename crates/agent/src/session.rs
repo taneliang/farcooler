@@ -38,6 +38,8 @@ pub fn handle_fs_write(
     Ok(AgentEvent::ToolUpdate {
         id: path.display().to_string(),
         status: ToolStatus::Completed,
+        title: None,
+        locations: vec![path.display().to_string()],
         content: None,
         diff: Some(Diff {
             path: path.display().to_string(),

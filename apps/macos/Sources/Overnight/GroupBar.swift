@@ -33,7 +33,10 @@ struct GroupBar: View {
         // scroll view claims whatever height it is offered and the panes lose it.
         .frame(height: 22)
         .padding(.bottom, Pane.inset)
-        .animation(.smooth(duration: 0.2), value: groups.map(\.isActive))
+        // Spring rather than a fixed curve: see `TileView.motion`. A tab
+        // strip that takes the same 200ms whether one tab changed or five
+        // reads as lag, not as motion.
+        .animation(.snappy(duration: 0.18), value: groups.map(\.isActive))
     }
 
     private func pill(_ group: PaneGroup, position: Int) -> some View {

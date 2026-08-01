@@ -59,7 +59,7 @@ struct AgentSurface: View {
                     Divider()
                 }
 
-                transcript
+                transcript(viewportHeight: proxy.size.height)
 
                 if let pending = stream.transcript.pendingPermission {
                     ApprovalCard(pending: pending) { optionID in
@@ -108,7 +108,7 @@ struct AgentSurface: View {
         }
     }
 
-    private var transcript: some View {
+    private func transcript(viewportHeight: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -122,11 +122,18 @@ struct AgentSurface: View {
                 // line spacing a terminal wants makes a paragraph a wall.
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
-                // Room under the last line. Text ending flush against the
-                // composer reads as clipped — as though there is more you
-                // cannot reach.
                 .padding(.bottom, 18)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Room to scroll past the end.
+                //
+                // Two jobs. It stops the last line sitting flush against the
+                // composer, which reads as content clipped rather than content
+                // finished. And it is what makes "put my question at the top"
+                // possible at all: without space below, a short exchange
+                // cannot scroll far enough for its first line to reach the
+                // top of the view.
+                Color.clear.frame(height: max(120, viewportHeight * 0.45))
             }
             // Pinned to the bottom: a chat is read at its most recent line,
             // the same reason a terminal scrolls to follow its own output.
@@ -138,9 +145,21 @@ struct AgentSurface: View {
             // The cursor moves for every event, which is exactly when there is
             // something new to see.
             .onChange(of: stream.transcript.cursor) { _, _ in
+                // A message the user just sent goes to the TOP and stays
+                // there, with the answer streaming into the space below — the
+                // reading position Cursor uses, and the right one: the
+                // question is the context for everything that follows, and
+                // chasing the bottom of a growing reply moves the text you are
+                // trying to read.
+                if let pinned = stream.pinnedRow {
+                    withAnimation(.snappy) { proxy.scrollTo(pinned, anchor: .top) }
+                    return
+                }
                 guard let last = stream.transcript.rows.last else { return }
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo(last.id, anchor: .bottom)
+                // Not `.bottom`: that puts the final line flush against the
+                // composer. Just above it, so the text has somewhere to sit.
+                withAnimation(.snappy) {
+                    proxy.scrollTo(last.id, anchor: UnitPoint(x: 0, y: 0.88))
                 }
             }
             .onAppear {

@@ -133,7 +133,7 @@ public struct Transcript: Sendable {
                 id: id, title: title, kind: kind, status: status,
                 locations: locations, content: nil, diff: nil)))
 
-        case let .toolUpdate(id, status, content, diff):
+        case let .toolUpdate(id, status, newTitle, content, diff, locations):
             // Mutate the call in place. Appending would fill the transcript
             // with duplicates of one tool reporting progress.
             guard let index = rows.lastIndex(where: {
@@ -141,14 +141,19 @@ public struct Transcript: Sendable {
                 return false
             }) else {
                 append(.tool(ToolRow(
-                    id: id, title: id, kind: "", status: status,
-                    locations: [], content: content, diff: diff)))
+                    id: id, title: newTitle ?? id, kind: "", status: status,
+                    locations: locations, content: content, diff: diff)))
                 return
             }
             guard case var .tool(tool) = rows[index].kind else { return }
             tool.status = status
+            // A call is renamed as it resolves — "Terminal" becomes the
+            // command, "Read File" becomes the file — and the new name is the
+            // informative one.
+            if let newTitle, !newTitle.isEmpty { tool.title = newTitle }
             if let content { tool.content = content }
             if let diff { tool.diff = diff }
+            if !locations.isEmpty { tool.locations = locations }
             rows[index].kind = .tool(tool)
 
         case let .plan(entries):

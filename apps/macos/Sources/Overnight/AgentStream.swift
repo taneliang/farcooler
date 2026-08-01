@@ -27,6 +27,13 @@ import Foundation
 @MainActor
 final class AgentStream: ObservableObject {
     @Published private(set) var transcript = Transcript()
+    /// The row to hold at the top of the view: the message just sent.
+    ///
+    /// Cleared when the turn ends, so the next reply is free to scroll
+    /// normally. Held here rather than in the view because the view is rebuilt
+    /// whenever the pane is, and a reading position that survives a rebuild is
+    /// the whole point.
+    @Published private(set) var pinnedRow: Int?
     @Published private(set) var connectionError: String?
 
     private let terminal: String
@@ -82,7 +89,12 @@ final class AgentStream: ObservableObject {
                 let event = (try? AgentEvent.decode(from: frame.payloadJson)) ?? .gap(.unparsed)
                 return Sequenced(seq: frame.seq, event: event)
             }
+            let wasThinking = pinnedRow != nil
             transcript.apply(decoded)
+            // The turn is over: let the view scroll normally again.
+            if wasThinking, decoded.contains(where: { if case .turnEnded = $0.event { true } else { false } }) {
+                pinnedRow = nil
+            }
             connectionError = nil
         } catch {
             connectionError = String(describing: error)
@@ -119,6 +131,7 @@ final class AgentStream: ObservableObject {
         // only when replaying a loaded session, so waiting for it back means
         // the message disappears the moment you press return.
         transcript.appendLocalUserMessage(text)
+        pinnedRow = transcript.rows.last?.id
         _ = try? await runCLI(["terminal", "agent-prompt", terminal, text])
     }
 

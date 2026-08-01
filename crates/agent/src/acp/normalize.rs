@@ -23,6 +23,43 @@ fn plan_entry(e: &WirePlanEntry) -> PlanEntry {
 /// dropped update is a transcript that is wrong without saying so. The one
 /// deliberate exception is `AvailableCommandsUpdate` — see its arm below for
 /// why an empty vec there is correct rather than an oversight.
+
+/// A tool's output, as one readable string.
+///
+/// The adapter fences console output as markdown (```console …```), which is
+/// right for a renderer that speaks markdown and noise for one that shows a
+/// monospace block. The fence is stripped here so every client does not have
+/// to.
+fn tool_text(content: &[crate::acp::wire::ToolContent]) -> Option<String> {
+    let joined: String = content
+        .iter()
+        .filter_map(|c| c.content.as_ref().map(|b| b.text.clone()))
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if joined.is_empty() {
+        return None;
+    }
+    Some(strip_fence(&joined))
+}
+
+fn strip_fence(text: &str) -> String {
+    let trimmed = text.trim();
+    let Some(rest) = trimmed.strip_prefix("```") else { return text.to_string() };
+    // The word after the opening fence is a language tag, not content.
+    let body = rest.split_once('\n').map(|(_, b)| b).unwrap_or("");
+    body.trim_end().strip_suffix("```").unwrap_or(body).trim_end().to_string()
+}
+
+/// A diff carried directly on a tool call, rather than reconstructed.
+fn tool_diff(content: &[crate::acp::wire::ToolContent]) -> Option<crate::event::Diff> {
+    content.iter().find(|c| c.kind == "diff").map(|c| crate::event::Diff {
+        path: c.path.clone(),
+        old_text: c.old_text.clone(),
+        new_text: c.new_text.clone().unwrap_or_default(),
+    })
+}
+
 pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
     match update {
         SessionUpdate::AgentMessageChunk { content } => {
@@ -53,7 +90,7 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
                 commands: available_commands.iter().map(|c| c.name.clone()).collect(),
             }]
         }
-        SessionUpdate::ToolCall { tool_call_id, title, kind, status: s, locations } => {
+        SessionUpdate::ToolCall { tool_call_id, title, kind, status: s, locations, content } => {
             vec![AgentEvent::ToolCall {
                 id: tool_call_id.clone(),
                 title: title.clone(),
@@ -61,13 +98,25 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
                 status: status(s),
                 locations: locations.iter().map(|l| l.path.clone()).collect(),
             }]
+            .into_iter()
+            .chain(tool_text(content).map(|text| AgentEvent::ToolUpdate {
+                id: tool_call_id.clone(),
+                status: status(s),
+                title: None,
+                content: Some(text),
+                diff: tool_diff(content),
+                locations: Vec::new(),
+            }))
+            .collect()
         }
-        SessionUpdate::ToolCallUpdate { tool_call_id, status: s } => {
+        SessionUpdate::ToolCallUpdate { tool_call_id, status: s, title, content, locations } => {
             vec![AgentEvent::ToolUpdate {
                 id: tool_call_id.clone(),
                 status: status(s),
-                content: None,
-                diff: None,
+                title: title.clone().filter(|t| !t.is_empty()),
+                content: tool_text(content),
+                diff: tool_diff(content),
+                locations: locations.iter().map(|l| l.path.clone()).collect(),
             }]
         }
         SessionUpdate::Plan { entries } => {
@@ -165,5 +214,25 @@ mod tests {
                 "{raw} produced a gap"
             );
         }
+    }
+
+    #[test]
+    fn a_tool_update_carries_its_new_name_and_its_output() {
+        // Copied from a live adapter. A `Bash` call starts life titled
+        // "Terminal" and is renamed to the command it ran; its output arrives
+        // fenced as markdown. Dropping both left a row that said a command ran
+        // and refused to say which, or what happened.
+        let raw = r#"{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed",
+            "title":"echo hello && ls",
+            "content":[{"type":"content","content":{"type":"text","text":"```console\nhello\nmain.rs\n```"}}]}"#;
+        let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
+        let events = update_to_events(&update);
+        let AgentEvent::ToolUpdate { title, content, .. } = &events[0] else {
+            panic!("expected a tool update, got {events:?}")
+        };
+        assert_eq!(title.as_deref(), Some("echo hello && ls"));
+        // Unfenced: the fence is markdown for a renderer that speaks it, and
+        // noise in a monospace block.
+        assert_eq!(content.as_deref(), Some("hello\nmain.rs"));
     }
 }

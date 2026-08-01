@@ -143,8 +143,11 @@ pub enum AgentEvent {
     ToolUpdate {
         id: String,
         status: ToolStatus,
+        /// A revised name for the call. `Terminal` becomes the command it ran.
+        title: Option<String>,
         content: Option<String>,
         diff: Option<Diff>,
+        locations: Vec<String>,
     },
     Plan {
         entries: Vec<PlanEntry>,

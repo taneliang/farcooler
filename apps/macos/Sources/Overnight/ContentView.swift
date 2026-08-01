@@ -15,6 +15,13 @@ struct ContentView: View {
     @State private var query = ""
     @State private var showQuickCreate = false
     @AppStorage("tasks.lastProject") private var lastProject = ""
+    /// The terminal that was open when the app last closed, as
+    /// `workspace/terminal`.
+    ///
+    /// Reopening somewhere else is a small thing that costs a real one: the
+    /// pane you were reading is the reason you came back, and finding it again
+    /// means walking a sidebar you had already navigated once.
+    @AppStorage("fleet.lastTerminal") private var lastTerminal = ""
     @FocusState private var searchFocused: Bool
     @State private var removeWorkspace: Workspace?
     @State private var showResumeBranch = false
@@ -65,6 +72,14 @@ struct ContentView: View {
             client.startEvents()
         }
         .onDisappear { client.stopEvents() }
+        // Recorded as it changes rather than on quit: an app that is force
+        // quit, crashes, or is killed by a rebuild never gets a last word, and
+        // this is exactly the state worth surviving all three.
+        .onChange(of: selection) { _, now in
+            if case let .terminal(workspace, terminal) = now {
+                lastTerminal = "\(workspace)/\(terminal)"
+            }
+        }
         // The event stream is a long-lived process pointed at a machine when
         // it starts, so changing which machine this window drives has to
         // restart it rather than let it go on listening to the old one.
@@ -696,6 +711,19 @@ struct ContentView: View {
     /// something arbitrary while an agent two projects down waits for an answer.
     private func selectFirstRunningTerminal() {
         guard selection == nil else { return }
+
+        // Where you left off, if it is still there. A terminal that has since
+        // exited falls through to the rules below rather than selecting
+        // nothing — the saved id is a preference, not a promise.
+        let saved = lastTerminal.split(separator: "/", maxSplits: 1).map(String.init)
+        if saved.count == 2,
+            let ws = client.fleet.workspaces.first(where: { $0.id == saved[0] }),
+            ws.terminals.contains(where: { $0.id == saved[1] })
+        {
+            expanded.insert(ws.id)
+            selection = .terminal(workspace: ws.id, terminal: saved[1])
+            return
+        }
 
         for ws in client.fleet.workspaces {
             if let t = ws.terminals.first(where: { $0.status.wantsAttention }) {
