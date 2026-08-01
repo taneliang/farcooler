@@ -7,5 +7,6 @@ pub mod paths;
 pub mod rpc;
 pub mod runtime;
 pub mod service;
+pub mod session_discovery;
 pub mod watch;
 pub mod wire;
