@@ -314,12 +314,40 @@ using the existing key-row work; images via the photo picker and paste.
 
 ## Verification
 
-### Gate 1 — the spike that can kill this design
+### Gate 1 — PASSED 2026-08-01
 
-Everything rests on one unverified assumption: that the ACP adapter's `sessionId`
-maps to Claude Code's own session id. If it does not, `claude --resume` in
-terminal mode opens a different conversation than the chat view showed, and the
-toggle silently displays the wrong history.
+**Result: all four conditions passed.** Full evidence in
+`docs/superpowers/specs/2026-08-01-gate1-acp-findings.md`.
+
+The decisive one: the ACP adapter's `sessionId` IS a Claude Code session id.
+`claude --resume <sessionId>` opens the same conversation, and a `session/load`
+replay includes turns that were taken through the native CLI in between — so
+ACP and `claude --resume` read one transcript file, not two stores. No
+id-recovery fallback is needed, and the toggle's correctness argument holds as
+designed.
+
+Three corrections came out of it, all now fixed in the implementation:
+
+- **`stopReason` arrives on the `session/prompt` response**, not as a
+  `session/update`. Sending the prompt as a notification meant `TurnEnded`
+  never fired — activity would have stayed `Working` forever, `Done` would
+  never happen, and nothing would ever notify anyone.
+- **`availableModes` lives in the `session/new` / `session/load` result**, not
+  in `initialize`. Reading it from `initialize` yielded an empty list forever.
+- **The project directory is munged from the RESOLVED cwd.** On macOS `/tmp` is
+  a symlink to `/private/tmp`, so session discovery must canonicalize first.
+
+Also found: `available_commands_update` is a real update kind, fires once per
+turn carrying tens of KB, and needed an explicit variant — without one it
+became a `Gap` and drew a spurious "history missing" break every turn.
+
+The original statement of the gate is kept below, because it is why the spike
+was run first and what would have happened had it failed.
+
+Everything rested on one unverified assumption: that the ACP adapter's
+`sessionId` maps to Claude Code's own session id. If it did not, `claude
+--resume` in terminal mode would open a different conversation than the chat
+view showed, and the toggle would silently display the wrong history.
 
 Stand up the shim with `@zed-industries/claude-code-acp`, declare the `fs`
 capability, and run one turn that edits a file. Confirm all four:
