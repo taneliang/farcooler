@@ -66,6 +66,13 @@ message Request {
     WorktreeImport worktree_import = 30;
     TerminalWrite terminal_write = 31;
     TerminalScreenRequest terminal_screen_request = 32;
+    SetPaneMode set_pane_mode = 33;
+    AgentSubscribe agent_subscribe = 34;
+    AgentPrompt agent_prompt = 35;
+    AgentAnswer agent_answer = 36;
+    AgentSetMode agent_set_mode = 37;
+    AgentCancel agent_cancel = 38;
+    WorktreeFileSearch worktree_file_search = 39;
   }
 }
 
@@ -101,7 +108,104 @@ message Result {
     PaneGroupList pane_group_list = 14;
     WorktreeList worktree_list = 15;
     TerminalScreen terminal_screen = 16;
+    AgentEventBatch agent_event_batch = 17;
+    WorktreeFileList worktree_file_list = 18;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Agent channel
+//
+// A sequence number counts EVENTS, not bytes. Unlike a terminal stream these
+// have record boundaries, so a cursor can name one.
+// ---------------------------------------------------------------------------
+
+message SetPaneMode {
+  bytes terminal_id = 1;
+  PaneMode pane_mode = 2;
+  // Switching to TERMINAL while a turn is in flight discards work that
+  // `claude --resume` cannot reattach to, so it is refused unless the user has
+  // been told and said yes.
+  bool force = 3;
+}
+
+message AgentSubscribe {
+  bytes terminal_id = 1;
+  uint64 from_seq = 2;
+}
+
+message ImageBlock {
+  string mime_type = 1;
+  bytes data = 2;
+}
+
+message AgentPromptBlock {
+  oneof content {
+    string text = 1;
+    // A worktree-relative path from an @-mention.
+    string file_mention = 2;
+    ImageBlock image = 3;
+  }
+}
+
+message AgentPrompt {
+  bytes terminal_id = 1;
+  repeated AgentPromptBlock blocks = 2;
+}
+
+message AgentAnswer {
+  bytes terminal_id = 1;
+  // Carried back exactly as the adapter sent it. Inventing an id here would
+  // make the answer unroutable and hang the agent on its own question.
+  string request_id = 2;
+  string option_id = 3;
+}
+
+message AgentSetMode {
+  bytes terminal_id = 1;
+  string agent_mode = 2;
+}
+
+message AgentCancel { bytes terminal_id = 1; }
+
+message WorktreeFileSearch {
+  bytes workspace_id = 1;
+  string query = 2;
+  uint32 limit = 3;
+}
+
+message WorktreeFileList { repeated string paths = 1; }
+
+// Why part of a transcript is missing.
+//
+// Rendered as a visible break, never silently omitted. A derived transcript is
+// only permissible in this product because it can say where it is incomplete —
+// the same contract as a lost terminal.
+enum AgentGapReason {
+  AGENT_GAP_REASON_UNSPECIFIED = 0;
+  // The ring dropped events the subscriber had not read.
+  AGENT_GAP_REASON_RING_TRIMMED = 1;
+  // Reconnected, but the agent cannot replay its own history.
+  AGENT_GAP_REASON_LOAD_UNSUPPORTED = 2;
+  // An update arrived that this adapter could not interpret.
+  AGENT_GAP_REASON_UNPARSED = 3;
+}
+
+message AgentEventFrame {
+  uint64 seq = 1;
+  // The normalized event, as JSON.
+  //
+  // JSON rather than a generated message, and deliberately: the shape is
+  // `overnight_agent::event::AgentEvent`, which is the single Rust definition
+  // both apps decode. Restating that union in protobuf would create a second
+  // definition to keep in step, and the two would disagree the first time an
+  // adapter grew a variant.
+  string payload_json = 2;
+}
+
+message AgentEventBatch {
+  bytes terminal_id = 1;
+  repeated AgentEventFrame events = 2;
 }
 
 message Event {
@@ -120,6 +224,9 @@ message Event {
     // agent driving the CLI — so a client that missed an event has to converge
     // on the next one rather than apply a delta to a state it may not hold.
     PaneGroupList layout_changed = 16;
+    // New events for one terminal's agent session, in seq order. A client that
+    // missed some asks for them by cursor rather than reconstructing.
+    AgentEventBatch agent_events = 17;
   }
 }
 
@@ -311,6 +418,38 @@ message Terminal {
   // `claude` into them, so the preset stops being true after the first
   // command; only this says what is actually there.
   string current_command = 17;
+
+  // What this terminal's pane is HOSTING: a TUI, or a headless ACP agent.
+  //
+  // Durable intent, not runtime state. Distinct from the VT modes a terminal
+  // reports and from `agent_mode` below — three unrelated things in one pane
+  // would otherwise all be called mode.
+  PaneMode pane_mode = 18;
+
+  // The ACP session this terminal is for.
+  //
+  // Intent in the same sense as the branch: it says what this terminal is FOR.
+  // It outlives every pane that ever hosts it, which is what makes toggling
+  // `pane_mode` land on the same conversation rather than a new one. The
+  // conversation itself is never stored anywhere.
+  optional string agent_session_id = 19;
+
+  // The ACP mode the agent is in, and the ones it offers. Both empty in
+  // TERMINAL pane mode, where there is no agent to ask.
+  optional string agent_mode = 20;
+  repeated string available_agent_modes = 21;
+}
+
+// What a pane is hosting.
+//
+// UNSPECIFIED is never sent by the daemon: a client that cannot tell which
+// mode a pane is in would not know which surface to draw.
+enum PaneMode {
+  PANE_MODE_UNSPECIFIED = 0;
+  // A TUI. The default, the product's terminal-first promise, and the mode
+  // that works with no ACP adapter installed.
+  PANE_MODE_TERMINAL = 1;
+  PANE_MODE_AGENT = 2;
 }
 
 // The four states a coding agent is in, plus the two non-answers.
