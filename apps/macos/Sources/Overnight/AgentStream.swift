@@ -34,6 +34,14 @@ final class AgentStream: ObservableObject {
     /// whenever the pane is, and a reading position that survives a rebuild is
     /// the whole point.
     @Published private(set) var pinnedRow: Int?
+    /// The run of the stream this transcript was built from.
+    ///
+    /// A shim renumbers its events from zero every time it restarts, and a
+    /// pane-mode toggle restarts it. Rather than trying to reconcile two
+    /// numberings — which failed in four different places — the daemon stamps
+    /// the stream and a change means "you are holding a different
+    /// conversation; take this one instead".
+    private var epoch: UInt64 = 0
     @Published private(set) var connectionError: String?
 
     private let terminal: String
@@ -79,8 +87,23 @@ final class AgentStream: ObservableObject {
     private func pump() async {
         do {
             let batch = try await agentSubscribe(fromSeq: transcript.cursor)
-            guard !batch.isEmpty else { return }
-            let decoded = batch.map { frame -> Sequenced in
+
+            // A different epoch means the stream restarted — the pane was
+            // toggled, or the shim came back — and every number this holds
+            // counts positions in a conversation that no longer exists. The
+            // batch that comes back is the whole transcript, so it replaces
+            // rather than appends. Four separate bugs came from trying to
+            // reconcile the two numberings instead of admitting they are
+            // different streams.
+            if batch.epoch != epoch {
+                epoch = batch.epoch
+                transcript.resetForNewEpoch()
+                pinnedRow = nil
+            } else if batch.events.isEmpty {
+                return
+            }
+
+            let decoded = batch.events.map { frame -> Sequenced in
                 // A frame this client cannot read becomes a visible gap, never
                 // a dropped event. `try?` here meant a decoder that fell behind
                 // the daemon rendered a blank chat with no pickers and no sign
@@ -110,6 +133,7 @@ final class AgentStream: ObservableObject {
 
     private struct Batch: Decodable {
         let events: [EventFrame]
+        let epoch: UInt64
     }
 
     /// New events for this terminal's agent session, from a cursor.
@@ -119,11 +143,12 @@ final class AgentStream: ObservableObject {
     /// `crates/client/tests/against_a_real_daemon.rs`) — so a chat view can
     /// open before the first turn instead of showing a connection failure for
     /// a pane that is simply new.
-    private func agentSubscribe(fromSeq: UInt64) async throws -> [EventFrame] {
+    private func agentSubscribe(fromSeq: UInt64) async throws -> Batch {
         let data = try await runCLI([
-            "terminal", "agent-subscribe", terminal, "--from-seq", "\(fromSeq)", "--json",
+            "terminal", "agent-subscribe", terminal,
+            "--from-seq", "\(fromSeq)", "--epoch", "\(epoch)", "--json",
         ])
-        return try JSONDecoder().decode(Batch.self, from: data).events
+        return try JSONDecoder().decode(Batch.self, from: data)
     }
 
     func send(_ text: String) async {
@@ -140,6 +165,10 @@ final class AgentStream: ObservableObject {
     }
 
     func setConfig(_ id: String, _ value: String) async {
+        // Shown before it is confirmed. The adapter applies the change without
+        // announcing it, so waiting for an echo left the picker snapping back
+        // to its old value — which reads as the control doing nothing at all.
+        transcript.selectConfigOptionLocally(id: id, value: value)
         _ = try? await runCLI(["terminal", "agent-set-config", terminal, id, value])
     }
 

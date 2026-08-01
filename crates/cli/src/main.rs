@@ -394,6 +394,13 @@ enum TerminalCmd {
         terminal: String,
         #[arg(long, default_value_t = 0)]
         from_seq: u64,
+        /// The run of the stream `from_seq` counts positions in.
+        ///
+        /// A shim renumbers from zero every time it restarts, so a cursor on
+        /// its own cannot say which stream it means. Pass back what the last
+        /// batch reported; a mismatch returns the whole transcript.
+        #[arg(long, default_value_t = 0)]
+        epoch: u64,
     },
     /// Send a chat message to the pane's agent.
     AgentPrompt { terminal: String, text: String },
@@ -1354,12 +1361,13 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             println!("{} is now in {mode} mode", short(id));
         }
 
-        TerminalCmd::AgentSubscribe { terminal, from_seq } => {
+        TerminalCmd::AgentSubscribe { terminal, from_seq, epoch } => {
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             let r = link
                 .call(with(
                     req("terminal.agent_subscribe"),
                     request::Payload::AgentSubscribe(overnight_protocol::v1::AgentSubscribe {
+                        epoch,
                         terminal_id: id_bytes(id),
                         from_seq,
                     }),
@@ -1378,6 +1386,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
                 println!(
                     "{}",
                     serde_json::json!({
+                        "epoch": batch.epoch,
                         "events": batch.events.iter().map(|e| serde_json::json!({
                             "seq": e.seq,
                             "payloadJson": e.payload_json,

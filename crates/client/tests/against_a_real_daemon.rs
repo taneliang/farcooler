@@ -202,7 +202,7 @@ async fn subscribing_to_a_terminal_with_no_agent_session_is_empty_not_an_error()
         .expect("create_terminal");
     let terminal_id = overnight_client::session::uuid_of(&terminal.id);
 
-    let batch = session.agent_subscribe(terminal_id, 0).await.expect("subscribe succeeds");
+    let batch = session.agent_subscribe(terminal_id, 0, 0).await.expect("subscribe succeeds");
     assert!(batch.events.is_empty());
 }
 

@@ -96,10 +96,11 @@ private struct ThoughtRow: View {
             .buttonStyle(.plain)
 
             if showing {
-                // Reasoning is markdown too — agents write lists and code in
-                // their thinking, and a wall of literal asterisks is no easier
-                // to read there than in a reply.
-                MarkdownText(text: text, secondary: true)
+                // While it is being written, only the last few lines — enough
+                // to see it moving, which is the whole point. A thinking agent
+                // that shows one collapsed word looks stuck, and one that
+                // shows everything pushes the conversation off screen.
+                MarkdownText(text: isLive && !expanded ? Self.tail(of: text) : text, secondary: true)
                     .padding(.leading, 2)
             }
         }
@@ -112,6 +113,13 @@ private struct ThoughtRow: View {
     /// Open while live unless the reader has closed it; closed after unless
     /// the reader has opened it.
     private var showing: Bool { expanded || isLive }
+
+    /// The last few lines, for a thought still being written.
+    private static func tail(of text: String, lines: Int = 5) -> String {
+        let all = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard all.count > lines else { return text }
+        return all.suffix(lines).joined(separator: "\n")
+    }
 }
 
 /// A bounded, scrollable block of output.

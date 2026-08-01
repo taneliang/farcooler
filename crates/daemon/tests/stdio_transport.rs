@@ -210,6 +210,7 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted_over_stdio() {
 
     let mut req = request("terminal.agent_subscribe");
     req.payload = Some(request::Payload::AgentSubscribe(AgentSubscribe {
+        epoch: 0,
         terminal_id: terminal.id.clone(),
         from_seq: 0,
     }));

@@ -78,6 +78,23 @@ public struct Transcript: Sendable {
 
     public init() {}
 
+    /// Throw away everything and start again.
+    ///
+    /// Used when the daemon reports a different epoch: the cursor this held
+    /// counts positions in a stream that no longer exists, so the rows built
+    /// from it describe a conversation that is not the one being served. The
+    /// selectors survive, because they describe the AGENT rather than the
+    /// stream and re-arrive with the next `SessionStarted` anyway — clearing
+    /// them would blank the pickers on every toggle.
+    public mutating func resetForNewEpoch() {
+        rows = []
+        plan = []
+        pendingPermission = nil
+        cursor = 0
+        nextRowID = 0
+        breakBeforeNextMessage = false
+    }
+
     public mutating func apply(_ events: [Sequenced]) {
         for item in events {
             cursor = max(cursor, item.seq + 1)
@@ -97,6 +114,25 @@ public struct Transcript: Sendable {
     /// the moment it is sent and does not reappear until the pane is reopened.
     /// A chat that swallows your own words reads as broken even when the turn
     /// underneath it is running perfectly.
+    /// Show a selector's new value straight away.
+    ///
+    /// The adapter does not reliably send `config_option_update` after
+    /// `session/set_config_option` — it applies the change and says nothing —
+    /// so a picker that waited for confirmation snapped back to its old value
+    /// and read as broken. If a real update does arrive it overwrites this
+    /// with the same thing.
+    public mutating func selectConfigOptionLocally(id: String, value: String) {
+        configOptions = configOptions.map { option in
+            guard option.id == id else { return option }
+            return ConfigOption(
+                id: option.id, name: option.name, description: option.description,
+                category: option.category, kind: option.kind, currentValue: value,
+                options: option.options)
+        }
+        if id == "model" { model = value }
+        if id == "mode" { agentMode = value }
+    }
+
     public mutating func appendLocalUserMessage(_ text: String) {
         append(.message(role: .user, text: text))
         // The agent's reply is a new turn's worth of speech, not a

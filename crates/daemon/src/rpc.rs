@@ -585,8 +585,8 @@ impl Rpc {
                 // Accepted even with no session: a client attaches to a PANE,
                 // not to a session, and an empty batch is the honest answer
                 // for one that has not run an agent yet.
-                let events = svc.agents().replay(id, p.from_seq);
-                Ok(result::Value::AgentEventBatch(wire::agent_batch(id, events)))
+                let (epoch, events) = svc.agents().replay(id, p.from_seq, p.epoch);
+                Ok(result::Value::AgentEventBatch(wire::agent_batch(id, events, epoch)))
             }
 
             // These four send to the shim and reply with the terminal read

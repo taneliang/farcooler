@@ -159,7 +159,10 @@ struct AgentSurface: View {
                     // space beneath it rather than dragging the question off
                     // screen. Only the first placement animates; re-anchoring
                     // on every chunk would jitter.
-                    proxy.scrollTo(pinned, anchor: .top)
+                    // `.top` alone puts the bubble flush against the edge of
+                    // the scroll area, which reads as clipped. A hair below
+                    // the top leaves the gap a person expects.
+                    proxy.scrollTo(pinned, anchor: UnitPoint(x: 0, y: -0.04))
                     return
                 }
                 guard let last = stream.transcript.rows.last else { return }

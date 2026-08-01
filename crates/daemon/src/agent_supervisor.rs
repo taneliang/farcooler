@@ -29,7 +29,12 @@ use uuid::Uuid;
 /// window only has to cover the common case of a client opening a pane that
 /// is already mid-conversation, not survive a daemon restart. Anything older
 /// than this is the shim's ring to replay, not the daemon's.
-const RECENT_WINDOW: usize = 512;
+/// How much of a conversation the daemon keeps per terminal.
+///
+/// The daemon owns this transcript outright — it is not a cache in front of
+/// the shim's ring. It has to outlive the shim, because the shim restarts on
+/// every pane-mode toggle and the conversation does not.
+const TRANSCRIPT_LIMIT: usize = 4096;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ToggleRefusal {
@@ -95,6 +100,16 @@ struct SessionState {
     session_id: Option<String>,
     agent_mode: Option<String>,
     available_modes: Vec<String>,
+    /// Which run of the shim this transcript belongs to.
+    ///
+    /// The same idea as a terminal's `epoch`, and for the same reason. A shim
+    /// numbers events by their position in ITS ring, and every pane-mode
+    /// toggle starts a new shim counting from zero — so a cursor a client
+    /// holds is meaningless the moment that happens. Rather than trying to
+    /// reconcile the two numberings (which failed four different ways), the
+    /// stream simply admits it is a new stream: the epoch changes, and every
+    /// reader knows to take the whole thing again.
+    epoch: u64,
 }
 
 #[derive(Clone, Default)]
@@ -145,15 +160,30 @@ impl AgentSupervisor {
     ///
     /// Empty for a terminal with no session — attaching to a pane that is not
     /// in agent mode is not an error, it just has nothing to show yet.
-    pub fn replay(&self, terminal: Uuid, from_seq: Seq) -> Vec<Sequenced> {
-        self.recent
+    /// The transcript this terminal has, and which run of it that is.
+    ///
+    /// A reader passes the epoch it last saw. If it does not match, the cursor
+    /// it holds counts positions in a stream that no longer exists, so the
+    /// whole transcript comes back and the reader replaces what it had. Within
+    /// one epoch the cursor means what it says.
+    pub fn replay(&self, terminal: Uuid, from_seq: Seq, client_epoch: u64) -> (u64, Vec<Sequenced>) {
+        let epoch = self
+            .sessions
+            .lock()
+            .ok()
+            .and_then(|s| s.get(&terminal).map(|st| st.epoch))
+            .unwrap_or(0);
+        let all: Vec<Sequenced> = self
+            .recent
             .lock()
             .ok()
             .and_then(|r| r.get(&terminal).cloned())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|e| e.seq >= from_seq)
-            .collect()
+            .unwrap_or_default();
+
+        if client_epoch != epoch {
+            return (epoch, all);
+        }
+        (epoch, all.into_iter().filter(|e| e.seq >= from_seq).collect())
     }
 
     pub fn send(&self, terminal: Uuid, message: DaemonMessage) {
@@ -320,6 +350,11 @@ impl AgentSupervisor {
                     entry.session_id = Some(session_id);
                     entry.available_modes = available_modes;
                     entry.cursor = 0;
+                    // A new shim is a new stream. Readers holding a cursor into
+                    // the old one are told by the change, rather than being
+                    // left to work it out from numbers that silently mean
+                    // something else now.
+                    entry.epoch += 1;
                 }
                 return;
             }
@@ -357,34 +392,34 @@ impl AgentSupervisor {
             }
         }
 
+        let mut renumbered: Vec<Sequenced> = Vec::new();
         if let Ok(mut recent) = self.recent.lock() {
             let entry = recent.entry(terminal).or_default();
-            // Only what we have not already seen.
+            // Numbered by this transcript's own length.
             //
-            // A shim replays from a cursor whenever it reconnects, and a
-            // daemon restart or a second connection means the same seqs arrive
-            // twice. Appending blindly put the whole conversation in the
-            // transcript two and three times over — visibly, since seq is
-            // monotonic and authoritative, so a repeat is always a replay
-            // rather than new speech.
-            let already = entry.last().map(|e| e.seq);
-            entry.extend(
-                batch
-                    .iter()
-                    .filter(|e| already.is_none_or(|last| e.seq > last))
-                    .cloned(),
-            );
+            // The daemon is the only thing that numbers these, so a number
+            // means one position in one transcript and nothing else. The shim
+            // renumbers from zero every time it restarts, which is what made
+            // every cursor in the system a lie after a toggle; the epoch above
+            // is what tells a reader that happened, and there is nothing left
+            // here to deduplicate against.
+            let base = entry.len() as u64;
+            renumbered = batch
+                .into_iter()
+                .enumerate()
+                .map(|(i, e)| Sequenced { seq: base + i as u64, event: e.event })
+                .collect();
+            entry.extend(renumbered.iter().cloned());
+
             // Oldest first, so trimming the front keeps the most recent
-            // `RECENT_WINDOW` — the same "drop the oldest" the shim's ring
-            // does, just at a smaller size and without a Gap: the shim's ring
-            // is still the authority a client falls back to.
-            if entry.len() > RECENT_WINDOW {
-                let excess = entry.len() - RECENT_WINDOW;
+            // `TRANSCRIPT_LIMIT`.
+            if entry.len() > TRANSCRIPT_LIMIT {
+                let excess = entry.len() - TRANSCRIPT_LIMIT;
                 entry.drain(0..excess);
             }
         }
 
-        on_events(terminal, batch);
+        on_events(terminal, renumbered);
     }
 
     /// A client looked at this terminal, which is what ends `Done`.
@@ -445,40 +480,6 @@ mod tests {
     }
 
     #[test]
-    fn a_replayed_batch_does_not_land_in_the_window_twice() {
-        // A shim replays from a cursor on every reconnect, so the same seqs
-        // arrive again after a daemon restart or a second connection.
-        // Appending blindly put the whole conversation into the transcript two
-        // and three times over. seq is monotonic and authoritative, so a
-        // repeat is always a replay rather than new speech.
-        let supervisor = AgentSupervisor::new();
-        let terminal = Uuid::now_v7();
-        let batch: Vec<Sequenced> = (0..3)
-            .map(|seq| Sequenced {
-                seq,
-                event: AgentEvent::Message { role: Role::Agent, text: format!("m{seq}") },
-            })
-            .collect();
-
-        supervisor.apply(terminal, ShimMessage::Events { events: batch.clone() }, &|_, _| {});
-        supervisor.apply(terminal, ShimMessage::Events { events: batch.clone() }, &|_, _| {});
-        assert_eq!(supervisor.replay(terminal, 0).len(), 3);
-
-        // And genuinely new events still land.
-        supervisor.apply(
-            terminal,
-            ShimMessage::Events {
-                events: vec![Sequenced {
-                    seq: 3,
-                    event: AgentEvent::Message { role: Role::Agent, text: "new".into() },
-                }],
-            },
-            &|_, _| {},
-        );
-        assert_eq!(supervisor.replay(terminal, 0).len(), 4);
-    }
-
-    #[test]
     fn a_socket_path_fits_in_a_unix_socket() {
         // The failure this prevents was invisible: `bind` returns an error the
         // daemon logs and moves on from, the shim keeps dialling, and the only
@@ -520,7 +521,7 @@ mod tests {
         };
 
         supervisor.apply(terminal, batch(&["one", "two", "three"]), &|_, _| {});
-        assert_eq!(supervisor.replay(terminal, 0).len(), 3);
+        assert_eq!(supervisor.replay(terminal, 0, u64::MAX).1.len(), 3);
 
         // The pane is toggled: a new shim announces itself and starts over.
         supervisor.apply(
@@ -533,7 +534,7 @@ mod tests {
         );
         supervisor.apply(terminal, batch(&["fresh"]), &|_, _| {});
 
-        let replayed = supervisor.replay(terminal, 0);
+        let (_, replayed) = supervisor.replay(terminal, 0, u64::MAX);
         assert_eq!(replayed.len(), 1, "the new stream must not be deduped away");
     }
 
@@ -555,7 +556,7 @@ mod tests {
         };
 
         supervisor.apply(terminal, batch(40), &|_, _| {});
-        assert_eq!(supervisor.replay(terminal, 0).len(), 40);
+        assert_eq!(supervisor.replay(terminal, 0, u64::MAX).1.len(), 40);
 
         // A respawn: fewer events, numbered from zero again.
         supervisor.apply(
@@ -565,9 +566,52 @@ mod tests {
         );
         supervisor.apply(terminal, batch(5), &|_, _| {});
         assert_eq!(
-            supervisor.replay(terminal, 0).len(),
+            supervisor.replay(terminal, 0, u64::MAX).1.len(),
             5,
             "the new stream must replace the old, not be filtered against it"
         );
+    }
+
+    #[test]
+    fn a_toggle_changes_the_epoch_and_hands_back_the_whole_transcript() {
+        // The bug this design replaces: a shim numbers events by position in
+        // its own ring, and a pane-mode toggle starts a new shim counting from
+        // zero. A client holding a cursor into the old stream then asked for
+        // events past the end of the new one and got nothing, so its
+        // conversation appeared to be erased. Rather than reconciling two
+        // numberings — which failed four separate ways — the stream says it is
+        // a different stream, and the reader takes the whole thing.
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        let batch = |n: u64| ShimMessage::Events {
+            events: (0..n)
+                .map(|seq| Sequenced {
+                    seq,
+                    event: AgentEvent::Message { role: Role::Agent, text: format!("m{seq}") },
+                })
+                .collect(),
+        };
+
+        supervisor.apply(terminal, batch(10), &|_, _| {});
+        let (first_epoch, events) = supervisor.replay(terminal, 0, 0);
+        assert_eq!(events.len(), 10);
+
+        // Caught up: nothing new to send.
+        let (_, nothing) = supervisor.replay(terminal, 10, first_epoch);
+        assert!(nothing.is_empty());
+
+        // The pane is toggled. A new shim announces itself and replays a
+        // conversation numbered from zero again.
+        supervisor.apply(
+            terminal,
+            ShimMessage::Established { session_id: "s".into(), available_modes: Vec::new() },
+            &|_, _| {},
+        );
+        supervisor.apply(terminal, batch(4), &|_, _| {});
+
+        // The client still asks with the cursor and epoch it held.
+        let (second_epoch, after) = supervisor.replay(terminal, 10, first_epoch);
+        assert_ne!(second_epoch, first_epoch, "a new shim is a new stream");
+        assert_eq!(after.len(), 4, "a stale cursor must not hide the new transcript");
     }
 }

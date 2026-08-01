@@ -480,7 +480,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         "terminal.agent_subscribe" => {
             let from_seq = args.get("fromSeq").and_then(|v| v.as_u64()).unwrap_or(0);
             let batch = session
-                .agent_subscribe(id("terminal")?, from_seq)
+                .agent_subscribe(id("terminal")?, from_seq, args.get("epoch").and_then(|v| v.as_u64()).unwrap_or(0))
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(json!({

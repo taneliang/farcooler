@@ -134,6 +134,13 @@ message SetPaneMode {
 message AgentSubscribe {
   bytes terminal_id = 1;
   uint64 from_seq = 2;
+  // The run of the stream this cursor belongs to.
+  //
+  // A shim numbers events by position in its own ring and every pane-mode
+  // toggle starts a new shim counting from zero, so a cursor alone cannot say
+  // which stream it means. Send back what the last batch reported; a mismatch
+  // returns the whole transcript instead of a slice.
+  uint64 epoch = 3;
 }
 
 message ImageBlock {
@@ -221,6 +228,10 @@ message AgentEventFrame {
 message AgentEventBatch {
   bytes terminal_id = 1;
   repeated AgentEventFrame events = 2;
+  // The run these events belong to. A client that gets back an epoch other
+  // than the one it asked with is holding a transcript of a stream that no
+  // longer exists, and should replace it with this batch rather than append.
+  uint64 epoch = 3;
 }
 
 message Event {

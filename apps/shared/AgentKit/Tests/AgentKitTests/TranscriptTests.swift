@@ -211,3 +211,22 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     #expect(tool.title == "echo hello && ls")
     #expect(tool.content == "hello\nmain.rs")
 }
+
+@Test func choosingAConfigOptionShowsImmediately() {
+    // The adapter applies `session/set_config_option` and says nothing back,
+    // so a picker that waited for confirmation snapped to its old value and
+    // read as a control that does nothing.
+    var t = Transcript()
+    t.apply([Sequenced(seq: 0, event: .sessionStarted(
+        sessionID: "s", agentMode: "default", availableModes: [],
+        model: "haiku", availableModels: [],
+        configOptions: [ConfigOption(
+            id: "model", name: "Model", description: "", category: "model",
+            kind: "select", currentValue: "haiku",
+            options: [AgentChoice(id: "opus", name: "Opus")])],
+        availableCommands: []))])
+
+    t.selectConfigOptionLocally(id: "model", value: "opus")
+    #expect(t.configOptions.first?.currentValue == "opus")
+    #expect(t.model == "opus")
+}

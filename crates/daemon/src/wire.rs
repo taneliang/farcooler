@@ -197,9 +197,14 @@ pub fn terminal_with_agent_state(view: &TerminalView, agents: &AgentSupervisor) 
 /// rather than calling `serde_json` directly keeps the daemon crate off a
 /// dependency it needs for nothing else — the shim already carries it for the
 /// exact same serialization.
-pub fn agent_batch(terminal: Uuid, events: Vec<Sequenced>) -> wire::AgentEventBatch {
+pub fn agent_batch(
+    terminal: Uuid,
+    events: Vec<Sequenced>,
+    epoch: u64,
+) -> wire::AgentEventBatch {
     wire::AgentEventBatch {
         terminal_id: id_bytes(terminal),
+        epoch,
         events: events
             .into_iter()
             .map(|s| {

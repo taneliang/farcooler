@@ -34,7 +34,14 @@ enum Markdown {
         var paragraph: [String] = []
 
         func flushParagraph() {
-            let joined = paragraph.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            // Joined with a NEWLINE, not a space.
+            //
+            // CommonMark folds a single line break into a space and needs two
+            // to make one. That rule exists for hand-written source files, and
+            // Claude does not write to it — it breaks lines where it means
+            // them to break. Honouring that is the difference between a
+            // readable reply and one run-on paragraph.
+            let joined = paragraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
             if !joined.isEmpty { blocks.append(.paragraph(joined)) }
             paragraph = []
         }

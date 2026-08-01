@@ -258,7 +258,11 @@ impl AgentSession {
                     // Starting fresh is right, and the gap is the honest part:
                     // whatever the old id referred to is not being shown.
                     Err(e) => {
-                        tracing::info!(error = %e, "no session to load; starting a new one");
+                        // The pane is this process's log surface — see
+                        // `agent_host`'s module doc. A `tracing` warning here
+                        // goes nowhere, and this is the failure that silently
+                        // costs a user their conversation.
+                        println!("overnight: could not load session {id}: {e}");
                         prelude.push(load_unsupported_event());
                         let result = conn
                             .request(

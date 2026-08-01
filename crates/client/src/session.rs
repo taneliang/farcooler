@@ -378,8 +378,10 @@ impl Session {
         &mut self,
         terminal: Uuid,
         from_seq: u64,
+        epoch: u64,
     ) -> Result<AgentEventBatch, SessionError> {
         let payload = request::Payload::AgentSubscribe(overnight_protocol::v1::AgentSubscribe {
+            epoch,
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             from_seq,
         });
