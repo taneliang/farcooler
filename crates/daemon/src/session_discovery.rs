@@ -33,6 +33,21 @@ pub fn project_dir_name(worktree: &Path) -> String {
         .collect()
 }
 
+/// Whether a session has anything on disk to resume.
+///
+/// Claude Code writes a transcript only once a turn has happened, so a session
+/// that exists in the protocol may not exist on disk at all. `claude --resume`
+/// answers "No conversation found with session ID" for those, which is what a
+/// user saw every time they opened a chat and switched straight back before
+/// saying anything.
+pub fn transcript_exists(home: &Path, worktree: &Path, session_id: &str) -> bool {
+    let resolved = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
+    home.join(".claude/projects")
+        .join(project_dir_name(&resolved))
+        .join(format!("{session_id}.jsonl"))
+        .exists()
+}
+
 /// The session id for a hand-started claude in `worktree`.
 ///
 /// `started_after` is the pane's start time. A session file older than the pane
@@ -55,7 +70,14 @@ pub fn discover_claude_session(
     let dir: PathBuf = home.join(".claude/projects").join(project_dir_name(&resolved));
     let entries = std::fs::read_dir(&dir).map_err(|_| DiscoveryError::NotFound)?;
 
-    let mut candidates: Vec<String> = Vec::new();
+    // Newest first, by when it was last written.
+    //
+    // Requiring a single candidate read well and worked nowhere: a worktree
+    // that has been used more than once holds a session per use, so adoption
+    // refused as "ambiguous" in exactly the situation it exists for. The
+    // session a pane is running is the one being written to — every turn
+    // touches its file — so recency is the signal, not count.
+    let mut candidates: Vec<(String, SystemTime)> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
@@ -64,22 +86,31 @@ pub fn discover_claude_session(
         // A file whose mtime cannot be read is skipped rather than assumed
         // recent: an unreadable candidate is exactly the kind of thing that
         // would make an ambiguous directory look unambiguous.
-        let modified = entry.metadata().and_then(|m| m.modified()).ok();
-        if modified.map(|m| m < started_after).unwrap_or(true) {
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else { continue };
+        if modified < started_after {
             continue;
         }
         if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-            candidates.push(stem.to_string());
+            candidates.push((stem.to_string(), modified));
         }
     }
 
-    match candidates.len() {
-        0 => Err(DiscoveryError::NotFound),
-        1 => Ok(candidates.remove(0)),
-        // Sorted so the message a user reads is stable between attempts.
-        _ => {
-            candidates.sort();
-            Err(DiscoveryError::Ambiguous { candidates })
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    match candidates.as_slice() {
+        [] => Err(DiscoveryError::NotFound),
+        [(only, _)] => Ok(only.clone()),
+        [(newest, first), (_, second), ..] => {
+            // Still refuses when two were written at what is, to a filesystem,
+            // the same moment — there is genuinely nothing to choose between
+            // them, and picking one would attach a chat to a conversation
+            // other than the one in the pane.
+            let margin = first.duration_since(*second).unwrap_or_default();
+            if margin < std::time::Duration::from_secs(2) {
+                let mut names: Vec<String> = candidates.iter().map(|(n, _)| n.clone()).collect();
+                names.sort();
+                return Err(DiscoveryError::Ambiguous { candidates: names });
+            }
+            Ok(newest.clone())
         }
     }
 }
@@ -118,11 +149,30 @@ mod tests {
     }
 
     #[test]
-    fn two_candidate_sessions_refuse_rather_than_pick_one() {
-        // The failure this rule prevents is silent and expensive: attaching a
-        // chat view to a conversation that is not the one in the pane.
-        let home = scratch("two");
+    fn the_most_recently_written_session_is_the_one_in_the_pane() {
+        // A worktree used more than once holds a session per use, so demanding
+        // a single candidate refused adoption in precisely the case it exists
+        // for. Every turn writes to the running session's file, so the newest
+        // is the one on screen.
+        let home = scratch("recency");
         let worktree = Path::new("/Users/e/Dev/proj2");
+        let dir = home.join(".claude/projects").join(project_dir_name(worktree));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("older.jsonl"), "{}").unwrap();
+        std::thread::sleep(Duration::from_millis(2100));
+        std::fs::write(dir.join("newer.jsonl"), "{}").unwrap();
+
+        let found = discover_claude_session(&home, worktree, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(found, "newer");
+    }
+
+    #[test]
+    fn two_written_at_the_same_moment_still_refuse() {
+        // Recency only decides when there is a difference to read. Two files a
+        // filesystem cannot separate leave nothing to choose between, and
+        // guessing would attach a chat to the wrong conversation.
+        let home = scratch("tie");
+        let worktree = Path::new("/Users/e/Dev/proj-tie");
         let dir = home.join(".claude/projects").join(project_dir_name(worktree));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("sess-a.jsonl"), "{}").unwrap();
@@ -196,5 +246,22 @@ mod tests {
         // a candidate another terminal already holds must be refused.
         let claimed = vec!["belongs-to-pane-one".to_string()];
         assert!(claimed.contains(&found), "the caller must reject this");
+    }
+
+    #[test]
+    fn a_session_with_no_turn_yet_has_nothing_to_resume() {
+        // The exact failure a user hit: open a chat, switch straight back
+        // without saying anything, and `claude --resume` answers "No
+        // conversation found with session ID". The session is real; the
+        // transcript is not written until a turn happens.
+        let home = scratch("no-transcript");
+        let worktree = Path::new("/Users/e/Dev/fresh");
+        let dir = home.join(".claude/projects").join(project_dir_name(worktree));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert!(!transcript_exists(&home, worktree, "never-spoke"));
+
+        std::fs::write(dir.join("has-spoken.jsonl"), "{}").unwrap();
+        assert!(transcript_exists(&home, worktree, "has-spoken"));
     }
 }

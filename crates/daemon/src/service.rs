@@ -990,10 +990,28 @@ impl Service {
             models::PaneMode::Terminal => {
                 let sid = session_id.clone().unwrap_or_default();
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-                if Uuid::parse_str(&sid).is_ok() {
+                // Resumable only if there is something on disk to resume.
+                //
+                // Claude Code writes a transcript when a turn happens, not
+                // when a session is created — so a chat opened and closed
+                // without a word has a perfectly real session id and no file.
+                // `--resume` answers "No conversation found with session ID"
+                // for those, which is what a user got every time they looked
+                // at a chat and switched straight back.
+                let resumable = Uuid::parse_str(&sid).is_ok()
+                    && directories::UserDirs::new().is_some_and(|dirs| {
+                        session_discovery::transcript_exists(
+                            dirs.home_dir(),
+                            Path::new(&ws.worktree_path),
+                            &sid,
+                        )
+                    });
+                if resumable {
                     format!("{shell} -ilc 'claude --resume {sid}'")
                 } else {
-                    preset_command(&term.command_preset, None)
+                    // Nothing to continue: start claude clean rather than fail
+                    // into an error message the user cannot act on.
+                    preset_command("claude", None)
                 }
             }
             models::PaneMode::Agent => {
