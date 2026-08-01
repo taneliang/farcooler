@@ -15,6 +15,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0001_initial_schema,
     migration_0002_pane_groups,
     migration_0003_drop_pane_groups,
+    migration_0004_pane_mode,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -184,6 +185,20 @@ fn migration_0003_drop_pane_groups(tx: &Transaction) -> rusqlite::Result<()> {
         r#"
         DROP TABLE IF EXISTS pane_members;
         DROP TABLE IF EXISTS pane_groups;
+        "#,
+    )
+}
+
+/// Agent pane mode, and the session id that outlives every pane hosting it.
+///
+/// `agent_session_id` is intent, in the same sense as the branch: it says what
+/// this terminal is FOR. The conversation it names is never stored here — the
+/// shim holds that in memory and says `Gap` where it cannot account for it.
+fn migration_0004_pane_mode(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        ALTER TABLE terminals ADD COLUMN pane_mode INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE terminals ADD COLUMN agent_session_id TEXT;
         "#,
     )
 }

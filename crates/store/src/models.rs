@@ -95,6 +95,35 @@ pub(crate) fn row_to_workspace(row: &Row) -> rusqlite::Result<Workspace> {
     })
 }
 
+/// What a terminal's pane is hosting.
+///
+/// Distinct from a terminal's VT `mode` and from the ACP `agent_mode`. Three
+/// unrelated things would otherwise all be called "mode" in one pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneMode {
+    /// A TUI, exactly as before this feature existed. The default.
+    Terminal,
+    /// `overnight agent-host`, bridging an ACP agent.
+    Agent,
+}
+
+impl PaneMode {
+    pub fn as_i64(self) -> i64 {
+        match self {
+            PaneMode::Terminal => 0,
+            PaneMode::Agent => 1,
+        }
+    }
+
+    pub fn from_i64(raw: i64) -> Self {
+        match raw {
+            1 => PaneMode::Agent,
+            // Anything unrecognised is the mode that always works.
+            _ => PaneMode::Terminal,
+        }
+    }
+}
+
 /// The durable half of a terminal. Deliberately has no runtime-state field:
 /// see the crate root docs for why that omission is the whole point.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +142,8 @@ pub struct Terminal {
     pub columns: u32,
     pub rows: u32,
     pub resource_version: u64,
+    pub pane_mode: PaneMode,
+    pub agent_session_id: Option<String>,
 }
 
 pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
@@ -131,6 +162,8 @@ pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
         columns: row.get::<_, i64>(11)? as u32,
         rows: row.get::<_, i64>(12)? as u32,
         resource_version: row.get::<_, i64>(13)? as u64,
+        pane_mode: PaneMode::from_i64(row.get(14)?),
+        agent_session_id: row.get(15)?,
     })
 }
 

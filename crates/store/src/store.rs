@@ -18,8 +18,9 @@ use uuid::Uuid;
 use crate::error::map_err;
 use crate::migrate;
 use crate::models::{
-    IdempotencyRecord, Repository, RepositoryRoot, Terminal, TerminalUpdate, Workspace, get_uuid,
-    row_to_repository, row_to_repository_root, row_to_terminal, row_to_workspace, uuid_blob,
+    IdempotencyRecord, PaneMode, Repository, RepositoryRoot, Terminal, TerminalUpdate, Workspace,
+    get_uuid, row_to_repository, row_to_repository_root, row_to_terminal, row_to_workspace,
+    uuid_blob,
 };
 
 /// Idempotency keys are pruned once older than this, measured against the
@@ -403,6 +404,8 @@ impl Store {
             columns,
             rows,
             resource_version: 1,
+            pane_mode: PaneMode::Terminal,
+            agent_session_id: None,
         })
     }
 
@@ -411,7 +414,7 @@ impl Store {
             .query_row(
                 r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, loss_dismissed, lease_generation, epoch,
-                          "columns", "rows", resource_version
+                          "columns", "rows", resource_version, pane_mode, agent_session_id
                    FROM terminals WHERE id = ?1"#,
                 params![uuid_blob(id)],
                 row_to_terminal,
@@ -425,7 +428,7 @@ impl Store {
             .prepare(
                 r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, loss_dismissed, lease_generation, epoch,
-                          "columns", "rows", resource_version
+                          "columns", "rows", resource_version, pane_mode, agent_session_id
                    FROM terminals WHERE workspace_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -492,6 +495,46 @@ impl Store {
             "SELECT 1 FROM terminals WHERE id = ?1",
             &[&uuid_blob(id)],
         )
+    }
+
+    /// Record which mode this terminal's pane is in, and the session it names.
+    ///
+    /// Version-checked like every other mutation: two clients toggling the same
+    /// pane must not both believe they won.
+    ///
+    /// A session id is never CLEARED by a mode change. Switching to terminal
+    /// mode and back has to land on the same conversation, so `None` means
+    /// "leave it alone" rather than "forget it".
+    pub fn set_pane_mode(
+        &self,
+        id: Uuid,
+        expected_version: u64,
+        pane_mode: PaneMode,
+        agent_session_id: Option<String>,
+    ) -> Result<Terminal> {
+        let changed = self
+            .conn()
+            .execute(
+                r#"UPDATE terminals
+                      SET pane_mode = ?1,
+                          agent_session_id = COALESCE(?2, agent_session_id),
+                          resource_version = resource_version + 1
+                    WHERE id = ?3 AND resource_version = ?4"#,
+                params![
+                    pane_mode.as_i64(),
+                    agent_session_id,
+                    id.as_bytes().as_slice(),
+                    expected_version as i64,
+                ],
+            )
+            .map_err(map_err)?;
+
+        if changed == 0 {
+            // Either the terminal is gone or someone else moved it first. Both
+            // are the caller's problem to re-read, not ours to paper over.
+            return Err(DomainError::ResourceConflict);
+        }
+        self.get_terminal(id)
     }
 
     // ---- idempotency ----
@@ -612,6 +655,14 @@ mod tests {
             "columns",
             "rows",
             "resource_version",
+            // Both of these are intent, which is why they are allowed to live
+            // here. `pane_mode` says what the pane is FOR, exactly as
+            // `command_preset` does. `agent_session_id` names a conversation
+            // that outlives every pane hosting it, which is what makes
+            // toggling pane mode land on the same conversation instead of a
+            // new one. The conversation itself is never stored.
+            "pane_mode",
+            "agent_session_id",
         ];
         assert_eq!(cols.len(), expected.len(), "unexpected column set: {cols:?}");
         for e in expected {
@@ -702,6 +753,40 @@ mod tests {
         assert_eq!(records[0].id, term.id);
         assert_eq!(records[0].intent, TerminalIntent::Running);
         assert!(records[0].runtime_confirmed);
+    }
+
+    // ---- pane mode ----
+
+    #[test]
+    fn a_new_terminal_starts_in_terminal_pane_mode() {
+        // Terminal-first is the product's default, and defaults belong in the
+        // schema rather than in whichever caller remembered.
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+        let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
+        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/x").unwrap();
+        let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
+        assert_eq!(t.pane_mode, PaneMode::Terminal);
+        assert_eq!(t.agent_session_id, None);
+    }
+
+    #[test]
+    fn a_session_id_survives_a_reopen_because_it_is_intent_not_runtime() {
+        // The one thing about an agent session that must outlive tmux. The
+        // conversation itself is never stored.
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+        let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
+        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/x").unwrap();
+        let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
+        let updated =
+            s.set_pane_mode(t.id, t.resource_version, PaneMode::Agent, Some("abc-123".into())).unwrap();
+        assert_eq!(updated.pane_mode, PaneMode::Agent);
+
+        let reopened = s.get_terminal(t.id).unwrap();
+        assert_eq!(reopened.agent_session_id.as_deref(), Some("abc-123"));
     }
 
     // ---- optimistic concurrency ----
