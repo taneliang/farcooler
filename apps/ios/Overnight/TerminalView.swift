@@ -107,14 +107,6 @@ struct TerminalView: View {
             // constantly — switching terminal — at the far end of the screen
             // from the hand holding the phone.
             TerminalTabStrip(workspaces: connection.fleet.workspaces, current: current, onSelect: select)
-            TerminalKeyRow(
-                ctrlArmed: ctrlArmed,
-                altArmed: altArmed,
-                onToggleCtrl: { ctrlArmed.toggle() },
-                onToggleAlt: { altArmed.toggle() },
-                onKey: sendKey,
-                onDismiss: { dismissRequest += 1 }
-            )
         }
         .background(TerminalPalette.background)
         // A terminal is dark regardless of the phone's own appearance — the
@@ -255,7 +247,17 @@ struct TerminalView: View {
                 onScroll: { lines, point in
                     let target = cell(at: point, grid: grid, size: size)
                     Task { await session.scroll(lines: lines, column: target.column, row: target.row) }
-                }
+                },
+                accessory: AnyView(
+                    TerminalKeyRow(
+                        ctrlArmed: ctrlArmed,
+                        altArmed: altArmed,
+                        onToggleCtrl: { ctrlArmed.toggle() },
+                        onToggleAlt: { altArmed.toggle() },
+                        onKey: sendKey,
+                        onDismiss: { dismissRequest += 1 }
+                    )
+                )
             )
         }
         // Bounded to the terminal, and clipped to it.
@@ -542,16 +544,9 @@ private struct TerminalKeyRow: View {
         // No Return key. The software keyboard already has one, and the row's
         // whole job is the keys a phone keyboard does not have.
         //
-        // The keyboard's own backdrop, so the row reads as its top row.
-        //
-        // It was briefly the keyboard's real `inputAccessoryView`, which is the
-        // native mechanism and did not work here: iOS 26 draws the keyboard as
-        // an inset panel with rounded top corners, and a full-width accessory
-        // above it merges with nothing — it reads as detached, and SwiftUI's
-        // keyboard avoidance does not account for its height, so it sat on top
-        // of the tab strip. Matching the colour from inside the stack gets the
-        // same look without either problem.
-        .background(Color(uiColor: .secondarySystemBackground), ignoresSafeAreaEdges: .bottom)
+        // No backdrop of its own: the `UIInputView` hosting this supplies the
+        // keyboard's, which is what makes the row the keyboard's top edge
+        // rather than a slab resting on it.
     }
 
     /// An arrow that means one thing tapped and a bigger version of the same
@@ -610,8 +605,17 @@ private struct KeystrokeField: UIViewRepresentable {
     var onInsertText: (String) -> Void
     var onDeleteBackward: () -> Void
     var onScroll: (Int, CGPoint) -> Void
+    /// The key row, handed to the system as the keyboard's accessory so it is
+    /// drawn as part of the keyboard rather than as a strip above one.
+    var accessory: AnyView
 
     func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// The accessory's exact height. Stated rather than self-sized, because a
+    /// `UIInputView` that sizes itself ends up taller than its content and the
+    /// difference is transparent — which is what put a strip of window between
+    /// the row and the keyboard and made the two look unrelated.
+    private static let accessoryHeight: CGFloat = 52
 
     func makeUIView(context: Context) -> KeystrokeSink {
         let view = KeystrokeSink()
@@ -620,6 +624,30 @@ private struct KeystrokeField: UIViewRepresentable {
         view.onScroll = onScroll
         view.cellHeight = cellHeight
         view.backgroundColor = .clear
+
+        let host = UIHostingController(rootView: accessory)
+        host.view.backgroundColor = .clear
+        // The accessory sits ON the keyboard, so the home indicator is the
+        // keyboard's problem and not this row's. Left alone, the hosting
+        // controller adds the bottom inset itself and the row floats.
+        host.safeAreaRegions = []
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        context.coordinator.accessoryHost = host
+
+        // `.keyboard` style draws the system keyboard's own background, which
+        // is what makes the row belong to the keyboard rather than resemble it.
+        let bar = UIInputView(
+            frame: CGRect(x: 0, y: 0, width: 0, height: Self.accessoryHeight),
+            inputViewStyle: .keyboard)
+        bar.autoresizingMask = .flexibleWidth
+        bar.addSubview(host.view)
+        NSLayoutConstraint.activate([
+            host.view.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            host.view.topAnchor.constraint(equalTo: bar.topAnchor),
+            host.view.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+        ])
+        view.accessory = bar
         return view
     }
 
@@ -628,6 +656,7 @@ private struct KeystrokeField: UIViewRepresentable {
         uiView.onDeleteBackward = onDeleteBackward
         uiView.onScroll = onScroll
         uiView.cellHeight = cellHeight
+        context.coordinator.accessoryHost?.rootView = accessory
 
         // `updateUIView` runs on every poll, not just on a tap — the grid it
         // sits beside changes every second. Only actually re-focus when
@@ -647,6 +676,10 @@ private struct KeystrokeField: UIViewRepresentable {
     final class Coordinator {
         var lastFocusRequest = -1
         var lastDismissRequest = 0
+        /// Retained because nothing else owns it: the input view holds the
+        /// hosting controller's VIEW, and a controller referenced only through
+        /// its own view is deallocated along with its SwiftUI state.
+        var accessoryHost: UIHostingController<AnyView>?
     }
 }
 
@@ -655,6 +688,10 @@ private final class KeystrokeSink: UIView, UIKeyInput {
     var onDeleteBackward: (() -> Void)?
     var onScroll: ((Int, CGPoint) -> Void)?
     var cellHeight: CGFloat = 16
+    /// The key row, shown by the system as part of the keyboard.
+    var accessory: UIView?
+
+    override var inputAccessoryView: UIView? { accessory }
 
 
     override init(frame: CGRect) {
