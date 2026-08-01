@@ -33,7 +33,18 @@
 **Interfaces:**
 - Produces: `AgentKit.AgentEvent` (enum), `AgentKit.Sequenced`, `AgentKit.Role`, `AgentKit.ToolStatus`, `AgentKit.Diff`, `AgentKit.PlanEntry`, `AgentKit.PermissionOption`, `AgentKit.GapReason`.
 
-The Rust side serialises `overnight_agent::event::AgentEvent` with serde's default enum representation: an externally-tagged object, e.g. `{"Message":{"role":"Agent","text":"hi"}}`, and `{"Gap":{"reason":"RingTrimmed"}}`. Read `crates/agent/src/event.rs` and confirm the exact shape with `cargo test -p overnight-agent` plus a scratch serialisation before writing the decoder — a wrong assumption here fails at runtime, not at compile time.
+The Rust side serialises `overnight_agent::event::AgentEvent` with serde's default externally-tagged representation. These are the **measured** outputs, printed from a scratch test against the real types — not a guess, and the decoder must match them exactly:
+
+```json
+{"Message":{"role":"Agent","text":"hi"}}
+{"Gap":{"reason":"RingTrimmed"}}
+{"TurnEnded":{"reason":"EndTurn"}}
+{"ToolUpdate":{"id":"t","status":"InProgress","content":null,"diff":{"path":"p","old_text":"o","new_text":"n"}}}
+{"SessionStarted":{"session_id":"s","agent_mode":"default","available_modes":["plan"],"available_commands":[]}}
+{"Permission":{"id":"r","tool_call":"t","options":[{"id":"a","name":"Allow","kind":"allow_once"}]}}
+```
+
+Note: variant names and unit-enum values are `PascalCase`; struct fields are `snake_case`. A wrong assumption here fails at runtime, not at compile time.
 
 - [ ] **Step 1: Write the failing test**
 
