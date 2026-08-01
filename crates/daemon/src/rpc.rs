@@ -430,6 +430,18 @@ impl Rpc {
                     }
                 }
                 let term = svc.create_terminal(workspace, &p.title, &p.command_preset).await?;
+                // A new terminal is a new tmux window, which IS a new layout —
+                // so the workspace's set of layouts just changed and every
+                // watcher has to be told.
+                //
+                // Clients read layouts once at startup and rely on events for
+                // everything after, so without this the tab simply does not
+                // appear. It shows up minutes later when some unrelated action
+                // happens to refresh, which reads as the pane arriving nowhere
+                // and then teleporting into a tab.
+                if let Ok(groups) = svc.layout(workspace).await {
+                    self.watcher.publish_layout(workspace, &groups);
+                }
                 self.terminal_result(term.id).await
             }
 

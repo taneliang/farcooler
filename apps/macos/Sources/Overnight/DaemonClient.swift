@@ -646,20 +646,16 @@ final class DaemonClient: ObservableObject {
         return nil
     }
 
-    /// A new terminal, in the layout you are looking at.
+    /// A terminal, which is a tmux window, which is a layout of its own.
     ///
-    /// `--tile`, and the reasoning it replaces was wrong about what a person
-    /// expects. It argued that `layout split` covers tiling so plain create
-    /// should always make a fresh layout — true of the CALL, but "New terminal"
-    /// is pressed while looking at a tiled workspace, and having the pane
-    /// appear in some other layout reads as the button having failed.
-    ///
-    /// It stays a no-op when the workspace has no layout yet, so the first
-    /// terminal still creates one rather than needing a different path.
+    /// Deliberately NOT `--tile`. A new terminal gets its own layout tab;
+    /// putting a pane into an existing arrangement is what `layout split` and
+    /// `⌃B %` are for, and they say so at the point of use. Tiling here made
+    /// every new terminal a split of whatever happened to be focused, which
+    /// also hid the tab strip — with one layout there are no tabs to show —
+    /// so the pane appeared to arrive nowhere at all.
     func createTerminal(workspace: String, preset: String, title: String) async {
-        _ = await run([
-            "terminal", "create", workspace, "--preset", preset, "--title", title, "--tile",
-        ])
+        _ = await run(["terminal", "create", workspace, "--preset", preset, "--title", title])
         await refresh()
     }
 
