@@ -185,6 +185,10 @@ impl Session {
                             "activity": activity_label(t.activity),
                                     "activitySince": activity_since(t),
                             "epoch": t.epoch,
+                            "paneMode": pane_mode_label(t.pane_mode),
+                            "agentSessionId": t.agent_session_id.clone(),
+                            "agentMode": t.agent_mode.clone(),
+                            "availableAgentModes": t.available_agent_modes.clone(),
                         }))
                         .collect::<Vec<_>>(),
                 })
@@ -416,6 +420,19 @@ fn activity_since(t: &overnight_protocol::v1::Terminal) -> Option<i64> {
     t.activity_changed_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
 }
 
+/// The pane mode, as a word rather than a number.
+///
+/// Same reason `activity_label` exists: a client that switched on an integer
+/// would hold a second copy of the enum and drift from it silently.
+fn pane_mode_label(mode: i32) -> &'static str {
+    match overnight_protocol::v1::PaneMode::try_from(mode) {
+        Ok(overnight_protocol::v1::PaneMode::Agent) => "agent",
+        // Unspecified from an older daemon is terminal: the mode that needs no
+        // adapter and always works.
+        _ => "terminal",
+    }
+}
+
 fn workspace_label(s: WorkspaceState) -> &'static str {
     match s {
         WorkspaceState::Unspecified => "?",
@@ -466,5 +483,15 @@ mod tests {
         let error: SessionError = ClientError::Closed.into();
         assert!(matches!(error, SessionError::DaemonMissing));
         assert!(error.to_string().contains("installed"));
+    }
+
+    #[test]
+    fn a_terminal_reports_its_pane_mode_as_a_word_a_client_can_switch_on() {
+        // Numbers would make every client carry a copy of the enum and drift
+        // from it. The label is the daemon's answer, not a code to look up.
+        assert_eq!(pane_mode_label(overnight_protocol::v1::PaneMode::Terminal as i32), "terminal");
+        assert_eq!(pane_mode_label(overnight_protocol::v1::PaneMode::Agent as i32), "agent");
+        // An unknown value is the mode that always works, not a guess.
+        assert_eq!(pane_mode_label(99), "terminal");
     }
 }

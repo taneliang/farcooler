@@ -61,8 +61,18 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// and it is why the same badge means the same thing here as on the Mac.
     var activity: String?
     var epoch: Int
+    /// What this terminal's pane is hosting. Absent on older daemons, which is
+    /// why it is optional rather than defaulted to something that would look
+    /// like a real answer.
+    var paneMode: String?
+    var agentSessionId: String?
+    var agentMode: String?
+    var availableAgentModes: [String]?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
+
+    /// Whether to draw a chat or a VT grid.
+    var isAgentPane: Bool { paneMode == "agent" }
 
     /// What to call this terminal.
     ///

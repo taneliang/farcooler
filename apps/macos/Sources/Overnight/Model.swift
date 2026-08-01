@@ -157,8 +157,18 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// not restart at every reconnect or lie after a laptop sleeps.
     var activitySince: Double?
     var epoch: Int
+    /// What this terminal's pane is hosting. Absent on older daemons, which is
+    /// why it is optional rather than defaulted to something that would look
+    /// like a real answer.
+    var paneMode: String?
+    var agentSessionId: String?
+    var agentMode: String?
+    var availableAgentModes: [String]?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
+
+    /// Whether to draw a chat or a VT grid.
+    var isAgentPane: Bool { paneMode == "agent" }
 
     /// What to call this terminal.
     ///
