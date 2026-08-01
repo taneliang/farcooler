@@ -58,6 +58,9 @@ impl Output {
     }
 }
 
+/// How long any one tmux command may take before it is abandoned. See `run`.
+const TMUX_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 impl TmuxServer {
     pub fn new(install_id: &str, daemon_id: Uuid) -> Self {
         let config_path = std::env::temp_dir().join(format!("overnight-{install_id}.tmux.conf"));
@@ -106,11 +109,40 @@ impl TmuxServer {
         cmd.arg("-L").arg(&self.socket).arg("-f").arg(&self.config_path);
         cmd.args(args);
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        // Killed if it outlives its welcome, which is what makes the timeout
+        // below a real bound rather than a way of losing track of a process.
+        cmd.kill_on_drop(true);
 
-        let out = cmd.output().await.map_err(|e| {
+        let child = cmd.spawn().map_err(|e| {
             tracing::warn!(error = %e, "failed to spawn tmux");
             DomainError::TmuxUnavailable
         })?;
+
+        // Every tmux command gets a deadline, because one of them can block
+        // forever and take everything with it.
+        //
+        // `send-keys` writes to a pane's pty. A program that never reads its
+        // input — `sleep` is the honest example, and any pane sitting at a
+        // prompt nobody is typing at is the common one — eventually lets that
+        // buffer fill, and then the write blocks. tmux blocks with it, this
+        // call blocks with tmux, and because a client connection answers one
+        // request at a time, every other terminal's requests queue behind a
+        // pane nobody is even looking at. Scrolling one terminal could stop
+        // scrolling in all of them.
+        //
+        // Local commands answer in milliseconds, so a second is already far
+        // outside normal and still short enough that a wedged pane costs one
+        // request rather than the session.
+        let out = match tokio::time::timeout(TMUX_COMMAND_TIMEOUT, child.wait_with_output()).await {
+            Ok(result) => result.map_err(|e| {
+                tracing::warn!(error = %e, "tmux failed");
+                DomainError::TmuxUnavailable
+            })?,
+            Err(_) => {
+                tracing::warn!(command = ?args, "tmux did not answer in time");
+                return Err(DomainError::TmuxUnavailable);
+            }
+        };
 
         Ok(Output {
             status: out.status.code(),
