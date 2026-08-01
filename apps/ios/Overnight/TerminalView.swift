@@ -47,6 +47,7 @@ struct TerminalView: View {
     @State private var ctrlArmed = false
     @State private var altArmed = false
     @State private var focusRequest = 0
+    @State private var dismissRequest = 0
     @State private var showWorkspaceList = false
 
     // User-configurable, unlike the Mac's fixed terminal font: see
@@ -111,7 +112,8 @@ struct TerminalView: View {
                 altArmed: altArmed,
                 onToggleCtrl: { ctrlArmed.toggle() },
                 onToggleAlt: { altArmed.toggle() },
-                onKey: sendKey
+                onKey: sendKey,
+                onDismiss: { dismissRequest += 1 }
             )
         }
         .background(TerminalPalette.background)
@@ -246,6 +248,7 @@ struct TerminalView: View {
             // see `KeystrokeSink.setup()`.
             KeystrokeField(
                 focusRequest: focusRequest,
+                dismissRequest: dismissRequest,
                 cellHeight: gridLayout(for: grid, in: size).cell.height,
                 onInsertText: insert,
                 onDeleteBackward: { sendKey(UInt32(OVERNIGHT_VT_KEY_BACKSPACE)) },
@@ -499,6 +502,7 @@ private struct TerminalKeyRow: View {
     let onToggleCtrl: () -> Void
     let onToggleAlt: () -> Void
     let onKey: (UInt32) -> Void
+    let onDismiss: () -> Void
 
     /// Keys share the width rather than each claiming their own.
     ///
@@ -526,6 +530,11 @@ private struct TerminalKeyRow: View {
             arrow("arrow.down", tap: OVERNIGHT_VT_KEY_DOWN, hold: OVERNIGHT_VT_KEY_PAGE_DOWN)
             arrow("arrow.up", tap: OVERNIGHT_VT_KEY_UP, hold: OVERNIGHT_VT_KEY_PAGE_UP)
             arrow("arrow.right", tap: OVERNIGHT_VT_KEY_RIGHT, hold: OVERNIGHT_VT_KEY_END)
+            // Putting the keyboard away, which this row is otherwise the only
+            // thing standing in the way of: it lives above the keyboard, so it
+            // goes when the keyboard does, and without a way to dismiss from
+            // here there is nowhere else to ask from.
+            key(action: onDismiss) { glyph("keyboard.chevron.compact.down") }
         }
         .padding(.horizontal, 6)
         .padding(.top, 6)
@@ -533,17 +542,15 @@ private struct TerminalKeyRow: View {
         // No Return key. The software keyboard already has one, and the row's
         // whole job is the keys a phone keyboard does not have.
         //
-        // The keyboard's own backdrop, not a material of this row's choosing.
-        // The keys already match the keyboard's keys, so matching the surface
-        // behind them is what makes this read as the keyboard's top row rather
-        // than a lighter slab balanced on it.
+        // The keyboard's own backdrop, so the row reads as its top row.
         //
-        // A seam remains where the keyboard's panel rounds its top corners and
-        // this row does not. The complete answer is for this to BE the
-        // keyboard's `inputAccessoryView`, which iOS draws as part of the
-        // keyboard and corners to match; that also means it would disappear
-        // whenever the keyboard did, which is a behaviour change rather than a
-        // colour, so it is not being made quietly here.
+        // It was briefly the keyboard's real `inputAccessoryView`, which is the
+        // native mechanism and did not work here: iOS 26 draws the keyboard as
+        // an inset panel with rounded top corners, and a full-width accessory
+        // above it merges with nothing — it reads as detached, and SwiftUI's
+        // keyboard avoidance does not account for its height, so it sat on top
+        // of the tab strip. Matching the colour from inside the stack gets the
+        // same look without either problem.
         .background(Color(uiColor: .secondarySystemBackground), ignoresSafeAreaEdges: .bottom)
     }
 
@@ -591,6 +598,10 @@ private struct TerminalKeyRow: View {
 /// terminal grid is the only place any of those are ever drawn.
 private struct KeystrokeField: UIViewRepresentable {
     var focusRequest: Int
+    /// Bumped to put the keyboard away. A counter rather than a boolean for
+    /// the same reason `focusRequest` is one: what matters is that a fresh
+    /// request happened, not what state anything is in.
+    var dismissRequest: Int
     /// The height, in points, one terminal row is actually drawn at right
     /// now — what a drag on this view is converted to lines against. Passed
     /// in rather than measured here, because only `TerminalView` knows the
@@ -622,6 +633,12 @@ private struct KeystrokeField: UIViewRepresentable {
         // sits beside changes every second. Only actually re-focus when
         // `focusRequest` itself moved, or an on-screen keyboard the user
         // deliberately dismissed would be pulled back up on the next tick.
+        if context.coordinator.lastDismissRequest != dismissRequest {
+            context.coordinator.lastDismissRequest = dismissRequest
+            DispatchQueue.main.async { uiView.resignFirstResponder() }
+            return
+        }
+
         guard context.coordinator.lastFocusRequest != focusRequest else { return }
         context.coordinator.lastFocusRequest = focusRequest
         DispatchQueue.main.async { uiView.becomeFirstResponder() }
@@ -629,6 +646,7 @@ private struct KeystrokeField: UIViewRepresentable {
 
     final class Coordinator {
         var lastFocusRequest = -1
+        var lastDismissRequest = 0
     }
 }
 
@@ -637,6 +655,7 @@ private final class KeystrokeSink: UIView, UIKeyInput {
     var onDeleteBackward: (() -> Void)?
     var onScroll: ((Int, CGPoint) -> Void)?
     var cellHeight: CGFloat = 16
+
 
     override init(frame: CGRect) {
         super.init(frame: frame)

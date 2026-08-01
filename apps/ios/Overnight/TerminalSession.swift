@@ -534,7 +534,30 @@ final class TerminalSession: ObservableObject {
             let response = try? JSONDecoder().decode(ScreenResponse.self, from: data)
         else { return }
         revision = response.revision
-        guard response.columns != size.columns || response.rows != size.rows else { return }
+        let now = (columns: response.columns, rows: response.rows)
+        guard now != size else { return }
+        paneSize = now
+
+        // A pane that is the shape THIS device asked for is not news, and
+        // reopening for it was a loop: the resize lands, the next check sees a
+        // size that no longer matches the one `prime` recorded, reopens, and
+        // the reopen's own resize starts it again. Nine ssh channels for one
+        // terminal had accumulated by the time it was noticed, and every
+        // reopen left a window in which the emulator was fresh — so it did not
+        // yet know the pane wanted the mouse, and scrolling silently did
+        // nothing until the replay arrived. That is the intermittent scroll.
+        //
+        // The emulator is reflowed in place instead. It holds the same screen
+        // either way, and tmux is already sending the program's redraw down
+        // the stream this is beside.
+        if let sent = lastResizeSent, now == sent {
+            vt?.resize(columns: now.columns, rows: now.rows)
+            publish()
+            return
+        }
+
+        // Somebody else reshaped it. That needs the replay, because only the
+        // host can re-wrap a screen it wrapped at a different width.
         await open()
     }
 
