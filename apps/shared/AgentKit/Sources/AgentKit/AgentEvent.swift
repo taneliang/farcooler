@@ -133,6 +133,8 @@ public enum AgentEvent: Sendable, Equatable {
     case configSet(id: String, value: String)
     /// Context-window usage, resent as a turn consumes it.
     case usage(used: UInt64, size: UInt64)
+    /// What this conversation is called, as the agent names it.
+    case sessionInfo(title: String)
     /// The slash-command menu, resent once per turn. Feeds the `/` picker.
     case commandsAvailable(commands: [String])
     case turnEnded(reason: String)
@@ -215,6 +217,9 @@ extension AgentEvent {
             case "CommandsAvailable":
                 let p = try outer.decode(CommandsAvailablePayload.self, forKey: key)
                 event = .commandsAvailable(commands: p.commands)
+            case "SessionInfo":
+                let p = try outer.decode(SessionInfoPayload.self, forKey: key)
+                event = .sessionInfo(title: p.title)
             case "Usage":
                 let p = try outer.decode(UsagePayload.self, forKey: key)
                 event = .usage(used: p.used, size: p.size)
@@ -271,6 +276,7 @@ extension AgentEvent {
     private struct CommandsAvailablePayload: Decodable { let commands: [String] }
     private struct ConfigSetPayload: Decodable { let id: String; let value: String }
     private struct UsagePayload: Decodable { let used: UInt64; let size: UInt64 }
+    private struct SessionInfoPayload: Decodable { let title: String }
     private struct ModeSetPayload: Decodable {
         let agentMode: String
         enum CodingKeys: String, CodingKey { case agentMode = "agent_mode" }

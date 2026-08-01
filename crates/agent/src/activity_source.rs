@@ -27,6 +27,7 @@ pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
         | AgentEvent::ModeSet { .. }
         | AgentEvent::ConfigSet { .. }
         | AgentEvent::Usage { .. }
+        | AgentEvent::SessionInfo { .. }
         | AgentEvent::CommandsAvailable { .. }
         | AgentEvent::Gap { .. } => None,
     }

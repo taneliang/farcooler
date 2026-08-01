@@ -135,6 +135,12 @@ pub enum SessionUpdate {
         #[serde(default)]
         value: serde_json::Value,
     },
+    /// The session's own name, which the adapter derives from the first
+    /// prompt and revises as the conversation goes on.
+    SessionInfoUpdate {
+        #[serde(default)]
+        title: String,
+    },
     /// Context-window usage, resent as a turn consumes it.
     UsageUpdate {
         #[serde(default)]

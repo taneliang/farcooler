@@ -49,6 +49,8 @@ public struct Transcript: Sendable {
     public private(set) var availableModels: [AgentChoice] = []
     /// Every selector the agent offers. Render one control each.
     public private(set) var configOptions: [ConfigOption] = []
+    /// What the agent calls this conversation, once it has named it.
+    public private(set) var title: String?
     /// Context-window usage, or nil before the agent has reported any.
     public private(set) var contextUsed: UInt64?
     public private(set) var contextSize: UInt64?
@@ -164,6 +166,11 @@ public struct Transcript: Sendable {
             // contents. Replacing is right; appending would grow the picker
             // without bound.
             availableCommands = commands
+
+        case let .sessionInfo(newTitle):
+            // Not a row. It is revised as the conversation goes on, and a line
+            // of transcript per revision would bury the conversation it names.
+            if !newTitle.isEmpty { title = newTitle }
 
         case let .usage(used, size):
             // Not a row. It is resent constantly as a turn burns context, and

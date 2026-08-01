@@ -73,6 +73,9 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
         SessionUpdate::Plan { entries } => {
             vec![AgentEvent::Plan { entries: entries.iter().map(plan_entry).collect() }]
         }
+        SessionUpdate::SessionInfoUpdate { title } => {
+            vec![AgentEvent::SessionInfo { title: title.clone() }]
+        }
         SessionUpdate::UsageUpdate { used, size } => {
             vec![AgentEvent::Usage { used: *used, size: *size }]
         }
@@ -142,5 +145,25 @@ mod tests {
                 .expect("parses as unknown");
         let events = update_to_events(&update);
         assert_eq!(events, vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }]);
+    }
+
+    #[test]
+    fn session_metadata_never_becomes_a_gap() {
+        // Two updates that carry no conversation: the slash-command menu and
+        // the session's own title. Both fire on ordinary turns, and both drew
+        // a "history missing" break until they were modelled. A gap means
+        // something was LOST; nothing here was.
+        for raw in [
+            r#"{"sessionUpdate":"session_info_update","title":"Say ok.","updatedAt":"2026-08-01T21:37:40Z"}"#,
+            r#"{"sessionUpdate":"usage_update","used":20107,"size":200000}"#,
+            r#"{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"init"}]}"#,
+        ] {
+            let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
+            let events = update_to_events(&update);
+            assert!(
+                !events.iter().any(|e| matches!(e, AgentEvent::Gap { .. })),
+                "{raw} produced a gap"
+            );
+        }
     }
 }

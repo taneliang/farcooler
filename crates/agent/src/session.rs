@@ -626,7 +626,24 @@ impl RunningSession {
                 let raw = params.clone();
                 let rpc = Rpc { method: Some(method), params: Some(params), id: None, result: None, error: None };
                 match rpc.session_notification() {
-                    Some(n) => Ok(update_to_events(&n.update)),
+                    Some(n) => {
+                        let events = update_to_events(&n.update);
+                        // Any gap from an update names the frame that caused
+                        // it. `SessionUpdate::Unknown` throws the raw JSON
+                        // away by design, so without this the one thing needed
+                        // to fix the gap is the one thing not recorded.
+                        if events.iter().any(|e| matches!(e, AgentEvent::Gap { .. })) {
+                            println!(
+                                "overnight: unmodelled session/update: {}",
+                                serde_json::to_string(&raw)
+                                    .unwrap_or_default()
+                                    .chars()
+                                    .take(300)
+                                    .collect::<String>()
+                            );
+                        }
+                        Ok(events)
+                    }
                     None => {
                         // The one Gap path that used to say nothing. A
                         // `session/update` whose params do not deserialize

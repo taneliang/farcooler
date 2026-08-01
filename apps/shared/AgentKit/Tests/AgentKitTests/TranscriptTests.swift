@@ -182,3 +182,12 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     #expect(role == .user)
     #expect(text == "hello")
 }
+
+@Test func aSessionTitleIsCarriedAndDrawsNoRow() {
+    // It arrived unmodelled and became a Gap, which drew a "history missing"
+    // break at the end of every turn for a title nobody had asked for.
+    var t = Transcript()
+    t.apply([Sequenced(seq: 0, event: .sessionInfo(title: "Say ok."))])
+    #expect(t.title == "Say ok.")
+    #expect(t.rows.isEmpty)
+}

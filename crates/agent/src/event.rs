@@ -161,6 +161,14 @@ pub enum AgentEvent {
     ModeSet {
         agent_mode: String,
     },
+    /// What this conversation is called.
+    ///
+    /// Session metadata, so NOT a `Gap` — nothing was lost. It arrived
+    /// unmodelled and therefore became one, which drew a "history missing"
+    /// break at the end of every turn for a title nobody had asked for.
+    SessionInfo {
+        title: String,
+    },
     /// How much of the context window this session has consumed.
     ///
     /// Resent as a turn burns through it. Worth showing: the honest answer to
