@@ -623,11 +623,22 @@ impl RunningSession {
                 Ok(vec![permission_event(&request_id, &params)])
             }
             ("session/update", _) => {
+                let raw = params.clone();
                 let rpc = Rpc { method: Some(method), params: Some(params), id: None, result: None, error: None };
-                Ok(rpc
-                    .session_notification()
-                    .map(|n| update_to_events(&n.update))
-                    .unwrap_or_else(|| vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }]))
+                match rpc.session_notification() {
+                    Some(n) => Ok(update_to_events(&n.update)),
+                    None => {
+                        // The one Gap path that used to say nothing. A
+                        // `session/update` whose params do not deserialize
+                        // produced a break in the transcript with no way to
+                        // find out which frame caused it.
+                        println!(
+                            "overnight: could not read a session/update: {}",
+                            serde_json::to_string(&raw).unwrap_or_default().chars().take(300).collect::<String>()
+                        );
+                        Ok(vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }])
+                    }
+                }
             }
             (other, id) => {
                 // Named, because a silent gap is untraceable. An adapter that

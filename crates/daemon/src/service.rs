@@ -974,6 +974,18 @@ impl Service {
             None => None,
         };
 
+        // What the shim ACTUALLY has, preferred over what the record hoped for.
+        //
+        // A session is often not the one we asked for: `session/load` can fail
+        // and the adapter starts a fresh one instead. Only the shim knows the
+        // id that resulted, and it reports it in `Established` — which until
+        // now lived in memory and nowhere else. So the record kept a stale id,
+        // switching back ran `claude --resume` on a conversation that was not
+        // the one on screen, and switching in again failed to load it and
+        // opened a third. Every toggle lost the thread and drew a gap saying
+        // so.
+        let session_id = self.agents.session_id(id).or(session_id);
+
         let command = match pane_mode {
             models::PaneMode::Terminal => {
                 let sid = session_id.clone().unwrap_or_default();
