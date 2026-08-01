@@ -73,8 +73,13 @@ final class AgentStream: ObservableObject {
         do {
             let batch = try await agentSubscribe(fromSeq: transcript.cursor)
             guard !batch.isEmpty else { return }
-            let decoded = batch.compactMap { frame -> Sequenced? in
-                guard let event = try? AgentEvent.decode(from: frame.payloadJson) else { return nil }
+            let decoded = batch.map { frame -> Sequenced in
+                // A frame this client cannot read becomes a visible gap, never
+                // a dropped event. `try?` here meant a decoder that fell behind
+                // the daemon rendered a blank chat with no pickers and no sign
+                // anything was wrong — which is exactly the silence the whole
+                // Gap contract exists to forbid.
+                let event = (try? AgentEvent.decode(from: frame.payloadJson)) ?? .gap(.unparsed)
                 return Sequenced(seq: frame.seq, event: event)
             }
             transcript.apply(decoded)

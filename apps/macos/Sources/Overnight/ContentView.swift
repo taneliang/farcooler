@@ -826,7 +826,20 @@ struct ContentView: View {
             let target =
                 here.flatMap { rect in workspace.terminals.first { $0.id == rect.id } }
                 ?? selectedTerminal?.terminal
-            guard let target else { return }
+                // Selecting a LAYOUT TAB is not selecting a terminal, and a
+                // cached layout does not always mark a pane focused — so both
+                // of the above are nil for the commonest way of getting here,
+                // and the command silently did nothing at all. A layout with
+                // one pane has no ambiguity about which pane is meant.
+                ?? group?.panes.first.flatMap { pane in
+                    workspace.terminals.first { $0.id == pane.id }
+                }
+            guard let target else {
+                // Never silent. A keystroke that does nothing and says nothing
+                // is indistinguishable from a broken feature.
+                client.lastError = "No pane to switch — select a terminal first."
+                return
+            }
             await togglePaneMode(target)
 
         case .help:

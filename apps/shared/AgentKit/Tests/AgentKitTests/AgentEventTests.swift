@@ -33,3 +33,29 @@ import Testing
     let event = try AgentEvent.decode(from: json)
     #expect(event == .gap(.unparsed))
 }
+
+@Test func aRealSessionStartedFromTheDaemonDecodes() throws {
+    // The exact bytes a live daemon emitted. A decoder that throws here is not
+    // a test failure in the abstract: `AgentStream` drops undecodable events
+    // with `try?`, so the chat renders blank — no model selector, no modes, no
+    // sign anything is wrong.
+    let json = """
+    {"SessionStarted":{"session_id":"s","agent_mode":"default",\
+    "available_modes":[{"id":"default","name":"Manual","description":"d"}],\
+    "model":"haiku",\
+    "available_models":[{"id":"haiku","name":"Haiku","description":"fast"}],\
+    "config_options":[{"id":"mode","name":"Mode","description":"","category":"mode",\
+    "kind":"select","current_value":"default",\
+    "options":[{"id":"default","name":"Manual","description":"d"}]}],\
+    "available_commands":[]}}
+    """
+    let event = try AgentEvent.decode(from: json)
+    guard case let .sessionStarted(_, _, modes, model, models, options, _) = event else {
+        Issue.record("expected sessionStarted, got \(event)")
+        return
+    }
+    #expect(modes.first?.name == "Manual")
+    #expect(model == "haiku")
+    #expect(models.first?.name == "Haiku")
+    #expect(options.first?.id == "mode")
+}
