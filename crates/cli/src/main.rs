@@ -72,6 +72,9 @@ enum Command {
     /// Manage terminals inside a workspace.
     #[command(subcommand)]
     Terminal(TerminalCmd),
+    /// Search a workspace's worktree files, for an agent chat's @-mention.
+    #[command(subcommand)]
+    Worktree(WorktreeCmd),
     /// Arrange terminals on screen: tile, zoom, focus, switch groups.
     ///
     /// Everything the Mac app's tiling does, because it is the same calls. An
@@ -297,6 +300,22 @@ enum WorkspaceCmd {
 }
 
 #[derive(Subcommand)]
+enum WorktreeCmd {
+    /// Search file paths inside a workspace's worktree, for an agent chat's
+    /// @-mention picker. Results are worktree-relative, never a host path —
+    /// the same redaction `wire.rs` applies to every other path this scope
+    /// can see.
+    FileSearch {
+        workspace: String,
+        query: String,
+        /// 0 asks the daemon for its own default rather than this CLI
+        /// inventing a second one that could drift from it.
+        #[arg(long, default_value_t = 0)]
+        limit: u32,
+    },
+}
+
+#[derive(Subcommand)]
 enum TerminalCmd {
     /// Launch a preset in a new tagged tmux window.
     Create {
@@ -348,6 +367,45 @@ enum TerminalCmd {
     /// one-shot dump is not the same as opening a terminal, and clearing a
     /// notification nobody read is worse than not sending one.
     Seen { terminal: String },
+
+    // -- Agent channel: `terminal.set_pane_mode` and friends. Every one of
+    // these is a daemon RPC, not a byte stream, so — like `Seen`/`Stop` above
+    // and unlike `Send`/`Screen`/`Stream` below — none of them need `proxy()`:
+    // `connect_to(host)` already reaches a remote daemon over ssh, and these
+    // never touch the local tmux runtime a remote host does not have.
+    /// Switch a pane between its terminal view and its agent chat view.
+    ///
+    /// The daemon is the sole owner of which mode a pane is in — `AgentStream.swift`'s
+    /// own doc comment records why: two clients guessing for themselves is the
+    /// disagreement this design exists to prevent.
+    SetPaneMode {
+        terminal: String,
+        /// "terminal" or "agent".
+        mode: String,
+        /// Needed to leave agent mode mid-turn: `claude --resume` cannot
+        /// reattach to a turn discarded out from under it, so the daemon
+        /// refuses this unless told the user has already been warned.
+        #[arg(long)]
+        force: bool,
+    },
+    /// New agent-channel events since a cursor, as JSON. What the Mac app's
+    /// chat view polls every 200ms (`AgentStream.pump`).
+    AgentSubscribe {
+        terminal: String,
+        #[arg(long, default_value_t = 0)]
+        from_seq: u64,
+    },
+    /// Send a chat message to the pane's agent.
+    AgentPrompt { terminal: String, text: String },
+    /// Answer a pending agent question, carrying the ids back exactly as the
+    /// adapter sent them — inventing one here would make the answer
+    /// unroutable and hang the agent on its own question.
+    AgentAnswer { terminal: String, request_id: String, option_id: String },
+    /// Switch the running agent's own mode (e.g. a permission mode), not the
+    /// pane's mode — see `SetPaneMode` for that.
+    AgentSetMode { terminal: String, agent_mode: String },
+    /// Cancel the agent's current turn.
+    AgentCancel { terminal: String },
 }
 
 #[tokio::main]
@@ -385,6 +443,7 @@ async fn run() -> Fallible {
         Command::Repo(c) => repo(host, c, cli.json).await,
         Command::Workspace(c) => workspace(host, c, cli.json).await,
         Command::Terminal(c) => terminal(host, c, cli.json).await,
+        Command::Worktree(c) => worktree(host, c, cli.json).await,
         Command::Layout(c) => layout(host, c, cli.json).await,
         Command::Attach { workspace } => attach(host, &workspace).await,
         Command::Events => events(host).await,
@@ -1248,6 +1307,124 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             println!("marked {} seen", short(id));
         }
 
+        // Agent channel. Every payload here names its own `terminal_id`
+        // rather than the envelope's `target_resource_id` — see the matching
+        // comment in `crates/daemon/src/rpc.rs` — so `req(method)` plus
+        // `with(...)` is right, not `req_for`.
+        TerminalCmd::SetPaneMode { terminal, mode, force } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let pane_mode = match mode.as_str() {
+                "terminal" => overnight_protocol::v1::PaneMode::Terminal,
+                "agent" => overnight_protocol::v1::PaneMode::Agent,
+                other => {
+                    return Err(format!("unknown pane mode {other:?}, want terminal or agent").into());
+                }
+            };
+            link.call(with(
+                req("terminal.set_pane_mode"),
+                request::Payload::SetPaneMode(overnight_protocol::v1::SetPaneMode {
+                    terminal_id: id_bytes(id),
+                    pane_mode: pane_mode as i32,
+                    force,
+                }),
+            ))
+            .await?;
+            println!("{} is now in {mode} mode", short(id));
+        }
+
+        TerminalCmd::AgentSubscribe { terminal, from_seq } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let r = link
+                .call(with(
+                    req("terminal.agent_subscribe"),
+                    request::Payload::AgentSubscribe(overnight_protocol::v1::AgentSubscribe {
+                        terminal_id: id_bytes(id),
+                        from_seq,
+                    }),
+                ))
+                .await?;
+            let result::Value::AgentEventBatch(batch) = expect_value(r.value, "agent event batch")?
+            else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            if json {
+                // `AgentStream.swift`'s `Batch`/`EventFrame` decode with the
+                // stock `JSONDecoder` — no snake_case conversion configured —
+                // so these keys must be exactly `events`/`seq`/`payloadJson`.
+                // Renaming any of them here does not fail to compile, it just
+                // makes the Mac app silently drop every batch it receives.
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "events": batch.events.iter().map(|e| serde_json::json!({
+                            "seq": e.seq,
+                            "payloadJson": e.payload_json,
+                        })).collect::<Vec<_>>(),
+                    })
+                );
+            } else if batch.events.is_empty() {
+                println!("no new agent events");
+            } else {
+                for e in &batch.events {
+                    println!("{:>6}  {}", e.seq, e.payload_json);
+                }
+            }
+        }
+
+        TerminalCmd::AgentPrompt { terminal, text } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(with(
+                req("terminal.agent_prompt"),
+                request::Payload::AgentPrompt(overnight_protocol::v1::AgentPrompt {
+                    terminal_id: id_bytes(id),
+                    blocks: vec![overnight_protocol::v1::AgentPromptBlock {
+                        content: Some(overnight_protocol::v1::agent_prompt_block::Content::Text(text)),
+                    }],
+                }),
+            ))
+            .await?;
+            println!("sent to {}", short(id));
+        }
+
+        TerminalCmd::AgentAnswer { terminal, request_id, option_id } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(with(
+                req("terminal.agent_answer"),
+                request::Payload::AgentAnswer(overnight_protocol::v1::AgentAnswer {
+                    terminal_id: id_bytes(id),
+                    request_id,
+                    option_id,
+                }),
+            ))
+            .await?;
+            println!("answered {}", short(id));
+        }
+
+        TerminalCmd::AgentSetMode { terminal, agent_mode } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(with(
+                req("terminal.agent_set_mode"),
+                request::Payload::AgentSetMode(overnight_protocol::v1::AgentSetMode {
+                    terminal_id: id_bytes(id),
+                    agent_mode: agent_mode.clone(),
+                }),
+            ))
+            .await?;
+            println!("set {} to agent mode {agent_mode}", short(id));
+        }
+
+        TerminalCmd::AgentCancel { terminal } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(with(
+                req("terminal.agent_cancel"),
+                request::Payload::AgentCancel(overnight_protocol::v1::AgentCancel {
+                    terminal_id: id_bytes(id),
+                }),
+            ))
+            .await?;
+            println!("cancelled {}", short(id));
+        }
+
         TerminalCmd::Restart { terminal } => {
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             let r = link.call(req_for("terminal.restart", id)).await?;
@@ -1347,6 +1524,47 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let runtime = Runtime::open().await?;
             let id = runtime.resolve_terminal(&terminal)?;
             print!("{}", runtime.capture(id, lines).await?);
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Worktree file search: a daemon RPC, so — like the agent channel above and
+// unlike the tmux-backed reads further up — `connect_to(host)` alone reaches
+// a remote host correctly and no `proxy()` is needed.
+// ---------------------------------------------------------------------------
+
+async fn worktree(host: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible {
+    match cmd {
+        WorktreeCmd::FileSearch { workspace, query, limit } => {
+            let mut link = connect_to(host).await?;
+            let all = list_workspaces(&mut link).await?;
+            let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
+            let id = uuid_of(&ws.id);
+            let r = link
+                .call(with(
+                    req("worktree.file_search"),
+                    request::Payload::WorktreeFileSearch(overnight_protocol::v1::WorktreeFileSearch {
+                        workspace_id: id_bytes(id),
+                        query,
+                        limit,
+                    }),
+                ))
+                .await?;
+            let result::Value::WorktreeFileList(list) = expect_value(r.value, "worktree file list")?
+            else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            if json {
+                println!("{}", serde_json::json!({ "paths": list.paths }));
+            } else if list.paths.is_empty() {
+                println!("no matches");
+            } else {
+                for p in &list.paths {
+                    println!("{p}");
+                }
+            }
         }
     }
     Ok(())
@@ -1455,6 +1673,13 @@ fn short(id: Uuid) -> String {
 
 fn uuid_of(bytes: &[u8]) -> Uuid {
     Uuid::from_slice(bytes).unwrap_or(Uuid::nil())
+}
+
+/// The inverse of `uuid_of`: an id going INTO a payload rather than out of
+/// one, for the agent-channel and worktree-search messages that carry their
+/// own id fields instead of using the envelope's `target_resource_id`.
+fn id_bytes(id: Uuid) -> bytes::Bytes {
+    bytes::Bytes::copy_from_slice(id.as_bytes())
 }
 
 fn short_bytes(bytes: &[u8]) -> String {
