@@ -451,6 +451,84 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             Ok(json!({}))
         }
 
+        // ---- agent channel ----
+        //
+        // The mutating calls discard the `Terminal` the daemon hands back and
+        // answer `{}`, the same as `terminal.stop` and `terminal.restart`: the
+        // pushed `terminal_changed` event is what a client actually redraws
+        // from, so echoing the row here would be a second, staler copy of it.
+        "terminal.set_pane_mode" => {
+            let mode = match text("paneMode").as_str() {
+                "agent" => overnight_protocol::v1::PaneMode::Agent,
+                "terminal" => overnight_protocol::v1::PaneMode::Terminal,
+                // Refused rather than guessed at: a client asking to switch to
+                // a mode that does not exist has a bug worth surfacing, not a
+                // default worth picking for it.
+                other => return Err(format!("unknown pane mode: {other}")),
+            };
+            let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+            session
+                .set_pane_mode(id("terminal")?, mode, force)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
+
+        // Answers `{"events": [{"seq": ..., "payloadJson": "..."}]}` — a
+        // client's whole cursor state is `fromSeq`, taken from the highest
+        // `seq` it has already applied, never a counter kept beside this call.
+        "terminal.agent_subscribe" => {
+            let from_seq = args.get("fromSeq").and_then(|v| v.as_u64()).unwrap_or(0);
+            let batch = session
+                .agent_subscribe(id("terminal")?, from_seq)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({
+                "events": batch.events.iter().map(|e| json!({
+                    "seq": e.seq,
+                    "payloadJson": e.payload_json,
+                })).collect::<Vec<_>>()
+            }))
+        }
+
+        "terminal.agent_prompt" => {
+            session
+                .agent_prompt(id("terminal")?, &text("text"))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
+
+        "terminal.agent_answer" => {
+            session
+                .agent_answer(id("terminal")?, &text("requestId"), &text("optionId"))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
+
+        "terminal.agent_set_mode" => {
+            session
+                .agent_set_mode(id("terminal")?, &text("mode"))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
+
+        "terminal.agent_cancel" => {
+            session.agent_cancel(id("terminal")?).await.map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
+
+        "worktree.file_search" => {
+            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
+            let paths = session
+                .search_worktree_files(id("workspace")?, &text("query"), limit)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({ "paths": paths }))
+        }
+
         // Refused rather than defaulted, so a typo in a client is a visible
         // error instead of a call that silently does nothing.
         other => Err(format!("unknown method: {other}")),

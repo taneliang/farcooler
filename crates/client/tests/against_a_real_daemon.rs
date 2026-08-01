@@ -168,6 +168,45 @@ async fn archiving_and_restoring_round_trips_through_the_client() {
 }
 
 #[tokio::test]
+async fn subscribing_to_a_terminal_with_no_agent_session_is_empty_not_an_error() {
+    // A client attaches to a PANE, not to a session. A terminal that has never
+    // been in agent mode must answer "nothing yet" rather than fail, or the
+    // UI cannot open a chat view before the first turn.
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = overnight_client::session::uuid_of(&repositories[0].id);
+    let workspace = session
+        .create_workspace(repository, "agent test", "feat/agent-empty", "HEAD")
+        .await
+        .expect("create_workspace");
+    let workspace_id = overnight_client::session::uuid_of(&workspace.id);
+
+    let terminal = session
+        .create_terminal(workspace_id, "shell", "shell", false)
+        .await
+        .expect("create_terminal");
+    let terminal_id = overnight_client::session::uuid_of(&terminal.id);
+
+    let batch = session.agent_subscribe(terminal_id, 0).await.expect("subscribe succeeds");
+    assert!(batch.events.is_empty());
+}
+
+#[tokio::test]
 async fn a_failed_call_arrives_as_an_error_not_a_dropped_session() {
     // A phone on a train needs the session to survive a refusal; reconnecting
     // over SSH for every rejected request would be unusable.

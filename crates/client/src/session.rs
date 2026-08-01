@@ -13,7 +13,8 @@
 //! CLI, with the model types it already has.
 
 use overnight_protocol::v1::{
-    Repository, RepositoryRoot, Terminal, TerminalState, Workspace, WorkspaceState, request, result,
+    AgentEventBatch, PaneMode, Repository, RepositoryRoot, Terminal, TerminalState, Workspace,
+    WorkspaceState, request, result,
 };
 use overnight_transport::{Client, ClientError};
 use serde_json::json;
@@ -336,6 +337,141 @@ impl Session {
             view_activity_id: 0,
         });
         self.value("terminal.resize", Some(terminal), Some(payload)).await.map(|_| ())
+    }
+
+    // ---- agent channel ----
+    //
+    // Every payload here names its own `terminal_id` rather than the
+    // envelope's `target_resource_id`, matching the daemon side: `agent_subscribe`
+    // in particular legitimately targets a terminal that holds no session yet,
+    // which is not the versioned-resource shape `target_resource_id` is for.
+
+    /// Switch a pane between a terminal and its agent, or back.
+    ///
+    /// `force` is the client's word for "yes, discard the turn in flight" —
+    /// the daemon refuses a bare switch to TERMINAL mid-turn, because
+    /// `claude --resume` cannot reattach to work that was never finished.
+    pub async fn set_pane_mode(
+        &mut self,
+        terminal: Uuid,
+        mode: PaneMode,
+        force: bool,
+    ) -> Result<Terminal, SessionError> {
+        let payload = request::Payload::SetPaneMode(overnight_protocol::v1::SetPaneMode {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            pane_mode: mode as i32,
+            force,
+        });
+        match self.value("terminal.set_pane_mode", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
+    /// New agent events for one terminal, from a cursor.
+    ///
+    /// Never an error for a terminal with no agent session: a client attaches
+    /// to a PANE, not a session, so a chat view has to be able to open before
+    /// the first turn — the daemon answers an empty batch rather than
+    /// refusing, and this call must not turn that into a special case here.
+    pub async fn agent_subscribe(
+        &mut self,
+        terminal: Uuid,
+        from_seq: u64,
+    ) -> Result<AgentEventBatch, SessionError> {
+        let payload = request::Payload::AgentSubscribe(overnight_protocol::v1::AgentSubscribe {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            from_seq,
+        });
+        match self.value("terminal.agent_subscribe", None, Some(payload)).await? {
+            result::Value::AgentEventBatch(b) => Ok(b),
+            other => Err(wrong("agent_event_batch", &other)),
+        }
+    }
+
+    /// Send one plain-text prompt block.
+    ///
+    /// Image and file-mention blocks belong to the composer (a later task);
+    /// this covers the one shape every caller needs immediately, without
+    /// inventing a multi-block API nothing yet constructs.
+    pub async fn agent_prompt(&mut self, terminal: Uuid, text: &str) -> Result<Terminal, SessionError> {
+        let payload = request::Payload::AgentPrompt(overnight_protocol::v1::AgentPrompt {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            blocks: vec![overnight_protocol::v1::AgentPromptBlock {
+                content: Some(overnight_protocol::v1::agent_prompt_block::Content::Text(
+                    text.to_string(),
+                )),
+            }],
+        });
+        match self.value("terminal.agent_prompt", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
+    /// Answer a pending permission request.
+    pub async fn agent_answer(
+        &mut self,
+        terminal: Uuid,
+        request_id: &str,
+        option_id: &str,
+    ) -> Result<Terminal, SessionError> {
+        let payload = request::Payload::AgentAnswer(overnight_protocol::v1::AgentAnswer {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            request_id: request_id.to_string(),
+            option_id: option_id.to_string(),
+        });
+        match self.value("terminal.agent_answer", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
+    pub async fn agent_set_mode(
+        &mut self,
+        terminal: Uuid,
+        agent_mode: &str,
+    ) -> Result<Terminal, SessionError> {
+        let payload = request::Payload::AgentSetMode(overnight_protocol::v1::AgentSetMode {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            agent_mode: agent_mode.to_string(),
+        });
+        match self.value("terminal.agent_set_mode", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
+    pub async fn agent_cancel(&mut self, terminal: Uuid) -> Result<Terminal, SessionError> {
+        let payload = request::Payload::AgentCancel(overnight_protocol::v1::AgentCancel {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+        });
+        match self.value("terminal.agent_cancel", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
+    /// Worktree-relative paths matching `query`, for an `@`-mention.
+    ///
+    /// Relative, never a host path: the same redaction the rest of this
+    /// protocol applies to everything below `host_admin`.
+    pub async fn search_worktree_files(
+        &mut self,
+        workspace: Uuid,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<String>, SessionError> {
+        let payload =
+            request::Payload::WorktreeFileSearch(overnight_protocol::v1::WorktreeFileSearch {
+                workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+                query: query.to_string(),
+                limit,
+            });
+        match self.value("worktree.file_search", None, Some(payload)).await? {
+            result::Value::WorktreeFileList(l) => Ok(l.paths),
+            other => Err(wrong("worktree_file_list", &other)),
+        }
     }
 
     async fn value(
