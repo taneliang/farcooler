@@ -892,25 +892,17 @@ extension String {
 }
 
 
-/// Apple's Liquid Glass where the system has it, a material where it does not.
+/// The composer's surface: Liquid Glass, because that is what a control resting
+/// ON scrolling content is on this platform.
 ///
-/// The composer floats over the transcript now, so it has to read as a layer
-/// ABOVE the conversation rather than a strip attached below it. That is
-/// exactly what glass is for on macOS 26. `.ultraThinMaterial` is the closest
-/// thing on 14 and 15, which this app still supports, so the shape and the
-/// spacing stay identical and only the surface differs.
+/// No fallback. macOS 26 is this app's floor, so the material-and-hairline
+/// approximation that used to sit behind an availability check was a second
+/// implementation nobody ran — the kind that rots quietly and then misleads the
+/// next person who reads it as documentation of what the app does.
 struct GlassCard: ViewModifier {
     var cornerRadius: CGFloat = 20
 
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-        } else {
-            content
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
-                .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(.quaternary)
-                }
-        }
+        content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
     }
 }

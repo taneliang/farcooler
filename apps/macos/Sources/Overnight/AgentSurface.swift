@@ -69,57 +69,67 @@ struct AgentSurface: View {
             //
             // `safeAreaInset` has no measurement to feed back.
             transcriptView
+            // How the conversation MEETS the glass over it.
+            //
+            // `safeAreaInset` places the composer and insets the scroll view;
+            // this says what the boundary looks like. Without it the last line
+            // passes under a hard edge — and it is exactly what the hand-built
+            // gradient mask was reaching for, the one that fed a layout that fed
+            // itself and pegged a core. Available now that the floor is macOS 26.
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 8) {
-                    // The plan and the queue are ATTACHED to the composer, not
-                    // scattered around the pane.
-                    //
-                    // The plan used to be pinned above the transcript and the
-                    // queue drawn inline at its end, which put three things
-                    // that are all "what happens next" in three different
-                    // places — and the plan, at the far top, was furthest from
-                    // the message that would change it. Everything about the
-                    // NEXT turn now sits together, directly over the box you
-                    // type into.
-                    if !stream.transcript.plan.isEmpty {
-                        PlanPanel(entries: stream.transcript.plan)
-                            .padding(.horizontal, 10)
-                    }
-
-                    ForEach(stream.transcript.queue) { queued in
-                        QueuedRow(
-                            queued: queued,
-                            onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
-                            onCancel: { Task { await stream.cancelQueued(queued.id) } },
-                            onSteer: { Task { await stream.steerQueued(queued.id) } })
-                            .padding(.horizontal, 10)
-                    }
-
-                    // Only when there is no tool call to hang it on. A
-                    // permission names the call it gates, so the buttons
-                    // normally live on that row — see `AgentRowView.pending`.
-                    // This is the fallback for a request about something the
-                    // transcript is not showing.
-                    if let pending = unattachedPermission {
-                        ApprovalCard(pending: pending) { optionID in
-                            Task { await stream.answer(pending.id, optionID) }
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 8)
-                    }
-
-                    AgentComposer(
-                        stream: stream, terminal: terminal, isFocused: isFocused,
-                        searchFiles: searchFiles,
-                        // The pane's own width, passed down as a plain number.
+                GlassEffectContainer(spacing: 8) {
+                    VStack(spacing: 8) {
+                        // The plan and the queue are ATTACHED to the composer, not
+                        // scattered around the pane.
                         //
-                        // Safe in a way the last two attempts were not: the
-                        // composer's WIDTH does not depend on its contents — it
-                        // fills what it is given — so a layout chosen from it
-                        // cannot feed back into it. The freeze came from height,
-                        // which does.
-                        width: proxy.size.width)
-                        .padding(10)
+                        // The plan used to be pinned above the transcript and the
+                        // queue drawn inline at its end, which put three things
+                        // that are all "what happens next" in three different
+                        // places — and the plan, at the far top, was furthest from
+                        // the message that would change it. Everything about the
+                        // NEXT turn now sits together, directly over the box you
+                        // type into.
+                        if !stream.transcript.plan.isEmpty {
+                            PlanPanel(entries: stream.transcript.plan)
+                                .padding(.horizontal, 10)
+                        }
+
+                        ForEach(stream.transcript.queue) { queued in
+                            QueuedRow(
+                                queued: queued,
+                                onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
+                                onCancel: { Task { await stream.cancelQueued(queued.id) } },
+                                onSteer: { Task { await stream.steerQueued(queued.id) } })
+                                .padding(.horizontal, 10)
+                        }
+
+                        // Only when there is no tool call to hang it on. A
+                        // permission names the call it gates, so the buttons
+                        // normally live on that row — see `AgentRowView.pending`.
+                        // This is the fallback for a request about something the
+                        // transcript is not showing.
+                        if let pending = unattachedPermission {
+                            ApprovalCard(pending: pending) { optionID in
+                                Task { await stream.answer(pending.id, optionID) }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 8)
+                        }
+
+                        AgentComposer(
+                            stream: stream, terminal: terminal, isFocused: isFocused,
+                            searchFiles: searchFiles,
+                            // The pane's own width, passed down as a plain number.
+                            //
+                            // Safe in a way the last two attempts were not: the
+                            // composer's WIDTH does not depend on its contents — it
+                            // fills what it is given — so a layout chosen from it
+                            // cannot feed back into it. The freeze came from height,
+                            // which does.
+                            width: proxy.size.width)
+                            .padding(10)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

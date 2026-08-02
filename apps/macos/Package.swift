@@ -16,7 +16,7 @@ let rustLibDir = repoRoot.appendingPathComponent("target/release").path
 
 let package = Package(
     name: "Overnight",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("26.0")],
     dependencies: [.package(path: "../shared/AgentKit")],
     targets: [
         // The Rust terminal core. One emulator, in the language the daemon
