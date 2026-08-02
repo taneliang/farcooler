@@ -54,22 +54,6 @@ public struct VersionSection: View {
             Button("Copy version details") { onCopy(details) }
         } header: {
             Text("Version")
-        } footer: {
-            Text(footer).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    private var footer: String {
-        switch AppVersion.channel {
-        case "release":
-            return "Include this in a bug report — a beta and a release share a version number, "
-                + "so the channel is what says which build you had."
-        case "beta":
-            return "This is a beta. It is the same code as the release it names, built and "
-                + "shipped earlier."
-        default:
-            return "A development build: made on someone's machine rather than by the release "
-                + "pipeline, so it may not match anything published."
         }
     }
 
