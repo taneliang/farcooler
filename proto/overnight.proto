@@ -75,6 +75,8 @@ message Request {
     WorktreeFileSearch worktree_file_search = 39;
     AgentSetModel agent_set_model = 40;
     AgentSetConfig agent_set_config = 41;
+    AgentEditQueued agent_edit_queued = 42;
+    AgentCancelQueued agent_cancel_queued = 43;
   }
 }
 
@@ -186,6 +188,21 @@ message AgentSetConfig {
   bytes terminal_id = 1;
   string config_id = 2;
   string value = 3;
+}
+
+// Rewrite or withdraw a prompt that is waiting for the current turn to end.
+//
+// Only possible because Overnight holds the queue itself: a prompt handed to
+// the adapter is gone, and one still here is still the user's to change.
+message AgentEditQueued {
+  bytes terminal_id = 1;
+  string queued_id = 2;
+  string text = 3;
+}
+
+message AgentCancelQueued {
+  bytes terminal_id = 1;
+  string queued_id = 2;
 }
 
 message AgentCancel { bytes terminal_id = 1; }
@@ -464,6 +481,14 @@ message Terminal {
   // TERMINAL pane mode, where there is no agent to ask.
   optional string agent_mode = 20;
   repeated string available_agent_modes = 21;
+
+  // Whether this terminal can be rendered as a native chat.
+  //
+  // Derived on the host, because it takes a screen read to answer: an agent
+  // renames its own process, so what is running can only be identified by
+  // looking. A client that guessed would offer the switch for a Codex pane,
+  // which has no adapter — and the pane would come back as a different agent.
+  bool chat_capable = 22;
 }
 
 // What a pane is hosting.

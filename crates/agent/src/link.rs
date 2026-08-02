@@ -35,6 +35,10 @@ pub enum DaemonMessage {
     SetModel { model: String },
     SetConfig { id: String, value: String },
     Cancel,
+    /// Rewrite a prompt that has not been sent yet.
+    EditQueued { id: String, text: String },
+    /// Take back a prompt that has not been sent yet.
+    CancelQueued { id: String },
 }
 
 pub fn encode_line<T: Serialize>(value: &T) -> Result<String, serde_json::Error> {

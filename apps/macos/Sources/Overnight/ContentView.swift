@@ -661,7 +661,8 @@ struct ContentView: View {
             onResizeDivider: { terminal, side, cells in
                 resizeDivider(terminal, side: side, cells: cells, in: ws)
             },
-            onSearchFiles: { query in await client.searchFiles(in: ws, query: query) }
+            onSearchFiles: { query in await client.searchFiles(in: ws, query: query) },
+            onSwitchPaneMode: { terminal in Task { await togglePaneMode(terminal) } }
         )
     }
 

@@ -56,6 +56,8 @@ final class AgentStream: ObservableObject {
 
     private struct Batch: Decodable {
         let events: [EventFrame]
+        /// Which run of the stream these numbers belong to. See `epoch`.
+        let epoch: UInt64
     }
 
     /// Ask for everything after what we already hold.
@@ -64,13 +66,32 @@ final class AgentStream: ObservableObject {
     /// here, so a reconnect — or this object simply being recreated when the
     /// tab strip switches to a different agent pane, see `AgentView` — cannot
     /// skip or repeat events after a gap.
+    /// The run of the stream this transcript was built from.
+    private var epoch: UInt64 = 0
+
     private func pump() async {
         do {
             let data = try await core.call(
                 "terminal.agent_subscribe",
-                ["terminal": terminal, "fromSeq": Int(clamping: transcript.cursor)])
+                [
+                    "terminal": terminal,
+                    "fromSeq": Int(clamping: transcript.cursor),
+                    "epoch": Int(clamping: epoch),
+                ])
             let batch = try JSONDecoder().decode(Batch.self, from: data)
-            guard !batch.events.isEmpty else {
+
+            // A different epoch means the stream restarted — the pane was
+            // toggled, or the shim came back — and every number this holds
+            // counts positions in a conversation that no longer exists. The
+            // batch that comes back is the whole transcript, so it replaces
+            // rather than appends. See `AgentSupervisor::replay`; the Mac
+            // client does exactly this, and without it a phone looking at a
+            // toggled pane shows a conversation that is not the one being
+            // served.
+            if batch.epoch != epoch {
+                epoch = batch.epoch
+                transcript.resetForNewEpoch()
+            } else if batch.events.isEmpty {
                 connectionError = nil
                 return
             }
@@ -89,12 +110,27 @@ final class AgentStream: ObservableObject {
         }
     }
 
-    func send(_ text: String) async {
-        // Shown before it is sent, not after. The adapter echoes user text
-        // only when replaying a loaded session, so waiting for it back means
-        // the message disappears the moment you press return.
-        transcript.appendLocalUserMessage(text)
+    func send(_ text: String, whileWorking: Bool = false) async {
+        // Echoed locally only when it is going out NOW. A message written
+        // mid-turn waits in the queue and joins the transcript when it is
+        // actually sent — see `AgentStream.send` on the Mac.
+        if !whileWorking {
+            transcript.appendLocalUserMessage(text)
+        }
         _ = try? await core.call("terminal.agent_prompt", ["terminal": terminal, "text": text])
+    }
+
+    /// Rewrite a message that has not gone out yet.
+    func editQueued(_ id: String, _ text: String) async {
+        _ = try? await core.call(
+            "terminal.agent_edit_queued",
+            ["terminal": terminal, "queuedId": id, "text": text])
+    }
+
+    /// Take back a message that has not gone out yet.
+    func cancelQueued(_ id: String) async {
+        _ = try? await core.call(
+            "terminal.agent_cancel_queued", ["terminal": terminal, "queuedId": id])
     }
 
     func setModel(_ model: String) async {

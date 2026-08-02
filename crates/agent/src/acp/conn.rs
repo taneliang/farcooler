@@ -284,6 +284,44 @@ impl AcpConnection {
     /// instead — `recv` IS cancellation safe, so it is the only thing safe to
     /// put in a `select!` branch. Do not fold this back into a `select!` over
     /// `read_line`; that is precisely the bug this method exists to close.
+    /// Take the `session/update` notifications already queued, as events.
+    ///
+    /// A `session/load` replays the whole conversation as notifications while
+    /// the load request is still in flight, so by the time it answers, the
+    /// history is sitting in this queue. Taking it here lets a resumed session
+    /// arrive as one batch that ends where the history ends.
+    ///
+    /// Requests are left exactly where they are. A `session/request_permission`
+    /// dropped here would hang the agent on a question nobody will ever be
+    /// asked.
+    pub fn take_pending_updates(&mut self) -> Vec<crate::event::AgentEvent> {
+        let mut events = Vec::new();
+        let mut kept = Vec::new();
+        for incoming in std::mem::take(&mut self.pending_incoming) {
+            let Incoming::Notification { method, params } = &incoming else {
+                kept.push(incoming);
+                continue;
+            };
+            if method != "session/update" {
+                kept.push(incoming);
+                continue;
+            }
+            let rpc = Rpc {
+                method: Some(method.clone()),
+                params: Some(params.clone()),
+                id: None,
+                result: None,
+                error: None,
+            };
+            match rpc.session_notification() {
+                Some(n) => events.extend(crate::acp::normalize::update_to_events(&n.update)),
+                None => kept.push(incoming),
+            }
+        }
+        self.pending_incoming = kept;
+        events
+    }
+
     pub fn split(self) -> (AcpWriter, mpsc::UnboundedReceiver<Incoming>) {
         let Self { child, stdin, mut stdout, next_id, pending_incoming, worktree } = self;
         let (tx, rx) = mpsc::unbounded_channel();

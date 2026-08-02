@@ -39,6 +39,18 @@ pub struct PlanEntry {
     pub status: String,
 }
 
+/// A prompt written but not yet sent.
+///
+/// It exists because an agent takes one turn at a time: a message written while
+/// a turn is running cannot be delivered until that turn ends. Overnight holds
+/// it rather than handing it to the adapter to sit on, which is what makes it
+/// possible to show the queue, edit an entry, or take one back.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct QueuedPrompt {
+    pub id: String,
+    pub text: String,
+}
+
 /// One selectable option an agent offers: a mode, or a model.
 ///
 /// Carries the human `name` as well as the `id`. Only the id was captured at
@@ -199,6 +211,13 @@ pub enum AgentEvent {
     TurnEnded {
         reason: EndReason,
     },
+    /// Everything waiting to be sent, in order, sent whole on every change.
+    ///
+    /// Wholesale like `Plan`, and for the same reason: the list is short, it is
+    /// replaced rather than appended to, and a client that had to reconstruct
+    /// it from adds and removes could drift from what will actually be sent.
+    PromptQueue { items: Vec<QueuedPrompt> },
+
     Gap {
         reason: AgentGapReason,
     },

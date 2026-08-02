@@ -484,6 +484,12 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(json!({
+                // The epoch goes back with the batch, not just in with the
+                // request. A client that cannot see it change cannot know its
+                // cursor has stopped meaning anything — which is the bug that
+                // took four attempts to fix on the Mac, and this is the path
+                // the phone uses.
+                "epoch": batch.epoch,
                 "events": batch.events.iter().map(|e| json!({
                     "seq": e.seq,
                     "payloadJson": e.payload_json,
@@ -510,6 +516,22 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         "terminal.agent_set_mode" => {
             session
                 .agent_set_mode(id("terminal")?, &text("mode"))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
+
+        "terminal.agent_edit_queued" => {
+            session
+                .agent_edit_queued(id("terminal")?, &text("queuedId"), &text("text"))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
+
+        "terminal.agent_cancel_queued" => {
+            session
+                .agent_cancel_queued(id("terminal")?, &text("queuedId"))
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(json!({}))

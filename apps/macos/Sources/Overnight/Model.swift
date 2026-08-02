@@ -164,11 +164,21 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var agentSessionId: String?
     var agentMode: String?
     var availableAgentModes: [String]?
+    /// Whether this pane can be rendered as a chat.
+    ///
+    /// Answered on the host: identifying an agent takes a screen read, because
+    /// Claude Code renames its own process. Absent from older daemons, and
+    /// absent means "do not offer" rather than "yes" — offering a switch that
+    /// comes back as a different agent is worse than not offering one.
+    var chatCapable: Bool?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
 
     /// Whether to draw a chat or a VT grid.
     var isAgentPane: Bool { paneMode == "agent" }
+
+    /// Whether to offer the terminal/chat switch at all.
+    var canSwitchPaneMode: Bool { chatCapable == true }
 
     /// What to call this terminal.
     ///
@@ -182,7 +192,25 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// the terminal COUNT so it repeated after any removal — three different panes
     /// called "Terminal 12" — and beside it sat the running command anyway, which
     /// was the only informative half of the row.
-    var label: String { Self.name(of: preset) }
+    /// The agent's own name for the conversation, when it has one.
+    ///
+    /// A fleet of eight panes all reading "claude" says nothing about which is
+    /// which — the process is identical in every one of them, and what differs
+    /// is the WORK. The agent names its conversation after that and revises it
+    /// as the work changes, which is the only description of a pane that is
+    /// about the task rather than the program.
+    ///
+    /// Only used when the daemon has one to give. The stored title is rejected
+    /// here for the reason below: it is "Terminal 12", which is a counter.
+    var label: String {
+        if !title.isEmpty, !Self.isPlaceholder(title) { return title }
+        return Self.name(of: preset)
+    }
+
+    /// Whether a title is the automatic one every terminal is created with.
+    private static func isPlaceholder(_ title: String) -> Bool {
+        title.hasPrefix("Terminal ") || title == "Terminal"
+    }
 
     /// One word for one thing, wherever a running command is shown.
     ///

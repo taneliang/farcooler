@@ -70,6 +70,11 @@ struct Observed {
     /// What is running in the pane, so a shell someone typed `claude` into
     /// announces itself the moment it becomes an agent.
     command: String,
+    /// Whether this pane can be rendered as a chat.
+    ///
+    /// Decided here because deciding it needs the screen, and the screen is
+    /// already being read on this pass. A client cannot answer it at all.
+    chat_capable: bool,
 }
 
 impl Watcher {
@@ -94,6 +99,11 @@ impl Watcher {
     /// What is running in a terminal, as the pane reports it.
     pub async fn command(&self, terminal: Uuid) -> Option<String> {
         self.state.lock().await.get(&terminal).map(|o| o.command.clone())
+    }
+
+    /// Whether this terminal could be shown as a chat, as last observed.
+    pub async fn chat_capable(&self, terminal: Uuid) -> bool {
+        self.state.lock().await.get(&terminal).is_some_and(|o| o.chat_capable)
     }
 
     /// Mark a terminal as looked at.
@@ -172,7 +182,13 @@ impl Watcher {
                     })
                     .or_else(|| pane.map(|p| p.command.clone()))
                     .unwrap_or_default();
-                live.push((id, command, terminal.state(), terminal.terminal.pane_mode));
+                live.push((
+                    id,
+                    command,
+                    terminal.state(),
+                    terminal.terminal.pane_mode,
+                    terminal.terminal.command_preset.clone(),
+                ));
             }
         }
 
@@ -180,17 +196,19 @@ impl Watcher {
         // inherit the activity of the process it replaced.
         {
             let mut state = self.state.lock().await;
-            let ids: std::collections::HashSet<Uuid> = live.iter().map(|(id, _, _, _)| *id).collect();
+            let ids: std::collections::HashSet<Uuid> =
+                live.iter().map(|(id, ..)| *id).collect();
             state.retain(|id, _| ids.contains(id));
         }
 
-        for (id, command, terminal_state, pane_mode) in live {
+        for (id, command, terminal_state, pane_mode, preset) in live {
             // The screen is read for any live terminal, not only one whose
             // process name we recognise. That is the point: Claude Code renames
             // itself to its version, so a pane reporting `2.1.220` is an agent
             // that process matching alone would never find.
-            let (label, observed) = if !matches!(terminal_state, TerminalState::Running) {
-                (activity::describe(&command, ""), AgentActivity::None)
+            let (label, observed, chat_capable) = if !matches!(terminal_state, TerminalState::Running)
+            {
+                (activity::describe(&command, ""), AgentActivity::None, false)
             } else if pane_mode == overnight_store::models::PaneMode::Agent {
                 // The protocol, not the screen. An agent-mode pane shows the
                 // shim's status log, which matches no agent signature, so the
@@ -198,9 +216,19 @@ impl Watcher {
                 // it needs you — the one failure the whole feature exists to
                 // prevent. The supervisor already folded these through
                 // `activity::advance`, so `Done` means what it always means.
+                // Named after the agent it is hosting. Calling every agent
+                // pane "agent" is the one label they all share, so it
+                // distinguishes nothing — and `set_pane_mode` recorded which
+                // harness this is at the moment the pane could still say.
                 (
-                    "agent".to_string(),
+                    if crate::service::chat_capable(&preset) {
+                        preset.clone()
+                    } else {
+                        "agent".to_string()
+                    },
                     self.service.agents().activity(id),
+                    // Already a chat. The switch it offers is back to terminal.
+                    true,
                 )
             } else {
                 // The screen is read for any live terminal, not only one whose
@@ -211,8 +239,17 @@ impl Watcher {
                     Ok((screen, _, _)) => (
                         activity::describe(&command, &screen),
                         activity::classify(&command, &screen),
+                        // Recognised AND hostable. Codex is recognised here and
+                        // has no adapter, so offering it a chat would hand the
+                        // user a Claude session in its place.
+                        activity::identify(&command, &screen)
+                            .is_some_and(|rules| crate::service::chat_capable(rules.preset)),
                     ),
-                    Err(_) => (activity::describe(&command, ""), AgentActivity::Unspecified),
+                    Err(_) => (
+                        activity::describe(&command, ""),
+                        AgentActivity::Unspecified,
+                        false,
+                    ),
                 }
             };
             // Resolved here, and sent resolved. A client has no screen to
@@ -252,6 +289,7 @@ impl Watcher {
                 },
                 state: terminal_state,
                 command: command.clone(),
+                chat_capable,
             };
             state.insert(id, record.clone());
             drop(state);
@@ -282,6 +320,7 @@ impl Watcher {
             message.activity = observed.activity as i32;
             message.activity_changed_at = Some(wire::timestamp(observed.changed_at));
             message.current_command = observed.command.clone();
+            message.chat_capable = observed.chat_capable;
 
             // A send with no subscribers is not a failure: it is the ordinary
             // case of a host nobody is watching, which still has to keep

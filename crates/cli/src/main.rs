@@ -417,6 +417,12 @@ enum TerminalCmd {
 
     /// Change one of an agent session's selectors: mode, model, subagent.
     AgentSetConfig { terminal: String, config_id: String, value: String },
+
+    /// Rewrite a prompt that is still waiting for the current turn to end
+    AgentEditQueued { terminal: String, queued_id: String, text: String },
+
+    /// Withdraw a prompt that is still waiting for the current turn to end
+    AgentCancelQueued { terminal: String, queued_id: String },
     /// Cancel the agent's current turn.
     AgentCancel { terminal: String },
 }
@@ -488,6 +494,11 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
             "{}",
             serde_json::json!({
                 "daemonVersion": host_facts.daemon_version,
+                "cliVersion": overnight_protocol::BUILD,
+                // Two builds that cannot agree on what they are running is a
+                // fact a client needs, not a detail. It is how a fix that was
+                // compiled and tested goes on reproducing in the app.
+                "buildsMatch": host_facts.daemon_version == overnight_protocol::BUILD,
                 "platform": host_facts.platform,
                 "runtimeHealthy": healthy,
                 "livePanes": host_facts.live_terminal_count,
@@ -503,6 +514,14 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
     println!("host          {}", host.unwrap_or("local"));
     println!("platform      {}", host_facts.platform);
     println!("daemon        {}", host_facts.daemon_version);
+    println!("this cli      {}", overnight_protocol::BUILD);
+    if host_facts.daemon_version != overnight_protocol::BUILD {
+        // Said out loud rather than left to be noticed. A CLI and a daemon
+        // built from different source can speak the same protocol perfectly
+        // and still behave like two different programs, and the symptom of
+        // that is a bug you already fixed still happening.
+        println!("              ^ MISMATCH: these were built from different source");
+    }
     println!(
         "tmux runtime  {}",
         if healthy { "reachable" } else { "UNAVAILABLE (all terminals derive lost)" }
@@ -719,6 +738,8 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                                     // forever, so an agent pane silently drew
                                     // a terminal and chat mode looked missing.
                                     "paneMode": pane_mode_label(t.pane_mode),
+                "chatCapable": t.chat_capable,
+                                    "chatCapable": t.chat_capable,
                                     "agentSessionId": t.agent_session_id,
                                     "agentMode": t.agent_mode,
                                     "availableAgentModes": t.available_agent_modes,
@@ -1469,6 +1490,33 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             ))
             .await?;
             println!("set {} {config_id} to {value}", short(id));
+        }
+
+        TerminalCmd::AgentEditQueued { terminal, queued_id, text } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(with(
+                req("terminal.agent_edit_queued"),
+                request::Payload::AgentEditQueued(overnight_protocol::v1::AgentEditQueued {
+                    terminal_id: id_bytes(id),
+                    queued_id: queued_id.clone(),
+                    text: text.clone(),
+                }),
+            ))
+            .await?;
+            println!("edited queued message {queued_id} on {}", short(id));
+        }
+
+        TerminalCmd::AgentCancelQueued { terminal, queued_id } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(with(
+                req("terminal.agent_cancel_queued"),
+                request::Payload::AgentCancelQueued(overnight_protocol::v1::AgentCancelQueued {
+                    terminal_id: id_bytes(id),
+                    queued_id: queued_id.clone(),
+                }),
+            ))
+            .await?;
+            println!("withdrew queued message {queued_id} on {}", short(id));
         }
 
         TerminalCmd::AgentCancel { terminal } => {

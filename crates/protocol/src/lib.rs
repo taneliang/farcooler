@@ -17,6 +17,16 @@ pub use v1::*;
 /// Protocol major version this build speaks.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Which source this binary was built from: `0.1.0+a1b2c3d`, `-dirty` if the
+/// worktree had uncommitted changes.
+///
+/// Reported by the daemon in every handshake and sent by every client in its
+/// own, so that two components built from different source SAY so rather than
+/// disagreeing silently — which is exactly how a fixed bug goes on reproducing.
+/// `PROTOCOL_VERSION` answers "can these talk"; this answers "are these the
+/// same build", and they are different questions.
+pub const BUILD: &str = env!("OVERNIGHT_BUILD");
+
 /// Control envelopes are capped at 1 MiB.
 pub const MAX_CONTROL_ENVELOPE_BYTES: usize = 1024 * 1024;
 

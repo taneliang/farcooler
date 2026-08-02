@@ -27,13 +27,6 @@ import Foundation
 @MainActor
 final class AgentStream: ObservableObject {
     @Published private(set) var transcript = Transcript()
-    /// The row to hold at the top of the view: the message just sent.
-    ///
-    /// Cleared when the turn ends, so the next reply is free to scroll
-    /// normally. Held here rather than in the view because the view is rebuilt
-    /// whenever the pane is, and a reading position that survives a rebuild is
-    /// the whole point.
-    @Published private(set) var pinnedRow: Int?
     /// The run of the stream this transcript was built from.
     ///
     /// A shim renumbers its events from zero every time it restarts, and a
@@ -98,7 +91,6 @@ final class AgentStream: ObservableObject {
             if batch.epoch != epoch {
                 epoch = batch.epoch
                 transcript.resetForNewEpoch()
-                pinnedRow = nil
             } else if batch.events.isEmpty {
                 return
             }
@@ -112,12 +104,7 @@ final class AgentStream: ObservableObject {
                 let event = (try? AgentEvent.decode(from: frame.payloadJson)) ?? .gap(.unparsed)
                 return Sequenced(seq: frame.seq, event: event)
             }
-            let wasThinking = pinnedRow != nil
             transcript.apply(decoded)
-            // The turn is over: let the view scroll normally again.
-            if wasThinking, decoded.contains(where: { if case .turnEnded = $0.event { true } else { false } }) {
-                pinnedRow = nil
-            }
             connectionError = nil
         } catch {
             connectionError = String(describing: error)
@@ -151,13 +138,28 @@ final class AgentStream: ObservableObject {
         return try JSONDecoder().decode(Batch.self, from: data)
     }
 
-    func send(_ text: String) async {
-        // Shown before it is sent, not after. The adapter echoes user text
-        // only when replaying a loaded session, so waiting for it back means
-        // the message disappears the moment you press return.
-        transcript.appendLocalUserMessage(text)
-        pinnedRow = transcript.rows.last?.id
+    func send(_ text: String, whileWorking: Bool) async {
+        // Echoed locally only when it is going out NOW.
+        //
+        // A message written mid-turn does not become part of the conversation
+        // when you press return — the agent is busy, and it waits. Drawing it
+        // in the transcript anyway claimed something that had not happened; it
+        // shows up in the queue instead, and joins the transcript at the moment
+        // it is actually sent.
+        if !whileWorking {
+            transcript.appendLocalUserMessage(text)
+        }
         _ = try? await runCLI(["terminal", "agent-prompt", terminal, text])
+    }
+
+    /// Rewrite a message that has not gone out yet.
+    func editQueued(_ id: String, _ text: String) async {
+        _ = try? await runCLI(["terminal", "agent-edit-queued", terminal, id, text])
+    }
+
+    /// Take back a message that has not gone out yet.
+    func cancelQueued(_ id: String) async {
+        _ = try? await runCLI(["terminal", "agent-cancel-queued", terminal, id])
     }
 
     func setModel(_ model: String) async {
@@ -173,6 +175,10 @@ final class AgentStream: ObservableObject {
     }
 
     func answer(_ requestID: String, _ optionID: String) async {
+        // Taken down on click, not on an echo. The agent resumes without
+        // acknowledging the request it was blocked on, so a card that waited
+        // for confirmation sat there after the work it gated had happened.
+        transcript.clearPendingPermission()
         _ = try? await runCLI(["terminal", "agent-answer", terminal, requestID, optionID])
     }
 

@@ -42,6 +42,11 @@ SOURCES = [
 AGENTKIT_SOURCES = [
     "AgentEvent.swift",
     "Composer.swift",
+    # The markdown renderer, shared for the same reason the reducer is: the
+    # phone drew agent replies as plain `Text`, so a table arrived as a wall of
+    # pipes and a heading as a line beginning with a hash. Same conversation,
+    # unreadable on one of the two clients.
+    "MarkdownView.swift",
     "Transcript.swift",
 ]
 FRAMEWORKS = ["overnight_vt.xcframework", "overnight_client.xcframework"]

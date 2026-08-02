@@ -167,6 +167,9 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // in.
         agent_mode: None,
         available_agent_modes: Vec::new(),
+        // The watcher's to decide, for the same reason as `activity`: it takes
+        // a screen read, and only the sampling loop does those.
+        chat_capable: false,
     }
 }
 
@@ -183,6 +186,16 @@ pub fn terminal_with_agent_state(view: &TerminalView, agents: &AgentSupervisor) 
     let id = view.terminal.id;
     message.agent_mode = agents.agent_mode(id);
     message.available_agent_modes = agents.available_modes(id);
+    // The conversation's own name, when it has one.
+    //
+    // A terminal's stored title is what it was created as — usually the task,
+    // sometimes "Terminal 19". The agent names the conversation after what is
+    // actually being worked on and revises it as that changes, which is a
+    // better answer to "which pane is which" than anything Overnight knows.
+    // Only ever an upgrade: without a title the stored one stands.
+    if let Some(title) = agents.title(id) {
+        message.title = title;
+    }
     message
 }
 

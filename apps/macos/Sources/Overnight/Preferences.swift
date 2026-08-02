@@ -31,6 +31,14 @@ final class Preferences: ObservableObject {
     /// state where Overnight does not know what happened.
     @AppStorage("terminals.autoRemoveExited") var autoRemoveExited = true
 
+    /// Open a detected coding agent as a chat rather than as its terminal.
+    ///
+    /// Off by default, and that is the product decision rather than caution:
+    /// Overnight is terminal-first, and chat is an upgrade a user opts into
+    /// once they have seen it. Someone who prefers it should not have to ask
+    /// for it a second time in every new pane.
+    @AppStorage("agents.preferChatMode") var preferChatMode = false
+
     /// System, light, or dark.
     ///
     /// Defaults to system, because that is what the rest of the machine does. It
@@ -243,6 +251,14 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
 
                 Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
+
+                Toggle("Open coding agents as a chat", isOn: $preferences.preferChatMode)
+                Text(
+                    "Applies to agents Overnight can render natively. "
+                        + "Every pane can still be switched with ⌃B a."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
                 Toggle("Move between panes with ⌃H ⌃J ⌃K ⌃L", isOn: $preferences.directTraversal)
                 Text(

@@ -444,6 +444,41 @@ impl Session {
         }
     }
 
+    /// Rewrite a prompt that is still waiting for the current turn to end.
+    pub async fn agent_edit_queued(
+        &mut self,
+        terminal: Uuid,
+        queued_id: &str,
+        text: &str,
+    ) -> Result<Terminal, SessionError> {
+        let payload = request::Payload::AgentEditQueued(overnight_protocol::v1::AgentEditQueued {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            queued_id: queued_id.to_string(),
+            text: text.to_string(),
+        });
+        match self.value("terminal.agent_edit_queued", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
+    /// Withdraw a prompt that is still waiting for the current turn to end.
+    pub async fn agent_cancel_queued(
+        &mut self,
+        terminal: Uuid,
+        queued_id: &str,
+    ) -> Result<Terminal, SessionError> {
+        let payload =
+            request::Payload::AgentCancelQueued(overnight_protocol::v1::AgentCancelQueued {
+                terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+                queued_id: queued_id.to_string(),
+            });
+        match self.value("terminal.agent_cancel_queued", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
     pub async fn agent_cancel(&mut self, terminal: Uuid) -> Result<Terminal, SessionError> {
         let payload = request::Payload::AgentCancel(overnight_protocol::v1::AgentCancel {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),

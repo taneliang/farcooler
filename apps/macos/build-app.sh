@@ -41,16 +41,26 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 # bundle carrying only the CLI would auto-start nothing and every command would
 # time out waiting. Shipping them together also guarantees the pair match, which
 # is the mismatch the version handshake exists to catch.
+#
+# BUILT here, never merely copied. This script used to bundle whatever happened
+# to be sitting in `target/release` and print a warning only if it was missing
+# entirely — so a Rust fix, compiled and unit-tested minutes earlier, shipped as
+# the binary from whenever someone last ran `cargo build --release`. The app
+# launched, the tests passed, and the bug under investigation was still there,
+# because the code that fixed it was never in the bundle. A stale binary must
+# not be a thing this script is capable of producing.
+echo "==> Building the CLI and daemon (release)"
+(cd ../.. && cargo build --release --bin overnight --bin overnightd) || {
+  echo "    the Rust build failed; refusing to bundle a stale binary"
+  exit 1
+}
+
 CLI="../../target/release/overnight"
 DAEMON="../../target/release/overnightd"
-if [ -x "$CLI" ] && [ -x "$DAEMON" ]; then
-  cp "$CLI" "$APP/Contents/Resources/overnight"
-  cp "$DAEMON" "$APP/Contents/Resources/overnightd"
-  echo "    bundled $(cd ../.. && ./target/release/overnight --version 2>/dev/null || echo 'cli') + overnightd"
-else
-  echo "    WARNING: missing $CLI or $DAEMON"
-  echo "    build them first:  (cd ../.. && cargo build --release)"
-fi
+[ -x "$CLI" ] && [ -x "$DAEMON" ] || { echo "missing $CLI or $DAEMON after a successful build"; exit 1; }
+cp "$CLI" "$APP/Contents/Resources/overnight"
+cp "$DAEMON" "$APP/Contents/Resources/overnightd"
+echo "    bundled $("$CLI" --version 2>/dev/null || echo cli) + overnightd"
 
 # SMAppService looks for the agent plist at exactly this path inside the bundle.
 # Anywhere else and registration reports notFound.

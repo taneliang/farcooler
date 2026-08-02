@@ -9,15 +9,88 @@ struct AgentRowView: View {
     /// That needs no extra state in the model: the transcript already knows
     /// the order, and asking "is anything after me" is the same question.
     var isLast: Bool = false
+    /// The request this row is blocked on, if it is the one being asked about.
+    ///
+    /// A permission names the tool call it gates, so it can be shown ON that
+    /// call rather than in a panel elsewhere. What you are approving and what
+    /// it will run are then the same object, and there is nothing to match up
+    /// by eye.
+    var pending: PendingPermission?
+    var onAnswer: ((String) -> Void)?
 
     var body: some View {
         switch row.kind {
         case let .message(role, text):
             MessageRow(role: role, text: text, isLive: isLast)
         case let .tool(tool):
-            ToolRowView(tool: tool)
+            ToolRowView(tool: tool, pending: pending, onAnswer: onAnswer)
         case let .gap(reason):
             GapRow(reason: reason)
+        }
+    }
+}
+
+/// The answers to a permission request.
+///
+/// Shared by the inline case and the standalone card so there is one set of
+/// buttons with one set of shortcuts, rather than two that drift.
+struct ApprovalControls: View {
+    let options: [PermissionOption]
+    let onChoose: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(options) { option in
+                Button { onChoose(option.id) } label: {
+                    HStack(spacing: 5) {
+                        Text(option.name)
+                        if let hint = hint(for: option) {
+                            // The shortcut, on the button it belongs to. A
+                            // keystroke nobody can see is a keystroke nobody
+                            // uses.
+                            Text(hint).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .modifier(
+                    ApprovalShortcut(
+                        option: option, allow: allowOption?.id, reject: rejectOption?.id))
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// ACP names these `allow_once`, `allow_always`, `reject_once`,
+    /// `reject_always`. The first of each kind is what the shortcut answers —
+    /// the once-only one, since it is the conservative reading of a keystroke
+    /// pressed without looking.
+    private var allowOption: PermissionOption? {
+        options.first { $0.kind.hasPrefix("allow") } ?? options.first
+    }
+
+    private var rejectOption: PermissionOption? {
+        options.first { $0.kind.hasPrefix("reject") }
+    }
+
+    private func hint(for option: PermissionOption) -> String? {
+        if option.id == allowOption?.id { return "⌘↩" }
+        if option.id == rejectOption?.id { return "⌘⌫" }
+        return nil
+    }
+}
+
+private struct ApprovalShortcut: ViewModifier {
+    let option: PermissionOption
+    let allow: String?
+    let reject: String?
+
+    func body(content: Content) -> some View {
+        if option.id == allow {
+            content.keyboardShortcut(.return, modifiers: .command)
+        } else if option.id == reject {
+            content.keyboardShortcut(.delete, modifiers: .command)
+        } else {
+            content
         }
     }
 }
@@ -122,76 +195,90 @@ private struct ThoughtRow: View {
     }
 }
 
-/// A bounded, scrollable block of output.
-///
-/// Bounded because a tool can return a thousand lines and a transcript is not
-/// a place to page through them; scrollable because truncating to a preview
-/// throws away the half you needed. The same box serves reasoning, console
-/// output and file contents, so they are not three inventions.
-struct DetailBox: View {
-    let text: String
-    var monospaced: Bool = true
-
-    var body: some View {
-        ScrollView {
-            Text(text)
-                .font(monospaced ? .caption.monospaced() : .caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-        }
-        .frame(maxHeight: 220)
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 7))
-    }
-}
-
 /// One tool call, mutated in place by every update — never a new row — so a
 /// call that reports progress four times still occupies the one line it
 /// earned.
 private struct ToolRowView: View {
     let tool: ToolRow
+    var pending: PendingPermission?
+    var onAnswer: ((String) -> Void)?
 
     private var expandable: Bool { tool.content != nil || tool.diff != nil }
 
     @State private var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        // One container for the summary and what it opens.
+        //
+        // These used to be two siblings, with the chevron OUTSIDE the summary's
+        // fill — so an expanded detail sat left of the box it came from and
+        // read as a separate thing that had appeared underneath. A disclosure
+        // and what it discloses are one object; drawing them as one says so.
+        VStack(alignment: .leading, spacing: 0) {
             if expandable {
                 Button {
                     withAnimation(Motion.snap) { expanded.toggle() }
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(expanded ? 90 : 0))
-                        label
-                    }
-                    .contentShape(Rectangle())
+                    label.contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             } else {
                 label
             }
 
-            if expanded {
+            if showingDetail {
+                Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     if let content = tool.content, !content.isEmpty {
-                        DetailBox(text: content)
+                        // No fill of its own: it is already inside one.
+                        DetailBox(text: content, chrome: false)
                     }
                     if let diff = tool.diff {
                         DiffView(diff: diff)
                     }
                 }
+                .padding(9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // The question, on the thing being asked about.
+            if let pending, let onAnswer {
+                Divider()
+                ApprovalControls(options: pending.options, onChoose: onAnswer)
+                    .padding(9)
+            }
+        }
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 7))
+        .overlay {
+            // Outlined only while it is waiting on you. A tool call that needs
+            // nothing should not shout, and one that does should be findable
+            // without reading the transcript.
+            if pending != nil {
+                RoundedRectangle(cornerRadius: 7).strokeBorder(Color.orange.opacity(0.45))
             }
         }
         .animation(Motion.snap, value: expanded)
+        .animation(Motion.snap, value: pending != nil)
     }
+
+    /// Open on its own while it is waiting to be approved.
+    ///
+    /// Being asked to allow a command without being shown the command is not a
+    /// decision, it is a guess. A reader who then folds it away has said they
+    /// have seen enough, so that still wins.
+    private var showingDetail: Bool { expanded || pending != nil }
 
     private var label: some View {
         HStack(spacing: 7) {
+            // Inside the box, not beside it — the chevron belongs to the row it
+            // opens, and outside the fill it aligned the detail to the wrong
+            // edge.
+            if expandable {
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(showingDetail ? 90 : 0))
+            }
             // The same dot the sidebar uses for a terminal's status, mapped
             // onto a tool call's own four states — one vocabulary for
             // "something is happening" everywhere it appears, rather than a
@@ -214,13 +301,13 @@ private struct ToolRowView: View {
             }
             Spacer(minLength: 4)
         }
-        // Inset on a faint fill so a tool call reads as machinery rather than
-        // as something the agent said. Without it the transcript is one
-        // undifferentiated column of text and the eye cannot find the prose.
+        // Inset on a faint fill — applied to the whole container in `body`, so
+        // a tool call reads as machinery rather than as something the agent
+        // said. Without it the transcript is one undifferentiated column of
+        // text and the eye cannot find the prose.
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 7))
     }
 
     private var status: Status {
@@ -267,5 +354,135 @@ private struct GapRow: View {
         case .unparsed:
             return "Something happened here that this version cannot show."
         }
+    }
+}
+
+
+/// A turn in progress, said where the work is appearing.
+///
+/// A spinner in a status line is a control that reports on the conversation
+/// from outside it. Shimmering text at the end of the transcript IS the
+/// conversation, one line ahead of itself — which is what every chat interface
+/// worth copying does now, and it reads as the agent about to speak rather than
+/// as the app being busy.
+struct WorkingRow: View {
+    /// One pass of the highlight, in seconds.
+    private static let period: TimeInterval = 1.1
+
+    /// When this row appeared, so the sweep starts at the start of the word.
+    ///
+    /// Phase taken straight from the wall clock put the highlight wherever the
+    /// current second happened to land — so the shimmer began mid-word, which
+    /// reads as a glitch rather than as a sweep.
+    @State private var start: Date?
+
+    var body: some View {
+        // Driven by `TimelineView`, not by an animated `@State`.
+        //
+        // The first version started a `repeatForever` animation in `onAppear`,
+        // and this row lives at the end of a `LazyVStack` that is rebuilt on
+        // every streamed event — so the animation was restarted from zero many
+        // times a second and never visibly moved. A timeline owns its own clock
+        // and does not care how often the view is recreated.
+        TimelineView(.animation) { context in
+            Text("Working…")
+                .font(.callout)
+                .foregroundStyle(
+                    LinearGradient(
+                        stops: stops(at: phase(now: context.date)),
+                        startPoint: .leading,
+                        endPoint: .trailing))
+        }
+        .onAppear { if start == nil { start = Date() } }
+    }
+
+    private func phase(now: Date) -> Double {
+        guard let start else { return 0 }
+        return now.timeIntervalSince(start)
+            .truncatingRemainder(dividingBy: Self.period) / Self.period
+    }
+
+    /// The highlight enters from before the first letter and leaves past the
+    /// last, rather than appearing at one edge and vanishing at the other.
+    private func stops(at phase: Double) -> [Gradient.Stop] {
+        let centre = -0.35 + phase * 1.7
+        let width = 0.3
+        return [
+            .init(color: .secondary, location: min(max(centre - width, 0), 1)),
+            .init(color: .primary, location: min(max(centre, 0), 1)),
+            .init(color: .secondary, location: min(max(centre + width, 0), 1)),
+        ]
+    }
+}
+
+/// A message written but not yet sent.
+///
+/// Drawn like the user's own messages, because it is one — right-aligned, same
+/// bubble — but dashed and dimmed to say it has not gone anywhere yet. That
+/// distinction is the whole point: before this, a message typed mid-turn was
+/// drawn identically to one the agent had received, and there was no way to
+/// tell which had actually happened.
+struct QueuedRow: View {
+    let queued: QueuedPrompt
+    let onEdit: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var editing = false
+    @State private var draft = ""
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Spacer(minLength: 32)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                if editing {
+                    TextField("", text: $draft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                        .frame(minWidth: 160)
+                        .onSubmit(commit)
+                } else {
+                    Text(queued.text)
+                        .font(.body)
+                        .textSelection(.enabled)
+                }
+
+                HStack(spacing: 8) {
+                    Text("Queued")
+                    Button(editing ? "Save" : "Edit") {
+                        if editing {
+                            commit()
+                        } else {
+                            draft = queued.text
+                            editing = true
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    Button("Remove", action: onCancel)
+                        .buttonStyle(.plain)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(.quaternary.opacity(0.5))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(
+                                .tertiary,
+                                style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    }
+            }
+        }
+    }
+
+    private func commit() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        editing = false
+        guard !trimmed.isEmpty, trimmed != queued.text else { return }
+        onEdit(trimmed)
     }
 }

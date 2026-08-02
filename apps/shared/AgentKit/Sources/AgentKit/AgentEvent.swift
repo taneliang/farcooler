@@ -140,7 +140,24 @@ public enum AgentEvent: Sendable, Equatable {
     /// The slash-command menu, resent once per turn. Feeds the `/` picker.
     case commandsAvailable(commands: [String])
     case turnEnded(reason: String)
+    /// Everything written but not yet sent, in order. Sent whole on any change.
+    case promptQueue(items: [QueuedPrompt])
     case gap(GapReason)
+}
+
+/// A prompt waiting for the current turn to end.
+///
+/// Overnight holds these rather than handing them straight to the agent, which
+/// is the only reason one can still be rewritten or taken back — a prompt the
+/// adapter has is gone.
+public struct QueuedPrompt: Decodable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public var text: String
+
+    public init(id: String, text: String) {
+        self.id = id
+        self.text = text
+    }
 }
 
 public struct Sequenced: Sendable, Equatable {
@@ -233,6 +250,9 @@ extension AgentEvent {
             case "ModeSet":
                 let p = try outer.decode(ModeSetPayload.self, forKey: key)
                 event = .modeSet(agentMode: p.agentMode)
+            case "PromptQueue":
+                let p = try outer.decode(PromptQueuePayload.self, forKey: key)
+                event = .promptQueue(items: p.items)
             case "TurnEnded":
                 let p = try outer.decode(TurnEndedPayload.self, forKey: key)
                 event = .turnEnded(reason: p.reason)
@@ -291,5 +311,6 @@ extension AgentEvent {
         enum CodingKeys: String, CodingKey { case agentMode = "agent_mode" }
     }
     private struct TurnEndedPayload: Decodable { let reason: String }
+    private struct PromptQueuePayload: Decodable { let items: [QueuedPrompt] }
     private struct GapPayload: Decodable { let reason: GapReason }
 }

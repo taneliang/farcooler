@@ -26,55 +26,90 @@ struct AgentComposer: View {
     @State private var suggestions: [String] = []
     @State private var highlight = 0
     @State private var isTargetedForDrop = false
+    /// The field's height, reported by it rather than negotiated with it.
+    @State private var fieldHeight: CGFloat = 20
 
     private var token: ComposerToken { activeToken(in: text, cursor: cursor) }
     private var pickerOpen: Bool { token != .none && !suggestions.isEmpty }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if pickerOpen { picker }
+        // One floating card, with everything that belongs to composing inside
+        // it — the field, what it will do, and the selectors that change how.
+        //
+        // It used to be a strip welded to the bottom edge, with its own divider
+        // and its own material, and the field in a well inside that. Three
+        // nested surfaces to say "type here". The transcript now scrolls behind
+        // this card instead of stopping above it, which is what makes the pane
+        // read as one conversation with a control resting on top rather than
+        // two stacked regions.
+        // Two rows, and everything sits on one of them.
+        //
+        // Before this the card held a status line, a field, a send button
+        // vertically centred against a field of changing height, and a wrapping
+        // strip of selectors — four things at four different alignments, which
+        // is why it read as crowded with no structure. Now: what you are
+        // writing, then everything that acts on it, left to right, on one
+        // baseline. The send button ends that row rather than floating beside
+        // the text.
+        VStack(alignment: .leading, spacing: 10) {
+            if pickerOpen {
+                picker
+                Divider()
+            }
             if !attachments.isEmpty { attachmentStrip }
-            Divider()
-            VStack(alignment: .leading, spacing: 7) {
-                activity
-                // The field, in a bordered well. Bare on a material it read as
-                // a caption floating in the chrome rather than as somewhere to
-                // type — there was nothing to say where the input was.
-                HStack(alignment: .bottom, spacing: 8) {
-                    AgentComposerField(
-                        text: $text,
-                        cursor: $cursor,
-                        placeholder: "Message \(terminal.label)",
-                        isFocused: isFocused,
-                        pickerOpen: pickerOpen,
-                        onNavigate: navigate,
-                        onAccept: acceptHighlighted,
-                        onSubmit: send,
-                        onDismissPicker: { suggestions = [] },
-                        onPasteImage: { attach(image: $0) }
-                    )
-                    .frame(minHeight: 20, maxHeight: 140)
-                    sendButton
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(.quaternary, lineWidth: 1)
+
+            AgentComposerField(
+                text: $text,
+                cursor: $cursor,
+                placeholder: "Message \(terminal.label.capitalized)",
+                isFocused: isFocused,
+                pickerOpen: pickerOpen,
+                onNavigate: navigate,
+                onAccept: acceptHighlighted,
+                onSubmit: send,
+                onDismissPicker: { suggestions = [] },
+                onPasteImage: { attach(image: $0) },
+                onApprove: approval.map { pending in
+                    { answer(pending, preferring: "allow") }
+                },
+                onReject: approval.map { pending in
+                    { answer(pending, preferring: "reject") }
+                },
+                measuredHeight: $fieldHeight
+            )
+            .frame(height: fieldHeight)
+
+            HStack(alignment: .center, spacing: 10) {
+                // A scrolling row, not a wrapping one.
+                //
+                // Five selectors are wider than a tiled pane, and a plain
+                // `HStack` made its whole column that wide — which pushed the
+                // pane past its own bounds and clipped the TRANSCRIPT on the
+                // right. A custom wrapping `Layout` fixed that and cost more
+                // than it was worth: it measures every child on every pass,
+                // and those children are platform views, which is one of the
+                // two things that froze this app.
+                //
+                // A `ScrollView` never asks for more than it is offered and
+                // never measures anything twice. The row stays one line tall
+                // and the selectors past the edge are a swipe away.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        attachButton
+                        configControls
+                    }
+                    .padding(.trailing, 4)
                 }
 
-                HStack(spacing: 10) {
-                    attachButton
-                    configControls
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(.secondary)
+                activity
+                sendButton
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .foregroundStyle(.secondary)
         }
-        .background(.thinMaterial)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .modifier(GlassCard())
         // Debounced by `.task(id:)` itself: a token that changes on every
         // keystroke cancels its predecessor for free, which is the whole
         // debounce — see `TileView.panels` for the same trick against a
@@ -310,6 +345,35 @@ struct AgentComposer: View {
         }
     }
 
+    /// "Mode" dim, "Manual" full strength, in one string.
+    ///
+    /// Showing only the value left a row reading "Manual · Default
+    /// (recommended) · High · Off · Default", and there is no way to know what
+    /// "Off" is off. The name says what the control is; the value says what it
+    /// is set to.
+    private func caption(for option: ConfigOption) -> AttributedString {
+        var name = AttributedString(option.name + "  ")
+        name.foregroundColor = .secondary
+        var value = AttributedString(
+            option.options.first { $0.id == option.currentValue }?.name ?? option.currentValue)
+        value.foregroundColor = .primary
+        return name + value
+    }
+
+    /// The request the composer's shortcuts answer, if one is waiting.
+    private var approval: PendingPermission? { stream.transcript.pendingPermission }
+
+    /// Answer with the first option of a kind — `allow` or `reject`.
+    ///
+    /// The same rule `ApprovalControls` uses for its buttons, so ⌘↩ and the
+    /// button it is printed on cannot mean two different things.
+    private func answer(_ pending: PendingPermission, preferring kind: String) {
+        let option = pending.options.first { $0.kind.hasPrefix(kind) }
+            ?? (kind == "allow" ? pending.options.first : nil)
+        guard let option else { return }
+        Task { await stream.answer(pending.id, option.id) }
+    }
+
     // MARK: - Mode
 
     /// The agent's own mode — plan vs act, or whatever the agent calls its
@@ -348,12 +412,16 @@ struct AgentComposer: View {
                         }
                     }
                 } label: {
-                    Text(
-                        option.options.first { $0.id == option.currentValue }?.name
-                            ?? option.name
-                    )
-                    .font(.caption)
-                    .lineLimit(1)
+                    // ONE `Text`, not a stack of two.
+                    //
+                    // A borderless menu is an `NSPopUpButton` underneath, and it
+                    // takes its title from a single string — hand it an `HStack`
+                    // and everything after the first view is silently dropped,
+                    // which is how the row came to read "Mode  Model  Effort"
+                    // with not a value in sight.
+                    Text(caption(for: option))
+                        .font(.caption)
+                        .lineLimit(1)
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -367,35 +435,31 @@ struct AgentComposer: View {
     /// sidebar dot, the fleet row, the notification. A chat that showed nothing
     /// while a turn ran left the user with a blank panel and no way to tell a
     /// thinking agent from a broken one.
+    /// What the agent is doing, on the two occasions it is not obvious.
+    ///
+    /// This used to report every state including `Done` and `Idle`, on the
+    /// theory that silence reads as the app having lost track. In a chat it
+    /// does not: the transcript IS the state, and a finished turn ending in
+    /// "Done" is the interface saying what the reader has just watched happen.
+    ///
+    /// What survives is the two states the transcript cannot show — waiting for
+    /// an answer, and not started yet, where an empty pane with no selectors is
+    /// genuinely indistinguishable from a broken one.
+    @ViewBuilder
     private var activity: some View {
-        // Always shown, idle included.
-        //
-        // `StatusGlyph`'s silence-by-default rule is right for a fleet list,
-        // where most rows are quiet and an icon on every one is an icon on
-        // none. A chat is the opposite situation: there is exactly one agent
-        // here and the whole question is what it is doing right now, so saying
-        // nothing reads as the app having lost track of it.
-        let state = terminal.agent
-        return HStack(spacing: 5) {
-            switch state {
-            case .working:
-                ProgressView().controlSize(.mini)
-                Text("Working…")
-            case .blocked:
+        if terminal.agent == .blocked {
+            HStack(spacing: 5) {
                 StatusGlyph(status: .blocked, size: 6)
                 Text("Waiting for you")
-            case .done:
-                StatusGlyph(status: .done, size: 6)
-                Text("Done")
-            default:
-                StatusGlyph(status: .idle, size: 6)
-                Text("Idle")
             }
-            Spacer(minLength: 0)
-            context
+            .font(.caption)
+        } else if stream.transcript.configOptions.isEmpty && stream.transcript.rows.isEmpty {
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.mini)
+                Text("Starting the agent…")
+            }
+            .font(.caption)
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
 
     /// How full the context window is.
@@ -444,7 +508,11 @@ struct AgentComposer: View {
         cursor = 0
         attachments = []
         suggestions = []
-        Task { await stream.send(body) }
+        // Whether this is going out now or joining the queue is the daemon's
+        // decision, but the composer already knows the answer and the echo
+        // depends on it — see `AgentStream.send`.
+        let working = terminal.agent == .working
+        Task { await stream.send(body, whileWorking: working) }
     }
 }
 
@@ -473,6 +541,10 @@ private struct AgentComposerField: NSViewRepresentable {
     let onSubmit: () -> Void
     let onDismissPicker: () -> Void
     let onPasteImage: (NSImage) -> Void
+    /// Set only while a permission is waiting. Nil the rest of the time, so
+    /// the keystrokes mean nothing when there is nothing to answer.
+    var onApprove: (() -> Void)?
+    var onReject: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -485,6 +557,21 @@ private struct AgentComposerField: NSViewRepresentable {
         let view = ComposerTextView()
         view.delegate = context.coordinator
         view.isRichText = false
+        // The standard growing-text-view configuration, and it is what makes
+        // `sizeThatFits` below mean anything: the text view tracks the width it
+        // is given and grows only downward, so its used height IS the height of
+        // what has been typed. Without it the view kept whatever height it was
+        // first handed and drew its placeholder wherever that left the origin —
+        // which is how "Message agent" ended up floating in the middle of the
+        // box.
+        view.isVerticallyResizable = true
+        view.isHorizontallyResizable = false
+        view.autoresizingMask = [.width]
+        view.minSize = NSSize(width: 0, height: 0)
+        view.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        view.textContainer?.widthTracksTextView = true
+        view.textContainer?.heightTracksTextView = false
         view.drawsBackground = false
         view.font = .systemFont(ofSize: 13)
         view.textContainerInset = NSSize(width: 2, height: 4)
@@ -498,6 +585,7 @@ private struct AgentComposerField: NSViewRepresentable {
         scroll.documentView = view
         context.coordinator.view = view
         apply(view)
+        context.coordinator.report(view)
         return scroll
     }
 
@@ -523,6 +611,20 @@ private struct AgentComposerField: NSViewRepresentable {
         }
     }
 
+    /// Reported by the coordinator after the text changes, NOT measured during
+    /// layout.
+    ///
+    /// This used to be a `sizeThatFits` that laid the text out and returned the
+    /// result. That reads as the obvious answer and it deadlocked the app: a
+    /// view that measures itself by mutating its own layout, inside a parent
+    /// whose size depends on the answer, is a loop with no fixed point. Two
+    /// separate freezes came from it, both of them thousands of frames of
+    /// `sizeThatFits` on the main thread.
+    ///
+    /// Text changes, then height changes, then layout happens. One direction
+    /// only.
+    @Binding var measuredHeight: CGFloat
+
     private func apply(_ view: ComposerTextView) {
         view.pickerOpen = pickerOpen
         view.onNavigate = onNavigate
@@ -530,6 +632,8 @@ private struct AgentComposerField: NSViewRepresentable {
         view.onSubmit = onSubmit
         view.onDismissPicker = onDismissPicker
         view.onPasteImage = onPasteImage
+        view.onApprove = onApprove
+        view.onReject = onReject
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -543,6 +647,23 @@ private struct AgentComposerField: NSViewRepresentable {
             guard let view = notification.object as? NSTextView else { return }
             parent.text = view.string
             parent.cursor = view.string.characterOffset(ofUTF16Location: view.selectedRange().location)
+            report(view)
+        }
+
+        /// How tall the text is now, clamped to what the composer will show.
+        ///
+        /// Sent up as state rather than answered during layout — see
+        /// `measuredHeight`.
+        func report(_ view: NSTextView) {
+            guard let container = view.textContainer, let manager = view.layoutManager else {
+                return
+            }
+            manager.ensureLayout(for: container)
+            let content = manager.usedRect(for: container).height
+                + view.textContainerInset.height * 2
+            let clamped = min(max(content, 20), 140)
+            guard abs(clamped - parent.measuredHeight) > 0.5 else { return }
+            DispatchQueue.main.async { [parent] in parent.measuredHeight = clamped }
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -570,11 +691,28 @@ final class ComposerTextView: NSTextView {
     var onSubmit: (() -> Void)?
     var onDismissPicker: (() -> Void)?
     var onPasteImage: ((NSImage) -> Void)?
+    var onApprove: (() -> Void)?
+    var onReject: (() -> Void)?
     var placeholder: String = "" { didSet { needsDisplay = true } }
 
     override func keyDown(with event: NSEvent) {
         if MainActor.assumeIsolated({ PrefixMode.shared.handle(event) }) == .handled {
             return
+        }
+
+        // Answering the agent, from wherever the cursor happens to be.
+        //
+        // The composer holds first responder for the whole pane, so a shortcut
+        // attached only to the buttons would be dead exactly when a user is
+        // most likely to reach for it — mid-sentence, with the agent waiting.
+        if event.modifierFlags.contains(.command) {
+            switch Int(event.keyCode) {
+            case 36, 76:  // Return, keypad Enter
+                if let onApprove { onApprove(); return }
+            case 51:  // Delete
+                if let onReject { onReject(); return }
+            default: break
+            }
         }
 
         if pickerOpen {
@@ -600,6 +738,17 @@ final class ComposerTextView: NSTextView {
     /// `insertNewline` rather than `keyDown`, and `Composer`'s own field
     /// overrides this too for the same reason.
     override func insertNewline(_ sender: Any?) {
+        // Shift+Return is a line break, and this is where it was being eaten.
+        //
+        // `keyDown` above deliberately lets it through to `super` — and
+        // `super`'s answer to Return, shift or not, is to call this method. So
+        // the fallback below swallowed the exact keystroke `keyDown` had just
+        // taken care to let past, and a multi-line message was impossible to
+        // type.
+        if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+            super.insertNewline(sender)
+            return
+        }
         if pickerOpen { onAccept?() } else { onSubmit?() }
     }
 
@@ -648,5 +797,29 @@ extension String {
         }
         guard let utf16Index = index.samePosition(in: utf16) else { return utf16.count }
         return utf16.distance(from: utf16.startIndex, to: utf16Index)
+    }
+}
+
+
+/// Apple's Liquid Glass where the system has it, a material where it does not.
+///
+/// The composer floats over the transcript now, so it has to read as a layer
+/// ABOVE the conversation rather than a strip attached below it. That is
+/// exactly what glass is for on macOS 26. `.ultraThinMaterial` is the closest
+/// thing on 14 and 15, which this app still supports, so the shape and the
+/// spacing stay identical and only the surface differs.
+struct GlassCard: ViewModifier {
+    var cornerRadius: CGFloat = 20
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+        } else {
+            content
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(.quaternary)
+                }
+        }
     }
 }

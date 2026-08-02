@@ -120,6 +120,19 @@ fn is_safe_model(text: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
+/// Agents Overnight can render natively.
+///
+/// One entry, honestly. `crates/cli`'s `default_adapter` speaks to Claude Code
+/// and nothing else, so this list is the truth about what chat mode can do —
+/// and the place to add to when a second adapter exists, rather than
+/// discovering the gap as a pane that renders the wrong agent.
+const CHAT_CAPABLE: &[&str] = &["claude"];
+
+/// Whether Overnight can render this agent as a chat.
+pub fn chat_capable(harness: &str) -> bool {
+    CHAT_CAPABLE.contains(&harness)
+}
+
 pub struct Service {
     pub store: Store,
     pub tmux: TmuxServer,
@@ -721,7 +734,11 @@ impl Service {
             return false;
         };
         let screen = self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default();
-        overnight_core::activity::identify(&pane.command, &screen).is_some()
+        // Supported, not merely recognised. Offering chat for an agent that
+        // would be replaced by a different one on arrival is how the offer
+        // becomes a trap.
+        overnight_core::activity::identify(&pane.command, &screen)
+            .is_some_and(|rules| CHAT_CAPABLE.contains(&rules.preset))
     }
 
     /// Re-open a socket for every terminal already in agent pane mode.
@@ -1047,8 +1064,45 @@ impl Service {
             self.agents.ensure_listening(&self.root, id);
         }
 
+        // Named after the agent it is hosting, before the pane stops being able
+        // to say. Every surface labels a terminal by what is running in it, and
+        // in agent mode that is `overnight agent-host` — so a Claude session
+        // rendered natively appeared in the sidebar as "agent", which is the one
+        // thing every agent pane has in common and therefore says nothing. The
+        // screen is still the old agent's at this instant; a moment later it is
+        // the shim's and the answer is gone.
+        let harness = overnight_core::activity::identify(
+            &pane.command,
+            &self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default(),
+        )
+        .map(|rules| rules.preset.to_string());
+
+        // An agent we cannot actually host is refused, not quietly replaced.
+        //
+        // The adapter is chosen by the shim, and it only knows one. So a Codex
+        // pane switched to chat did not render Codex — it started a brand new
+        // CLAUDE session in the same worktree and drew that instead, with
+        // nothing anywhere saying the agent had been swapped. Losing the
+        // toggle is a small disappointment; being handed a different agent
+        // wearing the same pane is a much larger one.
+        if pane_mode == models::PaneMode::Agent
+            && harness.as_deref().is_some_and(|h| !CHAT_CAPABLE.contains(&h))
+        {
+            return Err(DomainError::InvalidArgument {
+                what: "this agent has no chat adapter; it stays in terminal mode",
+            });
+        }
+
         self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
-        self.store.set_pane_mode(id, term.resource_version, pane_mode, session_id)
+        let updated = self.store.set_pane_mode(id, term.resource_version, pane_mode, session_id)?;
+        let Some(harness) = harness.filter(|_| pane_mode == models::PaneMode::Agent) else {
+            return Ok(updated);
+        };
+        self.store.update_terminal(
+            id,
+            updated.resource_version,
+            terminal_update(&updated, |u| u.command_preset = harness),
+        )
     }
 
     /// Files in a workspace's worktree, for the `@`-mention picker.
@@ -1537,4 +1591,20 @@ mod preset_tests {
 /// falling back to the raw string keeps it comparable with itself.
 fn canonical_or_raw(path: &str) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path))
+}
+
+#[cfg(test)]
+mod chat_capability_tests {
+    use super::CHAT_CAPABLE;
+
+    #[test]
+    fn an_agent_with_no_adapter_is_not_chat_capable() {
+        // Codex and cursor-agent are recognised by `activity::identify` and
+        // have no ACP adapter here. Treating recognition as support is what
+        // made a Codex pane switch to chat and quietly render a brand new
+        // Claude session in its place.
+        assert!(CHAT_CAPABLE.contains(&"claude"));
+        assert!(!CHAT_CAPABLE.contains(&"codex"));
+        assert!(!CHAT_CAPABLE.contains(&"cursor"));
+    }
 }

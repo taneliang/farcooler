@@ -99,6 +99,13 @@ struct SessionState {
     cursor: Seq,
     session_id: Option<String>,
     agent_mode: Option<String>,
+    /// What the agent calls this conversation.
+    ///
+    /// Kept because it is the only description of a pane that describes the
+    /// WORK. Every other name available — the preset, the process, the harness
+    /// — says what is running, and a fleet of eight panes all called "claude"
+    /// tells a user nothing about which is which.
+    title: Option<String>,
     available_modes: Vec<String>,
     /// Which run of the shim this transcript belongs to.
     ///
@@ -142,6 +149,11 @@ impl AgentSupervisor {
 
     pub fn session_id(&self, terminal: Uuid) -> Option<String> {
         self.sessions.lock().ok().and_then(|s| s.get(&terminal).and_then(|st| st.session_id.clone()))
+    }
+
+    /// What the agent has named this conversation, if it has named it.
+    pub fn title(&self, terminal: Uuid) -> Option<String> {
+        self.sessions.lock().ok().and_then(|s| s.get(&terminal).and_then(|st| st.title.clone()))
     }
 
     pub fn agent_mode(&self, terminal: Uuid) -> Option<String> {
@@ -385,6 +397,9 @@ impl AgentSupervisor {
                     }
                     AgentEvent::ModeSet { agent_mode } => {
                         entry.agent_mode = Some(agent_mode.clone());
+                    }
+                    AgentEvent::SessionInfo { title } if !title.is_empty() => {
+                        entry.title = Some(title.clone());
                     }
                     _ => {}
                 }

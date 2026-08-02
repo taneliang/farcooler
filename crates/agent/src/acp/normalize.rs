@@ -291,3 +291,82 @@ mod tests {
         assert_eq!(title.as_deref(), Some("echo hi"));
     }
 }
+
+/// Rewrite absolute paths inside the worktree as paths relative to it.
+///
+/// An adapter reports `/Users/someone/Library/Application Support/…/worktrees/
+/// overnight-sample-refactor-api/README.md`, and in a tiled pane that title is
+/// eighty characters of prefix and one of information. Everything in a
+/// conversation about a worktree is already understood to be in it, so the
+/// prefix says nothing the reader does not know.
+///
+/// Paths OUTSIDE the worktree are left absolute, because there the location is
+/// the surprising part and shortening it would hide it.
+pub fn relativize(events: &mut [AgentEvent], worktree: &std::path::Path) {
+    let prefix = format!("{}/", worktree.display());
+    let shorten = |text: &mut String| {
+        if text.contains(&prefix) {
+            *text = text.replace(&prefix, "");
+        }
+    };
+    for event in events {
+        match event {
+            AgentEvent::ToolCall { title, locations, .. } => {
+                shorten(title);
+                for location in locations {
+                    shorten(location);
+                }
+            }
+            AgentEvent::ToolUpdate { title, locations, content, .. } => {
+                if let Some(title) = title {
+                    shorten(title);
+                }
+                for location in locations {
+                    shorten(location);
+                }
+                if let Some(content) = content {
+                    shorten(content);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod relativize_tests {
+    use super::*;
+
+    #[test]
+    fn a_path_inside_the_worktree_loses_the_part_everyone_already_knows() {
+        let worktree = std::path::Path::new("/tmp/wt");
+        let mut events = vec![AgentEvent::ToolCall {
+            id: "1".into(),
+            title: "Read /tmp/wt/src/main.rs".into(),
+            kind: "read".into(),
+            status: ToolStatus::Pending,
+            locations: vec!["/tmp/wt/src/main.rs".into()],
+        }];
+        relativize(&mut events, worktree);
+        let AgentEvent::ToolCall { title, locations, .. } = &events[0] else { panic!() };
+        assert_eq!(title, "Read src/main.rs");
+        assert_eq!(locations[0], "src/main.rs");
+    }
+
+    #[test]
+    fn a_path_outside_the_worktree_keeps_saying_so() {
+        // Where a file is only matters when it is somewhere unexpected, so
+        // that is exactly the case that must not be shortened.
+        let worktree = std::path::Path::new("/tmp/wt");
+        let mut events = vec![AgentEvent::ToolCall {
+            id: "1".into(),
+            title: "Read /etc/hosts".into(),
+            kind: "read".into(),
+            status: ToolStatus::Pending,
+            locations: vec!["/etc/hosts".into()],
+        }];
+        relativize(&mut events, worktree);
+        let AgentEvent::ToolCall { title, .. } = &events[0] else { panic!() };
+        assert_eq!(title, "Read /etc/hosts");
+    }
+}

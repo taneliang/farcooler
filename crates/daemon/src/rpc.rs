@@ -41,7 +41,7 @@ impl Rpc {
         watcher: Arc<crate::watch::Watcher>,
         scope: Scope,
     ) -> Self {
-        Self { service, watcher, scope, daemon_version: env!("CARGO_PKG_VERSION").to_string() }
+        Self { service, watcher, scope, daemon_version: overnight_protocol::BUILD.to_string() }
     }
 }
 
@@ -645,6 +645,25 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
+            "terminal.agent_edit_queued" => {
+                let Some(request::Payload::AgentEditQueued(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                svc.agents()
+                    .send(id, DaemonMessage::EditQueued { id: p.queued_id, text: p.text });
+                self.terminal_result(id).await
+            }
+
+            "terminal.agent_cancel_queued" => {
+                let Some(request::Payload::AgentCancelQueued(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                svc.agents().send(id, DaemonMessage::CancelQueued { id: p.queued_id });
+                self.terminal_result(id).await
+            }
+
             "terminal.agent_cancel" => {
                 let Some(request::Payload::AgentCancel(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -827,6 +846,7 @@ impl Rpc {
         if let Some(command) = self.watcher.command(view.terminal.id).await {
             message.current_command = command;
         }
+        message.chat_capable = self.watcher.chat_capable(view.terminal.id).await;
         message
     }
 }

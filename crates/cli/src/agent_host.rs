@@ -223,8 +223,26 @@ pub async fn run(
                     }
                     cmd = cmd_rx.recv() => {
                         let Some(cmd) = cmd else { return }; // every sender (all daemon-link tasks) is gone: shim is shutting down
+                        // A command can produce events of its own — a queued
+                        // prompt is not something the agent will ever announce,
+                        // because the agent has not been told about it.
+                        let mut produced: Vec<overnight_agent::event::AgentEvent> = Vec::new();
                         let result = match cmd {
-                            DaemonMessage::Prompt { text } => running.prompt(&text).await,
+                            DaemonMessage::Prompt { text } => match running.prompt(&text).await {
+                                Ok(events) => {
+                                    produced = events;
+                                    Ok(())
+                                }
+                                Err(e) => Err(e),
+                            },
+                            DaemonMessage::EditQueued { id, text } => {
+                                produced = running.edit_queued(&id, &text);
+                                Ok(())
+                            }
+                            DaemonMessage::CancelQueued { id } => {
+                                produced = running.cancel_queued(&id);
+                                Ok(())
+                            }
                             DaemonMessage::Answer { request_id, option_id } => {
                                 let id: serde_json::Value = serde_json::from_str(&request_id)
                                     .unwrap_or(serde_json::Value::String(request_id));
@@ -243,6 +261,14 @@ pub async fn run(
                         };
                         if let Err(e) = result {
                             tracing::warn!(terminal = %terminal, error = %e, "a daemon command could not reach the agent");
+                        }
+                        if !produced.is_empty() {
+                            let mut ring = ring.lock().expect("ring mutex");
+                            for event in produced {
+                                ring.push(event);
+                            }
+                            drop(ring);
+                            notify.notify_one();
                         }
                     }
                 }
@@ -296,12 +322,27 @@ async fn serve(
         )
         .await?;
 
+    // Nothing is pushed until the daemon has said where it wants to start.
+    //
+    // A connection begins with the daemon clearing its transcript and asking
+    // for the whole ring, because a shim numbers from zero and the only honest
+    // cursor for a new stream is 0. But `notify` holds a permit from every
+    // event that arrived while no daemon was connected — so the push arm fired
+    // first, sent the ring, and then the `Subscribe` reply sent the very same
+    // events again. The daemon appended both, and every message in the pane
+    // appeared TWICE after a toggle.
+    //
+    // Waiting makes the order of a connection definite: established, asked,
+    // answered once, and only then streamed.
+    let mut subscribed = false;
+
     loop {
         tokio::select! {
             line = lines.next_line() => {
                 let Some(line) = line? else { return Ok(()) };
                 match decode_line::<DaemonMessage>(&line)? {
                     DaemonMessage::Subscribe { from_seq } => {
+                        subscribed = true;
                         let message = {
                             let ring = ring.lock().expect("ring mutex");
                             let message = match ring.since(from_seq) {
@@ -323,7 +364,7 @@ async fn serve(
                     }
                 }
             }
-            _ = notify.notified() => {
+            _ = notify.notified(), if subscribed => {
                 let message = {
                     let ring = ring.lock().expect("ring mutex");
                     match ring.since(*cursor) {
@@ -347,6 +388,70 @@ async fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The whole ring, exactly once — not once because it was pushed and again
+    /// because it was asked for.
+    ///
+    /// A shim buffers events while no daemon is connected, and every one of
+    /// them leaves a `Notify` permit behind. So a fresh connection had two
+    /// things ready to send the same events: the push arm, holding that permit,
+    /// and the reply to the daemon's opening `Subscribe { from_seq: 0 }`. Both
+    /// fired. The daemon appended both — it numbers by position and has nothing
+    /// to deduplicate against by design — and every message in the pane
+    /// rendered twice after a toggle.
+    #[tokio::test]
+    async fn a_connection_sends_each_event_once_even_with_a_notify_already_pending() {
+        use overnight_agent::event::{AgentEvent, Role};
+
+        let ring = Arc::new(Mutex::new(AgentRing::new()));
+        let notify = Arc::new(Notify::new());
+        for text in ["hello", "world"] {
+            ring.lock().expect("ring").push(AgentEvent::Message {
+                role: Role::User,
+                text: text.into(),
+            });
+            // Exactly what the session task does, and what leaves the permit
+            // sitting there with nobody connected to receive it.
+            notify.notify_one();
+        }
+
+        let (daemon_side, shim_side) = tokio::net::UnixStream::pair().expect("socketpair");
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        let served = {
+            let ring = Arc::clone(&ring);
+            let notify = Arc::clone(&notify);
+            tokio::spawn(async move {
+                let mut cursor = 0;
+                let _ = serve("s", &[], &ring, &notify, &cmd_tx, shim_side, &mut cursor).await;
+            })
+        };
+
+        let (read_half, mut write_half) = daemon_side.into_split();
+        let mut lines = BufReader::new(read_half).lines();
+
+        let established = lines.next_line().await.expect("read").expect("established");
+        assert!(established.contains("\"established\""), "{established}");
+
+        // The daemon asks from zero, because it just cleared its own
+        // transcript — see `AgentSupervisor::serve`.
+        write_half
+            .write_all(
+                encode_line(&DaemonMessage::Subscribe { from_seq: 0 }).expect("encode").as_bytes(),
+            )
+            .await
+            .expect("subscribe");
+
+        // Read everything the shim has to say for a moment, then count.
+        let mut delivered = 0;
+        while let Ok(Ok(Some(line))) =
+            tokio::time::timeout(std::time::Duration::from_millis(150), lines.next_line()).await
+        {
+            delivered += line.matches("\"hello\"").count();
+        }
+        served.abort();
+
+        assert_eq!(delivered, 1, "the ring was sent twice: once pushed, once asked for");
+    }
 
     #[test]
     fn a_status_line_is_readable_by_a_person_looking_at_the_pane() {

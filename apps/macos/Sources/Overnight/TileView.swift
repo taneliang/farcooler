@@ -42,6 +42,8 @@ struct TileView: View {
     let onResizeDivider: (String, TileDirection, Int) -> Bool
     /// The worktree file search behind an agent pane's `@` picker.
     let onSearchFiles: (String) async -> [String]
+    /// Switch a pane between its terminal and its chat.
+    let onSwitchPaneMode: (Terminal) -> Void
 
     @ObservedObject private var prefix = PrefixMode.shared
     @ObservedObject private var preferences = Preferences.shared
@@ -182,7 +184,8 @@ struct TileView: View {
             index: (group.panes.firstIndex(of: rect) ?? 0) + 1,
             size: size,
             onDrop: { dragged, side in onDropOnPane(dragged, terminal.id, side) },
-            onSearchFiles: onSearchFiles
+            onSearchFiles: onSearchFiles,
+            onSwitchPaneMode: onSwitchPaneMode
         )
         .onTapGesture { if !isFocused { onFocus(terminal.id) } }
     }
@@ -278,6 +281,8 @@ private struct TilePane: View {
     let size: CGSize
     let onDrop: (String, TileDirection) -> Void
     let onSearchFiles: (String) async -> [String]
+    /// Switch this pane between its terminal and its chat.
+    let onSwitchPaneMode: (Terminal) -> Void
 
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var drag = PaneDrag.shared
@@ -356,10 +361,12 @@ private struct TilePane: View {
             }
         }
         .paneCard(focused: isFocused || landing != nil)
-        // Its own, faster animation: which pane has the keyboard has to read as
-        // immediate, and a border easing in over the same third of a second as
-        // the panes moving would lag the keystroke that caused it.
-        .animation(Motion.snap, value: isFocused)
+        // Not animated at all.
+        //
+        // Focus was animated on the theory that a moving highlight is easier to
+        // follow. It is not: moving between panes is a keystroke, the answer is
+        // already known before the animation starts, and watching it arrive is
+        // the app being slow at something instantaneous.
         .overlay { dropIndicator }
         // A delegate rather than `dropDestination`, for one reason: the indicator
         // has to follow the pointer, and only a delegate is told where the pointer
@@ -436,6 +443,25 @@ private struct TilePane: View {
                 .lineLimit(1)
 
             Spacer(minLength: 4)
+
+            // Offered only where it would work, and only on a live pane.
+            //
+            // Chat mode was reachable solely by ⌃B a, which meant it was
+            // reachable by whoever already knew about it. The pane that CAN be
+            // switched is the one place the offer belongs, and the daemon has
+            // already worked out which panes those are — a client cannot,
+            // because Claude Code renames its own process.
+            if isLive, terminal.canSwitchPaneMode {
+                Button {
+                    onSwitchPaneMode(terminal)
+                } label: {
+                    Image(systemName: terminal.isAgentPane ? "terminal" : "bubble.left.and.text.bubble.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(terminal.isAgentPane ? "Show the terminal (⌃B a)" : "Show the chat (⌃B a)")
+            }
 
             if isZoomed {
                 Image(systemName: "arrow.down.right.and.arrow.up.left")

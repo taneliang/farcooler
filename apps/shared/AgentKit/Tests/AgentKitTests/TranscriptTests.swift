@@ -230,3 +230,38 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     #expect(t.configOptions.first?.currentValue == "opus")
     #expect(t.model == "opus")
 }
+
+@Test func aRedeliveredBatchDoesNotRenderTheConversationTwice() {
+    // The daemon numbers by position within an epoch, so a batch that arrives
+    // again carries numbers already applied. It happens whenever a delivery
+    // races a replay — which is exactly what a pane toggle does — and applying
+    // it a second time put every message on screen twice.
+    var t = Transcript()
+    let batch = [
+        Sequenced(seq: 0, event: .message(role: .user, text: "hello")),
+        Sequenced(seq: 1, event: .turnEnded(reason: "end_turn")),
+        Sequenced(seq: 2, event: .message(role: .agent, text: "hi")),
+    ]
+    t.apply(batch)
+    t.apply(batch)
+
+    let spoken = t.rows.compactMap { row -> String? in
+        if case let .message(_, text) = row.kind { return text }
+        return nil
+    }
+    #expect(spoken == ["hello", "hi"])
+}
+
+@Test func answeringAPermissionTakesTheCardDown() {
+    // The agent resumes without acknowledging the request it was blocked on,
+    // so a card that waited for a `Resolved` stayed up after the work it was
+    // gating had already run.
+    var t = Transcript()
+    t.apply([Sequenced(seq: 0, event: .permission(
+        id: "p1", toolCall: "bash",
+        options: [PermissionOption(id: "allow", name: "Allow", kind: "allow_once")]))])
+    #expect(t.pendingPermission != nil)
+
+    t.clearPendingPermission()
+    #expect(t.pendingPermission == nil)
+}

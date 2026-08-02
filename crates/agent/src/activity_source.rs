@@ -29,6 +29,10 @@ pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
         | AgentEvent::Usage { .. }
         | AgentEvent::SessionInfo { .. }
         | AgentEvent::CommandsAvailable { .. }
+        // What is WAITING to be sent says nothing about what the agent is
+        // doing. A queue that made a pane look busy would be reporting the
+        // user's typing as the agent's work.
+        | AgentEvent::PromptQueue { .. }
         | AgentEvent::Gap { .. } => None,
     }
 }

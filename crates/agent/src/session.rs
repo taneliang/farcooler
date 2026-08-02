@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 
 use crate::acp::conn::{AcpConnection, AcpError, AcpWriter, Incoming};
-use crate::acp::normalize::update_to_events;
+use crate::acp::normalize::{relativize, update_to_events};
 use crate::acp::wire::Rpc;
 use crate::event::{
     AgentChoice, AgentEvent, AgentGapReason, ConfigOption, Diff, EndReason, PermissionOption,
-    ToolStatus,
+    QueuedPrompt, Role, ToolStatus,
 };
 use crate::fs_guard::confine;
 
@@ -321,6 +321,21 @@ impl AgentSession {
             },
         );
 
+        // The replayed history, as one batch that ends where history ends.
+        //
+        // It is queued in the connection right now — `session/load` streams the
+        // conversation as notifications while its own request is still in
+        // flight. Left there, it trickles out AFTER startup with nothing to say
+        // it was history, so a pane reopened onto an idle agent showed
+        // "Working…" forever: the last thing anyone had seen was the agent
+        // talking, and nothing ever said it had stopped.
+        let mut replayed = conn.take_pending_updates();
+        if !replayed.is_empty() {
+            relativize(&mut replayed, &conn.worktree);
+            prelude.extend(replayed);
+            prelude.push(AgentEvent::TurnEnded { reason: end_reason("end_turn") });
+        }
+
         Ok((
             Self {
                 conn,
@@ -407,6 +422,8 @@ impl AgentSession {
             incoming,
             session_id: self.session_id,
             pending_prompt: self.pending_prompt,
+            queue: std::collections::VecDeque::new(),
+            next_queue_id: 0,
             worktree,
         }
     }
@@ -425,13 +442,78 @@ pub struct RunningSession {
     pub session_id: String,
     /// See the field of the same name on `AgentSession`.
     pending_prompt: Option<u64>,
+    /// Prompts written while a turn was running, in the order they were
+    /// written. See `QueuedPrompt`.
+    queue: std::collections::VecDeque<QueuedPrompt>,
+    /// Names the queued prompts. Monotonic, never reused, so an edit or a
+    /// cancel cannot land on a different message than the one being looked at.
+    next_queue_id: u64,
     worktree: PathBuf,
 }
 
 impl RunningSession {
-    /// Start a turn. See `AgentSession::prompt` for why this cannot wait on
-    /// its response.
-    pub async fn prompt(&mut self, text: &str) -> Result<(), SessionError> {
+    /// Send a prompt, or hold it until the current turn ends.
+    ///
+    /// An agent takes one turn at a time, and `session/prompt` sent during one
+    /// is not a second conversation — it is at best ignored and at worst
+    /// interleaved. This used to fire regardless, so a message typed while the
+    /// agent was working looked sent and might simply never have been.
+    ///
+    /// Held HERE rather than left with the adapter, because a message Overnight
+    /// is holding is one it can still show, rewrite, or take back.
+    pub async fn prompt(&mut self, text: &str) -> Result<Vec<AgentEvent>, SessionError> {
+        if self.pending_prompt.is_some() {
+            let id = self.next_queue_id;
+            self.next_queue_id += 1;
+            self.queue.push_back(QueuedPrompt { id: id.to_string(), text: text.to_string() });
+            return Ok(vec![self.queue_event()]);
+        }
+        self.send_prompt(text).await?;
+        Ok(Vec::new())
+    }
+
+    /// Rewrite a prompt that has not been sent. Unknown ids are ignored: the
+    /// turn may have ended and sent it between the click and the message.
+    pub fn edit_queued(&mut self, id: &str, text: &str) -> Vec<AgentEvent> {
+        let Some(entry) = self.queue.iter_mut().find(|q| q.id == id) else { return Vec::new() };
+        entry.text = text.to_string();
+        vec![self.queue_event()]
+    }
+
+    /// Take back a prompt that has not been sent.
+    pub fn cancel_queued(&mut self, id: &str) -> Vec<AgentEvent> {
+        let before = self.queue.len();
+        self.queue.retain(|q| q.id != id);
+        if self.queue.len() == before { return Vec::new() }
+        vec![self.queue_event()]
+    }
+
+    fn queue_event(&self) -> AgentEvent {
+        AgentEvent::PromptQueue { items: self.queue.iter().cloned().collect() }
+    }
+
+    /// The next queued prompt, sent now that the turn is over.
+    ///
+    /// Returns the user message as well, because this is the moment it truly
+    /// becomes part of the conversation — before this it was only waiting.
+    async fn send_next_queued(&mut self) -> Vec<AgentEvent> {
+        let Some(next) = self.queue.pop_front() else { return Vec::new() };
+        let mut events = vec![self.queue_event()];
+        match self.send_prompt(&next.text).await {
+            Ok(()) => {
+                events.push(AgentEvent::Message { role: Role::User, text: next.text });
+                events
+            }
+            Err(_) => {
+                // Put it back rather than losing it silently. A prompt that
+                // cannot be sent is still a prompt the user wrote.
+                self.queue.push_front(next);
+                vec![self.queue_event()]
+            }
+        }
+    }
+
+    async fn send_prompt(&mut self, text: &str) -> Result<(), SessionError> {
         let id = self
             .writer
             .request_no_wait(
@@ -581,7 +663,11 @@ impl RunningSession {
                 if id.as_u64() == self.pending_prompt {
                     self.pending_prompt = None;
                     let reason = end_reason(result["stopReason"].as_str().unwrap_or_default());
-                    return Ok(vec![AgentEvent::TurnEnded { reason }]);
+                    // The turn is over, so anything held back can go now. This
+                    // is the only moment it is safe to send one.
+                    let mut events = vec![AgentEvent::TurnEnded { reason }];
+                    events.extend(self.send_next_queued().await);
+                    return Ok(events);
                 }
                 return Ok(Vec::new());
             }
@@ -633,7 +719,10 @@ impl RunningSession {
                 let rpc = Rpc { method: Some(method), params: Some(params), id: None, result: None, error: None };
                 match rpc.session_notification() {
                     Some(n) => {
-                        let events = update_to_events(&n.update);
+                        let mut events = update_to_events(&n.update);
+                        // Paths shown to a person, not to a machine: everything
+                        // here is understood to be in the worktree already.
+                        relativize(&mut events, &worktree);
                         // Any gap from an update names the frame that caused
                         // it. `SessionUpdate::Unknown` throws the raw JSON
                         // away by design, so without this the one thing needed
@@ -709,6 +798,8 @@ mod tests {
             incoming,
             session_id: "s".to_string(),
             pending_prompt: None,
+            queue: Default::default(),
+            next_queue_id: 0,
             worktree,
         };
 
@@ -860,5 +951,33 @@ mod tests {
         assert_eq!(options.len(), 2);
         assert_eq!(options[0].current_value, "plan");
         assert_eq!(options[1].options[0].name, "Sonnet");
+    }
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::*;
+
+    /// A prompt written mid-turn waits, and says so.
+    ///
+    /// It used to be fired at the adapter regardless. An agent takes one turn
+    /// at a time, so the second `session/prompt` was at best ignored — the
+    /// message looked sent and simply never happened.
+    #[test]
+    fn a_prompt_written_during_a_turn_is_queued_rather_than_lost() {
+        let mut queue: std::collections::VecDeque<QueuedPrompt> = Default::default();
+        queue.push_back(QueuedPrompt { id: "0".into(), text: "first".into() });
+        queue.push_back(QueuedPrompt { id: "1".into(), text: "second".into() });
+
+        // Edited in place, by id rather than by position: the turn may end and
+        // send one between the click and the message arriving.
+        if let Some(entry) = queue.iter_mut().find(|q| q.id == "1") {
+            entry.text = "second, revised".into();
+        }
+        assert_eq!(queue[1].text, "second, revised");
+
+        queue.retain(|q| q.id != "0");
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].id, "1", "withdrawing one must not renumber the rest");
     }
 }

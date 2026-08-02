@@ -61,6 +61,8 @@ public struct Transcript: Sendable {
         return min(1, Double(used) / Double(size))
     }
     public private(set) var availableCommands: [String] = []
+    /// Written but not sent, in the order it will be sent.
+    public private(set) var queue: [QueuedPrompt] = []
     /// The seq to ask for on reconnect: one past the highest seen.
     public private(set) var cursor: UInt64 = 0
 
@@ -89,6 +91,7 @@ public struct Transcript: Sendable {
     public mutating func resetForNewEpoch() {
         rows = []
         plan = []
+        queue = []
         pendingPermission = nil
         cursor = 0
         nextRowID = 0
@@ -97,9 +100,27 @@ public struct Transcript: Sendable {
 
     public mutating func apply(_ events: [Sequenced]) {
         for item in events {
-            cursor = max(cursor, item.seq + 1)
+            // Already folded in, so skipped rather than applied twice.
+            //
+            // Within one epoch the daemon numbers by position, so a seq below
+            // the cursor names an event this transcript already holds. It can
+            // still arrive: anything that re-delivers a batch — a reconnect, a
+            // replay racing a push — hands back numbers already seen, and
+            // applying them again renders the conversation twice.
+            guard item.seq >= cursor else { continue }
+            cursor = item.seq + 1
             apply(item.event)
         }
+    }
+
+    /// Take the approval card down.
+    ///
+    /// The answer goes to the agent, which resumes without saying anything
+    /// about the request it was blocked on — no `Resolved` comes back — so a
+    /// card that waited for one stayed on screen after the work it was gating
+    /// had already happened.
+    public mutating func clearPendingPermission() {
+        pendingPermission = nil
     }
 
     private mutating func append(_ kind: TranscriptRow.Kind) {
@@ -234,6 +255,12 @@ public struct Transcript: Sendable {
 
         case let .modeSet(mode):
             agentMode = mode
+
+        case let .promptQueue(items):
+            // Wholesale, like the plan: the daemon sends the whole queue on
+            // every change, and a client reconstructing it from adds and
+            // removes could disagree with what will actually be sent.
+            queue = items
 
         case .turnEnded:
             // Nothing to DRAW, but it is a seam: the next message begins a new

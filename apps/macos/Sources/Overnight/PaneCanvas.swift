@@ -61,13 +61,23 @@ extension View {
     }
 
     /// One terminal, as a card on the canvas.
+    /// One hairline, the same on every pane.
+    ///
+    /// Three versions of a focus border were tried here and every one of them
+    /// was the loudest thing on screen: a blue ring (fine over a VT grid, awful
+    /// around a chat), a drop shadow (which a full-window pane smeared across
+    /// the chrome above it), and a thicker grey edge (just as heavy as the blue
+    /// one, minus the colour).
+    ///
+    /// The border is not where this belongs. A pane already says it has the
+    /// keyboard in its own header — the number goes accent, the title goes
+    /// primary and gains weight, the strip tints — and that is a whole row of
+    /// signal on the pane itself. The edge can go back to being an edge.
     func paneCard(focused: Bool = false) -> some View {
         clipShape(RoundedRectangle(cornerRadius: Pane.radius))
             .overlay(
                 RoundedRectangle(cornerRadius: Pane.radius)
-                    .strokeBorder(
-                        focused ? Color.accentColor : Color.primary.opacity(0.10),
-                        lineWidth: focused ? 2 : 1)
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
             )
     }
 }

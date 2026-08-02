@@ -162,6 +162,27 @@ final class DaemonClient: ObservableObject {
     /// `lost` deliberately does not. That is the one state where Overnight does
     /// not know what happened, and quietly deleting the evidence is the
     /// opposite of what it should do.
+    /// Terminals already offered the chat, so the offer is made once each.
+    private var openedAsChat: Set<String> = []
+
+    /// Open a detected agent as a chat, if that is what the user prefers.
+    ///
+    /// Once per terminal, tracked by id: a user who switches straight back to
+    /// the terminal must not be dragged into the chat again on the next refresh
+    /// two hundred milliseconds later. The preference sets a default, and a
+    /// default that cannot be overruled is a policy.
+    private func openAsChatIfPreferred(_ terminal: Terminal) {
+        guard Preferences.shared.preferChatMode else { return }
+        guard terminal.canSwitchPaneMode, !terminal.isAgentPane else { return }
+        guard !openedAsChat.contains(terminal.id) else { return }
+        openedAsChat.insert(terminal.id)
+
+        Task {
+            _ = await setPaneMode(terminal.short, mode: "agent")
+            await refresh()
+        }
+    }
+
     private func reapIfExited(_ terminal: Terminal) {
         guard Preferences.shared.autoRemoveExited else { return }
         let kind = StateKind.parse(terminal.state)
@@ -199,7 +220,10 @@ final class DaemonClient: ObservableObject {
             // without this the first thing you see on launch is exactly the
             // clutter auto-removal exists to prevent.
             for workspace in fleet.workspaces {
-                for terminal in workspace.terminals { reapIfExited(terminal) }
+                for terminal in workspace.terminals {
+                    reapIfExited(terminal)
+                    openAsChatIfPreferred(terminal)
+                }
             }
         } catch {
             // Show the daemon's own output, truncated. A decode failure is

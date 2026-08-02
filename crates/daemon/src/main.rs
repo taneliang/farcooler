@@ -130,7 +130,7 @@ async fn run() -> Result<(), i32> {
     tracing::info!(socket = %socket.display(), "overnightd listening");
 
     let cfg = HandshakeConfig {
-        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
+        daemon_version: overnight_protocol::BUILD.to_string(),
         // A local socket caller holds host_admin.
         //
         // Reaching this socket already requires being the owning user on this
@@ -204,7 +204,7 @@ async fn serve_stdio_session() -> Result<(), i32> {
     tokio::spawn(watcher.clone().run());
 
     let cfg = HandshakeConfig {
-        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
+        daemon_version: overnight_protocol::BUILD.to_string(),
         granted_scope: Scope::HostAdmin,
     };
 

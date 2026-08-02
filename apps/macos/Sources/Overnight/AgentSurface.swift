@@ -30,6 +30,10 @@ struct AgentSurface: View {
     @StateObject private var stream: AgentStream
     @ObservedObject private var preferences = Preferences.shared
     @State private var lastReportedGeometry: (columns: Int, rows: Int) = (0, 0)
+    /// How much of the pane's bottom the floating composer covers.
+    @State private var composerHeight: CGFloat = 0
+    /// The pane's own height, so the fade can be placed against the composer.
+    @State private var paneHeight: CGFloat = 0
 
     init(
         terminal: Terminal, binary: String?, environment: [String: String],
@@ -53,15 +57,26 @@ struct AgentSurface: View {
 
     var body: some View {
         GeometryReader { proxy in
-            VStack(spacing: 0) {
-                if !stream.transcript.plan.isEmpty {
-                    PlanPanel(entries: stream.transcript.plan)
-                    Divider()
+            // The composer floats OVER the transcript rather than sitting
+            // under it, so the conversation runs the full height of the pane
+            // and scrolls behind the control resting on top of it. The
+            // transcript pads its own tail by however tall that control is, so
+            // the last line can still be read.
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    if !stream.transcript.plan.isEmpty {
+                        PlanPanel(entries: stream.transcript.plan)
+                        Divider()
+                    }
+
+                    transcriptView(bottomInset: composerHeight + 20)
                 }
 
-                transcript(viewportHeight: proxy.size.height)
-
-                if let pending = stream.transcript.pendingPermission {
+                // Only when there is no tool call to hang it on. A permission
+                // names the call it gates, so the buttons normally live on that
+                // row — see `AgentRowView.pending`. This is the fallback for a
+                // request about something the transcript is not showing.
+                if let pending = unattachedPermission {
                     ApprovalCard(pending: pending) { optionID in
                         Task { await stream.answer(pending.id, optionID) }
                     }
@@ -71,7 +86,16 @@ struct AgentSurface: View {
                 AgentComposer(
                     stream: stream, terminal: terminal, isFocused: isFocused,
                     searchFiles: searchFiles)
+                    .padding(10)
+                    .background {
+                        GeometryReader { composer in
+                            Color.clear.preference(
+                                key: ComposerHeightKey.self, value: composer.size.height)
+                        }
+                    }
             }
+            .onPreferenceChange(ComposerHeightKey.self) { composerHeight = $0 }
+            .onChange(of: proxy.size.height, initial: true) { _, height in paneHeight = height }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // The native content background, NOT `Palette.background`.
             //
@@ -108,13 +132,39 @@ struct AgentSurface: View {
         }
     }
 
-    private func transcript(viewportHeight: CGFloat) -> some View {
+    private func transcriptView(bottomInset: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(stream.transcript.rows) { row in
-                        AgentRowView(row: row)
-                            .id(row.id)
+                        AgentRowView(
+                            row: row,
+                            isLast: row.id == stream.transcript.rows.last?.id,
+                            pending: permission(gating: row),
+                            onAnswer: { optionID in
+                                guard let id = stream.transcript.pendingPermission?.id else {
+                                    return
+                                }
+                                Task { await stream.answer(id, optionID) }
+                            }
+                        )
+                        .id(row.id)
+                    }
+
+                    // The turn that is still running, one line ahead of what it
+                    // has produced.
+                    if terminal.agent == .working {
+                        WorkingRow()
+                    }
+
+                    // Written, not yet sent. Below the working row because
+                    // that is where they are in time: after everything the
+                    // agent is doing now.
+                    ForEach(stream.transcript.queue) { queued in
+                        QueuedRow(
+                            queued: queued,
+                            onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
+                            onCancel: { Task { await stream.cancelQueued(queued.id) } })
                     }
                 }
                 // Roomier than a terminal, on purpose. A VT grid is dense
@@ -122,21 +172,20 @@ struct AgentSurface: View {
                 // line spacing a terminal wants makes a paragraph a wall.
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
-                .padding(.bottom, 18)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 4)
 
-                // Room to scroll past the end — but only while a turn is
-                // running.
+                // The end of the content, and what autoscroll actually targets.
                 //
-                // It exists so a message just sent can reach the TOP of the
-                // view with the answer streaming into the space below it. A
-                // fixed spacer did that and then stayed, which is why a
-                // finished conversation looked like it had been squeezed into
-                // the upper half of the pane. It collapses when the turn ends,
-                // leaving only the breathing room below the last line.
-                if stream.pinnedRow != nil {
-                    Color.clear.frame(height: viewportHeight * 0.75)
-                }
+                // Scrolling to the last ROW aligns that row's bottom with the
+                // viewport's, which is now UNDERNEATH the composer floating over
+                // it — the newest line, the one being written, ends up the one
+                // hidden. Scrolling to the end of the content instead leaves
+                // exactly this spacer covered, and the last line clear of the
+                // glass.
+                Color.clear
+                    .frame(height: bottomInset)
+                    .id(Self.endOfTranscript)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Pinned to the bottom: a chat is read at its most recent line,
             // the same reason a terminal scrolls to follow its own output.
@@ -147,36 +196,74 @@ struct AgentSurface: View {
             // count-keyed scroll sits still while text grows off the bottom.
             // The cursor moves for every event, which is exactly when there is
             // something new to see.
+            // Dissolved into the composer rather than cut off by it.
+            //
+            // The transcript runs the full height of the pane and the composer
+            // floats over its last inch, so a line scrolling past simply
+            // reappeared below the card, sliced in half. A fade over the same
+            // band the card occupies makes the two read as one surface — text
+            // going under something — instead of two overlapping ones.
+            .mask {
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: max(0, fadeStart - 0.06)),
+                        .init(color: .clear, location: fadeStart),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom)
+            }
             .onChange(of: stream.transcript.cursor) { _, _ in
-                // A message the user just sent goes to the TOP and stays
-                // there, with the answer streaming into the space below — the
-                // reading position Cursor uses, and the right one: the
-                // question is the context for everything that follows, and
-                // chasing the bottom of a growing reply moves the text you are
-                // trying to read.
-                if let pinned = stream.pinnedRow {
-                    // Pinned to the top and left there: the reply fills the
-                    // space beneath it rather than dragging the question off
-                    // screen. Only the first placement animates; re-anchoring
-                    // on every chunk would jitter.
-                    // `.top` alone puts the bubble flush against the edge of
-                    // the scroll area, which reads as clipped. A hair below
-                    // the top leaves the gap a person expects.
-                    proxy.scrollTo(pinned, anchor: UnitPoint(x: 0, y: -0.04))
-                    return
-                }
-                guard let last = stream.transcript.rows.last else { return }
-                // Not `.bottom`: that puts the final line flush against the
-                // composer, which reads as clipped rather than finished.
+                // The bottom, always.
+                //
+                // This used to pin a sent message to the top of the view with
+                // the reply streaming in beneath it — Cursor's reading
+                // position, and a nice one. Getting it right needs a spacer
+                // sized to the viewport that appears and collapses with the
+                // turn, and every version of that left content stranded
+                // somewhere unreachable. Following the newest line is what a
+                // terminal does, it is what this pane replaced, and it is never
+                // wrong about where the reader is looking.
                 withAnimation(Motion.snap) {
-                    proxy.scrollTo(last.id, anchor: UnitPoint(x: 0, y: 0.9))
+                    proxy.scrollTo(Self.endOfTranscript, anchor: .bottom)
                 }
             }
             .onAppear {
-                guard let last = stream.transcript.rows.last else { return }
-                proxy.scrollTo(last.id, anchor: .bottom)
+                proxy.scrollTo(Self.endOfTranscript, anchor: .bottom)
             }
         }
+    }
+
+    /// Where the transcript starts fading out, as a fraction of its height:
+    /// the top of the floating composer.
+    private var fadeStart: CGFloat {
+        guard paneHeight > 0 else { return 1 }
+        return min(1, max(0.5, 1 - (composerHeight + 10) / paneHeight))
+    }
+
+    /// The anchor at the very end of the transcript's content.
+    private static let endOfTranscript = "end-of-transcript"
+
+    /// The pending permission, if it is this row that it is asking about.
+    private func permission(gating row: TranscriptRow) -> PendingPermission? {
+        guard let pending = stream.transcript.pendingPermission,
+            case let .tool(tool) = row.kind, tool.id == pending.toolCall
+        else { return nil }
+        return pending
+    }
+
+    /// A request naming a tool call the transcript does not have a row for.
+    ///
+    /// It should not happen — a permission follows the call it is about — but
+    /// an unanswerable request that is also invisible would wedge the agent
+    /// with no way for anyone to see why.
+    private var unattachedPermission: PendingPermission? {
+        guard let pending = stream.transcript.pendingPermission else { return nil }
+        let shown = stream.transcript.rows.contains { row in
+            if case let .tool(tool) = row.kind { return tool.id == pending.toolCall }
+            return false
+        }
+        return shown ? nil : pending
     }
 
     /// Everything that changes what this view's size is worth in cells.
@@ -212,41 +299,108 @@ struct AgentSurface: View {
 
 // MARK: - Plan
 
-/// The agent's own plan, shown wholesale because the daemon sends it
-/// wholesale — see `Transcript.apply`'s comment on why it replaces rather
-/// than appends.
+/// The agent's task list, as the agent maintains it.
+///
+/// ACP calls this a plan and sends it whole on every change, which is why it is
+/// replaced rather than appended to — see `Transcript.apply`. It used to render
+/// as a thin strip of bullets, which is the same information and none of the
+/// use: what a reader wants from a task list is how far through it is and what
+/// is happening RIGHT NOW, and neither was visible without reading every line.
+///
+/// Pinned above the transcript rather than placed in it. The list is current
+/// state, not something that was said at a moment — inline it would scroll away
+/// exactly when the work it describes is still going on.
 private struct PlanPanel: View {
     let entries: [PlanEntry]
 
+    @State private var expanded = true
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: symbol(for: entry.status))
-                        .font(.system(size: 10))
-                        .foregroundStyle(isDone(entry.status) ? Color.green : .secondary)
-                    Text(entry.content)
-                        .font(.system(size: 11.5))
-                        .strikethrough(isDone(entry.status))
-                        .foregroundStyle(isDone(entry.status) ? .secondary : .primary)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(Motion.snap) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                    Text("Tasks")
+                        .font(.caption.weight(.semibold))
+                    Text("\(doneCount) of \(entries.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    // The one currently being worked on, named in the header —
+                    // so a collapsed list still answers the question people
+                    // actually open it to ask.
+                    if !expanded, let active {
+                        Text("· \(active.content)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 0)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                        HStack(alignment: .top, spacing: 7) {
+                            Image(systemName: symbol(for: entry.status))
+                                .font(.system(size: 10))
+                                .foregroundStyle(tint(for: entry.status))
+                                .frame(width: 12)
+                            Text(entry.content)
+                                .font(.system(size: 11.5))
+                                .strikethrough(isDone(entry.status))
+                                .foregroundStyle(colour(for: entry.status))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.03))
     }
 
+    private var doneCount: Int { entries.filter { isDone($0.status) }.count }
+
+    private var active: PlanEntry? { entries.first { isActive($0.status) } }
+
     private func isDone(_ status: String) -> Bool {
-        status.lowercased().contains("done") || status.lowercased().contains("complet")
+        let lowered = status.lowercased()
+        return lowered.contains("done") || lowered.contains("complet")
+    }
+
+    private func isActive(_ status: String) -> Bool {
+        let lowered = status.lowercased()
+        return lowered.contains("progress") || lowered.contains("active")
     }
 
     private func symbol(for status: String) -> String {
-        let lowered = status.lowercased()
-        if isDone(lowered) { return "checkmark.circle.fill" }
-        if lowered.contains("progress") || lowered.contains("active") { return "circle.lefthalf.filled" }
+        if isDone(status) { return "checkmark.circle.fill" }
+        if isActive(status) { return "circle.lefthalf.filled" }
         return "circle"
+    }
+
+    private func tint(for status: String) -> Color {
+        if isDone(status) { return .green }
+        if isActive(status) { return .accentColor }
+        return .secondary
+    }
+
+    private func colour(for status: String) -> Color {
+        if isDone(status) { return .secondary }
+        return .primary
     }
 }
 
@@ -268,12 +422,7 @@ private struct ApprovalCard: View {
             }
             .foregroundStyle(.orange)
 
-            HStack(spacing: 8) {
-                ForEach(Array(pending.options.enumerated()), id: \.element.id) { index, option in
-                    Button(option.name) { onChoose(option.id) }
-                        .modifier(NumberedShortcut(index: index))
-                }
-            }
+            ApprovalControls(options: pending.options, onChoose: onChoose)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -298,5 +447,15 @@ private struct NumberedShortcut: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+
+/// How tall the floating composer is, so the transcript can pad past it.
+private struct ComposerHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

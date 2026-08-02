@@ -28,6 +28,16 @@ struct AgentView: View {
 
     private var transcript: Transcript { stream.transcript }
 
+    /// Whether a turn is running, as the daemon sees it.
+    ///
+    /// From the fleet rather than inferred here: the daemon derives activity
+    /// for every surface that shows it, and a second opinion computed on the
+    /// phone is exactly the disagreement this design exists to prevent.
+    private var isWorking: Bool {
+        guard let workspaceID else { return false }
+        return connection.terminal(terminalID, in: workspaceID)?.agent == .working
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if !transcript.plan.isEmpty {
@@ -52,7 +62,13 @@ struct AgentView: View {
                 availableCommands: transcript.availableCommands,
                 workspaceID: workspaceID,
                 core: connection.core,
-                onSend: { text in Task { await stream.send(text) } },
+                onSend: { text in
+                    // Whether this goes out now or waits is the shim's call,
+                    // but the echo depends on the answer — see
+                    // `AgentStream.send`.
+                    let working = isWorking
+                    Task { await stream.send(text, whileWorking: working) }
+                },
                 onSetMode: { mode in Task { await stream.setMode(mode) } }
             )
         }
@@ -80,6 +96,19 @@ struct AgentView: View {
                         ForEach(transcript.rows) { row in
                             AgentRowView(row: row)
                         }
+
+                        // Written, not yet sent. See `QueuedPrompt`: a message
+                        // typed while the agent is working waits for the turn
+                        // to end, and drawing it like a sent one claimed
+                        // something that had not happened.
+                        ForEach(transcript.queue) { queued in
+                            QueuedRow(
+                                queued: queued,
+                                onEdit: { text in
+                                    Task { await stream.editQueued(queued.id, text) }
+                                },
+                                onCancel: { Task { await stream.cancelQueued(queued.id) } })
+                        }
                         // An invisible anchor rather than scrolling to the
                         // last row's own id: the last row mutates in place
                         // while a tool streams progress (see `Transcript`),
@@ -89,7 +118,10 @@ struct AgentView: View {
                     }
                     .padding(12)
                 }
-                .onChange(of: transcript.rows.count) { _, _ in
+                // Keyed on the CURSOR, not the row count. A streamed reply
+                // coalesces into the row already on screen, so the count does
+                // not change while the text grows off the bottom.
+                .onChange(of: transcript.cursor) { _, _ in
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
@@ -171,12 +203,12 @@ private struct MessageRow: View {
             }
 
         case .agent:
-            // Plain body text, full width — the common case, and the one
-            // that should cost the eye nothing extra to read.
+            // Full width, through the SHARED renderer — the same one the Mac
+            // uses. Plain `Text` here meant a table arrived as a wall of pipes
+            // and a heading as a line starting with a hash: the same
+            // conversation, unreadable on the phone.
             HStack {
-                Text(text)
-                    .font(.callout)
-                    .textSelection(.enabled)
+                MarkdownText(text: text)
                 Spacer(minLength: 40)
             }
 
@@ -186,10 +218,7 @@ private struct MessageRow: View {
             // time. A `DisclosureGroup` with no binding starts closed, which
             // is the state most sessions never need to leave.
             DisclosureGroup {
-                Text(text)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                MarkdownText(text: text, secondary: true)
                     .padding(.top, 2)
             } label: {
                 Text("Thought")
@@ -213,10 +242,11 @@ private struct ToolRowView: View {
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 8) {
                     if let content = tool.content, !content.isEmpty {
-                        Text(content)
-                            .font(.system(.footnote, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                        // Bounded, and for the same reason it is bounded on the
+                        // Mac: `Text` measures its whole string on every layout
+                        // pass, and a tool that returns thousands of lines
+                        // inside an animated disclosure froze the app there.
+                        DetailBox(text: content, chrome: false)
                     }
                     if let diff = tool.diff {
                         DiffView(diff: diff)
@@ -301,47 +331,152 @@ private struct GapRow: View {
 
 // MARK: - Plan
 
-/// The agent's own todo list, replaced wholesale on every update
-/// (`Transcript.plan` never appends — see its own comment). Shown only while
-/// there is one, the same silence-by-default rule the rest of the app's
-/// status indicators follow.
+/// The agent's task list, as the agent maintains it.
+///
+/// The same design as the Mac's, for the same reason the reducer is shared: a
+/// list of bullets is the same information and none of the use — what a reader
+/// wants is how far through it is and what is happening right now.
 private struct PlanPanel: View {
     let entries: [PlanEntry]
 
+    @State private var expanded = true
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                HStack(alignment: .top, spacing: 7) {
-                    Image(systemName: symbol(for: entry.status))
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) {
+                    expanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                    Text("Tasks").font(.caption.weight(.semibold))
+                    Text("\(doneCount) of \(entries.count)")
                         .font(.caption)
-                        .foregroundStyle(colour(for: entry.status))
-                        .frame(width: 14)
-                    Text(entry.content)
-                        .font(.footnote)
-                        .strikethrough(isDone(entry.status))
-                        .foregroundStyle(isDone(entry.status) ? .secondary : .primary)
+                        .foregroundStyle(.secondary)
+                    if !expanded, let active {
+                        Text("· \(active.content)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                    HStack(alignment: .top, spacing: 7) {
+                        Image(systemName: symbol(for: entry.status))
+                            .font(.caption)
+                            .foregroundStyle(tint(for: entry.status))
+                            .frame(width: 14)
+                        Text(entry.content)
+                            .font(.footnote)
+                            .strikethrough(isDone(entry.status))
+                            .foregroundStyle(isDone(entry.status) ? .secondary : .primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
                 }
             }
         }
-        .padding(10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
     }
 
+    private var doneCount: Int { entries.filter { isDone($0.status) }.count }
+
+    private var active: PlanEntry? { entries.first { isActive($0.status) } }
+
     private func isDone(_ status: String) -> Bool {
-        let s = status.lowercased()
-        return s == "completed" || s == "done"
+        let lowered = status.lowercased()
+        return lowered.contains("done") || lowered.contains("complet")
+    }
+
+    private func isActive(_ status: String) -> Bool {
+        let lowered = status.lowercased()
+        return lowered.contains("progress") || lowered.contains("active")
     }
 
     private func symbol(for status: String) -> String {
-        let s = status.lowercased()
         if isDone(status) { return "checkmark.circle.fill" }
-        if s.contains("progress") { return "circle.dotted" }
+        if isActive(status) { return "circle.lefthalf.filled" }
         return "circle"
     }
 
-    private func colour(for status: String) -> Color {
-        isDone(status) ? .green : .secondary
+    private func tint(for status: String) -> Color {
+        if isDone(status) { return .green }
+        if isActive(status) { return .accentColor }
+        return .secondary
+    }
+}
+
+/// A message written but not yet sent. See the Mac's `QueuedRow`.
+private struct QueuedRow: View {
+    let queued: QueuedPrompt
+    let onEdit: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var editing = false
+    @State private var draft = ""
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Spacer(minLength: 40)
+            VStack(alignment: .trailing, spacing: 4) {
+                if editing {
+                    TextField("", text: $draft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.callout)
+                        .frame(minWidth: 140)
+                        .onSubmit(commit)
+                } else {
+                    Text(queued.text).font(.callout)
+                }
+
+                HStack(spacing: 10) {
+                    Text("Queued")
+                    Button(editing ? "Save" : "Edit") {
+                        if editing {
+                            commit()
+                        } else {
+                            draft = queued.text
+                            editing = true
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    Button("Remove", action: onCancel).buttonStyle(.plain)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.primary.opacity(0.04))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(
+                                Color.secondary.opacity(0.4),
+                                style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    }
+            }
+        }
+    }
+
+    private func commit() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        editing = false
+        guard !trimmed.isEmpty, trimmed != queued.text else { return }
+        onEdit(trimmed)
     }
 }
 
@@ -653,7 +788,13 @@ extension DiffComputation.Kind {
 /// same rule the constraint file states for the Mac: no second header, no
 /// footer — whatever this pane needs to say lives here or nowhere.
 private struct AgentComposer: View {
-    let availableModes: [String]
+    /// The modes the agent offers, with their human names.
+    ///
+    /// `[AgentChoice]`, not `[String]`. This was `[String]` and had been
+    /// failing to compile since modes gained names on the Mac — the phone's
+    /// picker was listing wire identifiers like `acceptEdits` before that, and
+    /// nothing at all after.
+    let availableModes: [AgentChoice]
     let agentMode: String?
     let availableCommands: [String]
     let workspaceID: String?
@@ -740,14 +881,14 @@ private struct AgentComposer: View {
         // that never offered a second mode has nothing to switch to.
         if availableModes.count > 1 {
             Menu {
-                ForEach(availableModes, id: \.self) { mode in
+                ForEach(availableModes) { mode in
                     Button {
-                        onSetMode(mode)
+                        onSetMode(mode.id)
                     } label: {
-                        if mode == agentMode {
-                            Label(mode.capitalized, systemImage: "checkmark")
+                        if mode.id == agentMode {
+                            Label(mode.name, systemImage: "checkmark")
                         } else {
-                            Text(mode.capitalized)
+                            Text(mode.name)
                         }
                     }
                 }
