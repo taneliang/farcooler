@@ -48,7 +48,15 @@ struct TerminalTabStrip: View {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
             }
         }
-        .background(Color(white: 0.09))
+        // No slab behind it.
+        //
+        // This was a flat dark bar, which was right when everything above it
+        // was a flat dark terminal. It is wrong under a floating glass composer:
+        // a card resting on a slab reads as two competing surfaces, and the
+        // bottom of the screen ends up heavier than anything else on it. The
+        // chips carry their own glass now and the strip itself is nothing —
+        // content passes behind it, which is what makes the glass mean
+        // something.
     }
 }
 
@@ -75,18 +83,36 @@ private struct TabChip: View {
                     .fontWeight(wantsAttention ? .semibold : .regular)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isCurrent ? Color.white.opacity(0.18) : Color.white.opacity(0.07))
-            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .modifier(ChipGlass(isCurrent: isCurrent))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(wantsAttention ? attentionColour(terminal.agent) : .clear, lineWidth: 1.5)
+                Capsule()
+                    .strokeBorder(
+                        wantsAttention ? attentionColour(terminal.agent) : .clear, lineWidth: 1.5)
             )
             .foregroundStyle(isCurrent ? Color.white : Color.white.opacity(0.75))
         }
         .buttonStyle(.plain)
+    }
+}
+
+
+/// A chip's surface: glass on iOS 26, the nearest material before it.
+///
+/// A capsule rather than a rounded rectangle, because that is the shape the
+/// platform gives a floating, tappable pill — and because a rounded rectangle
+/// next to the composer's rounded rectangle read as a smaller version of the
+/// same thing rather than as a different kind of control.
+private struct ChipGlass: ViewModifier {
+    let isCurrent: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(isCurrent ? .regular.tint(.white.opacity(0.18)) : .regular, in: .capsule)
+        } else {
+            content.background(
+                Capsule().fill(isCurrent ? Color.white.opacity(0.18) : Color.white.opacity(0.07)))
+        }
     }
 }

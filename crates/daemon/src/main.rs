@@ -193,7 +193,60 @@ async fn stream_terminal(terminal: &str) -> Result<(), i32> {
     })
 }
 
+/// Pump bytes between this process's stdio and the running daemon.
+///
+/// Deliberately dumb: it parses nothing and knows nothing about the protocol,
+/// because the two ends already agree about it and anything this understood
+/// would be a third opinion to keep in step. Either direction closing ends the
+/// session, which is what an ssh client disconnecting looks like from here.
+async fn relay_stdio(stream: tokio::net::UnixStream) -> Result<(), i32> {
+    use tokio::io::AsyncWriteExt;
+
+    let (mut daemon_read, mut daemon_write) = stream.into_split();
+    let mut stdin = tokio::io::stdin();
+    let mut stdout = tokio::io::stdout();
+
+    let up = async {
+        let _ = tokio::io::copy(&mut stdin, &mut daemon_write).await;
+        let _ = daemon_write.shutdown().await;
+    };
+    let down = async {
+        let _ = tokio::io::copy(&mut daemon_read, &mut stdout).await;
+        let _ = stdout.flush().await;
+    };
+
+    tokio::select! {
+        _ = up => {}
+        _ = down => {}
+    }
+    Ok(())
+}
+
 async fn serve_stdio_session() -> Result<(), i32> {
+    // A daemon already running here owns everything that is not in SQLite.
+    //
+    // This used to open a second `Service` unconditionally, and for anything
+    // read from the database that was fine — workspaces and terminals came back
+    // correct, so it looked like it worked. But an agent's TRANSCRIPT lives in
+    // this process's memory (`AgentSupervisor`), and the shims that produce it
+    // are connected to the sockets the FIRST daemon bound. A second service has
+    // no shims, so it answers every `agent_subscribe` with epoch 0 and no
+    // events — which a client cannot tell apart from a conversation nobody has
+    // started.
+    //
+    // The effect was that agent chat could never work over ssh: not on the
+    // phone, which reaches every host this way, and not on any remote host from
+    // the Mac. The fleet listed perfectly and the chat was permanently empty.
+    //
+    // So when a daemon is listening, this becomes a pipe to it. One daemon per
+    // host owns the live state and every entry point reaches that one, which is
+    // what the rest of the design already assumes.
+    if let Ok(socket) = paths::socket_path() {
+        if let Ok(stream) = tokio::net::UnixStream::connect(&socket).await {
+            return relay_stdio(stream).await;
+        }
+    }
+
     // Nothing may be printed to stdout: it is the wire.
     let service = Arc::new(Service::open().await.map_err(|e| {
         eprintln!("cannot open the service: {e}");

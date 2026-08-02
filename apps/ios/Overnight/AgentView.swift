@@ -47,13 +47,28 @@ struct AgentView: View {
             }
 
             transcriptBody
+                // The composer sits in the transcript's bottom safe area, which
+                // is the framework's own answer to "a control resting on
+                // scrolling content": the conversation runs the full height and
+                // scrolls behind it, and the scroll view insets itself so the
+                // last line stays reachable. The Mac reached the same place by
+                // the same route, after building it by hand first and freezing
+                // the app.
+                .safeAreaInset(edge: .bottom, spacing: 0) { composerStack }
+        }
+        .onAppear { stream.start() }
+        .onDisappear { stream.stop() }
+    }
 
+    /// Everything that sits over the bottom of the conversation.
+    @ViewBuilder
+    private var composerStack: some View {
+        VStack(spacing: 6) {
             if let pending = transcript.pendingPermission {
                 ApprovalCard(pending: pending) { optionID in
                     Task { await stream.answer(pending.id, optionID) }
                 }
                 .padding(.horizontal, 12)
-                .padding(.bottom, 6)
             }
 
             AgentComposer(
@@ -72,14 +87,30 @@ struct AgentView: View {
                 onSetMode: { mode in Task { await stream.setMode(mode) } }
             )
         }
-        .onAppear { stream.start() }
-        .onDisappear { stream.stop() }
     }
 
     @ViewBuilder
     private var transcriptBody: some View {
         if transcript.rows.isEmpty {
-            emptyState
+            // The error goes ABOVE the empty state, not inside the transcript.
+            //
+            // The banner used to live in the scroll view, which only exists
+            // once there are rows — so a session that never loaded at all
+            // showed "Say something to begin" with the reason it was empty
+            // hidden behind the very condition that made it empty. The one
+            // moment the message is worth reading is the one moment it could
+            // not be seen.
+            VStack(spacing: 12) {
+                if let error = stream.connectionError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                emptyState
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -805,6 +836,17 @@ private struct AgentComposer: View {
     }
 
     var body: some View {
+        // A card that floats over the conversation, not a bar welded beneath it.
+        //
+        // This used to be a full-width strip on `.bar`, drawn to read as the
+        // keyboard's top edge. That was the right instinct for iOS 18 and is
+        // the wrong shape now: the platform's own messaging surfaces float a
+        // rounded, glass field above scrolling content, and a squared-off slab
+        // spanning edge to edge reads as a control from two releases ago.
+        //
+        // The transcript scrolls behind it — see `transcriptBody`'s
+        // `safeAreaInset` — which is what the glass is for. A material with
+        // nothing passing under it is just a grey rectangle.
         VStack(alignment: .leading, spacing: 0) {
             suggestions
 
@@ -812,39 +854,31 @@ private struct AgentComposer: View {
                 attachmentStrip
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
-                modeMenu
-
+            HStack(alignment: .bottom, spacing: 10) {
                 PhotosPicker(selection: $photoPickerItem, matching: .images) {
                     Image(systemName: "photo.badge.plus")
-                        .font(.system(size: 18))
+                        .font(.system(size: 17))
                         .foregroundStyle(.secondary)
                 }
                 .onChange(of: photoPickerItem) { _, item in loadPickedPhoto(item) }
+
+                modeMenu
 
                 fieldWithPlaceholder
 
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 28))
+                        .symbolRenderingMode(.hierarchical)
                 }
                 .disabled(!canSend)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
         }
-        // The system keyboard bar's own material, so this row reads as the
-        // keyboard's top edge rather than a slab resting on it — matching
-        // how `TerminalView`'s accessory row (`TerminalKeyRow`) is drawn.
-        // Unlike that row, this one is not an `inputAccessoryView`: it holds
-        // a real, selectable text field rather than a raw keystroke sink, so
-        // it sits in the ordinary SwiftUI view tree and rides the keyboard up
-        // through the platform's normal keyboard-avoidance instead — the
-        // simpler of the two mechanisms `TerminalView` demonstrates, and the
-        // correct one here because there is a genuine caret and selection to
-        // track (`activeToken` needs a cursor position `UIKeyInput` alone
-        // does not have).
-        .background(.bar)
+        .modifier(GlassField())
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
         .onChange(of: text) { _, _ in scheduleMentionSearch() }
         .onChange(of: cursor) { _, _ in scheduleMentionSearch() }
     }
@@ -1132,5 +1166,30 @@ private struct ComposerTextView: UIViewRepresentable {
         guard let index = text.index(text.startIndex, offsetBy: characterOffset, limitedBy: text.endIndex)
         else { return (text as NSString).length }
         return text.utf16.distance(from: text.utf16.startIndex, to: index.samePosition(in: text.utf16) ?? text.utf16.endIndex)
+    }
+}
+
+
+/// Apple's Liquid Glass where the system has it, a material where it does not.
+///
+/// The Mac's composer carries the same modifier for the same reason (see
+/// `GlassCard` there): a control resting ON scrolling content has to read as a
+/// layer above it, and on iOS 26 that is what glass means. `.ultraThinMaterial`
+/// is the closest thing on 17 and 18, which this app still supports, so the
+/// shape and the spacing stay identical and only the surface differs.
+private struct GlassField: ViewModifier {
+    private let radius: CGFloat = 24
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: .rect(cornerRadius: radius))
+        } else {
+            content
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: radius)
+                        .strokeBorder(Color.primary.opacity(0.08))
+                }
+        }
     }
 }

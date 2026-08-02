@@ -90,6 +90,20 @@ final class AgentStream: ObservableObject {
             // client does exactly this, and without it a phone looking at a
             // toggled pane shows a conversation that is not the one being
             // served.
+            // Epoch 0 with nothing in it means the daemon has no agent session
+            // for this terminal at all — `AgentSupervisor::replay` returns
+            // exactly that for a terminal it has never seen. A client starting
+            // at epoch 0 matches it, finds no events, and returns, which looked
+            // from the outside like a conversation nobody had started yet. It
+            // is not: it is a pane that has no shim behind it, and the two want
+            // different words.
+            if batch.epoch == 0 && batch.events.isEmpty && transcript.rows.isEmpty {
+                connectionError =
+                    "No agent session on pane \(terminal.prefix(8)) yet. If it was just "
+                    + "switched to chat, the agent is still starting."
+                return
+            }
+
             if batch.epoch != epoch {
                 epoch = batch.epoch
                 transcript.resetForNewEpoch()

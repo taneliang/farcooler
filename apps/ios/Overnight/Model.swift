@@ -65,6 +65,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// why it is optional rather than defaulted to something that would look
     /// like a real answer.
     var paneMode: String?
+    var chatCapable: Bool?
     var agentSessionId: String?
     var agentMode: String?
     var availableAgentModes: [String]?
@@ -73,6 +74,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
 
     /// Whether to draw a chat or a VT grid.
     var isAgentPane: Bool { paneMode == "agent" }
+
+    /// Whether this pane can be shown as a chat.
+    ///
+    /// Answered on the host, because identifying an agent takes a screen read —
+    /// Claude Code renames its own process. Absent from older daemons, and
+    /// absent means "do not offer": a switch that came back as a different
+    /// agent is worse than no switch at all.
+    var canSwitchPaneMode: Bool { chatCapable == true }
 
     /// What to call this terminal.
     ///

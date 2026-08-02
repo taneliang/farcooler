@@ -187,6 +187,11 @@ impl Session {
                                     "activitySince": activity_since(t),
                             "epoch": t.epoch,
                             "paneMode": pane_mode_label(t.pane_mode),
+                            // Without this the phone's terminal/chat switch
+                            // could never appear: `canSwitchPaneMode` reads it,
+                            // and a field the host never sends is a capability
+                            // the client always denies.
+                            "chatCapable": t.chat_capable,
                             "agentSessionId": t.agent_session_id.clone(),
                             "agentMode": t.agent_mode.clone(),
                             "availableAgentModes": t.available_agent_modes.clone(),

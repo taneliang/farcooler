@@ -44,12 +44,22 @@ struct RootView: View {
     var body: some View {
         Group {
             if let host = hosts.selected {
+                // The stack `FleetView` and everything under it assume.
+                //
+                // `FleetView` was previously PUSHED from the host list, so it
+                // inherited that screen's `NavigationStack`. Opening straight
+                // onto it left no stack at all: no navigation bar, so no title,
+                // no terminal/chat switch, and `navigationDestination` had
+                // nothing to push into.
+                //
                 // Keyed on the host, so switching machines rebuilds everything
                 // below rather than handing one host's screen the other's
                 // connection. The same rule the Mac follows for a pane whose
                 // terminal changes underneath it.
-                FleetView(host: host, store: hosts)
-                    .id(host.id)
+                NavigationStack {
+                    FleetView(host: host, store: hosts)
+                }
+                .id(host.id)
             } else {
                 HostOnboardingView(hosts: hosts)
             }

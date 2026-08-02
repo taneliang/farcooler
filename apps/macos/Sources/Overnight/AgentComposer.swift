@@ -92,9 +92,19 @@ struct AgentComposer: View {
                 attachButton
                 configControls
 
+                // Send is anchored to the trailing edge, always.
+                //
+                // Without this the row simply ends wherever the selectors
+                // happen to end, so the send button sat in the middle of the
+                // card with empty space beside it — and it moved every time a
+                // selector's value changed length. The one control whose
+                // position should never be in question is the one you reach for
+                // without looking.
+                Spacer(minLength: 8)
                 activity
                 sendButton
             }
+            .frame(maxWidth: .infinity)
             .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

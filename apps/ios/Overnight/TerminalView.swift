@@ -127,8 +127,10 @@ struct TerminalView: View {
             // Both bars live at the bottom, in thumb reach. The tab strip used
             // to sit under the title, which put the one control you use
             // constantly — switching terminal — at the far end of the screen
-            // from the hand holding the phone.
+            // from the hand holding the phone. That still holds; what changed
+            // is that it floats now instead of sitting on a slab of its own.
             TerminalTabStrip(workspaces: connection.fleet.workspaces, current: current, onSelect: select)
+                .padding(.bottom, 2)
         }
         .background(TerminalPalette.background)
         // A terminal is dark regardless of the phone's own appearance — the
@@ -162,6 +164,29 @@ struct TerminalView: View {
                     }
                 }
             }
+            // Terminal or chat, on the pane that can be either.
+            //
+            // The Mac puts this in the pane header; a phone has no pane header,
+            // so it goes in the bar that is already this screen's chrome. Shown
+            // only where it would work — offering it for a Codex pane would
+            // hand back a Claude session in its place, since the shim knows one
+            // adapter.
+            if current.canSwitchPaneMode {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task {
+                            await connection.setPaneMode(
+                                current, to: current.isAgentPane ? "terminal" : "agent")
+                        }
+                    } label: {
+                        Image(
+                            systemName: current.isAgentPane
+                                ? "terminal" : "bubble.left.and.text.bubble.right")
+                    }
+                    .accessibilityLabel(current.isAgentPane ? "Show the terminal" : "Show the chat")
+                }
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showWorkspaceList = true } label: {
                     Image(systemName: "square.stack")

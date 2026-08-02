@@ -172,6 +172,18 @@ final class Connection: ObservableObject {
     /// `fleet` is the one place `activity` lives, which is what the waiting
     /// loop polls. Looked up rather than cached, because each poll needs the
     /// freshest copy.
+    /// Switch a pane between its terminal and its chat.
+    ///
+    /// Refreshes afterwards rather than guessing: the daemon respawns the pane,
+    /// and what comes back — a new epoch, a different pane mode, possibly a
+    /// refusal because a turn was in flight — is its answer to give, not this
+    /// client's to assume.
+    func setPaneMode(_ terminal: Terminal, to mode: String) async {
+        _ = try? await core.call(
+            "terminal.set_pane_mode", ["terminal": terminal.id, "paneMode": mode])
+        await refresh()
+    }
+
     func terminal(_ id: String, in workspace: String) -> Terminal? {
         fleet.workspaces.first { $0.id == workspace }?.terminals.first { $0.id == id }
     }
