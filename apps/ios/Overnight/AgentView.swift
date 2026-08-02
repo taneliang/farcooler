@@ -28,6 +28,28 @@ struct AgentView: View {
 
     private var transcript: Transcript { stream.transcript }
 
+    /// The pending permission, if it is this row that it is asking about.
+    private func permission(gating row: TranscriptRow) -> PendingPermission? {
+        guard let pending = transcript.pendingPermission,
+            case let .tool(tool) = row.kind, tool.id == pending.toolCall
+        else { return nil }
+        return pending
+    }
+
+    /// A request naming a tool call the transcript has no row for.
+    ///
+    /// It should not happen — a permission follows the call it is about — but
+    /// an unanswerable request that is also invisible would wedge the agent
+    /// with no way for anyone to see why.
+    private var unattachedPermission: PendingPermission? {
+        guard let pending = transcript.pendingPermission else { return nil }
+        let shown = transcript.rows.contains { row in
+            if case let .tool(tool) = row.kind { return tool.id == pending.toolCall }
+            return false
+        }
+        return shown ? nil : pending
+    }
+
     /// Whether a turn is running, as the daemon sees it.
     ///
     /// From the fleet rather than inferred here: the daemon derives activity
@@ -102,7 +124,7 @@ struct AgentView: View {
                         .padding(.horizontal, 12)
                 }
 
-                if let pending = transcript.pendingPermission {
+                if let pending = unattachedPermission {
                     ApprovalCard(pending: pending) { optionID in
                         Task { await stream.answer(pending.id, optionID) }
                     }
@@ -167,7 +189,20 @@ struct AgentView: View {
                                 .foregroundStyle(.orange)
                         }
                         ForEach(transcript.rows) { row in
-                            AgentRowView(row: row)
+                            AgentRowView(
+                                row: row,
+                                isLast: row.id == transcript.rows.last?.id,
+                                pending: permission(gating: row),
+                                onAnswer: { optionID in
+                                    guard let id = transcript.pendingPermission?.id else { return }
+                                    Task { await stream.answer(id, optionID) }
+                                })
+                        }
+
+                        // The turn that is still running, one line ahead of
+                        // what it has produced.
+                        if isWorking {
+                            WorkingRow()
                         }
 
                         // An invisible anchor rather than scrolling to the
@@ -227,13 +262,24 @@ struct AgentView: View {
 /// three shapes it can hand back gets drawn.
 private struct AgentRowView: View {
     let row: TranscriptRow
+    /// The request this row is blocked on, if it is the one being asked about.
+    ///
+    /// A permission names the tool call it gates, so it is shown ON that call
+    /// rather than in a panel elsewhere: what you are approving and what it
+    /// will run become the same object, with nothing to match up by eye.
+    /// Whether this is the newest row. A thought is still being written exactly
+    /// while nothing has followed it — the transcript already knows the order,
+    /// so asking "is anything after me" is the same question.
+    var isLast: Bool = false
+    var pending: PendingPermission?
+    var onAnswer: ((String) -> Void)?
 
     var body: some View {
         switch row.kind {
         case let .message(role, text):
-            MessageRow(role: role, text: text)
+            MessageRow(role: role, text: text, isLive: isLast)
         case let .tool(tool):
-            ToolRowView(tool: tool)
+            ToolRowView(tool: tool, pending: pending, onAnswer: onAnswer)
         case let .gap(reason):
             GapRow(reason: reason)
         }
@@ -246,6 +292,8 @@ private struct AgentRowView: View {
 private struct MessageRow: View {
     let role: Role
     let text: String
+    /// Whether this is the newest row, which is what makes a thought "live".
+    var isLive: Bool = false
 
     var body: some View {
         switch role {
@@ -274,18 +322,13 @@ private struct MessageRow: View {
             }
 
         case .thought:
-            // Collapsed by default: a thought is the agent's scratch work,
-            // useful once something has gone wrong and noise every other
-            // time. A `DisclosureGroup` with no binding starts closed, which
-            // is the state most sessions never need to leave.
-            DisclosureGroup {
-                MarkdownText(text: text, secondary: true)
-                    .padding(.top, 2)
-            } label: {
-                Text("Thought")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
+            // Open while it is being written, closed once it is done.
+            //
+            // It was collapsed always, on the reasoning that a finished thought
+            // is scratch work — true, and it left a phone watching a long turn
+            // with one word on screen and no sign of movement, which reads as
+            // stuck. The Mac solved this and the phone never got it.
+            ThoughtRow(text: text, isLive: isLive)
         }
     }
 }
@@ -295,6 +338,8 @@ private struct MessageRow: View {
 /// earned.
 private struct ToolRowView: View {
     let tool: ToolRow
+    var pending: PendingPermission?
+    var onAnswer: ((String) -> Void)?
 
     private var expandable: Bool { tool.content != nil || tool.diff != nil }
 
@@ -323,7 +368,7 @@ private struct ToolRowView: View {
                 label
             }
 
-            if expanded {
+            if showingDetail {
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     if let content = tool.content, !content.isEmpty {
@@ -340,9 +385,25 @@ private struct ToolRowView: View {
                 .padding(9)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            // The question, on the thing being asked about.
+            if let pending, let onAnswer {
+                Divider()
+                ApprovalControls(options: pending.options, onChoose: onAnswer)
+                    .padding(9)
+            }
         }
         .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if pending != nil {
+                RoundedRectangle(cornerRadius: 8).strokeBorder(Color.orange.opacity(0.45))
+            }
+        }
     }
+
+    /// Open on its own while it is waiting to be approved: being asked to allow
+    /// a command without being shown it is a guess, not a decision.
+    private var showingDetail: Bool { expanded || pending != nil }
 
     private var label: some View {
         HStack(spacing: 7) {
@@ -570,6 +631,53 @@ private struct QueuedRow: View {
 /// this surface asks something of you rather than reporting something to
 /// you. Buttons are full-width and tall on purpose: this is the card a thumb
 /// has to hit correctly the first time, on a phone, possibly one-handed.
+/// A reject/deny option reads as destructive; everything else is a plain
+/// affirmative action. `kind` is a string the daemon defines (`allow_once`,
+/// `reject_once`, …) — matched loosely rather than against a fixed set, so a
+/// kind this client has never seen still lands on the safe, non-red default
+/// instead of a compile-time list going stale.
+private func approvalTint(for option: PermissionOption) -> Color {
+    let kind = option.kind.lowercased()
+    return (kind.contains("reject") || kind.contains("deny")) ? .red : .accentColor
+}
+
+/// The answers to a permission request.
+///
+/// Split out of `ApprovalCard` when the same buttons were needed on the tool
+/// row the request is about — one set of options with one idea of which is
+/// destructive, rather than two that can drift.
+struct ApprovalControls: View {
+    let options: [PermissionOption]
+    let onChoose: (String) -> Void
+
+    var body: some View {
+        // Compact, single-line, and ordered as the adapter gave them.
+        //
+        // These were full-width 46pt slabs, and an option named "Always Allow
+        // Bash(ls -la /tmp | head -3), Read(//private/tmp/**)" wrapped across
+        // two of them — so a routine question about one command filled half the
+        // screen and read as a system alert. The name is the command; it
+        // belongs on one line, truncated, with the tool call it is attached to
+        // saying the rest.
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(options) { option in
+                Button {
+                    onChoose(option.id)
+                } label: {
+                    Text(option.name)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(approvalTint(for: option))
+            }
+        }
+    }
+}
+
 private struct ApprovalCard: View {
     let pending: PendingPermission
     let onChoose: (String) -> Void
@@ -580,34 +688,14 @@ private struct ApprovalCard: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.orange)
 
-            VStack(spacing: 8) {
-                ForEach(pending.options) { option in
-                    Button {
-                        onChoose(option.id)
-                    } label: {
-                        Text(option.name)
-                            .font(.body.weight(.medium))
-                            .frame(maxWidth: .infinity, minHeight: 46)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(tint(for: option))
-                }
-            }
+            ApprovalControls(options: pending.options, onChoose: onChoose)
         }
         .padding(12)
         .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.orange.opacity(0.35)))
     }
 
-    /// A reject/deny option reads as destructive; everything else is a plain
-    /// affirmative action. `kind` is a string the daemon defines (`allow_once`,
-    /// `reject_once`, …) — matched loosely rather than against a fixed set, so
-    /// a kind this client has never seen still lands on the safe, non-red
-    /// default instead of a compile-time list going stale.
-    private func tint(for option: PermissionOption) -> Color {
-        let kind = option.kind.lowercased()
-        return (kind.contains("reject") || kind.contains("deny")) ? .red : .accentColor
-    }
+
 }
 
 // MARK: - Diff
@@ -1294,5 +1382,96 @@ struct GlassSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         content.glassEffect(.regular, in: .rect(cornerRadius: radius))
+    }
+}
+
+/// The agent's reasoning: streaming while it happens, folded away after.
+///
+/// The Mac's `ThoughtRow`, ported. A phone watching a long turn used to see one
+/// collapsed word and no sign of movement, which reads as an agent that has
+/// hung rather than one that is thinking.
+private struct ThoughtRow: View {
+    let text: String
+    let isLive: Bool
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .rotationEffect(.degrees(showing ? 90 : 0))
+                    Text(isLive ? "Thinking…" : "Thought")
+                        .font(.caption.weight(.medium))
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showing {
+                // While it is being written, only the last few lines — enough
+                // to see it moving, which is the whole point. One collapsed
+                // word looks stuck; the whole thing pushes the conversation off
+                // the screen.
+                MarkdownText(text: isLive && !expanded ? Self.tail(of: text) : text, secondary: true)
+            }
+        }
+        .animation(.spring(response: 0.22, dampingFraction: 0.82), value: isLive)
+    }
+
+    /// Open while live unless the reader has closed it; closed after unless the
+    /// reader has opened it.
+    private var showing: Bool { expanded || isLive }
+
+    private static func tail(of text: String, lines: Int = 5) -> String {
+        let all = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard all.count > lines else { return text }
+        return all.suffix(lines).joined(separator: "\n")
+    }
+}
+
+/// A turn in progress, said where the work is appearing.
+///
+/// The Mac's `WorkingRow`, ported — including its clock: phase from a
+/// `TimelineView` and a start captured on appear, because a `repeatForever`
+/// animation restarted from zero by every streamed event never visibly moves,
+/// and phase taken from the wall clock starts the sweep mid-word.
+private struct WorkingRow: View {
+    private static let period: TimeInterval = 1.1
+
+    @State private var start: Date?
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            Text("Working…")
+                .font(.callout)
+                .foregroundStyle(
+                    LinearGradient(
+                        stops: stops(at: phase(now: context.date)),
+                        startPoint: .leading,
+                        endPoint: .trailing))
+        }
+        .onAppear { if start == nil { start = Date() } }
+    }
+
+    private func phase(now: Date) -> Double {
+        guard let start else { return 0 }
+        return now.timeIntervalSince(start)
+            .truncatingRemainder(dividingBy: Self.period) / Self.period
+    }
+
+    private func stops(at phase: Double) -> [Gradient.Stop] {
+        let centre = -0.35 + phase * 1.7
+        let width = 0.3
+        return [
+            .init(color: .secondary, location: min(max(centre - width, 0), 1)),
+            .init(color: .primary, location: min(max(centre, 0), 1)),
+            .init(color: .secondary, location: min(max(centre + width, 0), 1)),
+        ]
     }
 }

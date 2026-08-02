@@ -40,6 +40,16 @@ use crate::wire;
 /// product exists for.
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
+/// How often the backstop compares what it believes against what tmux says.
+///
+/// Rare on purpose. It is a defect DETECTOR, not a repair: the inventory is
+/// meant to be kept current by control-mode notifications, and if this ever
+/// fires the bug is in that path. Running it every tick would double the tmux
+/// traffic to re-prove something that is almost always true; running it never —
+/// which is what happened, since nothing called it — means the one class of bug
+/// it exists to catch goes unreported forever.
+const BACKSTOP_INTERVAL: Duration = Duration::from_secs(60);
+
 /// How many events a slow client may fall behind before it starts losing them.
 ///
 /// Losing them is the right failure. Dropping the connection would be worse
@@ -146,9 +156,18 @@ impl Watcher {
     pub async fn run(self: Arc<Self>) {
         let mut ticker = tokio::time::interval(SAMPLE_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut backstop = tokio::time::interval(BACKSTOP_INTERVAL);
+        backstop.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // The first tick of an interval completes immediately, and comparing
+        // the inventory against itself before anything has had a chance to
+        // diverge would only ever report a false alarm.
+        backstop.tick().await;
+
         loop {
-            ticker.tick().await;
-            self.sample().await;
+            tokio::select! {
+                _ = ticker.tick() => self.sample().await,
+                _ = backstop.tick() => self.service.backstop_reconcile().await,
+            }
         }
     }
 

@@ -1273,6 +1273,15 @@ impl Service {
     // ---- derivation ----
 
     /// The live runtime view as of the last refresh.
+    /// Compare what the inventory believes against what tmux says.
+    ///
+    /// Exposed so the watcher can run it: `LiveInventory::backstop_reconcile`
+    /// existed with no callers, which meant the defect it detects — a missed
+    /// control-mode notification — could never be reported.
+    pub async fn backstop_reconcile(&self) {
+        self.inventory.backstop_reconcile().await;
+    }
+
     pub fn inventory_snapshot(&self) -> overnight_core::inventory::RuntimeSnapshot {
         self.inventory.snapshot()
     }
