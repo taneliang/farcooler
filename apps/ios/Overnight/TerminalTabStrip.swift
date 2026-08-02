@@ -86,10 +86,18 @@ private struct TabChip: View {
                 // in this app, not text a terminal is showing — and monospace
                 // beside a chat's body font is what made it read as a piece of
                 // some other program's chrome.
+                // Capped, because a chip now carries the CONVERSATION's name
+                // rather than "claude 2", and an agent will happily call one
+                // "Complete D17 authorization decision for Overnight" — which
+                // filled the strip with a single tab and pushed every other
+                // pane off the end of it.
                 Text(terminal.displayName(ordinal: ordinal))
                     .font(.caption)
                     .fontWeight(wantsAttention ? .semibold : .regular)
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 120, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)

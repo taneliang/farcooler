@@ -49,6 +49,9 @@ struct TerminalView: View {
     @State private var focusRequest = 0
     @State private var dismissRequest = 0
     @State private var showWorkspaceList = false
+    /// Whether the software keyboard is on screen, which is what decides
+    /// between the tab strip and the key row — see the comment at its use.
+    @State private var keyboardIsUp = false
 
     // User-configurable, unlike the Mac's fixed terminal font: see
     // Settings.swift. Read directly from the same `UserDefaults` key
@@ -129,8 +132,21 @@ struct TerminalView: View {
             // constantly — switching terminal — at the far end of the screen
             // from the hand holding the phone. That still holds; what changed
             // is that it floats now instead of sitting on a slab of its own.
-            TerminalTabStrip(workspaces: connection.fleet.workspaces, current: current, onSelect: select)
+            // Hidden while the keyboard is up.
+            //
+            // The key row is an input accessory, so it rides the keyboard and
+            // lands directly on top of this — two floating bars stacked on each
+            // other, one of them a row of terminal keys and the other a row of
+            // terminal names, with the same rounded glass on both. Nobody
+            // switching panes needs the switcher while they are mid-command,
+            // and the switcher sheet is still one tap away in the toolbar.
+            if !keyboardIsUp {
+                TerminalTabStrip(
+                    workspaces: connection.fleet.workspaces, current: current, onSelect: select
+                )
                 .padding(.top, 2)
+                .transition(.opacity)
+            }
         }
         .background(TerminalPalette.background)
         // A terminal is dark regardless of the phone's own appearance — the
@@ -208,6 +224,16 @@ struct TerminalView: View {
                 .navigationTitle("Worktrees")
                 .navigationBarTitleDisplayMode(.inline)
             }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
+        ) { _ in
+            withAnimation(.easeOut(duration: 0.18)) { keyboardIsUp = true }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
+        ) { _ in
+            withAnimation(.easeOut(duration: 0.18)) { keyboardIsUp = false }
         }
         .onDisappear { session.stop() }
         // Returning to the foreground carries no geometry of its own — this

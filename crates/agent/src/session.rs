@@ -1058,8 +1058,16 @@ mod queue_tests {
     #[test]
     fn a_prompt_written_during_a_turn_is_queued_rather_than_lost() {
         let mut queue: std::collections::VecDeque<QueuedPrompt> = Default::default();
-        queue.push_back(QueuedPrompt { id: "0".into(), text: "first".into() });
-        queue.push_back(QueuedPrompt { id: "1".into(), text: "second".into() });
+        queue.push_back(QueuedPrompt {
+            id: "0".into(),
+            text: "first".into(),
+            images: Vec::new(),
+        });
+        queue.push_back(QueuedPrompt {
+            id: "1".into(),
+            text: "second".into(),
+            images: Vec::new(),
+        });
 
         // Edited in place, by id rather than by position: the turn may end and
         // send one between the click and the message arriving.

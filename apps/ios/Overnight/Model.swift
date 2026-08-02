@@ -93,7 +93,21 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// it read the same as on the Mac: "Terminal 12" with a counter that
     /// repeated after any removal, sitting next to the running command
     /// anyway — the only informative half of the row.
-    var label: String { Self.name(of: preset) }
+    var label: String {
+        // The conversation's own name, when the agent has given it one.
+        //
+        // The Mac has read this since agent panes started reporting a title,
+        // and the phone did not — so a fleet of agents all read "claude 1",
+        // "claude 2", which is the one thing every pane has in common and
+        // therefore says nothing about which is which.
+        if !title.isEmpty, !Self.isPlaceholder(title) { return title }
+        return Self.name(of: preset)
+    }
+
+    /// Whether a title is the automatic one every terminal is created with.
+    private static func isPlaceholder(_ title: String) -> Bool {
+        title.hasPrefix("Terminal ") || title == "Terminal"
+    }
 
     /// `label`, plus its ordinal when it has one.
     ///
@@ -103,7 +117,9 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// number, but a title bar and a tab chip have nowhere to hang a second
     /// view, so they get the joined form.
     func displayName(ordinal: Int?) -> String {
-        guard let ordinal else { return label }
+        // A named conversation needs no counter: the ordinal exists to tell
+        // three identical "claude"s apart, and a title already has.
+        guard let ordinal, label == Self.name(of: preset) else { return label }
         return "\(label) \(ordinal)"
     }
 
