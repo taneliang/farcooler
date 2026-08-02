@@ -1274,13 +1274,6 @@ private struct AgentComposer: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 6)
             }
-            // Honest rather than silent: an image that visibly cannot be
-            // sent is a far smaller surprise than one that is typed,
-            // attached, sent, and simply never arrives. See the TODO above.
-            Text("Images aren't sent to the agent yet")
-                .font(.caption2)
-                .foregroundStyle(.orange)
-                .padding(.horizontal, 10)
         }
     }
 
