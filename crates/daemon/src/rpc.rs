@@ -60,6 +60,9 @@ fn required_scope(method: &str) -> Option<Scope> {
         "worktree.list" => Scope::HostAdmin,
         "repository.register"
         | "workspace.create"
+        // Adopting the repository's own checkout so a terminal can run there.
+        // The same gate as creating a worktree: it writes a workspace record.
+        | "workspace.main"
         | "workspace.archive"
         | "workspace.restore"
         | "terminal.create"
@@ -331,6 +334,14 @@ impl Rpc {
                     svc.create_workspace(repository, &p.task_name, &p.branch, &p.base_revision)
                         .await?
                 };
+                let view = svc.workspace_view(&ws).await?;
+                Ok(result::Value::Workspace(wire::workspace(&view, scope)))
+            }
+
+            // Takes a repository and no payload: there is no path to get wrong,
+            // which is the difference between this and importing a worktree.
+            "workspace.main" => {
+                let ws = svc.main_workspace(Self::target(&req)?).await?;
                 let view = svc.workspace_view(&ws).await?;
                 Ok(result::Value::Workspace(wire::workspace(&view, scope)))
             }
@@ -908,6 +919,7 @@ mod tests {
             "repository_root.add",
             "repository.register",
             "workspace.create",
+            "workspace.main",
             "workspace.archive",
             "workspace.restore",
             "terminal.seen",

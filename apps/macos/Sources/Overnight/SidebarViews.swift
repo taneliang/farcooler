@@ -205,9 +205,11 @@ struct WorkspaceSection: View {
 
             Menu {
                 Button("New terminal", action: onNewTerminal)
-                Divider()
-                Button("Archive", action: onArchive)
-                Button("Remove worktree…", role: .destructive, action: onRemove)
+                if !workspace.isMainCheckout {
+                    Divider()
+                    Button("Archive", action: onArchive)
+                    Button("Remove worktree…", role: .destructive, action: onRemove)
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 11, weight: .semibold))
@@ -240,6 +242,17 @@ struct WorkspaceSection: View {
 struct ProjectHeader: View {
     let name: String
     let count: Int
+    /// Adding to THIS project, rather than to whichever one a sheet defaults to.
+    ///
+    /// The only way to start a worktree was the sidebar's own `+`, which opens a
+    /// sheet with a repository picker — so adding to the project you were
+    /// already looking at meant re-choosing it. With several projects that is
+    /// the common case, not the edge one.
+    var onNewWorktree: (() -> Void)?
+    /// A terminal in the repository's own checkout, not in a worktree.
+    var onNewTerminal: (() -> Void)?
+
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -252,10 +265,40 @@ struct ProjectHeader: View {
                 .foregroundStyle(.quaternary)
                 .monospacedDigit()
             Spacer()
+
+            if onNewWorktree != nil || onNewTerminal != nil {
+                Menu {
+                    if let onNewWorktree {
+                        Button("New worktree in \(name)…", action: onNewWorktree)
+                    }
+                    if let onNewTerminal {
+                        // The main checkout is a place people work — a quick
+                        // build, a look at main while a worktree is mid-review —
+                        // and it was the one directory this app could not open a
+                        // terminal in.
+                        Button("New terminal in \(name)", action: onNewTerminal)
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                // Shown on hover, like every other per-row control in a
+                // sidebar. A `+` on every project header at all times is a
+                // column of plus signs down a list that is meant to read as
+                // quiet section labels.
+                .opacity(hovering ? 1 : 0)
+                .help("Add to \(name)")
+            }
         }
         .padding(.horizontal, Grid.margin + Grid.chevron)
         .padding(.top, 14)
         .padding(.bottom, 3)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }
 
@@ -510,8 +553,14 @@ struct WorkspaceDetail: View {
                 // Destructive actions live in a menu rather than sitting as
                 // permanent buttons next to the one you press constantly.
                 Menu {
-                    Button("Archive", action: onArchive)
-                    Button("Remove worktree…", role: .destructive, action: onRemove)
+                    if workspace.isMainCheckout {
+                        // Nothing destructive for the repository's own checkout
+                        // — see `Workspace.isMainCheckout`.
+                        Text("The repository's own checkout")
+                    } else {
+                        Button("Archive", action: onArchive)
+                        Button("Remove worktree…", role: .destructive, action: onRemove)
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }

@@ -285,6 +285,13 @@ enum RepoCmd {
 
 #[derive(Subcommand)]
 enum WorkspaceCmd {
+    /// Register the repository's own checkout, so terminals can run there.
+    ///
+    /// Idempotent, and takes a repository rather than a path — which is what
+    /// separates it from `import`, where the path someone types is usually the
+    /// wrong one. The main checkout can never be removed through Overnight;
+    /// see `Service::remove_worktree`.
+    Main { repo: String },
     /// Create a worktree and branch for one task.
     Create {
         repo: String,
@@ -813,6 +820,19 @@ async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
 async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
     let mut link = connect_to(host).await?;
     match cmd {
+        WorkspaceCmd::Main { repo } => {
+            let repos = list_repositories(&mut link).await?;
+            let target = resolve_repository(&repos, &repo)?;
+            let r = link.call(req_for("workspace.main", uuid_of(&target.id))).await?;
+            let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            if json {
+                println!("{}", serde_json::json!({ "id": uuid_of(&ws.id).to_string() }));
+            } else {
+                println!("{}", short_bytes(&ws.id));
+            }
+        }
         WorkspaceCmd::Create { repo, task, branch, base } => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;

@@ -70,6 +70,24 @@ struct HostsSettings: View {
     /// choice of machine, and hiding that behind an empty text field is what
     /// made the old setting hard to read.
     private var localRow: some View {
+        // A VStack, so a message about this machine is a LINE in the row rather
+        // than an overlay hanging off the bottom of it. It was the latter, and
+        // an overlay offset past its own bounds is one the form clips — so the
+        // one thing this row had to say ("Sign in first") arrived half cut off.
+        // `hostRow` had it right; this did not match it.
+        VStack(alignment: .leading, spacing: 6) {
+            localHeader
+            if let message = log[""] {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var localHeader: some View {
         HStack {
             Image(systemName: "laptopcomputer")
                 .foregroundStyle(.secondary)
@@ -99,12 +117,6 @@ struct HostsSettings: View {
                     .foregroundStyle(.green)
             } else {
                 Button("Drive") { hosts.active = "" }
-            }
-        }
-        .overlay(alignment: .bottomLeading) {
-            if let message = log[""] {
-                Text(message).font(.caption).foregroundStyle(.secondary)
-                    .offset(y: 14)
             }
         }
     }

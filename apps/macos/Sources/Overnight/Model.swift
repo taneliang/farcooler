@@ -46,6 +46,17 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// disambiguates.
     var host: String?
     var worktree: String
+
+    /// Whether this workspace IS the repository's own checkout.
+    ///
+    /// Adopted deliberately (`workspace main`) so a terminal can run there, and
+    /// then never removable: the daemon refuses it, and the UI does not offer
+    /// it. A refusal is a safety net, not a design — the button should not be
+    /// there to press.
+    ///
+    /// Recognised by task name because that is what the daemon writes and what
+    /// the fleet carries; the worktree path is not on every client.
+    var isMainCheckout: Bool { task == "main" }
     var state: String
     var terminals: [Terminal]
 

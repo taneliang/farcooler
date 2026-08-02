@@ -54,14 +54,29 @@ struct MachinePicker: View {
                 Text(currentName)
                     .font(.headline)
                     .lineLimit(1)
+                // Drawn rather than left to `menuIndicator`, which sits too far
+                // from the text and at the wrong weight for a title.
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 1)
             }
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
+        // A borderless menu insets its own label, so the icon landed several
+        // points right of the section headers below it and the whole band read
+        // as misaligned. The header pads to the same rail as everything else
+        // and this takes the chrome back out.
+        .padding(.leading, -Self.menuInset)
         // Named in full here even though the label truncates: an ssh alias and
         // the machine it points at are not always the same word.
         .help(hosts.active.isEmpty ? "Driving this Mac" : "Driving \(hosts.active)")
     }
+
+    /// What `.menuStyle(.borderlessButton)` adds around its label.
+    private static let menuInset: CGFloat = 5
 
     private var currentName: String {
         hosts.active.isEmpty ? "This Mac" : hosts.active

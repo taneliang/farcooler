@@ -4,6 +4,9 @@ import SwiftUI
 /// Create a workspace: one worktree plus branch for one task.
 struct NewWorkspaceSheet: View {
     let repositories: [Repository]
+    /// The repository to open on, when this was reached from a project header.
+    /// Empty means "ask", which is what the sidebar's own `+` wants.
+    var preselected: String = ""
     let onCreate: (String, String, String, String) async -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -69,7 +72,13 @@ struct NewWorkspaceSheet: View {
             }
             .formStyle(.grouped)
         }
-        .onAppear { if repo.isEmpty { repo = repositories.first?.short ?? "" } }
+        .onAppear {
+            guard repo.isEmpty else { return }
+            // The project whose header was clicked, if there was one. Matching
+            // on display name because that is what the sidebar groups by.
+            repo = repositories.first { $0.displayName == preselected }?.short
+                ?? repositories.first?.short ?? ""
+        }
     }
 }
 

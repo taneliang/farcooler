@@ -522,6 +522,21 @@ final class DaemonClient: ObservableObject {
         await refresh()
     }
 
+    /// The repository's own checkout, as a workspace, so a terminal can run
+    /// there. Idempotent — the daemon returns the same record every time.
+    ///
+    /// Returns its short id, because the only thing the caller does next is
+    /// open a terminal in it.
+    func mainWorkspace(repo: String) async -> String? {
+        guard let data = await run(["--json", "workspace", "main", repo]),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let id = body["id"] as? String
+        else { return nil }
+        await refresh()
+        // The fleet speaks in short ids everywhere else.
+        return fleet.workspaces.first(where: { $0.id == id })?.short
+    }
+
     func archiveWorkspace(_ workspace: String) async {
         _ = await run(["workspace", "archive", workspace])
         await refresh()

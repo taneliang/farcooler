@@ -441,6 +441,48 @@ impl Service {
         self.store.create_workspace(repository_id, &name, &branch, &found.path)
     }
 
+    /// The repository's own checkout, as a workspace, creating the record once.
+    ///
+    /// `import_worktree` refuses the main checkout and still does — importing
+    /// it by path is a footgun, because the path someone types is usually the
+    /// wrong one. This is the deliberate door instead: it takes a repository,
+    /// not a path, so there is nothing to get wrong, and it is idempotent
+    /// because "open a terminal in main" should not make a second workspace
+    /// every time.
+    ///
+    /// It exists because the main checkout is where a great deal of work
+    /// happens — a build, a glance at `main` while a worktree is mid-review —
+    /// and it was the one directory this app could not open a terminal in.
+    /// `remove_worktree` refuses it, so adopting it cannot lead to deleting it.
+    pub async fn main_workspace(&self, repository_id: Uuid) -> Result<models::Workspace> {
+        let repo = self.store.get_repository(repository_id)?;
+        let repo_path = self.repository_worktree(&repo);
+        let canonical = canonical_or_raw(&repo_path.to_string_lossy());
+
+        if let Some(existing) = self
+            .store
+            .list_workspaces_for_repository(repository_id)?
+            .into_iter()
+            .find(|w| canonical_or_raw(&w.worktree_path) == canonical)
+        {
+            return Ok(existing);
+        }
+
+        // git's own answer for which checkout is main and what it is on, rather
+        // than assuming the repository path is a worktree at all.
+        let main = git::list_worktrees(&repo_path)
+            .await?
+            .into_iter()
+            .find(|w| w.is_main)
+            .ok_or(DomainError::NotFound)?;
+
+        let branch = main.branch.clone().unwrap_or_else(|| {
+            format!("detached at {}", main.head.chars().take(8).collect::<String>())
+        });
+
+        self.store.create_workspace(repository_id, "main", &branch, &main.path)
+    }
+
     pub async fn adopt_branch(
         &self,
         repository_id: Uuid,
@@ -612,6 +654,17 @@ impl Service {
         let repo = self.store.get_repository(ws.repository_id)?;
         let repo_path = self.repository_worktree(&repo);
         let dest = PathBuf::from(&ws.worktree_path);
+
+        // Never the repository's own checkout. `main_workspace` can adopt it so
+        // a terminal can be opened there, and the moment that record exists
+        // this operation is one click from `git worktree remove --force` on the
+        // directory the person actually works in. git would refuse, but relying
+        // on that is relying on an error message to be a safety feature.
+        if canonical_or_raw(&dest.to_string_lossy())
+            == canonical_or_raw(&repo_path.to_string_lossy())
+        {
+            return Err(DomainError::InvalidArgument { what: "the main checkout" });
+        }
 
         let out = git::git(
             &repo_path,

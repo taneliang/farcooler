@@ -283,6 +283,14 @@ impl Session {
         }
     }
 
+    /// The repository's own checkout, as a workspace. Idempotent.
+    pub async fn main_workspace(&mut self, repository: Uuid) -> Result<Workspace, SessionError> {
+        match self.value("workspace.main", Some(repository), None).await? {
+            result::Value::Workspace(w) => Ok(w),
+            other => Err(wrong("workspace", &other)),
+        }
+    }
+
     pub async fn archive_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
         self.value("workspace.archive", Some(workspace), None).await.map(|_| ())
     }

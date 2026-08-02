@@ -9,6 +9,9 @@ struct ContentView: View {
     @State private var expanded: Set<String> = []
 
     @State private var showNewWorkspace = false
+    /// Which repository the new-workspace sheet should open on, when it was
+    /// reached from a project header rather than the sidebar's own `+`.
+    @State private var newWorkspaceRepository = ""
     @State private var showAddRepository = false
     @State private var showShortcuts = false
     @State private var showAbout = false
@@ -233,7 +236,10 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $showNewWorkspace) {
-            NewWorkspaceSheet(repositories: client.repositories) { repo, task, branch, base in
+            NewWorkspaceSheet(
+                repositories: client.repositories,
+                preselected: newWorkspaceRepository
+            ) { repo, task, branch, base in
                 await client.createWorkspace(repo: repo, task: task, branch: branch, base: base)
             }
         }
@@ -281,6 +287,30 @@ struct ContentView: View {
         return order.map { ($0, byProject[$0] ?? []) }
     }
 
+    /// Start a worktree in a named project.
+    ///
+    /// The sheet already has a repository picker; this just answers it in
+    /// advance, because someone clicking `+` on a project header has already
+    /// said which one.
+    private func newWorktree(in project: String) {
+        newWorkspaceRepository = repositoryName(from: project)
+        showNewWorkspace = true
+    }
+
+    /// A terminal in the repository's own checkout.
+    private func newMainTerminal(in project: String) async {
+        guard let workspace = await client.mainWorkspace(repo: repositoryName(from: project))
+        else { return }
+        await client.createTerminal(workspace: workspace, preset: "shell", title: "")
+        await client.refresh()
+    }
+
+    /// A group's key carries the host when a fleet spans machines
+    /// (`project · host`); the repository is the part before it.
+    private func repositoryName(from project: String) -> String {
+        project.components(separatedBy: " · ").first ?? project
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
             sidebarHeader
@@ -302,7 +332,12 @@ struct ContentView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(groups, id: \.0) { project, workspaces in
-                            ProjectHeader(name: project, count: workspaces.count)
+                            ProjectHeader(
+                                name: project,
+                                count: workspaces.count,
+                                onNewWorktree: { newWorktree(in: project) },
+                                onNewTerminal: { Task { await newMainTerminal(in: project) } }
+                            )
                             ForEach(workspaces) { ws in
                                 WorkspaceSection(
                                     workspace: ws,
@@ -386,6 +421,11 @@ struct ContentView: View {
             MachinePicker()
             if client.busy { ProgressView().controlSize(.mini) }
 
+            Spacer()
+
+            // With the actions, not beside the title. It is a button — it jumps
+            // to the next agent waiting — and sitting it against the machine
+            // name read as part of the name, which is the one thing it is not.
             if attentionCount > 0 {
                 // A dot and a number, not a filled capsule. A solid block of
                 // colour in the header shouts louder than the row it points at,
@@ -398,15 +438,16 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .help("\(attentionCount) waiting on you — click to jump there")
             }
-
-            Spacer()
             // A menu rather than a button, because "add a repository" has to be
             // reachable at all times. It used to live only in the empty state,
             // so once you had one workspace there was no way to add a second
             // repository without dropping to the terminal.
             Menu {
-                Button("New workspace…") { showNewWorkspace = true }
-                    .disabled(client.repositories.isEmpty)
+                Button("New workspace…") {
+                    newWorkspaceRepository = ""
+                    showNewWorkspace = true
+                }
+                .disabled(client.repositories.isEmpty)
                 Button("Import existing worktrees…") { openImport() }
                     .disabled(client.repositories.isEmpty)
                 Divider()
@@ -425,10 +466,11 @@ struct ContentView: View {
             .fixedSize()
             .help("Add a workspace, a repository, or a machine")
         }
-        // Aligned to the same rail as the workspace names below it, so the
-        // section title heads its column instead of sitting off to one side of
-        // it. The vstack's own padding is added on top, hence the subtraction.
-        .padding(.leading, Grid.rail + 8)
+        // The same rail as `ProjectHeader` and every workspace name below it.
+        // It used to carry an extra 8pt, tuned when this was a plain `Text`;
+        // once it became a menu the label picked up the control's own inset on
+        // top of that and the whole band sat visibly right of its column.
+        .padding(.leading, Grid.rail)
         .padding(.trailing, 14)
         .padding(.top, 12)
         .padding(.bottom, 8)
