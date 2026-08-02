@@ -244,7 +244,14 @@ struct TerminalView: View {
                 .navigationBarTitleDisplayMode(.inline)
             }
         }
-        .onDisappear { session.stop() }
+        // Which pane is on screen, so a banner about THIS one is suppressed
+        // while banners about the others still arrive — see `Notifier`.
+        .onAppear { Notifier.shared.visibleTerminal = current.id }
+        .onChange(of: current.id) { _, id in Notifier.shared.visibleTerminal = id }
+        .onDisappear {
+            session.stop()
+            Notifier.shared.visibleTerminal = nil
+        }
         // Returning to the foreground carries no geometry of its own — this
         // screen's size has not changed — but the pane is shared, and someone
         // on the Mac could have resized the shared window while this device

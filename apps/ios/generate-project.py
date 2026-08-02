@@ -18,6 +18,7 @@ SOURCES = [
     "Connection.swift",
     "FleetView.swift",
     "Model.swift",
+    "Notifications.swift",
     "Settings.swift",
     "Store.swift",
     "QuickTask.swift",

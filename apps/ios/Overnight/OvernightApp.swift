@@ -72,7 +72,16 @@ struct RootView: View {
         // meant a host could be added and connected to before this device had
         // an identity to offer. Doing it here costs one keygen on first run and
         // nothing on every run after — `privateKey()` returns the stored one.
-        .task { _ = Identity.publicKey }
+        .task {
+            _ = Identity.publicKey
+            // Asked for at launch, alongside the device key.
+            //
+            // Not on the first notification: the point of this feature is being
+            // told about an agent while you are not looking at the app, and a
+            // permission prompt that only appears once you ARE looking has
+            // already missed it.
+            Notifier.shared.requestAuthorisation()
+        }
     }
 }
 

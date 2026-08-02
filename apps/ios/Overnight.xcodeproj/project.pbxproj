@@ -11,6 +11,7 @@
 		07D87E54DCF4532A9432BCE2 /* Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF154E462EB1532396A5C5F3; };
 		3CB766C82CEA5109A2AA4C8E /* FleetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF27428554395E3898D3722A; };
 		84CD1507E8FC591EB0F90F4B /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC8223110EB551FAAB056EB; };
+		6C835EE49107597394AA1DC8 /* Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 971AD61504E35FE4827C014D; };
 		7865842DB5A55B828CCEE878 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D44DE2A6CF82570B8E7F2A14; };
 		255E0E0A6E6F5519A9B56104 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CA58826B13541AAD8DB092; };
 		20A16A50D87D593E8BA3B034 /* QuickTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D8F8D255CA54ED9DC7430A; };
@@ -38,6 +39,7 @@
 		CF154E462EB1532396A5C5F3 /* Connection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Connection.swift; sourceTree = "<group>"; };
 		DF27428554395E3898D3722A /* FleetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetView.swift; sourceTree = "<group>"; };
 		9BC8223110EB551FAAB056EB /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
+		971AD61504E35FE4827C014D /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
 		D44DE2A6CF82570B8E7F2A14 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		A5CA58826B13541AAD8DB092 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
 		C6D8F8D255CA54ED9DC7430A /* QuickTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTask.swift; sourceTree = "<group>"; };
@@ -91,6 +93,7 @@
 				CF154E462EB1532396A5C5F3 /* Connection.swift */,
 				DF27428554395E3898D3722A /* FleetView.swift */,
 				9BC8223110EB551FAAB056EB /* Model.swift */,
+				971AD61504E35FE4827C014D /* Notifications.swift */,
 				D44DE2A6CF82570B8E7F2A14 /* Settings.swift */,
 				A5CA58826B13541AAD8DB092 /* Store.swift */,
 				C6D8F8D255CA54ED9DC7430A /* QuickTask.swift */,
@@ -210,6 +213,7 @@
 				07D87E54DCF4532A9432BCE2 /* Connection.swift in Sources */,
 				3CB766C82CEA5109A2AA4C8E /* FleetView.swift in Sources */,
 				84CD1507E8FC591EB0F90F4B /* Model.swift in Sources */,
+				6C835EE49107597394AA1DC8 /* Notifications.swift in Sources */,
 				7865842DB5A55B828CCEE878 /* Settings.swift in Sources */,
 				255E0E0A6E6F5519A9B56104 /* Store.swift in Sources */,
 				20A16A50D87D593E8BA3B034 /* QuickTask.swift in Sources */,

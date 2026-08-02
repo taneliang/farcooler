@@ -43,6 +43,27 @@ enum TerminalSettings {
     static let maxFontSize: Double = 22
 }
 
+/// What the phone is allowed to interrupt you for.
+///
+/// Bare keys for the same reason the terminal's are: `@AppStorage` in the
+/// settings screen and `UserDefaults` in `Notifier` read and write the same
+/// key, so a change takes effect with nothing in between to publish it.
+enum NotificationSettings {
+    static let onAttentionKey = "notifyOnAttention"
+    static let onDoneKey = "notifyOnDone"
+
+    /// Both default ON, because an agent that needs you and cannot say so is
+    /// the failure this feature exists to prevent. Someone who finds it noisy
+    /// turns it off having seen what it does.
+    static var onAttention: Bool {
+        UserDefaults.standard.object(forKey: onAttentionKey) as? Bool ?? true
+    }
+
+    static var onDone: Bool {
+        UserDefaults.standard.object(forKey: onDoneKey) as? Bool ?? true
+    }
+}
+
 /// Whether the bundled font actually made it into the running app.
 ///
 /// A font missing from `UIAppFonts`, or listed there under the wrong
@@ -108,10 +129,26 @@ extension Font {
 struct SettingsView: View {
     @AppStorage(TerminalSettings.fontKey) private var fontChoice: TerminalFontChoice = .iosevka
     @AppStorage(TerminalSettings.fontSizeKey) private var fontSize: Double = TerminalSettings.defaultFontSize
+    @AppStorage(NotificationSettings.onAttentionKey) private var notifyOnAttention = true
+    @AppStorage(NotificationSettings.onDoneKey) private var notifyOnDone = true
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Form {
+            Section {
+                Toggle("When an agent needs you", isOn: $notifyOnAttention)
+                Toggle("When an agent finishes", isOn: $notifyOnDone)
+                    .disabled(!notifyOnAttention)
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text(
+                    "Only these two. A working agent is the normal case, and something "
+                        + "that buzzes for the normal case is something you turn off — after "
+                        + "which it cannot tell you the thing that mattered."
+                )
+            }
+
             Section("Terminal font") {
                 Picker("Typeface", selection: $fontChoice) {
                     ForEach(TerminalFontChoice.allCases) { choice in

@@ -80,6 +80,17 @@ final class Connection: ObservableObject {
         do {
             let data = try await core.call("fleet")
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
+
+            // Announce anything worth announcing, from the fleet we just read.
+            //
+            // Here rather than in a view: a notification about an agent must
+            // not depend on which screen happens to be open, and this is the
+            // one place that learns what every agent is doing.
+            for workspace in fleet.workspaces {
+                for terminal in workspace.terminals {
+                    Notifier.shared.report(terminal: terminal, workspace: workspace.task)
+                }
+            }
         } catch {
             // A failed poll is not a disconnection. Keep showing the last known
             // fleet rather than blanking the screen someone is reading.
