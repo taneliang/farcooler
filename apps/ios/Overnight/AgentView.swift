@@ -387,6 +387,10 @@ private struct ToolRowView: View {
             }
 
             // The question, on the thing being asked about.
+            //
+            // No heading and no orange panel: the ring around this row already
+            // says which call is waiting, and repeating it in words inside the
+            // row it is drawn on is the same fact twice.
             if let pending, let onAnswer {
                 Divider()
                 ApprovalControls(options: pending.options, onChoose: onAnswer)
@@ -631,50 +635,76 @@ private struct QueuedRow: View {
 /// this surface asks something of you rather than reporting something to
 /// you. Buttons are full-width and tall on purpose: this is the card a thumb
 /// has to hit correctly the first time, on a phone, possibly one-handed.
-/// A reject/deny option reads as destructive; everything else is a plain
-/// affirmative action. `kind` is a string the daemon defines (`allow_once`,
-/// `reject_once`, …) — matched loosely rather than against a fixed set, so a
-/// kind this client has never seen still lands on the safe, non-red default
-/// instead of a compile-time list going stale.
-private func approvalTint(for option: PermissionOption) -> Color {
-    let kind = option.kind.lowercased()
-    return (kind.contains("reject") || kind.contains("deny")) ? .red : .accentColor
-}
-
 /// The answers to a permission request.
 ///
-/// Split out of `ApprovalCard` when the same buttons were needed on the tool
-/// row the request is about — one set of options with one idea of which is
-/// destructive, rather than two that can drift.
+/// Ordered by what the question actually is. ACP hands back a flat list —
+/// `allow_once`, `allow_always`, `reject_once`, … — and rendering it flat gave
+/// three identical full-width buttons, two of them the same blue, with the
+/// longest and loudest being a restatement of the command already shown above.
+/// A stack of equal-weight options is not a decision; it is a menu.
+///
+/// So: the decision is one row, Allow prominent and Reject plain beside it, and
+/// everything else — the "always" variants, which are a policy change rather
+/// than an answer to this question — sits under it in small type.
+///
+/// Reject is NOT red. Red is for destructive; declining a command destroys
+/// nothing, and spending the alarm colour here leaves none for when it matters.
 struct ApprovalControls: View {
     let options: [PermissionOption]
     let onChoose: (String) -> Void
 
     var body: some View {
-        // Compact, single-line, and ordered as the adapter gave them.
-        //
-        // These were full-width 46pt slabs, and an option named "Always Allow
-        // Bash(ls -la /tmp | head -3), Read(//private/tmp/**)" wrapped across
-        // two of them — so a routine question about one command filled half the
-        // screen and read as a system alert. The name is the command; it
-        // belongs on one line, truncated, with the tool call it is attached to
-        // saying the rest.
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(options) { option in
-                Button {
-                    onChoose(option.id)
-                } label: {
-                    Text(option.name)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if let allow {
+                    Button(allow.name) { onChoose(allow.id) }
+                        .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(approvalTint(for: option))
+                if let reject {
+                    Button(reject.name) { onChoose(reject.id) }
+                        .buttonStyle(.bordered)
+                }
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+
+            ForEach(secondary) { option in
+                Button(option.name) { onChoose(option.id) }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
         }
+    }
+
+    /// The plain yes: `allow_once` if the adapter offers one, otherwise the
+    /// first thing that allows at all.
+    private var allow: PermissionOption? {
+        options.first { $0.kind.lowercased().contains("once") && isAllow($0) }
+            ?? options.first(where: isAllow)
+    }
+
+    private var reject: PermissionOption? {
+        options.first { isReject($0) }
+    }
+
+    /// Everything that is not the straight yes or no — kept, because an adapter
+    /// may offer options this client has never heard of and swallowing them
+    /// would make an answer unreachable.
+    private var secondary: [PermissionOption] {
+        options.filter { $0.id != allow?.id && $0.id != reject?.id }
+    }
+
+    private func isAllow(_ option: PermissionOption) -> Bool {
+        let kind = option.kind.lowercased()
+        return kind.contains("allow") || kind.contains("accept")
+    }
+
+    private func isReject(_ option: PermissionOption) -> Bool {
+        let kind = option.kind.lowercased()
+        return kind.contains("reject") || kind.contains("deny")
     }
 }
 
@@ -960,15 +990,17 @@ private struct AgentComposer: View {
 
     // MARK: Mode switcher
 
-    /// The two selectors worth a permanent place on a phone.
+    /// The selectors worth a permanent place on a phone.
     ///
-    /// Model and effort change what you get and what it costs, and they are the
-    /// two people reach for mid-session. Everything else — permission mode,
-    /// subagent, fast mode — is set once and forgotten, so it folds into the
-    /// menu beside them. Values only: "Sonnet" and "High" say what they are,
-    /// and a phone has no room to print the question as well. The menu spells
-    /// both out.
-    private static let inlineIDs = ["model", "effort"]
+    /// Mode, model and effort: what the agent is allowed to do without asking,
+    /// what it costs, and how hard it tries. All three get reached for
+    /// mid-session — mode most of all, since it is what you change when the
+    /// approvals start getting tedious. Subagent and fast mode are set once and
+    /// forgotten, so they fold into the menu beside them.
+    ///
+    /// Values only: "Manual", "Sonnet", "High" say what they are, and a phone
+    /// has no room to print the question as well. The menu spells both out.
+    private static let inlineIDs = ["mode", "model", "effort"]
 
     private var inlineOptions: [ConfigOption] {
         Self.inlineIDs.compactMap { id in configOptions.first { $0.id == id } }

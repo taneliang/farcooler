@@ -39,25 +39,56 @@ struct ApprovalControls: View {
     let onChoose: (String) -> Void
 
     var body: some View {
+        // Ordered by what the question actually is.
+        //
+        // ACP hands back a flat list and rendering it flat gave every option
+        // the same weight — so the straight yes, the straight no, and a policy
+        // change that will answer every FUTURE question too all looked like
+        // peers. They are not: two of them answer this request and the rest
+        // change the rules.
         HStack(spacing: 8) {
-            ForEach(options) { option in
-                Button { onChoose(option.id) } label: {
-                    HStack(spacing: 5) {
-                        Text(option.name)
-                        if let hint = hint(for: option) {
-                            // The shortcut, on the button it belongs to. A
-                            // keystroke nobody can see is a keystroke nobody
-                            // uses.
-                            Text(hint).foregroundStyle(.secondary)
-                        }
-                    }
+            if let allowOption {
+                Button { onChoose(allowOption.id) } label: {
+                    label(allowOption)
                 }
-                .modifier(
-                    ApprovalShortcut(
-                        option: option, allow: allowOption?.id, reject: rejectOption?.id))
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.return, modifiers: .command)
+            }
+            if let rejectOption {
+                Button { onChoose(rejectOption.id) } label: {
+                    label(rejectOption)
+                }
+                .keyboardShortcut(.delete, modifiers: .command)
+            }
+
+            ForEach(secondaryOptions) { option in
+                Button(option.name) { onChoose(option.id) }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             Spacer(minLength: 0)
         }
+    }
+
+    /// The name, plus the shortcut on the button it belongs to — a keystroke
+    /// nobody can see is a keystroke nobody uses.
+    private func label(_ option: PermissionOption) -> some View {
+        HStack(spacing: 5) {
+            Text(option.name)
+            if let hint = hint(for: option) {
+                Text(hint).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Everything that is not the straight yes or no — the "always" variants,
+    /// and anything an adapter offers that this client has never heard of.
+    /// Kept rather than dropped: swallowing one would make an answer
+    /// unreachable.
+    private var secondaryOptions: [PermissionOption] {
+        options.filter { $0.id != allowOption?.id && $0.id != rejectOption?.id }
     }
 
     /// ACP names these `allow_once`, `allow_always`, `reject_once`,
@@ -65,7 +96,9 @@ struct ApprovalControls: View {
     /// the once-only one, since it is the conservative reading of a keystroke
     /// pressed without looking.
     private var allowOption: PermissionOption? {
-        options.first { $0.kind.hasPrefix("allow") } ?? options.first
+        options.first { $0.kind.hasPrefix("allow_once") }
+            ?? options.first { $0.kind.hasPrefix("allow") }
+            ?? options.first
     }
 
     private var rejectOption: PermissionOption? {
@@ -76,22 +109,6 @@ struct ApprovalControls: View {
         if option.id == allowOption?.id { return "⌘↩" }
         if option.id == rejectOption?.id { return "⌘⌫" }
         return nil
-    }
-}
-
-private struct ApprovalShortcut: ViewModifier {
-    let option: PermissionOption
-    let allow: String?
-    let reject: String?
-
-    func body(content: Content) -> some View {
-        if option.id == allow {
-            content.keyboardShortcut(.return, modifiers: .command)
-        } else if option.id == reject {
-            content.keyboardShortcut(.delete, modifiers: .command)
-        } else {
-            content
-        }
     }
 }
 
