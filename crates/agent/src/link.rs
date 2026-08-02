@@ -39,6 +39,8 @@ pub enum DaemonMessage {
     EditQueued { id: String, text: String },
     /// Take back a prompt that has not been sent yet.
     CancelQueued { id: String },
+    /// Send a queued prompt now, into the turn already running.
+    SteerQueued { id: String },
 }
 
 pub fn encode_line<T: Serialize>(value: &T) -> Result<String, serde_json::Error> {

@@ -494,6 +494,46 @@ impl RunningSession {
         vec![self.queue_event()]
     }
 
+    /// Send a queued prompt NOW, without waiting for the turn to end.
+    ///
+    /// The adapter advertises `promptQueueing` and `steering`, meaning it will
+    /// accept a prompt while a turn is running and Claude picks it up between
+    /// tool calls rather than after everything finishes. That is the better
+    /// behaviour when what you are sending is a correction — "stop, do it this
+    /// way" is worth nothing once the wrong thing is done.
+    ///
+    /// It is not the default, because the reason the queue exists is that a
+    /// message you can still see and still edit is worth more than one already
+    /// gone. This is the deliberate escape hatch: you looked at what you wrote
+    /// and decided it should interrupt.
+    ///
+    /// `pending_prompt` is deliberately NOT reassigned. It names the turn whose
+    /// response ends the current turn, and a steering prompt joins that turn
+    /// rather than starting its own — overwriting it would leave the original
+    /// turn with nothing to report its end, and the pane would say Working
+    /// forever.
+    pub async fn steer_queued(&mut self, id: &str) -> Result<Vec<AgentEvent>, SessionError> {
+        let Some(index) = self.queue.iter().position(|q| q.id == id) else {
+            return Ok(Vec::new());
+        };
+        let queued = self.queue.remove(index).expect("index just found");
+
+        let pending = self.pending_prompt;
+        if let Err(e) = self.send_prompt(&queued.text).await {
+            self.queue.insert(index, queued);
+            return Err(e);
+        }
+        // Restored, for the reason in the doc comment above.
+        if pending.is_some() {
+            self.pending_prompt = pending;
+        }
+
+        Ok(vec![
+            self.queue_event(),
+            AgentEvent::Message { role: Role::User, text: queued.text },
+        ])
+    }
+
     /// Take back a prompt that has not been sent.
     pub fn cancel_queued(&mut self, id: &str) -> Vec<AgentEvent> {
         let before = self.queue.len();

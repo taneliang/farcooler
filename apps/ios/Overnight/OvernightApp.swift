@@ -27,41 +27,70 @@ func UIDeviceName() -> String {
     return "overnight-\(name)"
 }
 
+/// The app opens onto TERMINALS, not onto a list of machines.
+///
+/// It used to open on the host list, which meant the common case — one machine,
+/// already added, agents running on it — cost a tap on every launch to get past
+/// a screen with one row on it. A list of machines is onboarding, and onboarding
+/// is not a home screen.
+///
+/// So the host list appears exactly when it is the thing to do: when there are
+/// no hosts. Once there is one, the app lands on it, and switching machines
+/// moves to where you already go to switch terminals — see
+/// `WorkspaceListView`, which is the phone's equivalent of the Mac's sidebar.
 struct RootView: View {
     @StateObject private var hosts = HostStore()
+
+    var body: some View {
+        Group {
+            if let host = hosts.selected {
+                // Keyed on the host, so switching machines rebuilds everything
+                // below rather than handing one host's screen the other's
+                // connection. The same rule the Mac follows for a pane whose
+                // terminal changes underneath it.
+                FleetView(host: host, store: hosts)
+                    .id(host.id)
+            } else {
+                HostOnboardingView(hosts: hosts)
+            }
+        }
+        // Generate the device key at launch rather than the first time
+        // something asks for it.
+        //
+        // It used to appear only when the "Authorise" screen was opened, which
+        // put a several-hundred-millisecond keygen behind a tap and, worse,
+        // meant a host could be added and connected to before this device had
+        // an identity to offer. Doing it here costs one keygen on first run and
+        // nothing on every run after — `privateKey()` returns the stored one.
+        .task { _ = Identity.publicKey }
+    }
+}
+
+/// The first-run screen: no machines yet, so there is nothing else to show.
+struct HostOnboardingView: View {
+    @ObservedObject var hosts: HostStore
+
     @State private var showAddHost = false
     @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
             List {
-                if hosts.hosts.isEmpty {
-                    Section {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("No hosts yet").font(.headline)
-                            Text(
-                                "Overnight drives machines you already have SSH access to. "
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("No hosts yet").font(.headline)
+                        Text(
+                            "Overnight drives machines you already have SSH access to. "
                                 + "Add one, then authorise this device on it."
-                            )
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 6)
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                     }
+                    .padding(.vertical, 6)
                 }
 
-                ForEach(hosts.hosts) { host in
-                    NavigationLink(value: host) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(host.label).font(.body.weight(.medium))
-                            Text("\(host.user)@\(host.address)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .onDelete { offsets in
-                    offsets.map { hosts.hosts[$0] }.forEach(hosts.remove)
+                Section {
+                    Button("Add a host") { showAddHost = true }
                 }
 
                 Section("This device") {
@@ -69,27 +98,7 @@ struct RootView: View {
                 }
             }
             .navigationTitle("Overnight")
-            // Generate the device key at launch rather than the first time
-            // something asks for it.
-            //
-            // It used to appear only when the "Authorise" screen was opened,
-            // which put a several-hundred-millisecond keygen behind a tap and,
-            // worse, meant a host could be added and connected to before this
-            // device had an identity to offer. Doing it here costs one keygen on
-            // first run and nothing on every run after — `privateKey()` returns
-            // the stored one.
-            .task { _ = Identity.publicKey }
-            .navigationDestination(for: Host.self) { host in
-                FleetView(host: host, store: hosts)
-            }
             .toolbar {
-                // A sheet, not a pushed `NavigationLink` — deliberately, after
-                // a `NavigationLink` placed directly in a `ToolbarItem` turned
-                // out not to respond reliably to taps here. `AddHostView`
-                // already uses the sheet pattern for exactly this kind of "one
-                // more screen, not part of the drill-down into a host"
-                // navigation, so Settings follows it rather than being the one
-                // screen in the app that pushes.
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("Settings")

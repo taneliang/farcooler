@@ -479,6 +479,23 @@ impl Session {
         }
     }
 
+    /// Send a queued prompt into the turn already running.
+    pub async fn agent_steer_queued(
+        &mut self,
+        terminal: Uuid,
+        queued_id: &str,
+    ) -> Result<Terminal, SessionError> {
+        let payload =
+            request::Payload::AgentSteerQueued(overnight_protocol::v1::AgentSteerQueued {
+                terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+                queued_id: queued_id.to_string(),
+            });
+        match self.value("terminal.agent_steer_queued", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
     pub async fn agent_cancel(&mut self, terminal: Uuid) -> Result<Terminal, SessionError> {
         let payload = request::Payload::AgentCancel(overnight_protocol::v1::AgentCancel {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),

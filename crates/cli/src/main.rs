@@ -214,6 +214,12 @@ enum HostCmd {
     },
     /// Report what is installed and running on a host.
     Status { target: String },
+    /// Report what a host IS, changing nothing on it.
+    ///
+    /// What the Mac app asks before offering to install: the platform, whether
+    /// tmux is there, what would keep the daemon alive, and what is already
+    /// installed.
+    Probe { target: String },
 }
 
 #[derive(Subcommand)]
@@ -423,6 +429,9 @@ enum TerminalCmd {
 
     /// Withdraw a prompt that is still waiting for the current turn to end
     AgentCancelQueued { terminal: String, queued_id: String },
+
+    /// Send a queued prompt into the turn already running, rather than waiting
+    AgentSteerQueued { terminal: String, queued_id: String },
     /// Cancel the agent's current turn.
     AgentCancel { terminal: String },
 }
@@ -470,6 +479,23 @@ async fn run() -> Fallible {
             host_install::install(&target, from.as_deref()).await
         }
         Command::HostCmd(HostCmd::Status { target }) => host_install::status(&target).await,
+        Command::HostCmd(HostCmd::Probe { target }) => {
+            let probe = host_install::probe(&target).await?;
+            if cli.json {
+                println!("{}", probe.to_json());
+                return Ok(());
+            }
+            println!("{}", probe.target);
+            println!("  platform    {}", probe.platform.name());
+            println!("  os          {} {}", probe.os, probe.arch);
+            println!("  tmux        {}", probe.tmux.as_deref().unwrap_or("MISSING"));
+            println!("  persistence {}", probe.persistence.name());
+            println!("  installed   {}", probe.installed_cli.as_deref().unwrap_or("nothing"));
+            for blocker in &probe.blockers {
+                println!("  BLOCKED     {blocker}");
+            }
+            Ok(())
+        }
         Command::AgentHost { terminal, socket, worktree, session, adapter } => {
             agent_host::run(terminal, socket, worktree, session, adapter).await
         }
@@ -1517,6 +1543,19 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             ))
             .await?;
             println!("withdrew queued message {queued_id} on {}", short(id));
+        }
+
+        TerminalCmd::AgentSteerQueued { terminal, queued_id } => {
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            link.call(with(
+                req("terminal.agent_steer_queued"),
+                request::Payload::AgentSteerQueued(overnight_protocol::v1::AgentSteerQueued {
+                    terminal_id: id_bytes(id),
+                    queued_id: queued_id.clone(),
+                }),
+            ))
+            .await?;
+            println!("sent queued message {queued_id} into the running turn on {}", short(id));
         }
 
         TerminalCmd::AgentCancel { terminal } => {

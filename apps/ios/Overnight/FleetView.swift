@@ -63,7 +63,7 @@ struct FleetView: View {
             }
         }
         .navigationDestination(item: $pushed) { terminal in
-            TerminalView(terminal: terminal, connection: connection)
+            TerminalView(terminal: terminal, connection: connection, hosts: store)
         }
         .task { await connect(host) }
     }
@@ -71,9 +71,9 @@ struct FleetView: View {
     @ViewBuilder
     private var connected: some View {
         if let landing {
-            TerminalView(terminal: landing, connection: connection)
+            TerminalView(terminal: landing, connection: connection, hosts: store)
         } else if landingDecided {
-            WorkspaceListView(connection: connection, onSelect: { pushed = $0 })
+            WorkspaceListView(connection: connection, onSelect: { pushed = $0 }, hosts: store)
                 .navigationTitle(host.label)
                 .navigationBarTitleDisplayMode(.inline)
         } else {
@@ -159,13 +159,28 @@ struct WorkspaceListView: View {
     /// Non-nil only in the sheet: what "Done" calls. `FleetView`'s own use
     /// leaves this nil because a pushed screen already has a back button.
     var onDismiss: (() -> Void)?
+    /// The machines to switch between, when this is the sheet.
+    ///
+    /// Switching hosts lives here because this is already where you go to
+    /// switch what you are looking at. The app opens onto terminals now (see
+    /// `RootView`), so there is no host list to go back to — and inventing a
+    /// second switcher screen for the rarer of the two switches would be one
+    /// more place to look.
+    var hosts: HostStore?
 
     @State private var showNewWorkspace = false
     @State private var showQuickTask = false
+    @State private var showAddHost = false
+    @State private var showSettings = false
 
     var body: some View {
         FleetList(fleet: connection.fleet, onSelect: onSelect) { action, terminal in
             Task { await connection.act(action, on: terminal) }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let hosts, hosts.hosts.count > 1 || hosts.selected != nil {
+                hostSwitcher(hosts)
+            }
         }
         .refreshable { await connection.refresh() }
         .toolbar {
@@ -194,6 +209,69 @@ struct WorkspaceListView: View {
         .sheet(isPresented: $showQuickTask) {
             TaskComposerView(connection: connection)
         }
+        .sheet(isPresented: $showAddHost) {
+            AddHostView { host in hosts?.add(host) }
+        }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                SettingsView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            NavigationLink("Authorise") { AuthoriseView() }
+                        }
+                    }
+            }
+        }
+    }
+
+    /// Which machine these terminals are on, and how to change it.
+    ///
+    /// A strip along the bottom rather than a section in the list: the list is
+    /// worktrees on ONE host, and putting the host inside it would read as one
+    /// more thing in the same collection. This says what the collection belongs
+    /// to.
+    private func hostSwitcher(_ hosts: HostStore) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "server.rack")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Menu {
+                ForEach(hosts.hosts) { host in
+                    Button {
+                        hosts.selected = host
+                        onDismiss?()
+                    } label: {
+                        if host.id == hosts.selected?.id {
+                            Label(host.label, systemImage: "checkmark")
+                        } else {
+                            Text(host.label)
+                        }
+                    }
+                }
+                Divider()
+                Button("Add a host…") { showAddHost = true }
+                // Reachable from here because there is nowhere else left.
+                //
+                // Settings and the device's public key used to live on the root
+                // screen, which was the host list. The app opens onto terminals
+                // now, so that screen only appears when there are no hosts —
+                // and everything that was on it would have become unreachable
+                // the moment you added one.
+                Button("This device…") { showSettings = true }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(hosts.selected?.label ?? "No host")
+                        .font(.callout.weight(.medium))
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 }
 

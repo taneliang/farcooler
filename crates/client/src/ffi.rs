@@ -537,6 +537,14 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             Ok(json!({}))
         }
 
+        "terminal.agent_steer_queued" => {
+            session
+                .agent_steer_queued(id("terminal")?, &text("queuedId"))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
+
         "terminal.agent_cancel" => {
             session.agent_cancel(id("terminal")?).await.map_err(|e| e.to_string())?;
             Ok(json!({}))

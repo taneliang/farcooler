@@ -69,8 +69,16 @@ struct TerminalView: View {
         TerminalMetrics.cell(.terminal(fontChoice, size: fontSize))
     }
 
-    init(terminal: Terminal, connection: Connection) {
+    /// The machines to switch between, offered inside the switcher sheet.
+    ///
+    /// Optional because this screen works perfectly well without one — it is
+    /// the terminal, not the fleet — and because the previews and the demo
+    /// path construct it with no store at all.
+    let hosts: HostStore?
+
+    init(terminal: Terminal, connection: Connection, hosts: HostStore? = nil) {
         self.connection = connection
+        self.hosts = hosts
         _session = StateObject(wrappedValue: TerminalSession(terminalID: terminal.id, core: connection.core))
         _current = State(initialValue: terminal)
     }
@@ -169,7 +177,8 @@ struct TerminalView: View {
                         select(terminal)
                         showWorkspaceList = false
                     },
-                    onDismiss: { showWorkspaceList = false }
+                    onDismiss: { showWorkspaceList = false },
+                    hosts: hosts
                 )
                 .navigationTitle("Worktrees")
                 .navigationBarTitleDisplayMode(.inline)

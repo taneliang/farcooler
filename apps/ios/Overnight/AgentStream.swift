@@ -129,6 +129,12 @@ final class AgentStream: ObservableObject {
             ["terminal": terminal, "queuedId": id, "text": text])
     }
 
+    /// Send a queued message into the turn already running.
+    func steerQueued(_ id: String) async {
+        _ = try? await core.call(
+            "terminal.agent_steer_queued", ["terminal": terminal, "queuedId": id])
+    }
+
     /// Take back a message that has not gone out yet.
     func cancelQueued(_ id: String) async {
         _ = try? await core.call(

@@ -206,6 +206,17 @@ struct Host: Codable, Identifiable, Hashable {
 final class HostStore: ObservableObject {
     @Published private(set) var hosts: [Host] = []
     private let key = "hosts"
+    private let lastKey = "hosts.last"
+
+    /// The host the app opens onto.
+    ///
+    /// Persisted because the phone's home screen is now the terminals on a
+    /// machine rather than a list of machines — see `RootView`. Landing on
+    /// whichever host happened to be first in the list would mean the app
+    /// forgets where you were every time you close it.
+    @Published var selected: Host? {
+        didSet { UserDefaults.standard.set(selected?.id.uuidString, forKey: lastKey) }
+    }
 
     init() {
         if let data = UserDefaults.standard.data(forKey: key),
@@ -219,15 +230,25 @@ final class HostStore: ObservableObject {
             // and no way to be left with a host you did not add.
             hosts.append(demo)
         }
+
+        // Whatever was open last, or the first host. Assigned directly rather
+        // than through the property so opening the app does not count as
+        // choosing — `didSet` would rewrite the same value back.
+        let remembered = UserDefaults.standard.string(forKey: lastKey)
+        selected = hosts.first { $0.id.uuidString == remembered } ?? hosts.first
     }
 
     func add(_ host: Host) {
         hosts.append(host)
+        // Added means wanted: a host you just typed in is the one you want to
+        // be looking at, and the app opens onto whatever is selected.
+        selected = host
         save()
     }
 
     func remove(_ host: Host) {
         hosts.removeAll { $0.id == host.id }
+        if selected?.id == host.id { selected = hosts.first }
         save()
     }
 

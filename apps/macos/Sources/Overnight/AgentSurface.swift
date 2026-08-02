@@ -165,7 +165,8 @@ struct AgentSurface: View {
                         QueuedRow(
                             queued: queued,
                             onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
-                            onCancel: { Task { await stream.cancelQueued(queued.id) } })
+                            onCancel: { Task { await stream.cancelQueued(queued.id) } },
+                            onSteer: { Task { await stream.steerQueued(queued.id) } })
                     }
                 }
                 // Roomier than a terminal, on purpose. A VT grid is dense

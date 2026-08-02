@@ -25,6 +25,29 @@ use tokio::process::Command;
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
+/// The launchd user agent, for a macOS host.
+///
+/// `KeepAlive` with `SuccessfulExit=false` is launchd's spelling of systemd's
+/// `Restart=on-failure`: a daemon told to stop stays stopped, one that crashes
+/// comes back. `ThrottleInterval` is the same guard as `RestartSec` — launchd's
+/// default of 10s is already sane, but stating it keeps the two units
+/// comparable.
+const LAUNCH_AGENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.overnight.daemon.remote</string>
+  <key>ProgramArguments</key>
+  <array><string>__HOME__/.local/bin/overnightd</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key>
+  <dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Interactive</string>
+</dict>
+</plist>
+"#;
+
 /// The systemd user unit. Written to ~/.config/systemd/user/overnight.service.
 const UNIT: &str = "\
 [Unit]
@@ -48,22 +71,24 @@ WantedBy=default.target
 
 pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
     println!("==> Checking {target}");
-    let arch = remote_capture(target, "uname -m").await?;
-    let os = remote_capture(target, "uname -s").await?;
-    let os = os.trim().to_string();
-    if os != "Linux" {
-        return Err(format!(
-            "{target} reports {os}. `host install` is Linux only.\n\
-             A macOS host installs by running the Overnight app there once, because \
-             registering its LaunchAgent needs a GUI session."
-        )
-        .into());
+    let probe = probe(target).await?;
+
+    // Everything that makes this host impossible, said at once.
+    //
+    // These used to be sequential early returns, so a machine with neither tmux
+    // nor a supported OS told you about one problem, waited for you to fix it,
+    // and then told you about the next.
+    if !probe.installable() {
+        return Err(format!("{target}:\n  - {}", probe.blockers.join("\n  - ")).into());
     }
 
-    let arch = arch.trim();
+    let arch = probe.arch.as_str();
+    let Some(slug) = probe.platform.dist_slug(arch) else {
+        return Err(format!("{target} reports {arch}, which has no build here.").into());
+    };
     let dir = match from {
         Some(p) => p.to_path_buf(),
-        None => default_dist(arch),
+        None => PathBuf::from("dist").join(&slug),
     };
     let daemon = dir.join("overnightd");
     let cli = dir.join("overnight");
@@ -80,58 +105,314 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
         }
     }
 
-    // tmux is what actually keeps the agents alive; without it the daemon runs
-    // and every terminal derives lost. Better to say so now than to install
-    // successfully and be mysteriously broken.
-    let tmux = remote_capture(target, "command -v tmux || true").await?;
-    if tmux.trim().is_empty() {
-        return Err(format!(
-            "{target} has no tmux, and Overnight keeps every terminal inside one.\n\
-             Install it first, e.g.  ssh {target} 'sudo apt-get install -y tmux'"
-        )
-        .into());
-    }
+    println!(
+        "    {} {arch}, tmux at {}",
+        probe.os,
+        probe.tmux.as_deref().unwrap_or("?")
+    );
 
-    println!("    {os} {arch}, tmux at {}", tmux.trim());
-
-    remote_run(target, "mkdir -p ~/.local/bin ~/.config/systemd/user").await?;
+    remote_run(target, "mkdir -p ~/.local/bin").await?;
 
     for (path, name) in [(&daemon, "overnightd"), (&cli, "overnight")] {
         println!("==> Installing {name}");
         upload_verified(target, path, name).await?;
     }
 
-    println!("==> Registering the user service");
-    remote_write(target, "~/.config/systemd/user/overnight.service", UNIT).await?;
-
-    // Lingering needs no privilege for one's own account on most distributions,
-    // and without it the daemon dies at logout. If it is refused, say so rather
-    // than reporting a success that will not survive the night.
-    let linger = remote_capture(
-        target,
-        "loginctl enable-linger \"$USER\" 2>&1 || echo OVERNIGHT_LINGER_FAILED",
-    )
-    .await?;
-    let lingering = !linger.contains("OVERNIGHT_LINGER_FAILED");
-
-    remote_run(
-        target,
-        "systemctl --user daemon-reload && systemctl --user enable --now overnight.service",
-    )
-    .await?;
+    let persistence = register_service(target, probe.persistence).await?;
 
     println!();
     println!("Installed on {target}.");
-    if lingering {
-        println!("  Lingering is on, so the daemon survives logout and reboot.");
-    } else {
-        println!("  WARNING: could not enable lingering.");
-        println!("  The daemon will stop when you log out of {target}. To fix:");
-        println!("      ssh {target} 'sudo loginctl enable-linger $USER'");
+    match persistence {
+        Persistence::Systemd => {
+            println!("  A systemd user service keeps it running.")
+        }
+        Persistence::Launchd => {
+            println!("  A launchd agent keeps it running.")
+        }
+        Persistence::OnDemand => {
+            // Not a failure, and worth being exact about. Agents live in tmux
+            // and tmux is not going anywhere; what is lost is the supervision
+            // that notices one finishing while nobody is connected.
+            println!("  No user service manager here, so the daemon starts when you connect");
+            println!("  and stops when you disconnect. Agents keep running inside tmux;");
+            println!("  what you lose is being told about them while you are away.");
+            if probe.platform == Platform::Wsl {
+                println!();
+                println!("  WSL can run systemd. In /etc/wsl.conf on that machine:");
+                println!("      [boot]");
+                println!("      systemd=true");
+                println!("  then `wsl --shutdown` from Windows and install again.");
+            }
+        }
+        Persistence::None => println!("  WARNING: nothing will keep the daemon running."),
     }
     println!();
     println!("Check it:   overnight --host {target} status");
     Ok(())
+}
+
+/// Register whatever this host uses to keep a user daemon alive.
+///
+/// Returns what actually ended up in place, which is not always what was asked
+/// for: a service manager can refuse, and reporting success for a daemon that
+/// will not survive the night is the one outcome worth avoiding here.
+async fn register_service(target: &str, wanted: Persistence) -> Result<Persistence, Box<dyn std::error::Error>> {
+    match wanted {
+        Persistence::Systemd => {
+            println!("==> Registering the systemd user service");
+            remote_run(target, "mkdir -p ~/.config/systemd/user").await?;
+            remote_write(target, "~/.config/systemd/user/overnight.service", UNIT).await?;
+
+            // Lingering needs no privilege for one's own account on most
+            // distributions, and without it the daemon dies at logout.
+            let linger = remote_capture(
+                target,
+                "loginctl enable-linger \"$USER\" 2>&1 || echo OVERNIGHT_LINGER_FAILED",
+            )
+            .await?;
+            if linger.contains("OVERNIGHT_LINGER_FAILED") {
+                println!("    WARNING: could not enable lingering.");
+                println!("    The daemon will stop when you log out of {target}. To fix:");
+                println!("        ssh {target} 'sudo loginctl enable-linger $USER'");
+            }
+
+            remote_run(
+                target,
+                "systemctl --user daemon-reload && systemctl --user enable --now overnight.service",
+            )
+            .await?;
+            Ok(Persistence::Systemd)
+        }
+
+        Persistence::Launchd => {
+            println!("==> Registering the launchd agent");
+            remote_run(target, "mkdir -p ~/Library/LaunchAgents").await?;
+            // `$HOME` is not expanded inside a plist, so the path is baked in
+            // at write time from the host's own answer.
+            let home = remote_capture(target, "echo $HOME").await?;
+            let plist = LAUNCH_AGENT.replace("__HOME__", home.trim());
+            remote_write(target, "~/Library/LaunchAgents/com.overnight.daemon.remote.plist", &plist)
+                .await?;
+
+            // `bootstrap gui/$UID` needs a GUI session to bootstrap INTO, and
+            // over ssh to a Mac at a login window there is not one. That is not
+            // a failure to report as an error: the plist is in place and will
+            // load when someone logs in, and until then the daemon still starts
+            // on demand for anyone who connects.
+            let loaded = remote_capture(
+                target,
+                "launchctl bootstrap gui/$(id -u) \
+                 ~/Library/LaunchAgents/com.overnight.daemon.remote.plist 2>&1 \
+                 || echo OVERNIGHT_BOOTSTRAP_FAILED",
+            )
+            .await?;
+            if loaded.contains("OVERNIGHT_BOOTSTRAP_FAILED") {
+                println!("    The agent is installed but not started: {target} has no GUI");
+                println!("    session to load it into. It will start when someone logs in.");
+                return Ok(Persistence::OnDemand);
+            }
+            Ok(Persistence::Launchd)
+        }
+
+        other => Ok(other),
+    }
+}
+
+/// What a host IS, before anything is changed on it.
+///
+/// Separate from `install` because the app has to be able to ask "can this
+/// machine host Overnight, and what would installing involve" without
+/// installing anything. A user adding a server should be told it has no tmux
+/// before binaries start landing on it, not after.
+///
+/// Everything here is one ssh round trip. Each probe is a shell fragment that
+/// prints `key=value` and cannot fail the whole command — a host missing
+/// `loginctl` must still report its architecture.
+pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
+    let script = "        echo \"os=$(uname -s)\"; \
+        echo \"arch=$(uname -m)\"; \
+        echo \"kernel=$(uname -r)\"; \
+        echo \"tmux=$(command -v tmux || echo none)\"; \
+        echo \"systemd=$(systemctl --user show-environment >/dev/null 2>&1 && echo yes || echo no)\"; \
+        echo \"launchd=$(command -v launchctl >/dev/null 2>&1 && echo yes || echo no)\"; \
+        echo \"daemon=$(~/.local/bin/overnightd --version 2>/dev/null || echo none)\"; \
+        echo \"cli=$(~/.local/bin/overnight --version 2>/dev/null || echo none)\"; \
+        echo \"service=$(systemctl --user is-active overnight.service 2>/dev/null || echo unknown)\"; \
+        echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"";
+
+    let report = remote_capture(target, script).await?;
+    let mut fields: std::collections::HashMap<&str, &str> = Default::default();
+    for line in report.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            fields.insert(key.trim(), value.trim());
+        }
+    }
+    let get = |k: &str| fields.get(k).copied().unwrap_or_default().to_string();
+
+    let os = get("os");
+    let kernel = get("kernel");
+    // WSL announces itself in the kernel release, and nowhere else that is
+    // reliable: `uname -s` says Linux exactly like any other Linux, but the
+    // machine has no systemd unless the user opted into it, and its lifetime is
+    // tied to a Windows session rather than to a login.
+    let wsl = kernel.to_lowercase().contains("microsoft");
+    let tmux = get("tmux");
+    let systemd = get("systemd") == "yes";
+    // "none" is what the probe prints for a thing that is not there; an empty
+    // string is a field the host did not answer at all. Neither is a value.
+    fn present(value: String) -> Option<String> {
+        (!value.is_empty() && value != "none").then_some(value)
+    }
+    let launchd = get("launchd") == "yes";
+
+    let platform = match os.as_str() {
+        "Linux" if wsl => Platform::Wsl,
+        "Linux" => Platform::Linux,
+        "Darwin" => Platform::MacOs,
+        _ => Platform::Unsupported,
+    };
+
+    // What will keep the daemon alive when nobody is attached. Reported rather
+    // than assumed, because it is the difference between agents that survive
+    // the night and agents that die at logout — the whole point of the product.
+    let persistence = match platform {
+        Platform::MacOs if launchd => Persistence::Launchd,
+        Platform::Linux | Platform::Wsl if systemd => Persistence::Systemd,
+        Platform::Unsupported => Persistence::None,
+        _ => Persistence::OnDemand,
+    };
+
+    let mut blockers = Vec::new();
+    if matches!(platform, Platform::Unsupported) {
+        blockers.push(format!("{os} is not a platform Overnight can install on."));
+    }
+    if tmux == "none" {
+        blockers.push(
+            "No tmux. Overnight keeps every terminal inside one, so without it \
+             the daemon runs and every terminal derives lost."
+                .to_string(),
+        );
+    }
+
+    Ok(Probe {
+        target: target.to_string(),
+        platform,
+        os,
+        arch: get("arch"),
+        kernel,
+        tmux: present(tmux.clone()),
+        persistence,
+        installed_cli: present(get("cli")),
+        installed_daemon: present(get("daemon")),
+        service_active: get("service") == "active",
+        lingering: get("linger") == "yes",
+        blockers,
+    })
+}
+
+/// What a host is and what installing on it would involve.
+#[derive(Debug, Clone)]
+pub struct Probe {
+    pub target: String,
+    pub platform: Platform,
+    pub os: String,
+    pub arch: String,
+    pub kernel: String,
+    pub tmux: Option<String>,
+    pub persistence: Persistence,
+    pub installed_cli: Option<String>,
+    pub installed_daemon: Option<String>,
+    pub service_active: bool,
+    pub lingering: bool,
+    /// Reasons this host cannot be installed on at all. Empty means it can.
+    pub blockers: Vec<String>,
+}
+
+impl Probe {
+    pub fn installable(&self) -> bool {
+        self.blockers.is_empty()
+    }
+
+    /// Written out by hand rather than derived.
+    ///
+    /// This crate carries `serde_json` and not `serde` with its derive feature,
+    /// the same trade `sha256_hex` below makes: one dependency avoided for a
+    /// few lines, in a crate whose whole job is to wrap a CLI.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "target": self.target,
+            "platform": self.platform.name(),
+            "os": self.os,
+            "arch": self.arch,
+            "kernel": self.kernel,
+            "tmux": self.tmux,
+            "persistence": self.persistence.name(),
+            "installedCli": self.installed_cli,
+            "installedDaemon": self.installed_daemon,
+            "serviceActive": self.service_active,
+            "lingering": self.lingering,
+            "blockers": self.blockers,
+            "installable": self.installable(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    Linux,
+    /// Linux under Windows. Its own case because persistence is different and
+    /// the failure is silent otherwise — see `probe`.
+    Wsl,
+    MacOs,
+    Unsupported,
+}
+
+impl Platform {
+    pub fn name(self) -> &'static str {
+        match self {
+            Platform::Linux => "linux",
+            Platform::Wsl => "wsl",
+            Platform::MacOs => "macos",
+            Platform::Unsupported => "unsupported",
+        }
+    }
+
+    /// The directory `scripts/build-linux.sh` and friends write into.
+    pub fn dist_slug(self, arch: &str) -> Option<String> {
+        let arch = match arch {
+            "aarch64" | "arm64" => "aarch64",
+            "x86_64" | "amd64" => "x86_64",
+            _ => return None,
+        };
+        match self {
+            Platform::Linux | Platform::Wsl => Some(format!("{arch}-linux")),
+            Platform::MacOs => Some(format!("{arch}-darwin")),
+            Platform::Unsupported => None,
+        }
+    }
+}
+
+/// What will keep the daemon running when nobody is attached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Persistence {
+    Systemd,
+    Launchd,
+    /// Installed, but nothing will start it: it runs when a client connects and
+    /// stops when that connection ends. Agents inside tmux still survive; what
+    /// is lost is the supervision that notices them finishing.
+    OnDemand,
+    None,
+}
+
+impl Persistence {
+    pub fn name(self) -> &'static str {
+        match self {
+            Persistence::Systemd => "systemd",
+            Persistence::Launchd => "launchd",
+            Persistence::OnDemand => "onDemand",
+            Persistence::None => "none",
+        }
+    }
 }
 
 /// What is installed and running on a host.
@@ -243,9 +524,22 @@ async fn remote_capture(target: &str, command: &str) -> Result<String, Box<dyn s
         .args(ssh_options())
         .arg(target)
         .arg(command)
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .output()
         .await?;
+
+    // ssh's own failure is an error, not an empty answer.
+    //
+    // This returned stdout regardless of exit status, so a host that refused
+    // the connection came back as a host that answered with nothing — and a
+    // probe then read those empty fields as "some OS I do not recognise". The
+    // user was told their machine was an unsupported platform when the truth
+    // was that ssh could not reach it, which sends them to fix the wrong thing.
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let detail = stderr.trim().lines().next().unwrap_or("ssh failed").to_string();
+        return Err(format!("cannot reach {target}: {detail}").into());
+    }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
@@ -371,6 +665,34 @@ mod tests {
         assert!(UNIT.contains("WantedBy=default.target"));
         // A crash loop with systemd's 100ms default would hammer the machine.
         assert!(UNIT.contains("RestartSec=5s"));
+    }
+
+    #[test]
+    fn wsl_is_its_own_platform_because_persistence_differs() {
+        // `uname -s` says Linux on WSL exactly as it does anywhere else, and
+        // the kernel release is the only reliable tell. Treating it as ordinary
+        // Linux means promising a systemd service on a machine that usually has
+        // no systemd at all — the daemon then never starts, and nothing says so.
+        for kernel in ["5.15.153.1-microsoft-standard-WSL2", "4.4.0-19041-Microsoft"] {
+            assert!(
+                kernel.to_lowercase().contains("microsoft"),
+                "{kernel} must be recognised as WSL"
+            );
+        }
+        assert!(!"6.8.0-45-generic".to_lowercase().contains("microsoft"));
+        assert!(!"25.5.0".to_lowercase().contains("microsoft"));
+    }
+
+    #[test]
+    fn each_platform_looks_for_its_own_binaries() {
+        assert_eq!(Platform::Linux.dist_slug("x86_64").as_deref(), Some("x86_64-linux"));
+        // WSL runs Linux binaries. It differs in how the daemon is kept alive,
+        // not in what it can execute.
+        assert_eq!(Platform::Wsl.dist_slug("aarch64").as_deref(), Some("aarch64-linux"));
+        assert_eq!(Platform::MacOs.dist_slug("arm64").as_deref(), Some("aarch64-darwin"));
+        assert_eq!(Platform::Unsupported.dist_slug("x86_64"), None);
+        // An architecture with no build here is not a directory to guess at.
+        assert_eq!(Platform::Linux.dist_slug("riscv64"), None);
     }
 
     #[test]

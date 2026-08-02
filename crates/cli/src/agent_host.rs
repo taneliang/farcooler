@@ -243,6 +243,15 @@ pub async fn run(
                                 produced = running.cancel_queued(&id);
                                 Ok(())
                             }
+                            DaemonMessage::SteerQueued { id } => {
+                                match running.steer_queued(&id).await {
+                                    Ok(events) => {
+                                        produced = events;
+                                        Ok(())
+                                    }
+                                    Err(e) => Err(e),
+                                }
+                            }
                             DaemonMessage::Answer { request_id, option_id } => {
                                 let id: serde_json::Value = serde_json::from_str(&request_id)
                                     .unwrap_or(serde_json::Value::String(request_id));

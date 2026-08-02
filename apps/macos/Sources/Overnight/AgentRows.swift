@@ -426,6 +426,14 @@ struct QueuedRow: View {
     let queued: QueuedPrompt
     let onEdit: (String) -> Void
     let onCancel: () -> Void
+    /// Send this one into the turn already running.
+    ///
+    /// The queue's whole point is that a message you can still see and still
+    /// edit beats one already gone — so waiting is the default. But a message
+    /// written mid-turn is very often a correction, and a correction is worth
+    /// nothing once the wrong thing has been done. This is the escape hatch:
+    /// you looked at what you wrote and decided it should interrupt.
+    let onSteer: () -> Void
 
     @State private var editing = false
     @State private var draft = ""
@@ -449,6 +457,8 @@ struct QueuedRow: View {
 
                 HStack(spacing: 8) {
                     Text("Queued")
+                    Button("Send now", action: onSteer)
+                        .buttonStyle(.plain)
                     Button(editing ? "Save" : "Edit") {
                         if editing {
                             commit()

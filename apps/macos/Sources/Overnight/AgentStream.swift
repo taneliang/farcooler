@@ -162,6 +162,11 @@ final class AgentStream: ObservableObject {
         _ = try? await runCLI(["terminal", "agent-edit-queued", terminal, id, text])
     }
 
+    /// Send a queued message into the turn already running.
+    func steerQueued(_ id: String) async {
+        _ = try? await runCLI(["terminal", "agent-steer-queued", terminal, id])
+    }
+
     /// Take back a message that has not gone out yet.
     func cancelQueued(_ id: String) async {
         _ = try? await runCLI(["terminal", "agent-cancel-queued", terminal, id])

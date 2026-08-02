@@ -34,30 +34,9 @@ final class DaemonClient: ObservableObject {
         return target.isEmpty ? [] : ["--host", target]
     }
 
-    private var binary: String? {
-        var candidates: [String] = []
+    private var binary: String? { CLI.binary }
 
-        if let bundled = Bundle.main.resourceURL?
-            .appendingPathComponent("overnight").path
-        {
-            candidates.append(bundled)
-        }
-        if let override = ProcessInfo.processInfo.environment["OVERNIGHT_BIN"] {
-            candidates.append(override)
-        }
-        candidates += ["/usr/local/bin/overnight", "\(NSHomeDirectory())/.local/bin/overnight"]
-
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
-
-    /// Deliberately does NOT set OVERNIGHT_HOME.
-    ///
-    /// The CLI already resolves its own runtime directory. Setting a second
-    /// guess here would point the app at a different database than the CLI uses
-    /// from your shell, and the two would silently disagree about what exists.
-    private var environment: [String: String] {
-        ProcessInfo.processInfo.environment
-    }
+    private var environment: [String: String] { CLI.environment }
 
     // MARK: - Live updates
 

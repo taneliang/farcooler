@@ -664,6 +664,15 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
+            "terminal.agent_steer_queued" => {
+                let Some(request::Payload::AgentSteerQueued(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                svc.agents().send(id, DaemonMessage::SteerQueued { id: p.queued_id });
+                self.terminal_result(id).await
+            }
+
             "terminal.agent_cancel" => {
                 let Some(request::Payload::AgentCancel(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });

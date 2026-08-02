@@ -147,9 +147,10 @@ struct SettingsView: View {
         TabView {
             terminal.tabItem { Label("Terminal", systemImage: "terminal") }
             behaviour.tabItem { Label("Behaviour", systemImage: "gearshape") }
-            host.tabItem { Label("Host", systemImage: "bolt") }
+            HostsSettings().tabItem { Label("Machines", systemImage: "server.rack") }
+            host.tabItem { Label("Startup", systemImage: "bolt") }
         }
-        .frame(width: 480, height: 320)
+        .frame(width: 520, height: 400)
     }
 
     /// Whether this machine stays reachable when nobody is at it.
@@ -159,18 +160,6 @@ struct SettingsView: View {
     /// information about the fleet.
     private var host: some View {
         Form {
-            Section {
-                TextField("Drive another machine", text: $preferences.remoteHost)
-                    .autocorrectionDisabled()
-                Text(
-                    "A user@host or an ssh config alias. Empty means this Mac. Overnight "
-                    + "reaches the other machine over ssh — there is no Overnight listener "
-                    + "to set up anywhere."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
             Section {
                 switch service.state {
                 case .registered:
