@@ -33,6 +33,15 @@ struct AgentView: View {
     /// From the fleet rather than inferred here: the daemon derives activity
     /// for every surface that shows it, and a second opinion computed on the
     /// phone is exactly the disagreement this design exists to prevent.
+    /// The agent behind this pane, capitalised for the placeholder.
+    private var harnessName: String {
+        guard let workspaceID,
+            let preset = connection.terminal(terminalID, in: workspaceID)?.preset,
+            !preset.isEmpty
+        else { return "the agent" }
+        return preset.capitalized
+    }
+
     private var isWorking: Bool {
         guard let workspaceID else { return false }
         return connection.terminal(terminalID, in: workspaceID)?.agent == .working
@@ -40,12 +49,6 @@ struct AgentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !transcript.plan.isEmpty {
-                PlanPanel(entries: transcript.plan)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-            }
-
             transcriptBody
                 // The composer sits in the transcript's bottom safe area, which
                 // is the framework's own answer to "a control resting on
@@ -63,7 +66,27 @@ struct AgentView: View {
     /// Everything that sits over the bottom of the conversation.
     @ViewBuilder
     private var composerStack: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
+            // The plan and the queue are ATTACHED to the composer, not
+            // scattered around the screen. The plan used to be pinned at the
+            // top and the queue drawn inline at the transcript's end, which put
+            // three things that are all "what happens next" in three different
+            // places — and the plan, furthest away, was the one the next
+            // message is most likely to change.
+            if !transcript.plan.isEmpty {
+                PlanPanel(entries: transcript.plan)
+                    .padding(.horizontal, 12)
+            }
+
+            ForEach(transcript.queue) { queued in
+                QueuedRow(
+                    queued: queued,
+                    onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
+                    onCancel: { Task { await stream.cancelQueued(queued.id) } },
+                    onSteer: { Task { await stream.steerQueued(queued.id) } })
+                    .padding(.horizontal, 12)
+            }
+
             if let pending = transcript.pendingPermission {
                 ApprovalCard(pending: pending) { optionID in
                     Task { await stream.answer(pending.id, optionID) }
@@ -74,6 +97,9 @@ struct AgentView: View {
             AgentComposer(
                 availableModes: transcript.availableModes,
                 agentMode: transcript.agentMode,
+                configOptions: transcript.configOptions,
+                onSetConfig: { id, value in Task { await stream.setConfig(id, value) } },
+                harness: harnessName,
                 availableCommands: transcript.availableCommands,
                 workspaceID: workspaceID,
                 core: connection.core,
@@ -128,19 +154,6 @@ struct AgentView: View {
                             AgentRowView(row: row)
                         }
 
-                        // Written, not yet sent. See `QueuedPrompt`: a message
-                        // typed while the agent is working waits for the turn
-                        // to end, and drawing it like a sent one claimed
-                        // something that had not happened.
-                        ForEach(transcript.queue) { queued in
-                            QueuedRow(
-                                queued: queued,
-                                onEdit: { text in
-                                    Task { await stream.editQueued(queued.id, text) }
-                                },
-                                onCancel: { Task { await stream.cancelQueued(queued.id) } },
-                                onSteer: { Task { await stream.steerQueued(queued.id) } })
-                        }
                         // An invisible anchor rather than scrolling to the
                         // last row's own id: the last row mutates in place
                         // while a tool streams progress (see `Transcript`),
@@ -816,6 +829,19 @@ private struct AgentComposer: View {
     /// nothing at all after.
     let availableModes: [AgentChoice]
     let agentMode: String?
+    /// Every selector the agent advertises — mode, model, effort, subagent and
+    /// whatever an adapter adds next.
+    ///
+    /// The phone had only `availableModes`, so a session offering five
+    /// selectors showed one of them. The Mac has rendered the generic list
+    /// since ACP config options landed; this is the same data, drawn for a
+    /// screen with no room to lay them side by side.
+    let configOptions: [ConfigOption]
+    let onSetConfig: (String, String) -> Void
+    /// Which agent this is — "Claude", "Codex". The conversation's own name is
+    /// already in the title bar; what a fleet of several harnesses needs is to
+    /// tell them apart.
+    let harness: String
     let availableCommands: [String]
     let workspaceID: String?
     let core: ClientCore
@@ -828,6 +854,7 @@ private struct AgentComposer: View {
     @State private var mentionSearch: Task<Void, Never>?
     @State private var attachments: [ComposerAttachment] = []
     @State private var photoPickerItem: PhotosPickerItem?
+    @State private var fieldHeight: CGFloat = 22
 
     private var token: ComposerToken { activeToken(in: text, cursor: cursor) }
 
@@ -854,27 +881,37 @@ private struct AgentComposer: View {
                 attachmentStrip
             }
 
-            HStack(alignment: .bottom, spacing: 10) {
-                PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                    Image(systemName: "photo.badge.plus")
-                        .font(.system(size: 17))
-                        .foregroundStyle(.secondary)
-                }
-                .onChange(of: photoPickerItem) { _, item in loadPickedPhoto(item) }
-
-                modeMenu
-
+            // Two rows, the same shape the Mac settled on: what you are
+            // writing, then everything that acts on it. One row put a growing
+            // field between four fixed controls, so the buttons moved as you
+            // typed and the field never had the width it needed.
+            VStack(alignment: .leading, spacing: 8) {
                 fieldWithPlaceholder
 
-                Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 28))
-                        .symbolRenderingMode(.hierarchical)
+                HStack(spacing: 14) {
+                    PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.secondary)
+                    }
+                    .onChange(of: photoPickerItem) { _, item in loadPickedPhoto(item) }
+
+                    settingsMenu
+
+                    // Send is anchored to the trailing edge, always: the one
+                    // control you reach for without looking should not move.
+                    Spacer(minLength: 8)
+
+                    Button(action: send) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 28))
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                    .disabled(!canSend)
                 }
-                .disabled(!canSend)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
         .modifier(GlassField())
         .padding(.horizontal, 10)
@@ -886,23 +923,55 @@ private struct AgentComposer: View {
     // MARK: Field
 
     private var fieldWithPlaceholder: some View {
-        ZStack(alignment: .leading) {
+        // `.topLeading`, not `.leading`: centred, the placeholder sat halfway
+        // down a box that was itself too tall, which read as a text field that
+        // had lost its text rather than one waiting for some.
+        ZStack(alignment: .topLeading) {
             if text.isEmpty {
-                Text("Message").foregroundStyle(.tertiary).padding(.leading, 4)
+                Text("Message \(harness)")
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 6)
             }
-            ComposerTextView(text: $text, cursor: $cursor)
-                .frame(minHeight: 34, maxHeight: 110)
+            ComposerTextView(text: $text, cursor: $cursor, measuredHeight: $fieldHeight)
+                .frame(height: fieldHeight)
         }
     }
 
     // MARK: Mode switcher
 
+    /// Every selector, behind one control.
+    ///
+    /// Nested submenus rather than a flat list: these are several separate
+    /// questions, and flattening them would put "High" and "Opus" and "Plan
+    /// Mode" side by side with nothing saying which question each answers. The
+    /// Mac folds its overflow the same way; a phone has no room to show any of
+    /// them inline, so everything folds.
     @ViewBuilder
-    private var modeMenu: some View {
-        // A picker with one option is not a picker — the same rule
-        // `TaskComposerView` follows for a single-repository fleet. A session
-        // that never offered a second mode has nothing to switch to.
-        if availableModes.count > 1 {
+    private var settingsMenu: some View {
+        if !configOptions.isEmpty {
+            Menu {
+                ForEach(configOptions) { option in
+                    Menu(menuTitle(option)) {
+                        ForEach(option.options) { choice in
+                            Button {
+                                onSetConfig(option.id, choice.id)
+                            } label: {
+                                if choice.id == option.currentValue {
+                                    Label(choice.name, systemImage: "checkmark")
+                                } else {
+                                    Text(choice.name)
+                                }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.secondary)
+            }
+        } else if availableModes.count > 1 {
+            // An older daemon that only reports modes still gets a picker.
             Menu {
                 ForEach(availableModes) { mode in
                     Button {
@@ -921,6 +990,14 @@ private struct AgentComposer: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// "Model · Sonnet" — the question and its answer, so a menu of five reads
+    /// as five settings rather than five words.
+    private func menuTitle(_ option: ConfigOption) -> String {
+        let current = option.options.first { $0.id == option.currentValue }?.name
+        guard let current else { return option.name }
+        return "\(option.name) · \(current)"
     }
 
     // MARK: Slash / mention suggestions
@@ -1105,6 +1182,16 @@ private struct SuggestionList: View {
 private struct ComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var cursor: Int
+    /// How tall the typed text is, reported after it changes rather than
+    /// negotiated during layout.
+    ///
+    /// A `UITextView` has no useful intrinsic height, so given a flexible frame
+    /// it simply took the largest one offered — a one-line message rendered as
+    /// a box three lines deep with the placeholder floating in the middle of
+    /// it. The Mac hit this too; measuring during layout is what froze it
+    /// there, so this goes the same way round: text changes, then height
+    /// changes, then layout happens.
+    @Binding var measuredHeight: CGFloat
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -1115,6 +1202,7 @@ private struct ComposerTextView: UIViewRepresentable {
         view.textContainer.lineFragmentPadding = 0
         view.delegate = context.coordinator
         view.text = text
+        DispatchQueue.main.async { context.coordinator.report(view) }
         return view
     }
 
@@ -1140,6 +1228,21 @@ private struct ComposerTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
+            report(textView)
+        }
+
+        /// The height of what has been typed, clamped to what the composer
+        /// will show.
+        func report(_ textView: UITextView) {
+            let width = textView.bounds.width
+            guard width > 0 else { return }
+            let fitted = textView.sizeThatFits(
+                CGSize(width: width, height: .greatestFiniteMagnitude)
+            ).height
+            let clamped = min(max(fitted, 22), 110)
+            guard abs(clamped - parent.measuredHeight) > 0.5 else { return }
+            let binding = parent.$measuredHeight
+            DispatchQueue.main.async { binding.wrappedValue = clamped }
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {

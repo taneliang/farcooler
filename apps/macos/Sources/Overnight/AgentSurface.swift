@@ -68,16 +68,33 @@ struct AgentSurface: View {
             // next one, with a full-content mask re-composited each time.
             //
             // `safeAreaInset` has no measurement to feed back.
-            VStack(spacing: 0) {
-                if !stream.transcript.plan.isEmpty {
-                    PlanPanel(entries: stream.transcript.plan)
-                    Divider()
-                }
-
-                transcriptView
-            }
+            transcriptView
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    // The plan and the queue are ATTACHED to the composer, not
+                    // scattered around the pane.
+                    //
+                    // The plan used to be pinned above the transcript and the
+                    // queue drawn inline at its end, which put three things
+                    // that are all "what happens next" in three different
+                    // places — and the plan, at the far top, was furthest from
+                    // the message that would change it. Everything about the
+                    // NEXT turn now sits together, directly over the box you
+                    // type into.
+                    if !stream.transcript.plan.isEmpty {
+                        PlanPanel(entries: stream.transcript.plan)
+                            .padding(.horizontal, 10)
+                    }
+
+                    ForEach(stream.transcript.queue) { queued in
+                        QueuedRow(
+                            queued: queued,
+                            onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
+                            onCancel: { Task { await stream.cancelQueued(queued.id) } },
+                            onSteer: { Task { await stream.steerQueued(queued.id) } })
+                            .padding(.horizontal, 10)
+                    }
+
                     // Only when there is no tool call to hang it on. A
                     // permission names the call it gates, so the buttons
                     // normally live on that row — see `AgentRowView.pending`.
@@ -166,16 +183,6 @@ struct AgentSurface: View {
                         WorkingRow()
                     }
 
-                    // Written, not yet sent. Below the working row because
-                    // that is where they are in time: after everything the
-                    // agent is doing now.
-                    ForEach(stream.transcript.queue) { queued in
-                        QueuedRow(
-                            queued: queued,
-                            onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
-                            onCancel: { Task { await stream.cancelQueued(queued.id) } },
-                            onSteer: { Task { await stream.steerQueued(queued.id) } })
-                    }
                 }
                 // Roomier than a terminal, on purpose. A VT grid is dense
                 // because every cell is addressable; prose is read, and the
@@ -351,8 +358,10 @@ private struct PlanPanel: View {
                 .padding(.bottom, 8)
             }
         }
+        // A rounded surface, because it floats with the composer now rather
+        // than spanning the pane as a header.
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.03))
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
     }
 
 
