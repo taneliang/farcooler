@@ -61,6 +61,16 @@ struct AgentComposer: View {
             }
             if !attachments.isEmpty { attachmentStrip }
 
+            // On its own line, above the field.
+            //
+            // It used to share the controls row with the selectors and the send
+            // button, where it was the only thing that could grow — so "Waiting
+            // for you" got squeezed to "Waiting f…" the moment a pane was
+            // narrow or a model name was long. What it says is the state of the
+            // agent you are about to write to; it belongs over the field, not
+            // wedged between two controls.
+            activity
+
             AgentComposerField(
                 text: $text,
                 cursor: $cursor,
@@ -101,7 +111,6 @@ struct AgentComposer: View {
                 // position should never be in question is the one you reach for
                 // without looking.
                 Spacer(minLength: 8)
-                activity
                 sendButton
             }
             .frame(maxWidth: .infinity)
@@ -427,8 +436,15 @@ struct AgentComposer: View {
         // question each answers.
         if !overflowOptions.isEmpty {
             Menu {
+                // Sections, NOT nested menus.
+                //
+                // A `Menu` inside a borderless `Menu` flashes its submenu open
+                // and shut the moment the pointer reaches it on macOS — the
+                // submenu is unusable, which makes every option inside it
+                // unreachable. Sections say the same thing (this group of
+                // choices answers that question) in a control that works.
                 ForEach(overflowOptions) { option in
-                    Menu(option.name) {
+                    Section(option.name) {
                         ForEach(option.options) { choice in
                             Button {
                                 Task { await stream.setConfig(option.id, choice.id) }

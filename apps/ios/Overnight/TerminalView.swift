@@ -49,9 +49,6 @@ struct TerminalView: View {
     @State private var focusRequest = 0
     @State private var dismissRequest = 0
     @State private var showWorkspaceList = false
-    /// Whether the software keyboard is on screen, which is what decides
-    /// between the tab strip and the key row — see the comment at its use.
-    @State private var keyboardIsUp = false
 
     // User-configurable, unlike the Mac's fixed terminal font: see
     // Settings.swift. Read directly from the same `UserDefaults` key
@@ -90,6 +87,19 @@ struct TerminalView: View {
     /// rather than carried in from wherever `current` was set — a workspace
     /// the tab strip or the switcher sheet points at is only ever known to
     /// this screen by its terminal's id.
+    /// The terminal as the daemon describes it RIGHT NOW.
+    ///
+    /// `current` is a `@State` copy, taken when this screen opened and updated
+    /// by the tab strip. That is right for identity and wrong for anything that
+    /// changes underneath it — pane mode above all. Switching to chat left the
+    /// copy still saying "terminal", so the button asked for the same switch
+    /// every time, the screen kept drawing a VT grid, and the change only
+    /// appeared after navigating away and back, which rebuilt the copy.
+    private var live: Terminal {
+        guard let workspace = currentWorkspace?.id else { return current }
+        return connection.terminal(current.id, in: workspace) ?? current
+    }
+
     private var currentWorkspace: Workspace? {
         connection.fleet.workspaces.first { $0.terminals.contains { $0.id == current.id } }
     }
@@ -114,7 +124,7 @@ struct TerminalView: View {
             // side's `TerminalSession.switchTo` and correct here because an
             // agent session has no live ssh channel to hand off — a fresh
             // subscribe from seq 0 costs one round trip, not a stream.
-            if current.isAgentPane {
+            if live.isAgentPane {
                 AgentView(terminalID: current.id, workspaceID: currentWorkspace?.id, connection: connection)
                     .id(current.id)
             } else {
@@ -132,21 +142,17 @@ struct TerminalView: View {
             // constantly — switching terminal — at the far end of the screen
             // from the hand holding the phone. That still holds; what changed
             // is that it floats now instead of sitting on a slab of its own.
-            // Hidden while the keyboard is up.
+            // Always shown, keyboard or not.
             //
-            // The key row is an input accessory, so it rides the keyboard and
-            // lands directly on top of this — two floating bars stacked on each
-            // other, one of them a row of terminal keys and the other a row of
-            // terminal names, with the same rounded glass on both. Nobody
-            // switching panes needs the switcher while they are mid-command,
-            // and the switcher sheet is still one tap away in the toolbar.
-            if !keyboardIsUp {
-                TerminalTabStrip(
-                    workspaces: connection.fleet.workspaces, current: current, onSelect: select
-                )
-                .padding(.top, 2)
-                .transition(.opacity)
-            }
+            // It was hidden while the keyboard was up, because the key row is an
+            // input accessory and lands directly on top of it — two floating
+            // bars stacked. But switching between parallel work IS why this
+            // strip is on the screen, and needing it most while typing is not a
+            // strange case. The two bars are spaced apart instead.
+            TerminalTabStrip(
+                workspaces: connection.fleet.workspaces, current: current, onSelect: select
+            )
+            .padding(.top, 2)
         }
         .background(TerminalPalette.background)
         // A terminal is dark regardless of the phone's own appearance — the
@@ -187,19 +193,19 @@ struct TerminalView: View {
             // only where it would work — offering it for a Codex pane would
             // hand back a Claude session in its place, since the shim knows one
             // adapter.
-            if current.canSwitchPaneMode {
+            if live.canSwitchPaneMode {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task {
                             await connection.setPaneMode(
-                                current, to: current.isAgentPane ? "terminal" : "agent")
+                                live, to: live.isAgentPane ? "terminal" : "agent")
                         }
                     } label: {
                         Image(
-                            systemName: current.isAgentPane
+                            systemName: live.isAgentPane
                                 ? "terminal" : "bubble.left.and.text.bubble.right")
                     }
-                    .accessibilityLabel(current.isAgentPane ? "Show the terminal" : "Show the chat")
+                    .accessibilityLabel(live.isAgentPane ? "Show the terminal" : "Show the chat")
                 }
             }
 
@@ -224,16 +230,6 @@ struct TerminalView: View {
                 .navigationTitle("Worktrees")
                 .navigationBarTitleDisplayMode(.inline)
             }
-        }
-        .onReceive(
-            NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
-        ) { _ in
-            withAnimation(.easeOut(duration: 0.18)) { keyboardIsUp = true }
-        }
-        .onReceive(
-            NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
-        ) { _ in
-            withAnimation(.easeOut(duration: 0.18)) { keyboardIsUp = false }
         }
         .onDisappear { session.stop() }
         // Returning to the foreground carries no geometry of its own — this

@@ -63,8 +63,16 @@ struct ApprovalControls: View {
 
             ForEach(secondaryOptions) { option in
                 Button(option.name) { onChoose(option.id) }
-                    .buttonStyle(.link)
+                    // `.plain` and grey, NOT `.link`.
+                    //
+                    // A link style paints the label accent-blue, which is the
+                    // same mistake the composer's selector row made: blue reads
+                    // as somewhere to go, not as a thing that changes what the
+                    // agent may do from here on. It also put a second blue next
+                    // to the prominent Allow, so the two competed.
+                    .buttonStyle(.plain)
                     .font(.caption)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }

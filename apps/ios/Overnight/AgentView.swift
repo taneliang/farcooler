@@ -18,6 +18,9 @@ struct AgentView: View {
     @ObservedObject var connection: Connection
 
     @StateObject private var stream: AgentStream
+    /// Whether the transcript should follow its own tail — true while the
+    /// reader is parked at the bottom, false once they scroll away.
+    @State private var followingTail = true
 
     init(terminalID: String, workspaceID: String?, connection: Connection) {
         self.terminalID = terminalID
@@ -178,7 +181,12 @@ struct AgentView: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    // `VStack`, not `LazyVStack`: a lazy stack estimates the
+                    // height of rows it has not built and corrects itself as
+                    // they scroll in, which makes a transcript of wildly uneven
+                    // rows jump under the finger. Bounded by the daemon's
+                    // `TRANSCRIPT_LIMIT`.
+                    VStack(alignment: .leading, spacing: 12) {
                         // A stale error banner rather than a blanked screen: a
                         // failed poll is not a disconnection, the same rule
                         // `Connection.refresh()` follows — the last known
@@ -214,10 +222,23 @@ struct AgentView: View {
                     }
                     .padding(12)
                 }
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    // Whether the reader is parked at the tail. 40pt of slack,
+                    // because "at the bottom" after a redraw is rarely exact.
+                    geometry.contentOffset.y + geometry.containerSize.height
+                        >= geometry.contentSize.height - 40
+                } action: { _, atBottom in
+                    followingTail = atBottom
+                }
                 // Keyed on the CURSOR, not the row count. A streamed reply
                 // coalesces into the row already on screen, so the count does
                 // not change while the text grows off the bottom.
                 .onChange(of: transcript.cursor) { _, _ in
+                    // Only while the reader is at the tail. Scrolling to the
+                    // end on every event meant reading anything older was
+                    // impossible — a streamed reply fires several events a
+                    // second and each one threw the view back to the bottom.
+                    guard followingTail else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }

@@ -171,7 +171,18 @@ struct AgentSurface: View {
     private var transcriptView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                // `VStack`, not `LazyVStack`.
+                //
+                // A lazy stack estimates the height of rows it has not built
+                // yet and corrects itself as they scroll in — so scrolling UP
+                // through a transcript made the content jump and the scrollbar
+                // skip about, several times per drag. These rows are wildly
+                // uneven (a one-word message beside a 200-line tool output),
+                // which is exactly the case an estimate gets worst.
+                //
+                // Bounded by `TRANSCRIPT_LIMIT` on the daemon side, so this is
+                // never unbounded work.
+                VStack(alignment: .leading, spacing: 14) {
                     ForEach(stream.transcript.rows) { row in
                         AgentRowView(
                             row: row,
@@ -220,17 +231,23 @@ struct AgentSurface: View {
             // count-keyed scroll sits still while text grows off the bottom.
             // The cursor moves for every event, which is exactly when there is
             // something new to see.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                // Whether the reader is parked at the tail. 40pt of slack,
+                // because "at the bottom" after a redraw is rarely exact.
+                geometry.contentOffset.y + geometry.containerSize.height
+                    >= geometry.contentSize.height - 40
+            } action: { _, atBottom in
+                followingTail = atBottom
+            }
             .onChange(of: stream.transcript.cursor) { _, _ in
-                // The bottom, always.
+                // Only while the reader is at the tail.
                 //
-                // This used to pin a sent message to the top of the view with
-                // the reply streaming in beneath it — Cursor's reading
-                // position, and a nice one. Getting it right needs a spacer
-                // sized to the viewport that appears and collapses with the
-                // turn, and every version of that left content stranded
-                // somewhere unreachable. Following the newest line is what a
-                // terminal does, it is what this pane replaced, and it is never
-                // wrong about where the reader is looking.
+                // Scrolling to the end on EVERY event meant reading anything
+                // older was impossible: a streamed reply fires several events a
+                // second, and each one yanked the view back down. Following the
+                // newest line is right when you are already there and hostile
+                // when you are not.
+                guard followingTail else { return }
                 withAnimation(Motion.snap) {
                     proxy.scrollTo(Self.endOfTranscript, anchor: .bottom)
                 }
@@ -240,6 +257,12 @@ struct AgentSurface: View {
             }
         }
     }
+
+    /// Whether the transcript should follow its own tail.
+    ///
+    /// True while the reader is parked at the bottom, false the moment they
+    /// scroll away from it — see `onScrollGeometryChange` below.
+    @State private var followingTail = true
 
     /// The anchor at the very end of the transcript's content.
     private static let endOfTranscript = "end-of-transcript"
