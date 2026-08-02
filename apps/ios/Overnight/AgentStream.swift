@@ -172,11 +172,23 @@ final class AgentStream: ObservableObject {
     }
 
     func setConfig(_ id: String, _ value: String) async {
+        // Shown before it is confirmed, exactly as on the Mac.
+        //
+        // The adapter applies `session/set_config_option` and says nothing back,
+        // so a picker that waited for an echo snapped to its old value and read
+        // as a control that does nothing. That was found and fixed on the Mac
+        // and never ported; the phone has had the bug ever since.
+        transcript.selectConfigOptionLocally(id: id, value: value)
         _ = try? await core.call(
             "terminal.agent_set_config", ["terminal": terminal, "configId": id, "value": value])
     }
 
     func answer(_ requestID: String, _ optionID: String) async {
+        // Taken down on tap, not on an echo. The agent resumes without
+        // acknowledging the request it was blocked on, so a card that waited
+        // for confirmation sat there after the work it gated had happened —
+        // the same fix the Mac already carries.
+        transcript.clearPendingPermission()
         _ = try? await core.call(
             "terminal.agent_answer",
             ["terminal": terminal, "requestId": requestID, "optionId": optionID])

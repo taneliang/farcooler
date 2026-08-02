@@ -107,9 +107,6 @@ pub struct FakeInventory {
 }
 
 impl FakeInventory {
-    pub fn with_panes(panes: Vec<TaggedPane>) -> Self {
-        Self { snapshot: RuntimeSnapshot::healthy(panes) }
-    }
 
     pub fn unavailable() -> Self {
         Self { snapshot: RuntimeSnapshot::unavailable() }

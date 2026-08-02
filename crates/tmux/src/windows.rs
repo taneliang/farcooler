@@ -312,11 +312,6 @@ impl TmuxServer {
         Ok(())
     }
 
-    /// Stop streaming. `pipe-pane` with no command detaches the pipe.
-    pub async fn pipe_pane_stop(&self, pane_id: &str) -> Result<()> {
-        let _ = self.run(&["pipe-pane", "-t", pane_id]).await?;
-        Ok(())
-    }
 
     /// Everything tmux still holds for a pane, scrollback included, with colour.
     ///
@@ -734,10 +729,6 @@ impl TmuxServer {
         self.expect(&["select-layout", "-t", window_id, preset.as_str()], "select-layout").await
     }
 
-    /// Restore an arrangement from a layout description tmux gave us earlier.
-    pub async fn restore_layout(&self, window_id: &str, layout: &str) -> Result<()> {
-        self.expect(&["select-layout", "-t", window_id, layout], "select-layout").await
-    }
 
     /// Cycle to the next named layout, tmux's `prefix Space`.
     pub async fn next_preset(&self, window_id: &str) -> Result<()> {

@@ -108,10 +108,6 @@ where
         &self.server
     }
 
-    /// Events that arrived while waiting for responses.
-    pub fn take_events(&mut self) -> Vec<Event> {
-        std::mem::take(&mut self.pending_events)
-    }
 
     /// Wait for the next event.
     ///

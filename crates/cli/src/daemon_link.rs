@@ -42,10 +42,6 @@ impl Link {
         self.client.call(request).await
     }
 
-    pub fn server_hello(&self) -> &overnight_protocol::v1::ServerHello {
-        self.client.server_hello()
-    }
-
     /// Block until the daemon pushes something.
     pub async fn next_event(&mut self) -> Result<overnight_protocol::v1::Event, ClientError> {
         self.client.next_event().await

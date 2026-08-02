@@ -138,10 +138,6 @@ pub fn rules_for_command(command: &str) -> Option<&'static AgentRules> {
     RULES.iter().find(|r| r.commands.iter().any(|c| name.starts_with(c)))
 }
 
-/// Look up by agent name, for callers that already know which one.
-pub fn rules_for(preset: &str) -> Option<&'static AgentRules> {
-    RULES.iter().find(|r| r.preset == preset)
-}
 
 /// Which agent is in this pane: by process, or failing that, by what it drew.
 ///

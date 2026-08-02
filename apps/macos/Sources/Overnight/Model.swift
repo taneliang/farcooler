@@ -298,27 +298,6 @@ enum Status: Equatable {
         }
     }
 
-    /// One family, one size, one weight.
-    ///
-    /// The first attempt reached for literal imagery — a moon for idle, a
-    /// gearwheel for working — which reads as a sticker sheet rather than a
-    /// tool. These are all the same circle at the same optical weight, so a
-    /// column of them lines up and the differences between them are the only
-    /// thing that draws the eye.
-    var symbol: String {
-        switch self {
-        case .starting: return "circle.dotted"
-        case .running: return "circle.fill"
-        case .idle: return "circle"
-        case .working: return "circle.hexagonpath"
-        case .blocked: return "exclamationmark.circle.fill"
-        case .done: return "checkmark.circle.fill"
-        case .exited: return "circle.slash"
-        case .failed: return "xmark.circle.fill"
-        case .lost: return "questionmark.circle.fill"
-        }
-    }
-
     /// Does this want the user to do something?
     var wantsAttention: Bool {
         self == .blocked || self == .done || self == .lost || self == .failed

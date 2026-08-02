@@ -3,11 +3,9 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var client = DaemonClient()
-    @StateObject private var service = ServiceRegistration()
     @ObservedObject private var preferences = Preferences.shared
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
-    @State private var pollTask: Task<Void, Never>?
 
     @State private var showNewWorkspace = false
     @State private var showAddRepository = false
@@ -204,7 +202,6 @@ struct ContentView: View {
         ) { _ in
             // The user may have approved the login item in System Settings
             // while we were in the background; nothing tells us but this.
-            service.refresh()
         }
         .sheet(isPresented: $showAddRepository) {
             AddRepositorySheet(
@@ -489,40 +486,6 @@ struct ContentView: View {
     /// watch, and a permanent control in the status bar made a piece of
     /// configuration look like live information.
     @ViewBuilder
-    private var loginItemToggle: some View {
-        switch service.state {
-        case .registered:
-            Button { service.unregister() } label: {
-                Label("Starts at login", systemImage: "bolt.fill").font(.system(size: 10))
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .help("The daemon starts at login, so this host stays reachable. Click to stop.")
-
-        case .notRegistered:
-            Button { service.register() } label: {
-                Label("Start at login", systemImage: "bolt").font(.system(size: 10))
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .help("Keep this host reachable without opening Overnight first.")
-
-        case .awaitingApproval:
-            Button { service.register() } label: {
-                Label("Approve in Settings", systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 10))
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.orange)
-            .help("macOS needs you to enable Overnight under Login Items.")
-
-        case .unavailable(let why):
-            Image(systemName: "bolt.slash")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-                .help(why)
-        }
-    }
 
     private var statusBar: some View {
         VStack(spacing: 0) {
@@ -694,14 +657,6 @@ struct ContentView: View {
 
     private func toggle(_ id: String) {
         if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
-    }
-
-    /// Kept for the one case that still wants it: opening a worktree you just
-    /// selected. Launching no longer expands everything — with hundreds of
-    /// worktrees that produced a wall of terminals and hid the summary line
-    /// that collapsing exists to show.
-    private func expandAll() {
-        expanded.formUnion(client.fleet.workspaces.map(\.id))
     }
 
     /// Land on something usable rather than an empty pane.

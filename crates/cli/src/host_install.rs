@@ -436,16 +436,6 @@ pub async fn status(target: &str) -> Fallible {
     Ok(())
 }
 
-fn default_dist(arch: &str) -> PathBuf {
-    // The names `uname -m` uses, not the ones Rust uses.
-    let slug = match arch {
-        "aarch64" | "arm64" => "aarch64",
-        "x86_64" | "amd64" => "x86_64",
-        other => other,
-    };
-    PathBuf::from("dist").join(format!("{slug}-linux"))
-}
-
 /// Copy a file, then verify what landed before anything runs it.
 async fn upload_verified(target: &str, local: &Path, name: &str) -> Fallible {
     let bytes = std::fs::read(local)?;
@@ -695,10 +685,4 @@ mod tests {
         assert_eq!(Platform::Linux.dist_slug("riscv64"), None);
     }
 
-    #[test]
-    fn the_default_dist_directory_follows_uname() {
-        assert_eq!(default_dist("aarch64"), PathBuf::from("dist/aarch64-linux"));
-        assert_eq!(default_dist("arm64"), PathBuf::from("dist/aarch64-linux"));
-        assert_eq!(default_dist("x86_64"), PathBuf::from("dist/x86_64-linux"));
-    }
 }

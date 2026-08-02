@@ -251,7 +251,7 @@ pub unsafe extern "C" fn overnight_client_stream_start(
                 Ok(0) => break,
                 Ok(n) => push_line(
                     &finished,
-                    json!({ "stream": key, "chunk": base64(&buf[..n]) }).to_string(),
+                    json!({ "stream": key, "chunk": overnight_core::base64::encode(&buf[..n]) }).to_string(),
                 ),
                 Err(_) => break,
             }
@@ -421,7 +421,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             Ok(json!({
                 // Absent when unchanged, so an idle pane costs a few bytes on
                 // the wire instead of a whole capture several times a second.
-                "contents": base64(&screen.contents),
+                "contents": overnight_core::base64::encode(&screen.contents),
                 "columns": screen.columns,
                 "rows": screen.rows,
                 "cursorColumn": screen.cursor_column,
@@ -773,25 +773,6 @@ mod tests {
 }
 
 
-/// Standard base64, without pulling in a crate for twenty lines.
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
-        let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(ALPHABET[(n >> (18 - i * 6) & 0x3F) as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
     if !text.len().is_multiple_of(2) {
         return None;
@@ -806,22 +787,15 @@ fn decode_hex(text: &str) -> Option<Vec<u8>> {
 mod encoding_tests {
     use super::*;
 
-    #[test]
-    fn base64_matches_the_standard_including_padding() {
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64(b"foob"), "Zm9vYg==");
-        assert_eq!(base64(b"fooba"), "Zm9vYmE=");
-        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
-    }
 
     #[test]
     fn base64_survives_bytes_that_are_not_text() {
-        // Which is the point: a screen is escape sequences, not a string.
-        assert_eq!(base64(&[0x1b, 0x5b, 0x33, 0x31, 0x6d]), "G1szMW0=");
-        assert_eq!(base64(&[0xff, 0x00, 0xfe]), "/wD+");
+        // Kept after the local encoder was deleted in favour of
+        // `overnight_core::base64`: the shared module proves it matches the
+        // RFC, and this proves the thing THIS crate depends on — a screen is
+        // escape sequences and high bytes, not a string.
+        assert_eq!(overnight_core::base64::encode(&[0x1b, 0x5b, 0x33, 0x31, 0x6d]), "G1szMW0=");
+        assert_eq!(overnight_core::base64::encode(&[0xff, 0x00, 0xfe]), "/wD+");
     }
 
     #[test]

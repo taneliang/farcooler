@@ -23,6 +23,7 @@
 		9B898AB21D66551786167F63 /* AgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40DCF67F1A6B5F36B3EAE754; };
 		4D5329505C1B58D2A13ACF68 /* AgentEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BC817AC621451B592E2D127; };
 		CAC1D60B33465D84ABE1DB49 /* Composer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C953DB8CFB657258C239814; };
+		5BF4D39C4B2059679F79AE66 /* DiffComputation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 886920EDE0EF526FAFEE8B38; };
 		C0CAB09AF0F25280875B5F28 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBD46C73C59155FF81A6E196; };
 		B30D8C52CF2B5769AE32065E /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE70E4FD4805B5D9BC03EB4; };
 		FECA7427E1AD5FCCA209AB94 /* overnight_vt.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5FA5EC59B6750A5905DB67D; };
@@ -49,6 +50,7 @@
 		40DCF67F1A6B5F36B3EAE754 /* AgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentView.swift; sourceTree = "<group>"; };
 		5BC817AC621451B592E2D127 /* AgentEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentEvent.swift; sourceTree = "<group>"; };
 		1C953DB8CFB657258C239814 /* Composer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Composer.swift; sourceTree = "<group>"; };
+		886920EDE0EF526FAFEE8B38 /* DiffComputation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffComputation.swift; sourceTree = "<group>"; };
 		CBD46C73C59155FF81A6E196 /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
 		2BE70E4FD4805B5D9BC03EB4 /* Transcript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcript.swift; sourceTree = "<group>"; };
 		C5FA5EC59B6750A5905DB67D /* overnight_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_vt.xcframework; path = Frameworks/overnight_vt.xcframework; sourceTree = "<group>"; };
@@ -118,6 +120,7 @@
 			children = (
 				5BC817AC621451B592E2D127 /* AgentEvent.swift */,
 				1C953DB8CFB657258C239814 /* Composer.swift */,
+				886920EDE0EF526FAFEE8B38 /* DiffComputation.swift */,
 				CBD46C73C59155FF81A6E196 /* MarkdownView.swift */,
 				2BE70E4FD4805B5D9BC03EB4 /* Transcript.swift */,
 			);
@@ -219,6 +222,7 @@
 				9B898AB21D66551786167F63 /* AgentView.swift in Sources */,
 				4D5329505C1B58D2A13ACF68 /* AgentEvent.swift in Sources */,
 				CAC1D60B33465D84ABE1DB49 /* Composer.swift in Sources */,
+				5BF4D39C4B2059679F79AE66 /* DiffComputation.swift in Sources */,
 				C0CAB09AF0F25280875B5F28 /* MarkdownView.swift in Sources */,
 				B30D8C52CF2B5769AE32065E /* Transcript.swift in Sources */,
 			);
