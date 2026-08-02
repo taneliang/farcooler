@@ -58,6 +58,15 @@ struct AgentView: View {
                 // the same route, after building it by hand first and freezing
                 // the app.
                 .safeAreaInset(edge: .bottom, spacing: 0) { composerStack }
+                // How the conversation MEETS the glass over it.
+                //
+                // `safeAreaInset` puts the composer there and tells the scroll
+                // view to inset itself; this says what happens at the boundary.
+                // Without it the last line simply passes under a hard edge,
+                // which is the cut-off-mid-sentence look. `.soft` is the
+                // platform's own fade, and the reason the earlier hand-built
+                // gradient mask — which pegged a core — was trying to exist.
+                .modifier(SoftScrollEdge(edges: .bottom))
         }
         .onAppear { stream.start() }
         .onDisappear { stream.stop() }
@@ -66,52 +75,55 @@ struct AgentView: View {
     /// Everything that sits over the bottom of the conversation.
     @ViewBuilder
     private var composerStack: some View {
-        VStack(spacing: 8) {
-            // The plan and the queue are ATTACHED to the composer, not
-            // scattered around the screen. The plan used to be pinned at the
-            // top and the queue drawn inline at the transcript's end, which put
-            // three things that are all "what happens next" in three different
-            // places — and the plan, furthest away, was the one the next
-            // message is most likely to change.
-            if !transcript.plan.isEmpty {
-                PlanPanel(entries: transcript.plan)
-                    .padding(.horizontal, 12)
-            }
-
-            ForEach(transcript.queue) { queued in
-                QueuedRow(
-                    queued: queued,
-                    onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
-                    onCancel: { Task { await stream.cancelQueued(queued.id) } },
-                    onSteer: { Task { await stream.steerQueued(queued.id) } })
-                    .padding(.horizontal, 12)
-            }
-
-            if let pending = transcript.pendingPermission {
-                ApprovalCard(pending: pending) { optionID in
-                    Task { await stream.answer(pending.id, optionID) }
+        // Grouped, because several glass surfaces sit here — see `GlassGroup`.
+        GlassGroup(spacing: 8) {
+            VStack(spacing: 8) {
+                // The plan and the queue are ATTACHED to the composer, not
+                // scattered around the screen. The plan used to be pinned at the
+                // top and the queue drawn inline at the transcript's end, which put
+                // three things that are all "what happens next" in three different
+                // places — and the plan, furthest away, was the one the next
+                // message is most likely to change.
+                if !transcript.plan.isEmpty {
+                    PlanPanel(entries: transcript.plan)
+                        .padding(.horizontal, 12)
                 }
-                .padding(.horizontal, 12)
-            }
 
-            AgentComposer(
-                availableModes: transcript.availableModes,
-                agentMode: transcript.agentMode,
-                configOptions: transcript.configOptions,
-                onSetConfig: { id, value in Task { await stream.setConfig(id, value) } },
-                harness: harnessName,
-                availableCommands: transcript.availableCommands,
-                workspaceID: workspaceID,
-                core: connection.core,
-                onSend: { text, images in
-                    // Whether this goes out now or waits is the shim's call,
-                    // but the echo depends on the answer — see
-                    // `AgentStream.send`.
-                    let working = isWorking
-                    Task { await stream.send(text, images: images, whileWorking: working) }
-                },
-                onSetMode: { mode in Task { await stream.setMode(mode) } }
-            )
+                ForEach(transcript.queue) { queued in
+                    QueuedRow(
+                        queued: queued,
+                        onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
+                        onCancel: { Task { await stream.cancelQueued(queued.id) } },
+                        onSteer: { Task { await stream.steerQueued(queued.id) } })
+                        .padding(.horizontal, 12)
+                }
+
+                if let pending = transcript.pendingPermission {
+                    ApprovalCard(pending: pending) { optionID in
+                        Task { await stream.answer(pending.id, optionID) }
+                    }
+                    .padding(.horizontal, 12)
+                }
+
+                    AgentComposer(
+                    availableModes: transcript.availableModes,
+                    agentMode: transcript.agentMode,
+                    configOptions: transcript.configOptions,
+                    onSetConfig: { id, value in Task { await stream.setConfig(id, value) } },
+                    harness: harnessName,
+                    availableCommands: transcript.availableCommands,
+                    workspaceID: workspaceID,
+                    core: connection.core,
+                    onSend: { text, images in
+                        // Whether this goes out now or waits is the shim's call,
+                        // but the echo depends on the answer — see
+                        // `AgentStream.send`.
+                        let working = isWorking
+                        Task { await stream.send(text, images: images, whileWorking: working) }
+                    },
+                    onSetMode: { mode in Task { await stream.setMode(mode) } }
+                )
+            }
         }
     }
 
@@ -1426,6 +1438,44 @@ struct GlassSurface: ViewModifier {
                     RoundedRectangle(cornerRadius: radius)
                         .strokeBorder(Color.primary.opacity(0.08))
                 }
+        }
+    }
+}
+
+
+/// The platform's fade where scrolling content meets a bar over it.
+///
+/// iOS 26 only, and worth gating rather than approximating: this is what the
+/// hand-built gradient mask was reaching for, and that mask fed a layout that
+/// fed itself and pegged a core.
+struct SoftScrollEdge: ViewModifier {
+    let edges: Edge.Set
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectStyle(.soft, for: edges)
+        } else {
+            content
+        }
+    }
+}
+
+/// Several glass surfaces that should behave as one piece of glass.
+///
+/// Each `glassEffect` composites independently: two bars a few points apart
+/// both sample the background on their own and neither knows the other is
+/// there, so they never blend at the seam the way the platform's own stacked
+/// controls do. `GlassEffectContainer` is what groups them — and it is iOS 26
+/// only, so below that this is the plain stack it always was.
+struct GlassGroup<Content: View>: View {
+    var spacing: CGFloat = 8
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) { content }
+        } else {
+            content
         }
     }
 }
