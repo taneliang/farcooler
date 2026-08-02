@@ -128,6 +128,31 @@ fn is_safe_model(text: &str) -> bool {
 /// discovering the gap as a pane that renders the wrong agent.
 const CHAT_CAPABLE: &[&str] = &["claude"];
 
+/// Directories the `@`-mention picker never walks.
+///
+/// Build output and caches, which nobody mentions and which dwarf the tree they
+/// sit in — a Swift package's `.build` alone contributed hundreds of
+/// `index/store/v5/units/…` entries, so an unfiltered `@` filled its list with
+/// object files before reaching a single source file.
+///
+/// A denylist rather than reading `.gitignore`, deliberately: an untracked file
+/// the agent just created is exactly the one a user wants to mention next, so
+/// honouring ignore rules would hide the best answers.
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    ".build",
+    ".next",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+    "vendor",
+    "venv",
+];
+
+
 /// Whether Overnight can render this agent as a chat.
 pub fn chat_capable(harness: &str) -> bool {
     CHAT_CAPABLE.contains(&harness)
@@ -1234,10 +1259,7 @@ impl Service {
                 let path = entry.path();
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
-                // `.git` is enormous and never mentionable; `target` and
-                // `node_modules` are build output nobody `@`-mentions and
-                // walking them would dwarf the rest of the tree.
-                if name == ".git" || name == "target" || name == "node_modules" {
+                if SKIP_DIRS.contains(&name.as_ref()) {
                     continue;
                 }
                 if path.is_dir() {

@@ -86,6 +86,7 @@ fn a_real_capture_yields_the_slash_commands_a_picker_needs() {
             _ => None,
         })
         .flatten()
+        .map(|c| c.name)
         .collect();
 
     assert!(!commands.is_empty(), "a real capture carried no commands");

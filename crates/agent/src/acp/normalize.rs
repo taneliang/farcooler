@@ -104,7 +104,14 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
             // repeat reads as a restart and resets everything derived from the
             // first one.
             vec![AgentEvent::CommandsAvailable {
-                commands: available_commands.iter().map(|c| c.name.clone()).collect(),
+                commands: available_commands
+                    .iter()
+                    .map(|c| crate::event::AgentChoice {
+                        id: c.name.clone(),
+                        name: c.name.clone(),
+                        description: c.description.clone(),
+                    })
+                    .collect(),
             }]
         }
         SessionUpdate::ToolCall { tool_call_id, title, kind, status: s, locations, content } => {
@@ -232,7 +239,7 @@ mod tests {
         for raw in [
             r#"{"sessionUpdate":"session_info_update","title":"Say ok.","updatedAt":"2026-08-01T21:37:40Z"}"#,
             r#"{"sessionUpdate":"usage_update","used":20107,"size":200000}"#,
-            r#"{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"init"}]}"#,
+            r#"{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"init","description":"Set up a project"}]}"#,
         ] {
             let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
             let events = update_to_events(&update);

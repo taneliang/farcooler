@@ -117,18 +117,28 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
 @Test func commandsArriveOnTheirOwnEventAndReplaceRatherThanAccumulate() throws {
     // The agent resends its whole menu every turn. Appending would grow the
     // picker without bound, showing every command several times over.
+    let menu = [
+        AgentChoice(id: "init", name: "init", description: "Set up a project"),
+        AgentChoice(id: "review", name: "review", description: "Review the diff"),
+    ]
     var t = Transcript()
-    t.apply([Sequenced(seq: 0, event: .commandsAvailable(commands: ["init", "review"]))])
-    t.apply([Sequenced(seq: 1, event: .commandsAvailable(commands: ["init", "review"]))])
-    #expect(t.availableCommands == ["init", "review"])
+    t.apply([Sequenced(seq: 0, event: .commandsAvailable(commands: menu))])
+    t.apply([Sequenced(seq: 1, event: .commandsAvailable(commands: menu))])
+    #expect(t.availableCommands == menu)
 
     // And it is not a gap: nothing was lost, so nothing should be drawn.
     #expect(t.rows.isEmpty)
 }
 
 @Test func aCommandsEventDecodesRatherThanBecomingAGap() throws {
-    let json = #"{"CommandsAvailable":{"commands":["init"]}}"#
-    #expect(try AgentEvent.decode(from: json) == .commandsAvailable(commands: ["init"]))
+    // With its description, which the adapter has always sent and which the
+    // picker needs — a list of names is a list you have to already know.
+    let json = #"{"CommandsAvailable":{"commands":[{"id":"init","name":"init","description":"Set up a project"}]}}"#
+    #expect(
+        try AgentEvent.decode(from: json)
+            == .commandsAvailable(commands: [
+                AgentChoice(id: "init", name: "init", description: "Set up a project")
+            ]))
 }
 
 @Test func aNewTurnStartsANewRowRatherThanJoiningTheLastReply() {

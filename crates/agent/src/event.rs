@@ -153,7 +153,10 @@ pub enum AgentEvent {
         /// selectors — a subagent picker, a thought level — arrive here and
         /// need no protocol change to be rendered.
         config_options: Vec<ConfigOption>,
-        available_commands: Vec<String>,
+        /// `AgentChoice` rather than a bare name: a command has a description
+        /// and the picker needs it. Reused rather than a second struct of the
+        /// same three fields.
+        available_commands: Vec<AgentChoice>,
     },
     Message {
         role: Role,
@@ -220,7 +223,7 @@ pub enum AgentEvent {
     /// not a `Gap`, because nothing was lost: that would draw a "history
     /// missing" break on every turn for a menu nobody asked for.
     CommandsAvailable {
-        commands: Vec<String>,
+        commands: Vec<AgentChoice>,
     },
     TurnEnded {
         reason: EndReason,

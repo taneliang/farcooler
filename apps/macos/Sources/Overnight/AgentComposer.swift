@@ -26,7 +26,9 @@ struct AgentComposer: View {
     @State private var text = ""
     @State private var cursor = 0
     @State private var attachments: [ComposerAttachment] = []
-    @State private var suggestions: [String] = []
+    /// One shape for both pickers: a slash command has a description, a file
+    /// path is its own label. `AgentChoice` already means exactly that.
+    @State private var suggestions: [AgentChoice] = []
     @State private var highlight = 0
     @State private var isTargetedForDrop = false
     /// The field's height, reported by it rather than negotiated with it.
@@ -175,9 +177,20 @@ struct AgentComposer: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .frame(width: 12)
-                    Text(label(for: item))
+                    Text(label(for: item.name))
                         .font(.system(size: 12, design: isSlash ? .monospaced : .default))
                         .lineLimit(1)
+                        .layoutPriority(1)
+                    // What it does, which the adapter has always sent. Without
+                    // it this was a list of names, and a list of names is a
+                    // list you have to already know.
+                    if !item.description.isEmpty {
+                        Text(item.description)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 8)
@@ -186,7 +199,7 @@ struct AgentComposer: View {
                     index == highlight ? Color.primary.opacity(0.08) : .clear,
                     in: RoundedRectangle(cornerRadius: 5))
                 .contentShape(Rectangle())
-                .onTapGesture { accept(item) }
+                .onTapGesture { accept(item.name) }
             }
         }
         .padding(6)
@@ -198,7 +211,10 @@ struct AgentComposer: View {
 
     private var isSlash: Bool { if case .slash = token { return true }; return false }
 
-    private var pickerIcon: String { isSlash ? "chevron.right" : "doc.text" }
+    /// Not `chevron.right`, which is what a row you can EXPAND looks like —
+    /// and these rows do not expand, so the affordance was a promise nothing
+    /// kept. A command reads as a command; a file reads as a file.
+    private var pickerIcon: String { isSlash ? "terminal" : "doc.text" }
 
     private func label(for item: String) -> String { (isSlash ? "/" : "@") + item }
 
@@ -211,22 +227,26 @@ struct AgentComposer: View {
             // Resent every turn (`Transcript.availableCommands`), so filtering
             // is synchronous — no round trip, no debounce needed.
             suggestions = stream.transcript.availableCommands.filter {
-                prefix.isEmpty || $0.lowercased().hasPrefix(prefix.lowercased())
+                prefix.isEmpty || $0.name.lowercased().hasPrefix(prefix.lowercased())
             }
             highlight = 0
 
         case let .mention(prefix, _):
-            guard !prefix.isEmpty else {
-                suggestions = []
-                return
-            }
+            // A bare `@` lists the worktree rather than showing nothing.
+            //
+            // It used to require a character first, so typing `@` — which in
+            // every other agent tool opens a file list — appeared to do
+            // nothing at all, and the feature read as missing rather than
+            // as waiting.
             // A daemon round trip per keystroke would make typing a path feel
             // like it is fighting the network. `.task(id:)` already cancels
             // the previous search when the token changes, so this sleep is
             // the entire debounce.
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled else { return }
-            suggestions = await searchFiles(prefix)
+            suggestions = await searchFiles(prefix).map {
+                AgentChoice(id: $0, name: $0, description: "")
+            }
             highlight = 0
         }
     }
@@ -243,7 +263,7 @@ struct AgentComposer: View {
 
     private func acceptHighlighted() {
         guard suggestions.indices.contains(highlight) else { return }
-        accept(suggestions[highlight])
+        accept(suggestions[highlight].name)
     }
 
     /// Replace the token's own range with the chosen completion.

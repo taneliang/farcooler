@@ -60,7 +60,12 @@ public struct Transcript: Sendable {
         guard let used = contextUsed, let size = contextSize, size > 0 else { return nil }
         return min(1, Double(used) / Double(size))
     }
-    public private(set) var availableCommands: [String] = []
+    /// The agent's slash commands, each with what it does.
+    ///
+    /// `AgentChoice`, not names: the adapter has always sent a description and
+    /// the picker used to show only the name — a list of names is a list you
+    /// have to already know.
+    public private(set) var availableCommands: [AgentChoice] = []
     /// Written but not sent, in the order it will be sent.
     public private(set) var queue: [QueuedPrompt] = []
     /// The seq to ask for on reconnect: one past the highest seen.

@@ -912,7 +912,7 @@ private struct AgentComposer: View {
     /// already in the title bar; what a fleet of several harnesses needs is to
     /// tell them apart.
     let harness: String
-    let availableCommands: [String]
+    let availableCommands: [AgentChoice]
     let workspaceID: String?
     let core: ClientCore
     let onSend: (String, [(mime: String, data: Data)]) -> Void
@@ -1183,16 +1183,21 @@ private struct AgentComposer: View {
             EmptyView()
         case let .slash(prefix, range):
             let matches = availableCommands.filter {
-                prefix.isEmpty || $0.lowercased().hasPrefix(prefix.lowercased())
+                prefix.isEmpty || $0.name.lowercased().hasPrefix(prefix.lowercased())
             }
             if !matches.isEmpty {
-                SuggestionList(items: matches, icon: "chevron.right.2") { command in
+                // Not a chevron: these rows do not expand, and an affordance
+                // that promises otherwise is one nothing keeps.
+                SuggestionList(items: matches, icon: "terminal") { command in
                     apply(range: range, replacement: "/\(command) ")
                 }
             }
         case let .mention(_, range):
             if !mentionResults.isEmpty {
-                SuggestionList(items: mentionResults, icon: "doc") { path in
+                SuggestionList(
+                    items: mentionResults.map { AgentChoice(id: $0, name: $0, description: "") },
+                    icon: "doc"
+                ) { path in
                     apply(range: range, replacement: "@\(path) ")
                 }
             }
@@ -1332,29 +1337,48 @@ private struct ComposerAttachment: Identifiable {
 /// The floating list a slash command or an `@` mention pops open, tap to
 /// accept.
 private struct SuggestionList: View {
-    let items: [String]
+    let items: [AgentChoice]
     let icon: String
     let onChoose: (String) -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(items.prefix(8), id: \.self) { item in
+                ForEach(items.prefix(8), id: \.id) { item in
                     Button {
-                        onChoose(item)
+                        onChoose(item.name)
                     } label: {
-                        Label(item, systemImage: icon)
-                            .font(.footnote.monospaced())
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
+                        HStack(spacing: 8) {
+                            Image(systemName: icon)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 14)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.name)
+                                    .font(.footnote.monospaced())
+                                // What it does. The adapter has always sent
+                                // this and it was thrown away, so the list
+                                // named commands without saying what any of
+                                // them were for.
+                                if !item.description.isEmpty {
+                                    Text(item.description)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
                     }
                     .buttonStyle(.plain)
                     Divider().padding(.leading, 12)
                 }
             }
         }
-        .frame(maxHeight: 180)
+        .frame(maxHeight: 220)
         .background(.thickMaterial)
     }
 }

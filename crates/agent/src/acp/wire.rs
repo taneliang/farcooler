@@ -96,6 +96,11 @@ pub struct Location {
 pub struct WireAvailableCommand {
     #[serde(default)]
     pub name: String,
+    /// What the command does, which the adapter has always sent and this had
+    /// always thrown away — so the picker could only ever list names, and a
+    /// list of names is a list you have to already know.
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Deserialize)]

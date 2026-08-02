@@ -121,7 +121,7 @@ public enum AgentEvent: Sendable, Equatable {
     case sessionStarted(
         sessionID: String, agentMode: String?, availableModes: [AgentChoice],
         model: String?, availableModels: [AgentChoice], configOptions: [ConfigOption],
-        availableCommands: [String])
+        availableCommands: [AgentChoice])
     case message(role: Role, text: String)
     case toolCall(id: String, title: String, kind: String, status: ToolStatus, locations: [String])
     case toolUpdate(
@@ -138,7 +138,7 @@ public enum AgentEvent: Sendable, Equatable {
     /// What this conversation is called, as the agent names it.
     case sessionInfo(title: String)
     /// The slash-command menu, resent once per turn. Feeds the `/` picker.
-    case commandsAvailable(commands: [String])
+    case commandsAvailable(commands: [AgentChoice])
     case turnEnded(reason: String)
     /// Everything written but not yet sent, in order. Sent whole on any change.
     case promptQueue(items: [QueuedPrompt])
@@ -286,7 +286,7 @@ extension AgentEvent {
         let model: String?
         let availableModels: [AgentChoice]
         let configOptions: [ConfigOption]
-        let availableCommands: [String]
+        let availableCommands: [AgentChoice]
         enum CodingKeys: String, CodingKey {
             case sessionID = "session_id"
             case agentMode = "agent_mode"
@@ -316,7 +316,7 @@ extension AgentEvent {
         enum CodingKeys: String, CodingKey { case id, options, toolCall = "tool_call" }
     }
     private struct ResolvedPayload: Decodable { let id: String; let chosen: String }
-    private struct CommandsAvailablePayload: Decodable { let commands: [String] }
+    private struct CommandsAvailablePayload: Decodable { let commands: [AgentChoice] }
     private struct ConfigSetPayload: Decodable { let id: String; let value: String }
     private struct UsagePayload: Decodable { let used: UInt64; let size: UInt64 }
     private struct SessionInfoPayload: Decodable { let title: String }
