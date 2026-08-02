@@ -146,7 +146,7 @@ agentkit_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in AGENTKIT_S
 
 COMMON = """\t\t\t\tCLANG_ENABLE_MODULES = YES;
 \t\t\t\tSWIFT_VERSION = 5.0;
-\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 17.0;
+\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 26.0;
 \t\t\t\tSDKROOT = iphoneos;
 \t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";
 \t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;"""

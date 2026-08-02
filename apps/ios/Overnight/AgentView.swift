@@ -66,7 +66,7 @@ struct AgentView: View {
                 // which is the cut-off-mid-sentence look. `.soft` is the
                 // platform's own fade, and the reason the earlier hand-built
                 // gradient mask — which pegged a core — was trying to exist.
-                .modifier(SoftScrollEdge(edges: .bottom))
+                .scrollEdgeEffectStyle(.soft, for: .bottom)
         }
         .onAppear { stream.start() }
         .onDisappear { stream.stop() }
@@ -75,8 +75,12 @@ struct AgentView: View {
     /// Everything that sits over the bottom of the conversation.
     @ViewBuilder
     private var composerStack: some View {
-        // Grouped, because several glass surfaces sit here — see `GlassGroup`.
-        GlassGroup(spacing: 8) {
+        // Grouped so the composer and whatever sits above it behave as ONE
+        // piece of glass. Each `glassEffect` composites independently
+        // otherwise: two surfaces a few points apart both sample the background
+        // on their own and neither knows the other is there, so they never
+        // blend at the seam the way the platform's own stacked controls do.
+        GlassEffectContainer(spacing: 8) {
             VStack(spacing: 8) {
                 // The plan and the queue are ATTACHED to the composer, not
                 // scattered around the screen. The plan used to be pinned at the
@@ -1416,66 +1420,16 @@ private struct ComposerTextView: UIViewRepresentable {
 }
 
 
-/// Apple's Liquid Glass where the system has it, a material where it does not.
+/// The composer's surface: Liquid Glass, because that is what a control resting
+/// ON scrolling content is on this platform.
 ///
-/// Shared by everything on this screen that floats — the composer and the
-/// keyboard's own accessory row — so they cannot drift into two different
-/// answers to the same question. The Mac's composer carries the same modifier
-/// for the same reason (see `GlassCard` there): a control resting ON scrolling content has to read as a
-/// layer above it, and on iOS 26 that is what glass means. `.ultraThinMaterial`
-/// is the closest thing on 17 and 18, which this app still supports, so the
-/// shape and the spacing stay identical and only the surface differs.
+/// No fallback. This app's minimum is iOS 26, so the material-and-hairline
+/// approximation that used to sit behind an availability check was dead code
+/// pretending to be portability.
 struct GlassSurface: ViewModifier {
     var radius: CGFloat = 24
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: .rect(cornerRadius: radius))
-        } else {
-            content
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius))
-                .overlay {
-                    RoundedRectangle(cornerRadius: radius)
-                        .strokeBorder(Color.primary.opacity(0.08))
-                }
-        }
-    }
-}
-
-
-/// The platform's fade where scrolling content meets a bar over it.
-///
-/// iOS 26 only, and worth gating rather than approximating: this is what the
-/// hand-built gradient mask was reaching for, and that mask fed a layout that
-/// fed itself and pegged a core.
-struct SoftScrollEdge: ViewModifier {
-    let edges: Edge.Set
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.scrollEdgeEffectStyle(.soft, for: edges)
-        } else {
-            content
-        }
-    }
-}
-
-/// Several glass surfaces that should behave as one piece of glass.
-///
-/// Each `glassEffect` composites independently: two bars a few points apart
-/// both sample the background on their own and neither knows the other is
-/// there, so they never blend at the seam the way the platform's own stacked
-/// controls do. `GlassEffectContainer` is what groups them — and it is iOS 26
-/// only, so below that this is the plain stack it always was.
-struct GlassGroup<Content: View>: View {
-    var spacing: CGFloat = 8
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: spacing) { content }
-        } else {
-            content
-        }
+        content.glassEffect(.regular, in: .rect(cornerRadius: radius))
     }
 }
