@@ -498,8 +498,25 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         }
 
         "terminal.agent_prompt" => {
+            // `[{ "mime": "image/png", "base64": "..." }]`, decoded here so the
+            // protocol carries bytes and only this boundary deals in text.
+            let images: Vec<(String, Vec<u8>)> = args
+                .get("images")
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| {
+                            let mime = item.get("mime")?.as_str()?.to_string();
+                            let data =
+                                overnight_core::base64::decode(item.get("base64")?.as_str()?)?;
+                            Some((mime, data))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             session
-                .agent_prompt(id("terminal")?, &text("text"))
+                .agent_prompt(id("terminal")?, &text("text"), &images)
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(json!({}))

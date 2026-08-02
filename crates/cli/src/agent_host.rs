@@ -228,7 +228,7 @@ pub async fn run(
                         // because the agent has not been told about it.
                         let mut produced: Vec<overnight_agent::event::AgentEvent> = Vec::new();
                         let result = match cmd {
-                            DaemonMessage::Prompt { text } => match running.prompt(&text).await {
+                            DaemonMessage::Prompt { text, images } => match running.prompt(&text, images).await {
                                 Ok(events) => {
                                     produced = events;
                                     Ok(())

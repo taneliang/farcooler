@@ -22,7 +22,7 @@ struct TerminalTabStrip: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
+                HStack(spacing: 4) {
                     ForEach(workspaces) { workspace in
                         let numbering = workspace.ordinals()
                         ForEach(workspace.terminals) { terminal in
@@ -36,8 +36,8 @@ struct TerminalTabStrip: View {
                         }
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 5)
             }
             // Scrolled to the open terminal on first layout, not on every
             // fleet refresh: `.onAppear` fires once, `onChange(of: current)`
@@ -48,15 +48,19 @@ struct TerminalTabStrip: View {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
             }
         }
-        // No slab behind it.
+        // ONE surface, not one per chip.
         //
-        // This was a flat dark bar, which was right when everything above it
-        // was a flat dark terminal. It is wrong under a floating glass composer:
-        // a card resting on a slab reads as two competing surfaces, and the
-        // bottom of the screen ends up heavier than anything else on it. The
-        // chips carry their own glass now and the strip itself is nothing —
-        // content passes behind it, which is what makes the glass mean
-        // something.
+        // Three versions: a flat dark bar (right when everything above it was a
+        // flat dark terminal, wrong under a floating composer), then a chip
+        // apiece on glass — which put five or ten separate floating objects
+        // below the one floating object that matters, and read as a browser tab
+        // strip pasted under a chat.
+        //
+        // A single pill holding them is one sibling of the composer rather than
+        // a crowd competing with it, and it is the shape iOS 26 gives a
+        // floating group of controls.
+        .modifier(GlassSurface(radius: 20))
+        .padding(.horizontal, 10)
     }
 }
 
@@ -78,13 +82,17 @@ private struct TabChip: View {
                 // is shared rather than redefined here so a terminal cannot
                 // read green in one screen and red in the other.
                 Circle().fill(processColour(kind)).frame(width: 6, height: 6)
+                // Not monospaced. The strip names TERMINALS, which are things
+                // in this app, not text a terminal is showing — and monospace
+                // beside a chat's body font is what made it read as a piece of
+                // some other program's chrome.
                 Text(terminal.displayName(ordinal: ordinal))
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.caption)
                     .fontWeight(wantsAttention ? .semibold : .regular)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .modifier(ChipGlass(isCurrent: isCurrent))
             .overlay(
                 Capsule()
@@ -108,11 +116,9 @@ private struct ChipGlass: ViewModifier {
     let isCurrent: Bool
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(isCurrent ? .regular.tint(.white.opacity(0.18)) : .regular, in: .capsule)
-        } else {
-            content.background(
-                Capsule().fill(isCurrent ? Color.white.opacity(0.18) : Color.white.opacity(0.07)))
-        }
+        // A fill, not a second pane of glass. Glass inside glass has nothing
+        // new to refract and just muddies the edge that was doing the work.
+        content.background(
+            Capsule().fill(isCurrent ? Color.white.opacity(0.16) : Color.clear))
     }
 }

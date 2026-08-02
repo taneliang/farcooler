@@ -564,8 +564,18 @@ struct AgentComposer: View {
     private func send() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
-        let paths = attachments.map { "@\($0.url.path)" }.joined(separator: " ")
-        let body = paths.isEmpty ? trimmed : (trimmed.isEmpty ? paths : "\(paths)\n\(trimmed)")
+
+        // The BYTES, not the path.
+        //
+        // This used to write `@/Users/you/x.png` into the message. That names a
+        // file on the machine that picked it, and the agent runs on the host —
+        // so it worked when those were the same machine and silently referred
+        // to nothing when they were not, which is every remote host.
+        let images = attachments.compactMap { attachment -> ComposerImage? in
+            guard let data = try? Data(contentsOf: attachment.url) else { return nil }
+            return ComposerImage(mime: mimeType(for: attachment.url), data: data)
+        }
+        let body = trimmed
 
         text = ""
         cursor = 0
@@ -575,7 +585,25 @@ struct AgentComposer: View {
         // decision, but the composer already knows the answer and the echo
         // depends on it — see `AgentStream.send`.
         let working = terminal.agent == .working
-        Task { await stream.send(body, whileWorking: working) }
+        Task { await stream.send(body, images: images, whileWorking: working) }
+    }
+}
+
+/// An attached picture, as it goes to the agent.
+struct ComposerImage {
+    let mime: String
+    let data: Data
+}
+
+/// The image type, from the file's extension — all a picker gives us, and all
+/// the adapter needs in order to decode.
+func mimeType(for url: URL) -> String {
+    switch url.pathExtension.lowercased() {
+    case "png": "image/png"
+    case "gif": "image/gif"
+    case "webp": "image/webp"
+    case "heic": "image/heic"
+    default: "image/jpeg"
     }
 }
 

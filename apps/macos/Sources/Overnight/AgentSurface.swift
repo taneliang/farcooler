@@ -358,10 +358,16 @@ private struct PlanPanel: View {
                 .padding(.bottom, 8)
             }
         }
-        // A rounded surface, because it floats with the composer now rather
-        // than spanning the pane as a header.
+        // OPAQUE, because it floats over a scrolling transcript.
+        //
+        // `.quinary` is a translucent fill, which was fine when this was a
+        // header with nothing behind it. Over the conversation it let the text
+        // through, and expanding the list turned both into one unreadable
+        // overlap. A material is the platform's answer to "something legible
+        // resting on content that moves under it".
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
     }
 
 

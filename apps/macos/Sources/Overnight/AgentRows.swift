@@ -476,9 +476,12 @@ struct QueuedRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            // Opaque for the same reason the plan panel is: it floats over the
+            // transcript, and a half-transparent bubble with conversation
+            // showing through it is not a bubble.
             .background {
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(.quaternary.opacity(0.5))
+                    .fill(.regularMaterial)
                     .overlay {
                         RoundedRectangle(cornerRadius: 14)
                             .strokeBorder(

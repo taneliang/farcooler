@@ -49,6 +49,20 @@ pub struct PlanEntry {
 pub struct QueuedPrompt {
     pub id: String,
     pub text: String,
+    /// Pictures attached to it, waiting with it.
+    #[serde(default)]
+    pub images: Vec<PromptImage>,
+}
+
+/// An image travelling WITH a prompt rather than as a path beside it.
+///
+/// Base64 because that is what an ACP image content block carries, and because
+/// the alternative — a path — is only meaningful on the machine that produced
+/// it. See `RunningSession::send_prompt`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PromptImage {
+    pub mime: String,
+    pub base64: String,
 }
 
 /// One selectable option an agent offers: a mode, or a model.

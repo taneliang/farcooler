@@ -126,14 +126,25 @@ final class AgentStream: ObservableObject {
         }
     }
 
-    func send(_ text: String, whileWorking: Bool = false) async {
+    func send(_ text: String, images: [(mime: String, data: Data)] = [], whileWorking: Bool = false)
+        async
+    {
         // Echoed locally only when it is going out NOW. A message written
         // mid-turn waits in the queue and joins the transcript when it is
         // actually sent — see `AgentStream.send` on the Mac.
         if !whileWorking {
             transcript.appendLocalUserMessage(text)
         }
-        _ = try? await core.call("terminal.agent_prompt", ["terminal": terminal, "text": text])
+        // Base64 through the FFI, which decodes it into the protocol's bytes.
+        // The picture travels WITH the prompt; there is no path, because a path
+        // from a phone means nothing on the host.
+        var args: [String: Any] = ["terminal": terminal, "text": text]
+        if !images.isEmpty {
+            args["images"] = images.map {
+                ["mime": $0.mime, "base64": $0.data.base64EncodedString()]
+            }
+        }
+        _ = try? await core.call("terminal.agent_prompt", args)
     }
 
     /// Rewrite a message that has not gone out yet.

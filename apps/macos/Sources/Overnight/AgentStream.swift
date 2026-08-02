@@ -143,7 +143,7 @@ final class AgentStream: ObservableObject {
         return try JSONDecoder().decode(Batch.self, from: data)
     }
 
-    func send(_ text: String, whileWorking: Bool) async {
+    func send(_ text: String, images: [ComposerImage] = [], whileWorking: Bool) async {
         // Echoed locally only when it is going out NOW.
         //
         // A message written mid-turn does not become part of the conversation
@@ -154,7 +154,24 @@ final class AgentStream: ObservableObject {
         if !whileWorking {
             transcript.appendLocalUserMessage(text)
         }
-        _ = try? await runCLI(["terminal", "agent-prompt", terminal, text])
+        // Written to a temp file and handed to the CLI by path.
+        //
+        // The CLI reads the bytes and puts them in the prompt as image blocks;
+        // the path never leaves this machine. Passing base64 as an argument
+        // instead would put a megabyte on a command line, which is the one
+        // thing an argv is guaranteed to be bad at.
+        var arguments = ["terminal", "agent-prompt", terminal, text]
+        var scratch: [URL] = []
+        for image in images {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("overnight-attach-\(UUID().uuidString)")
+                .appendingPathExtension(image.mime == "image/png" ? "png" : "jpg")
+            guard (try? image.data.write(to: url)) != nil else { continue }
+            scratch.append(url)
+            arguments += ["--image", url.path]
+        }
+        _ = try? await runCLI(arguments)
+        for url in scratch { try? FileManager.default.removeItem(at: url) }
     }
 
     /// Rewrite a message that has not gone out yet.

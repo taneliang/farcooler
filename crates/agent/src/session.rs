@@ -9,7 +9,7 @@ use crate::acp::normalize::{relativize, update_to_events};
 use crate::acp::wire::Rpc;
 use crate::event::{
     AgentChoice, AgentEvent, AgentGapReason, ConfigOption, Diff, EndReason, PermissionOption,
-    QueuedPrompt, Role, ToolStatus,
+    PromptImage, QueuedPrompt, Role, ToolStatus,
 };
 use crate::fs_guard::confine;
 
@@ -461,7 +461,11 @@ impl RunningSession {
     ///
     /// Held HERE rather than left with the adapter, because a message Overnight
     /// is holding is one it can still show, rewrite, or take back.
-    pub async fn prompt(&mut self, text: &str) -> Result<Vec<AgentEvent>, SessionError> {
+    pub async fn prompt(
+        &mut self,
+        text: &str,
+        images: Vec<PromptImage>,
+    ) -> Result<Vec<AgentEvent>, SessionError> {
         // Anything already waiting goes first, even though no turn is running.
         //
         // A send that failed leaves its prompt at the head of the queue with
@@ -472,17 +476,25 @@ impl RunningSession {
             let mut events = self.send_next_queued().await;
             let id = self.next_queue_id;
             self.next_queue_id += 1;
-            self.queue.push_back(QueuedPrompt { id: id.to_string(), text: text.to_string() });
+            self.queue.push_back(QueuedPrompt {
+                id: id.to_string(),
+                text: text.to_string(),
+                images,
+            });
             events.push(self.queue_event());
             return Ok(events);
         }
         if self.pending_prompt.is_some() {
             let id = self.next_queue_id;
             self.next_queue_id += 1;
-            self.queue.push_back(QueuedPrompt { id: id.to_string(), text: text.to_string() });
+            self.queue.push_back(QueuedPrompt {
+                id: id.to_string(),
+                text: text.to_string(),
+                images,
+            });
             return Ok(vec![self.queue_event()]);
         }
-        self.send_prompt(text).await?;
+        self.send_prompt(text, &images).await?;
         Ok(Vec::new())
     }
 
@@ -519,7 +531,7 @@ impl RunningSession {
         let queued = self.queue.remove(index).expect("index just found");
 
         let pending = self.pending_prompt;
-        if let Err(e) = self.send_prompt(&queued.text).await {
+        if let Err(e) = self.send_prompt(&queued.text, &queued.images).await {
             self.queue.insert(index, queued);
             return Err(e);
         }
@@ -553,7 +565,7 @@ impl RunningSession {
     async fn send_next_queued(&mut self) -> Vec<AgentEvent> {
         let Some(next) = self.queue.pop_front() else { return Vec::new() };
         let mut events = vec![self.queue_event()];
-        match self.send_prompt(&next.text).await {
+        match self.send_prompt(&next.text, &next.images).await {
             Ok(()) => {
                 events.push(AgentEvent::Message { role: Role::User, text: next.text });
                 events
@@ -574,15 +586,34 @@ impl RunningSession {
         }
     }
 
-    async fn send_prompt(&mut self, text: &str) -> Result<(), SessionError> {
+    async fn send_prompt(&mut self, text: &str, images: &[PromptImage]) -> Result<(), SessionError> {
+        // Images as CONTENT BLOCKS, not as paths.
+        //
+        // The apps used to attach a picture by putting `@/Users/you/x.png` in
+        // the message. That works on the machine you are sitting at and nowhere
+        // else: the agent runs on the HOST, and a path from a phone or from a
+        // Mac driving a remote box refers to a file that does not exist there.
+        // The adapter advertises `promptCapabilities.image`, so the bytes
+        // travel with the prompt and the question never arises.
+        let mut blocks: Vec<serde_json::Value> = images
+            .iter()
+            .map(|image| {
+                serde_json::json!({
+                    "type": "image",
+                    "mimeType": image.mime,
+                    "data": image.base64,
+                })
+            })
+            .collect();
+        if !text.is_empty() || blocks.is_empty() {
+            blocks.push(serde_json::json!({ "type": "text", "text": text }));
+        }
+
         let id = self
             .writer
             .request_no_wait(
                 "session/prompt",
-                serde_json::json!({
-                    "sessionId": self.session_id,
-                    "prompt": [{ "type": "text", "text": text }]
-                }),
+                serde_json::json!({ "sessionId": self.session_id, "prompt": blocks }),
             )
             .await?;
         self.pending_prompt = Some(id);

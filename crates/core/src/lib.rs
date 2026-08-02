@@ -5,6 +5,7 @@
 //! one way and the derivation rule stays testable with no tmux present.
 
 pub mod activity;
+pub mod base64;
 pub mod derive;
 pub mod error;
 pub mod inventory;

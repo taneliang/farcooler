@@ -243,6 +243,26 @@ pub fn agent_batch(
 /// `image` block contributes no text: multimodal prompts are a later slice,
 /// and dropping the bytes here rather than inventing placeholder text keeps
 /// that boundary honest instead of pretending the block was handled.
+/// The images in a prompt, ready for the shim.
+///
+/// These used to be dropped on the floor here — `prompt_text` matched
+/// `Image(_) => None` — so a picture attached in either app travelled as far as
+/// the daemon and no further. The protocol has carried `ImageBlock` all along.
+pub fn prompt_images(blocks: &[wire::AgentPromptBlock]) -> Vec<overnight_agent::event::PromptImage> {
+    blocks
+        .iter()
+        .filter_map(|b| match &b.content {
+            Some(wire::agent_prompt_block::Content::Image(image)) => {
+                Some(overnight_agent::event::PromptImage {
+                    mime: image.mime_type.clone(),
+                    base64: overnight_core::base64::encode(&image.data),
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 pub fn prompt_text(blocks: &[wire::AgentPromptBlock]) -> String {
     blocks
         .iter()

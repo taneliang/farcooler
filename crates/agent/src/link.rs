@@ -29,7 +29,11 @@ pub enum ShimMessage {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DaemonMessage {
     Subscribe { from_seq: Seq },
-    Prompt { text: String },
+    Prompt {
+        text: String,
+        #[serde(default)]
+        images: Vec<crate::event::PromptImage>,
+    },
     Answer { request_id: String, option_id: String },
     SetMode { agent_mode: String },
     SetModel { model: String },

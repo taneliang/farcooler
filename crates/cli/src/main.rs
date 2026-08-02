@@ -409,7 +409,13 @@ enum TerminalCmd {
         epoch: u64,
     },
     /// Send a chat message to the pane's agent.
-    AgentPrompt { terminal: String, text: String },
+    AgentPrompt {
+        terminal: String,
+        text: String,
+        /// Attach an image. Repeatable.
+        #[arg(long = "image")]
+        images: Vec<PathBuf>,
+    },
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer
     /// unroutable and hang the agent on its own question.
@@ -1449,15 +1455,31 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             }
         }
 
-        TerminalCmd::AgentPrompt { terminal, text } => {
+        TerminalCmd::AgentPrompt { terminal, text, images } => {
+            use overnight_protocol::v1::agent_prompt_block::Content;
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
+
+            let mut blocks = Vec::new();
+            for path in &images {
+                let data = std::fs::read(path)?;
+                blocks.push(overnight_protocol::v1::AgentPromptBlock {
+                    content: Some(Content::Image(overnight_protocol::v1::ImageBlock {
+                        // From the extension, because that is all a file gives
+                        // us and the adapter only needs to know how to decode.
+                        mime_type: mime_for(path).to_string(),
+                        data: bytes::Bytes::from(data),
+                    })),
+                });
+            }
+            blocks.push(overnight_protocol::v1::AgentPromptBlock {
+                content: Some(Content::Text(text)),
+            });
+
             link.call(with(
                 req("terminal.agent_prompt"),
                 request::Payload::AgentPrompt(overnight_protocol::v1::AgentPrompt {
                     terminal_id: id_bytes(id),
-                    blocks: vec![overnight_protocol::v1::AgentPromptBlock {
-                        content: Some(overnight_protocol::v1::agent_prompt_block::Content::Text(text)),
-                    }],
+                    blocks,
                 }),
             ))
             .await?;
@@ -1850,6 +1872,21 @@ fn truncate(s: &str, n: usize) -> String {
 /// hold a second copy of the enum and drift from it silently. An unknown or
 /// unspecified mode is `terminal` — the mode that needs no ACP adapter and
 /// always works, which is the right guess for an older daemon.
+/// The image type, from the file's extension.
+///
+/// Not sniffed from the bytes: the adapter needs a MIME type to decode with,
+/// every real attachment comes from a picker that named it, and a wrong guess
+/// here fails loudly at the far end rather than corrupting anything.
+fn mime_for(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_lowercase().as_str() {
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "heic" => "image/heic",
+        _ => "image/jpeg",
+    }
+}
+
 fn pane_mode_label(mode: i32) -> &'static str {
     match overnight_protocol::v1::PaneMode::try_from(mode) {
         Ok(overnight_protocol::v1::PaneMode::Agent) => "agent",

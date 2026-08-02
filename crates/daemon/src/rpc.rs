@@ -599,7 +599,13 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents().send(id, DaemonMessage::Prompt { text: wire::prompt_text(&p.blocks) });
+                svc.agents().send(
+                    id,
+                    DaemonMessage::Prompt {
+                        text: wire::prompt_text(&p.blocks),
+                        images: wire::prompt_images(&p.blocks),
+                    },
+                );
                 self.terminal_result(id).await
             }
 

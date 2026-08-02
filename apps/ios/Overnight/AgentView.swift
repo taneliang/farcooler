@@ -103,12 +103,12 @@ struct AgentView: View {
                 availableCommands: transcript.availableCommands,
                 workspaceID: workspaceID,
                 core: connection.core,
-                onSend: { text in
+                onSend: { text, images in
                     // Whether this goes out now or waits is the shim's call,
                     // but the echo depends on the answer — see
                     // `AgentStream.send`.
                     let working = isWorking
-                    Task { await stream.send(text, whileWorking: working) }
+                    Task { await stream.send(text, images: images, whileWorking: working) }
                 },
                 onSetMode: { mode in Task { await stream.setMode(mode) } }
             )
@@ -282,9 +282,33 @@ private struct ToolRowView: View {
 
     private var expandable: Bool { tool.content != nil || tool.diff != nil }
 
+    @State private var expanded = false
+
     var body: some View {
-        if expandable {
-            DisclosureGroup {
+        // The Mac's grey box, not a `DisclosureGroup`.
+        //
+        // `DisclosureGroup` tints its label with the accent colour, so every
+        // tool call rendered as blue link text — a command looked like
+        // something to navigate to rather than something that ran. It also put
+        // the chevron OUTSIDE any container, which left an expanded detail
+        // aligned to the wrong edge. The Mac solved both by making the row and
+        // what it opens one object on one fill; this is that, on a phone.
+        VStack(alignment: .leading, spacing: 0) {
+            if expandable {
+                Button {
+                    withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) {
+                        expanded.toggle()
+                    }
+                } label: {
+                    label.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                label
+            }
+
+            if expanded {
+                Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     if let content = tool.content, !content.isEmpty {
                         // Bounded, and for the same reason it is bounded on the
@@ -297,17 +321,21 @@ private struct ToolRowView: View {
                         DiffView(diff: diff)
                     }
                 }
-                .padding(.top, 4)
-            } label: {
-                label
+                .padding(9)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } else {
-            label
         }
+        .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var label: some View {
         HStack(spacing: 7) {
+            if expandable {
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+            }
             // Not `StatusGlyph` — that type lives in the Mac target. Same
             // vocabulary, one dot at one weight for "something is happening",
             // just drawn locally: green finished, red missing, secondary
@@ -326,6 +354,10 @@ private struct ToolRowView: View {
             }
             Spacer(minLength: 4)
         }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -430,10 +462,13 @@ private struct PlanPanel: View {
                 }
             }
         }
+        // OPAQUE, because it floats over a scrolling transcript. A tinted
+        // overlay let the conversation through, and expanding the list turned
+        // both into one unreadable overlap.
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 
 
@@ -494,7 +529,7 @@ private struct QueuedRow: View {
             .padding(.vertical, 8)
             .background {
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.primary.opacity(0.04))
+                    .fill(.regularMaterial)
                     .overlay {
                         RoundedRectangle(cornerRadius: 14)
                             .strokeBorder(
@@ -845,7 +880,7 @@ private struct AgentComposer: View {
     let availableCommands: [String]
     let workspaceID: String?
     let core: ClientCore
-    let onSend: (String) -> Void
+    let onSend: (String, [(mime: String, data: Data)]) -> Void
     let onSetMode: (String) -> Void
 
     @State private var text = ""
@@ -1188,7 +1223,11 @@ private struct AgentComposer: View {
             if let data = try? await item.loadTransferable(type: Data.self),
                 let image = UIImage(data: data)
             {
-                attachments.append(ComposerAttachment(image: image))
+                // PNG only when it really is one — a picker hands back HEIC as
+                // often as anything else, and telling the agent the wrong type
+                // fails at the far end.
+                let mime = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg"
+                attachments.append(ComposerAttachment(image: image, data: data, mime: mime))
             }
             photoPickerItem = nil
         }
@@ -1196,8 +1235,11 @@ private struct AgentComposer: View {
 
     private func send() {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty else { return }
-        onSend(message)
+        guard !message.isEmpty || !attachments.isEmpty else { return }
+        // The attachments GO now. They used to be cleared on the next line
+        // without ever being sent: the picker worked, the thumbnail appeared,
+        // and the image was dropped on the floor.
+        onSend(message, attachments.compactMap(\.payload))
         text = ""
         cursor = 0
         attachments = []
@@ -1208,6 +1250,12 @@ private struct AgentComposer: View {
 private struct ComposerAttachment: Identifiable {
     let id = UUID()
     let image: UIImage
+    /// The original bytes, kept so the agent gets the picture the user picked
+    /// rather than one re-encoded from a `UIImage` for display.
+    let data: Data
+    let mime: String
+
+    var payload: (mime: String, data: Data)? { (mime, data) }
 }
 
 /// The floating list a slash command or an `@` mention pops open, tap to

@@ -398,17 +398,37 @@ impl Session {
 
     /// Send one plain-text prompt block.
     ///
-    /// Image and file-mention blocks belong to the composer (a later task);
-    /// this covers the one shape every caller needs immediately, without
-    /// inventing a multi-block API nothing yet constructs.
-    pub async fn agent_prompt(&mut self, terminal: Uuid, text: &str) -> Result<Terminal, SessionError> {
+    /// Images ride WITH the prompt, as content blocks.
+    ///
+    /// The composer used to attach a picture by writing `@/Users/you/x.png`
+    /// into the message. That is a path on the machine that picked the file,
+    /// and the agent runs on the HOST — so it worked when those were the same
+    /// machine and silently referred to nothing when they were not, which is
+    /// every phone and every remote host.
+    pub async fn agent_prompt(
+        &mut self,
+        terminal: Uuid,
+        text: &str,
+        images: &[(String, Vec<u8>)],
+    ) -> Result<Terminal, SessionError> {
+        use overnight_protocol::v1::agent_prompt_block::Content;
+
+        let mut blocks: Vec<overnight_protocol::v1::AgentPromptBlock> = images
+            .iter()
+            .map(|(mime, data)| overnight_protocol::v1::AgentPromptBlock {
+                content: Some(Content::Image(overnight_protocol::v1::ImageBlock {
+                    mime_type: mime.clone(),
+                    data: bytes::Bytes::copy_from_slice(data),
+                })),
+            })
+            .collect();
+        blocks.push(overnight_protocol::v1::AgentPromptBlock {
+            content: Some(Content::Text(text.to_string())),
+        });
+
         let payload = request::Payload::AgentPrompt(overnight_protocol::v1::AgentPrompt {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-            blocks: vec![overnight_protocol::v1::AgentPromptBlock {
-                content: Some(overnight_protocol::v1::agent_prompt_block::Content::Text(
-                    text.to_string(),
-                )),
-            }],
+            blocks,
         });
         match self.value("terminal.agent_prompt", None, Some(payload)).await? {
             result::Value::Terminal(t) => Ok(t),
