@@ -924,6 +924,8 @@ private struct AgentComposer: View {
     @State private var mentionSearch: Task<Void, Never>?
     @State private var attachments: [ComposerAttachment] = []
     @State private var photoPickerItem: PhotosPickerItem?
+    /// Why the last attachment did not attach. Shown in the composer.
+    @State private var attachmentError: String?
     @State private var fieldHeight: CGFloat = UIFont.preferredFont(forTextStyle: .body).lineHeight
 
     private var token: ComposerToken { activeToken(in: text, cursor: cursor) }
@@ -949,6 +951,14 @@ private struct AgentComposer: View {
 
             if !attachments.isEmpty {
                 attachmentStrip
+            }
+
+            if let attachmentError {
+                Text(attachmentError)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding(.bottom, 6)
+                    .onTapGesture { self.attachmentError = nil }
             }
 
             // Two rows, the same shape the Mac settled on: what you are
@@ -1009,8 +1019,19 @@ private struct AgentComposer: View {
         // through to whatever the conversation had scrolled under there. Tapping
         // dead space in an input box must never activate something you cannot
         // see.
-        .contentShape(Rectangle())
-        .onTapGesture {}
+        .background(
+            // BEHIND the content, not in front of it.
+            //
+            // Absorbing taps on the card itself risks winning them from the
+            // buttons inside — the photo picker and the selectors live in this
+            // rectangle. As a background it hit-tests after its children, so it
+            // catches only what they did not want: the dead space between them,
+            // which used to fall through the glass to whatever the conversation
+            // had scrolled underneath.
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {}
+        )
         .modifier(GlassSurface())
         .padding(.horizontal, 10)
         .padding(.bottom, 8)
@@ -1266,15 +1287,26 @@ private struct AgentComposer: View {
     private func loadPickedPhoto(_ item: PhotosPickerItem?) {
         guard let item else { return }
         Task {
-            if let data = try? await item.loadTransferable(type: Data.self),
-                let image = UIImage(data: data)
-            {
-                // PNG only when it really is one — a picker hands back HEIC as
-                // often as anything else, and telling the agent the wrong type
-                // fails at the far end.
-                let mime = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg"
-                attachments.append(ComposerAttachment(image: image, data: data, mime: mime))
+            // Loudly, not silently.
+            //
+            // This used to `try?` the load and drop the result on failure, so a
+            // photo that could not be read — an iCloud asset not on the device
+            // is the usual reason — looked exactly like a picker that did
+            // nothing. "Doesn't seem possible to upload images" is what that
+            // failure mode sounds like from outside.
+            let loaded = try? await item.loadTransferable(type: Data.self)
+            guard let data = loaded, let image = UIImage(data: data) else {
+                attachmentError = "That photo could not be read. If it lives in "
+                    + "iCloud, open it in Photos first so it downloads."
+                photoPickerItem = nil
+                return
             }
+            // PNG only when it really is one — a picker hands back HEIC as
+            // often as anything else, and telling the agent the wrong type
+            // fails at the far end.
+            let mime = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg"
+            attachments.append(ComposerAttachment(image: image, data: data, mime: mime))
+            attachmentError = nil
             photoPickerItem = nil
         }
     }

@@ -123,8 +123,19 @@ struct AgentComposer: View {
         // background, and a background is not a hit target — so a click in the
         // gap between the selectors and the field reached whatever the
         // transcript had scrolled underneath.
-        .contentShape(Rectangle())
-        .onTapGesture {}
+        .background(
+            // BEHIND the content, not in front of it.
+            //
+            // Absorbing taps on the card itself risks winning them from the
+            // buttons inside — the photo picker and the selectors live in this
+            // rectangle. As a background it hit-tests after its children, so it
+            // catches only what they did not want: the dead space between them,
+            // which used to fall through the glass to whatever the conversation
+            // had scrolled underneath.
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {}
+        )
         .modifier(GlassCard())
         // Debounced by `.task(id:)` itself: a token that changes on every
         // keystroke cancels its predecessor for free, which is the whole
