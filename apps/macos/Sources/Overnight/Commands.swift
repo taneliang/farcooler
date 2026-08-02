@@ -17,6 +17,7 @@ enum AppCommand: String {
     case addRepository
     case reload
     case showShortcuts
+    case about
     case search
     case commandPalette
     case toggleSidebar
@@ -43,6 +44,17 @@ enum AppCommand: String {
 /// without knowing it exists.
 struct OvernightCommands: Commands {
     var body: some Commands {
+        // About Overnight, saying which build this is.
+        //
+        // The standard panel shows CFBundleShortVersionString and
+        // CFBundleVersion, which for a beta and the release it names are
+        // identical — so the panel that exists to answer "what am I running"
+        // could not. This one names the channel too, and the daemon it is
+        // driving, which is the pair that has to match.
+        CommandGroup(replacing: .appInfo) {
+            Button("About Overnight") { AppCommand.about.post() }
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("New Terminal") { AppCommand.newTerminal.post() }
                 .keyboardShortcut("t", modifiers: .command)

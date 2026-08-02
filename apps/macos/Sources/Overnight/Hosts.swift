@@ -223,12 +223,22 @@ struct HostProbe: Codable, Equatable {
     var summary: String {
         if let blockers, !blockers.isEmpty { return blockers[0] }
         guard isInstalled else { return "Overnight is not installed here yet." }
+        // The version first. A machine that is installed and running is the
+        // normal case; which build it is running is the thing worth glancing
+        // at, and the only place it was visible before was a warning that only
+        // appeared once it was already wrong.
+        // Just the stamp. `overnightd --version` prints "overnightd 0.1.0+sha"
+        // and repeating the binary's name in a row that is already about that
+        // machine is noise.
+        let running = installedDaemon
+            .map { $0.split(separator: " ").last.map(String.init) ?? $0 }
+            .map { "\($0) · " } ?? ""
         switch persistence {
-        case "systemd": return "Installed, kept running by systemd."
-        case "launchd": return "Installed, kept running by launchd."
+        case "systemd": return "\(running)kept running by systemd."
+        case "launchd": return "\(running)kept running by launchd."
         case "onDemand":
-            return "Installed. Runs while you are connected — nothing here starts it on its own."
-        default: return "Installed."
+            return "\(running)runs while you are connected — nothing here starts it on its own."
+        default: return "\(running)installed."
         }
     }
 

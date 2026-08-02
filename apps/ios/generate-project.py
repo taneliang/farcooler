@@ -63,6 +63,7 @@ AGENTKIT_SOURCES = [
     # had it verbatim; only the device label differs.
     "PushRegistration.swift",
     "TokenStore.swift",
+    "VersionSection.swift",
     "Transcript.swift",
 ]
 FRAMEWORKS = ["overnight_vt.xcframework", "overnight_client.xcframework"]

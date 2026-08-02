@@ -75,6 +75,24 @@ final class Connection: ObservableObject {
             .map(String.init)
     }
 
+    /// What the daemon on the other end is, asked once per connection.
+    ///
+    /// Cached because it cannot change while connected — a daemon that
+    /// restarted is a connection that dropped — and because the settings screen
+    /// should not cost a round trip every time it opens.
+    @Published private(set) var daemon: DaemonBuild?
+
+    func loadDaemonBuild() async {
+        guard phase == .connected, daemon == nil else { return }
+        guard let data = try? await core.call("host"),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        daemon = DaemonBuild(
+            version: body["daemonVersion"] as? String ?? "unknown",
+            matches: body["buildsMatch"] as? Bool ?? true,
+            platform: body["platform"] as? String ?? "")
+    }
+
     func refresh() async {
         guard phase == .connected else { return }
         do {

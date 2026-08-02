@@ -127,6 +127,10 @@ extension Font {
 /// straight to `@AppStorage`, so there is nothing to save and nothing to
 /// throw away on dismiss.
 struct SettingsView: View {
+    /// Optional so the settings screen still opens from the onboarding screen,
+    /// where there is no host to have a daemon on.
+    var connection: Connection?
+
     @AppStorage(TerminalSettings.fontKey) private var fontChoice: TerminalFontChoice = .iosevka
     @AppStorage(TerminalSettings.fontSizeKey) private var fontSize: Double = TerminalSettings.defaultFontSize
     @AppStorage(NotificationSettings.onAttentionKey) private var notifyOnAttention = true
@@ -203,9 +207,14 @@ struct SettingsView: View {
                     .background(TerminalPalette.background)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+
+            // Last, because it is the thing you scroll to when something has
+            // gone wrong rather than something you set.
+            VersionSection(daemon: connection?.daemon) { UIPasteboard.general.string = $0 }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await connection?.loadDaemonBuild() }
         .toolbar {
             // Presented as a sheet (see `RootView`), which gets no back
             // button of its own — without an explicit dismiss there would be

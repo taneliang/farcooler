@@ -361,6 +361,26 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
     match method {
         "fleet" => session.fleet().await.map_err(|e| e.to_string()),
 
+        // What this machine is, and whether it was built from the same source
+        // as the client asking.
+        //
+        // Exposed because the phone had no way to find out. The Mac reads it
+        // from `overnight status --json`, and a mismatch there is the thing
+        // that makes a fix you already shipped go on reproducing — so a client
+        // that cannot see it is a client that cannot explain itself.
+        "host" => {
+            let facts = session.host().await.map_err(|e| e.to_string())?;
+            Ok(json!({
+                "daemonVersion": facts.daemon_version,
+                "clientVersion": overnight_protocol::BUILD,
+                "buildsMatch": facts.daemon_version == overnight_protocol::BUILD,
+                "platform": facts.platform,
+                "livePanes": facts.live_terminal_count,
+                "healthy": facts.self_health
+                    != overnight_protocol::v1::SelfHealth::Degraded as i32,
+            }))
+        }
+
         "repositories" => {
             let items = session.repositories().await.map_err(|e| e.to_string())?;
             Ok(json!({

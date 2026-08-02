@@ -214,7 +214,7 @@ struct WorkspaceListView: View {
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
-                SettingsView()
+                SettingsView(connection: connection)
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
                             NavigationLink("Authorise") { AuthoriseView() }

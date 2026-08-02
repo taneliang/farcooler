@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var showNewWorkspace = false
     @State private var showAddRepository = false
     @State private var showShortcuts = false
+    @State private var showAbout = false
     @State private var query = ""
     @State private var showQuickCreate = false
     @AppStorage("tasks.lastProject") private var lastProject = ""
@@ -131,6 +132,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
+        .sheet(isPresented: $showAbout) { AboutSheet() }
         .sheet(isPresented: $showImportWorktrees) {
             ImportWorktrees(
                 projects: client.repositories,
@@ -1017,6 +1019,7 @@ struct ContentView: View {
         case .addRepository: showAddRepository = true
         case .reload: Task { await client.refresh() }
         case .showShortcuts: showShortcuts = true
+        case .about: showAbout = true
         case .search: searchFocused = true
 
         // Toggles rather than opens. ⌘P on an open palette is what a hand

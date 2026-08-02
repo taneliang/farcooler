@@ -32,6 +32,7 @@
 		C0CAB09AF0F25280875B5F28 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBD46C73C59155FF81A6E196; };
 		B25E35807ECE5DAD91858808 /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22567B0DE105B538BE51A82; };
 		5BB9D81328D75B22BD0BA990 /* TokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A972196EAD557E8DE8BEF6; };
+		A3CA4A0D7EE6501880692928 /* VersionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9BEB3B836D53099FE44CC6; };
 		B30D8C52CF2B5769AE32065E /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE70E4FD4805B5D9BC03EB4; };
 		FECA7427E1AD5FCCA209AB94 /* overnight_vt.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5FA5EC59B6750A5905DB67D; };
 		2E99CD1866A95EFDAC853396 /* overnight_client.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA8286B4C4C155E1B03E0475; };
@@ -66,6 +67,7 @@
 		CBD46C73C59155FF81A6E196 /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
 		E22567B0DE105B538BE51A82 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
 		D1A972196EAD557E8DE8BEF6 /* TokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStore.swift; sourceTree = "<group>"; };
+		CE9BEB3B836D53099FE44CC6 /* VersionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionSection.swift; sourceTree = "<group>"; };
 		2BE70E4FD4805B5D9BC03EB4 /* Transcript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcript.swift; sourceTree = "<group>"; };
 		C5FA5EC59B6750A5905DB67D /* overnight_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_vt.xcframework; path = Frameworks/overnight_vt.xcframework; sourceTree = "<group>"; };
 		FA8286B4C4C155E1B03E0475 /* overnight_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = overnight_client.xcframework; path = Frameworks/overnight_client.xcframework; sourceTree = "<group>"; };
@@ -143,6 +145,7 @@
 				CBD46C73C59155FF81A6E196 /* MarkdownView.swift */,
 				E22567B0DE105B538BE51A82 /* PushRegistration.swift */,
 				D1A972196EAD557E8DE8BEF6 /* TokenStore.swift */,
+				CE9BEB3B836D53099FE44CC6 /* VersionSection.swift */,
 				2BE70E4FD4805B5D9BC03EB4 /* Transcript.swift */,
 			);
 			name = AgentKit;
@@ -252,6 +255,7 @@
 				C0CAB09AF0F25280875B5F28 /* MarkdownView.swift in Sources */,
 				B25E35807ECE5DAD91858808 /* PushRegistration.swift in Sources */,
 				5BB9D81328D75B22BD0BA990 /* TokenStore.swift in Sources */,
+				A3CA4A0D7EE6501880692928 /* VersionSection.swift in Sources */,
 				B30D8C52CF2B5769AE32065E /* Transcript.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -293,9 +297,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				OVERNIGHT_CHANNEL = dev;
-				OVERNIGHT_DISPLAY_VERSION = "0.1.0 (dev 8944ef9)";
+				OVERNIGHT_DISPLAY_VERSION = "0.1.0 (dev d8c3877)";
 				OVERNIGHT_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 193;
+				CURRENT_PROJECT_VERSION = 194;
 				PRODUCT_NAME = Overnight;
 				PRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
 				INFOPLIST_FILE = Overnight/Info.plist;
@@ -316,9 +320,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				OVERNIGHT_CHANNEL = dev;
-				OVERNIGHT_DISPLAY_VERSION = "0.1.0 (dev 8944ef9)";
+				OVERNIGHT_DISPLAY_VERSION = "0.1.0 (dev d8c3877)";
 				OVERNIGHT_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 193;
+				CURRENT_PROJECT_VERSION = 194;
 				PRODUCT_NAME = Overnight;
 				PRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
 				INFOPLIST_FILE = Overnight/Info.plist;
