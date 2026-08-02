@@ -154,10 +154,18 @@ struct TerminalView: View {
         // exactly the strip's height, and keyboard avoidance carries both up
         // together.
         .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Spaced on BOTH sides.
+            //
+            // The inset sits inside the terminal's own background, so with no
+            // padding the strip read as welded to the bottom of the grid, and
+            // with none below it crowded the key row that rides up on the
+            // keyboard. Two floating bars need to look like two floating bars:
+            // air above, air below, and the grid ending cleanly before either.
             TerminalTabStrip(
                 workspaces: connection.fleet.workspaces, current: current, onSelect: select
             )
-            .padding(.top, 2)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
         }
         .background(TerminalPalette.background)
         // A terminal is dark regardless of the phone's own appearance — the
