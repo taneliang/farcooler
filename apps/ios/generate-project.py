@@ -381,6 +381,40 @@ PBXPROJ = f"""// !$*UTF8*$!
 """
 
 here = pathlib.Path(__file__).parent
+
+# The frameworks this project links are BUILT from this workspace, and staleness
+# in them is invisible.
+#
+# `apps/macos/build-app.sh` used to copy whatever binary happened to be sitting
+# in `target/release`, which meant a Rust fix that had been compiled and tested
+# shipped as the binary from whenever someone last built by hand — the bug under
+# investigation went on reproducing with the fix nowhere in the app. The phone
+# has exactly the same hole and it is worse: an `.xcframework` is a directory of
+# static archives that Xcode links happily whatever its age, so a change to
+# `crates/client` simply does not reach the app and nothing says so.
+#
+# Warned about rather than rebuilt: the framework build is slow and cross-
+# compiles two targets, so making every project generation pay for it would be
+# its own kind of wrong. Naming the file that is newer is enough to act on.
+frameworks = here / "Frameworks"
+if frameworks.is_dir():
+    newest_framework = max(
+        (p.stat().st_mtime for p in frameworks.rglob("*") if p.is_file()), default=0
+    )
+    rust = here.parent.parent / "crates"
+    stale = [
+        p
+        for p in rust.rglob("*.rs")
+        if p.stat().st_mtime > newest_framework and "target" not in p.parts
+    ]
+    if stale:
+        print(
+            f"WARNING: {len(stale)} Rust source files are newer than "
+            f"Frameworks/ (e.g. {stale[0].relative_to(here.parent.parent)}).\n"
+            "         The app will link a STALE client core. Rebuild first:\n"
+            "           ./scripts/build-ios-frameworks.sh"
+        )
+
 project = here / "Overnight.xcodeproj"
 project.mkdir(exist_ok=True)
 (project / "project.pbxproj").write_text(PBXPROJ)

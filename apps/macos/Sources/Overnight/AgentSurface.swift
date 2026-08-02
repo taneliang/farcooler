@@ -431,26 +431,6 @@ private struct ApprovalCard: View {
     }
 }
 
-/// The first option is also what Return chooses, and the first three each get
-/// their own digit — the plan's own wording for this card. A fourth or later
-/// option is still reachable, just by clicking; a keyboard that runs out of
-/// digits before an agent runs out of options is not worth over-engineering
-/// for the sessions that never offer four.
-private struct NumberedShortcut: ViewModifier {
-    let index: Int
-
-    func body(content: Content) -> some View {
-        if index == 0 {
-            content.keyboardShortcut(.defaultAction)
-        } else if index < 3 {
-            content.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [])
-        } else {
-            content
-        }
-    }
-}
-
-
 /// How tall the floating composer is, so the transcript can pad past it.
 private struct ComposerHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
