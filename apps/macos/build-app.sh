@@ -34,12 +34,21 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Stamping the source would make every build dirty the working tree, which is
 # how a version ends up committed by accident and then hand-edited later. There
 # is one number — see scripts/version.sh — and this is where it lands.
+# `Set` on a key the plist does not have prints an error and exits 0, which is
+# how OvernightChannel silently shipped empty. Every stamp goes through here so
+# a missing key is a failed build rather than a bundle that lies about itself.
+stamp() {
+  /usr/libexec/PlistBuddy -c "Set :$1 $2" "$APP/Contents/Info.plist" 2>&1 | grep -q . && {
+    echo "    Info.plist has no :$1 to stamp"; exit 1; }
+  return 0
+}
+
 VERSION="$(../../scripts/version.sh)"
 BUILD_NUMBER="$(../../scripts/version.sh build)"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" \
-  "$APP/Contents/Info.plist" >/dev/null
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" \
-  "$APP/Contents/Info.plist" >/dev/null
+stamp CFBundleShortVersionString "$VERSION"
+stamp CFBundleVersion "$BUILD_NUMBER"
+stamp OvernightChannel "$(../../scripts/version.sh channel)"
+stamp OvernightDisplayVersion "$(../../scripts/version.sh display)"
 
 # The WorkOS client id, if this build has one.
 #
@@ -49,8 +58,7 @@ BUILD_NUMBER="$(../../scripts/version.sh build)"
 # works completely; the only thing missing is the sign-in button, and sign-in
 # buys notifications and nothing else.
 if [ -n "${OVERNIGHT_WORKOS_CLIENT_ID:-}" ]; then
-  /usr/libexec/PlistBuddy -c "Set :OvernightWorkOSClientID $OVERNIGHT_WORKOS_CLIENT_ID" \
-    "$APP/Contents/Info.plist" >/dev/null
+  stamp OvernightWorkOSClientID "$OVERNIGHT_WORKOS_CLIENT_ID"
 fi
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 

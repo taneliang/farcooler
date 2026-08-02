@@ -17,8 +17,14 @@ system. Nothing else holds a literal:
 `scripts/version.sh` is the only implementation of "what version is this":
 
     ./scripts/version.sh          0.2.0
-    ./scripts/version.sh build    1284           # commit count, for the stores
-    ./scripts/version.sh full     0.2.0+a1b2c3   # what components report to each other
+    ./scripts/version.sh build    1284             # commit count, for the stores
+    ./scripts/version.sh channel  dev|beta|release
+    ./scripts/version.sh display  0.2.0 (beta 3)   # what a person is shown
+    overnight --version           0.2.0+a1b2c3     # what components report to each other
+
+The last one is not this script. The stamp components check against each other
+is computed once, in `crates/protocol/build.rs`, and both binaries report it —
+a second implementation would be the drift the script exists to prevent.
 
 The build number is `git rev-list --count HEAD`. App Store build numbers must
 increase forever, and the commit count is the one monotonic integer this repo
@@ -42,10 +48,39 @@ change to the system.
 - **MINOR** — features.
 - **PATCH** — fixes.
 
+## Channels: dev, beta, release
+
+A beta of `0.2.0` **is** `0.2.0` — same code, same marketing version, same App
+Store entry. What differs is which build someone has, and that is what the
+channel answers. Without it, a bug report says "0.2.0" and there is no way to
+know which one they had.
+
+The channel is derived from the tag on `HEAD`, never from a flag someone
+remembers to pass:
+
+| HEAD | Channel | Shown as |
+| --- | --- | --- |
+| clean tag `v0.2.0` | `release` | `0.2.0` |
+| clean tag `v0.2.0-beta.3` | `beta` | `0.2.0 (beta 3)` |
+| untagged, or a dirty tree | `dev` | `0.2.0 (dev a1b2c3)` |
+
+Both apps stamp it into their `Info.plist` at build time (`OvernightChannel`,
+`OvernightDisplayVersion`), `AgentKit.AppVersion` reads it back, Settings shows
+it under the account row, and it is what each device reports to the relay. A
+tag containing `-beta.` is published as a GitHub prerelease, so it never becomes
+the download someone lands on.
+
+An unstamped bundle reports `dev`, deliberately: defaulting the other way would
+let a hand-made build pass itself off as a release.
+
 ## Cutting one
 
-    ./scripts/release.sh 0.2.0
+    ./scripts/release.sh 0.2.0            # a release
+    ./scripts/release.sh 0.2.0 --beta 1   # a TestFlight beta of the same code
     git push origin main v0.2.0
+
+`--beta` only tags — it makes no commit, because the version has not moved. A
+second beta of a version already in `Cargo.toml` is a tag and nothing else.
 
 That bumps `Cargo.toml`, commits, and tags. `.github/workflows/release.yml`
 builds every component **from the single commit the tag points at** and attaches
@@ -78,10 +113,10 @@ working until the analytics say nobody is calling it.
 
 | Job | What it protects |
 | --- | --- |
-| `rust` (Linux + macOS) | fmt, clippy, tests, against a real tmux — a fake one would agree with whatever this code believed |
+| `rust` (Linux + macOS) | clippy at -D warnings and tests, against a real tmux — a fake one would agree with whatever this code believed |
 | `swift` | the full `build-app.sh`, plus a check that the bundle's stamp matches the workspace |
 | `ios` | project generation then build, so a file added to AgentKit cannot compile locally and be missing from the app |
-| `relay` | typecheck and a `wrangler deploy --dry-run` |
+| `relay` | typecheck, `vitest` inside workerd against a real D1, and a `wrangler deploy --dry-run` |
 
 GitHub Actions specifically because this repo is public: public repos get
 unlimited minutes on standard runners, macOS included. A private repo would burn
@@ -99,7 +134,20 @@ repository settings, except the relay's, which live only in Cloudflare.
 | `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGN_IDENTITY` | Mac release | Developer ID, base64 `.p12` |
 | `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | notarisation | app-specific password |
 | `APP_STORE_KEY_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_P8` | TestFlight | base64 `.p8` |
-| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | relay deploy | |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | relay deploy | Plus a repository **variable** `RELAY_DEPLOY=true` — see below |
+
+### Why the gates use `vars` and `env`, never `secrets`
+
+`if: ${{ secrets.X != '' }}` looks like it gates a job on having a credential.
+It does not. The `secrets` context is not available to `if` at job or step
+level, so the expression compares `''` against `''` and is **always false** —
+silently, and failing closed, which is why it looks like it works. The relay
+job simply never deploys, and a release publishes an unsigned, un-notarised app
+with no failure signal.
+
+So: the relay job gates on the repository variable `RELAY_DEPLOY`, and the
+signing steps gate on job-level `env` that maps the secret to a boolean, which
+`if` can read.
 
 The relay's own secrets — the APNs key, the WorkOS API key, the FCM service
 account — are set with `wrangler secret put` and are never visible to a

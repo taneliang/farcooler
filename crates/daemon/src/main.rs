@@ -42,6 +42,19 @@ async fn run() -> Result<(), i32> {
     // transport: no listener, no port, no second authentication system. SSH has
     // already proved who the caller is, and the caller is the same Unix user
     // who owns the database and could read it directly anyway.
+    // `overnightd --version` answers instead of starting a daemon.
+    //
+    // It used to do neither: the flag was unrecognised, so the process started
+    // up, logged, and exited — and `host probe`, which runs
+    // `overnightd --version` over ssh to find out what is installed, captured
+    // that log line as the version. There was no way to ask this binary what it
+    // was, which is a strange gap in a system whose components check each
+    // other's build stamps.
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("overnightd {}", overnight_protocol::BUILD);
+        return Ok(());
+    }
+
     if std::env::args().any(|a| a == "--stdio") {
         return serve_stdio_session().await;
     }

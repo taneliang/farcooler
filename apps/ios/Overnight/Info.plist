@@ -72,6 +72,14 @@
          API key lives only in the relay's secrets, which is what lets this repo
          be open source without shipping anything worth stealing. Blank here so
          a fork can point at its own WorkOS project without editing source. -->
+    <!-- Which kind of build this is, stamped at build time from
+         scripts/version.sh. The whole reason it exists: a beta and a release
+         that call themselves the same version make a bug report unanswerable —
+         someone says "0.2.0" and there is no way to know which one they had. -->
+    <key>OvernightChannel</key>
+    <string>$(OVERNIGHT_CHANNEL)</string>
+    <key>OvernightDisplayVersion</key>
+    <string>$(OVERNIGHT_DISPLAY_VERSION)</string>
     <key>OvernightWorkOSClientID</key>
     <string>$(OVERNIGHT_WORKOS_CLIENT_ID)</string>
 </dict>

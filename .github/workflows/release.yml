@@ -69,6 +69,13 @@ jobs:
   macos:
     name: macOS app
     runs-on: macos-latest
+    # Hoisted to the job so the steps below can test them in an `if`. The
+    # `secrets` context is not available to `if` at any level — `secrets.X != ''`
+    # is always false — and the failure is silent: the signing steps skip and an
+    # ad-hoc-signed app ships as though it were notarised.
+    env:
+      HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
+      HAS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,11 +89,12 @@ jobs:
       # produces a working ad-hoc-signed app — which is what a contributor gets,
       # and it must keep working for them.
       - name: Import the signing certificate
-        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        if: env.HAS_CERTIFICATE == 'true'
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
+          trap 'rm -f certificate.p12' EXIT
           keychain=build.keychain
           security create-keychain -p actions "$keychain"
           security default-keychain -s "$keychain"
@@ -103,7 +111,7 @@ jobs:
           OVERNIGHT_WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
 
       - name: Sign and notarise
-        if: ${{ secrets.MACOS_SIGN_IDENTITY != '' }}
+        if: env.HAS_SIGN_IDENTITY == 'true'
         env:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -146,6 +154,8 @@ jobs:
   ios:
     name: iOS (TestFlight)
     runs-on: macos-latest
+    env:
+      HAS_APP_STORE_KEY: ${{ secrets.APP_STORE_KEY_ID != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -178,12 +188,13 @@ jobs:
             build
 
       - name: Archive and upload to TestFlight
-        if: ${{ secrets.APP_STORE_KEY_ID != '' }}
+        if: env.HAS_APP_STORE_KEY == 'true'
         env:
           APP_STORE_KEY_ID: ${{ secrets.APP_STORE_KEY_ID }}
           APP_STORE_ISSUER_ID: ${{ secrets.APP_STORE_ISSUER_ID }}
           APP_STORE_KEY_P8: ${{ secrets.APP_STORE_KEY_P8 }}
         run: |
+          trap 'rm -f ~/.appstoreconnect/private_keys/*.p8' EXIT
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$APP_STORE_KEY_P8" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
@@ -228,6 +239,9 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+          # A beta is marked as one, so it does not become the download anyone
+          # lands on — and so `-beta.3` is not silently the "latest release".
+          prerelease: ${{ contains(github.ref_name, '-beta.') }}
           body: |
             Every binary here was built from this one commit. The Mac app,
             the phone app, the CLI and the daemon check each other's build
@@ -236,3 +250,7 @@ jobs:
 
             Linux hosts: unpack the tarball into `dist/` and run
             `overnight host install <target>`, or let the Mac app do it.
+
+            The apps report their channel — a beta says so in Settings and in
+            what it tells the relay, so a bug report names which build it came
+            from rather than a version two different builds share.

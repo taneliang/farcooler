@@ -23,3 +23,14 @@ WORKOS_CLIENT_ID = "REPLACE"
 #   APNS_TOPIC          the iOS bundle id
 #   FCM_SERVICE_ACCOUNT the Google service account JSON, for Android
 #   ANALYTICS_SALT      rotates monthly; see analytics.ts
+
+# Throttling for /v1/auth/*, the only routes anyone can call without a
+# credential — and two of them spend the WorkOS API key per request, so
+# unlimited they are a way to exhaust the upstream quota and deny sign-in to
+# everyone. Thirty in a minute is far above a person signing in and far below
+# anything worth doing to us.
+[[unsafe.bindings]]
+name = "AUTH_LIMIT"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }

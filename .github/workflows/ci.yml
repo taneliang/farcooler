@@ -72,6 +72,12 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The build number is `git rev-list --count HEAD`, and the default
+          # depth-1 checkout would make it 1 — silently, since the command
+          # succeeds. scripts/version.sh now refuses a shallow clone outright,
+          # so without this the bundle step fails rather than lying.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -91,10 +97,22 @@ jobs:
 
       # Every component must report the same build stamp. This is the check that
       # would have caught a Mac driving a host running different source.
+      #
+      # It compares them, which the first version of this step did not: it ran
+      # `overnight --version`, threw the output away, and asserted only that the
+      # process exited 0. The regression it names would have sailed through.
       - name: Check the CLI and daemon agree
         run: |
-          apps/macos/build/Overnight.app/Contents/Resources/overnight --version
-          test -x apps/macos/build/Overnight.app/Contents/Resources/overnightd
+          resources=apps/macos/build/Overnight.app/Contents/Resources
+          cli="$("$resources/overnight" --version | awk '{print $2}')"
+          daemon="$("$resources/overnightd" --version | awk '{print $2}')"
+          echo "cli $cli / daemon $daemon"
+          [ "$cli" = "$daemon" ] || {
+            echo "the bundled pair disagree — they must be built together"; exit 1; }
+          case "$cli" in
+            "$(scripts/version.sh)"+*) ;;
+            *) echo "neither matches the workspace version $(scripts/version.sh)"; exit 1 ;;
+          esac
 
       - name: Test AgentKit
         run: swift test --package-path apps/shared/AgentKit
@@ -104,6 +122,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios-sim, aarch64-apple-ios
@@ -152,6 +172,10 @@ jobs:
           cache-dependency-path: services/relay/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      # Inside workerd against a real D1, not against fakes: the account scoping
+      # on revoke and the expiry predicate on notify are SQL, and a fake would
+      # agree with whatever this code believed.
+      - run: npm test
       # A dry run compiles and bundles the worker without deploying it, which
       # catches the class of error that only appears at upload time.
       - run: npx wrangler deploy --dry-run --outdir /tmp/relay-build

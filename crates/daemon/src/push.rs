@@ -46,17 +46,26 @@ impl Pairing {
     }
 
     pub fn save_in(&self, runtime_dir: &Path) -> std::io::Result<()> {
+        use std::io::Write;
+
         let path = config_path(runtime_dir);
-        let text = serde_json::to_string_pretty(self).unwrap_or_default();
-        std::fs::write(&path, text)?;
-        // Owner-only: it is a bearer token, and a runtime directory is not
-        // always as private as the machine's owner assumes.
+        // Not `unwrap_or_default()`. That wrote an EMPTY file, returned Ok, and
+        // let the CLI print "paired" — after which `load_in` parses nothing,
+        // `push status` says "not paired", and the machine is silently mute.
+        let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+
+        // Owner-only from the moment it exists. Setting the mode after writing
+        // leaves a window in which a bearer token sits on disk with whatever
+        // the umask says — usually world-readable — and the fix costs one
+        // `OpenOptions` call.
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
-        Ok(())
+        options.open(&path)?.write_all(text.as_bytes())
     }
 
     pub fn forget_in(runtime_dir: &Path) {
@@ -74,6 +83,14 @@ struct Notification<'a> {
     title: &'a str,
     subtitle: &'a str,
     terminal: &'a str,
+    /// What this machine is running, so the devices screen can show which of
+    /// someone's machines is behind without them going to each one to look.
+    ///
+    /// Sent here rather than on a route of its own because a daemon that
+    /// notifies is a daemon that is running, which is exactly when the answer
+    /// is worth recording — and it costs nothing on a request already being
+    /// made.
+    version: &'a str,
 }
 
 /// Send one, or quietly do nothing if this machine was never paired.
@@ -92,7 +109,7 @@ pub async fn notify(
     let result = client
         .post(&url)
         .bearer_auth(&pairing.token)
-        .json(&Notification { title, subtitle, terminal })
+        .json(&Notification { title, subtitle, terminal, version: overnight_protocol::BUILD })
         .send()
         .await;
 
@@ -108,6 +125,35 @@ pub async fn notify(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_pairing_comes_back_and_can_be_forgotten() {
+        // The whole contract of `overnight push pair|status|forget`, which had
+        // no test at all: whether a machine is paired is the difference between
+        // being told an agent is stuck and finding out in the morning.
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(Pairing::load_in(dir.path()).is_none(), "nothing is paired yet");
+
+        Pairing { relay: "https://mine.example".into(), token: "t".into() }
+            .save_in(dir.path())
+            .expect("save");
+        let back = Pairing::load_in(dir.path()).expect("saved");
+        assert_eq!(back.token, "t");
+        assert_eq!(back.relay, "https://mine.example");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(config_path(dir.path()))
+                .expect("metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "a bearer token must not be readable by anyone else");
+        }
+
+        Pairing::forget_in(dir.path());
+        assert!(Pairing::load_in(dir.path()).is_none(), "forget means forgotten");
+    }
 
     #[test]
     fn a_pairing_round_trips_and_defaults_its_relay() {

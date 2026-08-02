@@ -46,14 +46,18 @@ public struct AccountDevicesView: View {
                 list(
                     "Devices", kind: .device, rows: registrations?.devices ?? [],
                     empty: "No devices yet. Allow notifications on a device and it appears here.",
-                    footer: "These receive notifications. Removing one stops it being notified; "
-                        + "it reappears the next time that device opens Overnight."
+                    footer: "These receive notifications, and each says what version it "
+                        + "last reported — which is how you spot the one that needs "
+                        + "updating. Removing a device stops it being notified; it "
+                        + "reappears the next time that device opens Overnight."
                 )
                 list(
                     "Machines", kind: .machine, rows: registrations?.machines ?? [],
                     empty: "No machines paired. Pair one from Machines.",
-                    footer: "These may notify you. Removing one takes effect immediately at the "
-                        + "relay, whether or not you can still reach the machine itself."
+                    footer: "These may notify you, and report their version when they do — "
+                        + "so a machine showing an old one is a machine to reinstall. "
+                        + "Removing one takes effect immediately at the relay, whether or "
+                        + "not you can still reach the machine itself."
                 )
             }
         }
@@ -74,12 +78,9 @@ public struct AccountDevicesView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.label)
-                            Text(
-                                row.lastSeen.isEmpty
-                                    ? row.detail : "\(row.detail) · \(row.lastSeen)"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            Text(row.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         Spacer()
                         Button("Remove", role: .destructive) {

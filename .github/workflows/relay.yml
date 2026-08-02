@@ -25,7 +25,13 @@ jobs:
     # credential rather than on a repository name: a fork does not have the
     # secret, and a name in a workflow is one more thing to be wrong after a
     # rename.
-    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    #
+    # Through `vars`, not `secrets`. The `secrets` context is NOT available in
+    # an `if` — GitHub allows only github/needs/vars/inputs there — so
+    # `secrets.X != ''` compares '' against '' and is ALWAYS FALSE. It fails
+    # closed, which is why it looks like it works: the job simply never runs.
+    # Set the repository variable RELAY_DEPLOY to `true` alongside the secrets.
+    if: vars.RELAY_DEPLOY == 'true'
     defaults:
       run:
         working-directory: services/relay

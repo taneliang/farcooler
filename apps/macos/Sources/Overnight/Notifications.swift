@@ -84,31 +84,6 @@ final class Notifier {
 }
 
 
-/// Where APNs delivers this Mac's address, and where it goes next.
-///
-/// The same shape as the phone's, and for the same reason: the local `Notifier`
-/// above only knows what this app is watching, and the case worth solving is the
-/// app not running at all.
-@MainActor
-final class PushRegistration: NSObject, ObservableObject {
-    static let shared = PushRegistration()
-
-    /// Held until there is an account to file it under — registration and
-    /// sign-in finish in either order, and the second one completes the pair.
-    private var token: String?
-
-    func received(_ deviceToken: Data) {
-        token = deviceToken.map { String(format: "%02x", $0) }.joined()
-        Task { await sendIfPossible() }
-    }
-
-    func sendIfPossible() async {
-        guard let token, Account.shared.isSignedIn else { return }
-        await Account.shared.registerDevice(
-            pushToken: token, platform: "apns", label: Host.current().localizedName ?? "Mac")
-    }
-}
-
 /// The only reason this app has a delegate: the APNs token arrives nowhere else.
 final class PushDelegate: NSObject, NSApplicationDelegate {
     func application(
@@ -122,8 +97,6 @@ final class PushDelegate: NSObject, NSApplicationDelegate {
         _ application: NSApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
-        // Expected in an ad-hoc-signed build, which has no push entitlement.
-        // Local notifications keep working, so this is not worth a dialog.
-        print("remote notifications unavailable: \(error.localizedDescription)")
+        Task { @MainActor in PushRegistration.shared.unavailable(error) }
     }
 }

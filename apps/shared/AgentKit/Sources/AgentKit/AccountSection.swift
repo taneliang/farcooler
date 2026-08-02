@@ -21,9 +21,12 @@ public struct AccountSection: View {
                         Text("Notifications can reach this device.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        Text(AppVersion.display)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Sign out") { account.signOut() }
+                    Button("Sign out") { Task { await account.signOut() } }
                 }
             } else if account.signingIn {
                 HStack {

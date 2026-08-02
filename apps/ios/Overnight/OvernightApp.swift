@@ -84,6 +84,7 @@ struct RootView: View {
             // permission prompt that only appears once you ARE looking has
             // already missed it.
             Notifier.shared.requestAuthorisation()
+            PushRegistration.shared.label = { UIDevice.current.name }
             AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
         }
     }

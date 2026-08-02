@@ -53,9 +53,16 @@ public final class Account: NSObject, ObservableObject {
 
     private override init() {
         super.init()
+        // Before anything reads them. An earlier build put both tokens in
+        // UserDefaults; this moves them and deletes the plaintext.
+        TokenStore.migrateFromDefaults([Self.accessKey, Self.refreshKey], defaults: defaults)
         userId = defaults.string(forKey: "account.userId") ?? ""
         email = defaults.string(forKey: "account.email") ?? ""
     }
+
+    /// Credentials, so: Keychain. Labels stay in UserDefaults — see TokenStore.
+    private static let accessKey = "account.access"
+    private static let refreshKey = "account.refresh"
 
     // MARK: - Signing in
 
@@ -78,11 +85,18 @@ public final class Account: NSObject, ObservableObject {
         // PKCE, because the redirect returns through a custom URL scheme that
         // any app on the device can claim. Without it, an app that registered
         // the same scheme could take the code and become you.
-        let verifier = Self.randomVerifier()
-        guard let challenge = Self.challenge(for: verifier) else {
+        guard let verifier = Self.randomVerifier(), let challenge = Self.challenge(for: verifier)
+        else {
             lastError = "Could not start sign-in."
             return
         }
+        // Bound to this sign-in, so a callback that did not come from it is
+        // rejected. PKCE already defeats the practical code-injection attack —
+        // an injected code was issued against someone else's challenge — but
+        // `overnight://` is a scheme any app on the device may claim, and a
+        // flow with no request binding of its own has nothing to say about a
+        // callback it never asked for.
+        let state = Self.randomVerifier()
 
         var components = URLComponents(string: "https://api.workos.com/user_management/authorize")
         components?.queryItems = [
@@ -92,15 +106,18 @@ public final class Account: NSObject, ObservableObject {
             .init(name: "provider", value: "authkit"),
             .init(name: "code_challenge", value: challenge),
             .init(name: "code_challenge_method", value: "S256"),
+            .init(name: "state", value: state),
         ]
         guard let url = components?.url else { return }
 
         do {
             let callback = try await authenticate(url)
-            guard
-                let code = URLComponents(url: callback, resolvingAgainstBaseURL: false)?
-                    .queryItems?.first(where: { $0.name == "code" })?.value
-            else {
+            let returned = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems
+            guard let code = returned?.first(where: { $0.name == "code" })?.value else {
+                lastError = "Sign-in did not complete."
+                return
+            }
+            guard returned?.first(where: { $0.name == "state" })?.value == state else {
                 lastError = "Sign-in did not complete."
                 return
             }
@@ -118,12 +135,20 @@ public final class Account: NSObject, ObservableObject {
     /// Paired machines keep working: they hold tokens, not your session, and
     /// signing out of a phone should not silence the fleet. `overnight push
     /// forget` or the app's revoke button is how a machine is unpaired.
-    public func signOut() {
+    public func signOut() async {
+        // Told to the relay first, while there is still a token to tell it
+        // with. Clearing locally alone left the refresh token valid at WorkOS
+        // until natural expiry — so anyone who had lifted it kept minting
+        // sessions after the user believed they had signed out.
+        if let refresh = TokenStore.read(Self.refreshKey) {
+            _ = try? await post("/v1/auth/logout", ["refreshToken": refresh])
+        }
         userId = ""
         email = ""
-        for key in ["account.userId", "account.email", "account.access", "account.refresh"] {
-            defaults.removeObject(forKey: key)
-        }
+        defaults.removeObject(forKey: "account.userId")
+        defaults.removeObject(forKey: "account.email")
+        TokenStore.delete(Self.accessKey)
+        TokenStore.delete(Self.refreshKey)
     }
 
     // MARK: - Talking to the relay
@@ -134,31 +159,50 @@ public final class Account: NSObject, ObservableObject {
     /// WorkOS wants the API key on that call, and an app that could refresh
     /// alone would be an app carrying the key.
     public func accessToken() async -> String? {
-        guard let refresh = defaults.string(forKey: "account.refresh") else { return nil }
-        if let access = defaults.string(forKey: "account.access"),
-            let expiry = jwtExpiry(access), expiry.timeIntervalSinceNow > 60
+        guard let refresh = TokenStore.read(Self.refreshKey) else { return nil }
+        if let access = TokenStore.read(Self.accessKey),
+            let expiry = Self.jwtExpiry(access), expiry.timeIntervalSinceNow > 60
         {
             return access
         }
-        let body = try? await post("/v1/auth/refresh", ["refreshToken": refresh], authorised: false)
+        let body = try? await post("/v1/auth/refresh", ["refreshToken": refresh])
         guard let body else {
             // A refresh token that no longer works means the session is over,
             // and leaving a dead one in place makes every later call fail
-            // silently instead of showing a sign-in button.
-            signOut()
+            // silently instead of showing a sign-in button. Cleared locally
+            // rather than through `signOut()`: the token the logout route would
+            // need is the one that just proved dead.
+            userId = ""
+            email = ""
+            defaults.removeObject(forKey: "account.userId")
+            defaults.removeObject(forKey: "account.email")
+            TokenStore.delete(Self.accessKey)
+            TokenStore.delete(Self.refreshKey)
             return nil
         }
         store(body)
         return body["accessToken"] as? String
     }
 
-    /// Tell the relay where to reach this device.
-    public func registerDevice(pushToken: String, platform: String, label: String) async {
-        guard let token = await accessToken() else { return }
-        _ = try? await post(
+    /// Tell the relay where to reach this device, and what version is asking.
+    ///
+    /// Returns whether it worked, which it did not used to. The failure mode is
+    /// the product's central promise going quietly missing: the device is never
+    /// filed, the daemon's pushes reach zero addresses, and the settings screen
+    /// goes on saying "Notifications can reach this device."
+    @discardableResult
+    public func registerDevice(pushToken: String, platform: String, label: String) async -> Bool {
+        guard let token = await accessToken() else { return false }
+        let body = try? await post(
             "/v1/devices",
-            ["pushToken": pushToken, "platform": platform, "label": label],
+            [
+                "pushToken": pushToken, "platform": platform, "label": label,
+                // So the devices screen can show which of your machines is
+                // behind, without anyone having to go and look.
+                "version": AppVersion.reported,
+            ],
             bearer: token)
+        return body != nil
     }
 
     /// Ask for a token that lets one machine notify this account.
@@ -180,6 +224,7 @@ public final class Account: NSObject, ObservableObject {
                 id: $0["id"] as? String ?? "",
                 label: $0["label"] as? String ?? "Device",
                 detail: ($0["platform"] as? String) == "fcm" ? "Android" : "Apple",
+                version: $0["version"] as? String,
                 at: $0["updatedAt"] as? Double)
         }
         let machines = (body["machines"] as? [[String: Any]] ?? []).map {
@@ -187,6 +232,7 @@ public final class Account: NSObject, ObservableObject {
                 id: $0["id"] as? String ?? "",
                 label: $0["label"] as? String ?? "Machine",
                 detail: "Paired",
+                version: $0["version"] as? String,
                 at: ($0["lastSeenAt"] as? Double) ?? ($0["createdAt"] as? Double))
         }
         return Registrations(devices: devices, machines: machines)
@@ -206,16 +252,16 @@ public final class Account: NSObject, ObservableObject {
 
     private func exchange(code: String, verifier: String) async throws {
         let body = try await post(
-            "/v1/auth/token", ["code": code, "verifier": verifier], authorised: false)
+            "/v1/auth/token", ["code": code, "verifier": verifier])
         store(body)
     }
 
     private func store(_ body: [String: Any]) {
         if let access = body["accessToken"] as? String {
-            defaults.set(access, forKey: "account.access")
+            TokenStore.write(Self.accessKey, access)
         }
         if let refresh = body["refreshToken"] as? String {
-            defaults.set(refresh, forKey: "account.refresh")
+            TokenStore.write(Self.refreshKey, refresh)
         }
         if let id = body["userId"] as? String, !id.isEmpty {
             userId = id
@@ -229,9 +275,13 @@ public final class Account: NSObject, ObservableObject {
 
     @discardableResult
     private func post(
-        _ path: String, _ body: [String: Any], bearer: String? = nil, authorised: Bool = true
+        _ path: String, _ body: [String: Any], bearer: String? = nil
     ) async throws -> [String: Any] {
-        var request = URLRequest(url: URL(string: relay + path)!)
+        // Not force-unwrapped: `relay` is a setting anyone can type into, and
+        // a stray space in it would crash the app on the next sign-in rather
+        // than surface as a relay that would not answer.
+        guard let url = URL(string: relay + path) else { throw AccountError.relayRefused }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
@@ -243,7 +293,6 @@ public final class Account: NSObject, ObservableObject {
         else {
             throw AccountError.relayRefused
         }
-        _ = authorised
         return parsed
     }
 
@@ -272,7 +321,7 @@ public final class Account: NSObject, ObservableObject {
     /// Verification is the relay's job — it has the JWKS. This only decides
     /// whether to bother sending a token that is already stale, and a forged
     /// expiry buys nothing but an extra refresh.
-    private func jwtExpiry(_ token: String) -> Date? {
+    static func jwtExpiry(_ token: String) -> Date? {
         let parts = token.split(separator: ".")
         guard parts.count == 3 else { return nil }
         var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+")
@@ -288,13 +337,22 @@ public final class Account: NSObject, ObservableObject {
     private static let scheme = "overnight"
     private static let redirectURI = "overnight://auth"
 
-    private static func randomVerifier() -> String {
+    /// Nil rather than zeros if the system has no randomness for us.
+    ///
+    /// The discarded status was the bug: on failure `bytes` stays the all-zero
+    /// buffer it was initialised with, the verifier becomes a fixed publicly
+    /// known constant, sign-in still appears to work, and PKCE silently
+    /// protects nothing — which is the one thing standing between a custom URL
+    /// scheme any app can claim and account takeover.
+    static func randomVerifier() -> String? {
         var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            return nil
+        }
         return Data(bytes).base64URLEncoded
     }
 
-    private static func challenge(for verifier: String) -> String? {
+    static func challenge(for verifier: String) -> String? {
         guard let data = verifier.data(using: .ascii) else { return nil }
         return Data(SHA256.hash(data: data)).base64URLEncoded
     }
@@ -309,9 +367,23 @@ public struct Registration: Identifiable, Hashable, Sendable {
     public let id: String
     public let label: String
     public let detail: String
+    /// What this thing last reported running, or nil if it never has.
+    ///
+    /// The point of the whole devices screen once there is more than one
+    /// machine: seeing which one is behind without opening each of them. Nil is
+    /// not an error — a paired machine that has never had an agent get stuck
+    /// has never had a reason to talk to the relay.
+    public let version: String?
     /// Last heard from, as a Unix millisecond stamp — the only thing that tells
     /// you whether a row is a machine you still use or one you forgot about.
     public let at: Double?
+
+    /// The second line: what it is, what it runs, when it last spoke.
+    public var subtitle: String {
+        [detail, version, lastSeen.isEmpty ? nil : lastSeen]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
 
     public var lastSeen: String {
         guard let at else { return "" }

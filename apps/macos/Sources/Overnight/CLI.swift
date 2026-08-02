@@ -44,7 +44,10 @@ enum CLI {
     /// Both streams, and the exit status, because the callers here are about
     /// INSTALLING software on someone else's machine: an installer that failed
     /// halfway is exactly when its own words matter, and they arrive on stderr.
-    static func run(_ args: [String]) async -> (ok: Bool, output: String) {
+    /// - Parameter stdin: fed to the process and closed. For credentials: an
+    ///   argument is visible in `ps` to every process on the machine, and a
+    ///   pipe is not.
+    static func run(_ args: [String], stdin: String? = nil) async -> (ok: Bool, output: String) {
         guard let binary else {
             return (false, "The overnight CLI was not found.")
         }
@@ -60,11 +63,21 @@ enum CLI {
                 process.standardOutput = out
                 process.standardError = err
 
+                let input = stdin.map { _ in Pipe() }
+                if let input { process.standardInput = input }
+
                 do {
                     try process.run()
                 } catch {
                     continuation.resume(returning: (false, error.localizedDescription))
                     return
+                }
+
+                // Written and closed before reading stdout, because the child
+                // waits on EOF and we are about to wait on the child.
+                if let input, let stdin {
+                    input.fileHandleForWriting.write(Data(stdin.utf8))
+                    input.fileHandleForWriting.closeFile()
                 }
 
                 let stdout = out.fileHandleForReading.readDataToEndOfFile()

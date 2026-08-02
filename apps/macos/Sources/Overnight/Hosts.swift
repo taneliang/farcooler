@@ -129,8 +129,12 @@ final class Hosts: ObservableObject {
         }
 
         var arguments = target.isEmpty ? [] : ["--host", target]
-        arguments += ["push", "pair", token]
-        let result = await CLI.run(arguments)
+        arguments += ["push", "pair"]
+        // Down a pipe, never as an argument. `ps` is readable by every process
+        // running as this user, and the CLI forwards the same way over ssh, so
+        // a token passed here would be visible on both machines for the life of
+        // the command.
+        let result = await CLI.run(arguments, stdin: token)
         // The CLI's own words on failure, and a fixed sentence on success — the
         // success output would otherwise be the only place the token could
         // surface, and it must not.
@@ -143,14 +147,6 @@ final class Hosts: ObservableObject {
         arguments += ["push", "forget"]
         let result = await CLI.run(arguments)
         return result.ok ? "This machine will no longer notify you." : result.output
-    }
-
-    /// Whether a machine holds a token, asked of the machine.
-    func notificationStatus(_ target: String) async -> Bool {
-        var arguments = target.isEmpty ? [] : ["--host", target]
-        arguments += ["push", "status"]
-        let result = await CLI.run(arguments)
-        return result.ok && result.output.contains("paired ·")
     }
 
     // MARK: - Persistence

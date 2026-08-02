@@ -50,6 +50,7 @@ AGENTKIT_SOURCES = [
     "Account.swift",
     "AccountDevicesView.swift",
     "AccountSection.swift",
+    "AppVersion.swift",
     "AgentEvent.swift",
     "Composer.swift",
     "DiffComputation.swift",
@@ -58,6 +59,10 @@ AGENTKIT_SOURCES = [
     # pipes and a heading as a line beginning with a hash. Same conversation,
     # unreadable on one of the two clients.
     "MarkdownView.swift",
+    # The half of push registration that is not platform-specific. Both apps
+    # had it verbatim; only the device label differs.
+    "PushRegistration.swift",
+    "TokenStore.swift",
     "Transcript.swift",
 ]
 FRAMEWORKS = ["overnight_vt.xcframework", "overnight_client.xcframework"]
@@ -196,6 +201,8 @@ def version(kind):
 WORKOS_CLIENT_ID = os.environ.get("OVERNIGHT_WORKOS_CLIENT_ID", "")
 
 TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
+\t\t\t\tOVERNIGHT_CHANNEL = {version("channel")};
+\t\t\t\tOVERNIGHT_DISPLAY_VERSION = "{version("display")}";
 \t\t\t\tOVERNIGHT_WORKOS_CLIENT_ID = "{WORKOS_CLIENT_ID}";
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
 \t\t\t\tPRODUCT_NAME = Overnight;

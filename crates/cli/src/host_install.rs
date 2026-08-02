@@ -509,6 +509,37 @@ pub(crate) async fn remote_run(target: &str, command: &str) -> Fallible {
     Ok(())
 }
 
+/// Run a remote command, feeding it something on stdin.
+///
+/// Exists so a credential can reach a machine without ever being an argument.
+/// The error deliberately does NOT name the command: `remote_run` does, which is
+/// right for an installer step and wrong for anything carrying a secret, and the
+/// only way to be sure is for the secret-carrying path to have its own runner.
+pub(crate) async fn remote_run_with_stdin(target: &str, command: &str, input: &str) -> Fallible {
+    use tokio::io::AsyncWriteExt;
+
+    let mut child = Command::new("ssh")
+        .args(ssh_options())
+        .arg(target)
+        .arg(command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input.as_bytes()).await?;
+        // Dropped here rather than at the end of the function: the remote reads
+        // to EOF, and holding the pipe open would deadlock both sides.
+        drop(stdin);
+    }
+
+    if !child.wait().await?.success() {
+        return Err(format!("pairing failed on {target}").into());
+    }
+    Ok(())
+}
+
 async fn remote_capture(target: &str, command: &str) -> Result<String, Box<dyn std::error::Error>> {
     let out = Command::new("ssh")
         .args(ssh_options())

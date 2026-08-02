@@ -35,7 +35,14 @@ use uuid::Uuid;
 #[derive(Parser)]
 #[command(
     name = "overnight",
-    version,
+    // The BUILD STAMP, not `CARGO_PKG_VERSION`. Clap's bare `version` printed
+    // "overnight 0.1.0" — the same string in every build ever made — and two
+    // things read this expecting to tell builds apart: `host probe` captures it
+    // from a remote machine, and `HostProbe.matchesThisMac` compares the two.
+    // Comparing "0.1.0" to "0.1.0" always matched, so the "built from different
+    // source than this Mac" warning could never fire. That warning is the
+    // entire reason OVERNIGHT_BUILD exists.
+    version = overnight_protocol::BUILD,
     about = "A terminal-first command center for parallel coding agents"
 )]
 struct Cli {
@@ -214,9 +221,15 @@ enum LayoutCmd {
 
 #[derive(Subcommand)]
 enum PushCmd {
-    /// Store the token the app issued for this machine.
+    /// Store the token the app issued for this machine. Reads it from stdin.
+    ///
+    /// STDIN, not an argument, and that is the whole reason this reads oddly.
+    /// A bearer token in argv is a bearer token in `ps aux` — world-readable on
+    /// a default Linux box — on both the machine running this and, over ssh, the
+    /// machine being paired. It also ends up in shell history, in sshd's command
+    /// logging, and in any error that echoes the command back. One observation
+    /// by any local user is permanent: the token does not expire.
     Pair {
-        token: String,
         /// A self-hosted relay, if you run your own.
         #[arg(long)]
         relay: Option<String>,
@@ -499,28 +512,43 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 /// not over one the daemon would have to be trusted to keep private.
 async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
     use overnight_daemon::push::Pairing;
+    // The daemon's, not a third copy. This crate already had two spellings of
+    // shell quoting — `remote::shell_quote`, which passes safe arguments
+    // through unquoted, and the daemon's, which always wraps — and a third one
+    // on the path that forwards a credential over ssh is the one that gets it
+    // wrong later.
+    use overnight_daemon::service::shell_quote;
 
     if let Some(target) = host {
-        let remote = match &cmd {
-            PushCmd::Pair { token, relay } => {
+        match &cmd {
+            PushCmd::Pair { relay } => {
                 let relay = relay
                     .as_deref()
                     .map(|r| format!(" --relay {}", shell_quote(r)))
                     .unwrap_or_default();
-                format!("overnight push pair {}{relay}", shell_quote(token))
+                // The token goes down the pipe, not into the command. Which
+                // means it is also absent from the error if this fails — see
+                // `remote_run`, which names the command it ran.
+                let token = read_token()?;
+                return host_install::remote_run_with_stdin(
+                    target,
+                    &format!("overnight push pair{relay}"),
+                    &token,
+                )
+                .await;
             }
-            PushCmd::Status => "overnight push status".to_string(),
-            PushCmd::Forget => "overnight push forget".to_string(),
-        };
-        return host_install::remote_run(target, &remote).await;
+            PushCmd::Status => return host_install::remote_run(target, "overnight push status").await,
+            PushCmd::Forget => return host_install::remote_run(target, "overnight push forget").await,
+        }
     }
 
     let dir = overnight_daemon::paths::ensure_runtime_dir()?;
     match cmd {
-        PushCmd::Pair { token, relay } => {
+        PushCmd::Pair { relay } => {
             // The default lives in the daemon, not restated here: two
             // spellings of a relay URL is one of them being wrong later.
             let relay = relay.unwrap_or_else(overnight_daemon::push::default_relay);
+            let token = read_token()?;
             Pairing { relay, token }.save_in(&dir)?;
             println!("paired · notifications will go to your signed-in devices");
         }
@@ -538,9 +566,20 @@ async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
     Ok(())
 }
 
-/// Single-quote for a remote shell, the way the installer already does.
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
+/// One line from stdin, with nothing echoed.
+///
+/// Trimmed because whoever pipes this in — the Mac app, a shell heredoc, ssh —
+/// will append a newline, and a token with a trailing newline authenticates
+/// against nothing while looking exactly right in every error message.
+fn read_token() -> Result<String, Box<dyn std::error::Error>> {
+    use std::io::Read;
+    let mut token = String::new();
+    std::io::stdin().read_to_string(&mut token)?;
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        return Err("no token on stdin (the app pairs a machine for you)".into());
+    }
+    Ok(token)
 }
 
 async fn run() -> Fallible {

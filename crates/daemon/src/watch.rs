@@ -57,6 +57,22 @@ const BACKSTOP_INTERVAL: Duration = Duration::from_secs(60);
 /// certainty re-reads.
 const EVENT_BACKLOG: usize = 256;
 
+/// What, if anything, is worth waking a phone for.
+///
+/// Split out from the sending so it can be tested at all: the rule it encodes —
+/// two states out of five — is the difference between a product people keep
+/// notifications on for and one they mute, and the sending half is a spawn and
+/// a filesystem read that no test can reach through.
+fn notification(activity: AgentActivity, label: &str) -> Option<(String, String)> {
+    match activity {
+        AgentActivity::Blocked => {
+            Some((format!("{label} needs you"), "Waiting for your answer".to_string()))
+        }
+        AgentActivity::Done => Some((format!("{label} finished"), String::new())),
+        _ => None,
+    }
+}
+
 /// The daemon's live view of what every agent is doing.
 pub struct Watcher {
     service: Arc<Service>,
@@ -98,9 +114,10 @@ impl Watcher {
             events,
             state: tokio::sync::Mutex::new(HashMap::new()),
             push: reqwest::Client::builder()
-                // A notification is worth a few seconds and never worth
-                // holding the sampling loop open: the fleet has to keep being
-                // watched whether or not a relay is reachable.
+                // A notification is worth a few seconds and no more. The
+                // sampling loop is not held either way — see
+                // `push_if_paired`, which spawns rather than awaits — but a
+                // request with no ceiling would leak a task per stuck relay.
                 .timeout(std::time::Duration::from_secs(10))
                 .build()
                 .unwrap_or_default(),
@@ -112,14 +129,27 @@ impl Watcher {
     /// Blocked and done only. A working agent is the normal case, and something
     /// that buzzes for the normal case is something people turn off — after
     /// which it cannot tell them the thing that mattered.
-    async fn push_if_paired(&self, terminal: Uuid, activity: AgentActivity, label: &str) {
-        let (title, subtitle) = match activity {
-            AgentActivity::Blocked => (format!("{label} needs you"), "Waiting for your answer"),
-            AgentActivity::Done => (format!("{label} finished"), ""),
-            _ => return,
-        };
-        let Some(pairing) = crate::push::Pairing::load() else { return };
-        crate::push::notify(&self.push, &pairing, &title, subtitle, &terminal.to_string()).await;
+    ///
+    /// Deliberately NOT async, and this is the whole point of the function.
+    /// It is called from inside the sampling loop while the watcher's state
+    /// mutex is held, so awaiting an HTTP round trip here would stall the loop
+    /// — and, worse, every client asking `activity()` or `mark_seen()`, which
+    /// take the same lock — for as long as the relay took to answer. Ten agents
+    /// finishing at once against an unreachable relay is a fleet frozen for a
+    /// minute and a half. Spawning detaches it: the loop moves on immediately
+    /// and the notification arrives, or does not, on its own time.
+    ///
+    /// Reading the pairing file happens in the spawned task for the same
+    /// reason. It is blocking I/O, and it does not belong under a lock either.
+    fn push_if_paired(&self, terminal: Uuid, activity: AgentActivity, label: &str) {
+        let Some((title, subtitle)) = notification(activity, label) else { return };
+        // Cheap: a `reqwest::Client` is a handle to a shared pool, so this
+        // clone keeps the connection reuse the one-client-per-daemon buys.
+        let client = self.push.clone();
+        tokio::spawn(async move {
+            let Some(pairing) = crate::push::Pairing::load() else { return };
+            crate::push::notify(&client, &pairing, &title, &subtitle, &terminal.to_string()).await;
+        });
     }
 
     /// Subscribe a connection to the push stream.
@@ -345,7 +375,7 @@ impl Watcher {
             // daemon would buzz once for every idle agent on the machine.
             if let Some(before) = &previous {
                 if before.activity != next_activity {
-                    self.push_if_paired(id, next_activity, &command).await;
+                    self.push_if_paired(id, next_activity, &command);
                 }
             }
 
@@ -429,4 +459,34 @@ fn now_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_blocked_or_finished_agent_is_worth_a_phone() {
+        // Working is the NORMAL case. Something that buzzes for the normal case
+        // is something people turn off, after which it cannot tell them the
+        // thing that mattered — so this is the rule the whole feature rests on.
+        assert!(notification(AgentActivity::Working, "claude").is_none());
+        assert!(notification(AgentActivity::Idle, "claude").is_none());
+        assert!(notification(AgentActivity::Unspecified, "claude").is_none());
+    }
+
+    #[test]
+    fn a_blocked_agent_says_what_it_wants() {
+        let (title, subtitle) = notification(AgentActivity::Blocked, "claude").expect("blocked");
+        assert_eq!(title, "claude needs you");
+        assert_eq!(subtitle, "Waiting for your answer");
+    }
+
+    #[test]
+    fn a_finished_agent_needs_no_second_line() {
+        let (title, subtitle) = notification(AgentActivity::Done, "claude").expect("done");
+        assert_eq!(title, "claude finished");
+        assert!(subtitle.is_empty());
+    }
 }

@@ -59,6 +59,7 @@ struct ContentView: View {
         }
         .task {
             Notifier.shared.requestAuthorisation()
+            PushRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
             AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
             await client.refresh()
             await client.refreshRepositories()
