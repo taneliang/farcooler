@@ -201,7 +201,7 @@ pub async fn list_branches(repo: &Path) -> Result<Vec<BranchInfo>> {
     }
 
     let mut branches: Vec<BranchInfo> = order.into_iter().filter_map(|n| byname.remove(&n)).collect();
-    branches.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    branches.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
     Ok(branches)
 }
 

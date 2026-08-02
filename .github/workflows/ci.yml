@@ -1,0 +1,157 @@
+# What must be true of every commit.
+#
+# GitHub Actions, and specifically because this repo is public: public repos get
+# unlimited minutes on standard runners, macOS ones included, which is the whole
+# question for a project that has to build a Mac app and an iOS app. A private
+# repo would burn its monthly allowance on macOS runners in a couple of days
+# (they bill at 10× Linux), and that is the point at which CircleCI's open-source
+# plan would be worth the move.
+#
+# Four jobs because there are four things that can independently break: the Rust
+# workspace, the Swift that both apps share, the iOS app, and the relay. They run
+# in parallel; none depends on another's artefacts.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # A push that supersedes another cancels it. Nobody needs the results of a
+  # commit that is already two commits behind.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both, because the daemon runs on both and the differences are real:
+        # tmux behaves differently, launchd and systemd are different code paths,
+        # and the Linux build is the one that has to work without OpenSSL
+        # headers — which is why reqwest uses rustls.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      # tmux is not a test double here. The tmux crate drives the real binary,
+      # because a fake tmux would agree with whatever this code believed.
+      - name: Install tmux
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y tmux
+          else
+            brew install tmux
+          fi
+
+      # No `cargo fmt --check`, deliberately, and it is worth saying why rather
+      # than leaving it looking forgotten. This workspace predates any
+      # formatter, and default rustfmt wants to reformat sixty files — mostly by
+      # expanding onto four lines things that were written on one. Adopting it
+      # is a reasonable call to make later; making it as a side effect of adding
+      # CI is not. Clippy, which finds real defects rather than disagreeing
+      # about widths, runs at -D warnings.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  swift:
+    name: Swift (shared + macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # The full bundle, not `swift build`. `build-app.sh` is the thing that has
+      # gone wrong before — it once copied a stale Rust binary instead of
+      # building one — so the assembly step is what CI should exercise.
+      - name: Build Overnight.app
+        run: apps/macos/build-app.sh
+
+      - name: Check the bundle is stamped with this commit's version
+        run: |
+          expected="$(scripts/version.sh)"
+          actual="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+            apps/macos/build/Overnight.app/Contents/Info.plist)"
+          [ "$expected" = "$actual" ] || {
+            echo "bundle says $actual, the workspace says $expected"; exit 1; }
+
+      # Every component must report the same build stamp. This is the check that
+      # would have caught a Mac driving a host running different source.
+      - name: Check the CLI and daemon agree
+        run: |
+          apps/macos/build/Overnight.app/Contents/Resources/overnight --version
+          test -x apps/macos/build/Overnight.app/Contents/Resources/overnightd
+
+      - name: Test AgentKit
+        run: swift test --package-path apps/shared/AgentKit
+
+  ios:
+    name: iOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim, aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+
+      # The xcframeworks are gitignored — they are build output — so CI has to
+      # build them before the project that links them. Without this the app
+      # links nothing and fails at the linker, which reads as a Swift error.
+      - name: Build the Rust xcframeworks
+        run: ./scripts/build-ios-frameworks.sh
+
+      # The project file is generated, never committed as the source of truth,
+      # so CI must generate it too — otherwise a source file added to AgentKit
+      # compiles locally and is missing from the app.
+      - name: Generate the Xcode project
+        run: apps/ios/generate-project.py
+
+      # `ARCHS=arm64` explicitly, and a generic destination rather than a named
+      # simulator. The vendored xcframeworks carry no x86_64 simulator slice, so
+      # the default two-architecture build fails at link; naming a device
+      # instead ("iPhone 17 Pro") would work until the runner image ships a
+      # different set of simulators, which it does without warning.
+      - name: Build
+        run: |
+          xcodebuild -project apps/ios/Overnight.xcodeproj \
+            -scheme Overnight \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            ARCHS=arm64 \
+            build
+        env:
+          NSUnbufferedIO: YES
+
+  relay:
+    name: Relay
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/relay
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/relay/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      # A dry run compiles and bundles the worker without deploying it, which
+      # catches the class of error that only appears at upload time.
+      - run: npx wrangler deploy --dry-run --outdir /tmp/relay-build

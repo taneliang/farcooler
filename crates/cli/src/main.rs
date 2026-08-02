@@ -838,7 +838,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                                     "preset": label(t),
                                     "state": terminal_label(t.state()),
                                     "activity": activity_label(t.activity),
-                                    "activitySince": activity_since(&t),
+                                    "activitySince": activity_since(t),
                                     "epoch": t.epoch,
                                     // The Mac app decodes THIS, not the JSON
                                     // `crates/client` builds for iOS. Leaving
@@ -887,7 +887,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                         truncate(&t.title, 16),
                         terminal_label(t.state()),
                         if activity == "none" { "" } else { activity },
-                        label(&t)
+                        label(t)
                     );
                 }
             }
@@ -1184,7 +1184,7 @@ async fn events(host: Option<&str>) -> Fallible {
 
 async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     use overnight_daemon::layout::parse_preset;
-    use overnight_protocol::v1::{LayoutUpdate, SplitSide};
+    use overnight_protocol::v1::LayoutUpdate;
 
     let mut link = connect_to(host).await?;
     let workspaces = list_workspaces(&mut link).await?;

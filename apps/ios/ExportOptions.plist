@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- app-store-connect, not ad-hoc: every build goes to TestFlight, and a
+         build that reaches testers by any other route is one nobody can tell
+         you the version of. -->
+    <key>method</key>
+    <string>app-store-connect</string>
+    <key>destination</key>
+    <string>export</string>
+    <!-- Off. The build number is the commit count (see scripts/version.sh), so
+         it is already correct and already monotonic; letting Xcode invent one
+         would break the guarantee that a build number names a commit. -->
+    <key>manageAppVersionAndBuildNumber</key>
+    <false/>
+    <key>uploadSymbols</key>
+    <true/>
+</dict>
+</plist>

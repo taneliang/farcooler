@@ -720,7 +720,7 @@ impl RunningSession {
     /// answer that is never coming. Splitting the receive from the handling is
     /// what makes that impossible rather than merely rare.
     pub async fn recv_frame(&mut self) -> Result<Incoming, SessionError> {
-        self.incoming.recv().await.ok_or_else(|| {
+        self.incoming.recv().await.ok_or({
             // The reader task spawned by `split` only exits by dropping its
             // sender, and it only does that when the adapter's stdout closed
             // or sent something unparseable — either way the adapter is gone.

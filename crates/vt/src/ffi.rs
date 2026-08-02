@@ -16,6 +16,20 @@
 //! Every pointer parameter is null-checked. A null handle is a no-op or a
 //! zero/false return, never a crash: a renderer bug must not take down the app.
 
+//! ## Safety, once rather than 23 times
+//!
+//! Every function here is `unsafe` for the same reason and under the same
+//! contract, so `clippy::missing_safety_doc` is silenced at the module level
+//! rather than answered per function — 23 copies of one paragraph is 23 places
+//! for it to drift out of date.
+//!
+//! The contract: pointers are either null or valid for the call's duration, a
+//! handle came from this module's constructor and has not been freed, and no
+//! handle is used concurrently from two threads without the caller's own
+//! synchronisation. Null is checked everywhere and is never a crash — a
+//! renderer bug must not take down the app.
+#![allow(clippy::missing_safety_doc)]
+
 use std::ffi::{c_char, c_void};
 
 use crate::grid::{snapshot, Cell};

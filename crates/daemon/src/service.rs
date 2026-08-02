@@ -702,23 +702,6 @@ impl Service {
         Ok(term)
     }
 
-    /// Give every live pane its identity on the pane itself.
-    ///
-    /// A one-shot repair at startup, for terminals created before identity moved
-    /// from the window to the pane. Those carry their id as a WINDOW option,
-    /// which reads correctly — panes inherit window options — right up until the
-    /// pane is moved into a different window, at which point it inherits the
-    /// destination's options instead and the terminal becomes unidentifiable.
-    ///
-    /// `join-pane` re-tags as it goes, so a move is safe either way. This exists
-    /// because a fleet that has been running for days should not have to be
-    /// dragged through a move to be repaired, and because the failure is silent
-    /// and expensive: a terminal that loses its id derives as `lost` and takes
-    /// its workspace to `error`.
-    ///
-    /// Idempotent, and cheap enough to run unconditionally: setting a pane option
-    /// to the value it already has is one tmux call per live pane, once.
-
     /// Whether this pane has an agent in it that Overnight can host as a chat.
     ///
     /// Adoption only makes sense for a pane that IS an agent — a shell has no

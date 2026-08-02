@@ -131,7 +131,7 @@ pub fn workspace(view: &WorkspaceView, scope: Scope) -> wire::Workspace {
 /// A terminal with its DERIVED state.
 pub fn terminal(view: &TerminalView) -> wire::Terminal {
     let t = &view.terminal;
-    let exit_status = (t.exit_code.is_some() || t.exit_signal.is_some()).then(|| wire::ExitStatus {
+    let exit_status = (t.exit_code.is_some() || t.exit_signal.is_some()).then_some(wire::ExitStatus {
         code: t.exit_code,
         signal: t.exit_signal,
     });
@@ -294,6 +294,48 @@ pub fn timestamp(unix_millis: i64) -> prost_types::Timestamp {
     }
 }
 
+/// A workspace's tiling, whole.
+///
+/// Sent whole and never as a diff. Layout is edited by the app, by the CLI, by
+/// agents driving the CLI, and by anyone attached to the tmux session directly —
+/// so a client that missed one event converges on the next rather than applying a
+/// delta to a state it may not hold.
+pub fn pane_group_list(
+    workspace: Uuid,
+    layouts: &[crate::layout::LayoutView],
+) -> overnight_protocol::v1::PaneGroupList {
+    overnight_protocol::v1::PaneGroupList {
+        workspace_id: id_bytes(workspace),
+        items: layouts.iter().map(pane_group).collect(),
+    }
+}
+
+pub fn pane_group(view: &crate::layout::LayoutView) -> overnight_protocol::v1::PaneGroup {
+    let (columns, rows) = view.size();
+    overnight_protocol::v1::PaneGroup {
+        id: view.window.window_id.clone(),
+        workspace_id: id_bytes(view.window.workspace_id),
+        name: view.window.name.clone(),
+        active: view.window.active,
+        columns,
+        rows,
+        layout: view.window.layout.clone(),
+        panes: view
+            .panes
+            .iter()
+            .map(|p| overnight_protocol::v1::PaneRect {
+                terminal_id: id_bytes(p.terminal_id),
+                left: p.left,
+                top: p.top,
+                columns: p.columns,
+                rows: p.rows,
+                focused: p.pane_active,
+                zoomed: p.zoomed,
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,47 +416,5 @@ mod tests {
         assert!(before.nanos >= 0, "nanos must never be negative");
         assert_eq!(timestamp(1500).seconds, 1);
         assert_eq!(timestamp(1500).nanos, 500_000_000);
-    }
-}
-
-/// A workspace's tiling, whole.
-///
-/// Sent whole and never as a diff. Layout is edited by the app, by the CLI, by
-/// agents driving the CLI, and by anyone attached to the tmux session directly —
-/// so a client that missed one event converges on the next rather than applying a
-/// delta to a state it may not hold.
-pub fn pane_group_list(
-    workspace: Uuid,
-    layouts: &[crate::layout::LayoutView],
-) -> overnight_protocol::v1::PaneGroupList {
-    overnight_protocol::v1::PaneGroupList {
-        workspace_id: id_bytes(workspace),
-        items: layouts.iter().map(pane_group).collect(),
-    }
-}
-
-pub fn pane_group(view: &crate::layout::LayoutView) -> overnight_protocol::v1::PaneGroup {
-    let (columns, rows) = view.size();
-    overnight_protocol::v1::PaneGroup {
-        id: view.window.window_id.clone(),
-        workspace_id: id_bytes(view.window.workspace_id),
-        name: view.window.name.clone(),
-        active: view.window.active,
-        columns,
-        rows,
-        layout: view.window.layout.clone(),
-        panes: view
-            .panes
-            .iter()
-            .map(|p| overnight_protocol::v1::PaneRect {
-                terminal_id: id_bytes(p.terminal_id),
-                left: p.left,
-                top: p.top,
-                columns: p.columns,
-                rows: p.rows,
-                focused: p.pane_active,
-                zoomed: p.zoomed,
-            })
-            .collect(),
     }
 }

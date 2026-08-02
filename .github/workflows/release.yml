@@ -1,0 +1,238 @@
+# Cutting a release: tag it, and everything ships from the same commit.
+#
+#   ./scripts/release.sh 0.2.0
+#
+# The one rule this file exists to enforce: the CLI, the daemon, the Mac app and
+# the phone app in a given release are built from ONE commit. They speak a
+# protocol to each other and they check each other's build stamps, so a release
+# assembled from four separate builds is a release that can disagree with itself.
+# Everything below therefore checks out once and fans out from there.
+#
+# The relay is deliberately NOT here — see relay.yml. It deploys continuously and
+# must stay compatible with app versions that are months old, because an App
+# Store release cannot be rolled forward on demand.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Buildable without a tag, so the signing and notarisation path can be
+  # exercised before it matters.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      # musl, statically linked, for the reason scripts/build-linux.sh explains:
+      # a glibc build made on one distribution refuses to start on an older one,
+      # and "GLIBC_2.38 not found" is the most common way a self-installed
+      # daemon fails. One binary has to run on Debian, Alpine, and a NAS.
+      - name: Install cross
+        run: cargo install cross --locked
+
+      - name: Build
+        run: cross build --release --target ${{ matrix.target }} --bin overnight --bin overnightd
+
+      # The same layout `overnight host install` looks for, so a downloaded
+      # tarball unpacks straight into the path the installer already reads.
+      - name: Package
+        run: |
+          out="dist/${{ matrix.arch }}-linux"
+          mkdir -p "$out"
+          cp target/${{ matrix.target }}/release/overnight "$out/"
+          cp target/${{ matrix.target }}/release/overnightd "$out/"
+          tar -czf "overnight-$(scripts/version.sh)-${{ matrix.arch }}-linux.tar.gz" -C dist "${{ matrix.arch }}-linux"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: '*.tar.gz'
+
+  macos:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The build stamp is a git describe away, and a shallow clone makes
+          # `git rev-list --count` — the App Store build number — wrong.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Signing is conditional, not required. Without a Developer ID this still
+      # produces a working ad-hoc-signed app — which is what a contributor gets,
+      # and it must keep working for them.
+      - name: Import the signing certificate
+        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain=build.keychain
+          security create-keychain -p actions "$keychain"
+          security default-keychain -s "$keychain"
+          security unlock-keychain -p actions "$keychain"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
+          security import certificate.p12 -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$keychain"
+          rm certificate.p12
+
+      - name: Build Overnight.app
+        run: apps/macos/build-app.sh
+        env:
+          OVERNIGHT_WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+
+      - name: Sign and notarise
+        if: ${{ secrets.MACOS_SIGN_IDENTITY != '' }}
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          app=apps/macos/build/Overnight.app
+          # --deep is deprecated and wrong for a bundle carrying its own
+          # binaries: the CLI and daemon inside Resources are separate
+          # executables and each needs its own signature and hardened runtime.
+          for binary in "$app/Contents/Resources/overnight" "$app/Contents/Resources/overnightd"; do
+            codesign --force --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "$binary"
+          done
+          codesign --force --options runtime --timestamp \
+            --sign "$MACOS_SIGN_IDENTITY" "$app"
+
+          ditto -c -k --keepParent "$app" Overnight.zip
+          xcrun notarytool submit Overnight.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          # Stapled so the app opens on a machine that is offline the first time
+          # it runs — otherwise Gatekeeper has to phone home and a plane is
+          # exactly where someone tries a new tool.
+          xcrun stapler staple "$app"
+          rm Overnight.zip
+
+      - name: Package
+        run: |
+          ditto -c -k --keepParent apps/macos/build/Overnight.app \
+            "Overnight-$(scripts/version.sh)-macos.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: '*.zip'
+
+  ios:
+    name: iOS (TestFlight)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+
+      # The xcframeworks are gitignored — they are build output — so CI has to
+      # build them before the project that links them. Without this the app
+      # links nothing and fails at the linker, which reads as a Swift error.
+      # --device, unlike CI's simulator-only build: this one is archived.
+      - name: Build the Rust xcframeworks
+        run: ./scripts/build-ios-frameworks.sh --device
+
+      - name: Generate the Xcode project
+        run: apps/ios/generate-project.py
+
+      # Always, credentials or not. This is the step that catches a release
+      # broken for the phone, and a fork with no App Store account still
+      # deserves to find that out.
+      - name: Build for the device
+        run: |
+          xcodebuild -project apps/ios/Overnight.xcodeproj \
+            -scheme Overnight \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Archive and upload to TestFlight
+        if: ${{ secrets.APP_STORE_KEY_ID != '' }}
+        env:
+          APP_STORE_KEY_ID: ${{ secrets.APP_STORE_KEY_ID }}
+          APP_STORE_ISSUER_ID: ${{ secrets.APP_STORE_ISSUER_ID }}
+          APP_STORE_KEY_P8: ${{ secrets.APP_STORE_KEY_P8 }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APP_STORE_KEY_P8" | base64 --decode \
+            > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+
+          xcodebuild -project apps/ios/Overnight.xcodeproj \
+            -scheme Overnight \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Overnight.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyID "$APP_STORE_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8 \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
+            archive
+
+          xcodebuild -exportArchive \
+            -archivePath build/Overnight.xcarchive \
+            -exportOptionsPlist apps/ios/ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyID "$APP_STORE_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+
+          xcrun altool --upload-app -f build/export/Overnight.ipa -t ios \
+            --apiKey "$APP_STORE_KEY_ID" --apiIssuer "$APP_STORE_ISSUER_ID"
+
+  publish:
+    name: Publish the release
+    needs: [linux, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            Every binary here was built from this one commit. The Mac app,
+            the phone app, the CLI and the daemon check each other's build
+            stamps, so mixing versions between them is a supported way to
+            confuse yourself and nothing more.
+
+            Linux hosts: unpack the tarball into `dist/` and run
+            `overnight host install <target>`, or let the Mac app do it.

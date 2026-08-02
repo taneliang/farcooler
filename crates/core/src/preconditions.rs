@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn same_key_same_hash_replays() {
-        assert_eq!(check_idempotency_replay(Some("abc"), "abc").unwrap(), true);
+        assert!(check_idempotency_replay(Some("abc"), "abc").unwrap());
     }
 
     #[test]
@@ -130,6 +130,6 @@ mod tests {
 
     #[test]
     fn unseen_key_is_not_a_replay() {
-        assert_eq!(check_idempotency_replay(None, "abc").unwrap(), false);
+        assert!(!check_idempotency_replay(None, "abc").unwrap());
     }
 }

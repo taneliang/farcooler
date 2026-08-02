@@ -95,7 +95,7 @@ pub fn discover_claude_session(
         }
     }
 
-    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    candidates.sort_by_key(|c| std::cmp::Reverse(c.1));
     match candidates.as_slice() {
         [] => Err(DiscoveryError::NotFound),
         [(only, _)] => Ok(only.clone()),
@@ -244,7 +244,7 @@ mod tests {
 
         // The caller's job, asserted here because it is the whole protection:
         // a candidate another terminal already holds must be refused.
-        let claimed = vec!["belongs-to-pane-one".to_string()];
+        let claimed = ["belongs-to-pane-one".to_string()];
         assert!(claimed.contains(&found), "the caller must reject this");
     }
 

@@ -16,14 +16,6 @@ fn plan_entry(e: &WirePlanEntry) -> PlanEntry {
     PlanEntry { content: e.content.clone(), priority: e.priority.clone(), status: e.status.clone() }
 }
 
-/// One update becomes zero or more events.
-///
-/// Almost never an empty vec for an update that carried meaning: an update
-/// this version cannot interpret produces a `Gap`, because a silently
-/// dropped update is a transcript that is wrong without saying so. The one
-/// deliberate exception is `AvailableCommandsUpdate` — see its arm below for
-/// why an empty vec there is correct rather than an oversight.
-
 /// A title that says what the tool is doing, not merely what kind it is.
 ///
 /// Most tools name themselves usefully once resolved — a Bash call becomes
@@ -78,6 +70,13 @@ fn tool_diff(content: &[crate::acp::wire::ToolContent]) -> Option<crate::event::
     })
 }
 
+/// One update becomes zero or more events.
+///
+/// Almost never an empty vec for an update that carried meaning: an update
+/// this version cannot interpret produces a `Gap`, because a silently
+/// dropped update is a transcript that is wrong without saying so. The one
+/// deliberate exception is `AvailableCommandsUpdate` — see its arm below for
+/// why an empty vec there is correct rather than an oversight.
 pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
     match update {
         SessionUpdate::AgentMessageChunk { content } => {

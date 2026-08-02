@@ -23,10 +23,15 @@
     <string>Overnight</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <!-- Both deferred to build settings, which `generate-project.py` fills in
+         from scripts/version.sh. The two apps and the daemon must report the
+         same version — see that script for what goes wrong when they do not —
+         and the only way to guarantee it is for neither plist to hold a
+         literal. This one held "1.0" while the Mac held "0.1.0". -->
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UILaunchScreen</key>
@@ -68,6 +73,6 @@
          be open source without shipping anything worth stealing. Blank here so
          a fork can point at its own WorkOS project without editing source. -->
     <key>OvernightWorkOSClientID</key>
-    <string></string>
+    <string>$(OVERNIGHT_WORKOS_CLIENT_ID)</string>
 </dict>
 </plist>

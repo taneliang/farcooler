@@ -55,7 +55,7 @@ fn main() {
     let (host, port) = rest.rsplit_once(':').unwrap_or((rest, "22"));
     let key = std::fs::read_to_string(key_path).expect("private key");
 
-    let handle = unsafe { overnight_client_new() };
+    let handle = overnight_client_new();
     let config = serde_json::json!({
         "host": host, "port": port.parse::<u16>().unwrap(), "user": user,
         "private_key": key,

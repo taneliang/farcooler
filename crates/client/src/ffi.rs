@@ -20,6 +20,18 @@
 //! protobuf runtime in Swift and again in Kotlin — to describe messages this
 //! crate has already decoded — would be work with nothing to show for it.
 
+//! ## Safety, once rather than per function
+//!
+//! Every function here is `unsafe` under the same contract, so
+//! `clippy::missing_safety_doc` is silenced at the module level rather than
+//! answered one function at a time — copies of one paragraph are copies to
+//! drift out of date.
+//!
+//! The contract: pointers are either null or valid for the call's duration, a
+//! handle came from `overnight_client_new` and has not been freed, and strings
+//! passed in are NUL-terminated UTF-8. Null is checked everywhere.
+#![allow(clippy::missing_safety_doc)]
+
 use std::collections::VecDeque;
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::{Arc, Mutex};
@@ -774,7 +786,7 @@ mod tests {
 
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
+    if text.len() % 2 != 0 {
         return None;
     }
     (0..text.len())

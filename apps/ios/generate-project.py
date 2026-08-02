@@ -9,7 +9,9 @@ the unreadable mess that a hand-edited pbxproj becomes.
     ./apps/ios/generate-project.py
 """
 
+import os
 import pathlib
+import subprocess
 import uuid
 
 SOURCES = [
@@ -171,7 +173,32 @@ COMMON = """\t\t\t\tCLANG_ENABLE_MODULES = YES;
 # expresses that. Overnight/Info.plist says it directly, and every other key
 # it carries is only what GENERATE_INFOPLIST_FILE was already synthesizing —
 # nothing lost switching, one array gained.
-TARGET_COMMON = """\t\t\t\tPRODUCT_NAME = Overnight;
+def version(kind):
+    """The one version number, asked of the one thing that knows it.
+
+    Shelling out rather than re-parsing Cargo.toml here: two implementations of
+    "what version is this" is exactly the drift the script exists to prevent,
+    and the whole point is that the phone, the Mac, and the daemon report the
+    same string. Info.plist holds $(MARKETING_VERSION) and
+    $(CURRENT_PROJECT_VERSION) so that neither this file nor that one can carry
+    a literal that goes stale.
+    """
+    script = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "version.sh"
+    return subprocess.run(
+        [str(script), kind], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+# Public — it names the app to WorkOS, it authenticates as nothing — but read
+# from the environment rather than committed, so a fork points at its own WorkOS
+# project without editing source. Empty is fine: the app works, minus a sign-in
+# button, and sign-in buys notifications and nothing else.
+WORKOS_CLIENT_ID = os.environ.get("OVERNIGHT_WORKOS_CLIENT_ID", "")
+
+TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
+\t\t\t\tOVERNIGHT_WORKOS_CLIENT_ID = "{WORKOS_CLIENT_ID}";
+\t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
+\t\t\t\tPRODUCT_NAME = Overnight;
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
 \t\t\t\tINFOPLIST_FILE = Overnight/Info.plist;
 \t\t\t\tCODE_SIGN_STYLE = Manual;

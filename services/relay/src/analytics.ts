@@ -40,6 +40,10 @@ export async function anonymousId(accountId: string, salt: string): Promise<stri
 }
 
 export type EventName =
+  // The first event any account ever produces, and the one DAU and MAU are
+  // actually counted from: someone can open the app for a week without
+  // registering a device or pairing a machine, and that is still a user.
+  | 'signed_in'
   | 'device_registered'
   | 'daemon_paired'
   | 'notification_sent'

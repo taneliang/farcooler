@@ -28,6 +28,30 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/
 
 cp "$BIN" "$APP/Contents/MacOS/Overnight"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+
+# The version is stamped into the BUNDLED plist, not the source one.
+#
+# Stamping the source would make every build dirty the working tree, which is
+# how a version ends up committed by accident and then hand-edited later. There
+# is one number — see scripts/version.sh — and this is where it lands.
+VERSION="$(../../scripts/version.sh)"
+BUILD_NUMBER="$(../../scripts/version.sh build)"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" \
+  "$APP/Contents/Info.plist" >/dev/null
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" \
+  "$APP/Contents/Info.plist" >/dev/null
+
+# The WorkOS client id, if this build has one.
+#
+# Public — it names the app to WorkOS rather than authenticating as anything —
+# but still not committed, so that a fork points at its own WorkOS project by
+# setting one environment variable instead of editing source. A build without it
+# works completely; the only thing missing is the sign-in button, and sign-in
+# buys notifications and nothing else.
+if [ -n "${OVERNIGHT_WORKOS_CLIENT_ID:-}" ]; then
+  /usr/libexec/PlistBuddy -c "Set :OvernightWorkOSClientID $OVERNIGHT_WORKOS_CLIENT_ID" \
+    "$APP/Contents/Info.plist" >/dev/null
+fi
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # The app is the distribution unit: it carries the CLI it drives.
