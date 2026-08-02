@@ -36,7 +36,10 @@ struct TerminalTabStrip: View {
                         }
                     }
                 }
-                .padding(.horizontal, 5)
+                // Enough that a chip never reaches the bar's corner arc. Less
+                // than the radius and the chip's own capsule pokes out through
+                // the curve, which is what the clip below is really guarding.
+                .padding(.horizontal, 8)
                 .padding(.vertical, 5)
             }
             // Scrolled to the open terminal on first layout, not on every
@@ -59,6 +62,13 @@ struct TerminalTabStrip: View {
         // A single pill holding them is one sibling of the composer rather than
         // a crowd competing with it, and it is the shape iOS 26 gives a
         // floating group of controls.
+        //
+        // CLIPPED to that shape, not merely backed by it. `glassEffect(in:)`
+        // draws a surface behind its content and does not constrain it, so a
+        // scrolled chip — and in particular the ring around one that wants
+        // attention — carried on straight through the bar's rounded corner and
+        // out the side. A background is not a boundary.
+        .clipShape(RoundedRectangle(cornerRadius: 20))
         .modifier(GlassSurface(radius: 20))
         .padding(.horizontal, 10)
     }
