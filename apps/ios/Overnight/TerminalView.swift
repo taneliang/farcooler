@@ -142,13 +142,18 @@ struct TerminalView: View {
             // constantly — switching terminal — at the far end of the screen
             // from the hand holding the phone. That still holds; what changed
             // is that it floats now instead of sitting on a slab of its own.
-            // Always shown, keyboard or not.
-            //
-            // It was hidden while the keyboard was up, because the key row is an
-            // input accessory and lands directly on top of it — two floating
-            // bars stacked. But switching between parallel work IS why this
-            // strip is on the screen, and needing it most while typing is not a
-            // strange case. The two bars are spaced apart instead.
+        }
+        // The strip lives in the bottom safe area, not in the stack and not in
+        // the keyboard's accessory.
+        //
+        // In the stack it sat under the keyboard when one came up. In the
+        // accessory it rode up correctly but an accessory floats OVER content,
+        // so the terminal was laid out as though the strip were not there and
+        // the grid's last line ended up behind it. A safe-area inset is the one
+        // placement the layout actually accounts for: the grid shrinks by
+        // exactly the strip's height, and keyboard avoidance carries both up
+        // together.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             TerminalTabStrip(
                 workspaces: connection.fleet.workspaces, current: current, onSelect: select
             )
