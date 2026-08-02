@@ -321,7 +321,17 @@ impl Watcher {
             let Some(view) = workspace.terminals.iter().find(|t| t.terminal.id == terminal) else {
                 continue;
             };
-            let mut message = wire::terminal(view);
+            // `terminal_with_agent_state`, not `terminal`.
+            //
+            // The plain converter knows nothing about the ACP session, so an
+            // event-driven update carried the STORED title — and the stored
+            // title is "Terminal 19". A pane named after its conversation on
+            // load therefore reverted to the harness name the first time
+            // anything happened in it, which is to say immediately and forever
+            // after. The full-list path had this right; this one did not, and
+            // the two disagreeing about the same terminal is the disagreement
+            // every part of this design exists to prevent.
+            let mut message = wire::terminal_with_agent_state(view, self.service.agents());
             message.activity = observed.activity as i32;
             message.activity_changed_at = Some(wire::timestamp(observed.changed_at));
             message.current_command = observed.command.clone();

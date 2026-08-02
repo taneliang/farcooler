@@ -93,7 +93,15 @@ struct AgentSurface: View {
 
                     AgentComposer(
                         stream: stream, terminal: terminal, isFocused: isFocused,
-                        searchFiles: searchFiles)
+                        searchFiles: searchFiles,
+                        // The pane's own width, passed down as a plain number.
+                        //
+                        // Safe in a way the last two attempts were not: the
+                        // composer's WIDTH does not depend on its contents — it
+                        // fills what it is given — so a layout chosen from it
+                        // cannot feed back into it. The freeze came from height,
+                        // which does.
+                        width: proxy.size.width)
                         .padding(10)
                 }
             }

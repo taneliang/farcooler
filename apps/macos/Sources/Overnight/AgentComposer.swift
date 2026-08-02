@@ -19,6 +19,9 @@ struct AgentComposer: View {
     /// of a `DaemonClient`: this view can look things up and send a prompt,
     /// and nothing else.
     let searchFiles: (String) async -> [String]
+    /// How much room the pane has, which decides how many selectors are shown
+    /// inline and how many move into the overflow menu.
+    let width: CGFloat
 
     @State private var text = ""
     @State private var cursor = 0
@@ -61,7 +64,13 @@ struct AgentComposer: View {
             AgentComposerField(
                 text: $text,
                 cursor: $cursor,
-                placeholder: "Message \(terminal.label.capitalized)",
+                // The HARNESS, not the pane's label.
+                //
+                // The label is the conversation's own name now, which made the
+                // placeholder read "Message Complete D17 Authorization Decision
+                // For Overnight". You are not messaging the conversation, you
+                // are messaging the agent having it.
+                placeholder: "Message \(Terminal.name(of: terminal.preset).capitalized)",
                 isFocused: isFocused,
                 pickerOpen: pickerOpen,
                 onNavigate: navigate,
@@ -80,26 +89,8 @@ struct AgentComposer: View {
             .frame(height: fieldHeight)
 
             HStack(alignment: .center, spacing: 10) {
-                // A scrolling row, not a wrapping one.
-                //
-                // Five selectors are wider than a tiled pane, and a plain
-                // `HStack` made its whole column that wide — which pushed the
-                // pane past its own bounds and clipped the TRANSCRIPT on the
-                // right. A custom wrapping `Layout` fixed that and cost more
-                // than it was worth: it measures every child on every pass,
-                // and those children are platform views, which is one of the
-                // two things that froze this app.
-                //
-                // A `ScrollView` never asks for more than it is offered and
-                // never measures anything twice. The row stays one line tall
-                // and the selectors past the edge are a swipe away.
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        attachButton
-                        configControls
-                    }
-                    .padding(.trailing, 4)
-                }
+                attachButton
+                configControls
 
                 activity
                 sendButton
@@ -385,56 +376,118 @@ struct AgentComposer: View {
     /// options are deliberately generic, and the payoff is immediate: this
     /// adapter also advertises a SUBAGENT picker that nobody designed a field
     /// for, and it renders here for free. A `thought_level` will do the same.
+    /// How many selectors are shown in full before the rest fold away.
+    ///
+    /// Chosen from the pane's width rather than measured, on purpose. Three
+    /// versions of this row have now existed: a plain `HStack`, which was wider
+    /// than a tiled pane and pushed the TRANSCRIPT out of its own bounds; a
+    /// custom wrapping `Layout`, which fixed that and froze the app by
+    /// re-measuring five platform views on every layout pass; and a horizontal
+    /// `ScrollView`, which was stable and hid controls behind an edge with no
+    /// scrollbar to say so — a control you cannot see is a control you cannot
+    /// know is there, which was the argument for wrapping in the first place.
+    ///
+    /// Arithmetic on a number the pane already knows is none of those things.
+    private var inlineCount: Int {
+        // Each selector is roughly 130pt with its name and value, and the row
+        // also carries the attach button, the activity line and send.
+        let room = width - 150
+        return max(0, min(stream.transcript.configOptions.count, Int(room / 130)))
+    }
+
+    private var inlineOptions: [ConfigOption] {
+        Array(stream.transcript.configOptions.prefix(inlineCount))
+    }
+
+    private var overflowOptions: [ConfigOption] {
+        Array(stream.transcript.configOptions.dropFirst(inlineCount))
+    }
+
     @ViewBuilder
     private var configControls: some View {
-        ForEach(stream.transcript.configOptions) { option in
-            if option.isBoolean {
-                Toggle(option.name, isOn: Binding(
-                    get: { option.isOn },
-                    set: { on in Task { await stream.setConfig(option.id, on ? "true" : "false") } }
-                ))
-                .toggleStyle(.checkbox)
-                .font(.caption)
-            } else if !option.options.isEmpty {
-                Menu {
-                    ForEach(option.options) { choice in
-                        Button {
-                            Task { await stream.setConfig(option.id, choice.id) }
-                        } label: {
-                            // The description is the useful half — "Opus 5 ·
-                            // Best for everyday, complex tasks" says more than
-                            // the word it sits under.
-                            if choice.description.isEmpty {
-                                Text(choice.name)
-                            } else {
-                                Text("\(choice.name) — \(choice.description)")
+        ForEach(inlineOptions) { option in
+            selector(option)
+        }
+
+        // Everything that did not fit, nested one level down.
+        //
+        // Nested rather than flattened into a single list: these are several
+        // separate choices, and flattening them would put "High" and "Opus" and
+        // "Plan Mode" side by side in one menu with nothing saying which
+        // question each answers.
+        if !overflowOptions.isEmpty {
+            Menu {
+                ForEach(overflowOptions) { option in
+                    Menu(option.name) {
+                        ForEach(option.options) { choice in
+                            Button {
+                                Task { await stream.setConfig(option.id, choice.id) }
+                            } label: {
+                                if choice.id == option.currentValue {
+                                    Label(choice.name, systemImage: "checkmark")
+                                } else {
+                                    Text(choice.name)
+                                }
                             }
                         }
                     }
-                } label: {
-                    // ONE `Text`, not a stack of two.
-                    //
-                    // A borderless menu is an `NSPopUpButton` underneath, and it
-                    // takes its title from a single string — hand it an `HStack`
-                    // and everything after the first view is silently dropped,
-                    // which is how the row came to read "Mode  Model  Effort"
-                    // with not a value in sight.
-                    Text(caption(for: option))
-                        .font(.caption)
-                        .lineLimit(1)
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.caption)
             }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(overflowOptions.map(\.name).joined(separator: ", "))
         }
     }
 
-    /// What the agent is doing right now, in words.
-    ///
-    /// The daemon already derives this and every other surface renders it — the
-    /// sidebar dot, the fleet row, the notification. A chat that showed nothing
-    /// while a turn ran left the user with a blank panel and no way to tell a
-    /// thinking agent from a broken one.
+    /// One selector, shown in full.
+    @ViewBuilder
+    private func selector(_ option: ConfigOption) -> some View {
+        if option.isBoolean {
+            Toggle(
+                option.name,
+                isOn: Binding(
+                    get: { option.isOn },
+                    set: { on in Task { await stream.setConfig(option.id, on ? "true" : "false") } }
+                )
+            )
+            .toggleStyle(.checkbox)
+            .font(.caption)
+        } else if !option.options.isEmpty {
+            Menu {
+                ForEach(option.options) { choice in
+                    Button {
+                        Task { await stream.setConfig(option.id, choice.id) }
+                    } label: {
+                        // The description is the useful half — "Opus 5 · Best
+                        // for everyday, complex tasks" says more than the word
+                        // it sits under.
+                        if choice.description.isEmpty {
+                            Text(choice.name)
+                        } else {
+                            Text("\(choice.name) — \(choice.description)")
+                        }
+                    }
+                }
+            } label: {
+                // ONE `Text`, not a stack of two.
+                //
+                // A borderless menu is an `NSPopUpButton` underneath, and it
+                // takes its title from a single string — hand it an `HStack`
+                // and everything after the first view is silently dropped,
+                // which is how the row came to read "Mode  Model  Effort" with
+                // not a value in sight.
+                Text(caption(for: option))
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+    }
+
     /// What the agent is doing, on the two occasions it is not obvious.
     ///
     /// This used to report every state including `Done` and `Idle`, on the
