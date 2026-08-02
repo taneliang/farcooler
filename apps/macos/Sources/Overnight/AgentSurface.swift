@@ -30,6 +30,11 @@ struct AgentSurface: View {
     @StateObject private var stream: AgentStream
     @ObservedObject private var preferences = Preferences.shared
     @State private var lastReportedGeometry: (columns: Int, rows: Int) = (0, 0)
+    /// Whether the transcript should follow its own tail — true while the
+    /// reader is parked at the bottom, false once they scroll away.
+    @State private var followingTail = true
+    /// The row the scroll view holds still while heights around it resolve.
+    @State private var scrollPosition = ScrollPosition(idType: Int.self)
 
     init(
         terminal: Terminal, binary: String?, environment: [String: String],
@@ -169,103 +174,90 @@ struct AgentSurface: View {
     }
 
     private var transcriptView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                // `VStack`, not `LazyVStack`.
-                //
-                // A lazy stack estimates the height of rows it has not built
-                // yet and corrects itself as they scroll in — so scrolling UP
-                // through a transcript made the content jump and the scrollbar
-                // skip about, several times per drag. These rows are wildly
-                // uneven (a one-word message beside a 200-line tool output),
-                // which is exactly the case an estimate gets worst.
-                //
-                // Bounded by `TRANSCRIPT_LIMIT` on the daemon side, so this is
-                // never unbounded work.
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(stream.transcript.rows) { row in
-                        AgentRowView(
-                            row: row,
-                            isLast: row.id == stream.transcript.rows.last?.id,
-                            pending: permission(gating: row),
-                            onAnswer: { optionID in
-                                guard let id = stream.transcript.pendingPermission?.id else {
-                                    return
-                                }
-                                Task { await stream.answer(id, optionID) }
-                            }
-                        )
-                        .id(row.id)
-                    }
-
-                    // The turn that is still running, one line ahead of what it
-                    // has produced.
-                    if terminal.agent == .working {
-                        WorkingRow()
-                    }
-
-                }
-                // Roomier than a terminal, on purpose. A VT grid is dense
-                // because every cell is addressable; prose is read, and the
-                // line spacing a terminal wants makes a paragraph a wall.
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 4)
-
-                // The end of the content, and what autoscroll targets.
-                //
-                // A one-point anchor rather than the last ROW: a streamed reply
-                // coalesces into the row already on screen, so scrolling to that
-                // row's id has nothing new to react to while its text grows.
-                Color.clear
-                    .frame(height: 1)
-                    .id(Self.endOfTranscript)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            // Pinned to the bottom: a chat is read at its most recent line,
-            // the same reason a terminal scrolls to follow its own output.
-            // Keyed on the CURSOR, not the row count.
+        ScrollView {
+            // Lazy, and ANCHORED — which is the pair that makes it work.
             //
-            // A streamed reply arrives as chunks that coalesce into the row
-            // already on screen, so the count does not change and a
-            // count-keyed scroll sits still while text grows off the bottom.
-            // The cursor moves for every event, which is exactly when there is
-            // something new to see.
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                // Whether the reader is parked at the tail. 40pt of slack,
-                // because "at the bottom" after a redraw is rarely exact.
-                geometry.contentOffset.y + geometry.containerSize.height
-                    >= geometry.contentSize.height - 40
-            } action: { _, atBottom in
-                followingTail = atBottom
-            }
-            .onChange(of: stream.transcript.cursor) { _, _ in
-                // Only while the reader is at the tail.
-                //
-                // Scrolling to the end on EVERY event meant reading anything
-                // older was impossible: a streamed reply fires several events a
-                // second, and each one yanked the view back down. Following the
-                // newest line is right when you are already there and hostile
-                // when you are not.
-                guard followingTail else { return }
-                withAnimation(Motion.snap) {
-                    proxy.scrollTo(Self.endOfTranscript, anchor: .bottom)
+            // A lazy stack estimates the height of rows it has not built and
+            // corrects itself as they scroll in. With rows as uneven as these —
+            // a one-word message beside two hundred lines of tool output — the
+            // corrections are large, and scrolling up made the content jump
+            // under the pointer.
+            //
+            // Building every row eagerly fixes that and is the wrong trade: a
+            // transcript runs to thousands of rows and each one lays out
+            // markdown. The virtualisation is worth keeping; what was missing is
+            // telling the scroll view which row to hold still while the
+            // estimates around it resolve. That is `scrollPosition` below — a
+            // height correction above the viewport then moves the SCROLLBAR,
+            // which is honest because the content really did get taller, without
+            // moving what is being read.
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(stream.transcript.rows) { row in
+                    AgentRowView(
+                        row: row,
+                        isLast: row.id == stream.transcript.rows.last?.id,
+                        pending: permission(gating: row),
+                        onAnswer: { optionID in
+                            guard let id = stream.transcript.pendingPermission?.id else { return }
+                            Task { await stream.answer(id, optionID) }
+                        }
+                    )
+                    .id(row.id)
+                }
+
+                // The turn that is still running, one line ahead of what it has
+                // produced.
+                if terminal.agent == .working {
+                    WorkingRow()
                 }
             }
-            .onAppear {
-                proxy.scrollTo(Self.endOfTranscript, anchor: .bottom)
+            // Roomier than a terminal, on purpose. A VT grid is dense because
+            // every cell is addressable; prose is read, and the line spacing a
+            // terminal wants makes a paragraph a wall.
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+
+            // The end of the content, and what following the tail targets.
+            Color.clear
+                .frame(height: 1)
+                .id(Self.endOfTranscript)
+        }
+        // What the scroll view holds still.
+        //
+        // Bound rather than merely observed: setting it scrolls, and SwiftUI
+        // keeps whatever it names in place while content around it changes
+        // height. That second half is the point — it is what stops a lazy
+        // stack's corrections from dragging the text out from under the reader.
+        .scrollPosition($scrollPosition, anchor: .bottom)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            // Whether the reader is parked at the tail. 40pt of slack, because
+            // "at the bottom" after a redraw is rarely exact.
+            geometry.contentOffset.y + geometry.containerSize.height
+                >= geometry.contentSize.height - 40
+        } action: { _, atBottom in
+            followingTail = atBottom
+        }
+        // Keyed on the CURSOR, not the row count: a streamed reply coalesces
+        // into the row already on screen, so the count does not change while
+        // the text grows off the bottom.
+        .onChange(of: stream.transcript.cursor) { _, _ in
+            // Only while the reader is at the tail. Scrolling to the end on
+            // every event made reading anything older impossible — a streamed
+            // reply fires several a second, and each one yanked the view down.
+            guard followingTail else { return }
+            withAnimation(Motion.snap) {
+                scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
             }
         }
+        .onAppear { scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom) }
     }
 
-    /// Whether the transcript should follow its own tail.
+    /// The end of the transcript's content.
     ///
-    /// True while the reader is parked at the bottom, false the moment they
-    /// scroll away from it — see `onScrollGeometryChange` below.
-    @State private var followingTail = true
-
-    /// The anchor at the very end of the transcript's content.
-    private static let endOfTranscript = "end-of-transcript"
+    /// `Int`, like every row id, because `scrollPosition(id:)` binds ONE type —
+    /// a `String` sentinel among `Int` rows could never be named as the anchor.
+    private static let endOfTranscript = Int.max
 
     /// The pending permission, if it is this row that it is asking about.
     private func permission(gating row: TranscriptRow) -> PendingPermission? {
@@ -275,7 +267,7 @@ struct AgentSurface: View {
         return pending
     }
 
-    /// A request naming a tool call the transcript does not have a row for.
+    /// A request naming a tool call the transcript has no row for.
     ///
     /// It should not happen — a permission follows the call it is about — but
     /// an unanswerable request that is also invisible would wedge the agent

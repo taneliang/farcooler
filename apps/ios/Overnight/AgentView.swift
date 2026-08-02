@@ -21,6 +21,11 @@ struct AgentView: View {
     /// Whether the transcript should follow its own tail — true while the
     /// reader is parked at the bottom, false once they scroll away.
     @State private var followingTail = true
+    /// The row the scroll view holds still while heights around it resolve.
+    @State private var scrollPosition = ScrollPosition(idType: Int.self)
+    /// The end of the content. `Int` like every row id, because
+    /// `scrollPosition(id:)` binds one type.
+    private static let endOfTranscript = Int.max
 
     init(terminalID: String, workspaceID: String?, connection: Connection) {
         self.terminalID = terminalID
@@ -179,72 +184,77 @@ struct AgentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    // `VStack`, not `LazyVStack`: a lazy stack estimates the
-                    // height of rows it has not built and corrects itself as
-                    // they scroll in, which makes a transcript of wildly uneven
-                    // rows jump under the finger. Bounded by the daemon's
-                    // `TRANSCRIPT_LIMIT`.
-                    VStack(alignment: .leading, spacing: 12) {
-                        // A stale error banner rather than a blanked screen: a
-                        // failed poll is not a disconnection, the same rule
-                        // `Connection.refresh()` follows — the last known
-                        // transcript stays up while this device tries again.
-                        if let error = stream.connectionError {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                        ForEach(transcript.rows) { row in
-                            AgentRowView(
-                                row: row,
-                                isLast: row.id == transcript.rows.last?.id,
-                                pending: permission(gating: row),
-                                onAnswer: { optionID in
-                                    guard let id = transcript.pendingPermission?.id else { return }
-                                    Task { await stream.answer(id, optionID) }
-                                })
-                        }
-
-                        // The turn that is still running, one line ahead of
-                        // what it has produced.
-                        if isWorking {
-                            WorkingRow()
-                        }
-
-                        // An invisible anchor rather than scrolling to the
-                        // last row's own id: the last row mutates in place
-                        // while a tool streams progress (see `Transcript`),
-                        // so its id does not change and `scrollTo` would have
-                        // nothing new to react to.
-                        Color.clear.frame(height: 1).id("bottom")
+            ScrollView {
+                // Lazy, and ANCHORED — the pair that makes it work.
+                //
+                // A lazy stack estimates the height of rows it has not
+                // built and corrects as they scroll in, which made a
+                // transcript of wildly uneven rows jump under the finger.
+                // Building every row eagerly fixes that and is the wrong
+                // trade at thousands of rows, each laying out markdown.
+                // `scrollPosition` below is the missing half: it names the
+                // row to hold still while the estimates around it resolve.
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    // A stale error banner rather than a blanked screen: a
+                    // failed poll is not a disconnection, the same rule
+                    // `Connection.refresh()` follows — the last known
+                    // transcript stays up while this device tries again.
+                    if let error = stream.connectionError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
-                    .padding(12)
-                }
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    // Whether the reader is parked at the tail. 40pt of slack,
-                    // because "at the bottom" after a redraw is rarely exact.
-                    geometry.contentOffset.y + geometry.containerSize.height
-                        >= geometry.contentSize.height - 40
-                } action: { _, atBottom in
-                    followingTail = atBottom
-                }
-                // Keyed on the CURSOR, not the row count. A streamed reply
-                // coalesces into the row already on screen, so the count does
-                // not change while the text grows off the bottom.
-                .onChange(of: transcript.cursor) { _, _ in
-                    // Only while the reader is at the tail. Scrolling to the
-                    // end on every event meant reading anything older was
-                    // impossible — a streamed reply fires several events a
-                    // second and each one threw the view back to the bottom.
-                    guard followingTail else { return }
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("bottom", anchor: .bottom)
+                    ForEach(transcript.rows) { row in
+                        AgentRowView(
+                            row: row,
+                            isLast: row.id == transcript.rows.last?.id,
+                            pending: permission(gating: row),
+                            onAnswer: { optionID in
+                                guard let id = transcript.pendingPermission?.id else { return }
+                                Task { await stream.answer(id, optionID) }
+                            })
                     }
+
+                    // The turn that is still running, one line ahead of
+                    // what it has produced.
+                    if isWorking {
+                        WorkingRow()
+                    }
+
+                    // An invisible anchor rather than scrolling to the
+                    // last row's own id: the last row mutates in place
+                    // while a tool streams progress (see `Transcript`),
+                    // so its id does not change and `scrollTo` would have
+                    // nothing new to react to.
+                    Color.clear.frame(height: 1).id(Self.endOfTranscript)
                 }
-                .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+                .padding(12)
             }
+            // What the scroll view holds still while content around it
+            // changes height — see the stack above.
+            .scrollPosition($scrollPosition, anchor: .bottom)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                // Whether the reader is parked at the tail. 40pt of slack,
+                // because "at the bottom" after a redraw is rarely exact.
+                geometry.contentOffset.y + geometry.containerSize.height
+                    >= geometry.contentSize.height - 40
+            } action: { _, atBottom in
+                followingTail = atBottom
+            }
+            // Keyed on the CURSOR, not the row count. A streamed reply
+            // coalesces into the row already on screen, so the count does
+            // not change while the text grows off the bottom.
+            .onChange(of: transcript.cursor) { _, _ in
+                // Only while the reader is at the tail. Scrolling to the
+                // end on every event meant reading anything older was
+                // impossible — a streamed reply fires several events a
+                // second and each one threw the view back to the bottom.
+                guard followingTail else { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
+                }
+            }
+            .onAppear { scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom) }
         }
     }
 
