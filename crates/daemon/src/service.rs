@@ -766,6 +766,33 @@ impl Service {
         }
     }
 
+    /// Write an agent's own name for its conversation into the record.
+    ///
+    /// The supervisor learns this from `session_info_update` and keeps it in
+    /// memory, which is right for something the agent revises as it works — and
+    /// wrong as the only copy. A daemon restart dropped it, so a pane that had
+    /// been "Complete D17 authorization decision" reverted to "claude" and
+    /// stayed there until the agent happened to rename the session again.
+    ///
+    /// Only ever an upgrade, and only over a placeholder or a previous agent
+    /// title: a name a PERSON gave a terminal is not something an agent gets to
+    /// overwrite.
+    pub fn remember_agent_title(&self, id: Uuid, title: &str) {
+        let Ok(term) = self.store.get_terminal(id) else { return };
+        if term.title == title {
+            return;
+        }
+        let ours = term.title.starts_with("Terminal ") || term.title == "Terminal";
+        if !ours && !term.title.is_empty() && term.pane_mode != models::PaneMode::Agent {
+            return;
+        }
+        let _ = self.store.update_terminal(
+            id,
+            term.resource_version,
+            terminal_update(&term, |u| u.title = title.to_string()),
+        );
+    }
+
     pub async fn backfill_pane_tags(&self) {
         let Ok(panes) = self.tmux.list_tagged_panes().await else { return };
         let mut repaired = 0;

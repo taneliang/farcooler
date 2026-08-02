@@ -636,8 +636,15 @@ private struct TerminalKeyRow: View {
         // No Return key. The software keyboard already has one, and the row's
         // whole job is the keys a phone keyboard does not have.
         .modifier(GlassSurface(radius: 18))
-        .padding(.horizontal, 6)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 8)
+        // Clear of the keyboard, not resting on it.
+        //
+        // A floating bar whose bottom edge is flush against the keyboard's top
+        // edge is not floating — it reads as a strip welded to the keyboard
+        // with rounded corners drawn on, which is worse than either honest
+        // option. The gap is what says the two are different surfaces.
+        .padding(.bottom, 10)
+        .padding(.top, 2)
     }
 
     /// An arrow that means one thing tapped and a bigger version of the same

@@ -96,7 +96,7 @@ private struct TabChip: View {
                     .fontWeight(wantsAttention ? .semibold : .regular)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: 120, alignment: .leading)
+                    .frame(maxWidth: 150, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 10)

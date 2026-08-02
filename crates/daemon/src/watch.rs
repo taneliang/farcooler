@@ -331,6 +331,15 @@ impl Watcher {
             // after. The full-list path had this right; this one did not, and
             // the two disagreeing about the same terminal is the disagreement
             // every part of this design exists to prevent.
+            // Persisted as it is learned, not only reported.
+            //
+            // The title comes from the supervisor's memory; writing it through
+            // to the record here is what makes it survive a daemon restart. See
+            // `Service::remember_agent_title`.
+            if let Some(title) = self.service.agents().title(terminal) {
+                self.service.remember_agent_title(terminal, &title);
+            }
+
             let mut message = wire::terminal_with_agent_state(view, self.service.agents());
             message.activity = observed.activity as i32;
             message.activity_changed_at = Some(wire::timestamp(observed.changed_at));
