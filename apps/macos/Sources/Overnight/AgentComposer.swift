@@ -558,12 +558,12 @@ private struct AgentComposerField: NSViewRepresentable {
         view.delegate = context.coordinator
         view.isRichText = false
         // The standard growing-text-view configuration, and it is what makes
-        // `sizeThatFits` below mean anything: the text view tracks the width it
-        // is given and grows only downward, so its used height IS the height of
-        // what has been typed. Without it the view kept whatever height it was
-        // first handed and drew its placeholder wherever that left the origin —
-        // which is how "Message agent" ended up floating in the middle of the
-        // box.
+        // `Coordinator.report(_:)` mean anything: the text view tracks the
+        // width it is given and grows only downward, so its used height IS the
+        // height of what has been typed. Without it the view kept whatever
+        // height it was first handed and drew its placeholder wherever that
+        // left the origin — which is how "Message agent" ended up floating in
+        // the middle of the box.
         view.isVerticallyResizable = true
         view.isHorizontallyResizable = false
         view.autoresizingMask = [.width]

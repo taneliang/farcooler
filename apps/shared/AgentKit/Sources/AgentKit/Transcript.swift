@@ -128,13 +128,6 @@ public struct Transcript: Sendable {
         nextRowID += 1
     }
 
-    /// Show what the user just sent, before the agent says anything.
-    ///
-    /// The adapter echoes a `user_message_chunk` only when replaying a loaded
-    /// session, never during a live turn — so without this a message vanishes
-    /// the moment it is sent and does not reappear until the pane is reopened.
-    /// A chat that swallows your own words reads as broken even when the turn
-    /// underneath it is running perfectly.
     /// Show a selector's new value straight away.
     ///
     /// The adapter does not reliably send `config_option_update` after
@@ -143,6 +136,13 @@ public struct Transcript: Sendable {
     /// and read as broken. If a real update does arrive it overwrites this
     /// with the same thing.
     public mutating func selectConfigOptionLocally(id: String, value: String) {
+        setConfigValue(id: id, value: value)
+    }
+
+    /// Kept in the list rather than in a parallel dictionary, so the control a
+    /// user is looking at and the value it shows can never be two different
+    /// things.
+    private mutating func setConfigValue(id: String, value: String) {
         configOptions = configOptions.map { option in
             guard option.id == id else { return option }
             return ConfigOption(
@@ -154,6 +154,16 @@ public struct Transcript: Sendable {
         if id == "mode" { agentMode = value }
     }
 
+    /// Show what the user just sent, before the agent says anything.
+    ///
+    /// The adapter echoes a `user_message_chunk` only when replaying a loaded
+    /// session, never during a live turn — so without this a message vanishes
+    /// the moment it is sent and does not reappear until the pane is reopened.
+    /// A chat that swallows your own words reads as broken even when the turn
+    /// underneath it is running perfectly.
+    ///
+    /// Only for a message going out NOW. One written mid-turn is queued
+    /// instead, and joins the transcript when it is actually sent.
     public mutating func appendLocalUserMessage(_ text: String) {
         append(.message(role: .user, text: text))
         // The agent's reply is a new turn's worth of speech, not a
@@ -241,17 +251,7 @@ public struct Transcript: Sendable {
             contextSize = size
 
         case let .configSet(id, value):
-            // Kept in the list rather than in a parallel dictionary, so the
-            // control a user is looking at and the value it shows can never be
-            // two different things.
-            configOptions = configOptions.map { option in
-                guard option.id == id else { return option }
-                return ConfigOption(
-                    id: option.id, name: option.name, description: option.description,
-                    category: option.category, kind: option.kind, currentValue: value,
-                    options: option.options)
-            }
-            if id == "model" { model = value }
+            setConfigValue(id: id, value: value)
 
         case let .modeSet(mode):
             agentMode = mode

@@ -353,10 +353,10 @@ private struct PlanPanel: View {
                         .font(.caption2)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                     Text("Tasks").font(.caption.weight(.semibold))
-                    Text("\(doneCount) of \(entries.count)")
+                    Text("\(entries.doneCount) of \(entries.count)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if !expanded, let active {
+                    if !expanded, let active = entries.active {
                         Text("· \(active.content)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -371,14 +371,14 @@ private struct PlanPanel: View {
             if expanded {
                 ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
                     HStack(alignment: .top, spacing: 7) {
-                        Image(systemName: symbol(for: entry.status))
+                        Image(systemName: PlanStatus(entry.status).symbol)
                             .font(.caption)
-                            .foregroundStyle(tint(for: entry.status))
+                            .foregroundStyle(PlanStatus(entry.status).tint)
                             .frame(width: 14)
                         Text(entry.content)
                             .font(.footnote)
-                            .strikethrough(isDone(entry.status))
-                            .foregroundStyle(isDone(entry.status) ? .secondary : .primary)
+                            .strikethrough(PlanStatus(entry.status).isDone)
+                            .foregroundStyle(PlanStatus(entry.status).isDone ? .secondary : .primary)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                     }
@@ -391,31 +391,9 @@ private struct PlanPanel: View {
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private var doneCount: Int { entries.filter { isDone($0.status) }.count }
 
-    private var active: PlanEntry? { entries.first { isActive($0.status) } }
 
-    private func isDone(_ status: String) -> Bool {
-        let lowered = status.lowercased()
-        return lowered.contains("done") || lowered.contains("complet")
-    }
 
-    private func isActive(_ status: String) -> Bool {
-        let lowered = status.lowercased()
-        return lowered.contains("progress") || lowered.contains("active")
-    }
-
-    private func symbol(for status: String) -> String {
-        if isDone(status) { return "checkmark.circle.fill" }
-        if isActive(status) { return "circle.lefthalf.filled" }
-        return "circle"
-    }
-
-    private func tint(for status: String) -> Color {
-        if isDone(status) { return .green }
-        if isActive(status) { return .accentColor }
-        return .secondary
-    }
 }
 
 /// A message written but not yet sent. See the Mac's `QueuedRow`.

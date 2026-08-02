@@ -92,6 +92,11 @@ final class AgentStream: ObservableObject {
                 epoch = batch.epoch
                 transcript.resetForNewEpoch()
             } else if batch.events.isEmpty {
+                // Cleared here too, not only after applying events. A steady
+                // poll that returns nothing is the healthy case, and leaving a
+                // previous failure's message up through it meant the banner
+                // stayed on screen forever once anything had ever gone wrong.
+                connectionError = nil
                 return
             }
 

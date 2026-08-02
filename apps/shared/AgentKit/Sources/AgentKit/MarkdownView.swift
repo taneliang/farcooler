@@ -9,7 +9,6 @@ import SwiftUI
 // and a heading as a line beginning with a hash — the same conversation,
 // unreadable on one of the two clients.
 
-import SwiftUI
 
 /// Markdown, rendered as blocks rather than as one run of text.
 ///
@@ -354,9 +353,6 @@ private struct MarkdownTable: View {
         max(header.count, rows.map(\.count).max() ?? 0)
     }
 
-    private func cell(_ row: [String], _ column: Int) -> String {
-        column < row.count ? row[column] : ""
-    }
 }
 
 /// One cell's padding and its share of the grid's rules.
@@ -449,3 +445,60 @@ public struct DetailBox: View {
     }
 }
 
+
+// MARK: - Plan status
+
+/// What a plan entry's status means, in one place.
+///
+/// ACP sends the status as a free string and adapters spell it differently
+/// (`in_progress`, `inProgress`, `active`), so every renderer has to interpret
+/// it. Both apps were doing that interpretation themselves, with four identical
+/// private helpers each — the exact duplication `Transcript` is shared to
+/// avoid, since a phone and a Mac disagreeing about which task is running is a
+/// disagreement about the same session.
+public enum PlanStatus: Sendable {
+    case pending
+    case active
+    case done
+
+    public init(_ status: String) {
+        let lowered = status.lowercased()
+        if lowered.contains("done") || lowered.contains("complet") {
+            self = .done
+        } else if lowered.contains("progress") || lowered.contains("active") {
+            self = .active
+        } else {
+            self = .pending
+        }
+    }
+
+    /// The SF Symbol for this state.
+    public var symbol: String {
+        switch self {
+        case .done: "checkmark.circle.fill"
+        case .active: "circle.lefthalf.filled"
+        case .pending: "circle"
+        }
+    }
+
+    public var isDone: Bool { self == .done }
+
+    /// Green finished, accent running, quiet otherwise — the same three colours
+    /// on both clients.
+    public var tint: Color {
+        switch self {
+        case .done: .green
+        case .active: .accentColor
+        case .pending: .secondary
+        }
+    }
+}
+
+extension Collection where Element == PlanEntry {
+    /// How many are finished, for the "3 of 7" a reader actually wants.
+    public var doneCount: Int { filter { PlanStatus($0.status).isDone }.count }
+
+    /// The one being worked on now, which is what a collapsed list must still
+    /// be able to say.
+    public var active: PlanEntry? { first { PlanStatus($0.status) == .active } }
+}

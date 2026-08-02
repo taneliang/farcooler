@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use overnight_agent::event::{AgentEvent, Seq, Sequenced};
+use overnight_agent::event::{AgentEvent, AgentGapReason, Seq, Sequenced};
 use overnight_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
 use overnight_agent::activity_source;
 use overnight_core::activity;
@@ -23,22 +23,34 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
 
-/// Events kept per terminal for a client that attaches fresh.
-///
-/// Deliberately small next to the shim's `AGENT_RING_EVENTS` (4096): this
-/// window only has to cover the common case of a client opening a pane that
-/// is already mid-conversation, not survive a daemon restart. Anything older
-/// than this is the shim's ring to replay, not the daemon's.
 /// How much of a conversation the daemon keeps per terminal.
 ///
-/// The daemon owns this transcript outright — it is not a cache in front of
-/// the shim's ring. It has to outlive the shim, because the shim restarts on
-/// every pane-mode toggle and the conversation does not.
+/// The daemon owns this transcript outright — it is not a cache in front of the
+/// shim's ring, and nothing asks the shim for anything older. It has to outlive
+/// the shim, because the shim restarts on every pane-mode toggle and the
+/// conversation does not.
+///
+/// So this bound is where a conversation actually ends. Past it the front is
+/// dropped and a `Gap` takes its place, which is the only honest way to serve a
+/// transcript that no longer starts at the beginning.
+///
+/// (This carried a second, contradictory doc comment describing it as
+/// "deliberately small" next to the shim's ring, with older events being "the
+/// shim's ring to replay" — left over from the design this file replaced. There
+/// is no such fallback, and there never was one in this direction.)
 const TRANSCRIPT_LIMIT: usize = 4096;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ToggleRefusal {
-    #[error("a turn is in flight; cancel it or force the switch")]
+    /// Naming the queue as well as the turn, because both are lost.
+    ///
+    /// The shim holds unsent prompts in memory (`RunningSession::queue`) and
+    /// dies with the pane, so forcing a switch discards anything written and
+    /// not yet delivered along with the turn in progress. The message used to
+    /// mention only the turn, which meant a user could force the switch having
+    /// been warned about the wrong thing — they lose words they wrote, not just
+    /// work the agent was doing.
+    #[error("a turn is in flight, and any queued messages will be discarded with it; cancel it or force the switch")]
     TurnInFlight,
 }
 
@@ -268,13 +280,12 @@ impl AgentSupervisor {
 
         loop {
             let (stream, _) = listener.accept().await?;
-            let cursor = self
-                .sessions
-                .lock()
-                .ok()
-                .and_then(|s| s.get(&terminal).map(|st| st.cursor))
-                .unwrap_or(0);
-            if let Err(e) = self.serve(stream, terminal, cursor, &on_events).await {
+            // No cursor is read here, and that is the point: a connection is a
+            // new stream and the only honest place to resume one is the start.
+            // This used to look up the remembered cursor and hand it down, and
+            // `serve` discarded it — residue of the design that tried to
+            // reconcile two numberings and failed four different ways.
+            if let Err(e) = self.serve(stream, terminal, &on_events).await {
                 tracing::warn!(terminal = %terminal, error = %e, "agent shim link ended");
             }
         }
@@ -284,7 +295,6 @@ impl AgentSupervisor {
         &self,
         stream: UnixStream,
         terminal: Uuid,
-        cursor: Seq,
         on_events: &F,
     ) -> std::io::Result<()>
     where
@@ -310,7 +320,6 @@ impl AgentSupervisor {
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.entry(terminal).or_default().cursor = 0;
         }
-        let _ = cursor;
         let subscribe = encode_line(&DaemonMessage::Subscribe { from_seq: 0 })
             .unwrap_or_else(|_| "\n".to_string());
         write_half.write_all(subscribe.as_bytes()).await?;
@@ -339,10 +348,20 @@ impl AgentSupervisor {
     {
         let batch = match message {
             ShimMessage::Events { events } => events,
-            // The gap is already the first entry; the counters are for logs.
+            // The shim's own ring overflowed before the daemon could read it.
+            //
+            // `AgentReplay::Gap` reports the drop but carries no event saying
+            // so, and this used to forward the events alone — which is how a
+            // client came to hold a transcript missing history with nothing to
+            // mark it. The gap is prepended here, where the loss is known.
             ShimMessage::Trimmed { resumed_at, dropped, events } => {
                 tracing::info!(terminal = %terminal, resumed_at, dropped, "agent ring trimmed");
-                events
+                let mut with_gap = vec![Sequenced {
+                    seq: 0,
+                    event: AgentEvent::Gap { reason: AgentGapReason::RingTrimmed },
+                }];
+                with_gap.extend(events);
+                with_gap
             }
             ShimMessage::Established { session_id, available_modes } => {
                 // A new shim means a new stream, numbered from zero again.
@@ -428,9 +447,30 @@ impl AgentSupervisor {
 
             // Oldest first, so trimming the front keeps the most recent
             // `TRANSCRIPT_LIMIT`.
+            //
+            // The trim leaves a `Gap` behind, and that is not decoration. This
+            // window is renumbered by position, so dropping the front erases
+            // every trace that anything was there — a client would receive a
+            // shorter transcript with contiguous numbers and no reason to
+            // doubt it. A derived transcript is only defensible because it can
+            // say where it is incomplete; silently losing history is the one
+            // thing this design forbids.
             if entry.len() > TRANSCRIPT_LIMIT {
                 let excess = entry.len() - TRANSCRIPT_LIMIT;
                 entry.drain(0..excess);
+                entry[0] = Sequenced {
+                    seq: 0,
+                    event: AgentEvent::Gap { reason: AgentGapReason::RingTrimmed },
+                };
+                // Renumbered from the gap forward, so the numbers still mean
+                // "position in this transcript" — the property every cursor in
+                // the system depends on.
+                for (index, item) in entry.iter_mut().enumerate() {
+                    item.seq = index as u64;
+                }
+                // What was just handed out is renumbered too, or a live
+                // subscriber's next cursor would point past the end.
+                renumbered = entry[entry.len().saturating_sub(renumbered.len())..].to_vec();
             }
         }
 
@@ -628,5 +668,54 @@ mod tests {
         let (second_epoch, after) = supervisor.replay(terminal, 10, first_epoch);
         assert_ne!(second_epoch, first_epoch, "a new shim is a new stream");
         assert_eq!(after.len(), 4, "a stale cursor must not hide the new transcript");
+    }
+}
+
+#[cfg(test)]
+mod gap_tests {
+    use super::*;
+
+    /// A transcript that has lost its head says so.
+    ///
+    /// The window is renumbered by position, so trimming the front erases every
+    /// trace that anything was there: a client would receive a shorter
+    /// transcript with contiguous numbers and no reason to doubt it. A derived
+    /// transcript is only defensible because it can say where it is incomplete.
+    #[test]
+    fn trimming_the_window_leaves_a_gap_rather_than_a_shorter_story() {
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+
+        // Comfortably past the limit, so the front is dropped several times.
+        let mut sent = 0;
+        while sent < TRANSCRIPT_LIMIT + 500 {
+            let batch: Vec<Sequenced> = (0..250)
+                .map(|i| Sequenced {
+                    seq: i,
+                    event: AgentEvent::Message {
+                        role: overnight_agent::event::Role::Agent,
+                        text: format!("line {}", sent + i as usize),
+                    },
+                })
+                .collect();
+            supervisor.apply(terminal, ShimMessage::Events { events: batch }, &|_, _| {});
+            sent += 250;
+        }
+
+        let (_, events) = supervisor.replay(terminal, 0, 0);
+        assert_eq!(events.len(), TRANSCRIPT_LIMIT, "the window is bounded");
+        assert!(
+            matches!(
+                events[0].event,
+                AgentEvent::Gap { reason: AgentGapReason::RingTrimmed }
+            ),
+            "a trimmed transcript must open with the gap that says so, got {:?}",
+            events[0].event
+        );
+        // Still a position in this transcript, which is what every cursor in
+        // the system counts on.
+        for (index, item) in events.iter().enumerate() {
+            assert_eq!(item.seq, index as u64);
+        }
     }
 }

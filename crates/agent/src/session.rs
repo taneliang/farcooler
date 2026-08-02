@@ -462,6 +462,20 @@ impl RunningSession {
     /// Held HERE rather than left with the adapter, because a message Overnight
     /// is holding is one it can still show, rewrite, or take back.
     pub async fn prompt(&mut self, text: &str) -> Result<Vec<AgentEvent>, SessionError> {
+        // Anything already waiting goes first, even though no turn is running.
+        //
+        // A send that failed leaves its prompt at the head of the queue with
+        // nothing in flight — see `send_next_queued`. Without this, the message
+        // being written now would overtake it and the conversation would carry
+        // the user's words in an order they never wrote them in.
+        if self.pending_prompt.is_none() && !self.queue.is_empty() {
+            let mut events = self.send_next_queued().await;
+            let id = self.next_queue_id;
+            self.next_queue_id += 1;
+            self.queue.push_back(QueuedPrompt { id: id.to_string(), text: text.to_string() });
+            events.push(self.queue_event());
+            return Ok(events);
+        }
         if self.pending_prompt.is_some() {
             let id = self.next_queue_id;
             self.next_queue_id += 1;
@@ -507,6 +521,13 @@ impl RunningSession {
             Err(_) => {
                 // Put it back rather than losing it silently. A prompt that
                 // cannot be sent is still a prompt the user wrote.
+                //
+                // `pending_prompt` stays None, which is the honest state: no
+                // turn is in flight. That means the NEXT message goes straight
+                // out ahead of this one, so the failed send is retried here
+                // first — otherwise a stuck entry sits in the queue forever,
+                // since nothing but a turn ending ever drains it and no turn
+                // is running to end.
                 self.queue.push_front(next);
                 vec![self.queue_event()]
             }

@@ -719,11 +719,18 @@ impl Service {
     /// Idempotent, and cheap enough to run unconditionally: setting a pane option
     /// to the value it already has is one tmux call per live pane, once.
 
-    /// Whether this pane currently has a coding agent in it.
+    /// Whether this pane has an agent in it that Overnight can host as a chat.
     ///
     /// Adoption only makes sense for a pane that IS an agent — a shell has no
     /// conversation to continue, and letting one adopt a session is how a
     /// terminal ends up showing somebody else's transcript.
+    ///
+    /// Narrowed from "any agent" to "a chat-capable one" deliberately, though
+    /// the two questions are not the same and it is worth saying why they share
+    /// an answer here: the only thing this gates is adopting a CLAUDE session
+    /// id (`discover_claude_session`), and Claude is the only harness with an
+    /// adapter. If a second one ever ships, this splits back into two
+    /// questions.
     ///
     /// Screen as well as process name, for the reason `activity::identify`
     /// exists: Claude Code renames itself to its version, so `2.1.220` is an
@@ -738,7 +745,7 @@ impl Service {
         // would be replaced by a different one on arrival is how the offer
         // becomes a trap.
         overnight_core::activity::identify(&pane.command, &screen)
-            .is_some_and(|rules| CHAT_CAPABLE.contains(&rules.preset))
+            .is_some_and(|rules| chat_capable(rules.preset))
     }
 
     /// Re-open a socket for every terminal already in agent pane mode.
@@ -889,6 +896,15 @@ impl Service {
 
         // A restarted claude reattaches to the conversation it already had
         // rather than starting a new one the record does not know about.
+        //
+        // A TUI, though — not the ACP shim. `preset_command` knows how to start
+        // an agent in a terminal and nothing about `agent-host`, so a lost pane
+        // that was in AGENT mode comes back as a plain `claude` TUI. The record
+        // has to come back with it: left saying `Agent`, SQLite would claim a
+        // chat while the pane held a terminal, no shim would ever dial the
+        // socket, and the pane's activity would sit frozen at whatever it last
+        // reported. That is precisely the silent disagreement between record
+        // and runtime this whole design exists to prevent.
         let command = preset_command(&term.command_preset, term.agent_session_id.as_deref());
         self.tmux
             .create_terminal_window(term.workspace_id, id, &term.title, &ws.worktree_path, &command)
@@ -896,7 +912,7 @@ impl Service {
 
         self.inventory.refresh().await;
 
-        self.store.update_terminal(
+        let restarted = self.store.update_terminal(
             id,
             term.resource_version,
             terminal_update(&term, |u| {
@@ -908,6 +924,18 @@ impl Service {
                 // A new runtime means a new epoch: offsets restart at zero.
                 u.epoch = term.epoch + 1;
             }),
+        )?;
+
+        if term.pane_mode != models::PaneMode::Agent {
+            return Ok(restarted);
+        }
+        // Told the truth about what is in the pane. The user can switch it back
+        // to a chat, which respawns it as the shim properly.
+        self.store.set_pane_mode(
+            id,
+            restarted.resource_version,
+            models::PaneMode::Terminal,
+            term.agent_session_id.clone(),
         )
     }
 

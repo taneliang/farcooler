@@ -227,8 +227,13 @@ impl Watcher {
                         "agent".to_string()
                     },
                     self.service.agents().activity(id),
-                    // Already a chat. The switch it offers is back to terminal.
-                    true,
+                    // The SAME question the label just asked, not a hardcoded
+                    // yes. `set_pane_mode` writes the mode and the harness in
+                    // two statements, so a sample landing between them — or any
+                    // row predating the capability check — is in agent mode
+                    // with a preset that cannot actually be hosted, and saying
+                    // otherwise offers a switch that would refuse.
+                    crate::service::chat_capable(&preset),
                 )
             } else {
                 // The screen is read for any live terminal, not only one whose

@@ -30,10 +30,6 @@ struct AgentSurface: View {
     @StateObject private var stream: AgentStream
     @ObservedObject private var preferences = Preferences.shared
     @State private var lastReportedGeometry: (columns: Int, rows: Int) = (0, 0)
-    /// How much of the pane's bottom the floating composer covers.
-    @State private var composerHeight: CGFloat = 0
-    /// The pane's own height, so the fade can be placed against the composer.
-    @State private var paneHeight: CGFloat = 0
 
     init(
         terminal: Terminal, binary: String?, environment: [String: String],
@@ -57,45 +53,50 @@ struct AgentSurface: View {
 
     var body: some View {
         GeometryReader { proxy in
-            // The composer floats OVER the transcript rather than sitting
-            // under it, so the conversation runs the full height of the pane
-            // and scrolls behind the control resting on top of it. The
-            // transcript pads its own tail by however tall that control is, so
-            // the last line can still be read.
-            ZStack(alignment: .bottom) {
-                VStack(spacing: 0) {
-                    if !stream.transcript.plan.isEmpty {
-                        PlanPanel(entries: stream.transcript.plan)
-                        Divider()
-                    }
-
-                    transcriptView(bottomInset: composerHeight + 20)
+            // The composer sits in the transcript's bottom safe area, which is
+            // the framework's own answer to "a control resting on scrolling
+            // content": the conversation runs the full height of the pane and
+            // scrolls behind it, and the scroll view insets itself so the last
+            // line is still reachable.
+            //
+            // This was built by hand first — a `ZStack`, a `GeometryReader`
+            // measuring the composer, a `PreferenceKey` carrying that height up,
+            // a spacer sized from it, and a gradient mask placed against it.
+            // That is four pieces of machinery to restate one thing the
+            // framework already knows, and it PEGGED A CORE: the measurement fed
+            // a layout that fed the measurement, so every frame invalidated the
+            // next one, with a full-content mask re-composited each time.
+            //
+            // `safeAreaInset` has no measurement to feed back.
+            VStack(spacing: 0) {
+                if !stream.transcript.plan.isEmpty {
+                    PlanPanel(entries: stream.transcript.plan)
+                    Divider()
                 }
 
-                // Only when there is no tool call to hang it on. A permission
-                // names the call it gates, so the buttons normally live on that
-                // row — see `AgentRowView.pending`. This is the fallback for a
-                // request about something the transcript is not showing.
-                if let pending = unattachedPermission {
-                    ApprovalCard(pending: pending) { optionID in
-                        Task { await stream.answer(pending.id, optionID) }
-                    }
-                    .padding(10)
-                }
-
-                AgentComposer(
-                    stream: stream, terminal: terminal, isFocused: isFocused,
-                    searchFiles: searchFiles)
-                    .padding(10)
-                    .background {
-                        GeometryReader { composer in
-                            Color.clear.preference(
-                                key: ComposerHeightKey.self, value: composer.size.height)
-                        }
-                    }
+                transcriptView
             }
-            .onPreferenceChange(ComposerHeightKey.self) { composerHeight = $0 }
-            .onChange(of: proxy.size.height, initial: true) { _, height in paneHeight = height }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    // Only when there is no tool call to hang it on. A
+                    // permission names the call it gates, so the buttons
+                    // normally live on that row — see `AgentRowView.pending`.
+                    // This is the fallback for a request about something the
+                    // transcript is not showing.
+                    if let pending = unattachedPermission {
+                        ApprovalCard(pending: pending) { optionID in
+                            Task { await stream.answer(pending.id, optionID) }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 8)
+                    }
+
+                    AgentComposer(
+                        stream: stream, terminal: terminal, isFocused: isFocused,
+                        searchFiles: searchFiles)
+                        .padding(10)
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // The native content background, NOT `Palette.background`.
             //
@@ -132,7 +133,7 @@ struct AgentSurface: View {
         }
     }
 
-    private func transcriptView(bottomInset: CGFloat) -> some View {
+    private var transcriptView: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -174,16 +175,13 @@ struct AgentSurface: View {
                 .padding(.top, 14)
                 .padding(.bottom, 4)
 
-                // The end of the content, and what autoscroll actually targets.
+                // The end of the content, and what autoscroll targets.
                 //
-                // Scrolling to the last ROW aligns that row's bottom with the
-                // viewport's, which is now UNDERNEATH the composer floating over
-                // it — the newest line, the one being written, ends up the one
-                // hidden. Scrolling to the end of the content instead leaves
-                // exactly this spacer covered, and the last line clear of the
-                // glass.
+                // A one-point anchor rather than the last ROW: a streamed reply
+                // coalesces into the row already on screen, so scrolling to that
+                // row's id has nothing new to react to while its text grows.
                 Color.clear
-                    .frame(height: bottomInset)
+                    .frame(height: 1)
                     .id(Self.endOfTranscript)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -196,23 +194,6 @@ struct AgentSurface: View {
             // count-keyed scroll sits still while text grows off the bottom.
             // The cursor moves for every event, which is exactly when there is
             // something new to see.
-            // Dissolved into the composer rather than cut off by it.
-            //
-            // The transcript runs the full height of the pane and the composer
-            // floats over its last inch, so a line scrolling past simply
-            // reappeared below the card, sliced in half. A fade over the same
-            // band the card occupies makes the two read as one surface — text
-            // going under something — instead of two overlapping ones.
-            .mask {
-                LinearGradient(
-                    stops: [
-                        .init(color: .black, location: 0),
-                        .init(color: .black, location: max(0, fadeStart - 0.06)),
-                        .init(color: .clear, location: fadeStart),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom)
-            }
             .onChange(of: stream.transcript.cursor) { _, _ in
                 // The bottom, always.
                 //
@@ -232,13 +213,6 @@ struct AgentSurface: View {
                 proxy.scrollTo(Self.endOfTranscript, anchor: .bottom)
             }
         }
-    }
-
-    /// Where the transcript starts fading out, as a fraction of its height:
-    /// the top of the floating composer.
-    private var fadeStart: CGFloat {
-        guard paneHeight > 0 else { return 1 }
-        return min(1, max(0.5, 1 - (composerHeight + 10) / paneHeight))
     }
 
     /// The anchor at the very end of the transcript's content.
@@ -326,14 +300,14 @@ private struct PlanPanel: View {
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                     Text("Tasks")
                         .font(.caption.weight(.semibold))
-                    Text("\(doneCount) of \(entries.count)")
+                    Text("\(entries.doneCount) of \(entries.count)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     // The one currently being worked on, named in the header —
                     // so a collapsed list still answers the question people
                     // actually open it to ask.
-                    if !expanded, let active {
+                    if !expanded, let active = entries.active {
                         Text("· \(active.content)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -351,14 +325,14 @@ private struct PlanPanel: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
                         HStack(alignment: .top, spacing: 7) {
-                            Image(systemName: symbol(for: entry.status))
+                            Image(systemName: PlanStatus(entry.status).symbol)
                                 .font(.system(size: 10))
-                                .foregroundStyle(tint(for: entry.status))
+                                .foregroundStyle(PlanStatus(entry.status).tint)
                                 .frame(width: 12)
                             Text(entry.content)
                                 .font(.system(size: 11.5))
-                                .strikethrough(isDone(entry.status))
-                                .foregroundStyle(colour(for: entry.status))
+                                .strikethrough(PlanStatus(entry.status).isDone)
+                                .foregroundStyle(PlanStatus(entry.status).isDone ? .secondary : .primary)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
@@ -372,36 +346,10 @@ private struct PlanPanel: View {
         .background(Color.primary.opacity(0.03))
     }
 
-    private var doneCount: Int { entries.filter { isDone($0.status) }.count }
 
-    private var active: PlanEntry? { entries.first { isActive($0.status) } }
 
-    private func isDone(_ status: String) -> Bool {
-        let lowered = status.lowercased()
-        return lowered.contains("done") || lowered.contains("complet")
-    }
 
-    private func isActive(_ status: String) -> Bool {
-        let lowered = status.lowercased()
-        return lowered.contains("progress") || lowered.contains("active")
-    }
 
-    private func symbol(for status: String) -> String {
-        if isDone(status) { return "checkmark.circle.fill" }
-        if isActive(status) { return "circle.lefthalf.filled" }
-        return "circle"
-    }
-
-    private func tint(for status: String) -> Color {
-        if isDone(status) { return .green }
-        if isActive(status) { return .accentColor }
-        return .secondary
-    }
-
-    private func colour(for status: String) -> Color {
-        if isDone(status) { return .secondary }
-        return .primary
-    }
 }
 
 // MARK: - Approval
@@ -428,14 +376,5 @@ private struct ApprovalCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.orange.opacity(0.3)))
-    }
-}
-
-/// How tall the floating composer is, so the transcript can pad past it.
-private struct ComposerHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }

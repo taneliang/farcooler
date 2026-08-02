@@ -127,12 +127,37 @@ If that becomes wanted, the field can be promoted into its own table later.
 
 Overnight persists no transcript. SQLite stores only the session id, as intent.
 
-The buffer lives in the **shim**, not the daemon: the shim is co-located with the
-agent, lives exactly as long as the pane whose liveness is already authoritative,
-and dies with it. The daemon listens on a per-session socket and the shim dials
-out with retry, so a daemon restart does not disturb the agent — the shim
-reconnects and replays from the daemon's last cursor. The daemon keeps a small
-recent window for fast client attach and reuses the existing fanout.
+**AMENDED 2026-08-01 (commit 94ead85). What follows describes the design as
+approved; the paragraph after it describes what was built and why it differs.**
+
+~~The buffer lives in the **shim**, not the daemon: the shim is co-located with
+the agent, lives exactly as long as the pane whose liveness is already
+authoritative, and dies with it. The daemon listens on a per-session socket and
+the shim dials out with retry, so a daemon restart does not disturb the agent —
+the shim reconnects and replays from the daemon's last cursor. The daemon keeps
+a small recent window for fast client attach and reuses the existing fanout.~~
+
+**The daemon owns the transcript.** The reasoning above is right about liveness
+and wrong about the conversation: it ties the transcript's identity to a process
+that restarts on every pane-mode toggle, while the conversation outlives it. A
+shim numbers events by position in ITS ring and starts from zero each time, so
+"replays from the daemon's last cursor" is asking a new stream to honour a
+cursor into an old one. That produced four separate message-loss bugs, each
+fixed in a different layer, none of them the actual cause.
+
+So the daemon holds the transcript, numbers it itself, and stamps it with an
+`epoch` — the same device this codebase already uses for terminals. A new shim
+connection bumps the epoch; a reader sends back the epoch it holds, and a
+mismatch means its cursor counts positions in a stream that no longer exists, so
+it receives the whole transcript and replaces what it had. The shim still owns
+the ring, because it must keep working across a daemon restart, but it is a
+delivery buffer rather than the record.
+
+Everything else in this section stands. The transcript is still derived and
+still never stored in SQLite; it is bounded (`TRANSCRIPT_LIMIT`), and when that
+bound is reached the front is dropped and replaced with a `Gap` — see below,
+which is the invariant that makes a bounded derived transcript defensible at
+all.
 
 `session/load` is therefore needed for exactly one case: toggling back into agent
 mode after time spent in terminal mode. It is an optional ACP capability; an

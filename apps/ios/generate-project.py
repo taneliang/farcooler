@@ -401,11 +401,18 @@ if frameworks.is_dir():
     newest_framework = max(
         (p.stat().st_mtime for p in frameworks.rglob("*") if p.is_file()), default=0
     )
+    # Only the crates that are actually compiled INTO the frameworks. The
+    # daemon and the CLI are binaries the phone talks to over ssh, never links,
+    # so naming one of their files here would send someone to rebuild for a
+    # change that could not have reached the app.
     rust = here.parent.parent / "crates"
+    linked = {"client", "vt", "protocol", "core", "transport", "agent", "store", "tmux"}
     stale = [
         p
         for p in rust.rglob("*.rs")
-        if p.stat().st_mtime > newest_framework and "target" not in p.parts
+        if p.stat().st_mtime > newest_framework
+        and "target" not in p.parts
+        and p.relative_to(rust).parts[0] in linked
     ]
     if stale:
         print(

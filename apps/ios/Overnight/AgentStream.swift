@@ -66,8 +66,10 @@ final class AgentStream: ObservableObject {
     /// here, so a reconnect — or this object simply being recreated when the
     /// tab strip switches to a different agent pane, see `AgentView` — cannot
     /// skip or repeat events after a gap.
+
     /// The run of the stream this transcript was built from.
     private var epoch: UInt64 = 0
+
 
     private func pump() async {
         do {
