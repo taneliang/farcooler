@@ -1,0 +1,15 @@
+{
+  "name": "overnight-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply overnight --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250110.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^3.100.0"
+  }
+}
