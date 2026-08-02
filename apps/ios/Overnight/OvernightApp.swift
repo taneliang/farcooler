@@ -3,6 +3,9 @@ import UIKit
 
 @main
 struct OvernightApp: App {
+    /// Present only to catch the APNs device token, which arrives nowhere else.
+    @UIApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -81,6 +84,7 @@ struct RootView: View {
             // permission prompt that only appears once you ARE looking has
             // already missed it.
             Notifier.shared.requestAuthorisation()
+            AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
         }
     }
 }

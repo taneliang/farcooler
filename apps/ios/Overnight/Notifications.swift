@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import UserNotifications
 
 /// Telling you when an agent needs you.
@@ -36,7 +37,16 @@ final class Notifier {
         UNUserNotificationCenter.current().delegate = presenter
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, _ in
-                Task { @MainActor in self?.authorised = granted }
+                Task { @MainActor in
+                    self?.authorised = granted
+                    guard granted else { return }
+                    // Ask APNs for an address as soon as there is permission to
+                    // use one. The token is useless without an account, and
+                    // `PushRegistration` simply holds it until there is one —
+                    // better than making sign-in trigger a second permission
+                    // dance later.
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
             }
     }
 
@@ -101,5 +111,62 @@ private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDeleg
         let subject = notification.request.content.threadIdentifier
         let visible = await MainActor.run { Notifier.shared.visibleTerminal }
         return subject == visible ? [] : [.banner, .sound]
+    }
+}
+
+
+/// Where APNs delivers this device's address, and where it goes next.
+///
+/// The local `Notifier` above covers the case where the phone is awake and
+/// polling. This covers the case the product exists for: the phone is in a
+/// pocket, the app is not running, and an agent on a machine three time zones
+/// away is stuck. Nothing local can know that — only the daemon can, and the
+/// only way it reaches a sleeping phone is APNs.
+///
+/// Overnight's own servers never see the notification's contents beyond a title
+/// and a terminal id, and never see an APNs key: the key lives in the relay's
+/// secrets, and the daemon holds only a token that names an account.
+@MainActor
+final class PushRegistration: NSObject, ObservableObject {
+    static let shared = PushRegistration()
+
+    /// The last token APNs gave us, held until there is an account to file it
+    /// under. Registration and sign-in happen in either order, and whichever
+    /// finishes second is what completes the pair.
+    private var token: String?
+
+    func received(_ deviceToken: Data) {
+        token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        Task { await sendIfPossible() }
+    }
+
+    /// Called after signing in, for the case where the token arrived first.
+    func sendIfPossible() async {
+        guard let token, Account.shared.isSignedIn else { return }
+        await Account.shared.registerDevice(
+            pushToken: token, platform: "apns", label: UIDevice.current.name)
+    }
+}
+
+/// The only reason this app has a delegate.
+///
+/// SwiftUI has no scene-phase equivalent of "APNs answered" — the token arrives
+/// through `UIApplicationDelegate` and nowhere else.
+final class PushDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        Task { @MainActor in PushRegistration.shared.received(deviceToken) }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        // Not surfaced. It fails on the simulator and in builds without a push
+        // entitlement, neither of which is a thing to tell a user about, and
+        // local notifications keep working regardless.
+        print("remote notifications unavailable: \(error.localizedDescription)")
     }
 }

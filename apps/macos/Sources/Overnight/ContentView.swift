@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import SwiftUI
 
@@ -58,6 +59,7 @@ struct ContentView: View {
         }
         .task {
             Notifier.shared.requestAuthorisation()
+            AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
             await client.refresh()
             await client.refreshRepositories()
             await client.refreshRoots()

@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import SwiftUI
 
@@ -148,9 +149,29 @@ struct SettingsView: View {
             terminal.tabItem { Label("Terminal", systemImage: "terminal") }
             behaviour.tabItem { Label("Behaviour", systemImage: "gearshape") }
             HostsSettings().tabItem { Label("Machines", systemImage: "server.rack") }
+            account.tabItem { Label("Account", systemImage: "person.crop.circle") }
             host.tabItem { Label("Startup", systemImage: "bolt") }
         }
         .frame(width: 520, height: 400)
+    }
+
+    /// Signing in, which buys notifications and nothing else.
+    ///
+    /// Its own tab rather than a row under Machines: an account is about this
+    /// person, and a machine list is about machines. Pairing — which machine may
+    /// notify you — stays in Machines, where the machines are.
+    private var account: some View {
+        // The sign-in row on top of the two lists it makes meaningful. One
+        // scroll rather than a tab and a sheet: signing in, being notified, and
+        // seeing what can notify you are one subject.
+        ScrollView {
+            VStack(spacing: 0) {
+                Form { AccountSection() }
+                    .formStyle(.grouped)
+                AccountDevicesView()
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     /// Whether this machine stays reachable when nobody is at it.

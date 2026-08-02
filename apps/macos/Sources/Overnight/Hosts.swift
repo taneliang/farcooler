@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// The machines this Mac can drive, and which one it is driving.
@@ -104,6 +105,52 @@ final class Hosts: ObservableObject {
     func install(_ target: String) async -> String {
         let result = await CLI.run(["host", "install", target])
         return result.output
+    }
+
+    // MARK: - Letting a machine reach you
+
+    /// Give a machine a token so it can notify your devices, and nothing else.
+    ///
+    /// Two steps that must not be split: ask the relay for a token, then hand it
+    /// to the machine over ssh. The token exists in readable form for exactly
+    /// the span between those two lines — the relay keeps only a hash — so it is
+    /// never stored here, never logged, and never shown.
+    ///
+    /// The machine itself does no signing in. That is the whole point: a
+    /// headless Linux box has no browser, and a token that names an account and
+    /// carries no destination is worth only "notify its own owner".
+    func pairForNotifications(_ target: String) async -> String {
+        guard Account.shared.isSignedIn else {
+            return "Sign in first — Settings ▸ Account."
+        }
+        let label = target.isEmpty ? "This Mac" : target
+        guard let token = await Account.shared.pairDaemon(label: label) else {
+            return "The relay would not issue a token. Try signing in again."
+        }
+
+        var arguments = target.isEmpty ? [] : ["--host", target]
+        arguments += ["push", "pair", token]
+        let result = await CLI.run(arguments)
+        // The CLI's own words on failure, and a fixed sentence on success — the
+        // success output would otherwise be the only place the token could
+        // surface, and it must not.
+        return result.ok ? "This machine can now notify your devices." : result.output
+    }
+
+    /// Stop a machine notifying you, from the machine's side.
+    func unpairNotifications(_ target: String) async -> String {
+        var arguments = target.isEmpty ? [] : ["--host", target]
+        arguments += ["push", "forget"]
+        let result = await CLI.run(arguments)
+        return result.ok ? "This machine will no longer notify you." : result.output
+    }
+
+    /// Whether a machine holds a token, asked of the machine.
+    func notificationStatus(_ target: String) async -> Bool {
+        var arguments = target.isEmpty ? [] : ["--host", target]
+        arguments += ["push", "status"]
+        let result = await CLI.run(arguments)
+        return result.ok && result.output.contains("paired ·")
     }
 
     // MARK: - Persistence

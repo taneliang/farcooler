@@ -41,6 +41,13 @@ SOURCES = [
 # gives them a group of their own instead, the same way `fontsGroup` does for
 # `Fonts/`.
 AGENTKIT_SOURCES = [
+    # The account, and the two screens it makes meaningful. Shared because
+    # signing in is identical on both platforms and because the words under the
+    # button — that an account buys notifications and nothing else — must not
+    # come to differ between them.
+    "Account.swift",
+    "AccountDevicesView.swift",
+    "AccountSection.swift",
     "AgentEvent.swift",
     "Composer.swift",
     "DiffComputation.swift",

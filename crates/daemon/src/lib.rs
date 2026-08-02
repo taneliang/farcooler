@@ -5,6 +5,7 @@ pub mod foreground;
 pub mod git;
 pub mod layout;
 pub mod paths;
+pub mod push;
 pub mod rpc;
 pub mod runtime;
 pub mod service;

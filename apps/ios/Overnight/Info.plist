@@ -48,5 +48,26 @@
         <string>IosevkaNerdFontMono-Regular.ttf</string>
         <string>IosevkaNerdFontMono-Bold.ttf</string>
     </array>
+    <!-- Where AuthKit comes back to. A custom scheme rather than a universal
+         link because sign-in must work before an account exists and therefore
+         before any server association could be verified; PKCE is what makes a
+         scheme any app can claim safe to use — see AgentKit's Account. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.overnight.auth</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>overnight</string>
+            </array>
+        </dict>
+    </array>
+    <!-- Public by design: it names the app to WorkOS, it is not a bearer. The
+         API key lives only in the relay's secrets, which is what lets this repo
+         be open source without shipping anything worth stealing. Blank here so
+         a fork can point at its own WorkOS project without editing source. -->
+    <key>OvernightWorkOSClientID</key>
+    <string></string>
 </dict>
 </plist>

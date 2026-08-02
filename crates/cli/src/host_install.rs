@@ -494,7 +494,7 @@ async fn remote_write(target: &str, path: &str, contents: &str) -> Fallible {
     Ok(())
 }
 
-async fn remote_run(target: &str, command: &str) -> Fallible {
+pub(crate) async fn remote_run(target: &str, command: &str) -> Fallible {
     let status = Command::new("ssh")
         .args(ssh_options())
         .arg(target)

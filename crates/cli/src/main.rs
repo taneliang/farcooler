@@ -90,6 +90,15 @@ enum Command {
     /// poll, which forces a choice between noticing an agent's question late
     /// and spending a phone's battery asking constantly.
     Events,
+    /// Pair this machine with your account so it can notify your devices.
+    ///
+    /// There is no sign-in here on purpose. The app does the signing in, asks
+    /// the relay for a token that names nothing but the account, and hands that
+    /// token to this machine over the ssh channel you already trust. So a
+    /// headless Linux box never needs a browser, and the worst a leaked token
+    /// can do is notify the phone of the person it was taken from.
+    #[command(subcommand)]
+    Push(PushCmd),
     /// Install or inspect Overnight on a Linux host over ssh.
     #[command(subcommand, name = "host")]
     HostCmd(HostCmd),
@@ -201,6 +210,21 @@ enum LayoutCmd {
         #[arg(long)]
         prev: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum PushCmd {
+    /// Store the token the app issued for this machine.
+    Pair {
+        token: String,
+        /// A self-hosted relay, if you run your own.
+        #[arg(long)]
+        relay: Option<String>,
+    },
+    /// Say whether this machine is paired, without printing the token.
+    Status,
+    /// Forget the token. Notifications stop; nothing else changes.
+    Forget,
 }
 
 #[derive(Subcommand)]
@@ -468,6 +492,57 @@ async fn main() {
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
+/// Pair, unpair, or report — on this machine or, with `--host`, on another.
+///
+/// Forwarded over ssh rather than through the daemon protocol because a
+/// credential should travel over the channel the user already authenticated,
+/// not over one the daemon would have to be trusted to keep private.
+async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
+    use overnight_daemon::push::Pairing;
+
+    if let Some(target) = host {
+        let remote = match &cmd {
+            PushCmd::Pair { token, relay } => {
+                let relay = relay
+                    .as_deref()
+                    .map(|r| format!(" --relay {}", shell_quote(r)))
+                    .unwrap_or_default();
+                format!("overnight push pair {}{relay}", shell_quote(token))
+            }
+            PushCmd::Status => "overnight push status".to_string(),
+            PushCmd::Forget => "overnight push forget".to_string(),
+        };
+        return host_install::remote_run(target, &remote).await;
+    }
+
+    let dir = overnight_daemon::paths::ensure_runtime_dir()?;
+    match cmd {
+        PushCmd::Pair { token, relay } => {
+            // The default lives in the daemon, not restated here: two
+            // spellings of a relay URL is one of them being wrong later.
+            let relay = relay.unwrap_or_else(overnight_daemon::push::default_relay);
+            Pairing { relay, token }.save_in(&dir)?;
+            println!("paired · notifications will go to your signed-in devices");
+        }
+        PushCmd::Status => match Pairing::load_in(&dir) {
+            // Never the token itself. A status command that prints a credential
+            // is a credential in every terminal scrollback and CI log.
+            Some(p) => println!("paired · relay {}", p.relay),
+            None => println!("not paired"),
+        },
+        PushCmd::Forget => {
+            Pairing::forget_in(&dir);
+            println!("forgotten · this machine will not notify anything");
+        }
+    }
+    Ok(())
+}
+
+/// Single-quote for a remote shell, the way the installer already does.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
 async fn run() -> Fallible {
     let cli = Cli::parse();
     let host = cli.host.as_deref();
@@ -481,6 +556,7 @@ async fn run() -> Fallible {
         Command::Layout(c) => layout(host, c, cli.json).await,
         Command::Attach { workspace } => attach(host, &workspace).await,
         Command::Events => events(host).await,
+        Command::Push(c) => push(host, c).await,
         Command::HostCmd(HostCmd::Install { target, from }) => {
             host_install::install(&target, from.as_deref()).await
         }

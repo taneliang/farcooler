@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct OvernightApp: App {
+    /// Present only to catch the APNs device token, which arrives nowhere else.
+    @NSApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
+
     var body: some Scene {
         WindowGroup {
             ContentView()

@@ -135,6 +135,13 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            AccountSection()
+            if Account.shared.isSignedIn {
+                Section {
+                    NavigationLink("Devices and machines") { AccountDevicesView() }
+                }
+            }
+
             Section {
                 Toggle("When an agent needs you", isOn: $notifyOnAttention)
                 Toggle("When an agent finishes", isOn: $notifyOnDone)

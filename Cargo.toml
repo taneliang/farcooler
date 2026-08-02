@@ -30,6 +30,15 @@ overnight-client = { path = "crates/client" }
 overnight-daemon = { path = "crates/daemon" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "process", "sync", "time", "signal", "fs"] }
+# The only HTTPS client in the workspace, and it exists for exactly one call:
+# the daemon telling the relay that an agent needs its owner. Every other
+# network path here is ssh, which is a subprocess.
+#
+# `rustls` rather than the default TLS, so a Linux host does not need OpenSSL
+# headers to build the thing that watches its agents; `default-features = false`
+# because none of the rest — cookies, blocking, multipart, compression — is
+# wanted on that path.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 prost = "0.13"
 prost-types = "0.13"
 prost-build = "0.13"

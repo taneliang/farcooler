@@ -1,10 +1,15 @@
 /// The relay's routes.
 ///
-/// Four of them, and the asymmetry between the first three and the last is the
-/// whole security model: registering a device and pairing a machine are done BY
-/// A SIGNED-IN PERSON, and sending a notification is done by a machine that
-/// holds a token that person issued. A machine can therefore only ever notify
-/// the account that paired it — see `/v1/notify`.
+/// Three groups, and the asymmetry between them is the whole security model.
+/// Signing in exchanges a WorkOS code for a session. Registering a device and
+/// pairing a machine are done BY A SIGNED-IN PERSON. Sending a notification is
+/// done by a machine holding a token that person issued — so a machine can only
+/// ever notify the account that paired it. See `/v1/notify`.
+///
+/// The apps hold a WorkOS client id, which is public by design, and never an API
+/// key. The code exchange happens here because that is the one step that needs
+/// the secret, and a secret in a repo that is about to be open source — or in an
+/// app bundle anyone can unzip — is not a secret.
 
 import { record, type Metrics } from './analytics'
 import { verifySession } from './workos'
@@ -30,8 +35,16 @@ export default {
 
     try {
       switch (url.pathname) {
+        case '/v1/auth/token':
+          return await exchangeCode(request, env)
+        case '/v1/auth/refresh':
+          return await refreshSession(request, env)
         case '/v1/devices':
           return await registerDevice(request, env)
+        case '/v1/account':
+          return await listAccount(request, env)
+        case '/v1/devices/revoke':
+          return await revokeDevice(request, env)
         case '/v1/daemons':
           return await pairDaemon(request, env)
         case '/v1/daemons/revoke':
@@ -48,6 +61,87 @@ export default {
       return json({ error: 'internal' }, 500)
     }
   },
+}
+
+// MARK: - Signing in
+
+/// Trade an authorisation code for a session.
+///
+/// PKCE, so the code is worthless to anything that did not start the sign-in:
+/// the app invented a verifier, sent only its hash to WorkOS, and proves
+/// possession here. That matters because the redirect comes back through a
+/// custom URL scheme, which any app on the device can claim.
+async function exchangeCode(request: Request, env: Env): Promise<Response> {
+  const body = await request.json<{ code: string; verifier: string }>()
+  if (!body.code || !body.verifier) return json({ error: 'code' }, 400)
+
+  return await workosToken(env, {
+    grant_type: 'authorization_code',
+    code: body.code,
+    code_verifier: body.verifier,
+  })
+}
+
+/// Trade a refresh token for a fresh session.
+///
+/// Kept server-side for the same reason as the exchange: WorkOS wants the API
+/// key on this call too, and an app that could refresh on its own would be an
+/// app carrying that key.
+async function refreshSession(request: Request, env: Env): Promise<Response> {
+  const body = await request.json<{ refreshToken: string }>()
+  if (!body.refreshToken) return json({ error: 'refreshToken' }, 400)
+
+  return await workosToken(env, {
+    grant_type: 'refresh_token',
+    refresh_token: body.refreshToken,
+  })
+}
+
+/// The one call that needs the API key, in the one place that has it.
+async function workosToken(env: Env, fields: Record<string, string>): Promise<Response> {
+  const response = await fetch('https://api.workos.com/user_management/authenticate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...fields,
+      client_id: env.WORKOS_CLIENT_ID,
+      client_secret: env.WORKOS_API_KEY,
+    }),
+  })
+
+  if (!response.ok) {
+    // WorkOS's own reason is safe to pass through here and is the difference
+    // between "sign-in failed" and "your session expired, sign in again".
+    const detail = await response.text()
+    console.error('workos authenticate failed', response.status, detail)
+    return json({ error: 'auth', status: response.status }, 401)
+  }
+
+  const session = await response.json<{
+    access_token: string
+    refresh_token: string
+    user?: { id?: string; email?: string }
+  }>()
+
+  // Create the account here as well as in `requireAccount`, so a person who
+  // signs in and never registers a device still exists — that is the marketing
+  // and billing record, and it should not depend on a push permission prompt.
+  if (session.user?.id) {
+    await env.DB.prepare(
+      `INSERT INTO accounts (id, created_at, email) VALUES (?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET email = excluded.email`,
+    )
+      .bind(session.user.id, Date.now(), session.user.email ?? null)
+      .run()
+    await record(env.METRICS, env.ANALYTICS_SALT, 'signed_in', session.user.id)
+  }
+
+  return json({
+    accessToken: session.access_token,
+    refreshToken: session.refresh_token,
+    userId: session.user?.id ?? '',
+    email: session.user?.email ?? '',
+  })
 }
 
 // MARK: - Signed-in routes
@@ -80,6 +174,63 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
   await record(env.METRICS, env.ANALYTICS_SALT, 'device_registered', account, {
     platform: body.platform,
   })
+  return json({ ok: true })
+}
+
+/// Everything this account has registered, for the apps' management screen.
+///
+/// There is no web dashboard and there is not going to be one. Two lists and two
+/// delete buttons do not need a second product with its own login, and every
+/// person who has this data already has an app open.
+///
+/// Never the tokens — not the push tokens, not the daemon token hashes. A screen
+/// that lists devices needs to name them, not to be able to become them.
+async function listAccount(request: Request, env: Env): Promise<Response> {
+  const account = await requireAccount(request, env)
+  if (account instanceof Response) return account
+
+  const devices = await env.DB.prepare(
+    `SELECT id, platform, label, updated_at FROM devices WHERE account_id = ? ORDER BY updated_at DESC`,
+  )
+    .bind(account)
+    .all<{ id: string; platform: string; label: string; updated_at: number }>()
+
+  const daemons = await env.DB.prepare(
+    `SELECT id, label, created_at, last_seen_at FROM daemons WHERE account_id = ? ORDER BY created_at DESC`,
+  )
+    .bind(account)
+    .all<{ id: string; label: string; created_at: number; last_seen_at: number | null }>()
+
+  return json({
+    email: null,
+    devices: (devices.results ?? []).map(d => ({
+      id: d.id,
+      platform: d.platform,
+      label: d.label,
+      updatedAt: d.updated_at,
+    })),
+    machines: (daemons.results ?? []).map(d => ({
+      id: d.id,
+      label: d.label,
+      createdAt: d.created_at,
+      lastSeenAt: d.last_seen_at,
+    })),
+  })
+}
+
+/// Stop notifying a device.
+///
+/// Scoped by account in the WHERE clause, not checked before it: a delete that
+/// verifies ownership in a separate query has a window between the two, and
+/// there is no reason to have the window.
+async function revokeDevice(request: Request, env: Env): Promise<Response> {
+  const account = await requireAccount(request, env)
+  if (account instanceof Response) return account
+
+  const body = await request.json<{ id: string }>()
+  await env.DB.prepare(`DELETE FROM devices WHERE id = ? AND account_id = ?`)
+    .bind(body.id, account)
+    .run()
   return json({ ok: true })
 }
 

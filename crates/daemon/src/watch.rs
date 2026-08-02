@@ -60,6 +60,9 @@ const EVENT_BACKLOG: usize = 256;
 /// The daemon's live view of what every agent is doing.
 pub struct Watcher {
     service: Arc<Service>,
+    /// One client for the life of the daemon, so a night of notifications
+    /// reuses a connection rather than opening one per agent.
+    push: reqwest::Client,
     events: broadcast::Sender<Event>,
     /// Last reported activity per terminal, which is what makes `Done`
     /// possible: it exists only as a transition out of `Working`.
@@ -90,7 +93,33 @@ struct Observed {
 impl Watcher {
     pub fn new(service: Arc<Service>) -> Arc<Self> {
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
-        Arc::new(Self { service, events, state: tokio::sync::Mutex::new(HashMap::new()) })
+        Arc::new(Self {
+            service,
+            events,
+            state: tokio::sync::Mutex::new(HashMap::new()),
+            push: reqwest::Client::builder()
+                // A notification is worth a few seconds and never worth
+                // holding the sampling loop open: the fleet has to keep being
+                // watched whether or not a relay is reachable.
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_default(),
+        })
+    }
+
+    /// Push a state change to the owner's devices, if this machine is paired.
+    ///
+    /// Blocked and done only. A working agent is the normal case, and something
+    /// that buzzes for the normal case is something people turn off — after
+    /// which it cannot tell them the thing that mattered.
+    async fn push_if_paired(&self, terminal: Uuid, activity: AgentActivity, label: &str) {
+        let (title, subtitle) = match activity {
+            AgentActivity::Blocked => (format!("{label} needs you"), "Waiting for your answer"),
+            AgentActivity::Done => (format!("{label} finished"), ""),
+            _ => return,
+        };
+        let Some(pairing) = crate::push::Pairing::load() else { return };
+        crate::push::notify(&self.push, &pairing, &title, subtitle, &terminal.to_string()).await;
     }
 
     /// Subscribe a connection to the push stream.
@@ -301,6 +330,23 @@ impl Watcher {
             };
             if !changed {
                 continue;
+            }
+
+            // Worth telling the owner about, and only on the transition.
+            //
+            // The same two states the Mac announces locally, decided in the
+            // same place for the same reason: the daemon is what knows, and a
+            // phone that is asleep cannot be told any other way. Sent from
+            // here rather than from a client, because every client is asleep
+            // in the case this exists for.
+            //
+            // Only on a transition FROM a known previous state. The first
+            // sighting of a terminal is not news — otherwise restarting the
+            // daemon would buzz once for every idle agent on the machine.
+            if let Some(before) = &previous {
+                if before.activity != next_activity {
+                    self.push_if_paired(id, next_activity, &command).await;
+                }
             }
 
             let record = Observed {

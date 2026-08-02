@@ -81,12 +81,30 @@ struct HostsSettings: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            // This Mac gets the same pairing control as anything else. Its
+            // daemon is the same daemon and reaches a sleeping phone by the same
+            // route — being local buys it no special path.
+            Menu {
+                Button("Notify me from this machine") { Task { await pair("") } }
+                Button("Stop notifications from this machine") { Task { await unpair("") } }
+            } label: {
+                Image(systemName: "bell")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
             if hosts.active.isEmpty {
                 Label("Driving", systemImage: "checkmark.circle.fill")
                     .labelStyle(.iconOnly)
                     .foregroundStyle(.green)
             } else {
                 Button("Drive") { hosts.active = "" }
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if let message = log[""] {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+                    .offset(y: 14)
             }
         }
     }
@@ -157,6 +175,14 @@ struct HostsSettings: View {
 
             Menu {
                 Button("Check again") { Task { await probe(host.target) } }
+                Section {
+                    Button("Notify me from this machine") {
+                        Task { await pair(host.target) }
+                    }
+                    Button("Stop notifications from this machine") {
+                        Task { await unpair(host.target) }
+                    }
+                }
                 Button("Remove", role: .destructive) { hosts.remove(host.target) }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -195,6 +221,18 @@ struct HostsSettings: View {
         busy.insert(target)
         defer { busy.remove(target) }
         await hosts.probe(target)
+    }
+
+    private func pair(_ target: String) async {
+        busy.insert(target)
+        defer { busy.remove(target) }
+        log[target] = await hosts.pairForNotifications(target)
+    }
+
+    private func unpair(_ target: String) async {
+        busy.insert(target)
+        defer { busy.remove(target) }
+        log[target] = await hosts.unpairNotifications(target)
     }
 
     private func install(_ target: String) async {
