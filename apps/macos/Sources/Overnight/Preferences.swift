@@ -89,6 +89,13 @@ final class Preferences: ObservableObject {
     /// which is the only version of remote support worth having. There is no
     /// Overnight listener anywhere; a host reachable by ssh is reachable by
     /// Overnight, and one that is not, is not.
+    /// Which Settings tab to open on.
+    ///
+    /// Stored rather than passed because Settings is a scene, not a sheet —
+    /// nothing that opens it can hand it a parameter. Anything that wants to
+    /// send someone to a specific tab sets this first.
+    @AppStorage("settings.tab") var settingsTab = "terminal"
+
     @AppStorage("host.remote") var remoteHost = "" {
         didSet { revision += 1 }
     }
@@ -145,12 +152,13 @@ struct SettingsView: View {
     @StateObject private var service = ServiceRegistration()
 
     var body: some View {
-        TabView {
-            terminal.tabItem { Label("Terminal", systemImage: "terminal") }
-            behaviour.tabItem { Label("Behaviour", systemImage: "gearshape") }
+        TabView(selection: $preferences.settingsTab) {
+            terminal.tabItem { Label("Terminal", systemImage: "terminal") }.tag("terminal")
+            behaviour.tabItem { Label("Behaviour", systemImage: "gearshape") }.tag("behaviour")
             HostsSettings().tabItem { Label("Machines", systemImage: "server.rack") }
-            account.tabItem { Label("Account", systemImage: "person.crop.circle") }
-            host.tabItem { Label("Startup", systemImage: "bolt") }
+                .tag("machines")
+            account.tabItem { Label("Account", systemImage: "person.crop.circle") }.tag("account")
+            host.tabItem { Label("Startup", systemImage: "bolt") }.tag("startup")
         }
         .frame(width: 520, height: 400)
     }

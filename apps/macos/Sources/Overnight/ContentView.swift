@@ -381,7 +381,9 @@ struct ContentView: View {
 
     private var sidebarHeader: some View {
         HStack(spacing: 8) {
-            Text("Fleet").font(.headline)
+            // The machine, not the word "Fleet". This pane IS the fleet — the
+            // thing it could not tell you was whose.
+            MachinePicker()
             if client.busy { ProgressView().controlSize(.mini) }
 
             if attentionCount > 0 {
@@ -409,13 +411,19 @@ struct ContentView: View {
                     .disabled(client.repositories.isEmpty)
                 Divider()
                 Button("Add repository…") { showAddRepository = true }
+                // Here as well as in the picker above, because this is the
+                // menu people open looking for "add a thing" — and a machine
+                // is a thing you add.
+                SettingsLink { Text("Add a machine…") }
+                    .simultaneousGesture(
+                        TapGesture().onEnded { Preferences.shared.settingsTab = "machines" })
             } label: {
                 Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Add a workspace or a repository")
+            .help("Add a workspace, a repository, or a machine")
         }
         // Aligned to the same rail as the workspace names below it, so the
         // section title heads its column instead of sitting off to one side of
