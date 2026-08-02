@@ -119,6 +119,12 @@ struct AgentComposer: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        // Taps land ON the card, not through it. A glass surface is a
+        // background, and a background is not a hit target — so a click in the
+        // gap between the selectors and the field reached whatever the
+        // transcript had scrolled underneath.
+        .contentShape(Rectangle())
+        .onTapGesture {}
         .modifier(GlassCard())
         // Debounced by `.task(id:)` itself: a token that changes on every
         // keystroke cancels its predecessor for free, which is the whole

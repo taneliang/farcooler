@@ -153,11 +153,25 @@ public enum AgentEvent: Sendable, Equatable {
 public struct QueuedPrompt: Decodable, Sendable, Equatable, Identifiable {
     public let id: String
     public var text: String
+    /// How many pictures are waiting with it.
+    ///
+    /// Decoded because a message can be an image and nothing else, and a queued
+    /// row that showed only `text` then rendered an empty bubble — which is
+    /// indistinguishable from the attachment having been dropped on the floor.
+    public var images: [QueuedImage]?
 
-    public init(id: String, text: String) {
+    public var imageCount: Int { images?.count ?? 0 }
+
+    public init(id: String, text: String, images: [QueuedImage]? = nil) {
         self.id = id
         self.text = text
+        self.images = images
     }
+}
+
+/// Only its presence matters here — the bytes are the daemon's business.
+public struct QueuedImage: Decodable, Sendable, Equatable {
+    public let mime: String
 }
 
 public struct Sequenced: Sendable, Equatable {

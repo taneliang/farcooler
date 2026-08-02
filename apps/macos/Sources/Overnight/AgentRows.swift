@@ -474,6 +474,13 @@ struct QueuedRow: View {
                         .font(.body)
                         .frame(minWidth: 160)
                         .onSubmit(commit)
+                } else if queued.text.isEmpty && queued.imageCount > 0 {
+                    // An image with no words is still a message. Without this
+                    // the bubble was empty and read as a dropped attachment.
+                    Label(
+                        queued.imageCount == 1 ? "1 image" : "\(queued.imageCount) images",
+                        systemImage: "photo")
+                        .font(.body)
                 } else {
                     Text(queued.text)
                         .font(.body)

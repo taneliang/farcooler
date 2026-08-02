@@ -615,6 +615,13 @@ private struct QueuedRow: View {
                         .font(.callout)
                         .frame(minWidth: 140)
                         .onSubmit(commit)
+                } else if queued.text.isEmpty && queued.imageCount > 0 {
+                    // An image with no words is still a message. Without this
+                    // the bubble was empty and read as a dropped attachment.
+                    Label(
+                        queued.imageCount == 1 ? "1 image" : "\(queued.imageCount) images",
+                        systemImage: "photo")
+                        .font(.body)
                 } else {
                     Text(queued.text).font(.callout)
                 }
@@ -995,6 +1002,15 @@ private struct AgentComposer: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
         }
+        // Taps land ON the card, not through it.
+        //
+        // A glass surface is a background, and a background is not a hit target
+        // — so a tap in the gap between the chips and the field went straight
+        // through to whatever the conversation had scrolled under there. Tapping
+        // dead space in an input box must never activate something you cannot
+        // see.
+        .contentShape(Rectangle())
+        .onTapGesture {}
         .modifier(GlassSurface())
         .padding(.horizontal, 10)
         .padding(.bottom, 8)
