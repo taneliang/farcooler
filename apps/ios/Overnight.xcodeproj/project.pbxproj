@@ -297,9 +297,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				OVERNIGHT_CHANNEL = dev;
-				OVERNIGHT_DISPLAY_VERSION = "0.1.0 (dev 15dae9b)";
+				OVERNIGHT_DISPLAY_VERSION = "0.1.0 (dev fb3f195)";
 				OVERNIGHT_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 200;
+				CURRENT_PROJECT_VERSION = 201;
 				PRODUCT_NAME = Overnight;
 				PRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
 				INFOPLIST_FILE = Overnight/Info.plist;
@@ -320,9 +320,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				OVERNIGHT_CHANNEL = dev;
-				OVERNIGHT_DISPLAY_VERSION = "0.1.0 (dev 15dae9b)";
+				OVERNIGHT_DISPLAY_VERSION = "0.1.0 (dev fb3f195)";
 				OVERNIGHT_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 200;
+				CURRENT_PROJECT_VERSION = 201;
 				PRODUCT_NAME = Overnight;
 				PRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
 				INFOPLIST_FILE = Overnight/Info.plist;

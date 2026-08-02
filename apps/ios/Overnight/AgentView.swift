@@ -310,7 +310,7 @@ private struct AgentRowView: View {
         case let .message(role, text):
             MessageRow(role: role, text: text, isLive: isLast)
         case let .tool(tool):
-            ToolRowView(tool: tool, pending: pending, onAnswer: onAnswer)
+            ToolRowView(tool: tool, isLive: isLast, pending: pending, onAnswer: onAnswer)
         case let .gap(reason):
             GapRow(reason: reason)
         }
@@ -369,6 +369,8 @@ private struct MessageRow: View {
 /// earned.
 private struct ToolRowView: View {
     let tool: ToolRow
+    /// Whether this is the newest row — nothing has followed it yet.
+    var isLive: Bool = false
     var pending: PendingPermission?
     var onAnswer: ((String) -> Void)?
 
@@ -434,11 +436,24 @@ private struct ToolRowView: View {
                 RoundedRectangle(cornerRadius: 8).strokeBorder(Color.orange.opacity(0.45))
             }
         }
+        // Driven by the model rather than a timer, exactly as the thought row
+        // is: the fold follows the turn moving on.
+        .animation(.spring(response: 0.22, dampingFraction: 0.82), value: isLive)
+        .animation(.spring(response: 0.22, dampingFraction: 0.82), value: running)
     }
 
-    /// Open on its own while it is waiting to be approved: being asked to allow
-    /// a command without being shown it is a guess, not a decision.
-    private var showingDetail: Bool { expanded || pending != nil }
+    /// Open while it is waiting to be approved, and while it is the thing
+    /// currently happening.
+    ///
+    /// Being asked to allow a command without being shown it is a guess, not a
+    /// decision. And a command running with nothing after it IS the turn — the
+    /// same rule `ThoughtRow` follows — so it opens itself and folds away once
+    /// the agent moves on, because a transcript of every command's full output
+    /// is unreadable.
+    private var showingDetail: Bool { expanded || pending != nil || (isLive && running) }
+
+    /// Still going, as the agent last reported it.
+    private var running: Bool { tool.status == .pending || tool.status == .inProgress }
 
     private var label: some View {
         HStack(spacing: 7) {

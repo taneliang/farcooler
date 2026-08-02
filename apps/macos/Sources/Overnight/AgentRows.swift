@@ -23,7 +23,7 @@ struct AgentRowView: View {
         case let .message(role, text):
             MessageRow(role: role, text: text, isLive: isLast)
         case let .tool(tool):
-            ToolRowView(tool: tool, pending: pending, onAnswer: onAnswer)
+            ToolRowView(tool: tool, isLive: isLast, pending: pending, onAnswer: onAnswer)
         case let .gap(reason):
             GapRow(reason: reason)
         }
@@ -225,6 +225,8 @@ private struct ThoughtRow: View {
 /// earned.
 private struct ToolRowView: View {
     let tool: ToolRow
+    /// Whether this is the newest row — nothing has followed it yet.
+    var isLive: Bool = false
     var pending: PendingPermission?
     var onAnswer: ((String) -> Void)?
 
@@ -284,14 +286,28 @@ private struct ToolRowView: View {
         }
         .animation(Motion.snap, value: expanded)
         .animation(Motion.snap, value: pending != nil)
+        // Driven by the model rather than a timer, exactly as the thought row
+        // is: the fold follows the turn moving on.
+        .animation(Motion.snap, value: isLive)
+        .animation(Motion.snap, value: running)
     }
 
-    /// Open on its own while it is waiting to be approved.
+    /// Open on its own while it is waiting to be approved, and while it is
+    /// the thing currently happening.
     ///
     /// Being asked to allow a command without being shown the command is not a
     /// decision, it is a guess. A reader who then folds it away has said they
     /// have seen enough, so that still wins.
-    private var showingDetail: Bool { expanded || pending != nil }
+    ///
+    /// The live case is the same rule `ThoughtRow` already follows: a command
+    /// that is running with nothing after it IS the turn, and watching its
+    /// output is the only way to see what is happening. Once the agent moves
+    /// on it folds itself away, because a transcript of every command's full
+    /// output is unreadable.
+    private var showingDetail: Bool { expanded || pending != nil || (isLive && running) }
+
+    /// Still going, as the agent last reported it.
+    private var running: Bool { tool.status == .pending || tool.status == .inProgress }
 
     private var label: some View {
         HStack(spacing: 7) {
