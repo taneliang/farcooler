@@ -191,6 +191,16 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Whether to offer the terminal/chat switch at all.
     var canSwitchPaneMode: Bool { chatCapable == true }
 
+    /// What is running here, for a sentence about it.
+    ///
+    /// The preset when there is one — "codex", "cursor" — and something
+    /// truthful rather than a guess when there is not.
+    var agentLabel: String {
+        let name = (preset ?? "").split(separator: ":").first.map(String.init) ?? ""
+        guard !name.isEmpty, name != "shell" else { return "This pane" }
+        return name.prefix(1).uppercased() + name.dropFirst()
+    }
+
     /// What to call this terminal.
     ///
     /// Derived, never stored, and that is the whole point: a terminal IS the thing

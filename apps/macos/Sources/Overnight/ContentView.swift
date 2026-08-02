@@ -879,6 +879,17 @@ struct ContentView: View {
                 client.lastError = "No pane to switch — select a terminal first."
                 return
             }
+            // Said here rather than left to the daemon's refusal, because this
+            // is where the agent's NAME is known. The on-pane button is hidden
+            // for a pane that cannot switch; the keystroke was not, so ⌃B a on
+            // a Codex pane did nothing and explained nothing.
+            guard target.canSwitchPaneMode || target.isAgentPane else {
+                let agent = target.agentLabel
+                client.lastError =
+                    "\(agent) has no chat view — Overnight can only render Claude as a chat. "
+                    + "The terminal keeps working."
+                return
+            }
             await togglePaneMode(target)
 
         case .help:

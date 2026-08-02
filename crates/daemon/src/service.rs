@@ -1029,6 +1029,42 @@ impl Service {
             .find(|p| p.proves_life())
             .ok_or(DomainError::NotFound)?;
 
+        // Refused here, not merely hidden in a client.
+        //
+        // This function's own callers say the daemon is what decides whether a
+        // toggle is possible — and it did not check, so a pane running Codex
+        // could be switched into a chat Overnight has no adapter for. The
+        // on-pane button was hidden for those, but the keyboard path was not,
+        // and a keystroke that reaches the daemon and comes back with nothing
+        // to show is indistinguishable from a broken feature.
+        //
+        // Leaving agent mode is always allowed: a pane that got in somehow must
+        // always be able to get out.
+        if pane_mode == models::PaneMode::Agent {
+            let screen = self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default();
+            let harness = overnight_core::activity::identify(&pane.command, &screen);
+            match harness {
+                Some(rules) if chat_capable(rules.preset) => {}
+                Some(rules) => {
+                    tracing::info!(
+                        harness = rules.preset,
+                        "refused a chat toggle: no adapter for this agent"
+                    );
+                    return Err(DomainError::InvalidArgument {
+                        what: "this agent has no chat adapter",
+                    });
+                }
+                // A shell. Switching one into a chat used to work by adopting
+                // whatever session happened to be lying around in the worktree,
+                // which is the bug `pane_runs_an_agent` was narrowed to stop.
+                None => {
+                    return Err(DomainError::InvalidArgument {
+                        what: "nothing in this pane is an agent",
+                    });
+                }
+            }
+        }
+
         // A session id already declared at launch is reused; a hand-started
         // agent is looked up, and an ambiguous lookup refuses rather than
         // attaching a chat to the wrong conversation.
