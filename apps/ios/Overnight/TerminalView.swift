@@ -130,7 +130,7 @@ struct TerminalView: View {
             // from the hand holding the phone. That still holds; what changed
             // is that it floats now instead of sitting on a slab of its own.
             TerminalTabStrip(workspaces: connection.fleet.workspaces, current: current, onSelect: select)
-                .padding(.bottom, 2)
+                .padding(.top, 2)
         }
         .background(TerminalPalette.background)
         // A terminal is dark regardless of the phone's own appearance — the
@@ -596,15 +596,22 @@ private struct TerminalKeyRow: View {
             // here there is nowhere else to ask from.
             key(action: onDismiss) { glyph("keyboard.chevron.compact.down") }
         }
-        .padding(.horizontal, 6)
-        .padding(.top, 6)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        // Glass, like the composer next door.
+        //
+        // This used to take the `UIInputView`'s own backdrop, so that it read
+        // as the keyboard's top edge rather than a slab resting on it. That was
+        // right when the keyboard's edge was a flat bar; on iOS 26 the thing
+        // resting above a keyboard is a floating glass surface, and a squared
+        // strip against a rounded composer looked like two releases of the app
+        // at once.
+        //
         // No Return key. The software keyboard already has one, and the row's
         // whole job is the keys a phone keyboard does not have.
-        //
-        // No backdrop of its own: the `UIInputView` hosting this supplies the
-        // keyboard's, which is what makes the row the keyboard's top edge
-        // rather than a slab resting on it.
+        .modifier(GlassSurface(radius: 18))
+        .padding(.horizontal, 6)
+        .padding(.bottom, 4)
     }
 
     /// An arrow that means one thing tapped and a bigger version of the same

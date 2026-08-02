@@ -430,10 +430,10 @@ private struct PlanPanel: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
 
 
@@ -854,7 +854,7 @@ private struct AgentComposer: View {
     @State private var mentionSearch: Task<Void, Never>?
     @State private var attachments: [ComposerAttachment] = []
     @State private var photoPickerItem: PhotosPickerItem?
-    @State private var fieldHeight: CGFloat = 22
+    @State private var fieldHeight: CGFloat = UIFont.preferredFont(forTextStyle: .body).lineHeight
 
     private var token: ComposerToken { activeToken(in: text, cursor: cursor) }
 
@@ -885,37 +885,56 @@ private struct AgentComposer: View {
             // writing, then everything that acts on it. One row put a growing
             // field between four fixed controls, so the buttons moved as you
             // typed and the field never had the width it needed.
-            VStack(alignment: .leading, spacing: 8) {
-                fieldWithPlaceholder
-
-                HStack(spacing: 14) {
+            // Settings on top, the message and its send button beneath.
+            //
+            // The other way round left the field stranded at the top of the
+            // card with a band of dead space under it, and put the send button
+            // at the end of a row of small secondary controls rather than
+            // beside the thing it sends. This is the shape every messaging app
+            // on the platform uses, for the same reason.
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
                     PhotosPicker(selection: $photoPickerItem, matching: .images) {
                         Image(systemName: "photo.badge.plus")
-                            .font(.system(size: 17))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 15))
                     }
                     .onChange(of: photoPickerItem) { _, item in loadPickedPhoto(item) }
 
+                    ForEach(inlineOptions) { option in
+                        inlineSelector(option)
+                    }
+
                     settingsMenu
 
-                    // Send is anchored to the trailing edge, always: the one
-                    // control you reach for without looking should not move.
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 0)
+                }
+                // Grey, not accent.
+                //
+                // A `Menu` and a `PhotosPicker` tint their labels with the app's
+                // accent colour, and `.foregroundStyle` on the label inside does
+                // not survive it. So the whole row came out blue and read as a
+                // line of links — things that navigate — rather than as controls
+                // that change what the next message costs. Tinting the row is
+                // what actually reaches them.
+                .tint(.secondary)
+
+                HStack(alignment: .bottom, spacing: 8) {
+                    fieldWithPlaceholder
 
                     Button(action: send) {
                         Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 28))
+                            .font(.system(size: 27))
                             .symbolRenderingMode(.hierarchical)
                     }
                     .disabled(!canSend)
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.vertical, 11)
         }
-        .modifier(GlassField())
+        .modifier(GlassSurface())
         .padding(.horizontal, 10)
-        .padding(.bottom, 6)
+        .padding(.bottom, 8)
         .onChange(of: text) { _, _ in scheduleMentionSearch() }
         .onChange(of: cursor) { _, _ in scheduleMentionSearch() }
     }
@@ -930,7 +949,7 @@ private struct AgentComposer: View {
             if text.isEmpty {
                 Text("Message \(harness)")
                     .foregroundStyle(.tertiary)
-                    .padding(.top, 6)
+                    .padding(.top, 2)
             }
             ComposerTextView(text: $text, cursor: $cursor, measuredHeight: $fieldHeight)
                 .frame(height: fieldHeight)
@@ -939,7 +958,54 @@ private struct AgentComposer: View {
 
     // MARK: Mode switcher
 
-    /// Every selector, behind one control.
+    /// The two selectors worth a permanent place on a phone.
+    ///
+    /// Model and effort change what you get and what it costs, and they are the
+    /// two people reach for mid-session. Everything else — permission mode,
+    /// subagent, fast mode — is set once and forgotten, so it folds into the
+    /// menu beside them. Values only: "Sonnet" and "High" say what they are,
+    /// and a phone has no room to print the question as well. The menu spells
+    /// both out.
+    private static let inlineIDs = ["model", "effort"]
+
+    private var inlineOptions: [ConfigOption] {
+        Self.inlineIDs.compactMap { id in configOptions.first { $0.id == id } }
+    }
+
+    private var foldedOptions: [ConfigOption] {
+        configOptions.filter { !Self.inlineIDs.contains($0.id) }
+    }
+
+    /// One selector, shown in full.
+    @ViewBuilder
+    private func inlineSelector(_ option: ConfigOption) -> some View {
+        Menu {
+            ForEach(option.options) { choice in
+                Button {
+                    onSetConfig(option.id, choice.id)
+                } label: {
+                    if choice.id == option.currentValue {
+                        Label(choice.name, systemImage: "checkmark")
+                    } else {
+                        Text(choice.name)
+                    }
+                }
+            }
+        } label: {
+            // A bordered chip rather than plain tinted text, which read as a
+            // link — something that navigates — rather than a control that
+            // changes what the next message costs.
+            Text(option.options.first { $0.id == option.currentValue }?.name ?? option.name)
+                .font(.caption)
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(.quaternary))
+        }
+    }
+
+    /// Everything not worth a permanent place, behind one control.
     ///
     /// Nested submenus rather than a flat list: these are several separate
     /// questions, and flattening them would put "High" and "Opus" and "Plan
@@ -950,7 +1016,7 @@ private struct AgentComposer: View {
     private var settingsMenu: some View {
         if !configOptions.isEmpty {
             Menu {
-                ForEach(configOptions) { option in
+                ForEach(foldedOptions.isEmpty ? configOptions : foldedOptions) { option in
                     Menu(menuTitle(option)) {
                         ForEach(option.options) { choice in
                             Button {
@@ -966,9 +1032,12 @@ private struct AgentComposer: View {
                     }
                 }
             } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 17))
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(.quaternary))
             }
         } else if availableModes.count > 1 {
             // An older daemon that only reports modes still gets a picker.
@@ -985,9 +1054,12 @@ private struct AgentComposer: View {
                     }
                 }
             } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 17))
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(.quaternary))
             }
         }
     }
@@ -1198,7 +1270,10 @@ private struct ComposerTextView: UIViewRepresentable {
         view.font = .preferredFont(forTextStyle: .body)
         view.backgroundColor = .clear
         view.isScrollEnabled = true
-        view.textContainerInset = UIEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
+        // Tight: the card around it already provides the padding, and a text
+        // view that adds its own on top is what made a one-line field look
+        // like a three-line one.
+        view.textContainerInset = UIEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
         view.textContainer.lineFragmentPadding = 0
         view.delegate = context.coordinator
         view.text = text
@@ -1214,6 +1289,10 @@ private struct ComposerTextView: UIViewRepresentable {
     /// `UITextView`'s own undo stack and marked (IME composition) text out
     /// from under whatever is mid-composition.
     func updateUIView(_ uiView: UITextView, context: Context) {
+        // Measured here as well as on change: at `makeUIView` the view has no
+        // width yet, so the first measurement is worthless and an empty field
+        // would keep whatever height it was born with.
+        context.coordinator.report(uiView)
         guard uiView.text != text else { return }
         uiView.text = text
         let location = ComposerTextView.utf16Offset(forCharacterOffset: cursor, in: text)
@@ -1239,7 +1318,11 @@ private struct ComposerTextView: UIViewRepresentable {
             let fitted = textView.sizeThatFits(
                 CGSize(width: width, height: .greatestFiniteMagnitude)
             ).height
-            let clamped = min(max(fitted, 22), 110)
+            // The floor is one line of the body font, not a guess: an empty
+            // field that reserves three lines reads as a box that has lost its
+            // text rather than one waiting for some.
+            let oneLine = UIFont.preferredFont(forTextStyle: .body).lineHeight
+            let clamped = min(max(fitted, oneLine), 110)
             guard abs(clamped - parent.measuredHeight) > 0.5 else { return }
             let binding = parent.$measuredHeight
             DispatchQueue.main.async { binding.wrappedValue = clamped }
@@ -1275,13 +1358,15 @@ private struct ComposerTextView: UIViewRepresentable {
 
 /// Apple's Liquid Glass where the system has it, a material where it does not.
 ///
-/// The Mac's composer carries the same modifier for the same reason (see
-/// `GlassCard` there): a control resting ON scrolling content has to read as a
+/// Shared by everything on this screen that floats — the composer and the
+/// keyboard's own accessory row — so they cannot drift into two different
+/// answers to the same question. The Mac's composer carries the same modifier
+/// for the same reason (see `GlassCard` there): a control resting ON scrolling content has to read as a
 /// layer above it, and on iOS 26 that is what glass means. `.ultraThinMaterial`
 /// is the closest thing on 17 and 18, which this app still supports, so the
 /// shape and the spacing stay identical and only the surface differs.
-private struct GlassField: ViewModifier {
-    private let radius: CGFloat = 24
+struct GlassSurface: ViewModifier {
+    var radius: CGFloat = 24
 
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {

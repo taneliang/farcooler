@@ -36,8 +36,8 @@ struct TerminalTabStrip: View {
                         }
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
             }
             // Scrolled to the open terminal on first layout, not on every
             // fleet refresh: `.onAppear` fires once, `onChange(of: current)`
@@ -83,8 +83,8 @@ private struct TabChip: View {
                     .fontWeight(wantsAttention ? .semibold : .regular)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
             .modifier(ChipGlass(isCurrent: isCurrent))
             .overlay(
                 Capsule()
