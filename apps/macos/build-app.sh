@@ -19,7 +19,7 @@ APP="build/FarCooler.app"
 echo "==> Building ($CONFIG)"
 swift build -c "$CONFIG" >/dev/null
 
-BIN=".build/$CONFIG/FarCooler"
+BIN=".build/$CONFIG/Far Cooler"
 [ -x "$BIN" ] || { echo "build produced no binary at $BIN"; exit 1; }
 
 echo "==> Assembling $APP"
