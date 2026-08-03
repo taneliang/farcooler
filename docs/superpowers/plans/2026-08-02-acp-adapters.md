@@ -36,7 +36,7 @@
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
-  - `pub struct AdapterSpec { pub program: String, pub args: Vec<String>, pub env: Vec<(String, String)> }`
+  - `pub struct AdapterSpec { pub program: String, pub args: Vec<String>, pub env: BTreeMap<String, String> }`
   - `pub struct AgentRules { pub preset: String, pub commands: Vec<String>, pub identity: Vec<String>, pub blocked: Vec<String>, pub working: Vec<String>, pub adapter: Option<AdapterSpec> }`
   - `pub struct Registry { rules: Vec<AgentRules> }`
   - `Registry::built_in() -> Registry`
