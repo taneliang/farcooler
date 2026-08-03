@@ -100,6 +100,17 @@ final class Preferences: ObservableObject {
         didSet { revision += 1 }
     }
 
+    /// The editor the "Open in…" control uses on a click, by `Editor.id`.
+    ///
+    /// Empty means "whichever is first", which is what a fresh install has and
+    /// what someone who has only one editor never has to think about.
+    ///
+    /// Written only when the user picks an editor from the menu. The fallback
+    /// for a remote worktree an editor cannot reach — see `Editors.preferred` —
+    /// deliberately does not write here, so working on a box for an afternoon
+    /// does not quietly change what this Mac opens.
+    @AppStorage("editors.lastUsed") var lastUsedEditor = ""
+
     /// Notify when an agent needs you, or finishes.
     @AppStorage("notifications.enabled") var notifyOnAttention = true
     /// Also notify when an agent finishes, not only when it is blocked.
@@ -192,6 +203,9 @@ struct SettingsView: View {
             behaviour.tabItem { Label("Behaviour", systemImage: "gearshape") }.tag("behaviour")
             HostsSettings().tabItem { Label("Machines", systemImage: "server.rack") }
                 .tag("machines")
+            EditorsSettings()
+                .tabItem { Label("Editors", systemImage: "chevron.left.forwardslash.chevron.right") }
+                .tag("editors")
             account.tabItem { Label("Account", systemImage: "person.crop.circle") }.tag("account")
             host.tabItem { Label("Startup", systemImage: "bolt") }.tag("startup")
         }

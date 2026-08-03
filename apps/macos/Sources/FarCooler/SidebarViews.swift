@@ -105,6 +105,12 @@ struct WorkspaceSection: View {
     /// the ones running behind them are the same list, and the difference is one
     /// mark, not a second section.
     var tiled: Set<String> = []
+    /// Where an editor's refusal to start goes.
+    ///
+    /// A closure rather than a write from here: `DaemonClient` is `ContentView`'s
+    /// and is not in the environment, and the banner that shows this belongs to
+    /// the window, not to one sidebar row.
+    var onEditorError: (String) -> Void = { _ in }
 
     @State private var hovering = false
 
@@ -224,6 +230,13 @@ struct WorkspaceSection: View {
             }
 
             Menu {
+                // First, because it is what you do with a worktree you can see
+                // in a list but are not currently looking at — which is the
+                // only thing this menu can do that the title bar cannot.
+                EditorMenuItems(
+                    workspace: workspace, onError: onEditorError,
+                    showsSettingsItem: false)
+                Divider()
                 Button("New terminal", action: onNewTerminal)
                 if !workspace.isMainCheckout {
                     Divider()

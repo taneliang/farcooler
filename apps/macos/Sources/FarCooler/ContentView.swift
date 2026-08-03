@@ -40,6 +40,12 @@ struct ContentView: View {
     /// `removeWorkspace` does, rather than a banner: this refusal has an
     /// answer ("cancel it anyway?") a banner cannot offer.
     @State private var pendingPaneModeSwitch: PaneModeConfirmation?
+    /// What an editor said when it would not start.
+    ///
+    /// Its own state rather than `client.lastError`, which is rendered only by
+    /// `fleetPlaceholder` and therefore only while no fleet has loaded — the
+    /// opposite of when this control exists. See `EditorErrorBanner`.
+    @State private var editorError: String?
 
     /// What the detail pane is showing.
     enum Selection: Hashable {
@@ -60,6 +66,12 @@ struct ContentView: View {
             sidebar
         } detail: {
             detail
+                // Attached here rather than beside each of the four
+                // `navigationTitle` calls, which sit in three different views
+                // that would each need the failure channel threaded down to
+                // them. This is the one place that decides which worktree the
+                // window is showing, which is exactly what the control acts on.
+                .openInEditorToolbar(workspace: detailWorkspace) { editorError = $0 }
         }
         .task {
             Notifier.shared.requestAuthorisation()
@@ -186,6 +198,18 @@ struct ContentView: View {
             }
         }
         .animation(.snappy(duration: 0.16), value: showQuickCreate)
+        // The same weight as quick-create, and for the same reason: an editor
+        // that would not start is something to read and act on, not a decision
+        // to be interrupted for. Below quick-create's padding so the two do not
+        // land on top of each other in the rare moment both are up.
+        .overlay(alignment: .top) {
+            if let editorError {
+                EditorErrorBanner(message: editorError) { self.editorError = nil }
+                    .padding(.top, 14)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.16), value: editorError)
         // Centred and over everything, unlike quick-create. This one is not
         // something you work alongside — it is a switcher, it is on screen for
         // about a second, and while it is there every keystroke belongs to it.
@@ -363,7 +387,8 @@ struct ContentView: View {
                                     onDropTogether: { dragged, onto in
                                         placePane(dragged, onto: onto.id, side: .right, in: ws)
                                     },
-                                    tiled: Set(client.activeGroup(ws.id)?.terminals ?? [])
+                                    tiled: Set(client.activeGroup(ws.id)?.terminals ?? []),
+                                    onEditorError: { editorError = $0 }
                                 )
                             }
                         }
@@ -1211,6 +1236,21 @@ struct ContentView: View {
         else { return nil }
         selection = .terminal(workspace: workspace.id, terminal: created.id)
         return created
+    }
+
+    /// The workspace the detail pane is actually showing.
+    ///
+    /// Not `currentWorkspace`, which falls back to the first in the fleet when
+    /// nothing is selected. That fallback is right for the commands that use it
+    /// — they act on "where you are" — and wrong here, where the placeholder is
+    /// on screen and offering to open a worktree the window is not showing
+    /// would be the control lying about what it points at.
+    private var detailWorkspace: Workspace? {
+        switch selection {
+        case .workspace(let id): return workspace(id)
+        case .terminal(let id, _): return workspace(id)
+        case nil: return nil
+        }
     }
 
     /// The workspace the selection is in, or the first one.
