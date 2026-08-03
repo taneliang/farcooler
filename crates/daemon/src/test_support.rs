@@ -27,6 +27,7 @@ pub(crate) async fn fixture() -> (tempfile::TempDir, Arc<Service>, Uuid) {
     for args in [
         vec!["init", "-q", "-b", "main", "."],
         vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
         vec!["config", "user.name", "t"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
     ] {

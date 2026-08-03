@@ -379,6 +379,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
     for args in [
         vec!["init", "-q", "."],
         vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
         vec!["config", "user.name", "t"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
     ] {
@@ -459,6 +460,7 @@ async fn removing_a_root_survives_a_stopped_terminal_in_the_main_checkout() {
     for args in [
         vec!["init", "-q", "."],
         vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
         vec!["config", "user.name", "t"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
     ] {
@@ -537,6 +539,7 @@ async fn removing_a_root_is_refused_while_a_terminal_is_actually_running() {
     for args in [
         vec!["init", "-q", "."],
         vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
         vec!["config", "user.name", "t"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
     ] {
@@ -610,6 +613,7 @@ async fn a_workspace(
     for args in [
         vec!["init", "-q", "."],
         vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
         vec!["config", "user.name", "t"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
     ] {

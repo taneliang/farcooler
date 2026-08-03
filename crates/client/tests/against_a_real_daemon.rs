@@ -104,6 +104,7 @@ async fn a_workspace_created_through_the_client_comes_back_in_the_fleet() {
     for args in [
         vec!["init", "-q", "."],
         vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
         vec!["config", "user.name", "t"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
     ] {
@@ -146,6 +147,7 @@ async fn hiding_and_unhiding_round_trips_through_the_client() {
     for args in [
         vec!["init", "-q", "."],
         vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
         vec!["config", "user.name", "t"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
     ] {
@@ -190,6 +192,7 @@ async fn subscribing_to_a_terminal_with_no_agent_session_is_empty_not_an_error()
     for args in [
         vec!["init", "-q", "."],
         vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
         vec!["config", "user.name", "t"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
     ] {

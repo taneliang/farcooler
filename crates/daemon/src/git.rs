@@ -319,6 +319,7 @@ mod tests {
         for args in [
             vec!["init", "-q", "-b", "main"],
             vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
             vec!["config", "user.name", "t"],
         ] {
             let status = SyncCommand::new("git").current_dir(dir).args(&args).status().unwrap();
@@ -561,6 +562,7 @@ mod worktree_tests {
         for args in [
             vec!["init", "-q", "-b", "main", "."],
             vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
             vec!["config", "user.name", "t"],
             vec!["commit", "-q", "--allow-empty", "-m", "base"],
         ] {
@@ -594,6 +596,7 @@ mod worktree_tests {
         for args in [
             vec!["init", "-q", "-b", "main", "."],
             vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
             vec!["config", "user.name", "t"],
             vec!["commit", "-q", "--allow-empty", "-m", "base"],
         ] {

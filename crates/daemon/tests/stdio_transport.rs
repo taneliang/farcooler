@@ -127,6 +127,7 @@ async fn a_workspace(
     for args in [
         vec!["init", "-q", "."],
         vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
         vec!["config", "user.name", "t"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
     ] {
