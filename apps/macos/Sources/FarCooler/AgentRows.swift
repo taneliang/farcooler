@@ -20,10 +20,18 @@ struct AgentRowView: View {
 
     var body: some View {
         switch row.kind {
-        case let .message(role, text):
+        // The parent pointer is not read here: nesting already placed this row
+        // inside the block it belongs to, so drawing it a second time as text
+        // would say the same thing twice.
+        case let .message(role, text, _):
             MessageRow(role: role, text: text, isLive: isLast)
         case let .tool(tool):
             ToolRowView(tool: tool, isLive: isLast, pending: pending, onAnswer: onAnswer)
+        case let .subagent(block):
+            // The request is handed down rather than stopping here, because the
+            // call it gates is one of the block's children — see
+            // `SubagentBlockView.permission(gating:)`.
+            SubagentBlockView(block: block, pending: pending, onAnswer: onAnswer)
         case let .gap(reason):
             GapRow(reason: reason)
         }
@@ -358,6 +366,154 @@ private struct ToolRowView: View {
         case .completed: return .done
         case .failed: return .failed
         }
+    }
+}
+
+/// A subagent's dispatch and everything it did.
+///
+/// Open while it works, closed once it reports — the same rule `ThoughtRow`
+/// uses, and for the same reason: the interesting moment is while it happens,
+/// and a finished one is noise until you ask. The difference is that a reader
+/// who touches it wins permanently, because a block that shut itself while
+/// someone was reading it is worse than one that stayed open.
+private struct SubagentBlockView: View {
+    let block: SubagentBlock
+    /// The request the transcript is blocked on, if it names one of this
+    /// block's children.
+    var pending: PendingPermission?
+    var onAnswer: ((String) -> Void)?
+
+    /// `nil` means nobody has said, so the automatic rule applies.
+    @State private var toggled: Bool?
+    @State private var showingAll = false
+
+    /// How many children a running block shows. Enough to see what it is
+    /// doing; few enough that six at once still fit on a screen.
+    private static let visibleChildren = 3
+
+    /// Derived on the model, not here: interruption leaves the tool's status
+    /// alone, so asking it directly keeps a cut-off block spinning forever.
+    private var running: Bool { block.isRunning }
+
+    /// Open while it runs, unless the reader has said otherwise — and always
+    /// open while it is waiting on an answer, since the buttons live inside.
+    private var showing: Bool { pending != nil || (toggled ?? running) }
+
+    /// The LAST few, not the first: a running block's newest step is the one
+    /// worth watching, and a block that pinned its opening three rows would
+    /// show the same three for the whole of a long run.
+    private var shown: [TranscriptRow] {
+        // A pending request suspends the cap. The gating call is usually the
+        // newest child and so within the window anyway, but "usually" is not
+        // good enough for an approval: a button nobody can reach wedges the
+        // agent with no way to see why, which is the failure
+        // `unattachedPermission` exists to prevent and this must not
+        // re-introduce one level down. Bounded height is a convenience; a
+        // deadlock is not.
+        guard pending == nil else { return block.children }
+        guard !showingAll, block.children.count > Self.visibleChildren else { return block.children }
+        return Array(block.children.suffix(Self.visibleChildren))
+    }
+
+    private var hidden: Int { block.children.count - shown.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(Motion.snap) { toggled = !showing }
+            } label: {
+                header.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showing && !block.children.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 10) {
+                    // Above the rows it hides, because that is where they are:
+                    // these are the OLDEST children, and an affordance for them
+                    // placed below the newest ones would point the wrong way.
+                    if hidden > 0 {
+                        Button("… \(hidden) more") { withAnimation(Motion.snap) { showingAll = true } }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(shown) { child in
+                        AgentRowView(
+                            row: child,
+                            // While the block runs, its newest child is what is
+                            // happening — the same thing `isLast` means at the
+                            // top level, asked one level down. Without it a
+                            // running subagent shows three shut rows and none of
+                            // the output that is the reason to watch it.
+                            isLast: running && child.id == block.children.last?.id,
+                            pending: permission(gating: child),
+                            onAnswer: onAnswer)
+                    }
+                }
+                .padding(9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 7))
+        .animation(Motion.snap, value: showing)
+        // Driven by the model rather than by the toggle alone: children arrive
+        // while the block is open, and an unanimated insert makes the
+        // transcript below it jump.
+        .animation(Motion.snap, value: block.children.count)
+    }
+
+    private var header: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(showing ? 90 : 0))
+            StatusGlyph(status: status, size: 7)
+            Text(block.tool.title)
+                .font(.callout.weight(.medium))
+                // One line, for the reason `ToolRowView` gives: an adapter puts
+                // whole paths in a title, and a wrapped one turns a status row
+                // into the largest thing on screen.
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(block.subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// What a collapsed block still answers without being opened.
+
+    /// The same four-state vocabulary a tool call uses, with one override: an
+    /// interrupted block is NOT a completed one. The transcript marks it
+    /// interrupted precisely because the turn ended before it reported, and
+    /// wearing the green dot of a subagent that did report is the single
+    /// dishonesty this feature is not allowed to commit.
+    private var status: Status {
+        if block.interrupted { return .failed }
+        switch block.tool.status {
+        case .pending: return .starting
+        case .inProgress: return .working
+        case .completed: return .done
+        case .failed: return .failed
+        }
+    }
+
+    /// The pending request, if it is this child's call that it gates.
+    ///
+    /// The same test `AgentSurface` runs over the top level, run over the
+    /// children — so a permission raised inside a subagent lands on the call it
+    /// is about rather than on the block as a whole.
+    private func permission(gating child: TranscriptRow) -> PendingPermission? {
+        guard let pending, case let .tool(tool) = child.kind, tool.id == pending.toolCall
+        else { return nil }
+        return pending
     }
 }
 

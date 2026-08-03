@@ -38,10 +38,19 @@ struct AgentView: View {
 
     /// The pending permission, if it is this row that it is asking about.
     private func permission(gating row: TranscriptRow) -> PendingPermission? {
-        guard let pending = transcript.pendingPermission,
-            case let .tool(tool) = row.kind, tool.id == pending.toolCall
-        else { return nil }
-        return pending
+        guard let pending = transcript.pendingPermission else { return nil }
+        switch row.kind {
+        case .tool:
+            return names(pending, row) ? pending : nil
+        // A subagent's tool calls live inside its block, not beside it, so a
+        // request raised by one names a row this loop never visits. Matching
+        // only the top level left that request drawn nowhere — and a request
+        // nobody can answer wedges the turn.
+        case let .subagent(block):
+            return block.children.contains { names(pending, $0) } ? pending : nil
+        default:
+            return nil
+        }
     }
 
     /// A request naming a tool call the transcript has no row for.
@@ -52,8 +61,13 @@ struct AgentView: View {
     private var unattachedPermission: PendingPermission? {
         guard let pending = transcript.pendingPermission else { return nil }
         let shown = transcript.rows.contains { row in
-            if case let .tool(tool) = row.kind { return tool.id == pending.toolCall }
-            return false
+            if names(pending, row) { return true }
+            // Searched to the same depth `permission(gating:)` searches, and it
+            // has to be: a block that claims the request while this predicate
+            // says it is unattached would ask the same question twice, once
+            // inside the block and once in the banner below the transcript.
+            guard case let .subagent(block) = row.kind else { return false }
+            return block.children.contains { names(pending, $0) }
         }
         return shown ? nil : pending
     }
@@ -213,6 +227,13 @@ struct AgentView: View {
                                 guard let id = transcript.pendingPermission?.id else { return }
                                 Task { await stream.answer(id, optionID) }
                             })
+                            // Pinned to the row's own identity, which `ForEach`
+                            // would otherwise infer from position in a lazy
+                            // stack that recycles its views. A recycled view
+                            // keeps its `@State`, so a subagent block a reader
+                            // had opened by hand could hand that decision to a
+                            // different block scrolling into its place.
+                            .id(row.id)
                     }
 
                     // The turn that is still running, one line ahead of
@@ -285,6 +306,16 @@ struct AgentView: View {
 
 // MARK: - Rows
 
+/// Whether a row IS the tool call a request is asking about.
+///
+/// Free rather than a method, because the same question is asked at two depths
+/// — of a top-level row and of a block's child — and the two answers drifting
+/// apart is how a request ends up claimed by nobody or by two views at once.
+private func names(_ pending: PendingPermission, _ row: TranscriptRow) -> Bool {
+    if case let .tool(tool) = row.kind { return tool.id == pending.toolCall }
+    return false
+}
+
 /// One row of a rendered agent transcript.
 ///
 /// A thin switch, deliberately: `Transcript` already decided what happened —
@@ -307,10 +338,16 @@ private struct AgentRowView: View {
 
     var body: some View {
         switch row.kind {
-        case let .message(role, text):
+        // The parent pointer is deliberately ignored here. It exists so the
+        // reducer can refuse to coalesce an orphan into the agent's own words;
+        // once a message has been placed, where it came from changes nothing
+        // about how it is drawn.
+        case let .message(role, text, _):
             MessageRow(role: role, text: text, isLive: isLast)
         case let .tool(tool):
             ToolRowView(tool: tool, isLive: isLast, pending: pending, onAnswer: onAnswer)
+        case let .subagent(block):
+            SubagentBlockView(block: block, pending: pending, onAnswer: onAnswer)
         case let .gap(reason):
             GapRow(reason: reason)
         }
@@ -494,6 +531,149 @@ private func toolStatusColour(_ status: ToolStatus) -> Color {
     case .inProgress: return .secondary
     case .completed: return .green
     case .failed: return .red
+    }
+}
+
+/// A subagent's dispatch, and everything it did, as one object.
+///
+/// The Mac's block on a phone, and the same grey box `ToolRowView` draws for the
+/// same reason: the row and what it opens are one fill, so an expanded block
+/// cannot drift to a different edge than the header that opened it. Its
+/// children are ordinary `AgentRowView`s — a subagent's messages and tools are
+/// the same things the top level shows, and nesting is where they live rather
+/// than what they are.
+private struct SubagentBlockView: View {
+    let block: SubagentBlock
+    /// The request this block is answering for, if one of its children raised
+    /// it. Passed down rather than looked up here, so the transcript decides
+    /// once which row owns a request.
+    var pending: PendingPermission?
+    var onAnswer: ((String) -> Void)?
+
+    /// `nil` means nobody has said, so the automatic rule below applies. Once a
+    /// reader touches it they win permanently: a block that shut itself while
+    /// someone was reading it is worse than one left open.
+    @State private var toggled: Bool?
+    @State private var showingAll = false
+
+    /// How many children an expanded block shows. Enough to see what it is
+    /// doing; few enough that a subagent that ran three hundred steps still
+    /// leaves room for the conversation around it.
+    private static let visibleChildren = 3
+
+    /// This file's spring, spelled out — `Motion` is a Mac-target type and the
+    /// phone has never had it.
+    private static let motion = Animation.spring(response: 0.22, dampingFraction: 0.82)
+
+    /// Still working, as far as anyone knows.
+    ///
+    /// Derived on the model, not here: interruption leaves the tool's status
+    /// alone, so asking it directly keeps a cut-off block spinning forever.
+    private var running: Bool { block.isRunning }
+
+    /// Open while it works, closed once it reports — unless a reader has said
+    /// otherwise, or unless something inside it is waiting to be approved.
+    /// Being asked to allow a command without being shown it is a guess rather
+    /// than a decision, the same rule `ToolRowView.showingDetail` follows.
+    private var showing: Bool { pending != nil || (toggled ?? running) }
+
+    /// The last few children rather than the first few: what a subagent is
+    /// doing now is what a reader is watching for, and the cap is what bounds a
+    /// block's height whether it holds three rows or three hundred.
+    private var shown: [TranscriptRow] {
+        // A capped view could hide the very row a request is asking about,
+        // which is the one thing this block must never do while it holds an
+        // unanswered question.
+        guard pending == nil, !showingAll, block.children.count > Self.visibleChildren else {
+            return block.children
+        }
+        return Array(block.children.suffix(Self.visibleChildren))
+    }
+
+    private var hidden: Int { block.children.count - shown.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(Self.motion) { toggled = !showing }
+            } label: {
+                header.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showing && !block.children.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 10) {
+                    if hidden > 0 {
+                        Button("… \(hidden) more") { withAnimation(Self.motion) { showingAll = true } }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(shown) { child in
+                        // The approval controls are drawn by the child that is
+                        // actually blocked, not by this block, so what is being
+                        // approved and what will run stay the same object.
+                        AgentRowView(
+                            row: child,
+                            pending: gating(child),
+                            onAnswer: onAnswer)
+                    }
+                }
+                .padding(9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .animation(Self.motion, value: showing)
+        // Children arrive one at a time while the subagent works, and a block
+        // that grew by a row per frame with no animation flickered its way down
+        // the transcript.
+        .animation(Self.motion, value: block.children.count)
+    }
+
+    private var header: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(showing ? 90 : 0))
+            Circle()
+                .fill(dotColour)
+                .frame(width: 7, height: 7)
+            Text(block.tool.title)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                // Truncated in the middle, because a dispatch's title is the
+                // prompt it was given and the end of that sentence says more
+                // about what it went off to do than the middle does.
+                .truncationMode(.middle)
+            Text(block.subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// What a collapsed block still answers without being opened.
+
+    /// Red for interrupted, overriding the tool's own status on purpose: a
+    /// block cut off mid-flight is still `inProgress` on the wire, and a
+    /// subagent whose outcome nobody knows must never wear the mark of one that
+    /// came back.
+    private var dotColour: Color {
+        block.interrupted ? .red : toolStatusColour(block.tool.status)
+    }
+
+    /// The request, on the child it names.
+    private func gating(_ child: TranscriptRow) -> PendingPermission? {
+        guard let pending, names(pending, child) else { return nil }
+        return pending
     }
 }
 

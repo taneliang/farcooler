@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn work_in_flight_is_working() {
         assert_eq!(
-            observe(&AgentEvent::Message { role: Role::Agent, text: "hi".into() }),
+            observe(&AgentEvent::Message { role: Role::Agent, text: "hi".into(), parent: None }),
             Some(AgentActivity::Working)
         );
         assert_eq!(
@@ -78,8 +78,7 @@ mod tests {
                 title: None,
                 content: None,
                 diff: None,
-                locations: Vec::new(),
-            }),
+                locations: Vec::new(), parent: None, subagent: None, }),
             Some(AgentActivity::Working)
         );
     }

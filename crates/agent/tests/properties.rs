@@ -4,7 +4,7 @@ use farcooler_agent::event::{AgentEvent, AgentGapReason, Role};
 use farcooler_agent::ring::{AgentReplay, AgentRing};
 
 fn msg(i: usize) -> AgentEvent {
-    AgentEvent::Message { role: Role::Agent, text: format!("m{i}") }
+    AgentEvent::Message { role: Role::Agent, text: format!("m{i}"), parent: None }
 }
 
 #[test]

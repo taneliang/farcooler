@@ -65,7 +65,7 @@ mod tests {
         let msg = ShimMessage::Events {
             events: vec![Sequenced {
                 seq: 3,
-                event: AgentEvent::Message { role: Role::Agent, text: "hi".into() },
+                event: AgentEvent::Message { role: Role::Agent, text: "hi".into(), parent: None },
             }],
         };
         let line = encode_line(&msg).expect("encodes");

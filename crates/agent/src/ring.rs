@@ -91,7 +91,7 @@ mod tests {
     use crate::event::{AgentEvent, AgentGapReason, EndReason, Role};
 
     fn msg(text: &str) -> AgentEvent {
-        AgentEvent::Message { role: Role::Agent, text: text.to_string() }
+        AgentEvent::Message { role: Role::Agent, text: text.to_string(), parent: None }
     }
 
     #[test]

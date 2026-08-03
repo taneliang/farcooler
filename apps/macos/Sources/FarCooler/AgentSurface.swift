@@ -260,11 +260,26 @@ struct AgentSurface: View {
     private static let endOfTranscript = Int.max
 
     /// The pending permission, if it is this row that it is asking about.
+    ///
+    /// A subagent's call is not a row of the transcript — it is a child of a
+    /// block — so matching only top-level `.tool` rows left every request
+    /// raised inside a subagent looking unattached, and the buttons appeared in
+    /// the fallback card at the bottom of the pane, away from the command they
+    /// were approving. `SubagentBlockView` hands the request down to the child
+    /// that named it.
     private func permission(gating row: TranscriptRow) -> PendingPermission? {
-        guard let pending = stream.transcript.pendingPermission,
-            case let .tool(tool) = row.kind, tool.id == pending.toolCall
-        else { return nil }
-        return pending
+        guard let pending = stream.transcript.pendingPermission else { return nil }
+        switch row.kind {
+        case let .tool(tool):
+            return tool.id == pending.toolCall ? pending : nil
+        case let .subagent(block):
+            return block.children.contains { child in
+                if case let .tool(tool) = child.kind { return tool.id == pending.toolCall }
+                return false
+            } ? pending : nil
+        default:
+            return nil
+        }
     }
 
     /// A request naming a tool call the transcript has no row for.
@@ -272,11 +287,15 @@ struct AgentSurface: View {
     /// It should not happen — a permission follows the call it is about — but
     /// an unanswerable request that is also invisible would wedge the agent
     /// with no way for anyone to see why.
+    ///
+    /// Searches inside blocks for the same reason `permission(gating:)` does,
+    /// and it must search exactly as far: a request this said was unattached
+    /// while the row view had already drawn it on a child would render the same
+    /// buttons twice.
     private var unattachedPermission: PendingPermission? {
         guard let pending = stream.transcript.pendingPermission else { return nil }
         let shown = stream.transcript.rows.contains { row in
-            if case let .tool(tool) = row.kind { return tool.id == pending.toolCall }
-            return false
+            permission(gating: row) != nil
         }
         return shown ? nil : pending
     }

@@ -4,12 +4,73 @@ import Testing
 @Test func anAgentMessageDecodes() throws {
     let json = #"{"Message":{"role":"Agent","text":"hello"}}"#
     let event = try AgentEvent.decode(from: json)
-    guard case let .message(role, text) = event else {
+    guard case let .message(role, text, _) = event else {
         Issue.record("expected a message, got \(event)")
         return
     }
     #expect(role == .agent)
     #expect(text == "hello")
+}
+
+@Test func aSubagentsMessageDecodesWithItsParent() throws {
+    // Without the parent a client cannot tell a subagent's words from the
+    // dispatching agent's, which is exactly how they came to be rendered as
+    // the same speaker.
+    let json = #"{"Message":{"role":"Agent","text":"I'll read the file.","parent":"toolu_01Wnr"}}"#
+    let event = try AgentEvent.decode(from: json)
+    guard case let .message(_, text, parent) = event else {
+        Issue.record("expected a message, got \(event)")
+        return
+    }
+    #expect(text == "I'll read the file.")
+    #expect(parent == "toolu_01Wnr")
+}
+
+@Test func aMessageWithoutAParentStillDecodes() throws {
+    // Every event already in SQLite was written before this field existed. If
+    // absence threw, every stored transcript would fail to render.
+    let json = #"{"Message":{"role":"Agent","text":"hello"}}"#
+    let event = try AgentEvent.decode(from: json)
+    guard case let .message(_, _, parent) = event else {
+        Issue.record("expected a message, got \(event)")
+        return
+    }
+    #expect(parent == nil)
+}
+
+@Test func aDispatchDecodesAsOne() throws {
+    // The Task row and an ordinary tool row are the same event but for this
+    // flag, and only the dispatch owns a block.
+    let json = """
+        {"ToolCall":{"id":"t1","title":"Task","kind":"think","status":"Pending",\
+        "locations":[],"subagent":true}}
+        """
+    let event = try AgentEvent.decode(from: json)
+    guard case let .toolCall(_, _, _, _, _, _, subagent) = event else {
+        Issue.record("expected a tool call, got \(event)")
+        return
+    }
+    #expect(subagent)
+}
+
+@Test func aFinishedDispatchDecodesItsSummary() throws {
+    // These are the numbers a collapsed block shows. Dropping them leaves a
+    // finished subagent able to say only that it finished.
+    let json = """
+        {"ToolUpdate":{"id":"t1","status":"Completed","title":null,"content":null,\
+        "diff":null,"locations":[],"subagent":{"agent_type":"general-purpose",\
+        "model":"claude-opus-5[1m]","tokens":12479,"tool_uses":1,"duration_ms":4962,\
+        "status":"completed"}}}
+        """
+    let event = try AgentEvent.decode(from: json)
+    guard case let .toolUpdate(_, _, _, _, _, _, _, summary) = event else {
+        Issue.record("expected a tool update, got \(event)")
+        return
+    }
+    #expect(summary?.agentType == "general-purpose")
+    #expect(summary?.tokens == 12479)
+    #expect(summary?.toolUses == 1)
+    #expect(summary?.durationMs == 4962)
 }
 
 @Test func aGapDecodesAsAGapAndNotAsNothing() throws {

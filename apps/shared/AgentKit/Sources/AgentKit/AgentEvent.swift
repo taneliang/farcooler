@@ -117,16 +117,56 @@ public struct PermissionOption: Decodable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// What a finished subagent reports about itself.
+///
+/// Arrives once, on the dispatching call's final update. Everything here is
+/// structured on the wire — the same numbers also appear inside the tool's raw
+/// output as a `<usage>` text blob, and reading them from there would break
+/// the first time the adapter reworded a line nobody promised to keep.
+public struct SubagentSummary: Decodable, Sendable, Equatable {
+    public let agentType: String
+    public let model: String
+    public let tokens: UInt64
+    public let toolUses: UInt64
+    public let durationMs: UInt64
+    public let status: String
+
+    public init(
+        agentType: String, model: String, tokens: UInt64, toolUses: UInt64,
+        durationMs: UInt64, status: String
+    ) {
+        self.agentType = agentType
+        self.model = model
+        self.tokens = tokens
+        self.toolUses = toolUses
+        self.durationMs = durationMs
+        self.status = status
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case agentType = "agent_type"
+        case model, tokens, status
+        case toolUses = "tool_uses"
+        case durationMs = "duration_ms"
+    }
+}
+
 public enum AgentEvent: Sendable, Equatable {
     case sessionStarted(
         sessionID: String, agentMode: String?, availableModes: [AgentChoice],
         model: String?, availableModels: [AgentChoice], configOptions: [ConfigOption],
         availableCommands: [AgentChoice])
-    case message(role: Role, text: String)
-    case toolCall(id: String, title: String, kind: String, status: ToolStatus, locations: [String])
+    /// `parent` names the dispatch this belongs to when a subagent produced
+    /// it. `nil` is the ordinary case: the agent itself spoke.
+    case message(role: Role, text: String, parent: String?)
+    /// `subagent` marks a dispatch — a call that OWNS a block rather than
+    /// being a row inside one.
+    case toolCall(
+        id: String, title: String, kind: String, status: ToolStatus, locations: [String],
+        parent: String?, subagent: Bool)
     case toolUpdate(
         id: String, status: ToolStatus, title: String?, content: String?, diff: Diff?,
-        locations: [String])
+        locations: [String], parent: String?, subagent: SubagentSummary?)
     case plan(entries: [PlanEntry])
     case permission(id: String, toolCall: String, options: [PermissionOption])
     case resolved(id: String, chosen: String)
@@ -229,17 +269,18 @@ extension AgentEvent {
                     availableCommands: p.availableCommands)
             case "Message":
                 let p = try outer.decode(MessagePayload.self, forKey: key)
-                event = .message(role: p.role, text: p.text)
+                event = .message(role: p.role, text: p.text, parent: p.parent)
             case "ToolCall":
                 let p = try outer.decode(ToolCallPayload.self, forKey: key)
                 event = .toolCall(
                     id: p.id, title: p.title, kind: p.kind, status: p.status,
-                    locations: p.locations)
+                    locations: p.locations, parent: p.parent, subagent: p.subagent ?? false)
             case "ToolUpdate":
                 let p = try outer.decode(ToolUpdatePayload.self, forKey: key)
                 event = .toolUpdate(
                     id: p.id, status: p.status, title: p.title, content: p.content,
-                    diff: p.diff, locations: p.locations)
+                    diff: p.diff, locations: p.locations, parent: p.parent,
+                    subagent: p.subagent)
             case "Plan":
                 let p = try outer.decode(PlanPayload.self, forKey: key)
                 event = .plan(entries: p.entries)
@@ -297,10 +338,19 @@ extension AgentEvent {
             case availableCommands = "available_commands"
         }
     }
-    private struct MessagePayload: Decodable { let role: Role; let text: String }
+    // Every subagent field below is optional, and has to be: the daemon skips
+    // them when empty, so an event from before subagents were modelled — which
+    // is every event already in SQLite — carries none of them.
+    private struct MessagePayload: Decodable {
+        let role: Role
+        let text: String
+        let parent: String?
+    }
     private struct ToolCallPayload: Decodable {
         let id: String; let title: String; let kind: String
         let status: ToolStatus; let locations: [String]
+        let parent: String?
+        let subagent: Bool?
     }
     private struct ToolUpdatePayload: Decodable {
         let id: String
@@ -309,6 +359,8 @@ extension AgentEvent {
         let content: String?
         let diff: Diff?
         let locations: [String]
+        let parent: String?
+        let subagent: SubagentSummary?
     }
     private struct PlanPayload: Decodable { let entries: [PlanEntry] }
     private struct PermissionPayload: Decodable {

@@ -417,8 +417,7 @@ mod tests {
         for text in ["hello", "world"] {
             ring.lock().expect("ring").push(AgentEvent::Message {
                 role: Role::User,
-                text: text.into(),
-            });
+                text: text.into(), parent: None });
             // Exactly what the session task does, and what leaves the permit
             // sitting there with nobody connected to receive it.
             notify.notify_one();

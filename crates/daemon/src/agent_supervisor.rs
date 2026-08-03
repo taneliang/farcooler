@@ -506,7 +506,7 @@ mod tests {
         // The rule that makes a notification worth sending lives in core and is
         // not reimplemented here. Working -> Idle is what produces Done.
         let mut current = AgentActivity::Unspecified;
-        current = fold_activity(current, &AgentEvent::Message { role: Role::Agent, text: "x".into() });
+        current = fold_activity(current, &AgentEvent::Message { role: Role::Agent, text: "x".into(), parent: None });
         assert_eq!(current, AgentActivity::Working);
         current = fold_activity(current, &AgentEvent::TurnEnded { reason: EndReason::EndTurn });
         assert_eq!(current, AgentActivity::Done);
@@ -570,7 +570,7 @@ mod tests {
                 .enumerate()
                 .map(|(i, t)| Sequenced {
                     seq: i as u64,
-                    event: AgentEvent::Message { role: Role::Agent, text: (*t).into() },
+                    event: AgentEvent::Message { role: Role::Agent, text: (*t).into(), parent: None },
                 })
                 .collect(),
         };
@@ -605,7 +605,7 @@ mod tests {
             events: (0..n)
                 .map(|seq| Sequenced {
                     seq,
-                    event: AgentEvent::Message { role: Role::Agent, text: format!("m{seq}") },
+                    event: AgentEvent::Message { role: Role::Agent, text: format!("m{seq}"), parent: None },
                 })
                 .collect(),
         };
@@ -642,7 +642,7 @@ mod tests {
             events: (0..n)
                 .map(|seq| Sequenced {
                     seq,
-                    event: AgentEvent::Message { role: Role::Agent, text: format!("m{seq}") },
+                    event: AgentEvent::Message { role: Role::Agent, text: format!("m{seq}"), parent: None },
                 })
                 .collect(),
         };
@@ -694,8 +694,7 @@ mod gap_tests {
                     seq: i,
                     event: AgentEvent::Message {
                         role: farcooler_agent::event::Role::Agent,
-                        text: format!("line {}", sent + i as usize),
-                    },
+                        text: format!("line {}", sent + i as usize), parent: None },
                 })
                 .collect();
             supervisor.apply(terminal, ShimMessage::Events { events: batch }, &|_, _| {});

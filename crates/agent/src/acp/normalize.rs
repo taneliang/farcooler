@@ -12,6 +12,18 @@ fn status(raw: &str) -> ToolStatus {
     }
 }
 
+/// The adapter's report of a finished subagent, as clients render it.
+fn summary(result: &crate::acp::wire::SubagentResult) -> crate::event::SubagentSummary {
+    crate::event::SubagentSummary {
+        agent_type: result.agent_type.clone(),
+        model: result.resolved_model.clone(),
+        tokens: result.total_tokens,
+        tool_uses: result.total_tool_use_count,
+        duration_ms: result.total_duration_ms,
+        status: result.status.clone(),
+    }
+}
+
 fn plan_entry(e: &WirePlanEntry) -> PlanEntry {
     PlanEntry { content: e.content.clone(), priority: e.priority.clone(), status: e.status.clone() }
 }
@@ -79,14 +91,26 @@ fn tool_diff(content: &[crate::acp::wire::ToolContent]) -> Option<crate::event::
 /// why an empty vec there is correct rather than an oversight.
 pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
     match update {
-        SessionUpdate::AgentMessageChunk { content } => {
-            vec![AgentEvent::Message { role: Role::Agent, text: content.text.clone() }]
+        SessionUpdate::AgentMessageChunk { content, meta } => {
+            vec![AgentEvent::Message {
+                role: Role::Agent,
+                text: content.text.clone(),
+                parent: meta.claude_code.parent_tool_use_id.clone(),
+            }]
         }
-        SessionUpdate::UserMessageChunk { content } => {
-            vec![AgentEvent::Message { role: Role::User, text: content.text.clone() }]
+        SessionUpdate::UserMessageChunk { content, meta } => {
+            vec![AgentEvent::Message {
+                role: Role::User,
+                text: content.text.clone(),
+                parent: meta.claude_code.parent_tool_use_id.clone(),
+            }]
         }
-        SessionUpdate::AgentThoughtChunk { content } => {
-            vec![AgentEvent::Message { role: Role::Thought, text: content.text.clone() }]
+        SessionUpdate::AgentThoughtChunk { content, meta } => {
+            vec![AgentEvent::Message {
+                role: Role::Thought,
+                text: content.text.clone(),
+                parent: meta.claude_code.parent_tool_use_id.clone(),
+            }]
         }
         SessionUpdate::AvailableCommandsUpdate { available_commands } => {
             // Its own event, for two reasons it is worth being explicit about.
@@ -114,13 +138,15 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
                     .collect(),
             }]
         }
-        SessionUpdate::ToolCall { tool_call_id, title, kind, status: s, locations, content } => {
+        SessionUpdate::ToolCall { tool_call_id, title, kind, status: s, locations, content, meta } => {
             vec![AgentEvent::ToolCall {
                 id: tool_call_id.clone(),
                 title: title.clone(),
                 kind: kind.clone(),
                 status: status(s),
                 locations: locations.iter().map(|l| l.path.clone()).collect(),
+                parent: meta.claude_code.parent_tool_use_id.clone(),
+                subagent: meta.claude_code.subagent,
             }]
             .into_iter()
             .chain(tool_text(content).map(|text| AgentEvent::ToolUpdate {
@@ -130,6 +156,8 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
                 content: Some(text),
                 diff: tool_diff(content),
                 locations: Vec::new(),
+                parent: meta.claude_code.parent_tool_use_id.clone(),
+                subagent: None,
             }))
             .collect()
         }
@@ -140,6 +168,7 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
             content,
             locations,
             raw_input,
+            meta,
         } => {
             vec![AgentEvent::ToolUpdate {
                 id: tool_call_id.clone(),
@@ -151,6 +180,20 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
                 content: tool_text(content),
                 diff: tool_diff(content),
                 locations: locations.iter().map(|l| l.path.clone()).collect(),
+                parent: meta.claude_code.parent_tool_use_id.clone(),
+                // Gated on `agent_type`, and it has to be. EVERY tool reports
+                // a `toolResponse` — a `Read` sends the file it read — and
+                // because each field of `SubagentResult` defaults, any of them
+                // deserializes into one happily. Without this an ordinary tool
+                // row carried an empty subagent summary and rendered as a
+                // subagent that had reported nothing. Caught by replaying a
+                // real capture, which is the entire reason those exist.
+                subagent: meta
+                    .claude_code
+                    .tool_response
+                    .as_ref()
+                    .filter(|r| !r.agent_type.is_empty())
+                    .map(summary),
             }]
         }
         SessionUpdate::Plan { entries } => {
@@ -196,7 +239,7 @@ mod tests {
             serde_json::from_str(r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"hi"}}"#)
                 .expect("parses");
         let events = update_to_events(&update);
-        assert_eq!(events, vec![AgentEvent::Message { role: Role::Agent, text: "hi".into() }]);
+        assert_eq!(events, vec![AgentEvent::Message { role: Role::Agent, text: "hi".into(), parent: None }]);
     }
 
     #[test]
@@ -213,8 +256,7 @@ mod tests {
                 title: "Run ls".into(),
                 kind: "execute".into(),
                 status: ToolStatus::InProgress,
-                locations: vec![],
-            }]
+                locations: vec![], parent: None, subagent: false, }]
         );
     }
 
@@ -285,6 +327,85 @@ mod tests {
     }
 
     #[test]
+    fn a_subagents_message_says_whose_it_is() {
+        // The bug this whole change exists for: without the parent, a
+        // subagent's words render as the agent that dispatched it talking.
+        let raw = r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"I'll read the file."},
+            "_meta":{"claudeCode":{"parentToolUseId":"toolu_01Wnr"}}}"#;
+        let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
+        let AgentEvent::Message { parent, .. } = &update_to_events(&update)[0] else {
+            panic!("expected a message")
+        };
+        assert_eq!(parent.as_deref(), Some("toolu_01Wnr"));
+    }
+
+    #[test]
+    fn a_dispatch_row_is_marked_as_one() {
+        let raw = r#"{"sessionUpdate":"tool_call","toolCallId":"t1","title":"Task","kind":"think",
+            "status":"pending","_meta":{"claudeCode":{"subagent":true}}}"#;
+        let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
+        let AgentEvent::ToolCall { subagent, .. } = &update_to_events(&update)[0] else {
+            panic!("expected a tool call")
+        };
+        assert!(subagent);
+    }
+
+    #[test]
+    fn a_finished_dispatch_carries_its_summary() {
+        let raw = r#"{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed",
+            "_meta":{"claudeCode":{"toolResponse":{"status":"completed","agentType":"general-purpose",
+            "resolvedModel":"claude-opus-5[1m]","totalDurationMs":4962,"totalTokens":12479,
+            "totalToolUseCount":1}}}}"#;
+        let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
+        let AgentEvent::ToolUpdate { subagent, .. } = &update_to_events(&update)[0] else {
+            panic!("expected a tool update")
+        };
+        let summary = subagent.as_ref().expect("a summary");
+        assert_eq!(summary.agent_type, "general-purpose");
+        assert_eq!(summary.tokens, 12479);
+        assert_eq!(summary.tool_uses, 1);
+        assert_eq!(summary.duration_ms, 4962);
+    }
+
+    #[test]
+    fn an_ordinary_tools_result_is_not_mistaken_for_a_subagents() {
+        // Every tool reports a `toolResponse`, and every field of the subagent
+        // shape defaults — so a `Read` returning a file deserialized into a
+        // perfectly valid, perfectly empty subagent summary. That put a
+        // subagent badge on ordinary tool rows.
+        let raw = r#"{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed",
+            "_meta":{"claudeCode":{"toolName":"Read","toolResponse":{"type":"text",
+            "file":{"filePath":"/tmp/main.rs","content":"fn main(){}","numLines":2}}}}}"#;
+        let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
+        let AgentEvent::ToolUpdate { subagent, .. } = &update_to_events(&update)[0] else {
+            panic!("expected a tool update")
+        };
+        assert!(subagent.is_none(), "a Read reported itself as a subagent: {subagent:?}");
+    }
+
+    #[test]
+    fn an_ordinary_turn_carries_no_parent_at_all() {
+        // Old events in SQLite have no parent field. They must keep decoding,
+        // and must keep rendering at the top level.
+        let raw = r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"hi"}}"#;
+        let update: SessionUpdate = serde_json::from_str(raw).expect("parses");
+        let AgentEvent::Message { parent, .. } = &update_to_events(&update)[0] else {
+            panic!("expected a message")
+        };
+        assert!(parent.is_none());
+    }
+
+    #[test]
+    fn an_event_without_a_parent_serialises_exactly_as_it_used_to() {
+        // Stored transcripts and one-release-behind clients both read this
+        // JSON. A new key on every ordinary event would change bytes nothing
+        // asked to change, on every row ever written.
+        let event = AgentEvent::Message { role: Role::Agent, text: "hi".into(), parent: None };
+        let json = serde_json::to_string(&event).expect("serialises");
+        assert_eq!(json, r#"{"Message":{"role":"Agent","text":"hi"}}"#);
+    }
+
+    #[test]
     fn a_title_that_already_says_it_is_left_alone() {
         // A Bash call is renamed to its command, so appending the command
         // again would read "echo hi: echo hi".
@@ -351,8 +472,7 @@ mod relativize_tests {
             title: "Read /tmp/wt/src/main.rs".into(),
             kind: "read".into(),
             status: ToolStatus::Pending,
-            locations: vec!["/tmp/wt/src/main.rs".into()],
-        }];
+            locations: vec!["/tmp/wt/src/main.rs".into()], parent: None, subagent: false, }];
         relativize(&mut events, worktree);
         let AgentEvent::ToolCall { title, locations, .. } = &events[0] else { panic!() };
         assert_eq!(title, "Read src/main.rs");
@@ -369,8 +489,7 @@ mod relativize_tests {
             title: "Read /etc/hosts".into(),
             kind: "read".into(),
             status: ToolStatus::Pending,
-            locations: vec!["/etc/hosts".into()],
-        }];
+            locations: vec!["/etc/hosts".into()], parent: None, subagent: false, }];
         relativize(&mut events, worktree);
         let AgentEvent::ToolCall { title, .. } = &events[0] else { panic!() };
         assert_eq!(title, "Read /etc/hosts");

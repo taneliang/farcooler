@@ -134,6 +134,26 @@ pub enum AgentGapReason {
     Unparsed,
 }
 
+/// What a finished subagent reports about itself, as clients render it.
+///
+/// A normalized shape rather than the adapter's own: the wire's field set is
+/// the adapter's to change, and nothing downstream should have to track that.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SubagentSummary {
+    pub agent_type: String,
+    pub model: String,
+    pub tokens: u64,
+    pub tool_uses: u64,
+    pub duration_ms: u64,
+    pub status: String,
+}
+
+/// `skip_serializing_if` takes a predicate by path, and `bool` has no method
+/// with the right shape.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AgentEvent {
     SessionStarted {
@@ -161,6 +181,14 @@ pub enum AgentEvent {
     Message {
         role: Role,
         text: String,
+        /// The `ToolCall` id of the dispatch this belongs to, if a subagent
+        /// produced it. `None` is the ordinary case: the agent itself spoke.
+        ///
+        /// Skipped when absent so an ordinary event's JSON stays byte-identical
+        /// to what it was before subagents were modelled — every transcript
+        /// already in SQLite was written by that older code.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
     },
     ToolCall {
         id: String,
@@ -168,6 +196,12 @@ pub enum AgentEvent {
         kind: String,
         status: ToolStatus,
         locations: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
+        /// This call IS a subagent dispatch, so it owns a block rather than
+        /// being a row inside one.
+        #[serde(default, skip_serializing_if = "is_false")]
+        subagent: bool,
     },
     ToolUpdate {
         id: String,
@@ -177,6 +211,11 @@ pub enum AgentEvent {
         content: Option<String>,
         diff: Option<Diff>,
         locations: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
+        /// Present once, on a dispatch's final update.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent: Option<SubagentSummary>,
     },
     Plan {
         entries: Vec<PlanEntry>,

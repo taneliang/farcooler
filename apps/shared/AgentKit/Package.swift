@@ -21,6 +21,12 @@ let package = Package(
     products: [.library(name: "AgentKit", targets: ["AgentKit"])],
     targets: [
         .target(name: "AgentKit"),
-        .testTarget(name: "AgentKitTests", dependencies: ["AgentKit"]),
+        // The captured live events are a resource rather than a string literal
+        // so they stay byte-for-byte what the daemon emitted. A fixture
+        // reformatted by hand stops testing the thing it exists to test.
+        .testTarget(
+            name: "AgentKitTests",
+            dependencies: ["AgentKit"],
+            resources: [.copy("live_events.jsonl")]),
     ]
 )

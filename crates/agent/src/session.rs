@@ -46,6 +46,11 @@ pub fn handle_fs_write(
             old_text,
             new_text: contents.to_string(),
         }),
+        // An `fs/write_text_file` request carries no attribution, so a write
+        // made by a subagent is indistinguishable from one made by the agent
+        // itself. Claiming a parent we were not told about would be a guess.
+        parent: None,
+        subagent: None,
     })
 }
 
@@ -542,7 +547,7 @@ impl RunningSession {
 
         Ok(vec![
             self.queue_event(),
-            AgentEvent::Message { role: Role::User, text: queued.text },
+            AgentEvent::Message { role: Role::User, text: queued.text, parent: None },
         ])
     }
 
@@ -567,7 +572,7 @@ impl RunningSession {
         let mut events = vec![self.queue_event()];
         match self.send_prompt(&next.text, &next.images).await {
             Ok(()) => {
-                events.push(AgentEvent::Message { role: Role::User, text: next.text });
+                events.push(AgentEvent::Message { role: Role::User, text: next.text, parent: None });
                 events
             }
             Err(_) => {

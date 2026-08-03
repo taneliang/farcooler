@@ -17,13 +17,70 @@ public struct ToolRow: Sendable, Equatable, Identifiable {
 /// same id, and `ForEach` over duplicate ids does not merely look odd — it
 /// renders blank bands and repeats rows in the wrong places. Content is not
 /// identity: two identical messages are two messages.
+/// A subagent's dispatch row, and everything it did.
+///
+/// The children are `TranscriptRow`s rather than a second row type, so a
+/// subagent's messages, tools, and gaps render through exactly the same views
+/// as the top level. Nesting is where they live, not what they are.
+public struct SubagentBlock: Sendable, Equatable, Identifiable {
+    public var id: String { tool.id }
+    /// The `Task` call itself: title, status, location.
+    public var tool: ToolRow
+    public var children: [TranscriptRow]
+    /// What it reported on finishing. Absent while it runs.
+    public var summary: SubagentSummary?
+    /// The turn ended before this reported back, so its outcome is unknown.
+    /// Distinct from failure, and emphatically distinct from success.
+    public var interrupted: Bool
+
+    /// Still working, as far as anyone knows.
+    ///
+    /// Derived here rather than in each view because the interrupted case is
+    /// easy to miss and expensive to miss: interruption does NOT change the
+    /// tool's status — a cut-off subagent stays `inProgress` forever — so a
+    /// surface that asks the status alone keeps the block auto-expanded and
+    /// spinning for the rest of the session. The two apps derived this
+    /// separately once and disagreed within a day.
+    public var isRunning: Bool {
+        !interrupted && (tool.status == .pending || tool.status == .inProgress)
+    }
+
+    /// What a collapsed block says instead of its contents.
+    ///
+    /// Here rather than in each view for the same reason as `isRunning`: the
+    /// two apps wrote this twice and both said "1 tools".
+    public var subtitle: String {
+        // Ahead of the summary, deliberately. An interrupted block can carry a
+        // partial one, and reporting a token count for a subagent whose
+        // outcome nobody knows states the one thing this must never say.
+        if interrupted { return "interrupted" }
+        guard let summary else {
+            return isRunning ? count(children.count, "step") : ""
+        }
+        let tokens = summary.tokens >= 1000
+            ? "\(summary.tokens / 1000)k tok"
+            : "\(summary.tokens) tok"
+        let seconds = String(format: "%.1fs", Double(summary.durationMs) / 1000)
+        return "\(summary.agentType) · \(count(Int(summary.toolUses), "tool")) · \(tokens) · \(seconds)"
+    }
+
+    private func count(_ n: Int, _ noun: String) -> String {
+        "\(n) \(noun)\(n == 1 ? "" : "s")"
+    }
+}
+
 public struct TranscriptRow: Sendable, Equatable, Identifiable {
     public let id: Int
     public var kind: Kind
 
     public enum Kind: Sendable, Equatable {
-        case message(role: Role, text: String)
+        /// `parent` is carried even though nesting already places the row,
+        /// because coalescing needs it: an orphan whose block never arrived
+        /// sits at the top level beside the agent's own words, and merging
+        /// the two would re-create the very mis-attribution this fixes.
+        case message(role: Role, text: String, parent: String?)
         case tool(ToolRow)
+        case subagent(SubagentBlock)
         case gap(GapReason)
     }
 }
@@ -128,9 +185,144 @@ public struct Transcript: Sendable {
         pendingPermission = nil
     }
 
-    private mutating func append(_ kind: TranscriptRow.Kind) {
-        rows.append(TranscriptRow(id: nextRowID, kind: kind))
+    /// Which container a row belongs in.
+    ///
+    /// A parent nobody has seen resolves to `.top` rather than being dropped.
+    /// The ring can trim a dispatch out from under its children, and a reload
+    /// can replay only part of a turn. Nothing is missing in that case except
+    /// the nesting, and a shorter transcript that looks complete is the one
+    /// failure this design refuses.
+    private enum Destination {
+        case top
+        case block(Int)
+    }
+
+    private func destination(for parent: String?) -> Destination {
+        guard let parent else { return .top }
+        guard
+            let index = rows.lastIndex(where: {
+                if case let .subagent(block) = $0.kind { return block.tool.id == parent }
+                return false
+            })
+        else { return .top }
+        return .block(index)
+    }
+
+    private mutating func append(_ kind: TranscriptRow.Kind, to destination: Destination = .top) {
+        let row = TranscriptRow(id: nextRowID, kind: kind)
         nextRowID += 1
+        switch destination {
+        case .top:
+            rows.append(row)
+        case let .block(index):
+            guard case var .subagent(block) = rows[index].kind else { return }
+            block.children.append(row)
+            rows[index].kind = .subagent(block)
+        }
+    }
+
+    /// The last row of whichever container this names.
+    private func lastRow(in destination: Destination) -> TranscriptRow? {
+        switch destination {
+        case .top:
+            return rows.last
+        case let .block(index):
+            guard case let .subagent(block) = rows[index].kind else { return nil }
+            return block.children.last
+        }
+    }
+
+    private mutating func replaceLastRow(
+        in destination: Destination, with kind: TranscriptRow.Kind
+    ) {
+        switch destination {
+        case .top:
+            guard !rows.isEmpty else { return }
+            rows[rows.count - 1].kind = kind
+        case let .block(index):
+            guard case var .subagent(block) = rows[index].kind, !block.children.isEmpty else {
+                return
+            }
+            block.children[block.children.count - 1].kind = kind
+            rows[index].kind = .subagent(block)
+        }
+    }
+
+    /// Update a call in place, wherever it lives.
+    ///
+    /// Three lookups, in order: the dispatch rows themselves, the top level,
+    /// then inside a block. The flat search this replaced found nothing for a
+    /// nested tool and fell through to appending, so one tool reporting
+    /// progress rendered as two rows — the real one inside the block and a
+    /// half-built duplicate beside it.
+    private mutating func applyToolUpdate(
+        id: String, status: ToolStatus, title: String?, content: String?, diff: Diff?,
+        locations: [String], parent: String?, summary: SubagentSummary?
+    ) {
+        if let index = rows.lastIndex(where: {
+            if case let .subagent(block) = $0.kind { return block.tool.id == id }
+            return false
+        }) {
+            guard case var .subagent(block) = rows[index].kind else { return }
+            block.tool = merged(
+                block.tool, status: status, title: title, content: content, diff: diff,
+                locations: locations)
+            if let summary { block.summary = summary }
+            rows[index].kind = .subagent(block)
+            return
+        }
+
+        if let index = rows.lastIndex(where: {
+            if case let .tool(tool) = $0.kind { return tool.id == id }
+            return false
+        }) {
+            guard case let .tool(tool) = rows[index].kind else { return }
+            rows[index].kind = .tool(merged(
+                tool, status: status, title: title, content: content, diff: diff,
+                locations: locations))
+            return
+        }
+
+        for index in rows.indices.reversed() {
+            guard case var .subagent(block) = rows[index].kind else { continue }
+            guard
+                let child = block.children.lastIndex(where: {
+                    if case let .tool(tool) = $0.kind { return tool.id == id }
+                    return false
+                })
+            else { continue }
+            guard case let .tool(tool) = block.children[child].kind else { continue }
+            block.children[child].kind = .tool(merged(
+                tool, status: status, title: title, content: content, diff: diff,
+                locations: locations))
+            rows[index].kind = .subagent(block)
+            return
+        }
+
+        // Nothing to update: an update whose call we never saw. Shown rather
+        // than dropped, in whichever container it claims to belong to.
+        append(
+            .tool(ToolRow(
+                id: id, title: title ?? id, kind: "", status: status, locations: locations,
+                content: content, diff: diff)),
+            to: destination(for: parent))
+    }
+
+    /// The merge rules for a tool update, in one place so the lookup paths
+    /// above cannot drift apart from each other.
+    private func merged(
+        _ tool: ToolRow, status: ToolStatus, title: String?, content: String?, diff: Diff?,
+        locations: [String]
+    ) -> ToolRow {
+        var tool = tool
+        tool.status = status
+        // A call is renamed as it resolves — "Terminal" becomes the command,
+        // "Read File" becomes the file — and the new name is the useful one.
+        if let title, !title.isEmpty { tool.title = title }
+        if let content { tool.content = content }
+        if let diff { tool.diff = diff }
+        if !locations.isEmpty { tool.locations = locations }
+        return tool
     }
 
     /// Show a selector's new value straight away.
@@ -170,7 +362,9 @@ public struct Transcript: Sendable {
     /// Only for a message going out NOW. One written mid-turn is queued
     /// instead, and joins the transcript when it is actually sent.
     public mutating func appendLocalUserMessage(_ text: String) {
-        append(.message(role: .user, text: text))
+        // Always the top level: what the user typed is addressed to the
+        // session, never to one subagent inside it.
+        append(.message(role: .user, text: text, parent: nil))
         // The agent's reply is a new turn's worth of speech, not a
         // continuation of what the user just typed.
         breakBeforeNextMessage = true
@@ -188,45 +382,44 @@ public struct Transcript: Sendable {
             // event carrying an empty list would otherwise empty the picker.
             if !commands.isEmpty { availableCommands = commands }
 
-        case let .message(role, text):
+        case let .message(role, text, parent):
+            let target = destination(for: parent)
             // Chunks of one message coalesce. One row per chunk would render a
             // streamed sentence as a column of one-word paragraphs.
-            if case let .message(lastRole, lastText) = rows.last?.kind, lastRole == role,
-                !breakBeforeNextMessage
+            //
+            // Only within one container, and only across one parent: merging
+            // past either boundary splices a subagent's sentence onto the
+            // dispatching agent's and attributes it to the wrong speaker.
+            if case let .message(lastRole, lastText, lastParent) = lastRow(in: target)?.kind,
+                lastRole == role, lastParent == parent,
+                !(parent == nil && breakBeforeNextMessage)
             {
-                rows[rows.count - 1].kind = .message(role: role, text: lastText + text)
+                replaceLastRow(
+                    in: target, with: .message(role: role, text: lastText + text, parent: parent))
             } else {
-                append(.message(role: role, text: text))
+                append(.message(role: role, text: text, parent: parent), to: target)
             }
-            breakBeforeNextMessage = false
+            // The seam belongs to the top-level conversation; a subagent's
+            // chunks must not consume it.
+            if parent == nil { breakBeforeNextMessage = false }
 
-        case let .toolCall(id, title, kind, status, locations):
-            append(.tool(ToolRow(
+        case let .toolCall(id, title, kind, status, locations, parent, subagent):
+            let tool = ToolRow(
                 id: id, title: title, kind: kind, status: status,
-                locations: locations, content: nil, diff: nil)))
-
-        case let .toolUpdate(id, status, newTitle, content, diff, locations):
-            // Mutate the call in place. Appending would fill the transcript
-            // with duplicates of one tool reporting progress.
-            guard let index = rows.lastIndex(where: {
-                if case let .tool(t) = $0.kind { return t.id == id }
-                return false
-            }) else {
-                append(.tool(ToolRow(
-                    id: id, title: newTitle ?? id, kind: "", status: status,
-                    locations: locations, content: content, diff: diff)))
-                return
+                locations: locations, content: nil, diff: nil)
+            if subagent {
+                // A dispatch OWNS a block rather than being a row inside one,
+                // so it always lands at the level it was called from.
+                append(.subagent(SubagentBlock(
+                    tool: tool, children: [], summary: nil, interrupted: false)))
+            } else {
+                append(.tool(tool), to: destination(for: parent))
             }
-            guard case var .tool(tool) = rows[index].kind else { return }
-            tool.status = status
-            // A call is renamed as it resolves — "Terminal" becomes the
-            // command, "Read File" becomes the file — and the new name is the
-            // informative one.
-            if let newTitle, !newTitle.isEmpty { tool.title = newTitle }
-            if let content { tool.content = content }
-            if let diff { tool.diff = diff }
-            if !locations.isEmpty { tool.locations = locations }
-            rows[index].kind = .tool(tool)
+
+        case let .toolUpdate(id, status, newTitle, content, diff, locations, parent, summary):
+            applyToolUpdate(
+                id: id, status: status, title: newTitle, content: content, diff: diff,
+                locations: locations, parent: parent, summary: summary)
 
         case let .plan(entries):
             // Wholesale, because the daemon sends the whole plan each time.
@@ -271,6 +464,18 @@ public struct Transcript: Sendable {
             // Nothing to DRAW, but it is a seam: the next message begins a new
             // turn and must not be glued onto the tail of this one.
             breakBeforeNextMessage = true
+            // A subagent still running when the turn ends never receives its
+            // completion. Left alone it spins forever, and once the view stops
+            // animating it reads as one that finished — a subagent whose fate
+            // nobody knows wearing the mark of one that reported back.
+            for index in rows.indices {
+                guard case var .subagent(block) = rows[index].kind else { continue }
+                guard block.tool.status == .pending || block.tool.status == .inProgress else {
+                    continue
+                }
+                block.interrupted = true
+                rows[index].kind = .subagent(block)
+            }
 
         case let .gap(reason):
             // Never merged, never dropped. A gap that could be swallowed by a
