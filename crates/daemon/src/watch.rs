@@ -81,6 +81,26 @@ fn notification(activity: AgentActivity, label: &str) -> Option<(String, String)
     }
 }
 
+/// The supervisor's activity, reduced to a raw OBSERVATION.
+///
+/// The sampling loop folds whatever it observes through `activity::advance`,
+/// and that fold is what creates and destroys `Done`. A screen classifier hands
+/// it a raw sense of the pane — working, blocked, or sitting there — and never
+/// `Done`, so the fold owns the state outright.
+///
+/// The agent supervisor is different: it has already folded its own events, so
+/// its activity can BE `Done`. Feeding that back in folds it twice, and the
+/// second fold resurrects what the first one's `seen` had just cleared —
+/// `advance(Idle, Done)` is `Done`. That is a row you open, watch go quiet, and
+/// watch light up again a second later, notification and all, forever.
+///
+/// So the supervisor's `Done` is dropped here. `Done` means idle-and-unseen,
+/// and whether anyone has seen it is the watcher's business, not the
+/// supervisor's — one owner, exactly as for a pane read off the screen.
+fn agent_observation(folded: AgentActivity) -> AgentActivity {
+    activity::seen(folded)
+}
+
 /// The daemon's live view of what every agent is doing.
 pub struct Watcher {
     service: Arc<Service>,
@@ -382,8 +402,9 @@ impl Watcher {
                 // shim's status log, which matches no agent signature, so the
                 // classifier would report `None` and this row would never say
                 // it needs you — the one failure the whole feature exists to
-                // prevent. The supervisor already folded these through
-                // `activity::advance`, so `Done` means what it always means.
+                // prevent. Taken as a raw observation, `Done` and all: see
+                // `agent_observation` for why folding it twice was a row that
+                // could never be dismissed.
                 // Named after the agent it is hosting. Calling every agent
                 // pane "agent" is the one label they all share, so it
                 // distinguishes nothing — and `set_pane_mode` recorded which
@@ -394,7 +415,7 @@ impl Watcher {
                     } else {
                         "agent".to_string()
                     },
-                    self.service.agents().activity(id),
+                    agent_observation(self.service.agents().activity(id)),
                     // The SAME question the label just asked, not a hardcoded
                     // yes. `set_pane_mode` writes the mode and the harness in
                     // two statements, so a sample landing between them — or any
@@ -636,5 +657,42 @@ mod tests {
         std::fs::create_dir_all(&common).unwrap();
 
         assert_eq!(worktrees_changed(&common, None), None, "nothing there, nothing to scan");
+    }
+
+    #[test]
+    fn an_agent_pane_still_announces_finishing_exactly_once() {
+        // The transition the whole feature exists for. The supervisor folds its
+        // own events to `Done`; the watcher must read that as "the agent is
+        // sitting there" and reach `Done` through its OWN fold, off the
+        // `Working` it last reported.
+        let done = activity::advance(AgentActivity::Working, agent_observation(AgentActivity::Done));
+        assert_eq!(done, AgentActivity::Done);
+
+        // And it stays announced while nobody has looked, sample after sample.
+        let still = activity::advance(done, agent_observation(AgentActivity::Done));
+        assert_eq!(still, AgentActivity::Done);
+    }
+
+    #[test]
+    fn opening_an_agent_pane_ends_done_and_it_stays_ended() {
+        // The bug this guards: the supervisor goes on reporting `Done` forever
+        // — nothing about a user opening a terminal reaches it — so folding its
+        // activity in as an observation re-derived `Done` on the very next
+        // sample, one second after `mark_seen` had cleared it. The row lit up
+        // again and notified again, every single time it was read.
+        let cleared = activity::seen(AgentActivity::Done);
+        assert_eq!(cleared, AgentActivity::Idle);
+
+        let next = activity::advance(cleared, agent_observation(AgentActivity::Done));
+        assert_eq!(next, AgentActivity::Idle, "seeing a finished agent must stick");
+    }
+
+    #[test]
+    fn an_agent_that_asks_a_question_after_being_seen_still_says_so() {
+        // Dropping `Done` must drop only `Done`. Blocked is not idle-and-unseen
+        // — it is the agent genuinely waiting on an answer — and looking at it
+        // does not answer it.
+        let next = activity::advance(AgentActivity::Idle, agent_observation(AgentActivity::Blocked));
+        assert_eq!(next, AgentActivity::Blocked);
     }
 }

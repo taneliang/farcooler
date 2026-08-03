@@ -303,6 +303,16 @@ impl Session {
         self.value("terminal.dismiss_lost", Some(terminal), None).await.map(|_| ())
     }
 
+    /// A user has looked at this terminal, which is what ends `Done`.
+    ///
+    /// `Done` is idle-and-UNSEEN, so a client that can show a terminal has to be
+    /// able to say it showed one. Without this the phone could open a finished
+    /// agent, read it, and leave it still announcing itself — on the phone, on
+    /// the Mac, and in every push notification after.
+    pub async fn mark_seen(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+        self.value("terminal.seen", Some(terminal), None).await.map(|_| ())
+    }
+
     /// A terminal's visible screen, with escapes intact.
     ///
     /// `known_revision` is the last one received; the host answers `unchanged`

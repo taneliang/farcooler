@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// One host's session and the state a view renders from it.
 ///
@@ -109,11 +110,60 @@ final class Connection: ObservableObject {
                     Notifier.shared.report(terminal: terminal, workspace: workspace.task)
                 }
             }
+
+            // And end `done` for whatever is on screen, from the same fleet.
+            //
+            // Here as well as on the taps in `TerminalView`, because an agent
+            // finishing while you sit reading it is not a tap — it is a poll,
+            // and this is the poll. Without it, the one case that needs no
+            // interaction at all is the one case that never clears.
+            await markVisibleSeen()
         } catch {
             // A failed poll is not a disconnection. Keep showing the last known
             // fleet rather than blanking the screen someone is reading.
             return
         }
+    }
+
+    // MARK: - Attention
+
+    /// Terminals with a `terminal.seen` already in flight, so a poll landing
+    /// while the last one is still crossing the SSH link does not send a second.
+    private var markingSeen: Set<String> = []
+
+    /// End `done` for the terminal on screen, if anyone is there to see it.
+    ///
+    /// `done` is finished-and-UNSEEN. The phone had no way to say it had seen
+    /// anything — `terminal.seen` was never called from here at all — so an
+    /// agent you opened on the phone, read, and backed out of stayed `done`
+    /// forever: still orange in the list, still counted, and still the thing
+    /// every later notification was about. The Mac cleared it for you or nothing
+    /// did.
+    ///
+    /// Gated on the app being ACTIVE, which is the distinction the feature rests
+    /// on. An agent finishing while the phone is in a pocket is exactly what the
+    /// push notification is for, and a screen that happens to still be mounted
+    /// behind a locked phone has not been read by anyone.
+    ///
+    /// Only `done`. `blocked` is an agent waiting on an ANSWER — looking at a
+    /// question does not answer it — and the daemon would refuse to clear it
+    /// anyway, so sending it would be a round trip spent to be told no.
+    ///
+    /// Nothing is applied locally afterwards. The next poll brings the daemon's
+    /// answer, and this client does not compute a terminal's state; see the note
+    /// on the type.
+    func markVisibleSeen() async {
+        guard phase == .connected else { return }
+        guard UIApplication.shared.applicationState == .active else { return }
+        guard let id = Notifier.shared.visibleTerminal else { return }
+        guard
+            let terminal = fleet.workspaces.lazy.flatMap(\.terminals).first(where: { $0.id == id }),
+            terminal.agent == .done
+        else { return }
+        guard markingSeen.insert(id).inserted else { return }
+        defer { markingSeen.remove(id) }
+
+        _ = try? await core.call("terminal.seen", ["terminal": id])
     }
 
     private func loadRepositories() async {

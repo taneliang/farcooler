@@ -136,9 +136,6 @@ struct WorkspaceSection: View {
     }
 
     /// Numbers for terminals a worktree has more than one of, by command.
-    ///
-    /// Computed over creation order rather than display order, so a row does not
-    /// renumber itself when something starts needing attention and sorts up.
     private var ordinals: [String: Int] {
         var counts: [String: Int] = [:]
         for terminal in workspace.terminals {
@@ -154,19 +151,21 @@ struct WorkspaceSection: View {
         return out
     }
 
-    private var ordered: [Terminal] {
-        workspace.terminals.sorted { a, b in
-            a.status.wantsAttention && !b.status.wantsAttention
-        }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
             if showsTerminals {
                 let numbering = ordinals
-                ForEach(ordered) { t in
+                // Creation order, always. Sorting whatever needs you to the top
+                // put the sidebar in motion at the exact moment you were
+                // reaching for it: an agent three rows down finishes, every row
+                // under it slides, and the click you had already committed to
+                // lands on something else. Attention is a mark on a row — the
+                // glyph, the count in the status bar, ⌘⇧A — and a mark you can
+                // find in a stable list beats one that comes to you by moving
+                // the list.
+                ForEach(workspace.terminals) { t in
                     row(t, ordinal: numbering[t.id])
                 }
 
@@ -540,9 +539,6 @@ struct WorkspaceDetail: View {
     let onOpenTerminal: (Terminal) -> Void
 
     /// Numbers for terminals a worktree has more than one of, by command.
-    ///
-    /// Computed over creation order rather than display order, so a row does not
-    /// renumber itself when something starts needing attention and sorts up.
     private var ordinals: [String: Int] {
         var counts: [String: Int] = [:]
         for terminal in workspace.terminals {
@@ -558,12 +554,6 @@ struct WorkspaceDetail: View {
         return out
     }
 
-    private var ordered: [Terminal] {
-        workspace.terminals.sorted { a, b in
-            a.status.wantsAttention && !b.status.wantsAttention
-        }
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -573,7 +563,10 @@ struct WorkspaceDetail: View {
                     empty
                 } else {
                     VStack(spacing: 8) {
-                        ForEach(ordered) { t in
+                        // Creation order, for the reason `WorkspaceSection`
+                        // gives: cards that rearrange themselves under the
+                        // pointer are worse than cards you have to read.
+                        ForEach(workspace.terminals) { t in
                             terminalCard(t)
                         }
                     }

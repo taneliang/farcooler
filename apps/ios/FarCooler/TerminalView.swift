@@ -248,8 +248,18 @@ struct TerminalView: View {
         }
         // Which pane is on screen, so a banner about THIS one is suppressed
         // while banners about the others still arrive — see `Notifier`.
-        .onAppear { Notifier.shared.visibleTerminal = current.id }
-        .onChange(of: current.id) { _, id in Notifier.shared.visibleTerminal = id }
+        //
+        // It is also what ends `done`: a pane on screen has been read, so each
+        // of these three moments marks it seen rather than waiting up to three
+        // seconds for the poll to notice. See `Connection.markVisibleSeen`.
+        .onAppear {
+            Notifier.shared.visibleTerminal = current.id
+            Task { await connection.markVisibleSeen() }
+        }
+        .onChange(of: current.id) { _, id in
+            Notifier.shared.visibleTerminal = id
+            Task { await connection.markVisibleSeen() }
+        }
         .onDisappear {
             session.stop()
             Notifier.shared.visibleTerminal = nil
@@ -262,6 +272,10 @@ struct TerminalView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             session.reassertSize()
+            // Coming back to the app is reading whatever it comes back to. The
+            // notification did its job while the phone was away; leaving the
+            // pane flagged afterwards makes you dismiss the same news twice.
+            Task { await connection.markVisibleSeen() }
         }
     }
 

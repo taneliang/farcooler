@@ -476,15 +476,6 @@ impl AgentSupervisor {
 
         on_events(terminal, renumbered);
     }
-
-    /// A client looked at this terminal, which is what ends `Done`.
-    pub fn seen(&self, terminal: Uuid) {
-        if let Ok(mut sessions) = self.sessions.lock() {
-            if let Some(entry) = sessions.get_mut(&terminal) {
-                entry.activity = activity::seen(entry.activity);
-            }
-        }
-    }
 }
 
 #[cfg(test)]

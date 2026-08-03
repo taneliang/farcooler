@@ -440,6 +440,13 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             session.dismiss_lost(id("terminal")?).await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         }
+        // Answers `{}` for the reason the agent calls below do: what a client
+        // redraws from is the fleet it polls, or the pushed change, not an echo
+        // of the row taken at the instant of the write.
+        "terminal.seen" => {
+            session.mark_seen(id("terminal")?).await.map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        }
         // The screen, base64 so it survives JSON.
         //
         // A capture carries escape sequences and arbitrary bytes; JSON carries

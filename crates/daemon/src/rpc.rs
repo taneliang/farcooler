@@ -682,6 +682,10 @@ impl Rpc {
                         images: wire::prompt_images(&p.blocks),
                     },
                 );
+                // Typing into a pane is reading it. Waiting for the shim's first
+                // event to move the row off `Done` would leave a terminal you
+                // are actively using still asking for your attention.
+                self.watcher.mark_seen(id).await;
                 self.terminal_result(id).await
             }
 
@@ -696,7 +700,9 @@ impl Rpc {
                 );
                 // The same call `terminal.seen` makes: answering is only
                 // reachable by having looked, so it ends `Done` the same way.
-                svc.agents().seen(id);
+                // Against the WATCHER, which is the one place `Done` lives —
+                // clearing it on the supervisor cleared a copy nothing reads.
+                self.watcher.mark_seen(id).await;
                 self.terminal_result(id).await
             }
 

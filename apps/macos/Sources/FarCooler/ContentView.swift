@@ -48,6 +48,9 @@ struct ContentView: View {
     /// `fleetPlaceholder` and therefore only while no fleet has loaded — the
     /// opposite of when this control exists. See `EditorErrorBanner`.
     @State private var editorError: String?
+    /// Terminals with a `terminal seen` call already in flight. See
+    /// `markVisibleSeen`.
+    @State private var markingSeen: Set<String> = []
 
     /// What the detail pane is showing.
     enum Selection: Hashable {
@@ -130,6 +133,18 @@ struct ContentView: View {
             // common one — you press Ctrl-D in the terminal you are looking at —
             // left the selection pointing at something that no longer existed.
             healSelection()
+            // An agent finishing under your nose is a fleet change and nothing
+            // else — no click, no selection change — so this is the only hook
+            // that can catch the case where you were already watching it.
+            markVisibleSeen()
+        }
+        // Coming back to the app is reading whatever it comes back to. The
+        // notification did its job while you were away; leaving the row lit
+        // afterwards makes you dismiss the same news twice.
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            markVisibleSeen()
         }
         .onChange(of: selection) { _, new in
             // `lastError` is one flat field with no notion of which pane it was
@@ -170,19 +185,20 @@ struct ContentView: View {
                 Task { await client.focusPane(pane.short, in: workspace) }
             }
 
-            // Opening a terminal is what ends `done`. Being listed is not being
-            // read, so this is deliberately tied to selection.
-            if case .terminal(_, let id) = new,
-                let terminal = allTerminals.first(where: { $0.id == id })
-            {
+            if case .terminal(_, let id) = new {
                 // Stamped here rather than in the palette, so every way of
                 // arriving counts: a sidebar click, ⌘], ⌃B o, a jump from the
                 // palette itself. A switcher that only learned from its own
                 // choices would order by where you had used IT, not by where you
                 // have been.
                 VisitLog.shared.visited(id)
-                Task { await client.markSeen(terminal.short) }
             }
+
+            // Opening a terminal is what ends `done`. Being LISTED is still not
+            // being read — the sidebar shows every terminal on the machine and
+            // clearing a notification nobody read is worse than not sending one
+            // — but being on screen is, which is more than the pane you clicked.
+            markVisibleSeen()
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
         .sheet(isPresented: $showAbout) { AboutSheet() }
@@ -862,6 +878,74 @@ struct ContentView: View {
             let terminal = workspace.terminals.first(where: { $0.id == terminalID })
         else { return nil }
         return (workspace, terminal)
+    }
+
+    // MARK: - Attention
+
+    /// Which terminals the detail pane is actually putting in front of you.
+    ///
+    /// Not just the selected one. Selecting a pane shows the whole layout it
+    /// belongs to, and a terminal tiled beside the one with focus is as much on
+    /// screen as the one with focus — reading it took no extra click, so it
+    /// cannot go on asking for one.
+    ///
+    /// The branches mirror `detail` exactly, including its quirk that selecting
+    /// a pane in a non-active layout shows the ACTIVE one. Anything else would
+    /// have this marking terminals read that are not on screen, which is the one
+    /// mistake worse than the bug it fixes.
+    private var visibleTerminals: [Terminal] {
+        switch selection {
+        case .terminal(let workspaceID, let terminalID):
+            guard let ws = workspace(workspaceID) else { return [] }
+            if client.group(holding: terminalID, in: workspaceID) != nil,
+                let group = client.activeGroup(workspaceID)
+            {
+                return ws.terminals.filter { group.terminals.contains($0.id) }
+            }
+            return ws.terminals.filter { $0.id == terminalID }
+
+        case .workspace(let workspaceID):
+            guard let ws = workspace(workspaceID), let group = client.activeGroup(workspaceID),
+                !group.terminals.isEmpty
+            else { return [] }
+            return ws.terminals.filter { group.terminals.contains($0.id) }
+
+        case nil:
+            return []
+        }
+    }
+
+    /// End `done` for everything on screen, if anyone is there to see it.
+    ///
+    /// `done` is finished-and-UNSEEN, so it has to end when you see it — and you
+    /// see a pane by having it in front of you, not only by clicking on it.
+    /// Marking on selection alone missed the commonest case there is: you sit
+    /// watching an agent work, it finishes, and because you never had to click
+    /// anything the row goes on flagging itself indefinitely. Nothing short of
+    /// clicking away and back could clear it.
+    ///
+    /// Gated on the app being active, which is the whole distinction the feature
+    /// rests on. An agent finishing while you are in another app is precisely
+    /// what the notification exists for, and a window sitting behind three
+    /// others must not quietly mark it read.
+    ///
+    /// Only `done`. `blocked` is the agent waiting on an ANSWER, and looking at
+    /// a question does not answer it — the daemon agrees, so sending anything
+    /// else would only be a subprocess spent to be told no.
+    private func markVisibleSeen() {
+        guard NSApp.isActive else { return }
+        for terminal in visibleTerminals where terminal.agent == .done {
+            // The daemon is idempotent, but this is not free: each call is a
+            // CLI subprocess, and a fleet event arrives for every terminal on
+            // the machine. Without this, ten busy panes would mean ten
+            // redundant processes for every one that finished.
+            guard !markingSeen.contains(terminal.id) else { continue }
+            markingSeen.insert(terminal.id)
+            Task {
+                await client.markSeen(terminal.short)
+                markingSeen.remove(terminal.id)
+            }
+        }
     }
 
     // MARK: - Tiling

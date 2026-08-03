@@ -296,12 +296,15 @@ struct FleetList: View {
             ForEach(fleet.workspaces) { workspace in
                 let numbering = workspace.ordinals()
                 Section {
-                    // Anything waiting on you comes first. On a phone you see
-                    // four rows at a time, and scrolling to find the one that
-                    // needs an answer defeats the purpose of the screen.
-                    ForEach(workspace.terminals.sorted { a, b in
-                        a.agent.wantsAttention && !b.agent.wantsAttention
-                    }) { terminal in
+                    // Creation order, always. Sorting whatever needs you to the
+                    // top read well until you watched it happen: an agent three
+                    // rows down finishes, every row under it slides, and the tap
+                    // you had already committed to lands on something else. On a
+                    // phone that is worse, not better — the target is smaller
+                    // and the finger is already moving. Attention is a mark on a
+                    // row, and a mark you can find in a list that holds still
+                    // beats one that comes to you by moving the list.
+                    ForEach(workspace.terminals) { terminal in
                         Button { onSelect(terminal) } label: {
                             TerminalRow(terminal: terminal, ordinal: numbering[terminal.id]) { action in
                                 onAction(action, terminal)

@@ -18,12 +18,19 @@ final class Notifier {
     static let shared = Notifier()
 
     private var authorised = false
-    /// The terminal on screen, so a banner about it can be suppressed.
+    /// The terminal on screen.
     ///
-    /// Notifications DO show while the app is open — you are usually looking at
-    /// one agent while another is the one that got stuck, and iOS's default of
-    /// swallowing every foreground banner would hide exactly that. The one case
-    /// it is noise is being told about the pane you are already reading.
+    /// Two readers, and deliberately one register rather than two. A banner
+    /// about this pane is suppressed: notifications DO show while the app is
+    /// open — you are usually looking at one agent while another is the one that
+    /// got stuck, and iOS's default of swallowing every foreground banner would
+    /// hide exactly that — and the one case it is noise is being told about the
+    /// pane you are already reading.
+    ///
+    /// The same fact is what ends `done`, which is finished-and-unseen; see
+    /// `Connection.markVisibleSeen`. Suppressing a banner and marking something
+    /// read are the same judgement — "you are looking at this" — and answering
+    /// it in two places is how they come to disagree.
     var visibleTerminal: String?
 
     private let presenter = ForegroundPresenter()
