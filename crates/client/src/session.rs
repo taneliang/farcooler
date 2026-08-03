@@ -1,4 +1,4 @@
-//! An Overnight session, over whichever transport reached the host.
+//! An Far Cooler session, over whichever transport reached the host.
 //!
 //! Above this line nothing knows whether it is talking to a local Unix socket
 //! or to a daemon on the other side of an SSH connection. That is the property
@@ -12,11 +12,11 @@
 //! the iOS app decodes the same shapes the Mac app already decodes from the
 //! CLI, with the model types it already has.
 
-use overnight_protocol::v1::{
+use farcooler_protocol::v1::{
     AgentEventBatch, PaneMode, Repository, RepositoryRoot, Terminal, TerminalState, Workspace,
     WorkspaceState, request, result,
 };
-use overnight_transport::{Client, ClientError};
+use farcooler_transport::{Client, ClientError};
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
@@ -32,7 +32,7 @@ pub enum SessionError {
     #[error("the daemon returned {got} where {expected} was expected")]
     WrongResult { expected: &'static str, got: &'static str },
     #[error(
-        "connected, but `overnightd --stdio` did not answer. Is Overnight installed on that host?"
+        "connected, but `farcoolerd --stdio` did not answer. Is FarCooler installed on that host?"
     )]
     DaemonMissing,
     #[error("the host runs protocol {daemon}; this client speaks {client}")]
@@ -75,7 +75,7 @@ impl AsyncRead for StreamReader {
     }
 }
 
-/// A connected Overnight host.
+/// A connected Far Cooler host.
 pub struct Session {
     client: Client<Reader, Writer>,
     /// Held so the SSH connection lives as long as the session does.
@@ -86,12 +86,12 @@ impl Session {
     /// Connect over SSH and start a daemon session on the far side.
     pub async fn connect_ssh(destination: &ssh::Destination) -> Result<Self, SessionError> {
         let mut transport = ssh::Session::open(destination).await?;
-        let streams = transport.exec("overnightd --stdio").await?;
+        let streams = transport.exec("farcoolerd --stdio").await?;
 
         let client = Client::over(
             Box::new(streams.reader) as Reader,
             Box::new(streams.writer) as Writer,
-            "overnight-mobile",
+            "farcooler-mobile",
             env!("CARGO_PKG_VERSION"),
         )
         .await?;
@@ -117,7 +117,7 @@ impl Session {
         let ssh = self._ssh.as_mut().ok_or_else(|| {
             SessionError::Protocol("streaming needs an ssh session".into())
         })?;
-        let streams = ssh.exec(&format!("overnightd --stream {terminal}")).await?;
+        let streams = ssh.exec(&format!("farcoolerd --stream {terminal}")).await?;
         // The write half is kept, though nothing is ever written to it.
         //
         // Dropping it closes that side of the channel, and ssh reports a closed
@@ -141,7 +141,7 @@ impl Session {
         let client = Client::over(
             Box::new(read) as Reader,
             Box::new(write) as Writer,
-            "overnight-mobile",
+            "farcooler-mobile",
             env!("CARGO_PKG_VERSION"),
         )
         .await?;
@@ -163,7 +163,7 @@ impl Session {
         let terminals = self.terminals().await?;
         let host = self.host().await?;
         let healthy =
-            host.self_health != overnight_protocol::v1::SelfHealth::Degraded as i32;
+            host.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
 
         let items: Vec<_> = workspaces
             .iter()
@@ -208,7 +208,7 @@ impl Session {
         }))
     }
 
-    pub async fn host(&mut self) -> Result<overnight_protocol::v1::Host, SessionError> {
+    pub async fn host(&mut self) -> Result<farcooler_protocol::v1::Host, SessionError> {
         match self.value("host.health", None, None).await? {
             result::Value::Host(h) => Ok(h),
             other => Err(wrong("host", &other)),
@@ -252,7 +252,7 @@ impl Session {
         branch: &str,
         base: &str,
     ) -> Result<Workspace, SessionError> {
-        let payload = request::Payload::WorkspaceCreate(overnight_protocol::v1::WorkspaceCreate {
+        let payload = request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
             task_name: task.into(),
             branch: branch.into(),
             base_revision: base.into(),
@@ -272,7 +272,7 @@ impl Session {
         preset: &str,
         join_active_group: bool,
     ) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::TerminalCreate(overnight_protocol::v1::TerminalCreate {
+        let payload = request::Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
             title: title.into(),
             command_preset: preset.into(),
             join_active_group,
@@ -319,9 +319,9 @@ impl Session {
         &mut self,
         terminal: Uuid,
         known_revision: u64,
-    ) -> Result<overnight_protocol::v1::TerminalScreen, SessionError> {
+    ) -> Result<farcooler_protocol::v1::TerminalScreen, SessionError> {
         let payload = request::Payload::TerminalScreenRequest(
-            overnight_protocol::v1::TerminalScreenRequest { known_revision },
+            farcooler_protocol::v1::TerminalScreenRequest { known_revision },
         );
         match self.value("terminal.screen", Some(terminal), Some(payload)).await? {
             result::Value::TerminalScreen(s) => Ok(s),
@@ -331,7 +331,7 @@ impl Session {
 
     /// Send exact bytes to a terminal.
     pub async fn write(&mut self, terminal: Uuid, bytes: Vec<u8>) -> Result<(), SessionError> {
-        let payload = request::Payload::TerminalWrite(overnight_protocol::v1::TerminalWrite {
+        let payload = request::Payload::TerminalWrite(farcooler_protocol::v1::TerminalWrite {
             payload: bytes.into(),
         });
         self.value("terminal.write", Some(terminal), Some(payload)).await?;
@@ -344,7 +344,7 @@ impl Session {
         columns: u32,
         rows: u32,
     ) -> Result<(), SessionError> {
-        let payload = request::Payload::TerminalResize(overnight_protocol::v1::TerminalResize {
+        let payload = request::Payload::TerminalResize(farcooler_protocol::v1::TerminalResize {
             columns,
             rows,
             view_activity_id: 0,
@@ -370,7 +370,7 @@ impl Session {
         mode: PaneMode,
         force: bool,
     ) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::SetPaneMode(overnight_protocol::v1::SetPaneMode {
+        let payload = request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             pane_mode: mode as i32,
             force,
@@ -393,7 +393,7 @@ impl Session {
         from_seq: u64,
         epoch: u64,
     ) -> Result<AgentEventBatch, SessionError> {
-        let payload = request::Payload::AgentSubscribe(overnight_protocol::v1::AgentSubscribe {
+        let payload = request::Payload::AgentSubscribe(farcooler_protocol::v1::AgentSubscribe {
             epoch,
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             from_seq,
@@ -419,22 +419,22 @@ impl Session {
         text: &str,
         images: &[(String, Vec<u8>)],
     ) -> Result<Terminal, SessionError> {
-        use overnight_protocol::v1::agent_prompt_block::Content;
+        use farcooler_protocol::v1::agent_prompt_block::Content;
 
-        let mut blocks: Vec<overnight_protocol::v1::AgentPromptBlock> = images
+        let mut blocks: Vec<farcooler_protocol::v1::AgentPromptBlock> = images
             .iter()
-            .map(|(mime, data)| overnight_protocol::v1::AgentPromptBlock {
-                content: Some(Content::Image(overnight_protocol::v1::ImageBlock {
+            .map(|(mime, data)| farcooler_protocol::v1::AgentPromptBlock {
+                content: Some(Content::Image(farcooler_protocol::v1::ImageBlock {
                     mime_type: mime.clone(),
                     data: bytes::Bytes::copy_from_slice(data),
                 })),
             })
             .collect();
-        blocks.push(overnight_protocol::v1::AgentPromptBlock {
+        blocks.push(farcooler_protocol::v1::AgentPromptBlock {
             content: Some(Content::Text(text.to_string())),
         });
 
-        let payload = request::Payload::AgentPrompt(overnight_protocol::v1::AgentPrompt {
+        let payload = request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             blocks,
         });
@@ -451,7 +451,7 @@ impl Session {
         request_id: &str,
         option_id: &str,
     ) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::AgentAnswer(overnight_protocol::v1::AgentAnswer {
+        let payload = request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             request_id: request_id.to_string(),
             option_id: option_id.to_string(),
@@ -467,7 +467,7 @@ impl Session {
         terminal: Uuid,
         agent_mode: &str,
     ) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::AgentSetMode(overnight_protocol::v1::AgentSetMode {
+        let payload = request::Payload::AgentSetMode(farcooler_protocol::v1::AgentSetMode {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             agent_mode: agent_mode.to_string(),
         });
@@ -484,7 +484,7 @@ impl Session {
         queued_id: &str,
         text: &str,
     ) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::AgentEditQueued(overnight_protocol::v1::AgentEditQueued {
+        let payload = request::Payload::AgentEditQueued(farcooler_protocol::v1::AgentEditQueued {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             queued_id: queued_id.to_string(),
             text: text.to_string(),
@@ -502,7 +502,7 @@ impl Session {
         queued_id: &str,
     ) -> Result<Terminal, SessionError> {
         let payload =
-            request::Payload::AgentCancelQueued(overnight_protocol::v1::AgentCancelQueued {
+            request::Payload::AgentCancelQueued(farcooler_protocol::v1::AgentCancelQueued {
                 terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
                 queued_id: queued_id.to_string(),
             });
@@ -519,7 +519,7 @@ impl Session {
         queued_id: &str,
     ) -> Result<Terminal, SessionError> {
         let payload =
-            request::Payload::AgentSteerQueued(overnight_protocol::v1::AgentSteerQueued {
+            request::Payload::AgentSteerQueued(farcooler_protocol::v1::AgentSteerQueued {
                 terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
                 queued_id: queued_id.to_string(),
             });
@@ -530,7 +530,7 @@ impl Session {
     }
 
     pub async fn agent_cancel(&mut self, terminal: Uuid) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::AgentCancel(overnight_protocol::v1::AgentCancel {
+        let payload = request::Payload::AgentCancel(farcooler_protocol::v1::AgentCancel {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
         });
         match self.value("terminal.agent_cancel", None, Some(payload)).await? {
@@ -550,7 +550,7 @@ impl Session {
         limit: u32,
     ) -> Result<Vec<String>, SessionError> {
         let payload =
-            request::Payload::WorktreeFileSearch(overnight_protocol::v1::WorktreeFileSearch {
+            request::Payload::WorktreeFileSearch(farcooler_protocol::v1::WorktreeFileSearch {
                 workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
                 query: query.to_string(),
                 limit,
@@ -567,7 +567,7 @@ impl Session {
         target: Option<Uuid>,
         payload: Option<request::Payload>,
     ) -> Result<result::Value, SessionError> {
-        let mut request = overnight_transport::request(method);
+        let mut request = farcooler_transport::request(method);
         if let Some(id) = target {
             request.target_resource_id = Some(bytes::Bytes::copy_from_slice(id.as_bytes()));
         }
@@ -623,7 +623,7 @@ pub fn short(bytes: &[u8]) -> String {
 /// a permission prompt and one halfway through a file edit are both `running`;
 /// the difference between them is the reason to look at a fleet at all.
 fn activity_label(a: i32) -> &'static str {
-    use overnight_protocol::v1::AgentActivity;
+    use farcooler_protocol::v1::AgentActivity;
     match AgentActivity::try_from(a).unwrap_or(AgentActivity::Unspecified) {
         AgentActivity::None => "none",
         AgentActivity::Idle => "idle",
@@ -639,7 +639,7 @@ fn activity_label(a: i32) -> &'static str {
 ///
 /// A client shows "working for 4m" from this rather than timing it locally,
 /// which would restart at every reconnect and lie after a laptop sleeps.
-fn activity_since(t: &overnight_protocol::v1::Terminal) -> Option<i64> {
+fn activity_since(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
     t.activity_changed_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
 }
 
@@ -648,8 +648,8 @@ fn activity_since(t: &overnight_protocol::v1::Terminal) -> Option<i64> {
 /// Same reason `activity_label` exists: a client that switched on an integer
 /// would hold a second copy of the enum and drift from it silently.
 fn pane_mode_label(mode: i32) -> &'static str {
-    match overnight_protocol::v1::PaneMode::try_from(mode) {
-        Ok(overnight_protocol::v1::PaneMode::Agent) => "agent",
+    match farcooler_protocol::v1::PaneMode::try_from(mode) {
+        Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
         // Unspecified from an older daemon is terminal: the mode that needs no
         // adapter and always works.
         _ => "terminal",
@@ -712,8 +712,8 @@ mod tests {
     fn a_terminal_reports_its_pane_mode_as_a_word_a_client_can_switch_on() {
         // Numbers would make every client carry a copy of the enum and drift
         // from it. The label is the daemon's answer, not a code to look up.
-        assert_eq!(pane_mode_label(overnight_protocol::v1::PaneMode::Terminal as i32), "terminal");
-        assert_eq!(pane_mode_label(overnight_protocol::v1::PaneMode::Agent as i32), "agent");
+        assert_eq!(pane_mode_label(farcooler_protocol::v1::PaneMode::Terminal as i32), "terminal");
+        assert_eq!(pane_mode_label(farcooler_protocol::v1::PaneMode::Agent as i32), "agent");
         // An unknown value is the mode that always works, not a guess.
         assert_eq!(pane_mode_label(99), "terminal");
     }

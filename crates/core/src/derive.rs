@@ -16,7 +16,7 @@
 //!   FAILED                any                      ->   error
 //! ```
 
-use overnight_protocol::v1::{TerminalIntent, TerminalState, WorkspaceState};
+use farcooler_protocol::v1::{TerminalIntent, TerminalState, WorkspaceState};
 use uuid::Uuid;
 
 use crate::inventory::{RuntimeSnapshot, TaggedPane};

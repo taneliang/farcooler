@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 use crate::event::{AgentEvent, Seq, Sequenced};
 
 /// Events retained per session. At roughly a few hundred bytes each this is a
-/// small number of megabytes for an overnight session, and trimming is visible.
+/// small number of megabytes for an farcooler session, and trimming is visible.
 pub const AGENT_RING_EVENTS: usize = 4096;
 
 #[derive(Debug, PartialEq, Eq)]

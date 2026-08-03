@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the Linux daemon and CLI that `overnight host install` uploads.
+# Build the Linux daemon and CLI that `farcooler host install` uploads.
 #
 # Linux hosts get static musl binaries. A glibc build made on one distribution
 # refuses to start on an older one, and "works on my machine, GLIBC_2.38 not
@@ -38,25 +38,25 @@ Cannot build $TARGET yet. Pick one:
      then set the linker in .cargo/config.toml.
 
   3. Build on the host itself:
-         ssh HOST 'git clone <repo> && cd overnight && cargo build --release'
-     and install with:  overnight host install HOST --from <that>/target/release
+         ssh HOST 'git clone <repo> && cd farcooler && cargo build --release'
+     and install with:  farcooler host install HOST --from <that>/target/release
 EOF
   exit 1
 fi
 
 echo "==> Building $TARGET"
 if command -v cross >/dev/null 2>&1; then
-  cross build --release --target "$TARGET" -p overnight-daemon -p overnight-cli
+  cross build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli
 else
-  cargo build --release --target "$TARGET" -p overnight-daemon -p overnight-cli
+  cargo build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli
 fi
 
 mkdir -p "$OUT"
-cp "target/$TARGET/release/overnightd" "$OUT/"
-cp "target/$TARGET/release/overnight" "$OUT/"
+cp "target/$TARGET/release/farcoolerd" "$OUT/"
+cp "target/$TARGET/release/farcooler" "$OUT/"
 
 echo
 echo "Built $OUT"
 ls -lh "$OUT"
 echo
-echo "Install with:  overnight host install user@host"
+echo "Install with:  farcooler host install user@host"

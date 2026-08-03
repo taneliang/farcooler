@@ -1,11 +1,11 @@
 {
-  "name": "overnight-relay",
+  "name": "farcooler-relay",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "migrate": "wrangler d1 migrations apply overnight --remote",
+    "migrate": "wrangler d1 migrations apply farcooler --remote",
     "test": "vitest run"
   },
   "devDependencies": {

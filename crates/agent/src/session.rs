@@ -248,7 +248,7 @@ impl AgentSession {
                 match loaded {
                     Ok(result) => (id, result),
                     // A declared session id whose transcript does not exist yet
-                    // is the COMMON case, not an exotic one: Overnight hands
+                    // is the COMMON case, not an exotic one: Far Cooler hands
                     // every claude terminal a `--session-id` at launch, and a
                     // terminal switched to agent mode before anyone typed into
                     // it has no transcript to load. Failing here killed agent
@@ -262,7 +262,7 @@ impl AgentSession {
                         // `agent_host`'s module doc. A `tracing` warning here
                         // goes nowhere, and this is the failure that silently
                         // costs a user their conversation.
-                        println!("overnight: could not load session {id}: {e}");
+                        println!("farcooler: could not load session {id}: {e}");
                         prelude.push(load_unsupported_event());
                         let result = conn
                             .request(
@@ -459,7 +459,7 @@ impl RunningSession {
     /// interleaved. This used to fire regardless, so a message typed while the
     /// agent was working looked sent and might simply never have been.
     ///
-    /// Held HERE rather than left with the adapter, because a message Overnight
+    /// Held HERE rather than left with the adapter, because a message Far Cooler
     /// is holding is one it can still show, rewrite, or take back.
     pub async fn prompt(
         &mut self,
@@ -821,7 +821,7 @@ impl RunningSession {
                         // to fix the gap is the one thing not recorded.
                         if events.iter().any(|e| matches!(e, AgentEvent::Gap { .. })) {
                             println!(
-                                "overnight: unmodelled session/update: {}",
+                                "farcooler: unmodelled session/update: {}",
                                 serde_json::to_string(&raw)
                                     .unwrap_or_default()
                                     .chars()
@@ -837,7 +837,7 @@ impl RunningSession {
                         // produced a break in the transcript with no way to
                         // find out which frame caused it.
                         println!(
-                            "overnight: could not read a session/update: {}",
+                            "farcooler: could not read a session/update: {}",
                             serde_json::to_string(&raw).unwrap_or_default().chars().take(300).collect::<String>()
                         );
                         Ok(vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }])
@@ -853,7 +853,7 @@ impl RunningSession {
                 // — see the module doc on `agent_host` — and a `tracing`
                 // subscriber is never installed on this path, so a warning
                 // there goes nowhere at all.
-                println!("overnight: unhandled ACP method `{other}`");
+                println!("farcooler: unhandled ACP method `{other}`");
                 if let Some(id) = id {
                     // Answer anyway. An empty result is a poor answer, but a
                     // turn that continues beats one that waits forever.
@@ -905,7 +905,7 @@ mod tests {
     fn an_fs_write_becomes_a_diff_carrying_what_was_there_before() {
         // Tier 2's whole justification: the diff is a protocol fact, not a
         // reconstruction from a vendor's private tool schema.
-        let dir = std::env::temp_dir().join(format!("overnight-sess-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("farcooler-sess-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("a.txt");
         std::fs::write(&file, "old\n").unwrap();
@@ -918,7 +918,7 @@ mod tests {
 
     #[test]
     fn a_write_outside_the_worktree_is_refused_and_says_so() {
-        let dir = std::env::temp_dir().join(format!("overnight-sess2-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("farcooler-sess2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(handle_fs_write(&dir, "/etc/passwd", "x").is_err());
     }

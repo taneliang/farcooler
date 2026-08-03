@@ -20,7 +20,7 @@ const MIGRATIONS: &[Migration] = &[
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
 
-pub(crate) fn read_schema_version(conn: &Connection) -> overnight_core::Result<u32> {
+pub(crate) fn read_schema_version(conn: &Connection) -> farcooler_core::Result<u32> {
     let raw: Option<String> = conn
         .query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| r.get(0))
         .optional()
@@ -30,7 +30,7 @@ pub(crate) fn read_schema_version(conn: &Connection) -> overnight_core::Result<u
 
 /// Apply every migration from `from_version` up to `CURRENT_SCHEMA_VERSION` in
 /// one transaction, then advance the watermark. A no-op when already current.
-pub(crate) fn migrate(conn: &mut Connection, from_version: u32) -> overnight_core::Result<()> {
+pub(crate) fn migrate(conn: &mut Connection, from_version: u32) -> farcooler_core::Result<()> {
     if from_version >= CURRENT_SCHEMA_VERSION {
         return Ok(());
     }
@@ -86,7 +86,7 @@ fn migration_0001_initial_schema(tx: &Transaction) -> rusqlite::Result<()> {
         -- here: no `state`, no `is_running`, no `pid`. This table stores only
         -- intent, confirmation that creation once proved a live pane, and
         -- exit facts actually observed. There is deliberately no column a
-        -- stale "running" could ever occupy. See overnight_core::derive.
+        -- stale "running" could ever occupy. See farcooler_core::derive.
         CREATE TABLE terminals (
             id BLOB PRIMARY KEY,
             workspace_id BLOB NOT NULL REFERENCES workspaces(id),

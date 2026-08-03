@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// Shared because it is the same three states — signed out, working, signed in
 /// — and because the explanation underneath is the part that matters most: this
-/// is the one place Overnight asks for an account, and someone reading it should
+/// is the one place Far Cooler asks for an account, and someone reading it should
 /// find out immediately that it buys notifications and nothing else. The fleet
 /// works signed out. It always will.
 public struct AccountSection: View {
@@ -55,7 +55,7 @@ public struct AccountSection: View {
         } footer: {
             Text(
                 "An account exists for one reason: so a machine can wake this device "
-                    + "when an agent needs you. Everything else in Overnight works signed "
+                    + "when an agent needs you. Everything else in Far Cooler works signed "
                     + "out, over your own SSH, with nothing in the middle."
             )
             .font(.caption)

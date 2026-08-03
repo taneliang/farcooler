@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use overnight_core::{DomainError, Result};
+use farcooler_core::{DomainError, Result};
 use tokio::process::Command;
 
 #[derive(Debug)]
@@ -304,7 +304,7 @@ mod tests {
     use std::process::Command as SyncCommand;
 
     fn scratch(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("overnight-git-test-{name}-{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("farcooler-git-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
@@ -445,9 +445,9 @@ mod tests {
 
 /// A worktree that already exists on disk.
 ///
-/// Found rather than created. People arrive at Overnight with a repository they
+/// Found rather than created. People arrive at Far Cooler with a repository they
 /// have been using for months and a handful of worktrees already checked out —
-/// and until they can see those here, Overnight is a tool that only knows about
+/// and until they can see those here, Far Cooler is a tool that only knows about
 /// work it started itself, which is a bad first impression and a lot of manual
 /// re-creation.
 #[derive(Debug, Clone, PartialEq, Eq)]

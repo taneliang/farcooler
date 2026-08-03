@@ -9,7 +9,7 @@ fn main() -> Result<()> {
         std::env::set_var("PROTOC", protoc);
     }
 
-    println!("cargo:rerun-if-changed=../../proto/overnight.proto");
+    println!("cargo:rerun-if-changed=../../proto/farcooler.proto");
 
     // The build stamp every component reports.
     //
@@ -36,7 +36,7 @@ fn main() -> Result<()> {
         .filter(|o| o.status.success())
         .is_some_and(|o| !o.stdout.is_empty());
     println!(
-        "cargo:rustc-env=OVERNIGHT_BUILD={}+{}{}",
+        "cargo:rustc-env=FARCOOLER_BUILD={}+{}{}",
         env!("CARGO_PKG_VERSION"),
         sha,
         if dirty { "-dirty" } else { "" }
@@ -44,6 +44,6 @@ fn main() -> Result<()> {
 
     let mut cfg = prost_build::Config::new();
     cfg.bytes(["."]);
-    cfg.compile_protos(&["../../proto/overnight.proto"], &["../../proto"])?;
+    cfg.compile_protos(&["../../proto/farcooler.proto"], &["../../proto"])?;
     Ok(())
 }

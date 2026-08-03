@@ -1,25 +1,25 @@
 [package]
-name = "overnight-daemon"
+name = "farcooler-daemon"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [lib]
-name = "overnight_daemon"
+name = "farcooler_daemon"
 path = "src/lib.rs"
 
 [[bin]]
-name = "overnightd"
+name = "farcoolerd"
 path = "src/main.rs"
 
 [dependencies]
-overnight-agent.workspace = true
-overnight-core.workspace = true
-overnight-protocol.workspace = true
-overnight-store.workspace = true
-overnight-tmux.workspace = true
-overnight-transport.workspace = true
+farcooler-agent.workspace = true
+farcooler-core.workspace = true
+farcooler-protocol.workspace = true
+farcooler-store.workspace = true
+farcooler-tmux.workspace = true
+farcooler-transport.workspace = true
 prost-types.workspace = true
 bytes.workspace = true
 tokio.workspace = true
@@ -35,4 +35,4 @@ libc.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
-overnight-transport.workspace = true
+farcooler-transport.workspace = true

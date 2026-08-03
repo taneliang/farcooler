@@ -72,7 +72,7 @@ describe('the shape of the API', () => {
 describe('/v1/auth/token', () => {
   it('refuses an exchange with no PKCE verifier', async () => {
     // Without the verifier there is nothing binding the code to the app that
-    // started sign-in, and `overnight://` is a scheme any app can claim.
+    // started sign-in, and `farcooler://` is a scheme any app can claim.
     expect((await post('/v1/auth/token', { code: 'abc' })).status).toBe(400)
   })
 

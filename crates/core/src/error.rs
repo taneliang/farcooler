@@ -5,7 +5,7 @@
 //! needs a specific one. `retryable` is decided once per variant beside its
 //! code, never guessed at a call site, because clients act on it automatically.
 
-use overnight_protocol::v1::ErrorCode;
+use farcooler_protocol::v1::ErrorCode;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DomainError {
@@ -65,7 +65,7 @@ pub enum DomainError {
 
     /// Deliberately distinct from `RunningProcesses`: nothing is running, but
     /// removing anyway would strand records and leave worktree directories on
-    /// disk that Overnight would no longer be allowed to clean up. A client has
+    /// disk that Far Cooler would no longer be allowed to clean up. A client has
     /// to tell the user to remove those first, which it cannot do if this
     /// arrives as "managed processes are still running".
     #[error("workspaces still exist under this resource")]

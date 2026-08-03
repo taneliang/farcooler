@@ -7,9 +7,9 @@
 //!
 //! The model instead is a **request queue with polling**:
 //!
-//! 1. `overnight_call` submits work and returns immediately with a ticket.
+//! 1. `farcooler_call` submits work and returns immediately with a ticket.
 //! 2. The runtime, on its own thread, does the work.
-//! 3. `overnight_poll` returns finished results, oldest first.
+//! 3. `farcooler_poll` returns finished results, oldest first.
 //!
 //! A UI already has a frame loop or a timer, so polling costs it nothing and
 //! removes every question about callback threading, re-entrancy, and what
@@ -28,7 +28,7 @@
 //! drift out of date.
 //!
 //! The contract: pointers are either null or valid for the call's duration, a
-//! handle came from `overnight_client_new` and has not been freed, and strings
+//! handle came from `farcooler_client_new` and has not been freed, and strings
 //! passed in are NUL-terminated UTF-8. Null is checked everywhere.
 #![allow(clippy::missing_safety_doc)]
 
@@ -56,9 +56,9 @@ pub struct ClientHandle {
     streams: Arc<Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
-/// Create a client. Free with `overnight_client_free`.
+/// Create a client. Free with `farcooler_client_free`.
 #[unsafe(no_mangle)]
-pub extern "C" fn overnight_client_new() -> *mut c_void {
+pub extern "C" fn farcooler_client_new() -> *mut c_void {
     // A dedicated multi-threaded runtime: SSH keepalives have to keep running
     // while a call is in flight, which a single-threaded runtime driven only
     // during calls could not do.
@@ -83,7 +83,7 @@ pub extern "C" fn overnight_client_new() -> *mut c_void {
 
 /// Destroy a client, ending any SSH session it holds. Safe with null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_client_free(handle: *mut c_void) {
+pub unsafe extern "C" fn farcooler_client_free(handle: *mut c_void) {
     if handle.is_null() {
         return;
     }
@@ -106,7 +106,7 @@ pub unsafe extern "C" fn overnight_client_free(handle: *mut c_void) {
 ///
 /// Returns a ticket. Poll for the result.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_client_connect(
+pub unsafe extern "C" fn farcooler_client_connect(
     handle: *mut c_void,
     config: *const c_char,
 ) -> u64 {
@@ -139,7 +139,7 @@ pub unsafe extern "C" fn overnight_client_connect(
 ///
 /// Returns a ticket, or 0 if the arguments could not be read at all.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_client_call(
+pub unsafe extern "C" fn farcooler_client_call(
     handle: *mut c_void,
     method: *const c_char,
     args: *const c_char,
@@ -177,20 +177,20 @@ pub unsafe extern "C" fn overnight_client_call(
 ///
 /// ```text
 /// {"private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
-///  "public_key": "ssh-ed25519 AAAA... overnight"}
+///  "public_key": "ssh-ed25519 AAAA... farcooler"}
 /// ```
 ///
 /// Returns the number of bytes needed. If that exceeds `capacity`, nothing is
 /// written; call again with a larger buffer. 2048 bytes is ample.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_client_generate_key(
+pub unsafe extern "C" fn farcooler_client_generate_key(
     comment: *const c_char,
     out: *mut u8,
     capacity: usize,
 ) -> usize {
     use russh::keys::ssh_key::{Algorithm, LineEnding, PrivateKey};
 
-    let comment = unsafe { read_str(comment) }.unwrap_or_else(|| "overnight".into());
+    let comment = unsafe { read_str(comment) }.unwrap_or_else(|| "farcooler".into());
 
     let Ok(mut key) = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519) else {
         return 0;
@@ -222,7 +222,7 @@ pub unsafe extern "C" fn overnight_client_generate_key(
 ///
 /// Returns false if the client is not connected over ssh.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_client_stream_start(
+pub unsafe extern "C" fn farcooler_client_stream_start(
     handle: *mut c_void,
     terminal: *const c_char,
 ) -> bool {
@@ -263,7 +263,7 @@ pub unsafe extern "C" fn overnight_client_stream_start(
                 Ok(0) => break,
                 Ok(n) => push_line(
                     &finished,
-                    json!({ "stream": key, "chunk": overnight_core::base64::encode(&buf[..n]) }).to_string(),
+                    json!({ "stream": key, "chunk": farcooler_core::base64::encode(&buf[..n]) }).to_string(),
                 ),
                 Err(_) => break,
             }
@@ -280,7 +280,7 @@ pub unsafe extern "C" fn overnight_client_stream_start(
 
 /// Stop streaming a terminal. Safe to call when nothing is running.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_client_stream_stop(
+pub unsafe extern "C" fn farcooler_client_stream_stop(
     handle: *mut c_void,
     terminal: *const c_char,
 ) {
@@ -300,9 +300,9 @@ pub unsafe extern "C" fn overnight_client_stream_stop(
 /// offering a key it no longer knew the name of, and reported a stale one to the
 /// human trying to authorise it.
 ///
-/// Returns the number of bytes needed, as `overnight_client_generate_key` does.
+/// Returns the number of bytes needed, as `farcooler_client_generate_key` does.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_client_public_key(
+pub unsafe extern "C" fn farcooler_client_public_key(
     private_key: *const c_char,
     out: *mut u8,
     capacity: usize,
@@ -326,7 +326,7 @@ pub unsafe extern "C" fn overnight_client_public_key(
 /// The returned pointer is owned by the handle and stays valid until the next
 /// call on it. Each result is returned exactly once.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_client_poll(handle: *mut c_void) -> *const c_char {
+pub unsafe extern "C" fn farcooler_client_poll(handle: *mut c_void) -> *const c_char {
     let Some(h) = (unsafe { as_handle(handle) }) else { return std::ptr::null() };
     let next = h.finished.lock().expect("queue").pop_front();
     match next {
@@ -340,7 +340,7 @@ pub unsafe extern "C" fn overnight_client_poll(handle: *mut c_void) -> *const c_
 
 /// True once a session is established.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_client_connected(handle: *mut c_void) -> bool {
+pub unsafe extern "C" fn farcooler_client_connected(handle: *mut c_void) -> bool {
     let Some(h) = (unsafe { as_handle(handle) }) else { return false };
     // try_lock rather than blocking: this is called from a UI thread, and a
     // call in flight holds the session for as long as the host takes to answer.
@@ -365,19 +365,19 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         // as the client asking.
         //
         // Exposed because the phone had no way to find out. The Mac reads it
-        // from `overnight status --json`, and a mismatch there is the thing
+        // from `farcooler status --json`, and a mismatch there is the thing
         // that makes a fix you already shipped go on reproducing — so a client
         // that cannot see it is a client that cannot explain itself.
         "host" => {
             let facts = session.host().await.map_err(|e| e.to_string())?;
             Ok(json!({
                 "daemonVersion": facts.daemon_version,
-                "clientVersion": overnight_protocol::BUILD,
-                "buildsMatch": facts.daemon_version == overnight_protocol::BUILD,
+                "clientVersion": farcooler_protocol::BUILD,
+                "buildsMatch": facts.daemon_version == farcooler_protocol::BUILD,
                 "platform": facts.platform,
                 "livePanes": facts.live_terminal_count,
                 "healthy": facts.self_health
-                    != overnight_protocol::v1::SelfHealth::Degraded as i32,
+                    != farcooler_protocol::v1::SelfHealth::Degraded as i32,
             }))
         }
 
@@ -458,7 +458,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             Ok(json!({
                 // Absent when unchanged, so an idle pane costs a few bytes on
                 // the wire instead of a whole capture several times a second.
-                "contents": overnight_core::base64::encode(&screen.contents),
+                "contents": farcooler_core::base64::encode(&screen.contents),
                 "columns": screen.columns,
                 "rows": screen.rows,
                 "cursorColumn": screen.cursor_column,
@@ -496,8 +496,8 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         // from, so echoing the row here would be a second, staler copy of it.
         "terminal.set_pane_mode" => {
             let mode = match text("paneMode").as_str() {
-                "agent" => overnight_protocol::v1::PaneMode::Agent,
-                "terminal" => overnight_protocol::v1::PaneMode::Terminal,
+                "agent" => farcooler_protocol::v1::PaneMode::Agent,
+                "terminal" => farcooler_protocol::v1::PaneMode::Terminal,
                 // Refused rather than guessed at: a client asking to switch to
                 // a mode that does not exist has a bug worth surfacing, not a
                 // default worth picking for it.
@@ -546,7 +546,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
                         .filter_map(|item| {
                             let mime = item.get("mime")?.as_str()?.to_string();
                             let data =
-                                overnight_core::base64::decode(item.get("base64")?.as_str()?)?;
+                                farcooler_core::base64::decode(item.get("base64")?.as_str()?)?;
                             Some((mime, data))
                         })
                         .collect()
@@ -723,33 +723,33 @@ mod tests {
 
     #[test]
     fn results_come_back_in_order_and_only_once() {
-        let handle = overnight_client_new();
+        let handle = farcooler_client_new();
         assert!(!handle.is_null());
 
         let h = unsafe { as_handle(handle) }.unwrap();
         push(&h.finished, 1, Ok(json!({"a": 1})));
         push(&h.finished, 2, Err("nope".into()));
 
-        let first = unsafe { overnight_client_poll(handle) };
+        let first = unsafe { farcooler_client_poll(handle) };
         let first = unsafe { CStr::from_ptr(first) }.to_str().unwrap().to_string();
         assert!(first.contains("\"ticket\":1") && first.contains("\"ok\":true"));
 
-        let second = unsafe { overnight_client_poll(handle) };
+        let second = unsafe { farcooler_client_poll(handle) };
         let second = unsafe { CStr::from_ptr(second) }.to_str().unwrap().to_string();
         assert!(second.contains("\"ticket\":2") && second.contains("\"ok\":false"));
         assert!(second.contains("nope"));
 
         // Drained.
-        assert!(unsafe { overnight_client_poll(handle) }.is_null());
-        unsafe { overnight_client_free(handle) };
+        assert!(unsafe { farcooler_client_poll(handle) }.is_null());
+        unsafe { farcooler_client_free(handle) };
     }
 
     #[test]
     fn a_generated_key_is_a_usable_openssh_pair() {
         let mut buffer = vec![0u8; 4096];
         let n = unsafe {
-            overnight_client_generate_key(
-                c"overnight-test".as_ptr(),
+            farcooler_client_generate_key(
+                c"farcooler-test".as_ptr(),
                 buffer.as_mut_ptr(),
                 buffer.len(),
             )
@@ -762,7 +762,7 @@ mod tests {
 
         assert!(private.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"));
         assert!(public.starts_with("ssh-ed25519 "));
-        assert!(public.ends_with("overnight-test"), "the comment identifies the device");
+        assert!(public.ends_with("farcooler-test"), "the comment identifies the device");
 
         // The real assertion: the private key we hand out is one our own SSH
         // client can load. A key that generates but cannot be used would only
@@ -774,8 +774,8 @@ mod tests {
     fn two_generated_keys_differ() {
         let mut a = vec![0u8; 4096];
         let mut b = vec![0u8; 4096];
-        let na = unsafe { overnight_client_generate_key(std::ptr::null(), a.as_mut_ptr(), a.len()) };
-        let nb = unsafe { overnight_client_generate_key(std::ptr::null(), b.as_mut_ptr(), b.len()) };
+        let na = unsafe { farcooler_client_generate_key(std::ptr::null(), a.as_mut_ptr(), a.len()) };
+        let nb = unsafe { farcooler_client_generate_key(std::ptr::null(), b.as_mut_ptr(), b.len()) };
         assert_ne!(a[..na], b[..nb]);
     }
 
@@ -783,7 +783,7 @@ mod tests {
     fn generating_into_a_short_buffer_reports_the_size_and_writes_nothing() {
         let mut tiny = [0u8; 4];
         let needed = unsafe {
-            overnight_client_generate_key(std::ptr::null(), tiny.as_mut_ptr(), tiny.len())
+            farcooler_client_generate_key(std::ptr::null(), tiny.as_mut_ptr(), tiny.len())
         };
         assert!(needed > tiny.len());
         assert_eq!(tiny, [0, 0, 0, 0], "a truncated private key would be worse than none");
@@ -794,17 +794,17 @@ mod tests {
         // A UI bug must not take down the app.
         let null = std::ptr::null_mut();
         unsafe {
-            assert_eq!(overnight_client_connect(null, std::ptr::null()), 0);
-            assert_eq!(overnight_client_call(null, std::ptr::null(), std::ptr::null()), 0);
-            assert!(overnight_client_poll(null).is_null());
-            assert!(!overnight_client_connected(null));
-            overnight_client_free(null);
+            assert_eq!(farcooler_client_connect(null, std::ptr::null()), 0);
+            assert_eq!(farcooler_client_call(null, std::ptr::null(), std::ptr::null()), 0);
+            assert!(farcooler_client_poll(null).is_null());
+            assert!(!farcooler_client_connected(null));
+            farcooler_client_free(null);
         }
 
-        let handle = overnight_client_new();
+        let handle = farcooler_client_new();
         unsafe {
-            assert_eq!(overnight_client_call(handle, std::ptr::null(), std::ptr::null()), 0);
-            overnight_client_free(handle);
+            assert_eq!(farcooler_client_call(handle, std::ptr::null(), std::ptr::null()), 0);
+            farcooler_client_free(handle);
         }
     }
 }
@@ -828,11 +828,11 @@ mod encoding_tests {
     #[test]
     fn base64_survives_bytes_that_are_not_text() {
         // Kept after the local encoder was deleted in favour of
-        // `overnight_core::base64`: the shared module proves it matches the
+        // `farcooler_core::base64`: the shared module proves it matches the
         // RFC, and this proves the thing THIS crate depends on — a screen is
         // escape sequences and high bytes, not a string.
-        assert_eq!(overnight_core::base64::encode(&[0x1b, 0x5b, 0x33, 0x31, 0x6d]), "G1szMW0=");
-        assert_eq!(overnight_core::base64::encode(&[0xff, 0x00, 0xfe]), "/wD+");
+        assert_eq!(farcooler_core::base64::encode(&[0x1b, 0x5b, 0x33, 0x31, 0x6d]), "G1szMW0=");
+        assert_eq!(farcooler_core::base64::encode(&[0xff, 0x00, 0xfe]), "/wD+");
     }
 
     #[test]
@@ -855,7 +855,7 @@ mod identity_tests {
         let comment = CString::new("test").unwrap();
         let mut buf = vec![0u8; 4096];
         let n = unsafe {
-            super::overnight_client_generate_key(comment.as_ptr(), buf.as_mut_ptr(), buf.len())
+            super::farcooler_client_generate_key(comment.as_ptr(), buf.as_mut_ptr(), buf.len())
         };
         assert!(n > 0 && n <= buf.len());
 
@@ -866,7 +866,7 @@ mod identity_tests {
         let key = CString::new(private).unwrap();
         let mut out = vec![0u8; 2048];
         let n = unsafe {
-            super::overnight_client_public_key(key.as_ptr(), out.as_mut_ptr(), out.len())
+            super::farcooler_client_public_key(key.as_ptr(), out.as_mut_ptr(), out.len())
         };
         assert!(n > 0 && n <= out.len());
         let derived = String::from_utf8_lossy(&out[..n]).into_owned();
@@ -884,7 +884,7 @@ mod identity_tests {
         let junk = CString::new("not a key").unwrap();
         let mut out = vec![0u8; 256];
         assert_eq!(
-            unsafe { super::overnight_client_public_key(junk.as_ptr(), out.as_mut_ptr(), out.len()) },
+            unsafe { super::farcooler_client_public_key(junk.as_ptr(), out.as_mut_ptr(), out.len()) },
             0
         );
     }

@@ -11,14 +11,14 @@
 
 use std::sync::Arc;
 
-use overnight_daemon::{rpc::Rpc, service::Service};
-use overnight_protocol::v1::{ErrorCode, Scope, request, result};
-use overnight_transport::{Client, ClientError, HandshakeConfig, UnixListenerServer, request};
+use farcooler_daemon::{rpc::Rpc, service::Service};
+use farcooler_protocol::v1::{ErrorCode, Scope, request, result};
+use farcooler_transport::{Client, ClientError, HandshakeConfig, UnixListenerServer, request};
 
 /// A daemon on a private socket with a private database.
 ///
 /// The service is opened at an EXPLICIT directory, never through
-/// `OVERNIGHT_HOME`. The environment is process-global and these tests run in
+/// `FARCOOLER_HOME`. The environment is process-global and these tests run in
 /// parallel, so routing through it would have each test reading whichever
 /// database the most recent `start()` happened to point at — which is exactly
 /// the failure this harness produced the first time it was written.
@@ -68,14 +68,14 @@ static TMUX_SERVERS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
 async fn start(scope: Scope) -> Harness {
     let permit = TMUX_SERVERS.clone().acquire_owned().await.expect("permit");
     let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("overnightd.sock");
+    let socket = dir.path().join("farcoolerd.sock");
     let service = Arc::new(Service::open_in(dir.path().to_path_buf()).await.expect("service"));
     let tmux_socket = service.tmux.socket().to_string();
     let server = UnixListenerServer::bind(&socket).expect("bind");
 
     // The watcher is constructed but not run: these tests are about dispatch,
     // and a sampling loop would make them race a tmux that may not be there.
-    let watcher = overnight_daemon::watch::Watcher::new(service.clone());
+    let watcher = farcooler_daemon::watch::Watcher::new(service.clone());
 
     let cfg = HandshakeConfig { daemon_version: "test".into(), granted_scope: scope };
     tokio::spawn(async move {
@@ -91,17 +91,17 @@ async fn start(scope: Scope) -> Harness {
 #[derive(Clone)]
 struct Factory {
     service: Arc<Service>,
-    watcher: Arc<overnight_daemon::watch::Watcher>,
+    watcher: Arc<farcooler_daemon::watch::Watcher>,
     scope: Scope,
 }
 
-impl overnight_transport::Handler for Factory {
+impl farcooler_transport::Handler for Factory {
     fn handle(
         &self,
-        req: overnight_protocol::v1::Request,
-    ) -> impl std::future::Future<Output = overnight_protocol::v1::Response> + Send {
+        req: farcooler_protocol::v1::Request,
+    ) -> impl std::future::Future<Output = farcooler_protocol::v1::Response> + Send {
         let rpc = Rpc::new(self.service.clone(), self.watcher.clone(), self.scope);
-        async move { overnight_transport::Handler::handle(&rpc, req).await }
+        async move { farcooler_transport::Handler::handle(&rpc, req).await }
     }
 }
 
@@ -123,7 +123,7 @@ async fn a_client_can_ask_the_daemon_what_it_is() {
     let Some(result::Value::DaemonVersion(v)) = result.value else {
         panic!("expected a DaemonVersion, got {:?}", result.value);
     };
-    assert!(v.protocol_versions.contains(&overnight_protocol::PROTOCOL_VERSION));
+    assert!(v.protocol_versions.contains(&farcooler_protocol::PROTOCOL_VERSION));
     assert!(!v.capabilities.is_empty());
 }
 
@@ -152,7 +152,7 @@ async fn a_read_scoped_client_is_refused_a_mutation_with_a_specific_code() {
 
     let mut req = request("repository.register");
     req.payload = Some(request::Payload::RepositoryRegister(
-        overnight_protocol::v1::RepositoryRegister { relative_path: "/tmp".into() },
+        farcooler_protocol::v1::RepositoryRegister { relative_path: "/tmp".into() },
     ));
 
     match client.call(req).await {
@@ -217,7 +217,7 @@ async fn adding_a_repository_root_persists_and_is_listed_back() {
     let repo = tempfile::tempdir().unwrap();
     let mut req = request("repository_root.add");
     req.payload = Some(request::Payload::RepositoryRootAdd(
-        overnight_protocol::v1::RepositoryRootAdd {
+        farcooler_protocol::v1::RepositoryRootAdd {
             absolute_path: repo.path().to_string_lossy().into_owned(),
             typed_confirmation: String::new(),
         },
@@ -244,7 +244,7 @@ async fn a_second_client_sees_what_the_first_one_wrote() {
     let repo = tempfile::tempdir().unwrap();
     let mut req = request("repository_root.add");
     req.payload = Some(request::Payload::RepositoryRootAdd(
-        overnight_protocol::v1::RepositoryRootAdd {
+        farcooler_protocol::v1::RepositoryRootAdd {
             absolute_path: repo.path().to_string_lossy().into_owned(),
             typed_confirmation: String::new(),
         },
@@ -267,7 +267,7 @@ async fn a_root_is_removed_only_with_its_exact_name() {
 
     let mut add = request("repository_root.add");
     add.payload = Some(request::Payload::RepositoryRootAdd(
-        overnight_protocol::v1::RepositoryRootAdd {
+        farcooler_protocol::v1::RepositoryRootAdd {
             absolute_path: repo.path().to_string_lossy().into_owned(),
             typed_confirmation: String::new(),
         },
@@ -280,7 +280,7 @@ async fn a_root_is_removed_only_with_its_exact_name() {
     let mut wrong = request("repository_root.remove");
     wrong.target_resource_id = Some(root.id.clone());
     wrong.payload = Some(request::Payload::TypedConfirmation(
-        overnight_protocol::v1::TypedConfirmation { typed_confirmation: "nope".into() },
+        farcooler_protocol::v1::TypedConfirmation { typed_confirmation: "nope".into() },
     ));
     match client.call(wrong).await {
         Err(ClientError::Daemon { code, .. }) => {
@@ -297,7 +297,7 @@ async fn a_root_is_removed_only_with_its_exact_name() {
     let mut right = request("repository_root.remove");
     right.target_resource_id = Some(root.id.clone());
     right.payload = Some(request::Payload::TypedConfirmation(
-        overnight_protocol::v1::TypedConfirmation { typed_confirmation: name },
+        farcooler_protocol::v1::TypedConfirmation { typed_confirmation: name },
     ));
     client.call(right).await.expect("remove");
 
@@ -312,7 +312,7 @@ async fn a_root_is_removed_only_with_its_exact_name() {
 #[tokio::test]
 async fn removing_a_root_leaves_no_orphaned_repositories() {
     // A repository exists only as a member of a root. Leaving one behind would
-    // strand a row pointing at a tree Overnight may no longer touch.
+    // strand a row pointing at a tree Far Cooler may no longer touch.
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
 
@@ -328,7 +328,7 @@ async fn removing_a_root_leaves_no_orphaned_repositories() {
 
     let mut add = request("repository_root.add");
     add.payload = Some(request::Payload::RepositoryRootAdd(
-        overnight_protocol::v1::RepositoryRootAdd {
+        farcooler_protocol::v1::RepositoryRootAdd {
             absolute_path: dir.path().to_string_lossy().into_owned(),
             typed_confirmation: String::new(),
         },
@@ -338,7 +338,7 @@ async fn removing_a_root_leaves_no_orphaned_repositories() {
 
     let mut register = request("repository.register");
     register.payload = Some(request::Payload::RepositoryRegister(
-        overnight_protocol::v1::RepositoryRegister {
+        farcooler_protocol::v1::RepositoryRegister {
             relative_path: repo_path.to_string_lossy().into_owned(),
         },
     ));
@@ -347,7 +347,7 @@ async fn removing_a_root_leaves_no_orphaned_repositories() {
     let mut remove = request("repository_root.remove");
     remove.target_resource_id = Some(root.id.clone());
     remove.payload = Some(request::Payload::TypedConfirmation(
-        overnight_protocol::v1::TypedConfirmation { typed_confirmation: name },
+        farcooler_protocol::v1::TypedConfirmation { typed_confirmation: name },
     ));
     client.call(remove).await.expect("remove");
 
@@ -383,7 +383,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
 
     let mut add = request("repository_root.add");
     add.payload = Some(request::Payload::RepositoryRootAdd(
-        overnight_protocol::v1::RepositoryRootAdd {
+        farcooler_protocol::v1::RepositoryRootAdd {
             absolute_path: dir.path().to_string_lossy().into_owned(),
             typed_confirmation: String::new(),
         },
@@ -393,7 +393,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
 
     let mut register = request("repository.register");
     register.payload = Some(request::Payload::RepositoryRegister(
-        overnight_protocol::v1::RepositoryRegister {
+        farcooler_protocol::v1::RepositoryRegister {
             relative_path: repo_path.to_string_lossy().into_owned(),
         },
     ));
@@ -403,7 +403,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
     let mut create = request("workspace.create");
     create.target_resource_id = Some(repository.id.clone());
     create.payload = Some(request::Payload::WorkspaceCreate(
-        overnight_protocol::v1::WorkspaceCreate {
+        farcooler_protocol::v1::WorkspaceCreate {
             task_name: "a task".into(),
             branch: "feat/x".into(),
             base_revision: "HEAD".into(),
@@ -416,7 +416,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
     let mut remove = request("repository_root.remove");
     remove.target_resource_id = Some(root.id.clone());
     remove.payload = Some(request::Payload::TypedConfirmation(
-        overnight_protocol::v1::TypedConfirmation { typed_confirmation: name },
+        farcooler_protocol::v1::TypedConfirmation { typed_confirmation: name },
     ));
     match client.call(remove).await {
         Err(ClientError::Daemon { code, retryable, .. }) => {
@@ -431,7 +431,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
 async fn a_workspace(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
     dir: &std::path::Path,
-) -> overnight_protocol::v1::Workspace {
+) -> farcooler_protocol::v1::Workspace {
     let repo_path = dir.join("demo");
     std::fs::create_dir(&repo_path).unwrap();
     for args in [
@@ -449,7 +449,7 @@ async fn a_workspace(
 
     let mut add = request("repository_root.add");
     add.payload = Some(request::Payload::RepositoryRootAdd(
-        overnight_protocol::v1::RepositoryRootAdd {
+        farcooler_protocol::v1::RepositoryRootAdd {
             absolute_path: dir.to_string_lossy().into_owned(),
             typed_confirmation: String::new(),
         },
@@ -458,7 +458,7 @@ async fn a_workspace(
 
     let mut register = request("repository.register");
     register.payload = Some(request::Payload::RepositoryRegister(
-        overnight_protocol::v1::RepositoryRegister {
+        farcooler_protocol::v1::RepositoryRegister {
             relative_path: repo_path.to_string_lossy().into_owned(),
         },
     ));
@@ -468,7 +468,7 @@ async fn a_workspace(
     let mut create = request("workspace.create");
     create.target_resource_id = Some(repository.id.clone());
     create.payload = Some(request::Payload::WorkspaceCreate(
-        overnight_protocol::v1::WorkspaceCreate {
+        farcooler_protocol::v1::WorkspaceCreate {
             task_name: "tiling".into(),
             branch: "feat/tiling".into(),
             base_revision: "HEAD".into(),
@@ -485,8 +485,8 @@ async fn layout_call(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
     method: &str,
     workspace: &bytes::Bytes,
-    update: overnight_protocol::v1::LayoutUpdate,
-) -> overnight_protocol::v1::PaneGroupList {
+    update: farcooler_protocol::v1::LayoutUpdate,
+) -> farcooler_protocol::v1::PaneGroupList {
     let mut req = request(method);
     req.target_resource_id = Some(workspace.clone());
     req.payload = Some(request::Payload::LayoutUpdate(update));
@@ -529,7 +529,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
     let mut create = request("terminal.create");
     create.target_resource_id = Some(workspace.id.clone());
     create.payload = Some(request::Payload::TerminalCreate(
-        overnight_protocol::v1::TerminalCreate {
+        farcooler_protocol::v1::TerminalCreate {
             title: "one".into(),
             command_preset: "shell".into(),
             join_active_group: false,
@@ -542,9 +542,9 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
         &mut client,
         "layout.split",
         &workspace.id,
-        overnight_protocol::v1::LayoutUpdate {
+        farcooler_protocol::v1::LayoutUpdate {
             target: Some(one.id.clone()),
-            side: overnight_protocol::v1::SplitSide::Right as i32,
+            side: farcooler_protocol::v1::SplitSide::Right as i32,
             command_preset: "shell".into(),
             ..Default::default()
         },
@@ -564,7 +564,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
         &mut client,
         "layout.zoom",
         &workspace.id,
-        overnight_protocol::v1::LayoutUpdate { zoom: Some(first.clone()), ..Default::default() },
+        farcooler_protocol::v1::LayoutUpdate { zoom: Some(first.clone()), ..Default::default() },
     )
     .await;
     let pane = zoomed.items[0].panes.iter().find(|p| p.terminal_id == first).expect("first");
@@ -574,7 +574,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
         &mut client,
         "layout.focus",
         &workspace.id,
-        overnight_protocol::v1::LayoutUpdate { step: Some(1), ..Default::default() },
+        farcooler_protocol::v1::LayoutUpdate { step: Some(1), ..Default::default() },
     )
     .await;
     let now = moved.items[0].panes.iter().find(|p| p.terminal_id == second).expect("second");
@@ -621,11 +621,11 @@ async fn a_terminal(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
     workspace: &bytes::Bytes,
     title: &str,
-) -> overnight_protocol::v1::Terminal {
+) -> farcooler_protocol::v1::Terminal {
     let mut create = request("terminal.create");
     create.target_resource_id = Some(workspace.clone());
     create.payload = Some(request::Payload::TerminalCreate(
-        overnight_protocol::v1::TerminalCreate {
+        farcooler_protocol::v1::TerminalCreate {
             title: title.into(),
             command_preset: "shell".into(),
             join_active_group: false,
@@ -645,7 +645,7 @@ async fn a_terminal(
     let mut viewport = request("layout.viewport");
     viewport.target_resource_id = Some(workspace.clone());
     viewport.payload = Some(request::Payload::LayoutUpdate(
-        overnight_protocol::v1::LayoutUpdate {
+        farcooler_protocol::v1::LayoutUpdate {
             columns: Some(120),
             rows: Some(40),
             ..Default::default()
@@ -655,8 +655,8 @@ async fn a_terminal(
     terminal
 }
 
-fn split(target: &bytes::Bytes, side: overnight_protocol::v1::SplitSide) -> overnight_protocol::v1::LayoutUpdate {
-    overnight_protocol::v1::LayoutUpdate {
+fn split(target: &bytes::Bytes, side: farcooler_protocol::v1::SplitSide) -> farcooler_protocol::v1::LayoutUpdate {
+    farcooler_protocol::v1::LayoutUpdate {
         target: Some(target.clone()),
         side: side as i32,
         command_preset: "shell".into(),
@@ -697,7 +697,7 @@ async fn splitting_right_puts_the_new_pane_on_the_right() {
         &mut client,
         "layout.split",
         &workspace.id,
-        split(&first.id, overnight_protocol::v1::SplitSide::Right),
+        split(&first.id, farcooler_protocol::v1::SplitSide::Right),
     )
     .await;
 
@@ -725,7 +725,7 @@ async fn splitting_left_puts_the_new_pane_on_the_left() {
         &mut client,
         "layout.split",
         &workspace.id,
-        split(&first.id, overnight_protocol::v1::SplitSide::Left),
+        split(&first.id, farcooler_protocol::v1::SplitSide::Left),
     )
     .await;
     let group = &after.items[0];
@@ -746,7 +746,7 @@ async fn splitting_downwards_stacks_rather_than_sitting_beside() {
         &mut client,
         "layout.split",
         &workspace.id,
-        split(&first.id, overnight_protocol::v1::SplitSide::Bottom),
+        split(&first.id, farcooler_protocol::v1::SplitSide::Bottom),
     )
     .await;
     let group = &after.items[0];
@@ -760,7 +760,7 @@ async fn splitting_downwards_stacks_rather_than_sitting_beside() {
 async fn a_pane_splits_at_any_depth() {
     // The claim the old preset model could not make. Splitting a pane that is
     // itself half of a split has to nest, not flatten — which it does, because
-    // tmux keeps the tree and Overnight does not.
+    // tmux keeps the tree and Far Cooler does not.
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
@@ -771,7 +771,7 @@ async fn a_pane_splits_at_any_depth() {
         &mut client,
         "layout.split",
         &workspace.id,
-        split(&first.id, overnight_protocol::v1::SplitSide::Right),
+        split(&first.id, farcooler_protocol::v1::SplitSide::Right),
     )
     .await;
     let second = after.items[0]
@@ -788,7 +788,7 @@ async fn a_pane_splits_at_any_depth() {
         &mut client,
         "layout.split",
         &workspace.id,
-        split(&second, overnight_protocol::v1::SplitSide::Bottom),
+        split(&second, farcooler_protocol::v1::SplitSide::Bottom),
     )
     .await;
 
@@ -820,7 +820,7 @@ async fn breaking_a_pane_out_makes_a_layout_and_dropping_it_back_puts_it_where_a
         &mut client,
         "layout.split",
         &workspace.id,
-        split(&first.id, overnight_protocol::v1::SplitSide::Right),
+        split(&first.id, farcooler_protocol::v1::SplitSide::Right),
     )
     .await;
     let second = after.items[0]
@@ -835,7 +835,7 @@ async fn breaking_a_pane_out_makes_a_layout_and_dropping_it_back_puts_it_where_a
         &mut client,
         "layout.break",
         &workspace.id,
-        overnight_protocol::v1::LayoutUpdate {
+        farcooler_protocol::v1::LayoutUpdate {
             target: Some(second.clone()),
             ..Default::default()
         },
@@ -849,10 +849,10 @@ async fn breaking_a_pane_out_makes_a_layout_and_dropping_it_back_puts_it_where_a
         &mut client,
         "layout.move",
         &workspace.id,
-        overnight_protocol::v1::LayoutUpdate {
+        farcooler_protocol::v1::LayoutUpdate {
             terminals: vec![second.clone()],
             target: Some(first.id.clone()),
-            side: overnight_protocol::v1::SplitSide::Left as i32,
+            side: farcooler_protocol::v1::SplitSide::Left as i32,
             ..Default::default()
         },
     )
@@ -891,10 +891,10 @@ async fn moving_a_pane_that_is_alone_in_its_window_keeps_its_identity() {
         &mut client,
         "layout.move",
         &workspace.id,
-        overnight_protocol::v1::LayoutUpdate {
+        farcooler_protocol::v1::LayoutUpdate {
             terminals: vec![second.id.clone()],
             target: Some(first.id.clone()),
-            side: overnight_protocol::v1::SplitSide::Bottom as i32,
+            side: farcooler_protocol::v1::SplitSide::Bottom as i32,
             ..Default::default()
         },
     )
@@ -916,7 +916,7 @@ async fn moving_a_pane_that_is_alone_in_its_window_keeps_its_identity() {
     let moved = terminals.items.iter().find(|t| t.id == second.id).expect("moved terminal");
     assert_eq!(
         moved.state(),
-        overnight_protocol::v1::TerminalState::Running,
+        farcooler_protocol::v1::TerminalState::Running,
         "a moved terminal is running, not lost"
     );
 }
@@ -930,7 +930,7 @@ async fn a_terminal_reports_its_pane_mode_to_a_client() {
     let workspace = a_workspace(&mut client, dir.path()).await;
     let terminal = a_terminal(&mut client, &workspace.id, "claude").await;
 
-    assert_eq!(terminal.pane_mode, overnight_protocol::v1::PaneMode::Terminal as i32);
+    assert_eq!(terminal.pane_mode, farcooler_protocol::v1::PaneMode::Terminal as i32);
 }
 
 #[tokio::test]
@@ -945,7 +945,7 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted() {
     let terminal = a_terminal(&mut client, &workspace.id, "claude").await;
 
     let mut req = request("terminal.agent_subscribe");
-    req.payload = Some(request::Payload::AgentSubscribe(overnight_protocol::v1::AgentSubscribe {
+    req.payload = Some(request::Payload::AgentSubscribe(farcooler_protocol::v1::AgentSubscribe {
         epoch: 0,
         terminal_id: terminal.id.clone(),
         from_seq: 0,

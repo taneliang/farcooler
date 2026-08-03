@@ -1,12 +1,12 @@
-# Overnight
+# Far Cooler
 
 A terminal-first command center for parallel coding agents on hosts you own.
 
 A **workspace** is one git worktree plus one branch for one task, along with its
-terminals and agent processes. Overnight lets you run several at once and see,
+terminals and agent processes. Far Cooler lets you run several at once and see,
 truthfully, which are alive.
 
-Design: [`docs/overnight-design.md`](docs/overnight-design.md).
+Design: [`docs/farcooler-design.md`](docs/farcooler-design.md).
 Deferred work: [`TODOS.md`](TODOS.md).
 
 ## The one idea worth knowing
@@ -18,7 +18,7 @@ each is on, and what you *intended* each terminal to be doing. tmux is the sole
 authority on whether a process is alive right now.
 
 There is no database column in which a stale `running` could ever be written, so
-Overnight structurally cannot tell you an agent is running after it died. When a
+Far Cooler structurally cannot tell you an agent is running after it died. When a
 terminal is expected to be alive and no live exactly-tagged pane proves it, the
 answer is `LOST` rather than a guess.
 
@@ -33,7 +33,7 @@ answer is `LOST` rather than a guess.
 
 ```sh
 cargo build --release
-./target/release/overnight --help
+./target/release/farcooler --help
 ```
 
 The macOS app:
@@ -45,24 +45,24 @@ cd apps/macos && swift build
 ## Quick start
 
 ```sh
-# 1. Allowlist a directory Overnight may operate in.
-overnight root add ~/Dev
+# 1. Allowlist a directory Far Cooler may operate in.
+farcooler root add ~/Dev
 
 # 2. Register a repository inside it.
-overnight repo register ~/Dev/my-project
+farcooler repo register ~/Dev/my-project
 
 # 3. Create task workspaces. Each is a real git worktree on a new branch.
-overnight repo list                       # note the id
-overnight workspace create <repo-id> "add auth"   --branch feat/auth
-overnight workspace create <repo-id> "fix parser" --branch fix/parser
+farcooler repo list                       # note the id
+farcooler workspace create <repo-id> "add auth"   --branch feat/auth
+farcooler workspace create <repo-id> "fix parser" --branch fix/parser
 
 # 4. Launch a terminal in each.
-overnight workspace list                  # note the workspace ids
-overnight terminal create <ws-id> --preset claude
-overnight terminal create <ws-id> --preset shell
+farcooler workspace list                  # note the workspace ids
+farcooler terminal create <ws-id> --preset claude
+farcooler terminal create <ws-id> --preset shell
 
 # 5. See the fleet, with every state derived fresh from tmux.
-overnight workspace list
+farcooler workspace list
 ```
 
 ```
@@ -75,22 +75,22 @@ f0a16d76  fix parser              active    fix/parser
 Drive a terminal:
 
 ```sh
-overnight terminal send <term-id> 'git status
+farcooler terminal send <term-id> 'git status
 '
-overnight terminal read <term-id> --lines 50
+farcooler terminal read <term-id> --lines 50
 ```
 
 Recover one that died:
 
 ```sh
-overnight terminal restart <term-id>       # new epoch, same preset
-overnight terminal dismiss-lost <term-id>  # acknowledge without claiming an exit
+farcooler terminal restart <term-id>       # new epoch, same preset
+farcooler terminal dismiss-lost <term-id>  # acknowledge without claiming an exit
 ```
 
 Attach to the real tmux session:
 
 ```sh
-overnight attach <ws-id>     # prints the exact command
+farcooler attach <ws-id>     # prints the exact command
 ```
 
 ## Presets
@@ -102,7 +102,7 @@ aliases, and startup files behave exactly as in a hand-launched terminal.
 ## The macOS app
 
 ```sh
-OVERNIGHT_BIN=$PWD/target/release/overnight ./apps/macos/.build/debug/Overnight
+FARCOOLER_BIN=$PWD/target/release/farcooler ./apps/macos/.build/debug/Far Cooler
 ```
 
 A fleet sidebar, per-terminal output, and an input box. It renders the state the
@@ -119,7 +119,7 @@ crates/
 ├── tmux        private tmux server, control mode, the live runtime inventory
 ├── transport   Unix socket and stdio adapters, backpressure
 ├── daemon      git worktree transactions, domain services
-└── cli         the overnight command
+└── cli         the farcooler command
 apps/macos      SwiftUI client
 proto/          canonical protocol source of truth
 ```
@@ -137,7 +137,7 @@ running.
   A dirty one is preserved with the artifacts left in place.
 - Archiving is refused while a managed terminal is running, and never touches git.
 - Identity comes only from exact tmux tags. Names, indexes, and PIDs are
-  diagnostic and never establish identity, so Overnight never adopts a process it
+  diagnostic and never establish identity, so Far Cooler never adopts a process it
   did not launch.
 
 ## Status

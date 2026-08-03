@@ -9,7 +9,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use overnight_core::{DomainError, Result};
+use farcooler_core::{DomainError, Result};
 
 /// FNV-1a 64-bit. Not cryptographic; this only has to catch a truncated or
 /// corrupted copy, not an adversary, and needs no dependency beyond the
@@ -51,7 +51,7 @@ mod tests {
     use super::*;
 
     fn scratch_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("overnight-store-backup-{}", Uuid::now_v7()));
+        let dir = std::env::temp_dir().join(format!("farcooler-store-backup-{}", Uuid::now_v7()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Without this the app is unsigned, has no entitlements at all, and every
+         keychain write fails with errSecMissingEntitlement (-34018). The device
+         then cannot hold an identity: each call generated a key, failed to store
+         it, and generated another next time — so it authenticated with one key
+         and displayed a different one to authorise, which looks exactly like a
+         host rejecting a correct key. -->
+    <key>keychain-access-groups</key>
+    <array>
+        <string>com.farcooler.ios</string>
+    </array>
+
+    <!-- Remote notifications. `development` so a locally-signed build gets a
+         sandbox APNs token; the App Store build is re-signed with `production`
+         automatically. Without this key the app gets no device token at all and
+         the daemon can never reach a sleeping phone — which is the case the
+         whole notification path exists for. -->
+    <key>aps-environment</key>
+    <string>development</string>
+</dict>
+</plist>

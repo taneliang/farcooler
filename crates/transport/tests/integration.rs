@@ -9,9 +9,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bytes::{BufMut, BytesMut};
-use overnight_protocol::PROTOCOL_VERSION;
-use overnight_protocol::v1::{self, Request, Response, WireEnvelope, wire_envelope};
-use overnight_transport::{Connection, ConnectionError, FrameReader, FrameWriter, Handler, HandshakeConfig, UnixListenerServer};
+use farcooler_protocol::PROTOCOL_VERSION;
+use farcooler_protocol::v1::{self, Request, Response, WireEnvelope, wire_envelope};
+use farcooler_transport::{Connection, ConnectionError, FrameReader, FrameWriter, Handler, HandshakeConfig, UnixListenerServer};
 use tempfile::tempdir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -36,11 +36,11 @@ fn handshake_cfg() -> HandshakeConfig {
 fn request_envelope(method: &str) -> WireEnvelope {
     // Uses `uuid` directly (rather than the protocol crate's own id helper)
     // to exercise the crate's declared dependency on it, not just its
-    // transitive presence via overnight-protocol.
-    let request_id = overnight_protocol::ids::to_bytes(uuid::Uuid::now_v7());
+    // transitive presence via farcooler-protocol.
+    let request_id = farcooler_protocol::ids::to_bytes(uuid::Uuid::now_v7());
     WireEnvelope {
         protocol_version: PROTOCOL_VERSION,
-        message_id: overnight_protocol::ids::new_id(),
+        message_id: farcooler_protocol::ids::new_id(),
         body: Some(wire_envelope::Body::Request(Request {
             request_id,
             method: method.into(),
@@ -56,7 +56,7 @@ fn request_envelope(method: &str) -> WireEnvelope {
 #[tokio::test]
 async fn round_trip_request_response_over_real_unix_socket() {
     let dir = tempdir().unwrap();
-    let sock_path = dir.path().join("overnight.sock");
+    let sock_path = dir.path().join("farcooler.sock");
     let handler = RecordingHandler::default();
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
@@ -88,7 +88,7 @@ async fn round_trip_request_response_over_real_unix_socket() {
 #[tokio::test]
 async fn non_hello_first_frame_closes_connection_without_dispatch() {
     let dir = tempdir().unwrap();
-    let sock_path = dir.path().join("overnight.sock");
+    let sock_path = dir.path().join("farcooler.sock");
     let handler = RecordingHandler::default();
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
@@ -111,7 +111,7 @@ async fn non_hello_first_frame_closes_connection_without_dispatch() {
 #[tokio::test]
 async fn oversized_length_prefix_closes_connection_promptly() {
     let dir = tempdir().unwrap();
-    let sock_path = dir.path().join("overnight.sock");
+    let sock_path = dir.path().join("farcooler.sock");
     let handler = RecordingHandler::default();
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
@@ -140,7 +140,7 @@ async fn oversized_length_prefix_closes_connection_promptly() {
 #[tokio::test]
 async fn truncated_frame_after_handshake_does_not_dispatch() {
     let dir = tempdir().unwrap();
-    let sock_path = dir.path().join("overnight.sock");
+    let sock_path = dir.path().join("farcooler.sock");
     let handler = RecordingHandler::default();
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
@@ -157,7 +157,7 @@ async fn truncated_frame_after_handshake_does_not_dispatch() {
     // rule 2, is under test here.
     let hello = WireEnvelope {
         protocol_version: PROTOCOL_VERSION,
-        message_id: overnight_protocol::ids::new_id(),
+        message_id: farcooler_protocol::ids::new_id(),
         body: Some(wire_envelope::Body::ClientHello(v1::ClientHello {
             supported_protocol_versions: vec![PROTOCOL_VERSION],
             client_name: "itest".into(),
@@ -170,7 +170,7 @@ async fn truncated_frame_after_handshake_does_not_dispatch() {
 
     // Send a Request's length prefix and everything except its final byte,
     // then close the write side: a truncated frame must never dispatch.
-    let full = overnight_protocol::framing::encode(&request_envelope("Ping")).unwrap();
+    let full = farcooler_protocol::framing::encode(&request_envelope("Ping")).unwrap();
     raw_writer.write_raw(&full[..full.len() - 1]).await.unwrap();
     // A real shutdown(SHUT_WR), not just a drop: `read_half` is still alive
     // in `raw_reader`, and a plain drop of only the write half would not
@@ -190,7 +190,7 @@ async fn truncated_frame_after_handshake_does_not_dispatch() {
 #[tokio::test]
 async fn incompatible_client_hello_yields_version_incompatible() {
     let dir = tempdir().unwrap();
-    let sock_path = dir.path().join("overnight.sock");
+    let sock_path = dir.path().join("farcooler.sock");
     let handler = RecordingHandler::default();
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
@@ -206,7 +206,7 @@ async fn incompatible_client_hello_yields_version_incompatible() {
     assert!(matches!(err, ConnectionError::VersionIncompatible));
     assert_eq!(
         err.domain().map(|d| d.code()),
-        Some(overnight_protocol::v1::ErrorCode::VersionIncompatible)
+        Some(farcooler_protocol::v1::ErrorCode::VersionIncompatible)
     );
     assert_eq!(handler.calls.load(Ordering::SeqCst), 0);
 }

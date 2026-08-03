@@ -24,8 +24,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use overnight_core::activity;
-use overnight_protocol::v1::{AgentActivity, Event, TerminalState};
+use farcooler_core::activity;
+use farcooler_protocol::v1::{AgentActivity, Event, TerminalState};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -205,7 +205,7 @@ impl Watcher {
         let _ = self.events.send(Event {
             event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
             sequence: 0,
-            payload: Some(overnight_protocol::v1::event::Payload::LayoutChanged(
+            payload: Some(farcooler_protocol::v1::event::Payload::LayoutChanged(
                 wire::pane_group_list(workspace, groups),
             )),
         });
@@ -287,7 +287,7 @@ impl Watcher {
             let (label, observed, chat_capable) = if !matches!(terminal_state, TerminalState::Running)
             {
                 (activity::describe(&command, ""), AgentActivity::None, false)
-            } else if pane_mode == overnight_store::models::PaneMode::Agent {
+            } else if pane_mode == farcooler_store::models::PaneMode::Agent {
                 // The protocol, not the screen. An agent-mode pane shows the
                 // shim's status log, which matches no agent signature, so the
                 // classifier would report `None` and this row would never say
@@ -447,7 +447,7 @@ impl Watcher {
             let _ = self.events.send(Event {
                 event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
                 sequence: 0,
-                payload: Some(overnight_protocol::v1::event::Payload::TerminalChanged(message)),
+                payload: Some(farcooler_protocol::v1::event::Payload::TerminalChanged(message)),
             });
             return;
         }

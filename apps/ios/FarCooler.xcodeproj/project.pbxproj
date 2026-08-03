@@ -1,0 +1,365 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		92403CA2D0B757B9BC89B4A9 /* FarCoolerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9BF3AAC150B500C9EAD8938; };
+		27EA95179D065D9983BF4169 /* ClientCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09A28730BB825CEAA6A39E6F; };
+		4AD1D989FF065475986EA623 /* Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DCFAB04585F583393DD034B; };
+		B7B7E8CABF6354C393CCA4AA /* FleetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F342BD83956A52AFA8E283D4; };
+		9F5AA511436B5EA797092474 /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABF4CE4F60F5562A55DABDA; };
+		65BC051A08EB52D1925F8E13 /* Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 187F8E7EBB055EE28B4E67E0; };
+		6D4A0EFB0B5D560DAFE9179A /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B544A71636558E0931C038F; };
+		14CC0B48DA7A59509BAB17BF /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44EFA7B6FE3153B686B0EA92; };
+		381629282DA45A10B0D4C8B5 /* QuickTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = B131EF9D6FCF56858D53BD95; };
+		9EEE0D41BCAB52609113FE9A /* TaskComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E69A0E803A4537AB291D373; };
+		2158FBCD5E6052FEA8C368C9 /* VTCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24008172D7157DE94556AF4; };
+		277F3B04D4A35D27973EA0DD /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 851A6DCCD0835D92A1F84110; };
+		3FBD96AF8E9856509E8AA6AA /* TerminalTabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DD9107C112755A48A85E126; };
+		33ADF6CBA58D552A8FFC5F05 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D039AC3CA50A565AB5C9E2C9; };
+		090F5919118C5EE2A6F910CC /* AgentStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E65812E2025DDCA0AE929F; };
+		155CBF2767425E0385B106DD /* AgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F819FB63EB645686A9D99358; };
+		1A09F419AF965628A9456165 /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C790C4B7EB5611B14165FE; };
+		6BC64D16CD585BCF8FE27CF3 /* AccountDevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA7B7C8BCE5A55DDA3550FE3; };
+		F96E491D15E457A18C63D257 /* AccountSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7093A96D0DB3550E8E6FA109; };
+		4EF5F2C42876520BAAF43538 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FAC520458BB54C78801B53E; };
+		4DA1B4EE5A72553AA017D4B2 /* AgentEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 823B9C2C792F5A4EAF165645; };
+		9B567005FFE2529E9DAA23A5 /* Composer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288A7984A1835381AFF6A4C3; };
+		632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15A666CD6FD525982BAC34F; };
+		72C8B4DFB7B95847A02B9623 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB01EEA774815AC5A7038DAD; };
+		CBDDC5EC069D53FC8EB3004A /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BD8F54D5B935B33A810D490; };
+		A4677749D2C9588EB8FA703D /* TokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F21B2F4E7305C52A6B39A5D; };
+		A057A865719A51ED8C536CF7 /* VersionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5B7BC3FED5259D183C18D69; };
+		739934EC2264588692457640 /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F7004A6B092527BAE191DD2; };
+		47ABCA46F37C53F8B31FA67E /* farcooler_vt.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C58051F3AA0C5DE2A3B15416; };
+		1590685CD3625030B862EAED /* farcooler_client.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 78C00FC7C5AC5565A723E44C; };
+		6C87999BD8695773BC9A037A /* IosevkaNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E57A0A7090B459EA8D69806B; };
+		D461E214179654D68E69ABD2 /* IosevkaNerdFontMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 718EE640EBC05D97A1B17342; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		E9BF3AAC150B500C9EAD8938 /* FarCoolerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarCoolerApp.swift; sourceTree = "<group>"; };
+		09A28730BB825CEAA6A39E6F /* ClientCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientCore.swift; sourceTree = "<group>"; };
+		2DCFAB04585F583393DD034B /* Connection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Connection.swift; sourceTree = "<group>"; };
+		F342BD83956A52AFA8E283D4 /* FleetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetView.swift; sourceTree = "<group>"; };
+		4ABF4CE4F60F5562A55DABDA /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
+		187F8E7EBB055EE28B4E67E0 /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
+		2B544A71636558E0931C038F /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
+		44EFA7B6FE3153B686B0EA92 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		B131EF9D6FCF56858D53BD95 /* QuickTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTask.swift; sourceTree = "<group>"; };
+		2E69A0E803A4537AB291D373 /* TaskComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskComposer.swift; sourceTree = "<group>"; };
+		A24008172D7157DE94556AF4 /* VTCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VTCore.swift; sourceTree = "<group>"; };
+		851A6DCCD0835D92A1F84110 /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
+		7DD9107C112755A48A85E126 /* TerminalTabStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabStrip.swift; sourceTree = "<group>"; };
+		D039AC3CA50A565AB5C9E2C9 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		28E65812E2025DDCA0AE929F /* AgentStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStream.swift; sourceTree = "<group>"; };
+		F819FB63EB645686A9D99358 /* AgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentView.swift; sourceTree = "<group>"; };
+		67C790C4B7EB5611B14165FE /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
+		DA7B7C8BCE5A55DDA3550FE3 /* AccountDevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDevicesView.swift; sourceTree = "<group>"; };
+		7093A96D0DB3550E8E6FA109 /* AccountSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSection.swift; sourceTree = "<group>"; };
+		7FAC520458BB54C78801B53E /* AppVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersion.swift; sourceTree = "<group>"; };
+		823B9C2C792F5A4EAF165645 /* AgentEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentEvent.swift; sourceTree = "<group>"; };
+		288A7984A1835381AFF6A4C3 /* Composer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Composer.swift; sourceTree = "<group>"; };
+		B15A666CD6FD525982BAC34F /* DiffComputation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffComputation.swift; sourceTree = "<group>"; };
+		DB01EEA774815AC5A7038DAD /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
+		1BD8F54D5B935B33A810D490 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
+		9F21B2F4E7305C52A6B39A5D /* TokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStore.swift; sourceTree = "<group>"; };
+		E5B7BC3FED5259D183C18D69 /* VersionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionSection.swift; sourceTree = "<group>"; };
+		3F7004A6B092527BAE191DD2 /* Transcript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcript.swift; sourceTree = "<group>"; };
+		C58051F3AA0C5DE2A3B15416 /* farcooler_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_vt.xcframework; path = Frameworks/farcooler_vt.xcframework; sourceTree = "<group>"; };
+		78C00FC7C5AC5565A723E44C /* farcooler_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_client.xcframework; path = Frameworks/farcooler_client.xcframework; sourceTree = "<group>"; };
+		E57A0A7090B459EA8D69806B /* IosevkaNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Regular.ttf; sourceTree = "<group>"; };
+		718EE640EBC05D97A1B17342 /* IosevkaNerdFontMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Bold.ttf; sourceTree = "<group>"; };
+		A133A464581D57FABB4108BE /* FarCooler.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FarCooler.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		BD06D3E3D0E55D4FA8204FD6 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				47ABCA46F37C53F8B31FA67E /* farcooler_vt.xcframework in Frameworks */,
+				1590685CD3625030B862EAED /* farcooler_client.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2539350B586A57CBBDDF27F3 = {
+			isa = PBXGroup;
+			children = (
+				DC2B394B789C517AA24120A8 /* FarCooler */,
+				4C4542875C415F8685B9A60E /* AgentKit */,
+				7BF7610560DA5A64A5782FD6 /* Frameworks */,
+				1DC6147A6B3C5E5D8ACDF5DE /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DC2B394B789C517AA24120A8 /* FarCooler */ = {
+			isa = PBXGroup;
+			children = (
+				E9BF3AAC150B500C9EAD8938 /* FarCoolerApp.swift */,
+				09A28730BB825CEAA6A39E6F /* ClientCore.swift */,
+				2DCFAB04585F583393DD034B /* Connection.swift */,
+				F342BD83956A52AFA8E283D4 /* FleetView.swift */,
+				4ABF4CE4F60F5562A55DABDA /* Model.swift */,
+				187F8E7EBB055EE28B4E67E0 /* Notifications.swift */,
+				2B544A71636558E0931C038F /* Settings.swift */,
+				44EFA7B6FE3153B686B0EA92 /* Store.swift */,
+				B131EF9D6FCF56858D53BD95 /* QuickTask.swift */,
+				2E69A0E803A4537AB291D373 /* TaskComposer.swift */,
+				A24008172D7157DE94556AF4 /* VTCore.swift */,
+				851A6DCCD0835D92A1F84110 /* TerminalSession.swift */,
+				7DD9107C112755A48A85E126 /* TerminalTabStrip.swift */,
+				D039AC3CA50A565AB5C9E2C9 /* TerminalView.swift */,
+				28E65812E2025DDCA0AE929F /* AgentStream.swift */,
+				F819FB63EB645686A9D99358 /* AgentView.swift */,
+				318B509E6A965252B6B6AD0E /* Fonts */,
+			);
+			path = FarCooler;
+			sourceTree = "<group>";
+		};
+		318B509E6A965252B6B6AD0E /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				E57A0A7090B459EA8D69806B /* IosevkaNerdFontMono-Regular.ttf */,
+				718EE640EBC05D97A1B17342 /* IosevkaNerdFontMono-Bold.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
+		4C4542875C415F8685B9A60E /* AgentKit */ = {
+			isa = PBXGroup;
+			children = (
+				67C790C4B7EB5611B14165FE /* Account.swift */,
+				DA7B7C8BCE5A55DDA3550FE3 /* AccountDevicesView.swift */,
+				7093A96D0DB3550E8E6FA109 /* AccountSection.swift */,
+				7FAC520458BB54C78801B53E /* AppVersion.swift */,
+				823B9C2C792F5A4EAF165645 /* AgentEvent.swift */,
+				288A7984A1835381AFF6A4C3 /* Composer.swift */,
+				B15A666CD6FD525982BAC34F /* DiffComputation.swift */,
+				DB01EEA774815AC5A7038DAD /* MarkdownView.swift */,
+				1BD8F54D5B935B33A810D490 /* PushRegistration.swift */,
+				9F21B2F4E7305C52A6B39A5D /* TokenStore.swift */,
+				E5B7BC3FED5259D183C18D69 /* VersionSection.swift */,
+				3F7004A6B092527BAE191DD2 /* Transcript.swift */,
+			);
+			name = AgentKit;
+			path = "../shared/AgentKit/Sources/AgentKit";
+			sourceTree = "<group>";
+		};
+		7BF7610560DA5A64A5782FD6 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C58051F3AA0C5DE2A3B15416 /* farcooler_vt.xcframework */,
+				78C00FC7C5AC5565A723E44C /* farcooler_client.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		1DC6147A6B3C5E5D8ACDF5DE /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A133A464581D57FABB4108BE /* FarCooler.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F71A1340A17D5BAAA17AAE9D /* FarCooler */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 227E65BEEF00503E8D9EBBEB;
+			buildPhases = (
+				B80F12BD5B455B29AE0DF96F,
+				BD06D3E3D0E55D4FA8204FD6,
+				7E266E705A115865B3DE1CE2,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = FarCooler;
+			productName = FarCooler;
+			productReference = A133A464581D57FABB4108BE;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C9A7D3CE0F735C64936BDAE6 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 1ECFBC020B595330B018024C;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = 2539350B586A57CBBDDF27F3;
+			productRefGroup = 1DC6147A6B3C5E5D8ACDF5DE;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F71A1340A17D5BAAA17AAE9D /* FarCooler */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		7E266E705A115865B3DE1CE2 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6C87999BD8695773BC9A037A /* IosevkaNerdFontMono-Regular.ttf in Resources */,
+				D461E214179654D68E69ABD2 /* IosevkaNerdFontMono-Bold.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B80F12BD5B455B29AE0DF96F = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				92403CA2D0B757B9BC89B4A9 /* FarCoolerApp.swift in Sources */,
+				27EA95179D065D9983BF4169 /* ClientCore.swift in Sources */,
+				4AD1D989FF065475986EA623 /* Connection.swift in Sources */,
+				B7B7E8CABF6354C393CCA4AA /* FleetView.swift in Sources */,
+				9F5AA511436B5EA797092474 /* Model.swift in Sources */,
+				65BC051A08EB52D1925F8E13 /* Notifications.swift in Sources */,
+				6D4A0EFB0B5D560DAFE9179A /* Settings.swift in Sources */,
+				14CC0B48DA7A59509BAB17BF /* Store.swift in Sources */,
+				381629282DA45A10B0D4C8B5 /* QuickTask.swift in Sources */,
+				9EEE0D41BCAB52609113FE9A /* TaskComposer.swift in Sources */,
+				2158FBCD5E6052FEA8C368C9 /* VTCore.swift in Sources */,
+				277F3B04D4A35D27973EA0DD /* TerminalSession.swift in Sources */,
+				3FBD96AF8E9856509E8AA6AA /* TerminalTabStrip.swift in Sources */,
+				33ADF6CBA58D552A8FFC5F05 /* TerminalView.swift in Sources */,
+				090F5919118C5EE2A6F910CC /* AgentStream.swift in Sources */,
+				155CBF2767425E0385B106DD /* AgentView.swift in Sources */,
+				1A09F419AF965628A9456165 /* Account.swift in Sources */,
+				6BC64D16CD585BCF8FE27CF3 /* AccountDevicesView.swift in Sources */,
+				F96E491D15E457A18C63D257 /* AccountSection.swift in Sources */,
+				4EF5F2C42876520BAAF43538 /* AppVersion.swift in Sources */,
+				4DA1B4EE5A72553AA017D4B2 /* AgentEvent.swift in Sources */,
+				9B567005FFE2529E9DAA23A5 /* Composer.swift in Sources */,
+				632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */,
+				72C8B4DFB7B95847A02B9623 /* MarkdownView.swift in Sources */,
+				CBDDC5EC069D53FC8EB3004A /* PushRegistration.swift in Sources */,
+				A4677749D2C9588EB8FA703D /* TokenStore.swift in Sources */,
+				A057A865719A51ED8C536CF7 /* VersionSection.swift in Sources */,
+				739934EC2264588692457640 /* Transcript.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2EBE0EF96A0C526B823D2657 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				SWIFT_VERSION = 5.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				GCC_OPTIMIZATION_LEVEL = 0;
+				ENABLE_TESTABILITY = YES;
+			};
+			name = Debug;
+		};
+		E89569D3C9195F7AA17C2D63 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				SWIFT_VERSION = 5.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		FE785DA885045FADB511F3CE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				FARCOOLER_CHANNEL = dev;
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev b29ea1a)";
+				FARCOOLER_WORKOS_CLIENT_ID = "";
+				CURRENT_PROJECT_VERSION = 202;
+				PRODUCT_NAME = FarCooler;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
+				INFOPLIST_FILE = FarCooler/Info.plist;
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = FarCooler/FarCooler.entitlements;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				OTHER_LDFLAGS = "-lc++";
+				SWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
+				HEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";
+			};
+			name = Debug;
+		};
+		33C729E7BC50562081AFF17F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				FARCOOLER_CHANNEL = dev;
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev b29ea1a)";
+				FARCOOLER_WORKOS_CLIENT_ID = "";
+				CURRENT_PROJECT_VERSION = 202;
+				PRODUCT_NAME = FarCooler;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
+				INFOPLIST_FILE = FarCooler/Info.plist;
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = FarCooler/FarCooler.entitlements;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				OTHER_LDFLAGS = "-lc++";
+				SWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
+				HEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1ECFBC020B595330B018024C = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2EBE0EF96A0C526B823D2657 /* Debug */,
+				E89569D3C9195F7AA17C2D63 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		227E65BEEF00503E8D9EBBEB = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE785DA885045FADB511F3CE /* Debug */,
+				33C729E7BC50562081AFF17F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C9A7D3CE0F735C64936BDAE6 /* Project object */;
+}

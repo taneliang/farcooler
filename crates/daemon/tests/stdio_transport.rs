@@ -1,6 +1,6 @@
 //! The remote transport, exercised the way sshd will drive it.
 //!
-//! `overnight --host box ...` runs `ssh box overnightd --stdio` and speaks the
+//! `farcooler --host box ...` runs `ssh box farcoolerd --stdio` and speaks the
 //! protocol over the resulting pipes. ssh is not part of what can go wrong
 //! there — it is a byte pipe either way — so this spawns the real daemon binary
 //! with `--stdio` and talks to its actual stdin and stdout.
@@ -10,20 +10,20 @@
 //! handshake that hangs rather than an error that names the cause. A log line,
 //! a `println!` left in, a panic message — any of them.
 
-use overnight_protocol::v1::{
+use farcooler_protocol::v1::{
     request, result, AgentSubscribe, ErrorCode, PaneMode, RepositoryRegister, RepositoryRootAdd,
     Scope, SetPaneMode, TerminalCreate, WorkspaceCreate,
 };
-use overnight_transport::{request, Client, ClientError};
+use farcooler_transport::{request, Client, ClientError};
 use tokio::process::{ChildStdin, ChildStdout, Command};
 
 /// Spawn the daemon in stdio mode against a private runtime directory.
 async fn spawn(
     dir: &std::path::Path,
 ) -> (tokio::process::Child, Client<ChildStdout, ChildStdin>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_overnightd"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
         .arg("--stdio")
-        .env("OVERNIGHT_HOME", dir)
+        .env("FARCOOLER_HOME", dir)
         // Deliberately noisy: if any of this reaches stdout the handshake
         // breaks, which is exactly what this test exists to catch.
         .env("RUST_LOG", "debug")
@@ -32,7 +32,7 @@ async fn spawn(
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .expect("spawn overnightd --stdio");
+        .expect("spawn farcoolerd --stdio");
 
     let stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
@@ -54,7 +54,7 @@ async fn the_daemon_serves_the_protocol_over_stdio() {
 
     let result = client.call(request("daemon.version")).await.expect("daemon.version");
     let Some(result::Value::DaemonVersion(v)) = result.value else { panic!("wrong result") };
-    assert!(v.protocol_versions.contains(&overnight_protocol::PROTOCOL_VERSION));
+    assert!(v.protocol_versions.contains(&farcooler_protocol::PROTOCOL_VERSION));
 }
 
 #[tokio::test]
@@ -78,8 +78,8 @@ async fn a_remote_client_can_write_and_read_back_what_it_wrote() {
 
     let repo = tempfile::tempdir().unwrap();
     let mut add = request("repository_root.add");
-    add.payload = Some(overnight_protocol::v1::request::Payload::RepositoryRootAdd(
-        overnight_protocol::v1::RepositoryRootAdd {
+    add.payload = Some(farcooler_protocol::v1::request::Payload::RepositoryRootAdd(
+        farcooler_protocol::v1::RepositoryRootAdd {
             absolute_path: repo.path().to_string_lossy().into_owned(),
             typed_confirmation: String::new(),
         },
@@ -103,9 +103,9 @@ async fn host_health_is_reported_by_the_daemon_not_sampled_by_the_client() {
     let result = client.call(request("host.health")).await.expect("host.health");
     let Some(result::Value::Host(host)) = result.value else { panic!("wrong result") };
     assert!(!host.platform.is_empty());
-    assert_ne!(host.self_health, overnight_protocol::v1::SelfHealth::Unspecified as i32);
+    assert_ne!(host.self_health, farcooler_protocol::v1::SelfHealth::Unspecified as i32);
     // Degraded must always come with a reason a user can act on.
-    if host.self_health == overnight_protocol::v1::SelfHealth::Degraded as i32 {
+    if host.self_health == farcooler_protocol::v1::SelfHealth::Degraded as i32 {
         assert!(!host.self_health_reasons.is_empty());
     }
 }
@@ -113,7 +113,7 @@ async fn host_health_is_reported_by_the_daemon_not_sampled_by_the_client() {
 // ---- the agent channel, over the same transport a phone actually uses ----
 //
 // `rpc_over_socket.rs` proves these against the Unix socket. Mirrored here
-// against a real `overnightd --stdio` process rather than in-process dispatch,
+// against a real `farcoolerd --stdio` process rather than in-process dispatch,
 // because the whole point of this file is that nothing about the daemon's
 // behaviour may depend on which listener accepted the connection.
 
@@ -121,7 +121,7 @@ async fn host_health_is_reported_by_the_daemon_not_sampled_by_the_client() {
 async fn a_workspace(
     client: &mut Client<ChildStdout, ChildStdin>,
     dir: &std::path::Path,
-) -> overnight_protocol::v1::Workspace {
+) -> farcooler_protocol::v1::Workspace {
     let repo_path = dir.join("demo");
     std::fs::create_dir(&repo_path).unwrap();
     for args in [
@@ -170,7 +170,7 @@ async fn a_terminal(
     client: &mut Client<ChildStdout, ChildStdin>,
     workspace: &bytes::Bytes,
     title: &str,
-) -> overnight_protocol::v1::Terminal {
+) -> farcooler_protocol::v1::Terminal {
     let mut create = request("terminal.create");
     create.target_resource_id = Some(workspace.clone());
     create.payload = Some(request::Payload::TerminalCreate(TerminalCreate {

@@ -4,7 +4,7 @@
 
 **Goal:** Build and test the complete host-side contract for running a coding agent headlessly under the Agent Client Protocol inside a tmux pane, so that a later plan can render it natively on macOS and iOS.
 
-**Architecture:** A terminal gains a `pane_mode`. In `AGENT` pane mode its tagged tmux pane runs `overnight agent-host`, a shim that spawns an ACP adapter, answers the ACP `fs` capability under worktree confinement, owns a bounded event ring, and bridges normalized events to the daemon over a Unix socket. Liveness derivation is untouched — the pane is still the sole authority. No transcript is persisted.
+**Architecture:** A terminal gains a `pane_mode`. In `AGENT` pane mode its tagged tmux pane runs `farcooler agent-host`, a shim that spawns an ACP adapter, answers the ACP `fs` capability under worktree confinement, owns a bounded event ring, and bridges normalized events to the daemon over a Unix socket. Liveness derivation is untouched — the pane is still the sole authority. No transcript is persisted.
 
 **Tech Stack:** Rust 2024 (workspace crates), tokio, prost/protobuf for client-facing protocol, serde_json for the internal shim socket, rusqlite for durable intent, tmux control for pane lifecycle.
 
@@ -17,9 +17,9 @@
 - No conversation content is ever written to SQLite. SQLite stores `pane_mode` and `agent_session_id` only, as durable intent.
 - Missing history is always an explicit `Gap` event. Never a shorter transcript, never a silent drop.
 - `derive.rs` is not modified. Liveness stays derived from a live exactly-tagged pane.
-- Client-facing protocol is protobuf in `proto/overnight.proto`. The shim↔daemon socket is newline-delimited JSON, permitted because shim and daemon ship in the same binary and therefore have no version skew.
+- Client-facing protocol is protobuf in `proto/farcooler.proto`. The shim↔daemon socket is newline-delimited JSON, permitted because shim and daemon ship in the same binary and therefore have no version skew.
 - Every `fs/read_text_file` and `fs/write_text_file` path is fully resolved, symlinks included, and rejected unless inside the worktree the shim was launched for.
-- Error messages crossing the client protocol never contain a path, terminal byte, command, or session id (existing rule, `proto/overnight.proto:83`).
+- Error messages crossing the client protocol never contain a path, terminal byte, command, or session id (existing rule, `proto/farcooler.proto:83`).
 
 ---
 
@@ -110,8 +110,8 @@ Extract only the inbound frames into two fixture files, one per scenario, one JS
 
 ```bash
 cd /tmp/gate1
-mkdir -p ~/Dev/overnight/crates/agent/tests/fixtures
-jq -c 'select(.dir=="in") | .msg' capture.jsonl > ~/Dev/overnight/crates/agent/tests/fixtures/session_basic.jsonl
+mkdir -p ~/Dev/farcooler/crates/agent/tests/fixtures
+jq -c 'select(.dir=="in") | .msg' capture.jsonl > ~/Dev/farcooler/crates/agent/tests/fixtures/session_basic.jsonl
 ```
 
 Then produce `session_permission.jsonl` the same way from a run whose prompt triggers an approval (ask it to run a shell command). These fixtures are what every later test replays, so CI never needs credentials or a live agent.
@@ -125,7 +125,7 @@ git commit -m "spike: gate 1 — ACP adapter session identity and fs capability"
 
 ---
 
-### Task 2: The `overnight-agent` crate and its normalized event model
+### Task 2: The `farcooler-agent` crate and its normalized event model
 
 **Files:**
 - Modify: `Cargo.toml` (workspace members and dependencies)
@@ -134,7 +134,7 @@ git commit -m "spike: gate 1 — ACP adapter session identity and fs capability"
 - Create: `crates/agent/src/event.rs`
 
 **Interfaces:**
-- Produces: `overnight_agent::event::{AgentEvent, Sequenced, Role, ToolStatus, Diff, PlanEntry, PermissionOption, EndReason, AgentGapReason, Seq}`.
+- Produces: `farcooler_agent::event::{AgentEvent, Sequenced, Role, ToolStatus, Diff, PlanEntry, PermissionOption, EndReason, AgentGapReason, Seq}`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -167,8 +167,8 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-agent`
-Expected: FAIL — `error: package ID specification 'overnight-agent' did not match any packages`
+Run: `cargo test -p farcooler-agent`
+Expected: FAIL — `error: package ID specification 'farcooler-agent' did not match any packages`
 
 - [ ] **Step 3: Create the crate and the model**
 
@@ -181,7 +181,7 @@ Add to `Cargo.toml` `[workspace] members` after `"crates/core",`:
 Add to `[workspace.dependencies]`:
 
 ```toml
-overnight-agent = { path = "crates/agent" }
+farcooler-agent = { path = "crates/agent" }
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -189,14 +189,14 @@ Create `crates/agent/Cargo.toml`:
 
 ```toml
 [package]
-name = "overnight-agent"
+name = "farcooler-agent"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-overnight-protocol.workspace = true
+farcooler-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -345,7 +345,7 @@ pub struct Sequenced {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-agent`
+Run: `cargo test -p farcooler-agent`
 Expected: PASS, 2 tests
 
 - [ ] **Step 5: Commit**
@@ -368,7 +368,7 @@ git commit -m "feat(agent): one normalized event model, so the UI never sees a v
 
 **Interfaces:**
 - Consumes: `event::{AgentEvent, Role, ToolStatus, PlanEntry, PermissionOption, AgentGapReason}` (Task 2).
-- Produces: `overnight_agent::acp::normalize::update_to_events(&wire::SessionUpdate) -> Vec<AgentEvent>` and `overnight_agent::acp::wire::{Rpc, SessionUpdate, SessionNotification}`.
+- Produces: `farcooler_agent::acp::normalize::update_to_events(&wire::SessionUpdate) -> Vec<AgentEvent>` and `farcooler_agent::acp::wire::{Rpc, SessionUpdate, SessionNotification}`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -377,8 +377,8 @@ Create `crates/agent/tests/normalize_fixtures.rs`:
 ```rust
 //! Replay real captured ACP frames. No live agent, no credentials in CI.
 
-use overnight_agent::acp::{normalize::update_to_events, wire};
-use overnight_agent::event::{AgentEvent, Role};
+use farcooler_agent::acp::{normalize::update_to_events, wire};
+use farcooler_agent::event::{AgentEvent, Role};
 
 fn events_from(fixture: &str) -> Vec<AgentEvent> {
     let raw = std::fs::read_to_string(format!("tests/fixtures/{fixture}")).expect("fixture");
@@ -418,14 +418,14 @@ fn an_update_nobody_wrote_a_rule_for_becomes_a_gap_not_a_silence() {
     let json = r#"{"sessionUpdate":"something_from_a_future_version"}"#;
     let update: wire::SessionUpdate = serde_json::from_str(json).expect("parses as unknown");
     let events = update_to_events(&update);
-    assert_eq!(events, vec![AgentEvent::Gap { reason: overnight_agent::event::AgentGapReason::Unparsed }]);
+    assert_eq!(events, vec![AgentEvent::Gap { reason: farcooler_agent::event::AgentGapReason::Unparsed }]);
 }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-agent --test normalize_fixtures`
-Expected: FAIL — `unresolved import overnight_agent::acp`
+Run: `cargo test -p farcooler-agent --test normalize_fixtures`
+Expected: FAIL — `unresolved import farcooler_agent::acp`
 
 - [ ] **Step 3: Write the wire types and the normalizer**
 
@@ -608,7 +608,7 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-agent --test normalize_fixtures`
+Run: `cargo test -p farcooler-agent --test normalize_fixtures`
 Expected: PASS, 3 tests
 
 If the two fixture-driven tests fail because the captured field names differ from those above, correct `wire.rs` to match the fixture — the fixture is real and this file is the guess.
@@ -630,7 +630,7 @@ git commit -m "feat(agent): normalize ACP updates, and say Gap when we cannot"
 
 **Interfaces:**
 - Consumes: `event::{AgentEvent, Sequenced, Seq, AgentGapReason}` (Task 2).
-- Produces: `overnight_agent::ring::{AgentRing, AgentReplay, AGENT_RING_EVENTS}` with `AgentRing::new()`, `push(&mut self, AgentEvent) -> Seq`, `next_seq(&self) -> Seq`, `since(&self, from: Seq) -> AgentReplay`.
+- Produces: `farcooler_agent::ring::{AgentRing, AgentReplay, AGENT_RING_EVENTS}` with `AgentRing::new()`, `push(&mut self, AgentEvent) -> Seq`, `next_seq(&self) -> Seq`, `since(&self, from: Seq) -> AgentReplay`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -707,7 +707,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-agent ring`
+Run: `cargo test -p farcooler-agent ring`
 Expected: FAIL — `cannot find type AgentRing in this scope`
 
 - [ ] **Step 3: Write the ring**
@@ -732,7 +732,7 @@ use std::collections::VecDeque;
 use crate::event::{AgentEvent, Seq, Sequenced};
 
 /// Events retained per session. At roughly a few hundred bytes each this is a
-/// small number of megabytes for an overnight session, and trimming is visible.
+/// small number of megabytes for an farcooler session, and trimming is visible.
 pub const AGENT_RING_EVENTS: usize = 4096;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -805,7 +805,7 @@ impl Default for AgentRing {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-agent ring`
+Run: `cargo test -p farcooler-agent ring`
 Expected: PASS, 5 tests
 
 - [ ] **Step 5: Commit**
@@ -824,9 +824,9 @@ git commit -m "feat(agent): a bounded ring that admits what it dropped"
 - Modify: `crates/agent/src/lib.rs`
 
 **Interfaces:**
-- Produces: `overnight_agent::fs_guard::{confine, FsGuardError}` with `confine(worktree: &Path, requested: &Path) -> Result<PathBuf, FsGuardError>`.
+- Produces: `farcooler_agent::fs_guard::{confine, FsGuardError}` with `confine(worktree: &Path, requested: &Path) -> Result<PathBuf, FsGuardError>`.
 
-This is the security boundary named in the spec. Taking the ACP `fs` capability means Overnight writes files an agent names, on a host reachable from a phone. Without confinement it is an arbitrary-write primitive.
+This is the security boundary named in the spec. Taking the ACP `fs` capability means Far Cooler writes files an agent names, on a host reachable from a phone. Without confinement it is an arbitrary-write primitive.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -839,7 +839,7 @@ mod tests {
     use std::fs;
 
     fn worktree() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("overnight-guard-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("farcooler-guard-{}", std::process::id()));
         let _ = fs::create_dir_all(dir.join("src"));
         fs::canonicalize(&dir).expect("temp worktree")
     }
@@ -890,7 +890,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-agent fs_guard`
+Run: `cargo test -p farcooler-agent fs_guard`
 Expected: FAIL — `cannot find function confine in this scope`
 
 - [ ] **Step 3: Write the guard**
@@ -960,7 +960,7 @@ pub fn confine(worktree: &Path, requested: &Path) -> Result<PathBuf, FsGuardErro
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-agent fs_guard`
+Run: `cargo test -p farcooler-agent fs_guard`
 Expected: PASS, 5 tests
 
 - [ ] **Step 5: Commit**
@@ -980,7 +980,7 @@ git commit -m "feat(agent): an agent writes only inside its own worktree"
 
 **Interfaces:**
 - Consumes: `acp::wire::Rpc` (Task 3), `fs_guard::confine` (Task 5).
-- Produces: `overnight_agent::acp::conn::{AcpConnection, Incoming, AcpError}` with `AcpConnection::spawn(program, args, worktree) -> Result<Self>`, `request(&mut self, method, params) -> Result<serde_json::Value>`, `notify(&mut self, method, params) -> Result<()>`, `next_incoming(&mut self) -> Option<Incoming>`, `respond(&mut self, id, result) -> Result<()>`.
+- Produces: `farcooler_agent::acp::conn::{AcpConnection, Incoming, AcpError}` with `AcpConnection::spawn(program, args, worktree) -> Result<Self>`, `request(&mut self, method, params) -> Result<serde_json::Value>`, `notify(&mut self, method, params) -> Result<()>`, `next_incoming(&mut self) -> Option<Incoming>`, `respond(&mut self, id, result) -> Result<()>`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1029,7 +1029,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-agent acp::conn`
+Run: `cargo test -p farcooler-agent acp::conn`
 Expected: FAIL — `cannot find type AcpConnection in this scope`
 
 - [ ] **Step 3: Write the connection**
@@ -1201,7 +1201,7 @@ impl AcpConnection {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-agent acp::conn`
+Run: `cargo test -p farcooler-agent acp::conn`
 Expected: PASS, 2 tests
 
 - [ ] **Step 5: Commit**
@@ -1221,7 +1221,7 @@ git commit -m "feat(agent): a connection that answers the adapter, not just itse
 
 **Interfaces:**
 - Consumes: `acp::conn::{AcpConnection, Incoming}` (Task 6), `acp::normalize::update_to_events` (Task 3), `fs_guard::confine` (Task 5), `ring::AgentRing` (Task 4).
-- Produces: `overnight_agent::session::{AgentSession, SessionError, handle_fs_read, handle_fs_write, permission_event, load_unsupported_event}` with `AgentSession::start(conn: AcpConnection, resume: Option<String>) -> Result<(Self, Vec<AgentEvent>), SessionError>`, `pump(&mut self) -> Result<Vec<AgentEvent>, SessionError>`, `prompt(&mut self, text: &str)`, `answer(&mut self, request_id: serde_json::Value, option_id: &str)`, `set_mode(&mut self, agent_mode: &str)`, `cancel(&mut self)`. Public fields `session_id: String`, `available_modes: Vec<String>`, `available_commands: Vec<String>`.
+- Produces: `farcooler_agent::session::{AgentSession, SessionError, handle_fs_read, handle_fs_write, permission_event, load_unsupported_event}` with `AgentSession::start(conn: AcpConnection, resume: Option<String>) -> Result<(Self, Vec<AgentEvent>), SessionError>`, `pump(&mut self) -> Result<Vec<AgentEvent>, SessionError>`, `prompt(&mut self, text: &str)`, `answer(&mut self, request_id: serde_json::Value, option_id: &str)`, `set_mode(&mut self, agent_mode: &str)`, `cancel(&mut self)`. Public fields `session_id: String`, `available_modes: Vec<String>`, `available_commands: Vec<String>`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1237,7 +1237,7 @@ mod tests {
     fn an_fs_write_becomes_a_diff_carrying_what_was_there_before() {
         // Tier 2's whole justification: the diff is a protocol fact, not a
         // reconstruction from a vendor's private tool schema.
-        let dir = std::env::temp_dir().join(format!("overnight-sess-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("farcooler-sess-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("a.txt");
         std::fs::write(&file, "old\n").unwrap();
@@ -1250,7 +1250,7 @@ mod tests {
 
     #[test]
     fn a_write_outside_the_worktree_is_refused_and_says_so() {
-        let dir = std::env::temp_dir().join(format!("overnight-sess2-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("farcooler-sess2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(handle_fs_write(&dir, "/etc/passwd", "x").is_err());
     }
@@ -1283,7 +1283,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-agent session`
+Run: `cargo test -p farcooler-agent session`
 Expected: FAIL — `cannot find function handle_fs_write in this scope`
 
 - [ ] **Step 3: Write the driver**
@@ -1544,7 +1544,7 @@ impl AgentSession {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-agent session`
+Run: `cargo test -p farcooler-agent session`
 Expected: PASS, 4 tests
 
 - [ ] **Step 5: Commit**
@@ -1563,8 +1563,8 @@ git commit -m "feat(agent): a session that answers capabilities and reports diff
 - Modify: `crates/agent/src/lib.rs`
 
 **Interfaces:**
-- Consumes: `event::AgentEvent` (Task 2), `overnight_protocol::v1::AgentActivity`.
-- Produces: `overnight_agent::activity_source::observe(&AgentEvent) -> Option<AgentActivity>`.
+- Consumes: `event::AgentEvent` (Task 2), `farcooler_protocol::v1::AgentActivity`.
+- Produces: `farcooler_agent::activity_source::observe(&AgentEvent) -> Option<AgentActivity>`.
 
 This is the reliability win the spec names: in agent pane mode, `Blocked` stops being a generous list of hopeful substrings and becomes a protocol fact. `activity::advance`, `seen` and `wants_attention` in `crates/core` are reused **unchanged** — do not modify them.
 
@@ -1577,7 +1577,7 @@ Create `crates/agent/src/activity_source.rs` containing only this test module:
 mod tests {
     use super::*;
     use crate::event::{AgentEvent, AgentGapReason, EndReason, PermissionOption, Role, ToolStatus};
-    use overnight_protocol::v1::AgentActivity;
+    use farcooler_protocol::v1::AgentActivity;
 
     #[test]
     fn a_permission_request_is_exactly_blocked() {
@@ -1630,7 +1630,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-agent activity_source`
+Run: `cargo test -p farcooler-agent activity_source`
 Expected: FAIL — `cannot find function observe in this scope`
 
 - [ ] **Step 3: Write the source**
@@ -1648,7 +1648,7 @@ Add `pub mod activity_source;` to `crates/agent/src/lib.rs`. Prepend to `crates/
 //! stay in `core` and are reused unchanged, so `Done` means the same thing and
 //! a phone, a Mac badge and a notification cannot disagree.
 
-use overnight_protocol::v1::AgentActivity;
+use farcooler_protocol::v1::AgentActivity;
 
 use crate::event::AgentEvent;
 
@@ -1672,7 +1672,7 @@ pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-agent activity_source`
+Run: `cargo test -p farcooler-agent activity_source`
 Expected: PASS, 4 tests
 
 - [ ] **Step 5: Commit**
@@ -1692,7 +1692,7 @@ git commit -m "feat(agent): blocked becomes a fact instead of a hopeful substrin
 
 **Interfaces:**
 - Consumes: `event::{AgentEvent, Sequenced, Seq}` (Task 2), `ring::AgentReplay` (Task 4).
-- Produces: `overnight_agent::link::{ShimMessage, DaemonMessage, encode_line, decode_line}`.
+- Produces: `farcooler_agent::link::{ShimMessage, DaemonMessage, encode_line, decode_line}`.
 
 Newline-delimited JSON, permitted by the Global Constraints because shim and daemon ship in one binary and therefore have no version skew. The client-facing protocol stays protobuf.
 
@@ -1739,7 +1739,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-agent link`
+Run: `cargo test -p farcooler-agent link`
 Expected: FAIL — `cannot find type ShimMessage in this scope`
 
 - [ ] **Step 3: Write the link types**
@@ -1797,10 +1797,10 @@ pub fn decode_line<T: for<'de> Deserialize<'de>>(line: &str) -> Result<T, serde_
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-agent link`
+Run: `cargo test -p farcooler-agent link`
 Expected: PASS, 3 tests
 
-Then confirm nothing else broke: `cargo test -p overnight-agent`
+Then confirm nothing else broke: `cargo test -p farcooler-agent`
 
 - [ ] **Step 5: Commit**
 
@@ -1811,7 +1811,7 @@ git commit -m "feat(agent): a private channel between a shim and its daemon"
 
 ---
 
-### Task 10: `overnight agent-host` — the shim that lives in the pane
+### Task 10: `farcooler agent-host` — the shim that lives in the pane
 
 **Files:**
 - Create: `crates/cli/src/agent_host.rs`
@@ -1819,8 +1819,8 @@ git commit -m "feat(agent): a private channel between a shim and its daemon"
 - Modify: `crates/cli/Cargo.toml`
 
 **Interfaces:**
-- Consumes: `overnight_agent::{session::AgentSession, acp::conn::AcpConnection, ring::AgentRing, link::{ShimMessage, DaemonMessage, encode_line, decode_line}, ring::AgentReplay}` (Tasks 4, 6, 7, 9).
-- Produces: the subcommand `overnight agent-host --terminal <uuid> --socket <path> --worktree <path> [--session <uuid>] [--adapter <program>]`.
+- Consumes: `farcooler_agent::{session::AgentSession, acp::conn::AcpConnection, ring::AgentRing, link::{ShimMessage, DaemonMessage, encode_line, decode_line}, ring::AgentReplay}` (Tasks 4, 6, 7, 9).
+- Produces: the subcommand `farcooler agent-host --terminal <uuid> --socket <path> --worktree <path> [--session <uuid>] [--adapter <program>]`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1852,7 +1852,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-cli agent_host`
+Run: `cargo test -p farcooler-cli agent_host`
 Expected: FAIL — `file not found for module agent_host`
 
 - [ ] **Step 3: Write the shim**
@@ -1860,7 +1860,7 @@ Expected: FAIL — `file not found for module agent_host`
 Add to `crates/cli/Cargo.toml` `[dependencies]`:
 
 ```toml
-overnight-agent.workspace = true
+farcooler-agent.workspace = true
 ```
 
 Add `mod agent_host;` to `crates/cli/src/main.rs`, and a variant to its `clap` command enum:
@@ -1908,10 +1908,10 @@ Prepend to `crates/cli/src/agent_host.rs`:
 
 use std::path::PathBuf;
 
-use overnight_agent::acp::conn::AcpConnection;
-use overnight_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
-use overnight_agent::ring::{AgentReplay, AgentRing};
-use overnight_agent::session::AgentSession;
+use farcooler_agent::acp::conn::AcpConnection;
+use farcooler_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
+use farcooler_agent::ring::{AgentReplay, AgentRing};
+use farcooler_agent::session::AgentSession;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use uuid::Uuid;
@@ -1924,17 +1924,17 @@ pub enum Status {
 pub fn status_line(status: &Status) -> String {
     match status {
         Status::AdapterMissing { program } => format!(
-            "overnight: could not start the ACP adapter `{program}`.\n\
+            "farcooler: could not start the ACP adapter `{program}`.\n\
              Install it, or switch this terminal back to terminal mode — \
              terminal mode needs no adapter and is unaffected."
         ),
         Status::Connected { session_id } => {
-            format!("overnight: agent session {session_id} connected. Rendering natively.")
+            format!("farcooler: agent session {session_id} connected. Rendering natively.")
         }
     }
 }
 
-/// The adapter Overnight uses when preferences name none.
+/// The adapter Far Cooler uses when preferences name none.
 pub fn default_adapter() -> (String, Vec<String>) {
     (
         "npx".to_string(),
@@ -2038,7 +2038,7 @@ async fn serve(
                 let mut batch = Vec::with_capacity(events.len());
                 for event in events {
                     let seq = ring.push(event.clone());
-                    batch.push(overnight_agent::event::Sequenced { seq, event });
+                    batch.push(farcooler_agent::event::Sequenced { seq, event });
                 }
                 cursor = ring.next_seq();
                 let _ = terminal;
@@ -2053,7 +2053,7 @@ async fn serve(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-cli agent_host`
+Run: `cargo test -p farcooler-cli agent_host`
 Expected: PASS, 2 tests
 
 Then: `cargo build --workspace` — expected to succeed.
@@ -2112,7 +2112,7 @@ Add to the bottom of `crates/store/src/store.rs` inside its existing `#[cfg(test
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-store pane_mode`
+Run: `cargo test -p farcooler-store pane_mode`
 Expected: FAIL — `no field pane_mode on type Terminal`
 
 - [ ] **Step 3: Add the migration, the model fields and the mutator**
@@ -2152,7 +2152,7 @@ In `crates/store/src/models.rs`, add the enum and the two fields on `Terminal`:
 pub enum PaneMode {
     /// A TUI, exactly as before this feature existed. The default.
     Terminal,
-    /// `overnight agent-host`, bridging an ACP agent.
+    /// `farcooler agent-host`, bridging an ACP agent.
     Agent,
 }
 
@@ -2241,7 +2241,7 @@ Then add the mutator:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-store`
+Run: `cargo test -p farcooler-store`
 Expected: PASS, including the two new tests
 
 - [ ] **Step 5: Commit**
@@ -2262,7 +2262,7 @@ git commit -m "feat(store): pane mode and a session id, as intent and nothing mo
 **Interfaces:**
 - Produces: `preset_command(preset: &str, session_id: Option<&str>) -> String`.
 
-Discovery is archaeology. Declaring is exact. Every claude terminal Overnight launches gets a uuid Overnight chose, so adoption later is a lookup rather than a guess.
+Discovery is archaeology. Declaring is exact. Every claude terminal Far Cooler launches gets a uuid Far Cooler chose, so adoption later is a lookup rather than a guess.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2295,7 +2295,7 @@ Add to `crates/daemon/src/service.rs`'s test module:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-daemon preset_command`
+Run: `cargo test -p farcooler-daemon preset_command`
 Expected: FAIL — `this function takes 1 argument but 2 arguments were supplied`
 
 - [ ] **Step 3: Thread the session id through**
@@ -2356,7 +2356,7 @@ Update the other two call sites (`split_terminal` and `restart_terminal`) to pas
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-daemon`
+Run: `cargo test -p farcooler-daemon`
 Expected: PASS, including the three new tests
 
 - [ ] **Step 5: Commit**
@@ -2393,12 +2393,12 @@ mod tests {
     fn a_worktree_path_munges_the_way_claude_munges_it() {
         // Read off a real machine: every non-alphanumeric becomes a dash, and
         // the leading slash produces a leading dash.
-        assert_eq!(project_dir_name(Path::new("/Users/e/Dev/overnight")), "-Users-e-Dev-overnight");
+        assert_eq!(project_dir_name(Path::new("/Users/e/Dev/farcooler")), "-Users-e-Dev-farcooler");
         assert_eq!(project_dir_name(Path::new("/Users/e/.claude/jobs")), "-Users-e--claude-jobs");
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("overnight-disc-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("farcooler-disc-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -2453,7 +2453,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-daemon session_discovery`
+Run: `cargo test -p farcooler-daemon session_discovery`
 Expected: FAIL — `file not found for module session_discovery`
 
 - [ ] **Step 3: Write the discovery**
@@ -2463,7 +2463,7 @@ Add `pub mod session_discovery;` to `crates/daemon/src/lib.rs`. Prepend to `crat
 ```rust
 //! Which conversation is running in a pane nobody declared.
 //!
-//! Only for `claude` typed into a shell by hand. Anything Overnight launched
+//! Only for `claude` typed into a shell by hand. Anything Far Cooler launched
 //! carries a declared session id in SQLite and never reaches here.
 //!
 //! A workspace is one worktree, so the project directory almost always holds a
@@ -2535,7 +2535,7 @@ pub fn discover_claude_session(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-daemon session_discovery`
+Run: `cargo test -p farcooler-daemon session_discovery`
 Expected: PASS, 4 tests
 
 - [ ] **Step 5: Commit**
@@ -2597,7 +2597,7 @@ async fn respawning_a_pane_keeps_its_id_its_tag_and_its_place() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-tmux --test live_tmux respawning`
+Run: `cargo test -p farcooler-tmux --test live_tmux respawning`
 Expected: FAIL — `no method named respawn_pane`
 
 - [ ] **Step 3: Add the method**
@@ -2629,7 +2629,7 @@ Add to `impl TmuxServer` in `crates/tmux/src/windows.rs`, beside `kill_pane`:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-tmux --test live_tmux respawning`
+Run: `cargo test -p farcooler-tmux --test live_tmux respawning`
 Expected: PASS (or a clean skip if the harness finds no live tmux — verify by running with tmux available)
 
 - [ ] **Step 5: Commit**
@@ -2649,7 +2649,7 @@ git commit -m "feat(tmux): respawn a pane so a toggle keeps its place in the lay
 - Modify: `crates/daemon/src/service.rs`
 
 **Interfaces:**
-- Consumes: `overnight_agent::link::{ShimMessage, DaemonMessage}` (Task 9), `TmuxServer::respawn_pane` (Task 14), `Store::set_pane_mode` (Task 11), `session_discovery` (Task 13), `activity_source::observe` (Task 8), `core::activity::advance`.
+- Consumes: `farcooler_agent::link::{ShimMessage, DaemonMessage}` (Task 9), `TmuxServer::respawn_pane` (Task 14), `Store::set_pane_mode` (Task 11), `session_discovery` (Task 13), `activity_source::observe` (Task 8), `core::activity::advance`.
 - Produces: `AgentSupervisor::{socket_path, listen, set_pane_mode, prompt, answer, set_agent_mode, cancel, subscribe}` and `Service::set_pane_mode(terminal_id, PaneMode, force: bool) -> Result<models::Terminal>`.
 
 - [ ] **Step 1: Write the failing test**
@@ -2660,15 +2660,15 @@ Create `crates/daemon/src/agent_supervisor.rs` containing only this test module:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use overnight_agent::event::{AgentEvent, EndReason, PermissionOption, Role};
-    use overnight_protocol::v1::AgentActivity;
+    use farcooler_agent::event::{AgentEvent, EndReason, PermissionOption, Role};
+    use farcooler_protocol::v1::AgentActivity;
 
     #[test]
     fn a_socket_path_is_per_terminal_and_not_guessable_across_daemons() {
-        let a = socket_path(Path::new("/run/overnight"), Uuid::now_v7());
-        let b = socket_path(Path::new("/run/overnight"), Uuid::now_v7());
+        let a = socket_path(Path::new("/run/farcooler"), Uuid::now_v7());
+        let b = socket_path(Path::new("/run/farcooler"), Uuid::now_v7());
         assert_ne!(a, b);
-        assert!(a.starts_with("/run/overnight"));
+        assert!(a.starts_with("/run/farcooler"));
     }
 
     #[test]
@@ -2708,7 +2708,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-daemon agent_supervisor`
+Run: `cargo test -p farcooler-daemon agent_supervisor`
 Expected: FAIL — `file not found for module agent_supervisor`
 
 - [ ] **Step 3: Write the supervisor**
@@ -2730,11 +2730,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use overnight_agent::event::AgentEvent;
-use overnight_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
-use overnight_agent::{activity_source, event::Seq};
-use overnight_core::activity;
-use overnight_protocol::v1::AgentActivity;
+use farcooler_agent::event::AgentEvent;
+use farcooler_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
+use farcooler_agent::{activity_source, event::Seq};
+use farcooler_core::activity;
+use farcooler_protocol::v1::AgentActivity;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
@@ -2755,7 +2755,7 @@ pub fn socket_path(runtime_dir: &Path, terminal: Uuid) -> PathBuf {
 
 /// Apply one event to a terminal's activity.
 ///
-/// The observation is `overnight_agent`'s; the FOLD is `core::activity`'s, and
+/// The observation is `farcooler_agent`'s; the FOLD is `core::activity`'s, and
 /// deliberately so. `Done` must mean the same thing whether it came from a
 /// screen or from a protocol, or a Mac badge and a phone notification will
 /// disagree about the same terminal.
@@ -2828,7 +2828,7 @@ impl AgentSupervisor {
         on_events: F,
     ) -> std::io::Result<()>
     where
-        F: Fn(Uuid, Vec<overnight_agent::event::Sequenced>) + Send + 'static,
+        F: Fn(Uuid, Vec<farcooler_agent::event::Sequenced>) + Send + 'static,
     {
         let path = socket_path(runtime_dir, terminal);
         let _ = std::fs::remove_file(&path);
@@ -2856,7 +2856,7 @@ impl AgentSupervisor {
         on_events: &F,
     ) -> std::io::Result<()>
     where
-        F: Fn(Uuid, Vec<overnight_agent::event::Sequenced>) + Send + 'static,
+        F: Fn(Uuid, Vec<farcooler_agent::event::Sequenced>) + Send + 'static,
     {
         let (read_half, mut write_half) = stream.into_split();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<DaemonMessage>();
@@ -2888,7 +2888,7 @@ impl AgentSupervisor {
 
     fn apply<F>(&self, terminal: Uuid, message: ShimMessage, on_events: &F)
     where
-        F: Fn(Uuid, Vec<overnight_agent::event::Sequenced>) + Send + 'static,
+        F: Fn(Uuid, Vec<farcooler_agent::event::Sequenced>) + Send + 'static,
     {
         let batch = match message {
             ShimMessage::Events { events } => events,
@@ -2993,7 +2993,7 @@ Add to `Service` in `crates/daemon/src/service.rs`:
             models::PaneMode::Agent => {
                 let binary = std::env::current_exe()
                     .map(|p| p.display().to_string())
-                    .unwrap_or_else(|_| "overnight".to_string());
+                    .unwrap_or_else(|_| "farcooler".to_string());
                 let socket =
                     agent_supervisor::socket_path(&self.runtime_dir, id).display().to_string();
                 let session = session_id
@@ -3016,7 +3016,7 @@ Add `agents: agent_supervisor::AgentSupervisor` and `runtime_dir: PathBuf` field
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-daemon agent_supervisor`
+Run: `cargo test -p farcooler-daemon agent_supervisor`
 Expected: PASS, 4 tests
 
 Then: `cargo test --workspace`
@@ -3033,7 +3033,7 @@ git commit -m "feat(daemon): supervise agent sessions, and refuse a toggle mid-t
 ### Task 16: Protocol surface for clients
 
 **Files:**
-- Modify: `proto/overnight.proto`
+- Modify: `proto/farcooler.proto`
 - Modify: `crates/daemon/src/rpc.rs`
 - Modify: `crates/daemon/src/wire.rs`
 
@@ -3069,12 +3069,12 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-daemon --test rpc_over_socket`
+Run: `cargo test -p farcooler-daemon --test rpc_over_socket`
 Expected: FAIL — `no field pane_mode on type Terminal`
 
 - [ ] **Step 3: Extend the proto and wire it up**
 
-In `proto/overnight.proto`, add to `message Terminal` after field 17:
+In `proto/farcooler.proto`, add to `message Terminal` after field 17:
 
 ```proto
   // What this terminal's pane is HOSTING: a TUI, or a headless ACP agent.
@@ -3181,7 +3181,7 @@ message AgentEventBatch {
 
 message AgentEventFrame {
   uint64 seq = 1;
-  // The normalized event, as JSON. The shape is `overnight_agent::event::
+  // The normalized event, as JSON. The shape is `farcooler_agent::event::
   // AgentEvent`, which is the single definition both apps decode.
   string payload_json = 2;
 }
@@ -3308,7 +3308,7 @@ Add to `AgentSupervisor` in `crates/daemon/src/agent_supervisor.rs`:
     ///
     /// Empty for a terminal with no session — attaching to a pane that is not
     /// in agent mode is not an error, it just has nothing to show yet.
-    pub fn replay(&self, terminal: Uuid, from_seq: Seq) -> Vec<overnight_agent::event::Sequenced> {
+    pub fn replay(&self, terminal: Uuid, from_seq: Seq) -> Vec<farcooler_agent::event::Sequenced> {
         self.recent
             .lock()
             .ok()
@@ -3399,7 +3399,7 @@ Add to `crates/daemon/src/service.rs`'s test module:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-daemon --test rpc_over_socket`
+Run: `cargo test -p farcooler-daemon --test rpc_over_socket`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -3466,8 +3466,8 @@ Create `crates/agent/tests/properties.rs`:
 ```rust
 //! The three invariants the whole design rests on.
 
-use overnight_agent::event::{AgentEvent, AgentGapReason, Role};
-use overnight_agent::ring::{AgentReplay, AgentRing};
+use farcooler_agent::event::{AgentEvent, AgentGapReason, Role};
+use farcooler_agent::ring::{AgentReplay, AgentRing};
 
 fn msg(i: usize) -> AgentEvent {
     AgentEvent::Message { role: Role::Agent, text: format!("m{i}") }
@@ -3530,7 +3530,7 @@ fn an_unparsed_update_is_representable_end_to_end() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p overnight-daemon --test stdio_transport && cargo test -p overnight-agent --test properties`
+Run: `cargo test -p farcooler-daemon --test stdio_transport && cargo test -p farcooler-agent --test properties`
 Expected: FAIL — the stdio harness does not yet know the new payload variants
 
 - [ ] **Step 3: Make them pass**

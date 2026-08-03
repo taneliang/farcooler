@@ -1,8 +1,8 @@
 // Makes the client core importable as a Swift module.
 //
 // An XCFramework built from a static library exposes headers through search
-// paths, not as a Clang module, so `import OvernightClient` fails without this.
-module OvernightClient {
-    header "overnight_client.h"
+// paths, not as a Clang module, so `import FarCoolerClient` fails without this.
+module FarCoolerClient {
+    header "farcooler_client.h"
     export *
 }

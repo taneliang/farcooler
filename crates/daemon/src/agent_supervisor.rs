@@ -14,11 +14,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use overnight_agent::event::{AgentEvent, AgentGapReason, Seq, Sequenced};
-use overnight_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
-use overnight_agent::activity_source;
-use overnight_core::activity;
-use overnight_protocol::v1::AgentActivity;
+use farcooler_agent::event::{AgentEvent, AgentGapReason, Seq, Sequenced};
+use farcooler_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
+use farcooler_agent::activity_source;
+use farcooler_core::activity;
+use farcooler_protocol::v1::AgentActivity;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
@@ -61,7 +61,7 @@ pub enum ToggleRefusal {
 ///
 /// SHORT, and that is not tidiness. A Unix socket path cannot exceed
 /// `sun_path` — 104 bytes on macOS — and the default runtime directory is
-/// `~/Library/Application Support/com.overnight.Overnight`, which is already
+/// `~/Library/Application Support/com.farcooler.FarCooler`, which is already
 /// 66 of them. A full uuid took the total to 113: `bind` failed, the daemon
 /// never listened, the shim dialled a socket nobody was on, and the chat sat
 /// blank forever with the pane cheerfully reporting "connected". It worked in
@@ -83,7 +83,7 @@ pub const MAX_SOCKET_PATH: usize = 103;
 
 /// Apply one event to a terminal's activity.
 ///
-/// The observation is `overnight_agent`'s; the FOLD is `core::activity`'s, and
+/// The observation is `farcooler_agent`'s; the FOLD is `core::activity`'s, and
 /// deliberately so. `Done` must mean the same thing whether it came from a
 /// screen or from a protocol, or a Mac badge and a phone notification will
 /// disagree about the same terminal.
@@ -490,15 +490,15 @@ impl AgentSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use overnight_agent::event::{AgentEvent, EndReason, PermissionOption, Role};
-    use overnight_protocol::v1::AgentActivity;
+    use farcooler_agent::event::{AgentEvent, EndReason, PermissionOption, Role};
+    use farcooler_protocol::v1::AgentActivity;
 
     #[test]
     fn a_socket_path_is_per_terminal_and_not_guessable_across_daemons() {
-        let a = socket_path(Path::new("/run/overnight"), Uuid::now_v7());
-        let b = socket_path(Path::new("/run/overnight"), Uuid::now_v7());
+        let a = socket_path(Path::new("/run/farcooler"), Uuid::now_v7());
+        let b = socket_path(Path::new("/run/farcooler"), Uuid::now_v7());
         assert_ne!(a, b);
-        assert!(a.starts_with("/run/overnight"));
+        assert!(a.starts_with("/run/farcooler"));
     }
 
     #[test]
@@ -540,7 +540,7 @@ mod tests {
         // daemon logs and moves on from, the shim keeps dialling, and the only
         // symptom is a chat that never fills in. Measured against the real
         // default runtime directory, which is the one that broke.
-        let real = Path::new("/Users/some-long-user-name/Library/Application Support/com.overnight.Overnight");
+        let real = Path::new("/Users/some-long-user-name/Library/Application Support/com.farcooler.FarCooler");
         let path = socket_path(real, Uuid::now_v7());
         assert!(
             path.as_os_str().len() <= MAX_SOCKET_PATH,
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn two_terminals_do_not_share_a_socket() {
-        let dir = Path::new("/run/overnight");
+        let dir = Path::new("/run/farcooler");
         assert_ne!(socket_path(dir, Uuid::now_v7()), socket_path(dir, Uuid::now_v7()));
     }
 
@@ -693,7 +693,7 @@ mod gap_tests {
                 .map(|i| Sequenced {
                     seq: i,
                     event: AgentEvent::Message {
-                        role: overnight_agent::event::Role::Agent,
+                        role: farcooler_agent::event::Role::Agent,
                         text: format!("line {}", sent + i as usize),
                     },
                 })

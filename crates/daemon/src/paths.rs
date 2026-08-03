@@ -6,14 +6,14 @@
 
 use std::path::PathBuf;
 
-use overnight_core::{DomainError, Result};
+use farcooler_core::{DomainError, Result};
 
-/// `~/Library/Application Support/Overnight` on macOS.
+/// `~/Library/Application Support/Far Cooler` on macOS.
 pub fn runtime_dir() -> Result<PathBuf> {
-    if let Ok(over) = std::env::var("OVERNIGHT_HOME") {
+    if let Ok(over) = std::env::var("FARCOOLER_HOME") {
         return Ok(PathBuf::from(over));
     }
-    let dirs = directories::ProjectDirs::from("com", "overnight", "Overnight")
+    let dirs = directories::ProjectDirs::from("com", "farcooler", "FarCooler")
         .ok_or(DomainError::OperationFailed)?;
     Ok(dirs.data_dir().to_path_buf())
 }
@@ -40,12 +40,12 @@ pub fn ensure_runtime_dir() -> Result<PathBuf> {
 }
 
 pub fn database_path() -> Result<PathBuf> {
-    Ok(ensure_runtime_dir()?.join("overnight.db"))
+    Ok(ensure_runtime_dir()?.join("farcooler.db"))
 }
 
 /// The daemon-owned socket. Mode 0600 under a user-only directory.
 pub fn socket_path() -> Result<PathBuf> {
-    Ok(ensure_runtime_dir()?.join("overnightd.sock"))
+    Ok(ensure_runtime_dir()?.join("farcoolerd.sock"))
 }
 
 pub fn install_id_path() -> Result<PathBuf> {
@@ -88,7 +88,7 @@ mod tests {
 
     fn scratch(tag: &str) -> std::path::PathBuf {
         let p = std::env::temp_dir()
-            .join(format!("overnight-paths-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
+            .join(format!("farcooler-paths-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p

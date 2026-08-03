@@ -1,13 +1,13 @@
 [package]
-name = "overnight-tmux"
+name = "farcooler-tmux"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-overnight-core.workspace = true
-overnight-protocol.workspace = true
+farcooler-core.workspace = true
+farcooler-protocol.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

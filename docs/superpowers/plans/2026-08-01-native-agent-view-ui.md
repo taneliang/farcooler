@@ -33,7 +33,7 @@
 **Interfaces:**
 - Produces: `AgentKit.AgentEvent` (enum), `AgentKit.Sequenced`, `AgentKit.Role`, `AgentKit.ToolStatus`, `AgentKit.Diff`, `AgentKit.PlanEntry`, `AgentKit.PermissionOption`, `AgentKit.GapReason`.
 
-The Rust side serialises `overnight_agent::event::AgentEvent` with serde's default externally-tagged representation. These are the **measured** outputs, printed from a scratch test against the real types — not a guess, and the decoder must match them exactly:
+The Rust side serialises `farcooler_agent::event::AgentEvent` with serde's default externally-tagged representation. These are the **measured** outputs, printed from a scratch test against the real types — not a guess, and the decoder must match them exactly:
 
 ```json
 {"Message":{"role":"Agent","text":"hi"}}
@@ -190,7 +190,7 @@ public struct Sequenced: Sendable, Equatable {
 }
 
 extension AgentEvent {
-    /// Decode one serialised `overnight_agent::event::AgentEvent`.
+    /// Decode one serialised `farcooler_agent::event::AgentEvent`.
     ///
     /// Serde's externally-tagged representation: a single-key object whose key
     /// names the variant. An unrecognised key is a `.gap(.unparsed)` rather
@@ -305,10 +305,10 @@ Add the dependency in `apps/macos/Package.swift` — add to `Package(...)`:
     dependencies: [.package(path: "../shared/AgentKit")],
 ```
 
-and to the `Overnight` executable target's `dependencies`:
+and to the `Far Cooler` executable target's `dependencies`:
 
 ```swift
-            dependencies: ["COvernightVT", .product(name: "AgentKit", package: "AgentKit")],
+            dependencies: ["CFarCoolerVT", .product(name: "AgentKit", package: "AgentKit")],
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -728,8 +728,8 @@ git commit -m "feat(agentkit): one parse of slash and at, so both apps pop the s
 
 **Files:**
 - Modify: `crates/client/src/session.rs`
-- Modify: `apps/macos/Sources/Overnight/Model.swift`
-- Modify: `apps/ios/Overnight/Model.swift`
+- Modify: `apps/macos/Sources/Far Cooler/Model.swift`
+- Modify: `apps/ios/Far Cooler/Model.swift`
 
 **Interfaces:**
 - Produces: `paneMode`, `agentSessionId`, `agentMode`, `availableAgentModes` on the Swift `Terminal` in both apps.
@@ -745,8 +745,8 @@ Add to `crates/client/src/session.rs`'s test module:
     fn a_terminal_reports_its_pane_mode_as_a_word_a_client_can_switch_on() {
         // Numbers would make every client carry a copy of the enum and drift
         // from it. The label is the daemon's answer, not a code to look up.
-        assert_eq!(pane_mode_label(overnight_protocol::v1::PaneMode::Terminal as i32), "terminal");
-        assert_eq!(pane_mode_label(overnight_protocol::v1::PaneMode::Agent as i32), "agent");
+        assert_eq!(pane_mode_label(farcooler_protocol::v1::PaneMode::Terminal as i32), "terminal");
+        assert_eq!(pane_mode_label(farcooler_protocol::v1::PaneMode::Agent as i32), "agent");
         // An unknown value is the mode that always works, not a guess.
         assert_eq!(pane_mode_label(99), "terminal");
     }
@@ -754,7 +754,7 @@ Add to `crates/client/src/session.rs`'s test module:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-client pane_mode`
+Run: `cargo test -p farcooler-client pane_mode`
 Expected: FAIL — `cannot find function pane_mode_label`
 
 - [ ] **Step 3: Implement**
@@ -767,8 +767,8 @@ In `crates/client/src/session.rs`, beside `activity_label`:
 /// Same reason `activity_label` exists: a client that switched on an integer
 /// would hold a second copy of the enum and drift from it silently.
 fn pane_mode_label(mode: i32) -> &'static str {
-    match overnight_protocol::v1::PaneMode::try_from(mode) {
-        Ok(overnight_protocol::v1::PaneMode::Agent) => "agent",
+    match farcooler_protocol::v1::PaneMode::try_from(mode) {
+        Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
         // Unspecified from an older daemon is terminal: the mode that needs no
         // adapter and always works.
         _ => "terminal",
@@ -785,7 +785,7 @@ Add to the JSON object built around line 183:
                             "availableAgentModes": t.available_agent_modes.clone(),
 ```
 
-Add to `struct Terminal` in BOTH `apps/macos/Sources/Overnight/Model.swift` and `apps/ios/Overnight/Model.swift`:
+Add to `struct Terminal` in BOTH `apps/macos/Sources/Far Cooler/Model.swift` and `apps/ios/Far Cooler/Model.swift`:
 
 ```swift
     /// What this terminal's pane is hosting. Absent on older daemons, which is
@@ -802,7 +802,7 @@ Add to `struct Terminal` in BOTH `apps/macos/Sources/Overnight/Model.swift` and 
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-client`
+Run: `cargo test -p farcooler-client`
 Expected: PASS
 
 Then: `cd apps/macos && swift build`
@@ -810,7 +810,7 @@ Then: `cd apps/macos && swift build`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/client apps/macos/Sources/Overnight/Model.swift apps/ios/Overnight/Model.swift
+git add crates/client apps/macos/Sources/Far Cooler/Model.swift apps/ios/Far Cooler/Model.swift
 git commit -m "feat(client): a terminal says which surface to draw"
 ```
 
@@ -821,12 +821,12 @@ git commit -m "feat(client): a terminal says which surface to draw"
 **Files:**
 - Modify: `crates/client/src/session.rs`
 - Modify: `crates/client/src/ffi.rs`
-- Create: `apps/macos/Sources/Overnight/AgentStream.swift`
+- Create: `apps/macos/Sources/Far Cooler/AgentStream.swift`
 
 **Interfaces:**
 - Produces: a client call that subscribes from a cursor and returns `[(seq, payload_json)]`, and `AgentStream`, an `ObservableObject` holding a `Transcript` for one terminal.
 
-Read `crates/client/src/ffi.rs` and `apps/macos/Sources/Overnight/TerminalStream.swift` first — the terminal stream is the pattern this follows, and the FFI boundary has an established shape that must be matched rather than reinvented.
+Read `crates/client/src/ffi.rs` and `apps/macos/Sources/Far Cooler/TerminalStream.swift` first — the terminal stream is the pattern this follows, and the FFI boundary has an established shape that must be matched rather than reinvented.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -847,14 +847,14 @@ async fn subscribing_to_a_terminal_with_no_agent_session_is_empty_not_an_error()
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p overnight-client --test against_a_real_daemon subscribing`
+Run: `cargo test -p farcooler-client --test against_a_real_daemon subscribing`
 Expected: FAIL — no `agent_subscribe` method
 
 - [ ] **Step 3: Implement**
 
 Add `agent_subscribe`, `agent_prompt`, `agent_answer`, `agent_set_mode`, `agent_cancel`, `set_pane_mode` and `worktree_file_search` to the client session, each a thin wrapper over the request payloads added in the core plan's Task 16, following the existing method style exactly. Expose them across the FFI in the same shape `ffi.rs` already uses for terminal calls.
 
-Create `apps/macos/Sources/Overnight/AgentStream.swift`:
+Create `apps/macos/Sources/Far Cooler/AgentStream.swift`:
 
 ```swift
 import AgentKit
@@ -922,17 +922,17 @@ final class AgentStream: ObservableObject {
 }
 ```
 
-Match `DaemonClient`'s real method names and error handling to what exists in `apps/macos/Sources/Overnight/DaemonClient.swift`; the names above are the shape, not a promise about that file's API.
+Match `DaemonClient`'s real method names and error handling to what exists in `apps/macos/Sources/Far Cooler/DaemonClient.swift`; the names above are the shape, not a promise about that file's API.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p overnight-client` then `cd apps/macos && swift build`
+Run: `cargo test -p farcooler-client` then `cd apps/macos && swift build`
 Expected: PASS and a clean build
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/client apps/macos/Sources/Overnight/AgentStream.swift
+git add crates/client apps/macos/Sources/Far Cooler/AgentStream.swift
 git commit -m "feat(client): subscribe to an agent session by cursor"
 ```
 
@@ -941,11 +941,11 @@ git commit -m "feat(client): subscribe to an agent session by cursor"
 ### Task 6: `AgentSurface` — the pane
 
 **Files:**
-- Create: `apps/macos/Sources/Overnight/AgentSurface.swift`
-- Create: `apps/macos/Sources/Overnight/AgentRows.swift`
-- Create: `apps/macos/Sources/Overnight/DiffView.swift`
-- Modify: `apps/macos/Sources/Overnight/TileView.swift`
-- Modify: `apps/macos/Sources/Overnight/TerminalPane.swift`
+- Create: `apps/macos/Sources/Far Cooler/AgentSurface.swift`
+- Create: `apps/macos/Sources/Far Cooler/AgentRows.swift`
+- Create: `apps/macos/Sources/Far Cooler/DiffView.swift`
+- Modify: `apps/macos/Sources/Far Cooler/TileView.swift`
+- Modify: `apps/macos/Sources/Far Cooler/TerminalPane.swift`
 
 **Interfaces:**
 - Consumes: `AgentStream` (Task 5), `Terminal.isAgentPane` (Task 4), `AgentKit.TranscriptRow`.
@@ -954,7 +954,7 @@ Read `TerminalSurface.swift`, `TerminalPane.swift` and `TileView.swift` first. `
 
 - [ ] **Step 1: Write the failing test**
 
-macOS views are not unit-testable here without adding a UI test harness, which is out of scope. Instead assert the routing decision, which is the part that can silently be wrong. Add to a new `apps/macos/Sources/Overnight/AgentSurface.swift` test-free helper and cover it in `AgentKit`:
+macOS views are not unit-testable here without adding a UI test harness, which is out of scope. Instead assert the routing decision, which is the part that can silently be wrong. Add to a new `apps/macos/Sources/Far Cooler/AgentSurface.swift` test-free helper and cover it in `AgentKit`:
 
 Add to `apps/shared/AgentKit/Tests/AgentKitTests/TranscriptTests.swift`:
 
@@ -1010,7 +1010,7 @@ Then run the app, create a workspace, launch a claude terminal, and switch it to
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/macos/Sources/Overnight
+git add apps/macos/Sources/Far Cooler
 git commit -m "feat(macos): a chat is a pane, drawn where a terminal would be"
 ```
 
@@ -1019,10 +1019,10 @@ git commit -m "feat(macos): a chat is a pane, drawn where a terminal would be"
 ### Task 7: Composer, slash commands, mentions, images, mode switcher
 
 **Files:**
-- Create: `apps/macos/Sources/Overnight/AgentComposer.swift`
-- Modify: `apps/macos/Sources/Overnight/AgentSurface.swift`
-- Modify: `apps/macos/Sources/Overnight/Shortcuts.swift`
-- Modify: `apps/macos/Sources/Overnight/CommandPalette.swift`
+- Create: `apps/macos/Sources/Far Cooler/AgentComposer.swift`
+- Modify: `apps/macos/Sources/Far Cooler/AgentSurface.swift`
+- Modify: `apps/macos/Sources/Far Cooler/Shortcuts.swift`
+- Modify: `apps/macos/Sources/Far Cooler/CommandPalette.swift`
 
 **Interfaces:**
 - Consumes: `AgentKit.activeToken` (Task 3), `transcript.availableCommands`, `transcript.availableModes`, the worktree file-search call (Task 5).
@@ -1042,15 +1042,15 @@ Verify with `swift build` and by exercising each affordance against a live agent
 ### Task 8: iOS
 
 **Files:**
-- Create: `apps/ios/Overnight/AgentView.swift`
-- Create: `apps/ios/Overnight/AgentStream.swift`
-- Modify: `apps/ios/Overnight/TerminalView.swift`
+- Create: `apps/ios/Far Cooler/AgentView.swift`
+- Create: `apps/ios/Far Cooler/AgentStream.swift`
+- Modify: `apps/ios/Far Cooler/TerminalView.swift`
 - Modify: `apps/ios/generate-project.py`
 
 **Interfaces:**
 - Consumes: everything above.
 
-`apps/ios` uses a generated Xcode project whose `SOURCES` list is explicit. Add the new files there, and add the shared `AgentKit` sources as their own group with path `../shared/AgentKit/Sources/AgentKit` — the generator currently assumes basenames under `Overnight/`, so this needs a second group in the same style as the existing `fontsGroup`. Regenerate with `./apps/ios/generate-project.py`.
+`apps/ios` uses a generated Xcode project whose `SOURCES` list is explicit. Add the new files there, and add the shared `AgentKit` sources as their own group with path `../shared/AgentKit/Sources/AgentKit` — the generator currently assumes basenames under `Far Cooler/`, so this needs a second group in the same style as the existing `fontsGroup`. Regenerate with `./apps/ios/generate-project.py`.
 
 The view is the same surface without tiling: a full-screen agent view swapped with the terminal view behind the existing `TerminalTabStrip`, chosen by `terminal.isAgentPane`. The composer sits over the keyboard using the existing key-row work; images come from the photo picker and paste. The approval card is the same shape as the Mac's, sized for a thumb.
 

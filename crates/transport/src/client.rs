@@ -12,10 +12,10 @@
 
 use std::path::Path;
 
-use overnight_protocol::v1::{
+use farcooler_protocol::v1::{
     ClientHello, Event, Request, Response, ServerHello, WireEnvelope, response, wire_envelope,
 };
-use overnight_protocol::{PROTOCOL_VERSION, ids};
+use farcooler_protocol::{PROTOCOL_VERSION, ids};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::UnixStream;
 
@@ -132,7 +132,7 @@ where
     pub async fn call(
         &mut self,
         request: Request,
-    ) -> Result<overnight_protocol::v1::Result, ClientError> {
+    ) -> Result<farcooler_protocol::v1::Result, ClientError> {
         let request_id = request.request_id.clone();
         self.writer
             .write_frame(&WireEnvelope {
@@ -159,7 +159,7 @@ where
     }
 }
 
-fn unwrap_response(r: Response) -> Result<overnight_protocol::v1::Result, ClientError> {
+fn unwrap_response(r: Response) -> Result<farcooler_protocol::v1::Result, ClientError> {
     match r.outcome {
         Some(response::Outcome::Result(value)) => Ok(value),
         Some(response::Outcome::Error(e)) => {
@@ -178,8 +178,8 @@ pub fn request(method: &str) -> Request {
         expected_resource_version: None,
         expected_lease_generation: None,
         idempotency_key: None,
-        payload: Some(overnight_protocol::v1::request::Payload::Empty(
-            overnight_protocol::v1::Empty {},
+        payload: Some(farcooler_protocol::v1::request::Payload::Empty(
+            farcooler_protocol::v1::Empty {},
         )),
     }
 }

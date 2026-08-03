@@ -49,17 +49,17 @@ jobs:
         run: cargo install cross --locked
 
       - name: Build
-        run: cross build --release --target ${{ matrix.target }} --bin overnight --bin overnightd
+        run: cross build --release --target ${{ matrix.target }} --bin farcooler --bin farcoolerd
 
-      # The same layout `overnight host install` looks for, so a downloaded
+      # The same layout `farcooler host install` looks for, so a downloaded
       # tarball unpacks straight into the path the installer already reads.
       - name: Package
         run: |
           out="dist/${{ matrix.arch }}-linux"
           mkdir -p "$out"
-          cp target/${{ matrix.target }}/release/overnight "$out/"
-          cp target/${{ matrix.target }}/release/overnightd "$out/"
-          tar -czf "overnight-$(scripts/version.sh)-${{ matrix.arch }}-linux.tar.gz" -C dist "${{ matrix.arch }}-linux"
+          cp target/${{ matrix.target }}/release/farcooler "$out/"
+          cp target/${{ matrix.target }}/release/farcoolerd "$out/"
+          tar -czf "farcooler-$(scripts/version.sh)-${{ matrix.arch }}-linux.tar.gz" -C dist "${{ matrix.arch }}-linux"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -105,10 +105,10 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k actions "$keychain"
           rm certificate.p12
 
-      - name: Build Overnight.app
+      - name: Build FarCooler.app
         run: apps/macos/build-app.sh
         env:
-          OVERNIGHT_WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+          FARCOOLER_WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
 
       - name: Sign and notarise
         if: env.HAS_SIGN_IDENTITY == 'true'
@@ -118,19 +118,19 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          app=apps/macos/build/Overnight.app
+          app=apps/macos/build/FarCooler.app
           # --deep is deprecated and wrong for a bundle carrying its own
           # binaries: the CLI and daemon inside Resources are separate
           # executables and each needs its own signature and hardened runtime.
-          for binary in "$app/Contents/Resources/overnight" "$app/Contents/Resources/overnightd"; do
+          for binary in "$app/Contents/Resources/farcooler" "$app/Contents/Resources/farcoolerd"; do
             codesign --force --options runtime --timestamp \
               --sign "$MACOS_SIGN_IDENTITY" "$binary"
           done
           codesign --force --options runtime --timestamp \
             --sign "$MACOS_SIGN_IDENTITY" "$app"
 
-          ditto -c -k --keepParent "$app" Overnight.zip
-          xcrun notarytool submit Overnight.zip \
+          ditto -c -k --keepParent "$app" FarCooler.zip
+          xcrun notarytool submit FarCooler.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
@@ -139,12 +139,12 @@ jobs:
           # it runs — otherwise Gatekeeper has to phone home and a plane is
           # exactly where someone tries a new tool.
           xcrun stapler staple "$app"
-          rm Overnight.zip
+          rm FarCooler.zip
 
       - name: Package
         run: |
-          ditto -c -k --keepParent apps/macos/build/Overnight.app \
-            "Overnight-$(scripts/version.sh)-macos.zip"
+          ditto -c -k --keepParent apps/macos/build/FarCooler.app \
+            "FarCooler-$(scripts/version.sh)-macos.zip"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -180,8 +180,8 @@ jobs:
       # deserves to find that out.
       - name: Build for the device
         run: |
-          xcodebuild -project apps/ios/Overnight.xcodeproj \
-            -scheme Overnight \
+          xcodebuild -project apps/ios/FarCooler.xcodeproj \
+            -scheme FarCooler \
             -destination 'generic/platform=iOS' \
             -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
@@ -199,10 +199,10 @@ jobs:
           echo "$APP_STORE_KEY_P8" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
 
-          xcodebuild -project apps/ios/Overnight.xcodeproj \
-            -scheme Overnight \
+          xcodebuild -project apps/ios/FarCooler.xcodeproj \
+            -scheme FarCooler \
             -destination 'generic/platform=iOS' \
-            -archivePath build/Overnight.xcarchive \
+            -archivePath build/FarCooler.xcarchive \
             -allowProvisioningUpdates \
             -authenticationKeyID "$APP_STORE_KEY_ID" \
             -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
@@ -212,7 +212,7 @@ jobs:
             archive
 
           xcodebuild -exportArchive \
-            -archivePath build/Overnight.xcarchive \
+            -archivePath build/FarCooler.xcarchive \
             -exportOptionsPlist apps/ios/ExportOptions.plist \
             -exportPath build/export \
             -allowProvisioningUpdates \
@@ -220,7 +220,7 @@ jobs:
             -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
 
-          xcrun altool --upload-app -f build/export/Overnight.ipa -t ios \
+          xcrun altool --upload-app -f build/export/FarCooler.ipa -t ios \
             --apiKey "$APP_STORE_KEY_ID" --apiIssuer "$APP_STORE_ISSUER_ID"
 
   publish:
@@ -249,7 +249,7 @@ jobs:
             confuse yourself and nothing more.
 
             Linux hosts: unpack the tarball into `dist/` and run
-            `overnight host install <target>`, or let the Mac app do it.
+            `farcooler host install <target>`, or let the Mac app do it.
 
             The apps report their channel — a beta says so in Settings and in
             what it tells the relay, so a bug report names which build it came

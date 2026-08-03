@@ -10,8 +10,8 @@
 //! An integration test cannot reach this: its fixtures are created by the current
 //! code, which already tags the pane. So the legacy shape is built by hand here.
 
-use overnight_tmux::TmuxServer;
-use overnight_tmux::windows::Axis;
+use farcooler_tmux::TmuxServer;
+use farcooler_tmux::windows::Axis;
 use uuid::Uuid;
 
 #[tokio::main]
@@ -35,11 +35,11 @@ async fn main() {
     // Make the second one look like a terminal from before the change: identity
     // on the window, nothing on the pane.
     server
-        .run(&["set-option", "-w", "-t", &b.window_id, "@overnight_terminal_id", &t2.to_string()])
+        .run(&["set-option", "-w", "-t", &b.window_id, "@farcooler_terminal_id", &t2.to_string()])
         .await
         .expect("window tag");
     server
-        .run(&["set-option", "-up", "-t", &b.pane_id, "@overnight_terminal_id"])
+        .run(&["set-option", "-up", "-t", &b.pane_id, "@farcooler_terminal_id"])
         .await
         .expect("clear pane tag");
 

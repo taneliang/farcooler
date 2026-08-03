@@ -1,8 +1,8 @@
-//! Installing Overnight on a Linux host, over ssh.
+//! Installing Far Cooler on a Linux host, over ssh.
 //!
 //! Everything here runs through one `ssh` session and touches only the user's
 //! own home directory. No root, no package manager, no system unit, nothing
-//! written outside `~`. A user who can ssh in can install Overnight, and a user
+//! written outside `~`. A user who can ssh in can install Far Cooler, and a user
 //! who cannot should not be able to.
 //!
 //! Two things are deliberate:
@@ -15,7 +15,7 @@
 //!
 //! - **Lingering is enabled.** Without it systemd tears down a user's services
 //!   at logout, so a host would stop being reachable the moment the user logged
-//!   out of it — which is precisely the situation Overnight exists for.
+//!   out of it — which is precisely the situation Far Cooler exists for.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -36,9 +36,9 @@ const LAUNCH_AGENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.overnight.daemon.remote</string>
+  <key>Label</key><string>com.farcooler.daemon.remote</string>
   <key>ProgramArguments</key>
-  <array><string>__HOME__/.local/bin/overnightd</string></array>
+  <array><string>__HOME__/.local/bin/farcoolerd</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key>
   <dict><key>SuccessfulExit</key><false/></dict>
@@ -48,16 +48,16 @@ const LAUNCH_AGENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 "#;
 
-/// The systemd user unit. Written to ~/.config/systemd/user/overnight.service.
+/// The systemd user unit. Written to ~/.config/systemd/user/farcooler.service.
 const UNIT: &str = "\
 [Unit]
-Description=Overnight daemon
-Documentation=https://github.com/overnight
+Description=FarCooler daemon
+Documentation=https://github.com/farcooler
 After=default.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/overnightd
+ExecStart=%h/.local/bin/farcoolerd
 Restart=on-failure
 # systemd's default is 100ms, which turns a crash into a hot loop.
 RestartSec=5s
@@ -90,15 +90,15 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
         Some(p) => p.to_path_buf(),
         None => PathBuf::from("dist").join(&slug),
     };
-    let daemon = dir.join("overnightd");
-    let cli = dir.join("overnight");
+    let daemon = dir.join("farcoolerd");
+    let cli = dir.join("farcooler");
     for path in [&daemon, &cli] {
         if !path.is_file() {
             return Err(format!(
                 "No Linux binary at {}.\n\
                  Build them first:\n\
                  \n    ./scripts/build-linux.sh {arch}\n\n\
-                 or pass --from <dir> with `overnight` and `overnightd` inside.",
+                 or pass --from <dir> with `farcooler` and `farcoolerd` inside.",
                 path.display()
             )
             .into());
@@ -113,7 +113,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
 
     remote_run(target, "mkdir -p ~/.local/bin").await?;
 
-    for (path, name) in [(&daemon, "overnightd"), (&cli, "overnight")] {
+    for (path, name) in [(&daemon, "farcoolerd"), (&cli, "farcooler")] {
         println!("==> Installing {name}");
         upload_verified(target, path, name).await?;
     }
@@ -147,7 +147,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
         Persistence::None => println!("  WARNING: nothing will keep the daemon running."),
     }
     println!();
-    println!("Check it:   overnight --host {target} status");
+    println!("Check it:   farcooler --host {target} status");
     Ok(())
 }
 
@@ -161,16 +161,16 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
         Persistence::Systemd => {
             println!("==> Registering the systemd user service");
             remote_run(target, "mkdir -p ~/.config/systemd/user").await?;
-            remote_write(target, "~/.config/systemd/user/overnight.service", UNIT).await?;
+            remote_write(target, "~/.config/systemd/user/farcooler.service", UNIT).await?;
 
             // Lingering needs no privilege for one's own account on most
             // distributions, and without it the daemon dies at logout.
             let linger = remote_capture(
                 target,
-                "loginctl enable-linger \"$USER\" 2>&1 || echo OVERNIGHT_LINGER_FAILED",
+                "loginctl enable-linger \"$USER\" 2>&1 || echo FARCOOLER_LINGER_FAILED",
             )
             .await?;
-            if linger.contains("OVERNIGHT_LINGER_FAILED") {
+            if linger.contains("FARCOOLER_LINGER_FAILED") {
                 println!("    WARNING: could not enable lingering.");
                 println!("    The daemon will stop when you log out of {target}. To fix:");
                 println!("        ssh {target} 'sudo loginctl enable-linger $USER'");
@@ -178,7 +178,7 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
 
             remote_run(
                 target,
-                "systemctl --user daemon-reload && systemctl --user enable --now overnight.service",
+                "systemctl --user daemon-reload && systemctl --user enable --now farcooler.service",
             )
             .await?;
             Ok(Persistence::Systemd)
@@ -191,7 +191,7 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
             // at write time from the host's own answer.
             let home = remote_capture(target, "echo $HOME").await?;
             let plist = LAUNCH_AGENT.replace("__HOME__", home.trim());
-            remote_write(target, "~/Library/LaunchAgents/com.overnight.daemon.remote.plist", &plist)
+            remote_write(target, "~/Library/LaunchAgents/com.farcooler.daemon.remote.plist", &plist)
                 .await?;
 
             // `bootstrap gui/$UID` needs a GUI session to bootstrap INTO, and
@@ -202,11 +202,11 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
             let loaded = remote_capture(
                 target,
                 "launchctl bootstrap gui/$(id -u) \
-                 ~/Library/LaunchAgents/com.overnight.daemon.remote.plist 2>&1 \
-                 || echo OVERNIGHT_BOOTSTRAP_FAILED",
+                 ~/Library/LaunchAgents/com.farcooler.daemon.remote.plist 2>&1 \
+                 || echo FARCOOLER_BOOTSTRAP_FAILED",
             )
             .await?;
-            if loaded.contains("OVERNIGHT_BOOTSTRAP_FAILED") {
+            if loaded.contains("FARCOOLER_BOOTSTRAP_FAILED") {
                 println!("    The agent is installed but not started: {target} has no GUI");
                 println!("    session to load it into. It will start when someone logs in.");
                 return Ok(Persistence::OnDemand);
@@ -221,7 +221,7 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
 /// What a host IS, before anything is changed on it.
 ///
 /// Separate from `install` because the app has to be able to ask "can this
-/// machine host Overnight, and what would installing involve" without
+/// machine host Far Cooler, and what would installing involve" without
 /// installing anything. A user adding a server should be told it has no tmux
 /// before binaries start landing on it, not after.
 ///
@@ -235,9 +235,9 @@ pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
         echo \"tmux=$(command -v tmux || echo none)\"; \
         echo \"systemd=$(systemctl --user show-environment >/dev/null 2>&1 && echo yes || echo no)\"; \
         echo \"launchd=$(command -v launchctl >/dev/null 2>&1 && echo yes || echo no)\"; \
-        echo \"daemon=$(~/.local/bin/overnightd --version 2>/dev/null || echo none)\"; \
-        echo \"cli=$(~/.local/bin/overnight --version 2>/dev/null || echo none)\"; \
-        echo \"service=$(systemctl --user is-active overnight.service 2>/dev/null || echo unknown)\"; \
+        echo \"daemon=$(~/.local/bin/farcoolerd --version 2>/dev/null || echo none)\"; \
+        echo \"cli=$(~/.local/bin/farcooler --version 2>/dev/null || echo none)\"; \
+        echo \"service=$(systemctl --user is-active farcooler.service 2>/dev/null || echo unknown)\"; \
         echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"";
 
     let report = remote_capture(target, script).await?;
@@ -284,11 +284,11 @@ pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
 
     let mut blockers = Vec::new();
     if matches!(platform, Platform::Unsupported) {
-        blockers.push(format!("{os} is not a platform Overnight can install on."));
+        blockers.push(format!("{os} is not a platform FarCooler can install on."));
     }
     if tmux == "none" {
         blockers.push(
-            "No tmux. Overnight keeps every terminal inside one, so without it \
+            "No tmux. FarCooler keeps every terminal inside one, so without it \
              the daemon runs and every terminal derives lost."
                 .to_string(),
         );
@@ -421,9 +421,9 @@ pub async fn status(target: &str) -> Fallible {
         target,
         "echo \"os=$(uname -s)\"; echo \"arch=$(uname -m)\"; \
          echo \"tmux=$(command -v tmux || echo none)\"; \
-         echo \"daemon=$(~/.local/bin/overnightd --version 2>/dev/null || echo none)\"; \
-         echo \"cli=$(~/.local/bin/overnight --version 2>/dev/null || echo none)\"; \
-         echo \"service=$(systemctl --user is-active overnight.service 2>/dev/null || echo inactive)\"; \
+         echo \"daemon=$(~/.local/bin/farcoolerd --version 2>/dev/null || echo none)\"; \
+         echo \"cli=$(~/.local/bin/farcooler --version 2>/dev/null || echo none)\"; \
+         echo \"service=$(systemctl --user is-active farcooler.service 2>/dev/null || echo inactive)\"; \
          echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"",
     )
     .await?;
@@ -682,7 +682,7 @@ mod tests {
     #[test]
     fn the_unit_starts_the_daemon_from_the_users_own_bin() {
         // %h so the unit is not tied to one username, and no absolute /home.
-        assert!(UNIT.contains("ExecStart=%h/.local/bin/overnightd"));
+        assert!(UNIT.contains("ExecStart=%h/.local/bin/farcoolerd"));
         assert!(UNIT.contains("WantedBy=default.target"));
         // A crash loop with systemd's 100ms default would hammer the machine.
         assert!(UNIT.contains("RestartSec=5s"));

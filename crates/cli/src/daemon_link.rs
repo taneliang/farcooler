@@ -1,6 +1,6 @@
 //! Reaching the daemon — locally, or on another machine.
 //!
-//! Durable state has exactly one owner. Before this existed, every `overnight`
+//! Durable state has exactly one owner. Before this existed, every `farcooler`
 //! invocation opened the database itself, which meant two commands running at
 //! once were two authorities on the same file — and it made a second client,
 //! which is the entire point of the product, impossible.
@@ -18,8 +18,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use overnight_protocol::v1::{Request, request, result};
-use overnight_transport::{Client, ClientError};
+use farcooler_protocol::v1::{Request, request, result};
+use farcooler_transport::{Client, ClientError};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::process::Child;
 
@@ -38,12 +38,12 @@ impl Link {
     pub async fn call(
         &mut self,
         request: Request,
-    ) -> Result<overnight_protocol::v1::Result, ClientError> {
+    ) -> Result<farcooler_protocol::v1::Result, ClientError> {
         self.client.call(request).await
     }
 
     /// Block until the daemon pushes something.
-    pub async fn next_event(&mut self) -> Result<overnight_protocol::v1::Event, ClientError> {
+    pub async fn next_event(&mut self) -> Result<farcooler_protocol::v1::Event, ClientError> {
         self.client.next_event().await
     }
 }
@@ -61,7 +61,7 @@ pub async fn connect_to(target: Option<&str>) -> Result<Link, Box<dyn std::error
 
 /// Connect to the local daemon, starting it if nothing answers.
 pub async fn connect() -> Result<Link, Box<dyn std::error::Error>> {
-    let socket = overnight_daemon::paths::socket_path()?;
+    let socket = farcooler_daemon::paths::socket_path()?;
 
     match dial(&socket).await {
         Ok(link) => return Ok(link),
@@ -82,7 +82,7 @@ async fn dial(socket: &std::path::Path) -> Result<Link, ClientError> {
     let client = Client::over(
         Box::new(read) as Reader,
         Box::new(write) as Writer,
-        "overnight-cli",
+        "farcooler-cli",
         env!("CARGO_PKG_VERSION"),
     )
     .await?;
@@ -105,25 +105,25 @@ fn spawn_daemon() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Where `overnightd` is.
+/// Where `farcoolerd` is.
 ///
 /// Beside this executable first, because that is how both the app bundle and a
 /// cargo target directory lay them out, and it guarantees the daemon matches
 /// the CLI that started it. A mismatched pair is exactly the failure the
 /// version handshake exists to catch, and it is better not to create one.
 fn daemon_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Ok(explicit) = std::env::var("OVERNIGHTD_BIN") {
+    if let Ok(explicit) = std::env::var("FARCOOLERD_BIN") {
         return Ok(PathBuf::from(explicit));
     }
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
-        let sibling = dir.join("overnightd");
+        let sibling = dir.join("farcoolerd");
         if sibling.is_file() {
             return Ok(sibling);
         }
     }
-    Ok(PathBuf::from("overnightd"))
+    Ok(PathBuf::from("farcoolerd"))
 }
 
 /// Poll until the daemon is listening.
@@ -150,7 +150,7 @@ async fn wait_for(socket: &std::path::Path) -> Result<Link, Box<dyn std::error::
 
 /// A request with no payload.
 pub fn req(method: &str) -> Request {
-    overnight_transport::request(method)
+    farcooler_transport::request(method)
 }
 
 /// A request addressed at one resource.

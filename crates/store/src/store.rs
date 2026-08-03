@@ -4,14 +4,14 @@
 //! and leaves the row untouched. There is no method here, and there must never
 //! be one, that writes anything resembling "this terminal is running" -- that
 //! fact is derived from tmux on every read, never stored. See the crate root
-//! docs and `overnight_core::derive`.
+//! docs and `farcooler_core::derive`.
 
 use std::path::Path;
 
-use overnight_core::{DomainError, Result};
-use overnight_core::derive::TerminalRecord;
-use overnight_core::preconditions::check_idempotency_replay;
-use overnight_protocol::v1::TerminalIntent;
+use farcooler_core::{DomainError, Result};
+use farcooler_core::derive::TerminalRecord;
+use farcooler_core::preconditions::check_idempotency_replay;
+use farcooler_protocol::v1::TerminalIntent;
 use rusqlite::{Connection, OptionalExtension, ToSql, params};
 use uuid::Uuid;
 
@@ -618,7 +618,7 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use overnight_protocol::v1::TerminalIntent;
+    use farcooler_protocol::v1::TerminalIntent;
 
     use super::*;
 
@@ -886,7 +886,7 @@ mod tests {
 
     #[test]
     fn file_backed_store_persists_and_reopen_is_idempotent() {
-        let dir = std::env::temp_dir().join(format!("overnight-store-open-{}", Uuid::now_v7()));
+        let dir = std::env::temp_dir().join(format!("farcooler-store-open-{}", Uuid::now_v7()));
         std::fs::create_dir_all(&dir).unwrap();
         let db_path = dir.join("db.sqlite3");
 

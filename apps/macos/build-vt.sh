@@ -16,12 +16,12 @@ CONFIG="${1:-release}"
 
 echo "==> Building the terminal core ($CONFIG)"
 if [ "$CONFIG" = "debug" ]; then
-  (cd "$ROOT" && cargo build -p overnight-vt)
+  (cd "$ROOT" && cargo build -p farcooler-vt)
 else
-  (cd "$ROOT" && cargo build --release -p overnight-vt)
+  (cd "$ROOT" && cargo build --release -p farcooler-vt)
 fi
 
-LIB="$ROOT/target/$CONFIG/libovernight_vt.a"
+LIB="$ROOT/target/$CONFIG/libfarcooler_vt.a"
 [ -f "$LIB" ] || { echo "no static library at $LIB"; exit 1; }
 
 # Package.swift links from target/release. A debug build is staged there too so
@@ -29,10 +29,10 @@ LIB="$ROOT/target/$CONFIG/libovernight_vt.a"
 # rather than silently linking a stale release library.
 if [ "$CONFIG" = "debug" ]; then
   mkdir -p "$ROOT/target/release"
-  cp "$LIB" "$ROOT/target/release/libovernight_vt.a"
+  cp "$LIB" "$ROOT/target/release/libfarcooler_vt.a"
 fi
 
 echo "==> Staging the header"
-cp "$ROOT/crates/vt/include/overnight_vt.h" Sources/COvernightVT/overnight_vt.h
+cp "$ROOT/crates/vt/include/farcooler_vt.h" Sources/CFarCoolerVT/farcooler_vt.h
 
 echo "    $(du -h "$LIB" | cut -f1)  $LIB"

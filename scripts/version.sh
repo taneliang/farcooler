@@ -1,7 +1,7 @@
 #!/bin/bash
 # The version of the whole system, from one place.
 #
-# Overnight is five things that must agree — the CLI, the daemon, the Mac app,
+# Far Cooler is five things that must agree — the CLI, the daemon, the Mac app,
 # the phone app, and the relay — and the failure they produce when they do not
 # is not a build error. It is a bug you already fixed still happening, because
 # the fix shipped in one of them. This project has hit that twice: once when
@@ -19,7 +19,7 @@
 #
 # There is deliberately no `full` here. The stamp components report to each
 # other — `0.1.0+a1b2c3` — is computed once, in crates/protocol/build.rs, and
-# asked for with `overnight --version`. A second implementation in this file
+# asked for with `farcooler --version`. A second implementation in this file
 # would be exactly the drift the file exists to prevent.
 set -euo pipefail
 

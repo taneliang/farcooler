@@ -2,14 +2,14 @@
 //!
 //! Every struct here mirrors a table exactly. `Terminal` in particular has no
 //! field that could encode whether the process is alive right now: that is
-//! `overnight_core::derive`'s job, computed fresh against tmux on every read,
+//! `farcooler_core::derive`'s job, computed fresh against tmux on every read,
 //! never stored. See the crate root docs and `store::tests::terminals_table_has_no_runtime_state_column`.
 
 use rusqlite::Row;
 use rusqlite::types::Type;
 use uuid::Uuid;
 
-use overnight_protocol::v1::TerminalIntent;
+use farcooler_protocol::v1::TerminalIntent;
 
 pub(crate) fn uuid_blob(id: Uuid) -> Vec<u8> {
     id.as_bytes().to_vec()
@@ -103,7 +103,7 @@ pub(crate) fn row_to_workspace(row: &Row) -> rusqlite::Result<Workspace> {
 pub enum PaneMode {
     /// A TUI, exactly as before this feature existed. The default.
     Terminal,
-    /// `overnight agent-host`, bridging an ACP agent.
+    /// `farcooler agent-host`, bridging an ACP agent.
     Agent,
 }
 

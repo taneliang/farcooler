@@ -1,6 +1,6 @@
 //! How much of a frame the terminal core costs.
 //!
-//!     cargo run --release --example bench -p overnight-vt
+//!     cargo run --release --example bench -p farcooler-vt
 //!
 //! Worth having because "the terminal feels laggy" is a claim someone will make
 //! again, and the first question is whether the emulator is responsible. This
@@ -23,7 +23,7 @@ fn main() {
     }
 
     let rounds = 2000u32;
-    let mut term = overnight_vt::Terminal::new(120, 40);
+    let mut term = farcooler_vt::Terminal::new(120, 40);
 
     let start = Instant::now();
     for _ in 0..rounds {
@@ -33,7 +33,7 @@ fn main() {
 
     let start = Instant::now();
     for _ in 0..rounds {
-        black_box(overnight_vt::grid::snapshot(&term));
+        black_box(farcooler_vt::grid::snapshot(&term));
     }
     let snapshotting = start.elapsed();
 

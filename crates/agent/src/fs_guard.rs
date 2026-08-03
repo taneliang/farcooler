@@ -63,7 +63,7 @@ mod tests {
     use std::fs;
 
     fn worktree() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("overnight-guard-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("farcooler-guard-{}", std::process::id()));
         let _ = fs::create_dir_all(dir.join("src"));
         fs::canonicalize(&dir).expect("temp worktree")
     }
@@ -130,8 +130,8 @@ mod tests {
     fn a_sibling_directory_with_a_prefix_matching_name_is_refused() {
         // `starts_with` must compare path components, not raw strings. A
         // string-prefix check would let this through, because the text
-        // "overnight-guard-123-evil" starts with the text
-        // "overnight-guard-123" even though the paths are unrelated siblings.
+        // "farcooler-guard-123-evil" starts with the text
+        // "farcooler-guard-123" even though the paths are unrelated siblings.
         let wt = worktree();
         let sibling = PathBuf::from(format!("{}-evil", wt.display()));
         let _ = fs::create_dir_all(&sibling);

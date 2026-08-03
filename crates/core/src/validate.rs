@@ -1,7 +1,7 @@
 //! Input validation at the boundary.
 
 use crate::error::{DomainError, Result};
-use overnight_protocol::{MAX_COLUMNS, MAX_ROWS, MIN_COLUMNS, MIN_ROWS};
+use farcooler_protocol::{MAX_COLUMNS, MAX_ROWS, MIN_COLUMNS, MIN_ROWS};
 
 /// Display names are 1-80 UTF-8 scalar values.
 pub fn display_name(s: &str) -> Result<()> {

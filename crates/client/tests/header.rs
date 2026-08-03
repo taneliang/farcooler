@@ -5,13 +5,13 @@
 //!
 //! Both directions are checked, because both have happened.
 
-const HEADER: &str = include_str!("../include/overnight_client.h");
+const HEADER: &str = include_str!("../include/farcooler_client.h");
 const FFI: &str = include_str!("../src/ffi.rs");
 
 fn declared() -> Vec<String> {
     let mut found = Vec::new();
     for line in HEADER.lines() {
-        let Some(start) = line.find("overnight_client_") else { continue };
+        let Some(start) = line.find("farcooler_client_") else { continue };
         let rest = &line[start..];
         let name: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
         if rest[name.len()..].starts_with('(') && !found.contains(&name) {
@@ -38,7 +38,7 @@ fn every_declared_function_is_exported() {
 fn every_exported_function_is_declared() {
     let declared = declared();
     for line in FFI.lines() {
-        let Some(index) = line.find("extern \"C\" fn overnight_client_") else { continue };
+        let Some(index) = line.find("extern \"C\" fn farcooler_client_") else { continue };
         let rest = &line[index + "extern \"C\" fn ".len()..];
         let name: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
         assert!(

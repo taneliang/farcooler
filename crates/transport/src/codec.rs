@@ -3,8 +3,8 @@
 //! stdio without duplicating parsing logic in either place.
 
 use bytes::BytesMut;
-use overnight_protocol::framing;
-use overnight_protocol::v1::WireEnvelope;
+use farcooler_protocol::framing;
+use farcooler_protocol::v1::WireEnvelope;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Bytes requested per underlying read call. An I/O chunk size, not a
@@ -102,7 +102,7 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use overnight_protocol::v1::{ClientHello, wire_envelope};
+    use farcooler_protocol::v1::{ClientHello, wire_envelope};
 
     fn hello() -> WireEnvelope {
         WireEnvelope {

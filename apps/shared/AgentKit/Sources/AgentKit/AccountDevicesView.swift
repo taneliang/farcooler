@@ -49,7 +49,7 @@ public struct AccountDevicesView: View {
                     footer: "These receive notifications, and each says what version it "
                         + "last reported — which is how you spot the one that needs "
                         + "updating. Removing a device stops it being notified; it "
-                        + "reappears the next time that device opens Overnight."
+                        + "reappears the next time that device opens Far Cooler."
                 )
                 list(
                     "Machines", kind: .machine, rows: registrations?.machines ?? [],

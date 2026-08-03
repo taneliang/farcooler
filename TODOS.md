@@ -39,6 +39,6 @@ rechecked against whatever floor the allocation guarantees.
 **Depends on / blocked by:** Nothing. Reconnect behaviour does not change in kind, since a
 terminal exceeding its share emits the same honest `Gap` it already would.
 
-**Where the full reasoning lives:** `docs/overnight-design.md`, the protocol framing and
+**Where the full reasoning lives:** `docs/farcooler-design.md`, the protocol framing and
 replay section, in the bullet stating the per-terminal cost and naming the global budget as
 the known answer.

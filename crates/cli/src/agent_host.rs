@@ -12,10 +12,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use overnight_agent::acp::conn::AcpConnection;
-use overnight_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
-use overnight_agent::ring::{AgentReplay, AgentRing};
-use overnight_agent::session::AgentSession;
+use farcooler_agent::acp::conn::AcpConnection;
+use farcooler_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
+use farcooler_agent::ring::{AgentReplay, AgentRing};
+use farcooler_agent::session::AgentSession;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::{Notify, mpsc};
@@ -38,12 +38,12 @@ pub enum Status {
 pub fn status_line(status: &Status) -> String {
     match status {
         Status::AdapterMissing { program } => format!(
-            "overnight: could not start the ACP adapter `{program}`.\n\
+            "farcooler: could not start the ACP adapter `{program}`.\n\
              Install it, or switch this terminal back to terminal mode — \
              terminal mode needs no adapter and is unaffected."
         ),
         Status::AdapterSilent { program } => format!(
-            "overnight: the ACP adapter `{program}` started but never answered.\n\
+            "farcooler: the ACP adapter `{program}` started but never answered.\n\
              Nothing is wrong with this terminal — switch it back to terminal mode \
              and it will work as it always has.\n\
              One known cause: the Claude SDK refuses to launch inside another \
@@ -51,12 +51,12 @@ pub fn status_line(status: &Status) -> String {
              daemon's environment has no CLAUDECODE variable set."
         ),
         Status::Connected { session_id } => {
-            format!("overnight: agent session {session_id} connected. Rendering natively.")
+            format!("farcooler: agent session {session_id} connected. Rendering natively.")
         }
     }
 }
 
-/// The adapter Overnight uses when preferences name none.
+/// The adapter Far Cooler uses when preferences name none.
 ///
 /// `@agentclientprotocol/claude-agent-acp`, NOT `@zed-industries/claude-code-acp`.
 /// npm reports the latter as renamed and it stopped at 0.16.2 while this one is
@@ -226,7 +226,7 @@ pub async fn run(
                         // A command can produce events of its own — a queued
                         // prompt is not something the agent will ever announce,
                         // because the agent has not been told about it.
-                        let mut produced: Vec<overnight_agent::event::AgentEvent> = Vec::new();
+                        let mut produced: Vec<farcooler_agent::event::AgentEvent> = Vec::new();
                         let result = match cmd {
                             DaemonMessage::Prompt { text, images } => match running.prompt(&text, images).await {
                                 Ok(events) => {
@@ -410,7 +410,7 @@ mod tests {
     /// rendered twice after a toggle.
     #[tokio::test]
     async fn a_connection_sends_each_event_once_even_with_a_notify_already_pending() {
-        use overnight_agent::event::{AgentEvent, Role};
+        use farcooler_agent::event::{AgentEvent, Role};
 
         let ring = Arc::new(Mutex::new(AgentRing::new()));
         let notify = Arc::new(Notify::new());

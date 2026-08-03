@@ -15,7 +15,7 @@ import subprocess
 import uuid
 
 SOURCES = [
-    "OvernightApp.swift",
+    "FarCoolerApp.swift",
     "ClientCore.swift",
     "Connection.swift",
     "FleetView.swift",
@@ -36,9 +36,9 @@ SOURCES = [
 # `AgentKit`'s own sources, compiled directly into this target rather than
 # vended as a real module the way `apps/macos/Package.swift` vends it via
 # SwiftPM — iOS has no SwiftPM project here, only this generated one. So
-# `Transcript`, `AgentEvent` and friends simply become part of the "Overnight"
-# module, and nothing under `Overnight/` writes `import AgentKit`. They live
-# outside `Overnight/`, which is why `SOURCES` above — basenames the generator
+# `Transcript`, `AgentEvent` and friends simply become part of the "Far Cooler"
+# module, and nothing under `Far Cooler/` writes `import AgentKit`. They live
+# outside `Far Cooler/`, which is why `SOURCES` above — basenames the generator
 # assumes sit in that one directory — cannot hold them; `agentKitGroup` below
 # gives them a group of their own instead, the same way `fontsGroup` does for
 # `Fonts/`.
@@ -66,7 +66,7 @@ AGENTKIT_SOURCES = [
     "VersionSection.swift",
     "Transcript.swift",
 ]
-FRAMEWORKS = ["overnight_vt.xcframework", "overnight_client.xcframework"]
+FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
 
 # Bundled rather than downloaded — see Fonts/README.md for why a terminal
 # app cannot treat its own typeface as optional. Basenames only: they sit in
@@ -89,7 +89,7 @@ KEYS = [
 
 def oid(seed):
     """A stable 24-hex object id, so regenerating produces an identical file."""
-    return uuid.uuid5(uuid.NAMESPACE_URL, "overnight-ios/" + seed).hex[:24].upper()
+    return uuid.uuid5(uuid.NAMESPACE_URL, "farcooler-ios/" + seed).hex[:24].upper()
 
 
 ids = {name: oid(name) for name in SOURCES + AGENTKIT_SOURCES + FRAMEWORKS + FONTS}
@@ -118,9 +118,9 @@ def file_refs():
             f"lastKnownFileType = file; path = {name}; sourceTree = \"<group>\"; }};"
         )
     lines.append(
-        f"\t\t{P['product']} /* Overnight.app */ = {{isa = PBXFileReference; "
+        f"\t\t{P['product']} /* FarCooler.app */ = {{isa = PBXFileReference; "
         "explicitFileType = wrapper.application; includeInIndex = 0; "
-        "path = Overnight.app; sourceTree = BUILT_PRODUCTS_DIR; };"
+        "path = FarCooler.app; sourceTree = BUILT_PRODUCTS_DIR; };"
     )
     return "\n".join(lines)
 
@@ -157,7 +157,7 @@ agentkit_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in AGENTKIT_S
 # `agentKitGroup`'s `path` is "../shared/AgentKit/Sources/AgentKit", which
 # only resolves to the right directory (`apps/shared/AgentKit/Sources/AgentKit`)
 # if the group sits directly under `mainGroup` — a sibling of `sourcesGroup`,
-# not nested inside it. Nested one level deeper, inside "Overnight", the same
+# not nested inside it. Nested one level deeper, inside "Far Cooler", the same
 # relative path would land one directory short. See where `P['agentKitGroup']`
 # is added to `mainGroup`'s children below.
 
@@ -176,7 +176,7 @@ COMMON = """\t\t\t\tCLANG_ENABLE_MODULES = YES;
 # A checked-in Info.plist, not GENERATE_INFOPLIST_FILE — the bundled fonts are
 # why. INFOPLIST_KEY_<key> settings round-trip one scalar string per key, and
 # UIAppFonts is an array of two filenames; there is no INFOPLIST_KEY_ that
-# expresses that. Overnight/Info.plist says it directly, and every other key
+# expresses that. Far Cooler/Info.plist says it directly, and every other key
 # it carries is only what GENERATE_INFOPLIST_FILE was already synthesizing —
 # nothing lost switching, one array gained.
 def version(kind):
@@ -199,21 +199,21 @@ def version(kind):
 # from the environment rather than committed, so a fork points at its own WorkOS
 # project without editing source. Empty is fine: the app works, minus a sign-in
 # button, and sign-in buys notifications and nothing else.
-WORKOS_CLIENT_ID = os.environ.get("OVERNIGHT_WORKOS_CLIENT_ID", "")
+WORKOS_CLIENT_ID = os.environ.get("FARCOOLER_WORKOS_CLIENT_ID", "")
 
 TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
-\t\t\t\tOVERNIGHT_CHANNEL = {version("channel")};
-\t\t\t\tOVERNIGHT_DISPLAY_VERSION = "{version("display")}";
-\t\t\t\tOVERNIGHT_WORKOS_CLIENT_ID = "{WORKOS_CLIENT_ID}";
+\t\t\t\tFARCOOLER_CHANNEL = {version("channel")};
+\t\t\t\tFARCOOLER_DISPLAY_VERSION = "{version("display")}";
+\t\t\t\tFARCOOLER_WORKOS_CLIENT_ID = "{WORKOS_CLIENT_ID}";
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
-\t\t\t\tPRODUCT_NAME = Overnight;
-\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.overnight.ios;
-\t\t\t\tINFOPLIST_FILE = Overnight/Info.plist;
+\t\t\t\tPRODUCT_NAME = FarCooler;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
+\t\t\t\tINFOPLIST_FILE = FarCooler/Info.plist;
 \t\t\t\tCODE_SIGN_STYLE = Manual;
 \t\t\t\tCODE_SIGN_IDENTITY = "-";
 \t\t\t\tCODE_SIGNING_ALLOWED = YES;
 \t\t\t\tCODE_SIGNING_REQUIRED = NO;
-\t\t\t\tCODE_SIGN_ENTITLEMENTS = Overnight/Overnight.entitlements;
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = FarCooler/FarCooler.entitlements;
 \t\t\t\tENABLE_USER_SCRIPT_SANDBOXING = NO;
 \t\t\t\tOTHER_LDFLAGS = "-lc++";
 \t\t\t\tSWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
@@ -249,20 +249,20 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t{P['mainGroup']} = {{
 \t\t\tisa = PBXGroup;
 \t\t\tchildren = (
-\t\t\t\t{P['sourcesGroup']} /* Overnight */,
+\t\t\t\t{P['sourcesGroup']} /* FarCooler */,
 \t\t\t\t{P['agentKitGroup']} /* AgentKit */,
 \t\t\t\t{P['frameworksGroup']} /* Frameworks */,
 \t\t\t\t{P['productsGroup']} /* Products */,
 \t\t\t);
 \t\t\tsourceTree = "<group>";
 \t\t}};
-\t\t{P['sourcesGroup']} /* Overnight */ = {{
+\t\t{P['sourcesGroup']} /* FarCooler */ = {{
 \t\t\tisa = PBXGroup;
 \t\t\tchildren = (
 {source_children}
 \t\t\t\t{P['fontsGroup']} /* Fonts */,
 \t\t\t);
-\t\t\tpath = Overnight;
+\t\t\tpath = FarCooler;
 \t\t\tsourceTree = "<group>";
 \t\t}};
 \t\t{P['fontsGroup']} /* Fonts */ = {{
@@ -293,7 +293,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t{P['productsGroup']} /* Products */ = {{
 \t\t\tisa = PBXGroup;
 \t\t\tchildren = (
-\t\t\t\t{P['product']} /* Overnight.app */,
+\t\t\t\t{P['product']} /* FarCooler.app */,
 \t\t\t);
 \t\t\tname = Products;
 \t\t\tsourceTree = "<group>";
@@ -301,7 +301,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-\t\t{P['target']} /* Overnight */ = {{
+\t\t{P['target']} /* FarCooler */ = {{
 \t\t\tisa = PBXNativeTarget;
 \t\t\tbuildConfigurationList = {P['targetConfigList']};
 \t\t\tbuildPhases = (
@@ -311,8 +311,8 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t);
 \t\t\tbuildRules = ();
 \t\t\tdependencies = ();
-\t\t\tname = Overnight;
-\t\t\tproductName = Overnight;
+\t\t\tname = FarCooler;
+\t\t\tproductName = FarCooler;
 \t\t\tproductReference = {P['product']};
 \t\t\tproductType = "com.apple.product-type.application";
 \t\t}};
@@ -336,7 +336,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tprojectDirPath = "";
 \t\t\tprojectRoot = "";
 \t\t\ttargets = (
-\t\t\t\t{P['target']} /* Overnight */,
+\t\t\t\t{P['target']} /* FarCooler */,
 \t\t\t);
 \t\t}};
 /* End PBXProject section */
@@ -466,7 +466,7 @@ if frameworks.is_dir():
             "           ./scripts/build-ios-frameworks.sh"
         )
 
-project = here / "Overnight.xcodeproj"
+project = here / "FarCooler.xcodeproj"
 project.mkdir(exist_ok=True)
 (project / "project.pbxproj").write_text(PBXPROJ)
 print(f"wrote {project / 'project.pbxproj'}")

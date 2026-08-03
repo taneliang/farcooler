@@ -8,7 +8,7 @@
 //! stay in `core` and are reused unchanged, so `Done` means the same thing and
 //! a phone, a Mac badge and a notification cannot disagree.
 
-use overnight_protocol::v1::AgentActivity;
+use farcooler_protocol::v1::AgentActivity;
 
 use crate::event::AgentEvent;
 
@@ -41,7 +41,7 @@ pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
 mod tests {
     use super::*;
     use crate::event::{AgentEvent, AgentGapReason, EndReason, PermissionOption, Role, ToolStatus};
-    use overnight_protocol::v1::AgentActivity;
+    use farcooler_protocol::v1::AgentActivity;
 
     #[test]
     fn a_permission_request_is_exactly_blocked() {

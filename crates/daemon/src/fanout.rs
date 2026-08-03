@@ -11,12 +11,12 @@
 //! product being broken.
 //!
 //! So the pipe is started once and its bytes are handed to everyone. tmux pipes
-//! into `overnightd --fanout <pane>`, which listens on a unix socket named for
+//! into `farcoolerd --fanout <pane>`, which listens on a unix socket named for
 //! that pane; every watcher connects to it and gets the same bytes.
 //!
 //! Deliberately a process rather than something the daemon owns:
 //!
-//! - `overnightd --stream` runs over ssh with no daemon necessarily running,
+//! - `farcoolerd --stream` runs over ssh with no daemon necessarily running,
 //!   and making streaming depend on one would make a phone's terminal fail for
 //!   a reason that has nothing to do with the phone.
 //! - tmux already manages this process's lifetime perfectly. It starts when the
@@ -61,7 +61,7 @@ pub fn socket_path(pane_id: &str) -> PathBuf {
     // with the bare number while the watcher subscribing to it holds the whole
     // id. Both have to arrive at the same path or they never meet.
     let name = pane_id.trim_start_matches('%');
-    std::env::temp_dir().join(format!("overnight-pane-{name}.sock"))
+    std::env::temp_dir().join(format!("farcooler-pane-{name}.sock"))
 }
 
 /// Connect to a pane's fanout, if one is running.

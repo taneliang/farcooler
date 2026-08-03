@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    The per-user LaunchAgent for farcoolerd.
+
+    Copied into Contents/Library/LaunchAgents/ at build time and registered
+    through SMAppService, which is why nothing is ever written to
+    ~/Library/LaunchAgents. Registration is a reversible action the user takes,
+    and unregistering stops only the daemon: tmux sessions, worktrees and the
+    database are untouched.
+
+    BundleProgram addresses the daemon INSIDE the app bundle, so moving or
+    replacing the app moves the daemon with it and there is no stale absolute
+    path pointing at a binary that no longer exists.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.farcooler.daemon</string>
+
+    <key>BundleProgram</key>
+    <string>Contents/Resources/farcoolerd</string>
+
+    <!-- At login, so a host is reachable before anyone opens the app. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+        Restart on an unexpected exit, but not on a clean one.
+
+        A clean exit is deliberate: the daemon exits 0 when it finds another
+        already listening, which is how two racing starts stay harmless. Keeping
+        it alive through that would be a restart loop.
+    -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!--
+        Interactive, not Background. A Background job is throttled by the system
+        for CPU and I/O, and this one supervises terminals a user is watching
+        live; latency there is the product.
+    -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

@@ -15,14 +15,14 @@
 
 use std::sync::Arc;
 
-use overnight_agent::link::DaemonMessage;
-use overnight_core::{DomainError, Result};
-use overnight_protocol::v1::{
+use farcooler_agent::link::DaemonMessage;
+use farcooler_core::{DomainError, Result};
+use farcooler_protocol::v1::{
     Empty, Error as WireError, Request, Response, Result as WireResult, Scope, request, response,
     result,
 };
-use overnight_store::models;
-use overnight_transport::Handler;
+use farcooler_store::models;
+use farcooler_transport::Handler;
 use uuid::Uuid;
 
 use crate::service::Service;
@@ -41,7 +41,7 @@ impl Rpc {
         watcher: Arc<crate::watch::Watcher>,
         scope: Scope,
     ) -> Self {
-        Self { service, watcher, scope, daemon_version: overnight_protocol::BUILD.to_string() }
+        Self { service, watcher, scope, daemon_version: farcooler_protocol::BUILD.to_string() }
     }
 }
 
@@ -201,9 +201,9 @@ impl Rpc {
             }
 
             "daemon.version" => Ok(result::Value::DaemonVersion(
-                overnight_protocol::v1::DaemonVersion {
+                farcooler_protocol::v1::DaemonVersion {
                     daemon_version: self.daemon_version.clone(),
-                    protocol_versions: vec![overnight_protocol::PROTOCOL_VERSION],
+                    protocol_versions: vec![farcooler_protocol::PROTOCOL_VERSION],
                     capabilities: vec!["workspaces".into(), "terminals".into()],
                 },
             )),
@@ -222,20 +222,20 @@ impl Rpc {
                     })
                     .collect();
                 Ok(result::Value::RepositoryRootList(
-                    overnight_protocol::v1::RepositoryRootList { items },
+                    farcooler_protocol::v1::RepositoryRootList { items },
                 ))
             }
 
             "repository.list" => {
                 let items =
                     svc.list_repositories()?.iter().map(|r| wire::repository(r, scope)).collect();
-                Ok(result::Value::RepositoryList(overnight_protocol::v1::RepositoryList { items }))
+                Ok(result::Value::RepositoryList(farcooler_protocol::v1::RepositoryList { items }))
             }
 
             "workspace.list" => {
                 let items =
                     svc.fleet().await?.iter().map(|view| wire::workspace(view, scope)).collect();
-                Ok(result::Value::WorkspaceList(overnight_protocol::v1::WorkspaceList { items }))
+                Ok(result::Value::WorkspaceList(farcooler_protocol::v1::WorkspaceList { items }))
             }
 
             "terminal.list" => {
@@ -251,7 +251,7 @@ impl Rpc {
                         items.push(self.with_activity(terminal).await);
                     }
                 }
-                Ok(result::Value::TerminalList(overnight_protocol::v1::TerminalList { items }))
+                Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList { items }))
             }
 
             // ---- mutations ----
@@ -277,7 +277,7 @@ impl Rpc {
                     .list_branches(repository)
                     .await?
                     .into_iter()
-                    .map(|b| overnight_protocol::v1::Branch {
+                    .map(|b| farcooler_protocol::v1::Branch {
                         name: b.name,
                         local: b.local,
                         remote: b.remote,
@@ -286,7 +286,7 @@ impl Rpc {
                         subject: b.subject,
                     })
                     .collect();
-                Ok(result::Value::BranchList(overnight_protocol::v1::BranchList { items }))
+                Ok(result::Value::BranchList(farcooler_protocol::v1::BranchList { items }))
             }
 
             "worktree.list" => {
@@ -300,7 +300,7 @@ impl Rpc {
                             .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| w.head.clone());
-                        overnight_protocol::v1::ExistingWorktree {
+                        farcooler_protocol::v1::ExistingWorktree {
                             path: w.path.clone(),
                             branch: w.branch,
                             head: w.head,
@@ -309,7 +309,7 @@ impl Rpc {
                         }
                     })
                     .collect();
-                Ok(result::Value::WorktreeList(overnight_protocol::v1::WorktreeList { items }))
+                Ok(result::Value::WorktreeList(farcooler_protocol::v1::WorktreeList { items }))
             }
 
             "workspace.import" => {
@@ -360,7 +360,7 @@ impl Rpc {
 
             "repository_root.remove" => {
                 let id = Self::target(&req)?;
-                // Removing a root revokes Overnight's permission to operate
+                // Removing a root revokes Far Cooler's permission to operate
                 // under a whole directory tree, so it is confirmed by name for
                 // the same reason deleting a worktree is.
                 let Some(request::Payload::TypedConfirmation(p)) = req.payload else {
@@ -432,7 +432,7 @@ impl Rpc {
                             .split_terminal(
                                 workspace,
                                 anchor,
-                                overnight_protocol::v1::SplitSide::Right,
+                                farcooler_protocol::v1::SplitSide::Right,
                                 &p.title,
                                 &p.command_preset,
                             )
@@ -481,7 +481,7 @@ impl Rpc {
                 let revision = screen_revision(&contents, cursor_column, cursor_row);
                 if known != 0 && known == revision {
                     return Ok(result::Value::TerminalScreen(
-                        overnight_protocol::v1::TerminalScreen {
+                        farcooler_protocol::v1::TerminalScreen {
                             contents: bytes::Bytes::new(),
                             columns,
                             rows,
@@ -494,7 +494,7 @@ impl Rpc {
                     ));
                 }
 
-                Ok(result::Value::TerminalScreen(overnight_protocol::v1::TerminalScreen {
+                Ok(result::Value::TerminalScreen(farcooler_protocol::v1::TerminalScreen {
                     contents: bytes::Bytes::from(contents.into_bytes()),
                     columns,
                     rows,
@@ -547,7 +547,7 @@ impl Rpc {
                 // the honest shape for "this succeeded and there is nothing to
                 // show", rather than echoing back a record that no longer
                 // exists.
-                Ok(result::Value::TerminalList(overnight_protocol::v1::TerminalList {
+                Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList {
                     items: Vec::new(),
                 }))
             }
@@ -576,9 +576,9 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                let mode = match overnight_protocol::v1::PaneMode::try_from(p.pane_mode) {
-                    Ok(overnight_protocol::v1::PaneMode::Agent) => models::PaneMode::Agent,
-                    Ok(overnight_protocol::v1::PaneMode::Terminal) => models::PaneMode::Terminal,
+                let mode = match farcooler_protocol::v1::PaneMode::try_from(p.pane_mode) {
+                    Ok(farcooler_protocol::v1::PaneMode::Agent) => models::PaneMode::Agent,
+                    Ok(farcooler_protocol::v1::PaneMode::Terminal) => models::PaneMode::Terminal,
                     // A client that sends UNSPECIFIED is asking for a mode
                     // that does not exist, not for a default — guessing one
                     // would silently switch a pane nobody asked to switch.
@@ -705,7 +705,7 @@ impl Rpc {
                 };
                 let id = wire::parse_id(&p.workspace_id).ok_or(DomainError::NotFound)?;
                 let paths = svc.search_worktree_files(id, &p.query, p.limit).await?;
-                Ok(result::Value::WorktreeFileList(overnight_protocol::v1::WorktreeFileList {
+                Ok(result::Value::WorktreeFileList(farcooler_protocol::v1::WorktreeFileList {
                     paths,
                 }))
             }
@@ -771,8 +771,8 @@ impl Rpc {
                     "layout.preset" => {
                         let preset = p
                             .preset
-                            .and_then(|raw| overnight_protocol::v1::LayoutPreset::try_from(raw).ok())
-                            .unwrap_or(overnight_protocol::v1::LayoutPreset::Tiled);
+                            .and_then(|raw| farcooler_protocol::v1::LayoutPreset::try_from(raw).ok())
+                            .unwrap_or(farcooler_protocol::v1::LayoutPreset::Tiled);
                         svc.layout_preset(workspace, group, preset).await?
                     }
                     "layout.cycle" => svc.layout_cycle(workspace, group).await?,
@@ -864,7 +864,7 @@ impl Rpc {
     async fn with_activity(
         &self,
         view: &crate::service::TerminalView,
-    ) -> overnight_protocol::v1::Terminal {
+    ) -> farcooler_protocol::v1::Terminal {
         let mut message = wire::terminal_with_agent_state(view, self.service.agents());
         let (activity, changed_at) = self.watcher.activity(view.terminal.id).await;
         message.activity = activity as i32;

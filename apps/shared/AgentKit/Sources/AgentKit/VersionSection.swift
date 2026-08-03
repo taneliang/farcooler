@@ -2,7 +2,7 @@ import SwiftUI
 
 /// What you are running, on both ends.
 ///
-/// Two versions rather than one, because Overnight is two programs: the app in
+/// Two versions rather than one, because Far Cooler is two programs: the app in
 /// your hand and the daemon on the machine doing the work. They are meant to
 /// match — everything else in this project's versioning exists to make that
 /// true — so the interesting case is the one where they do not, and that is the
@@ -59,7 +59,7 @@ public struct VersionSection: View {
 
     private var details: String {
         var lines = [
-            "Overnight \(AppVersion.display)",
+            "Far Cooler \(AppVersion.display)",
             "build \(AppVersion.build) · \(AppVersion.channel)",
         ]
         if let daemon {

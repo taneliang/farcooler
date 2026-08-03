@@ -31,7 +31,7 @@ pub struct Pairing {
 }
 
 pub fn default_relay() -> String {
-    "https://relay.overnight.sh".to_string()
+    "https://relay.farcooler.com".to_string()
 }
 
 impl Pairing {
@@ -109,7 +109,7 @@ pub async fn notify(
     let result = client
         .post(&url)
         .bearer_auth(&pairing.token)
-        .json(&Notification { title, subtitle, terminal, version: overnight_protocol::BUILD })
+        .json(&Notification { title, subtitle, terminal, version: farcooler_protocol::BUILD })
         .send()
         .await;
 
@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn a_saved_pairing_comes_back_and_can_be_forgotten() {
-        // The whole contract of `overnight push pair|status|forget`, which had
+        // The whole contract of `farcooler push pair|status|forget`, which had
         // no test at all: whether a machine is paired is the difference between
         // being told an agent is stuck and finding out in the morning.
         let dir = tempfile::tempdir().expect("tempdir");

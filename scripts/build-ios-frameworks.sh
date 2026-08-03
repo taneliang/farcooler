@@ -28,9 +28,9 @@ OUT="apps/ios/Frameworks"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-for CRATE in overnight-vt overnight-client; do
+for CRATE in farcooler-vt farcooler-client; do
   LIB="lib$(echo "$CRATE" | tr '-' '_').a"
-  NAME="$(echo "$CRATE" | sed 's/overnight-//')"
+  NAME="$(echo "$CRATE" | sed 's/farcooler-//')"
 
   echo "==> $CRATE for the simulator"
   SDKROOT="$SIM_SDK" cargo build --release -p "$CRATE" --target aarch64-apple-ios-sim
@@ -54,8 +54,8 @@ for CRATE in overnight-vt overnight-client; do
     ARGS+=(-library "target/aarch64-apple-ios/release/$LIB" -headers "$STAGE")
   fi
 
-  echo "==> Packaging Overnight$(tr '[:lower:]' '[:upper:]' <<< "${NAME:0:1}")${NAME:1}.xcframework"
-  FRAMEWORK="$OUT/overnight_$NAME.xcframework"
+  echo "==> Packaging FarCooler$(tr '[:lower:]' '[:upper:]' <<< "${NAME:0:1}")${NAME:1}.xcframework"
+  FRAMEWORK="$OUT/farcooler_$NAME.xcframework"
   xcodebuild -create-xcframework "${ARGS[@]}" -output "$FRAMEWORK" >/dev/null
 done
 

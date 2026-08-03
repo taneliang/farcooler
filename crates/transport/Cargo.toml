@@ -1,5 +1,5 @@
 [package]
-name = "overnight-transport"
+name = "farcooler-transport"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,8 @@ license.workspace = true
 # io-std is not part of the workspace tokio feature set (most crates never
 # touch stdin/stdout); stdio.rs needs it for the sshd entry point (rule 1).
 tokio = { workspace = true, features = ["io-std"] }
-overnight-protocol.workspace = true
-overnight-core.workspace = true
+farcooler-protocol.workspace = true
+farcooler-core.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

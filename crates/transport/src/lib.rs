@@ -1,4 +1,4 @@
-//! Transport adapters over the wire framing in `overnight-protocol`.
+//! Transport adapters over the wire framing in `farcooler-protocol`.
 //!
 //! Rule 1: the daemon opens no network listener. The only entry points are a
 //! mode-0600 Unix socket (`listener.rs`) and a process launched by sshd
@@ -18,7 +18,7 @@ pub use connection::{Connection, ConnectionError, HandshakeConfig, TOO_SLOW_DISC
 pub use listener::UnixListenerServer;
 pub use stdio::serve_stdio;
 
-use overnight_protocol::v1::{Request, Response};
+use farcooler_protocol::v1::{Request, Response};
 
 /// Implemented by the daemon crate. Transport owns envelope mechanics
 /// (framing, the Hello handshake, request_id correlation, rule-4
@@ -37,7 +37,7 @@ pub trait Handler: Send + Sync + 'static {
     /// Defaulted to none so a handler that only answers requests — a test, a
     /// one-shot stdio session — needs no change. Returning a receiver opts a
     /// connection into the push stream instead of leaving it to poll.
-    fn events(&self) -> Option<tokio::sync::broadcast::Receiver<overnight_protocol::v1::Event>> {
+    fn events(&self) -> Option<tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>> {
         None
     }
 }

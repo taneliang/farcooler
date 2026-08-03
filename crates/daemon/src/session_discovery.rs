@@ -1,6 +1,6 @@
 //! Which conversation is running in a pane nobody declared.
 //!
-//! Only for `claude` typed into a shell by hand. Anything Overnight launched
+//! Only for `claude` typed into a shell by hand. Anything Far Cooler launched
 //! carries a declared session id in SQLite and never reaches here.
 //!
 //! A workspace is one worktree, so the project directory almost always holds a
@@ -125,12 +125,12 @@ mod tests {
     fn a_worktree_path_munges_the_way_claude_munges_it() {
         // Read off a real machine: every non-alphanumeric becomes a dash, and
         // the leading slash produces a leading dash.
-        assert_eq!(project_dir_name(Path::new("/Users/e/Dev/overnight")), "-Users-e-Dev-overnight");
+        assert_eq!(project_dir_name(Path::new("/Users/e/Dev/farcooler")), "-Users-e-Dev-farcooler");
         assert_eq!(project_dir_name(Path::new("/Users/e/.claude/jobs")), "-Users-e--claude-jobs");
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("overnight-disc-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("farcooler-disc-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -191,7 +191,7 @@ mod tests {
         // session that is sitting right there.
         let home = scratch("symlink-home");
         let real = scratch("symlink-real");
-        let link = std::env::temp_dir().join(format!("overnight-disc-link-{}", std::process::id()));
+        let link = std::env::temp_dir().join(format!("farcooler-disc-link-{}", std::process::id()));
         let _ = std::fs::remove_file(&link);
         #[cfg(unix)]
         std::os::unix::fs::symlink(&real, &link).unwrap();

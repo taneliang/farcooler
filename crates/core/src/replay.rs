@@ -8,7 +8,7 @@
 
 use std::collections::VecDeque;
 
-use overnight_protocol::{REPLAY_BUFFER_BYTES, v1::GapReason};
+use farcooler_protocol::{REPLAY_BUFFER_BYTES, v1::GapReason};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resume {

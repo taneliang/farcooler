@@ -1,17 +1,17 @@
-name = "overnight-relay"
+name = "farcooler-relay"
 main = "src/index.ts"
 compatibility_date = "2026-01-15"
 
 # Identity, devices, and pairings. Small and relational.
 [[d1_databases]]
 binding = "DB"
-database_name = "overnight"
+database_name = "farcooler"
 database_id = "REPLACE_WITH_D1_ID"
 
 # Counters, kept apart from the account data on purpose — see analytics.ts.
 [[analytics_engine_datasets]]
 binding = "METRICS"
-dataset = "overnight_events"
+dataset = "farcooler_events"
 
 [vars]
 WORKOS_CLIENT_ID = "REPLACE"

@@ -1,20 +1,20 @@
 [package]
-name = "overnight-cli"
+name = "farcooler-cli"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "overnight"
+name = "farcooler"
 path = "src/main.rs"
 
 [dependencies]
-overnight-agent.workspace = true
-overnight-core.workspace = true
-overnight-protocol.workspace = true
-overnight-daemon.workspace = true
-overnight-transport.workspace = true
+farcooler-agent.workspace = true
+farcooler-core.workspace = true
+farcooler-protocol.workspace = true
+farcooler-daemon.workspace = true
+farcooler-transport.workspace = true
 bytes.workspace = true
 tokio.workspace = true
 clap.workspace = true

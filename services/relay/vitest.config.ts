@@ -18,7 +18,7 @@ export default defineWorkersConfig({
           // and these tests are about the routes, not the throttle.
           compatibilityDate: '2026-01-15',
           d1Databases: ['DB'],
-          analyticsEngineDatasets: { METRICS: { dataset: 'overnight_events' } },
+          analyticsEngineDatasets: { METRICS: { dataset: 'farcooler_events' } },
           bindings: {
             WORKOS_CLIENT_ID: 'client_test',
             WORKOS_API_KEY: 'sk_test_do_not_use',
@@ -26,7 +26,7 @@ export default defineWorkersConfig({
             APNS_KEY_P8: '',
             APNS_KEY_ID: '',
             APNS_TEAM_ID: '',
-            APNS_TOPIC: 'com.overnight.ios',
+            APNS_TOPIC: 'com.farcooler.ios',
             FCM_SERVICE_ACCOUNT: '',
           },
         },

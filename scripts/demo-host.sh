@@ -1,7 +1,7 @@
 #!/bin/bash
 # Give the iOS simulator a host to talk to, without touching your Mac's settings.
 #
-# The phone reaches a host over ssh and nothing else — there is no Overnight
+# The phone reaches a host over ssh and nothing else — there is no Far Cooler
 # network listener, by design. So to try the app you need sshd running somewhere.
 # Turning on Remote Login in System Settings would do it, and it is a system-wide
 # change requiring an admin password for something you only want while playing.
@@ -23,8 +23,8 @@ REPO="$PWD"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export PATH="$HOME/.cargo/bin:$PATH"
 
-BUNDLE="com.overnight.ios"
-DIR="${TMPDIR:-/tmp}/overnight-demo-host"
+BUNDLE="com.farcooler.ios"
+DIR="${TMPDIR:-/tmp}/farcooler-demo-host"
 PORT=2222
 
 stop() {
@@ -49,20 +49,20 @@ xcrun simctl list devices booted | grep -q iPhone || {
 # The daemon this host will serve. Started if it is not already running.
 # ---------------------------------------------------------------------------
 cargo build --release --workspace >/dev/null 2>&1
-pgrep -x overnightd >/dev/null || {
-    nohup "$REPO/target/release/overnightd" >"$DIR.daemon.log" 2>&1 &
+pgrep -x farcoolerd >/dev/null || {
+    nohup "$REPO/target/release/farcoolerd" >"$DIR.daemon.log" 2>&1 &
     sleep 2
 }
-echo "daemon: $(pgrep -x overnightd >/dev/null && echo running || echo 'not running')"
+echo "daemon: $(pgrep -x farcoolerd >/dev/null && echo running || echo 'not running')"
 
 # ---------------------------------------------------------------------------
 # The app, installed and launched once so it has generated its device key.
 # ---------------------------------------------------------------------------
-APP=$(find ~/Library/Developer/Xcode/DerivedData/Overnight-*/Build/Products/Debug-iphonesimulator \
-      -maxdepth 1 -name "Overnight.app" 2>/dev/null | head -1)
+APP=$(find ~/Library/Developer/Xcode/DerivedData/FarCooler-*/Build/Products/Debug-iphonesimulator \
+      -maxdepth 1 -name "FarCooler.app" 2>/dev/null | head -1)
 [ -n "$APP" ] || {
     echo "Build the iOS app first:"
-    echo "  cd apps/ios && xcodebuild -project Overnight.xcodeproj -scheme Overnight \\"
+    echo "  cd apps/ios && xcodebuild -project FarCooler.xcodeproj -scheme FarCooler \\"
     echo "    -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build"
     exit 1
 }
@@ -134,7 +134,7 @@ UsePAM no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
-# The phone runs \`overnightd --stdio\` over this connection, and a
+# The phone runs \`farcoolerd --stdio\` over this connection, and a
 # non-interactive ssh session does not read your shell's PATH. Saying where the
 # binary is here beats putting a symlink somewhere on the real PATH.
 SetEnv PATH=$REPO/target/release:/usr/bin:/bin:/usr/sbin:/sbin
@@ -160,7 +160,7 @@ echo "sshd: listening on 127.0.0.1:$PORT"
 # It also means nothing is persisted: launch without the argument and the host is
 # gone, so there is nothing for `stop` to clean up.
 xcrun simctl terminate booted "$BUNDLE" >/dev/null 2>&1 || true
-xcrun simctl launch booted "$BUNDLE" -overnightDemoHost "$USER@127.0.0.1:$PORT" >/dev/null
+xcrun simctl launch booted "$BUNDLE" -farcoolerDemoHost "$USER@127.0.0.1:$PORT" >/dev/null
 
 echo
 echo "Ready. The simulator has a host called \"Demo host\"."

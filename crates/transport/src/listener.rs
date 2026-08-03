@@ -70,7 +70,7 @@ mod tests {
     #[tokio::test]
     async fn socket_and_parent_directory_are_owner_only() {
         let dir = tempdir().unwrap();
-        let sock_path = dir.path().join("nested").join("overnight.sock");
+        let sock_path = dir.path().join("nested").join("farcooler.sock");
         let server = UnixListenerServer::bind(&sock_path).unwrap();
 
         let meta = std::fs::metadata(server.local_path()).unwrap();
@@ -83,7 +83,7 @@ mod tests {
     #[tokio::test]
     async fn rebinding_removes_a_stale_socket() {
         let dir = tempdir().unwrap();
-        let sock_path = dir.path().join("overnight.sock");
+        let sock_path = dir.path().join("farcooler.sock");
         let first = UnixListenerServer::bind(&sock_path).unwrap();
         // Simulate a crash: drop the listener but leave the file behind.
         drop(first);

@@ -1,9 +1,9 @@
-//! `overnightd` — the host daemon.
+//! `farcoolerd` — the host daemon.
 //!
 //! It opens no network listener. The only entry point is a mode-0600 Unix
 //! socket under a user-only directory; reaching a host from elsewhere means
 //! going through sshd, which already authenticates both directions. That is the
-//! whole of Overnight's attack surface, and it is deliberately this small.
+//! whole of Far Cooler's attack surface, and it is deliberately this small.
 //!
 //! The daemon owns the SQLite database. Nothing else may open it — two writers
 //! would contend for the same file lock and, worse, two processes would each
@@ -13,16 +13,16 @@
 
 use std::sync::Arc;
 
-use overnight_daemon::{paths, rpc::Rpc, service::Service, watch::Watcher};
-use overnight_protocol::v1::{Request, Response, Scope};
-use overnight_transport::{HandshakeConfig, Handler, UnixListenerServer};
+use farcooler_daemon::{paths, rpc::Rpc, service::Service, watch::Watcher};
+use farcooler_protocol::v1::{Request, Response, Scope};
+use farcooler_transport::{HandshakeConfig, Handler, UnixListenerServer};
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "overnight=info,warn".into()),
+                .unwrap_or_else(|_| "farcooler=info,warn".into()),
         )
         // stderr always: in --stdio mode stdout IS the wire, and one log line
         // on it would corrupt the first frame.
@@ -35,23 +35,23 @@ async fn main() {
 }
 
 async fn run() -> Result<(), i32> {
-    // `overnightd --stdio` is the remote entry point.
+    // `farcoolerd --stdio` is the remote entry point.
     //
     // sshd launches it, and it speaks the identical framing over stdin and
-    // stdout that the socket speaks. That is the whole of Overnight's remote
+    // stdout that the socket speaks. That is the whole of Far Cooler's remote
     // transport: no listener, no port, no second authentication system. SSH has
     // already proved who the caller is, and the caller is the same Unix user
     // who owns the database and could read it directly anyway.
-    // `overnightd --version` answers instead of starting a daemon.
+    // `farcoolerd --version` answers instead of starting a daemon.
     //
     // It used to do neither: the flag was unrecognised, so the process started
     // up, logged, and exited — and `host probe`, which runs
-    // `overnightd --version` over ssh to find out what is installed, captured
+    // `farcoolerd --version` over ssh to find out what is installed, captured
     // that log line as the version. There was no way to ask this binary what it
     // was, which is a strange gap in a system whose components check each
     // other's build stamps.
     if std::env::args().any(|a| a == "--version" || a == "-V") {
-        println!("overnightd {}", overnight_protocol::BUILD);
+        println!("farcoolerd {}", farcooler_protocol::BUILD);
         return Ok(());
     }
 
@@ -59,7 +59,7 @@ async fn run() -> Result<(), i32> {
         return serve_stdio_session().await;
     }
 
-    // `overnightd --stream <terminal>` is the data plane, and it is deliberately
+    // `farcoolerd --stream <terminal>` is the data plane, and it is deliberately
     // not the control plane.
     //
     // Screens used to reach a phone by polling a request/response method, which
@@ -82,7 +82,7 @@ async fn run() -> Result<(), i32> {
         return stream_terminal(terminal).await;
     }
 
-    // `overnightd --fanout <pane>` is what tmux pipes a pane into, so that every
+    // `farcoolerd --fanout <pane>` is what tmux pipes a pane into, so that every
     // watcher of that pane can have the same bytes.
     //
     // Not a mode a human runs. tmux allows one `pipe-pane` per pane, so before
@@ -93,7 +93,7 @@ async fn run() -> Result<(), i32> {
             eprintln!("--fanout needs a pane id");
             return Err(2);
         };
-        return overnight_daemon::fanout::serve(pane).await.map_err(|e| {
+        return farcooler_daemon::fanout::serve(pane).await.map_err(|e| {
             eprintln!("cannot serve that pane: {e}");
             1
         });
@@ -140,10 +140,10 @@ async fn run() -> Result<(), i32> {
         1
     })?;
 
-    tracing::info!(socket = %socket.display(), "overnightd listening");
+    tracing::info!(socket = %socket.display(), "farcoolerd listening");
 
     let cfg = HandshakeConfig {
-        daemon_version: overnight_protocol::BUILD.to_string(),
+        daemon_version: farcooler_protocol::BUILD.to_string(),
         // A local socket caller holds host_admin.
         //
         // Reaching this socket already requires being the owning user on this
@@ -270,11 +270,11 @@ async fn serve_stdio_session() -> Result<(), i32> {
     tokio::spawn(watcher.clone().run());
 
     let cfg = HandshakeConfig {
-        daemon_version: overnight_protocol::BUILD.to_string(),
+        daemon_version: farcooler_protocol::BUILD.to_string(),
         granted_scope: Scope::HostAdmin,
     };
 
-    overnight_transport::serve_stdio(cfg, RpcFactory { service, watcher }).await.map_err(|e| {
+    farcooler_transport::serve_stdio(cfg, RpcFactory { service, watcher }).await.map_err(|e| {
         eprintln!("stdio session ended: {e}");
         1
     })
@@ -302,7 +302,7 @@ impl Handler for RpcFactory {
     /// No opt-in request: a client that connected wants to know when something
     /// changes, and making it ask would just be a round trip before the first
     /// event. Cost is zero on a quiet host, because only changes are sent.
-    fn events(&self) -> Option<tokio::sync::broadcast::Receiver<overnight_protocol::v1::Event>> {
+    fn events(&self) -> Option<tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>> {
         Some(self.watcher.subscribe())
     }
 }

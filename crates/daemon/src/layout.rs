@@ -11,7 +11,7 @@
 //!   `break-pane`.
 //! - Where every pane sits comes from `list-panes`, in cells, computed by tmux.
 //!
-//! Overnight stores none of it, and that is the same rule the rest of the daemon
+//! Far Cooler stores none of it, and that is the same rule the rest of the daemon
 //! already follows: tmux is the authority for live runtime, and an arrangement of
 //! live processes is runtime. If the server dies the panes die with it, and there
 //! is no arrangement left to restore them into.
@@ -24,10 +24,10 @@
 //! that drew it: three implementations of one question, and the preset model could
 //! not express an arbitrary split at all.
 
-use overnight_core::inventory::TaggedPane;
-use overnight_core::{DomainError, Result};
-use overnight_protocol::v1::{LayoutPreset, SplitSide};
-use overnight_tmux::windows::{Axis, ManagedLayout, Preset};
+use farcooler_core::inventory::TaggedPane;
+use farcooler_core::{DomainError, Result};
+use farcooler_protocol::v1::{LayoutPreset, SplitSide};
+use farcooler_tmux::windows::{Axis, ManagedLayout, Preset};
 use uuid::Uuid;
 
 use crate::service::Service;
@@ -218,7 +218,7 @@ impl Service {
         // Zooming a single pane is a way to see more of it; zooming across four
         // agents is a reading posture, and being dropped back into the grid
         // between each one is not what anyone meant. So the zoom is re-applied to
-        // wherever focus landed. This is the one place Overnight overrides tmux's
+        // wherever focus landed. This is the one place Far Cooler overrides tmux's
         // own behaviour rather than borrowing it, and it is deliberate.
         let was_zoomed = self
             .tmux

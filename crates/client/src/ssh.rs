@@ -7,7 +7,7 @@
 //!
 //! russh is that library. It is maintained by the Warp terminal team, and its
 //! default crypto backend is `aws-lc-rs`, the same FIPS-validated implementation
-//! AWS ships. Overnight does not implement any cryptography itself, here or
+//! AWS ships. Far Cooler does not implement any cryptography itself, here or
 //! anywhere.
 //!
 //! What this deliberately does NOT do:
@@ -42,10 +42,10 @@ pub enum SshError {
     #[error("the private key could not be read: {0}")]
     BadKey(String),
     #[error(
-        "the host key for {host} is not the one Overnight has recorded.\n\
+        "the host key for {host} is not the one FarCooler has recorded.\n\
          Expected {expected}\n\
          Got      {actual}\n\
-         This is either a changed server or an interception. Overnight will not connect."
+         This is either a changed server or an interception. FarCooler will not connect."
     )]
     HostKeyChanged { host: String, expected: String, actual: String },
     #[error("{host} is unknown. Its key fingerprint is {fingerprint}")]
@@ -201,7 +201,7 @@ impl Session {
 
     /// Run a command and get its stdin and stdout as byte streams.
     ///
-    /// This is the whole remote transport: `overnightd --stdio` on one end, the
+    /// This is the whole remote transport: `farcoolerd --stdio` on one end, the
     /// protocol client on the other, and SSH in between doing what it is for.
     pub async fn exec(&mut self, command: &str) -> Result<Streams, SshError> {
         let channel = self
@@ -262,7 +262,7 @@ impl Streams {
                     ChannelMsg::ExtendedData { data, .. } => {
                         let text = String::from_utf8_lossy(&data);
                         for line in text.lines().filter(|l| !l.trim().is_empty()) {
-                            tracing::debug!(target: "overnight::remote", "{line}");
+                            tracing::debug!(target: "farcooler::remote", "{line}");
                         }
                     }
                     ChannelMsg::Eof | ChannelMsg::Close => break,

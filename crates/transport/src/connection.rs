@@ -12,12 +12,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
-use overnight_core::DomainError;
-use overnight_protocol::v1::{
+use farcooler_core::DomainError;
+use farcooler_protocol::v1::{
     ClientHello, Error as WireErrorMsg, ErrorCode, Event, Response, Scope, ServerHello, WireEnvelope,
     response, wire_envelope,
 };
-use overnight_protocol::{MAX_QUEUED_CONTROL_BYTES, PROTOCOL_VERSION, ids};
+use farcooler_protocol::{MAX_QUEUED_CONTROL_BYTES, PROTOCOL_VERSION, ids};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, watch};
 use tokio::time::Instant as TokioInstant;
@@ -203,8 +203,8 @@ impl<R: AsyncRead + Unpin> Connection<R> {
             body: Some(wire_envelope::Body::ServerHello(ServerHello {
                 selected_protocol_version: PROTOCOL_VERSION,
                 daemon_version: cfg.daemon_version.clone(),
-                max_control_envelope_bytes: overnight_protocol::MAX_CONTROL_ENVELOPE_BYTES as u32,
-                max_terminal_payload_bytes: overnight_protocol::MAX_TERMINAL_PAYLOAD_BYTES as u32,
+                max_control_envelope_bytes: farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES as u32,
+                max_terminal_payload_bytes: farcooler_protocol::MAX_TERMINAL_PAYLOAD_BYTES as u32,
                 granted_scope: cfg.granted_scope as i32,
             })),
         };

@@ -8,7 +8,7 @@
 
 use uuid::Uuid;
 
-/// One pane carrying Overnight's exact tags.
+/// One pane carrying Far Cooler's exact tags.
 ///
 /// Names, indexes, and PID values are display or diagnostic data only and never
 /// establish identity.
@@ -56,7 +56,7 @@ pub struct TaggedPane {
     pub dead_status: Option<i32>,
     /// The pane's foreground process, as tmux reports it.
     ///
-    /// This is how Overnight knows an agent is running. A terminal is created
+    /// This is how Far Cooler knows an agent is running. A terminal is created
     /// as a plain shell and the user types `claude` into it — so what the
     /// terminal was launched as says nothing about what is running in it now,
     /// and only the live process does.

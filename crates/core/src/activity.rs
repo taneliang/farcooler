@@ -23,7 +23,7 @@
 //! The rules are a table rather than a match, because "Claude Code changed its
 //! prompt" should be a data change, not a code change.
 
-use overnight_protocol::v1::AgentActivity;
+use farcooler_protocol::v1::AgentActivity;
 
 /// One agent's screen signatures.
 ///

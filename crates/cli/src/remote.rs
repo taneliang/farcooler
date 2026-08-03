@@ -1,25 +1,25 @@
 //! Reaching another machine.
 //!
-//! There is no Overnight network protocol. `overnight --host you@box ...` runs
-//! `ssh you@box overnightd --stdio` and speaks the exact framing it speaks over
+//! There is no Far Cooler network protocol. `farcooler --host you@box ...` runs
+//! `ssh you@box farcoolerd --stdio` and speaks the exact framing it speaks over
 //! a local socket, because sshd has already authenticated both directions and
-//! the caller is the same Unix user who owns the database there. Overnight adds
+//! the caller is the same Unix user who owns the database there. Far Cooler adds
 //! no certificate authority, no pairing flow, and no second set of credentials
 //! to lose.
 //!
 //! Two consequences worth stating, because they shape everything here:
 //!
 //! - **No port is opened anywhere.** A host that is reachable by SSH is
-//!   reachable by Overnight, and one that is not, is not. Tailscale or a
-//!   bastion is the answer to reachability, not something Overnight reimplements.
+//!   reachable by Far Cooler, and one that is not, is not. Tailscale or a
+//!   bastion is the answer to reachability, not something Far Cooler reimplements.
 //! - **Live terminal bytes do not go through this.** Streaming runs the remote
-//!   `overnight` CLI over its own ssh session, which is a byte pipe already.
+//!   `farcooler` CLI over its own ssh session, which is a byte pipe already.
 //!   Wrapping a multi-hour stream inside a request/response conversation would
 //!   be the wrong shape for both.
 
 use std::process::Stdio;
 
-use overnight_transport::{Client, ClientError};
+use farcooler_transport::{Client, ClientError};
 use tokio::process::{Child, Command};
 
 type Reader = Box<dyn tokio::io::AsyncRead + Unpin + Send>;
@@ -49,7 +49,7 @@ fn ssh_args(target: &str) -> Vec<String> {
         "-o".into(),
         "ControlMaster=auto".into(),
         "-o".into(),
-        "ControlPath=~/.ssh/overnight-%r@%h:%p".into(),
+        "ControlPath=~/.ssh/farcooler-%r@%h:%p".into(),
         "-o".into(),
         "ControlPersist=120".into(),
         target.to_string(),
@@ -60,11 +60,11 @@ fn ssh_args(target: &str) -> Vec<String> {
 pub async fn connect(target: &str) -> Result<RemoteLink, Box<dyn std::error::Error>> {
     let mut command = Command::new("ssh");
     command.args(ssh_args(target));
-    // `overnightd` is found on the remote user's PATH. `host install` puts it in
+    // `farcoolerd` is found on the remote user's PATH. `host install` puts it in
     // ~/.local/bin, and the login shell is what puts that on PATH, so this runs
     // through a shell rather than exec'ing an absolute path we would have to
     // guess.
-    command.arg("overnightd --stdio");
+    command.arg("farcoolerd --stdio");
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -80,7 +80,7 @@ pub async fn connect(target: &str) -> Result<RemoteLink, Box<dyn std::error::Err
     let client = Client::over(
         Box::new(stdout) as Reader,
         Box::new(stdin) as Writer,
-        "overnight-cli",
+        "farcooler-cli",
         env!("CARGO_PKG_VERSION"),
     )
     .await
@@ -95,12 +95,12 @@ fn explain(target: &str, error: ClientError) -> String {
         // The far side said nothing, which nearly always means the command did
         // not exist rather than that the protocol went wrong.
         ClientError::Closed | ClientError::NoHello => format!(
-            "Connected to {target}, but `overnightd --stdio` did not answer.\n\
-             Is Overnight installed there?  overnight host install {target}"
+            "Connected to {target}, but `farcoolerd --stdio` did not answer.\n\
+             Is FarCooler installed there?  farcooler host install {target}"
         ),
         ClientError::VersionMismatch { daemon, client } => format!(
             "{target} runs protocol {daemon}; this client speaks {client}.\n\
-             Update the older side:  overnight host install {target}"
+             Update the older side:  farcooler host install {target}"
         ),
         other => format!("{target}: {other}"),
     }
@@ -123,7 +123,7 @@ pub async fn exec(
         command.arg("-t");
     }
     command.args(ssh_args(target));
-    command.arg(format!("overnight {}", shell_join(args)));
+    command.arg(format!("farcooler {}", shell_join(args)));
     command.kill_on_drop(true);
 
     let status = command.status().await.map_err(|e| format!("cannot run ssh: {e}"))?;

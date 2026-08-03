@@ -13,7 +13,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use overnight_core::inventory::{RuntimeInventory, RuntimeSnapshot};
+use farcooler_core::inventory::{RuntimeInventory, RuntimeSnapshot};
 
 use crate::server::TmuxServer;
 

@@ -2,11 +2,11 @@
 
 Date: 2026-08-01
 Status: APPROVED (design); implementation not started
-Supersedes nothing. Extends `docs/overnight-design.md`.
+Supersedes nothing. Extends `docs/farcooler-design.md`.
 
 ## Problem
 
-Overnight renders coding agents as what they are: a TUI in a tmux pane. That is
+Far Cooler renders coding agents as what they are: a TUI in a tmux pane. That is
 honest and it is the product's constraint — terminal-first on both desktop and
 mobile — but a phone screen full of ANSI is a poor way to answer the question
 the user actually has at 3am, which is "what did it do, and does it need me?"
@@ -18,13 +18,13 @@ do is take the terminal away, or lie about a session it can only partially see.
 
 ## What we are building
 
-A terminal in Overnight gains a **pane mode**. In `terminal` pane mode it behaves
+A terminal in Far Cooler gains a **pane mode**. In `terminal` pane mode it behaves
 exactly as it does today. In `agent` pane mode the same pane hosts a headless
 coding agent speaking the Agent Client Protocol, and clients render a native chat
 instead of a VT grid.
 
 Terminal mode remains the default and the entry point. Agent mode is an upgrade
-*offered* on a terminal where Overnight can already see a supported agent
+*offered* on a terminal where Far Cooler can already see a supported agent
 running — the signal `activity.rs` produces today. A future preference may take
 the offer automatically; nothing in this design needs to change for that.
 
@@ -76,7 +76,7 @@ package `@zed-industries/claude-code-acp`. The alternative was Claude's own
 first-party and needs no Node.
 
 ACP was chosen for one reason: the client-side `fs` capability. With it,
-`fs/read_text_file` and `fs/write_text_file` route through Overnight's own shim
+`fs/read_text_file` and `fs/write_text_file` route through Far Cooler's own shim
 instead of the agent touching disk, so edits arrive as before-and-after and diffs
 are a protocol fact. Without it, diffs must
 be reconstructed from tool-call arguments — precisely the coupling to vendor
@@ -92,15 +92,15 @@ than adapter code. Cursor has native ACP; Codex is adapter-based.
 
 ### The agent runs in a tmux pane
 
-Overnight's central invariant is that runtime state is derived, never stored:
+Far Cooler's central invariant is that runtime state is derived, never stored:
 SQLite holds intent, tmux is the sole authority on liveness, and there is no
 column where a stale `running` could be written. A daemon-owned child process
 would be exactly such a place.
 
-So an agent-mode pane runs `overnight agent-host`, a shim that spawns the real
+So an agent-mode pane runs `farcooler agent-host`, a shim that spawns the real
 ACP adapter with clean pipes and bridges the protocol to a Unix socket. The pane
 displays a plain human-readable status log. `derive.rs` is untouched: a live
-exactly-tagged pane means running, its absence means `LOST`, and `overnight
+exactly-tagged pane means running, its absence means `LOST`, and `farcooler
 attach` still works. A crashed agent surfaces through the path already built and
 already trusted.
 
@@ -113,7 +113,7 @@ accepted as more honest than the alternative.
 `Terminal` gains `pane_mode` and `agent_session_id` rather than a new
 `AgentSession` resource being introduced beside it. The session id is durable intent on a
 terminal row, which is what the SQLite/tmux split is for, and which
-`docs/overnight-design.md` already anticipates by listing agent session IDs
+`docs/farcooler-design.md` already anticipates by listing agent session IDs
 among the things SQLite stores.
 
 The consequence is that the tab strip, tiles, sidebar rows, activity badges,
@@ -125,7 +125,7 @@ If that becomes wanted, the field can be promoted into its own table later.
 
 ### The conversation is derived, never stored
 
-Overnight persists no transcript. SQLite stores only the session id, as intent.
+Far Cooler persists no transcript. SQLite stores only the session id, as intent.
 
 **AMENDED 2026-08-01 (commit 94ead85). What follows describes the design as
 approved; the paragraph after it describes what was built and why it differs.**
@@ -177,7 +177,7 @@ gets a distinct name and the bare word is never used alone:
 
 ```
 tmux pane (tagged; liveness derived exactly as today)
-  └─ overnight agent-host  ── spawns ACP adapter, owns its stdio
+  └─ farcooler agent-host  ── spawns ACP adapter, owns its stdio
         │  owns the bounded event ring; dials the daemon's socket with retry
         ▼
    adapter (ACP)  ──►  normalizer  ──►  daemon fanout  ──►  clients
@@ -212,7 +212,7 @@ cannot be replayed because the agent does not implement `session/load`. The
 native view renders it as a visible break in the transcript. A derived transcript
 is only permissible in this product because it can say where it is incomplete.
 
-### Protocol changes (`proto/overnight.proto`)
+### Protocol changes (`proto/farcooler.proto`)
 
 - `Terminal` gains `PaneMode pane_mode` (`TERMINAL` | `AGENT`) and
   `string agent_session_id`.
@@ -252,7 +252,7 @@ one tile of four does not reflow the window. Kill-and-create would lose the
 pane's position and is not used.
 
 - agent → terminal: respawn with `claude --resume <session_id>`.
-- terminal → agent: respawn with `overnight agent-host --terminal <id>
+- terminal → agent: respawn with `farcooler agent-host --terminal <id>
   --socket <path> --session <uuid>`.
 
 `claude --resume` cannot attach to a turn already in flight. Toggling to terminal
@@ -266,14 +266,14 @@ history, so the transcript heals across a round trip.
 
 ### Session identity
 
-`claude --session-id <uuid>` exists, so every claude terminal Overnight launches
-is given a uuid Overnight chose, stored in SQLite as intent beside the branch and
+`claude --session-id <uuid>` exists, so every claude terminal Far Cooler launches
+is given a uuid Far Cooler chose, stored in SQLite as intent beside the branch and
 preset. Adoption of those terminals is exact.
 
 Only a hand-typed `claude` needs discovery: the newest `.jsonl` under
 `~/.claude/projects/<munged-worktree>/`, cross-checked against the pane's start
 time. A workspace is one worktree, so that directory almost always holds one
-session. Where it is ambiguous, Overnight refuses and names the candidate
+session. Where it is ambiguous, Far Cooler refuses and names the candidate
 sessions rather than choosing — attaching to the wrong conversation is worse than
 declining to offer.
 
@@ -284,7 +284,7 @@ The shim is the ACP client, so the shim answers `fs/read_text_file` and
 before-and-after as a `ToolUpdate` carrying a `Diff`. The daemon performs no file
 writes on an agent's behalf.
 
-This means Overnight writes files on an agent's instruction, on a host reachable
+This means Far Cooler writes files on an agent's instruction, on a host reachable
 from a phone. Every such path must be fully resolved — symlinks included — and
 validated as inside the worktree the shim was launched for, and a rejection must
 be surfaced to the user rather than swallowed. Without this the capability is an
@@ -407,7 +407,7 @@ first appears on disk. Do not write UI before this is known.
   shim must fail loudly and readably into its own pane when it cannot start.
 - ACP capabilities are optional, so the UI needs per-capability degradation even
   with a single agent.
-- Shim ring memory on a long overnight session; the ring is bounded and trimming
+- Shim ring memory on a long farcooler session; the ring is bounded and trimming
   is visible as a `Gap`.
 - Node becomes a requirement for agent mode on a product that currently needs
   only tmux and git. Terminal mode must remain fully functional without it.
@@ -418,7 +418,7 @@ Each slice is independently reviewable.
 
 1. Gate 1 spike. Stop if it fails.
 2. `crates/agent`: normalized model, ACP adapter, fixture tests. No UI, no daemon.
-3. `overnight agent-host`: pane hosting, socket, ring, cursor replay, and the
+3. `farcooler agent-host`: pane hosting, socket, ring, cursor replay, and the
    `fs` capability with path confinement.
 4. Daemon: `pane_mode` and `agent_session_id`; `SetPaneMode` via `respawn-pane`;
    declared session ids; adoption resolution with honest refusal; agent-event

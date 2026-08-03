@@ -786,6 +786,149 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
+name = "farcooler-agent"
+version = "0.1.0"
+dependencies = [
+ "farcooler-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "farcooler-cli"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "clap",
+ "farcooler-agent",
+ "farcooler-core",
+ "farcooler-daemon",
+ "farcooler-protocol",
+ "farcooler-transport",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "farcooler-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "farcooler-core",
+ "farcooler-daemon",
+ "farcooler-protocol",
+ "farcooler-transport",
+ "rand",
+ "russh",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "farcooler-core"
+version = "0.1.0"
+dependencies = [
+ "farcooler-protocol",
+ "thiserror 2.0.19",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "farcooler-daemon"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "directories",
+ "farcooler-agent",
+ "farcooler-core",
+ "farcooler-protocol",
+ "farcooler-store",
+ "farcooler-tmux",
+ "farcooler-transport",
+ "libc",
+ "prost-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "farcooler-protocol"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "prost",
+ "prost-build",
+ "prost-types",
+ "protoc-bin-vendored",
+ "thiserror 2.0.19",
+ "uuid",
+]
+
+[[package]]
+name = "farcooler-store"
+version = "0.1.0"
+dependencies = [
+ "farcooler-core",
+ "farcooler-protocol",
+ "rusqlite",
+ "thiserror 2.0.19",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "farcooler-tmux"
+version = "0.1.0"
+dependencies = [
+ "farcooler-core",
+ "farcooler-protocol",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "farcooler-transport"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "farcooler-core",
+ "farcooler-protocol",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "farcooler-vt"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1624,149 +1767,6 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
-
-[[package]]
-name = "overnight-agent"
-version = "0.1.0"
-dependencies = [
- "overnight-protocol",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "overnight-cli"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "clap",
- "overnight-agent",
- "overnight-core",
- "overnight-daemon",
- "overnight-protocol",
- "overnight-transport",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "overnight-client"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "overnight-core",
- "overnight-daemon",
- "overnight-protocol",
- "overnight-transport",
- "rand",
- "russh",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "overnight-core"
-version = "0.1.0"
-dependencies = [
- "overnight-protocol",
- "thiserror 2.0.19",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "overnight-daemon"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "directories",
- "libc",
- "overnight-agent",
- "overnight-core",
- "overnight-protocol",
- "overnight-store",
- "overnight-tmux",
- "overnight-transport",
- "prost-types",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "overnight-protocol"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "prost",
- "prost-build",
- "prost-types",
- "protoc-bin-vendored",
- "thiserror 2.0.19",
- "uuid",
-]
-
-[[package]]
-name = "overnight-store"
-version = "0.1.0"
-dependencies = [
- "overnight-core",
- "overnight-protocol",
- "rusqlite",
- "thiserror 2.0.19",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "overnight-tmux"
-version = "0.1.0"
-dependencies = [
- "overnight-core",
- "overnight-protocol",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "overnight-transport"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "overnight-core",
- "overnight-protocol",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "overnight-vt"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
-]
 
 [[package]]
 name = "p256"

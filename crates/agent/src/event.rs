@@ -42,7 +42,7 @@ pub struct PlanEntry {
 /// A prompt written but not yet sent.
 ///
 /// It exists because an agent takes one turn at a time: a message written while
-/// a turn is running cannot be delivered until that turn ends. Overnight holds
+/// a turn is running cannot be delivered until that turn ends. Far Cooler holds
 /// it rather than handing it to the adapter to sit on, which is what makes it
 /// possible to show the queue, edit an entry, or take one back.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

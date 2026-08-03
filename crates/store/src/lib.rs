@@ -5,7 +5,7 @@
 //! so the `terminals` table has no `state`, `is_running`, or `pid` column --
 //! there is no column in which a stale "running" could ever be recorded.
 //! Runtime state is derived fresh from tmux on every read by
-//! `overnight_core::derive`, never stored here.
+//! `farcooler_core::derive`, never stored here.
 //!
 //! Schema changes are forward-only migrations within a major version, tracked
 //! by `schema_version` in the `meta` table. A pre-existing database gets a

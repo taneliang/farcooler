@@ -1,6 +1,6 @@
 # Versions and releases
 
-Overnight is five things that have to agree, and one that deliberately does not.
+Far Cooler is five things that have to agree, and one that deliberately does not.
 
 ## One number
 
@@ -9,7 +9,7 @@ system. Nothing else holds a literal:
 
 | Component | Where the version comes from |
 | --- | --- |
-| CLI, daemon | `CARGO_PKG_VERSION`, stamped with the commit sha into `OVERNIGHT_BUILD` by `crates/protocol/build.rs` |
+| CLI, daemon | `CARGO_PKG_VERSION`, stamped with the commit sha into `FARCOOLER_BUILD` by `crates/protocol/build.rs` |
 | Mac app | `build-app.sh` stamps the **bundled** `Info.plist` from `scripts/version.sh` |
 | iOS app | `generate-project.py` sets `MARKETING_VERSION`; `Info.plist` says `$(MARKETING_VERSION)` |
 | Relay | Not versioned with the rest — see below |
@@ -20,7 +20,7 @@ system. Nothing else holds a literal:
     ./scripts/version.sh build    1284             # commit count, for the stores
     ./scripts/version.sh channel  dev|beta|release
     ./scripts/version.sh display  0.2.0 (beta 3)   # what a person is shown
-    overnight --version           0.2.0+a1b2c3     # what components report to each other
+    farcooler --version           0.2.0+a1b2c3     # what components report to each other
 
 The last one is not this script. The stamp components check against each other
 is computed once, in `crates/protocol/build.rs`, and both binaries report it —
@@ -64,8 +64,8 @@ remembers to pass:
 | clean tag `v0.2.0-beta.3` | `beta` | `0.2.0 (beta 3)` |
 | untagged, or a dirty tree | `dev` | `0.2.0 (dev a1b2c3)` |
 
-Both apps stamp it into their `Info.plist` at build time (`OvernightChannel`,
-`OvernightDisplayVersion`), `AgentKit.AppVersion` reads it back, Settings shows
+Both apps stamp it into their `Info.plist` at build time (`FarCoolerChannel`,
+`FarCoolerDisplayVersion`), `AgentKit.AppVersion` reads it back, Settings shows
 it under the account row, and it is what each device reports to the relay. A
 tag containing `-beta.` is published as a GitHub prerelease, so it never becomes
 the download someone lands on.
@@ -87,8 +87,8 @@ builds every component **from the single commit the tag points at** and attaches
 the results to a GitHub release:
 
 - Linux `x86_64` and `aarch64`, static musl, in the `dist/<arch>-linux/` layout
-  `overnight host install` already reads
-- `Overnight.app`, signed and notarised if the secrets are present
+  `farcooler host install` already reads
+- `FarCooler.app`, signed and notarised if the secrets are present
 - iOS to TestFlight
 
 Signing is conditional throughout. Without a Developer ID the Mac job still

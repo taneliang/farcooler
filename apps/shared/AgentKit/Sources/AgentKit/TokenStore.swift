@@ -95,5 +95,5 @@ enum TokenStore {
 
     /// Distinct from the SSH identity's service so a sign-out cannot reach the
     /// device key, which is a different credential with a different lifetime.
-    private static let service = "com.overnight.account"
+    private static let service = "com.farcooler.account"
 }

@@ -1,6 +1,6 @@
 //! The C ABI.
 //!
-//! This is Overnight's own boundary, not a passthrough of the emulator's API.
+//! This is Far Cooler's own boundary, not a passthrough of the emulator's API.
 //! Every platform renderer — Swift today, Kotlin later — speaks only these
 //! functions, so the emulator underneath can be replaced without touching a
 //! single line of UI code.
@@ -85,9 +85,9 @@ pub struct VtHandle {
     bell: bool,
 }
 
-/// Create a terminal. Free with `overnight_vt_free`.
+/// Create a terminal. Free with `farcooler_vt_free`.
 #[unsafe(no_mangle)]
-pub extern "C" fn overnight_vt_new(columns: u16, rows: u16) -> *mut c_void {
+pub extern "C" fn farcooler_vt_new(columns: u16, rows: u16) -> *mut c_void {
     let handle = Box::new(VtHandle {
         terminal: Terminal::new(columns, rows),
         cells: Vec::new(),
@@ -101,7 +101,7 @@ pub extern "C" fn overnight_vt_new(columns: u16, rows: u16) -> *mut c_void {
 
 /// Destroy a terminal. Safe to call with null; never call twice.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_free(handle: *mut c_void) {
+pub unsafe extern "C" fn farcooler_vt_free(handle: *mut c_void) {
     if handle.is_null() {
         return;
     }
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn overnight_vt_free(handle: *mut c_void) {
 /// Chunk boundaries are irrelevant: a sequence split across calls parses the
 /// same as one call, which is what makes this safe to drive from a socket.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_feed(handle: *mut c_void, bytes: *const u8, len: usize) {
+pub unsafe extern "C" fn farcooler_vt_feed(handle: *mut c_void, bytes: *const u8, len: usize) {
     let Some(h) = (unsafe { as_handle(handle) }) else { return };
     if bytes.is_null() || len == 0 {
         return;
@@ -132,7 +132,7 @@ pub unsafe extern "C" fn overnight_vt_feed(handle: *mut c_void, bytes: *const u8
 
 /// Resize the grid. Dimensions are clamped to the protocol's range.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_resize(handle: *mut c_void, columns: u16, rows: u16) {
+pub unsafe extern "C" fn farcooler_vt_resize(handle: *mut c_void, columns: u16, rows: u16) {
     let Some(h) = (unsafe { as_handle(handle) }) else { return };
     h.terminal.resize(columns, rows);
     h.revision = h.revision.wrapping_add(1);
@@ -143,7 +143,7 @@ pub unsafe extern "C" fn overnight_vt_resize(handle: *mut c_void, columns: u16, 
 /// A renderer that caches this value and finds it unchanged can skip the frame
 /// entirely.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_revision(handle: *mut c_void) -> u64 {
+pub unsafe extern "C" fn farcooler_vt_revision(handle: *mut c_void) -> u64 {
     match unsafe { as_handle(handle) } {
         Some(h) => h.revision,
         None => 0,
@@ -156,7 +156,7 @@ pub unsafe extern "C" fn overnight_vt_revision(handle: *mut c_void) -> u64 {
 /// next call on this handle, which is all a synchronous draw needs, and is why
 /// a steady redraw allocates nothing.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_snapshot(handle: *mut c_void, out: *mut VtSnapshot) -> bool {
+pub unsafe extern "C" fn farcooler_vt_snapshot(handle: *mut c_void, out: *mut VtSnapshot) -> bool {
     let Some(h) = (unsafe { as_handle(handle) }) else { return false };
     if out.is_null() {
         return false;
@@ -193,7 +193,7 @@ pub unsafe extern "C" fn overnight_vt_snapshot(handle: *mut c_void, out: *mut Vt
 /// Scrollback is the client's own view; the program is never told about it, so
 /// this produces no bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_scroll(handle: *mut c_void, lines: i32) {
+pub unsafe extern "C" fn farcooler_vt_scroll(handle: *mut c_void, lines: i32) {
     let Some(h) = (unsafe { as_handle(handle) }) else { return };
     h.terminal.scroll(lines);
     h.revision = h.revision.wrapping_add(1);
@@ -204,7 +204,7 @@ pub unsafe extern "C" fn overnight_vt_scroll(handle: *mut c_void, lines: i32) {
 /// Call this on input: typing into a scrolled-back view would show the user
 /// nothing of what they typed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_scroll_to_bottom(handle: *mut c_void) {
+pub unsafe extern "C" fn farcooler_vt_scroll_to_bottom(handle: *mut c_void) {
     let Some(h) = (unsafe { as_handle(handle) }) else { return };
     h.terminal.scroll_to_bottom();
     h.revision = h.revision.wrapping_add(1);
@@ -216,7 +216,7 @@ pub unsafe extern "C" fn overnight_vt_scroll_to_bottom(handle: *mut c_void) {
 /// full-screen agent will hang waiting for an answer. Returns the number
 /// copied; call again while it equals `capacity`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_take_writes(
+pub unsafe extern "C" fn farcooler_vt_take_writes(
     handle: *mut c_void,
     out: *mut u8,
     capacity: usize,
@@ -233,7 +233,7 @@ pub unsafe extern "C" fn overnight_vt_take_writes(
 
 /// Take the bell flag, clearing it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_take_bell(handle: *mut c_void) -> bool {
+pub unsafe extern "C" fn farcooler_vt_take_bell(handle: *mut c_void) -> bool {
     match unsafe { as_handle(handle) } {
         Some(h) => std::mem::take(&mut h.bell),
         None => false,
@@ -244,7 +244,7 @@ pub unsafe extern "C" fn overnight_vt_take_bell(handle: *mut c_void) -> bool {
 ///
 /// Borrowed; valid until the next `feed`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_title(handle: *mut c_void) -> *const c_char {
+pub unsafe extern "C" fn farcooler_vt_title(handle: *mut c_void) -> *const c_char {
     match unsafe { as_handle(handle) } {
         Some(h) => h.title.as_ref().map_or(std::ptr::null(), |t| t.as_ptr()),
         None => std::ptr::null(),
@@ -295,7 +295,7 @@ pub const MOUSE_MOVE: u32 = 2;
 /// the handle rather than computed by the renderer. 16 bytes is ample for every
 /// sequence this produces.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_encode_key(
+pub unsafe extern "C" fn farcooler_vt_encode_key(
     handle: *mut c_void,
     key: u32,
     modifiers: u32,
@@ -311,7 +311,7 @@ pub unsafe extern "C" fn overnight_vt_encode_key(
 /// Encode a mouse event. Returns 0 when the program does not want the event,
 /// which is not an error: it means the client should handle it locally instead.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_encode_mouse(
+pub unsafe extern "C" fn farcooler_vt_encode_mouse(
     handle: *mut c_void,
     button: u32,
     action: u32,
@@ -350,7 +350,7 @@ pub unsafe extern "C" fn overnight_vt_encode_mouse(
 /// nothing is written — call again with a buffer at least that large. A paste
 /// is arbitrarily long, so a silent truncation here would corrupt it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_encode_paste(
+pub unsafe extern "C" fn farcooler_vt_encode_paste(
     handle: *mut c_void,
     text: *const u8,
     len: usize,
@@ -376,7 +376,7 @@ pub unsafe extern "C" fn overnight_vt_encode_paste(
 /// The client uses this to decide whether the wheel scrolls its own scrollback
 /// or belongs to the program.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn overnight_vt_alt_screen(handle: *mut c_void) -> bool {
+pub unsafe extern "C" fn farcooler_vt_alt_screen(handle: *mut c_void) -> bool {
     match unsafe { as_handle(handle) } {
         Some(h) => h.terminal.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN),
         None => false,
@@ -464,7 +464,7 @@ mod tests {
             display_offset: 0,
             history_size: 0,
         };
-        assert!(unsafe { overnight_vt_snapshot(h, &mut snap) });
+        assert!(unsafe { farcooler_vt_snapshot(h, &mut snap) });
         let cells = unsafe {
             std::slice::from_raw_parts(snap.cells, snap.rows as usize * snap.columns as usize)
         }
@@ -473,12 +473,12 @@ mod tests {
     }
 
     fn feed(h: *mut c_void, bytes: &[u8]) {
-        unsafe { overnight_vt_feed(h, bytes.as_ptr(), bytes.len()) };
+        unsafe { farcooler_vt_feed(h, bytes.as_ptr(), bytes.len()) };
     }
 
     #[test]
     fn a_full_round_trip_through_the_abi() {
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         feed(h, b"\x1b[1;31mR\x1b[0mp");
 
         let (snap, cells) = read(h);
@@ -488,98 +488,98 @@ mod tests {
         assert_eq!(cells[0].flags & FLAG_BOLD, FLAG_BOLD);
         assert_ne!(cells[0].fg, cells[1].fg);
 
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn the_revision_moves_only_when_the_screen_might_have() {
-        let h = overnight_vt_new(40, 6);
-        let start = unsafe { overnight_vt_revision(h) };
+        let h = farcooler_vt_new(40, 6);
+        let start = unsafe { farcooler_vt_revision(h) };
 
         // Reading must not count as a change, or every frame would redraw.
         let _ = read(h);
-        assert_eq!(unsafe { overnight_vt_revision(h) }, start);
+        assert_eq!(unsafe { farcooler_vt_revision(h) }, start);
 
         feed(h, b"x");
-        assert_ne!(unsafe { overnight_vt_revision(h) }, start);
+        assert_ne!(unsafe { farcooler_vt_revision(h) }, start);
 
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn the_snapshot_buffer_is_reused_across_frames() {
         // This is the no-allocation-per-frame promise, stated as a test.
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         feed(h, b"one");
         let first = read(h).0.cells;
         feed(h, b"two");
         let second = read(h).0.cells;
         assert_eq!(first, second, "the cell buffer must not be reallocated");
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn resize_is_visible_through_the_abi() {
-        let h = overnight_vt_new(40, 6);
-        unsafe { overnight_vt_resize(h, 80, 24) };
+        let h = farcooler_vt_new(40, 6);
+        unsafe { farcooler_vt_resize(h, 80, 24) };
         let (snap, cells) = read(h);
         assert_eq!((snap.columns, snap.rows), (80, 24));
         assert_eq!(cells.len(), 80 * 24);
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn pty_replies_are_drained_in_order_and_only_once() {
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         feed(h, b"\x1b[6n");
 
         let mut buf = [0u8; 64];
-        let n = unsafe { overnight_vt_take_writes(h, buf.as_mut_ptr(), buf.len()) };
+        let n = unsafe { farcooler_vt_take_writes(h, buf.as_mut_ptr(), buf.len()) };
         assert!(n > 0);
         assert_eq!(buf[0], 0x1b);
 
-        let again = unsafe { overnight_vt_take_writes(h, buf.as_mut_ptr(), buf.len()) };
+        let again = unsafe { farcooler_vt_take_writes(h, buf.as_mut_ptr(), buf.len()) };
         assert_eq!(again, 0, "taking must drain");
 
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn a_short_buffer_takes_a_prefix_and_leaves_the_rest() {
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         feed(h, b"\x1b[6n");
 
         let mut one = [0u8; 1];
-        assert_eq!(unsafe { overnight_vt_take_writes(h, one.as_mut_ptr(), 1) }, 1);
+        assert_eq!(unsafe { farcooler_vt_take_writes(h, one.as_mut_ptr(), 1) }, 1);
         assert_eq!(one[0], 0x1b);
 
         let mut rest = [0u8; 64];
-        assert!(unsafe { overnight_vt_take_writes(h, rest.as_mut_ptr(), rest.len()) } > 0);
+        assert!(unsafe { farcooler_vt_take_writes(h, rest.as_mut_ptr(), rest.len()) } > 0);
 
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn the_title_crosses_the_boundary() {
-        let h = overnight_vt_new(40, 6);
-        assert!(unsafe { overnight_vt_title(h) }.is_null());
+        let h = farcooler_vt_new(40, 6);
+        assert!(unsafe { farcooler_vt_title(h) }.is_null());
 
         feed(h, b"\x1b]0;claude\x07");
-        let ptr = unsafe { overnight_vt_title(h) };
+        let ptr = unsafe { farcooler_vt_title(h) };
         assert!(!ptr.is_null());
         let s = unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str().unwrap();
         assert_eq!(s, "claude");
 
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn the_bell_is_taken_once() {
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         feed(h, b"\x07");
-        assert!(unsafe { overnight_vt_take_bell(h) });
-        assert!(!unsafe { overnight_vt_take_bell(h) });
-        unsafe { overnight_vt_free(h) };
+        assert!(unsafe { farcooler_vt_take_bell(h) });
+        assert!(!unsafe { farcooler_vt_take_bell(h) });
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
@@ -587,34 +587,34 @@ mod tests {
         // A renderer bug must not crash the app.
         let null = std::ptr::null_mut();
         unsafe {
-            overnight_vt_feed(null, b"x".as_ptr(), 1);
-            overnight_vt_resize(null, 10, 10);
-            assert_eq!(overnight_vt_revision(null), 0);
-            assert!(!overnight_vt_snapshot(null, std::ptr::null_mut()));
-            assert_eq!(overnight_vt_take_writes(null, std::ptr::null_mut(), 0), 0);
-            assert!(!overnight_vt_take_bell(null));
-            assert!(overnight_vt_title(null).is_null());
-            overnight_vt_free(null);
+            farcooler_vt_feed(null, b"x".as_ptr(), 1);
+            farcooler_vt_resize(null, 10, 10);
+            assert_eq!(farcooler_vt_revision(null), 0);
+            assert!(!farcooler_vt_snapshot(null, std::ptr::null_mut()));
+            assert_eq!(farcooler_vt_take_writes(null, std::ptr::null_mut(), 0), 0);
+            assert!(!farcooler_vt_take_bell(null));
+            assert!(farcooler_vt_title(null).is_null());
+            farcooler_vt_free(null);
         }
 
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         unsafe {
-            overnight_vt_feed(h, std::ptr::null(), 4);
-            overnight_vt_feed(h, b"x".as_ptr(), 0);
-            assert!(!overnight_vt_snapshot(h, std::ptr::null_mut()));
-            overnight_vt_free(h);
+            farcooler_vt_feed(h, std::ptr::null(), 4);
+            farcooler_vt_feed(h, b"x".as_ptr(), 0);
+            assert!(!farcooler_vt_snapshot(h, std::ptr::null_mut()));
+            farcooler_vt_free(h);
         }
     }
 
     fn key(h: *mut c_void, code: u32, mods: u32) -> Vec<u8> {
         let mut buf = [0u8; 16];
-        let n = unsafe { overnight_vt_encode_key(h, code, mods, buf.as_mut_ptr(), buf.len()) };
+        let n = unsafe { farcooler_vt_encode_key(h, code, mods, buf.as_mut_ptr(), buf.len()) };
         buf[..n].to_vec()
     }
 
     #[test]
     fn keys_encode_against_the_live_terminal_modes() {
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
 
         assert_eq!(key(h, 'c' as u32, MOD_CTRL), vec![0x03]);
         assert_eq!(key(h, KEY_UP, 0), b"\x1b[A".to_vec());
@@ -627,51 +627,51 @@ mod tests {
         assert_eq!(key(h, KEY_F1, 0), b"\x1bOP".to_vec());
         assert_eq!(key(h, KEY_F1 + 11, 0), b"\x1b[24~".to_vec());
 
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn mouse_encoding_follows_what_the_program_enabled() {
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         let mut buf = [0u8; 32];
 
         let n = unsafe {
-            overnight_vt_encode_mouse(h, MOUSE_LEFT, MOUSE_PRESS, 0, 0, 0, buf.as_mut_ptr(), 32)
+            farcooler_vt_encode_mouse(h, MOUSE_LEFT, MOUSE_PRESS, 0, 0, 0, buf.as_mut_ptr(), 32)
         };
         assert_eq!(n, 0, "silent until the program asks");
 
         feed(h, b"\x1b[?1000h\x1b[?1006h"); // click reporting, SGR encoding
         let n = unsafe {
-            overnight_vt_encode_mouse(h, MOUSE_LEFT, MOUSE_PRESS, 9, 4, 0, buf.as_mut_ptr(), 32)
+            farcooler_vt_encode_mouse(h, MOUSE_LEFT, MOUSE_PRESS, 9, 4, 0, buf.as_mut_ptr(), 32)
         };
         assert_eq!(&buf[..n], b"\x1b[<0;10;5M");
 
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn paste_reports_the_size_it_needs_rather_than_truncating() {
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         feed(h, b"\x1b[?2004h"); // bracketed paste
 
         let text = b"hello";
         let needed = unsafe {
-            overnight_vt_encode_paste(h, text.as_ptr(), text.len(), std::ptr::null_mut(), 0)
+            farcooler_vt_encode_paste(h, text.as_ptr(), text.len(), std::ptr::null_mut(), 0)
         };
         assert_eq!(needed, 5 + 12);
 
         let mut buf = vec![0u8; needed];
         let n =
-            unsafe { overnight_vt_encode_paste(h, text.as_ptr(), text.len(), buf.as_mut_ptr(), needed) };
+            unsafe { farcooler_vt_encode_paste(h, text.as_ptr(), text.len(), buf.as_mut_ptr(), needed) };
         assert_eq!(n, needed);
         assert_eq!(buf, b"\x1b[200~hello\x1b[201~".to_vec());
 
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn scrolling_crosses_the_boundary_with_its_position() {
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         for i in 0..30 {
             feed(h, format!("line{i}\r\n").as_bytes());
         }
@@ -680,37 +680,37 @@ mod tests {
         assert_eq!(live.display_offset, 0);
         assert_eq!(live.history_size, 25);
 
-        unsafe { overnight_vt_scroll(h, 10) };
+        unsafe { farcooler_vt_scroll(h, 10) };
         let back = read(h).0;
         assert_eq!(back.display_offset, 10);
         assert!(!back.cursor_visible, "the caret is off-screen when scrolled back");
 
-        unsafe { overnight_vt_scroll_to_bottom(h) };
+        unsafe { farcooler_vt_scroll_to_bottom(h) };
         assert_eq!(read(h).0.display_offset, 0);
 
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn the_alt_screen_flag_tracks_the_program() {
-        let h = overnight_vt_new(40, 6);
-        assert!(!unsafe { overnight_vt_alt_screen(h) });
+        let h = farcooler_vt_new(40, 6);
+        assert!(!unsafe { farcooler_vt_alt_screen(h) });
         feed(h, b"\x1b[?1049h");
-        assert!(unsafe { overnight_vt_alt_screen(h) });
+        assert!(unsafe { farcooler_vt_alt_screen(h) });
         feed(h, b"\x1b[?1049l");
-        assert!(!unsafe { overnight_vt_alt_screen(h) });
-        unsafe { overnight_vt_free(h) };
+        assert!(!unsafe { farcooler_vt_alt_screen(h) });
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]
     fn an_undersized_key_buffer_writes_nothing() {
         // A partial escape sequence would be interpreted as garbage input.
-        let h = overnight_vt_new(40, 6);
+        let h = farcooler_vt_new(40, 6);
         let mut one = [0u8; 1];
-        let n = unsafe { overnight_vt_encode_key(h, KEY_UP, 0, one.as_mut_ptr(), 1) };
+        let n = unsafe { farcooler_vt_encode_key(h, KEY_UP, 0, one.as_mut_ptr(), 1) };
         assert_eq!(n, 0);
         assert_eq!(one[0], 0);
-        unsafe { overnight_vt_free(h) };
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]

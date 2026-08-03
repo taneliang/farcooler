@@ -1,6 +1,6 @@
 //! The shared terminal core.
 //!
-//! One VT emulator, in Rust, behind an Overnight-owned C ABI, consumed by the
+//! One VT emulator, in Rust, behind an Far Cooler-owned C ABI, consumed by the
 //! Mac, iOS and Android clients. Each platform writes only a renderer: it asks
 //! for the grid and draws cells. Parsing, the screen model, the cursor, scroll
 //! regions, the alternate screen and character attributes live here, once.

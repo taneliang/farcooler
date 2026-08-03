@@ -147,7 +147,7 @@ public enum AgentEvent: Sendable, Equatable {
 
 /// A prompt waiting for the current turn to end.
 ///
-/// Overnight holds these rather than handing them straight to the agent, which
+/// Far Cooler holds these rather than handing them straight to the agent, which
 /// is the only reason one can still be rewritten or taken back — a prompt the
 /// adapter has is gone.
 public struct QueuedPrompt: Decodable, Sendable, Equatable, Identifiable {
@@ -185,7 +185,7 @@ public struct Sequenced: Sendable, Equatable {
 }
 
 extension AgentEvent {
-    /// Decode one serialised `overnight_agent::event::AgentEvent`.
+    /// Decode one serialised `farcooler_agent::event::AgentEvent`.
     ///
     /// Serde's externally-tagged representation: a single-key object whose key
     /// names the variant. An unrecognised key is a `.gap(.unparsed)` rather

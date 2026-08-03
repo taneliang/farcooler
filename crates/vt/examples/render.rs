@@ -1,6 +1,6 @@
 //! Render a byte stream to text, for checking the core against real output.
 //!
-//!     overnight terminal stream <id> | overnight-render 120 40
+//!     farcooler terminal stream <id> | farcooler-render 120 40
 //!
 //! Prints what the emulator believes is on screen. This is the same path the
 //! app draws, minus the pixels, so a screen that comes out right here comes out
@@ -8,8 +8,8 @@
 
 use std::io::Read;
 
-use overnight_vt::grid::snapshot;
-use overnight_vt::Terminal;
+use farcooler_vt::grid::snapshot;
+use farcooler_vt::Terminal;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -52,7 +52,7 @@ fn main() {
         .rows
         .iter()
         .flat_map(|r| r.cells.iter())
-        .filter(|c| c.fg != overnight_vt::grid::DEFAULT_FG)
+        .filter(|c| c.fg != farcooler_vt::grid::DEFAULT_FG)
         .count();
     let styled = snap.rows.iter().flat_map(|r| r.cells.iter()).filter(|c| c.bold).count();
     println!("{coloured} cells carry a non-default colour, {styled} are bold");

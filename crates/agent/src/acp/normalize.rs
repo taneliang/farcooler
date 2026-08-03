@@ -301,7 +301,7 @@ mod tests {
 /// Rewrite absolute paths inside the worktree as paths relative to it.
 ///
 /// An adapter reports `/Users/someone/Library/Application Support/…/worktrees/
-/// overnight-sample-refactor-api/README.md`, and in a tiled pane that title is
+/// farcooler-sample-refactor-api/README.md`, and in a tiled pane that title is
 /// eighty characters of prefix and one of information. Everything in a
 /// conversation about a worktree is already understood to be in it, so the
 /// prefix says nothing the reader does not know.

@@ -1,4 +1,4 @@
-//! `overnight` command line interface.
+//! `farcooler` command line interface.
 //!
 //! Two paths out of this process, and which one a command takes follows from
 //! what it touches:
@@ -26,23 +26,23 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
-use overnight_daemon::runtime::Runtime;
-use overnight_protocol::v1::{
+use farcooler_daemon::runtime::Runtime;
+use farcooler_protocol::v1::{
     Repository, RepositoryRoot, Terminal, TerminalState, Workspace, WorkspaceState, request, result,
 };
 use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(
-    name = "overnight",
+    name = "farcooler",
     // The BUILD STAMP, not `CARGO_PKG_VERSION`. Clap's bare `version` printed
-    // "overnight 0.1.0" — the same string in every build ever made — and two
+    // "farcooler 0.1.0" — the same string in every build ever made — and two
     // things read this expecting to tell builds apart: `host probe` captures it
     // from a remote machine, and `HostProbe.matchesThisMac` compares the two.
     // Comparing "0.1.0" to "0.1.0" always matched, so the "built from different
     // source than this Mac" warning could never fire. That warning is the
-    // entire reason OVERNIGHT_BUILD exists.
-    version = overnight_protocol::BUILD,
+    // entire reason FARCOOLER_BUILD exists.
+    version = farcooler_protocol::BUILD,
     about = "A terminal-first command center for parallel coding agents"
 )]
 struct Cli {
@@ -53,8 +53,8 @@ struct Cli {
 
     /// Operate on another machine, as `user@host` or an ssh config alias.
     ///
-    /// Runs the same protocol over ssh. There is no Overnight network
-    /// listener: a host reachable by ssh is reachable by Overnight, and one
+    /// Runs the same protocol over ssh. There is no Far Cooler network
+    /// listener: a host reachable by ssh is reachable by Far Cooler, and one
     /// that is not, is not.
     #[arg(long, global = true, value_name = "TARGET")]
     host: Option<String>,
@@ -106,7 +106,7 @@ enum Command {
     /// can do is notify the phone of the person it was taken from.
     #[command(subcommand)]
     Push(PushCmd),
-    /// Install or inspect Overnight on a Linux host over ssh.
+    /// Install or inspect Far Cooler on a Linux host over ssh.
     #[command(subcommand, name = "host")]
     HostCmd(HostCmd),
     /// Host a headless coding agent in this pane. Started by the daemon.
@@ -261,10 +261,10 @@ enum HostCmd {
 
 #[derive(Subcommand)]
 enum RootCmd {
-    /// Allowlist a directory Overnight may operate in.
+    /// Allowlist a directory Far Cooler may operate in.
     Add { path: PathBuf },
     List,
-    /// Stop allowing Overnight to operate under a directory.
+    /// Stop allowing Far Cooler to operate under a directory.
     ///
     /// Removes its registered repositories too, and touches nothing on disk.
     Remove {
@@ -289,7 +289,7 @@ enum WorkspaceCmd {
     ///
     /// Idempotent, and takes a repository rather than a path — which is what
     /// separates it from `import`, where the path someone types is usually the
-    /// wrong one. The main checkout can never be removed through Overnight;
+    /// wrong one. The main checkout can never be removed through Far Cooler;
     /// see `Service::remove_worktree`.
     Main { repo: String },
     /// Create a worktree and branch for one task.
@@ -315,7 +315,7 @@ enum WorkspaceCmd {
         #[arg(long)]
         task: Option<String>,
     },
-    /// Show worktrees on disk that Overnight does not know about yet.
+    /// Show worktrees on disk that Far Cooler does not know about yet.
     ///
     /// The onboarding path: a repository you have used for months already has
     /// worktrees checked out, and there is no reason to re-create them by hand.
@@ -371,7 +371,7 @@ enum TerminalCmd {
     Create {
         workspace: String,
         /// What to launch. Defaults to your shell, which is almost always
-        /// right: you open a terminal and type `claude` into it, and Overnight
+        /// right: you open a terminal and type `claude` into it, and Far Cooler
         /// notices what is running rather than being told in advance.
         #[arg(long, default_value = "shell")]
         preset: String,
@@ -497,7 +497,7 @@ async fn main() {
     // an unrelated log line is broken however good the log line is.
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("OVERNIGHT_LOG")
+            tracing_subscriber::EnvFilter::try_from_env("FARCOOLER_LOG")
                 .unwrap_or_else(|_| "warn".into()),
         )
         .with_target(false)
@@ -518,13 +518,13 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 /// credential should travel over the channel the user already authenticated,
 /// not over one the daemon would have to be trusted to keep private.
 async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
-    use overnight_daemon::push::Pairing;
+    use farcooler_daemon::push::Pairing;
     // The daemon's, not a third copy. This crate already had two spellings of
     // shell quoting — `remote::shell_quote`, which passes safe arguments
     // through unquoted, and the daemon's, which always wraps — and a third one
     // on the path that forwards a credential over ssh is the one that gets it
     // wrong later.
-    use overnight_daemon::service::shell_quote;
+    use farcooler_daemon::service::shell_quote;
 
     if let Some(target) = host {
         match &cmd {
@@ -539,22 +539,22 @@ async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
                 let token = read_token()?;
                 return host_install::remote_run_with_stdin(
                     target,
-                    &format!("overnight push pair{relay}"),
+                    &format!("farcooler push pair{relay}"),
                     &token,
                 )
                 .await;
             }
-            PushCmd::Status => return host_install::remote_run(target, "overnight push status").await,
-            PushCmd::Forget => return host_install::remote_run(target, "overnight push forget").await,
+            PushCmd::Status => return host_install::remote_run(target, "farcooler push status").await,
+            PushCmd::Forget => return host_install::remote_run(target, "farcooler push forget").await,
         }
     }
 
-    let dir = overnight_daemon::paths::ensure_runtime_dir()?;
+    let dir = farcooler_daemon::paths::ensure_runtime_dir()?;
     match cmd {
         PushCmd::Pair { relay } => {
             // The default lives in the daemon, not restated here: two
             // spellings of a relay URL is one of them being wrong later.
-            let relay = relay.unwrap_or_else(overnight_daemon::push::default_relay);
+            let relay = relay.unwrap_or_else(farcooler_daemon::push::default_relay);
             let token = read_token()?;
             Pairing { relay, token }.save_in(&dir)?;
             println!("paired · notifications will go to your signed-in devices");
@@ -641,18 +641,18 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
     let workspaces = list_workspaces(&mut link).await?;
     let terminals = list_terminals(&mut link, None).await?;
     let host_facts = host_get(&mut link).await?;
-    let healthy = host_facts.self_health != overnight_protocol::v1::SelfHealth::Degraded as i32;
+    let healthy = host_facts.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
 
     if json {
         println!(
             "{}",
             serde_json::json!({
                 "daemonVersion": host_facts.daemon_version,
-                "cliVersion": overnight_protocol::BUILD,
+                "cliVersion": farcooler_protocol::BUILD,
                 // Two builds that cannot agree on what they are running is a
                 // fact a client needs, not a detail. It is how a fix that was
                 // compiled and tested goes on reproducing in the app.
-                "buildsMatch": host_facts.daemon_version == overnight_protocol::BUILD,
+                "buildsMatch": host_facts.daemon_version == farcooler_protocol::BUILD,
                 "platform": host_facts.platform,
                 "runtimeHealthy": healthy,
                 "livePanes": host_facts.live_terminal_count,
@@ -668,8 +668,8 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
     println!("host          {}", host.unwrap_or("local"));
     println!("platform      {}", host_facts.platform);
     println!("daemon        {}", host_facts.daemon_version);
-    println!("this cli      {}", overnight_protocol::BUILD);
-    if host_facts.daemon_version != overnight_protocol::BUILD {
+    println!("this cli      {}", farcooler_protocol::BUILD);
+    if host_facts.daemon_version != farcooler_protocol::BUILD {
         // Said out loud rather than left to be noticed. A CLI and a daemon
         // built from different source can speak the same protocol perfectly
         // and still behave like two different programs, and the symptom of
@@ -710,7 +710,7 @@ async fn root(host: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
                 .call(with(
                     req("repository_root.add"),
                     request::Payload::RepositoryRootAdd(
-                        overnight_protocol::v1::RepositoryRootAdd {
+                        farcooler_protocol::v1::RepositoryRootAdd {
                             absolute_path: absolute.to_string_lossy().into_owned(),
                             typed_confirmation: String::new(),
                         },
@@ -731,7 +731,7 @@ async fn root(host: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
             let target = resolve(&roots, &root, |r| &r.id, "root")?;
             link.call(with(
                 req_for("repository_root.remove", uuid_of(&target.id)),
-                request::Payload::TypedConfirmation(overnight_protocol::v1::TypedConfirmation {
+                request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
                     typed_confirmation: confirm,
                 }),
             ))
@@ -776,7 +776,7 @@ async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
                 .call(with(
                     req("repository.register"),
                     request::Payload::RepositoryRegister(
-                        overnight_protocol::v1::RepositoryRegister {
+                        farcooler_protocol::v1::RepositoryRegister {
                             relative_path: absolute.to_string_lossy().into_owned(),
                         },
                     ),
@@ -839,7 +839,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
             let r = link
                 .call(with(
                     req_for("workspace.create", uuid_of(&target.id)),
-                    request::Payload::WorkspaceCreate(overnight_protocol::v1::WorkspaceCreate {
+                    request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
                         task_name: task,
                         branch,
                         base_revision: base,
@@ -864,7 +864,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
             let repositories = list_repositories(&mut link).await?;
             let host_facts = host_get(&mut link).await?;
             let healthy =
-                host_facts.self_health != overnight_protocol::v1::SelfHealth::Degraded as i32;
+                host_facts.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
 
             if json {
                 let items: Vec<_> = workspaces
@@ -984,7 +984,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                 let lock = if w.locked { "  (locked)" } else { "" };
                 println!("{:28}  {:24}{}  {}", truncate(&w.suggested_name, 28), truncate(&branch, 24), lock, w.path);
             }
-            println!("\nimport them with: overnight workspace import {repo}");
+            println!("\nimport them with: farcooler workspace import {repo}");
         }
 
         WorkspaceCmd::Import { repo, paths, task } => {
@@ -1015,7 +1015,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                     .call(with(
                         req_for("workspace.import", repository),
                         request::Payload::WorktreeImport(
-                            overnight_protocol::v1::WorktreeImport {
+                            farcooler_protocol::v1::WorktreeImport {
                                 path: path.clone(),
                                 task_name: task.clone().unwrap_or_default(),
                             },
@@ -1086,7 +1086,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
             let r = link
                 .call(with(
                     req_for("workspace.create", uuid_of(&target.id)),
-                    request::Payload::WorkspaceCreate(overnight_protocol::v1::WorkspaceCreate {
+                    request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
                         task_name: task,
                         branch,
                         base_revision: String::new(),
@@ -1125,7 +1125,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
             // a client that skips the prompt must still be refused.
             link.call(with(
                 req_for("workspace.remove_worktree", uuid_of(&ws.id)),
-                request::Payload::TypedConfirmation(overnight_protocol::v1::TypedConfirmation {
+                request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
                     typed_confirmation: confirm,
                 }),
             ))
@@ -1149,7 +1149,7 @@ async fn attach(host: Option<&str>, workspace: &str) -> Fallible {
     match host {
         // The tmux socket is on the host, so the command has to run there.
         Some(target) => {
-            println!("  ssh -t {target} overnight attach {workspace}");
+            println!("  ssh -t {target} farcooler attach {workspace}");
         }
         None => {
             let runtime = Runtime::open().await?;
@@ -1177,7 +1177,7 @@ async fn events(host: Option<&str>) -> Fallible {
         let Some(payload) = event.payload else { continue };
 
         let line = match payload {
-            overnight_protocol::v1::event::Payload::TerminalChanged(t) => serde_json::json!({
+            farcooler_protocol::v1::event::Payload::TerminalChanged(t) => serde_json::json!({
                 "kind": "terminal",
                 "id": uuid_of(&t.id).to_string(),
                 "short": short_bytes(&t.id),
@@ -1195,14 +1195,14 @@ async fn events(host: Option<&str>) -> Fallible {
                 "agentMode": t.agent_mode,
                 "availableAgentModes": t.available_agent_modes,
             }),
-            overnight_protocol::v1::event::Payload::WorkspaceChanged(w) => serde_json::json!({
+            farcooler_protocol::v1::event::Payload::WorkspaceChanged(w) => serde_json::json!({
                 "kind": "workspace",
                 "id": uuid_of(&w.id).to_string(),
                 "short": short_bytes(&w.id),
                 "task": w.task_name,
                 "state": workspace_label(w.state()),
             }),
-            overnight_protocol::v1::event::Payload::LayoutChanged(l) => serde_json::json!({
+            farcooler_protocol::v1::event::Payload::LayoutChanged(l) => serde_json::json!({
                 "kind": "layout",
                 "workspace": uuid_of(&l.workspace_id).to_string(),
                 "groups": l.items.iter().map(|g| serde_json::json!({
@@ -1242,8 +1242,8 @@ async fn events(host: Option<&str>) -> Fallible {
 // ---------------------------------------------------------------------------
 
 async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
-    use overnight_daemon::layout::parse_preset;
-    use overnight_protocol::v1::LayoutUpdate;
+    use farcooler_daemon::layout::parse_preset;
+    use farcooler_protocol::v1::LayoutUpdate;
 
     let mut link = connect_to(host).await?;
     let workspaces = list_workspaces(&mut link).await?;
@@ -1369,8 +1369,8 @@ async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
 }
 
 /// A drop edge by name.
-fn parse_side(text: &str) -> Result<overnight_protocol::v1::SplitSide, String> {
-    use overnight_protocol::v1::SplitSide;
+fn parse_side(text: &str) -> Result<farcooler_protocol::v1::SplitSide, String> {
+    use farcooler_protocol::v1::SplitSide;
     Ok(match text.trim().to_ascii_lowercase().as_str() {
         "left" | "l" => SplitSide::Left,
         "right" | "r" => SplitSide::Right,
@@ -1381,7 +1381,7 @@ fn parse_side(text: &str) -> Result<overnight_protocol::v1::SplitSide, String> {
 }
 
 fn print_layout(
-    list: &overnight_protocol::v1::PaneGroupList,
+    list: &farcooler_protocol::v1::PaneGroupList,
     terminals: &[Terminal],
     json: bool,
 ) {
@@ -1439,7 +1439,7 @@ fn unknown_preset(text: &str) -> String {
 async fn fetch_layout(
     link: &mut Link,
     workspace: Uuid,
-) -> Result<Vec<overnight_protocol::v1::PaneGroup>, Box<dyn std::error::Error>> {
+) -> Result<Vec<farcooler_protocol::v1::PaneGroup>, Box<dyn std::error::Error>> {
     let r = link.call(req_for("layout.list", workspace)).await?;
     match expect_value(r.value, "layout")? {
         result::Value::PaneGroupList(l) => Ok(l.items),
@@ -1448,7 +1448,7 @@ async fn fetch_layout(
 }
 
 fn layout_json(
-    list: &overnight_protocol::v1::PaneGroupList,
+    list: &farcooler_protocol::v1::PaneGroupList,
     terminals: &[Terminal],
 ) -> serde_json::Value {
     serde_json::json!({
@@ -1487,7 +1487,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let r = link
                 .call(with(
                     req_for("terminal.create", uuid_of(&ws.id)),
-                    request::Payload::TerminalCreate(overnight_protocol::v1::TerminalCreate {
+                    request::Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
                         title,
                         command_preset: preset,
                         join_active_group: tile,
@@ -1531,15 +1531,15 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         TerminalCmd::SetPaneMode { terminal, mode, force } => {
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             let pane_mode = match mode.as_str() {
-                "terminal" => overnight_protocol::v1::PaneMode::Terminal,
-                "agent" => overnight_protocol::v1::PaneMode::Agent,
+                "terminal" => farcooler_protocol::v1::PaneMode::Terminal,
+                "agent" => farcooler_protocol::v1::PaneMode::Agent,
                 other => {
                     return Err(format!("unknown pane mode {other:?}, want terminal or agent").into());
                 }
             };
             link.call(with(
                 req("terminal.set_pane_mode"),
-                request::Payload::SetPaneMode(overnight_protocol::v1::SetPaneMode {
+                request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
                     terminal_id: id_bytes(id),
                     pane_mode: pane_mode as i32,
                     force,
@@ -1554,7 +1554,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let r = link
                 .call(with(
                     req("terminal.agent_subscribe"),
-                    request::Payload::AgentSubscribe(overnight_protocol::v1::AgentSubscribe {
+                    request::Payload::AgentSubscribe(farcooler_protocol::v1::AgentSubscribe {
                         epoch,
                         terminal_id: id_bytes(id),
                         from_seq,
@@ -1591,14 +1591,14 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentPrompt { terminal, text, images } => {
-            use overnight_protocol::v1::agent_prompt_block::Content;
+            use farcooler_protocol::v1::agent_prompt_block::Content;
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
 
             let mut blocks = Vec::new();
             for path in &images {
                 let data = std::fs::read(path)?;
-                blocks.push(overnight_protocol::v1::AgentPromptBlock {
-                    content: Some(Content::Image(overnight_protocol::v1::ImageBlock {
+                blocks.push(farcooler_protocol::v1::AgentPromptBlock {
+                    content: Some(Content::Image(farcooler_protocol::v1::ImageBlock {
                         // From the extension, because that is all a file gives
                         // us and the adapter only needs to know how to decode.
                         mime_type: mime_for(path).to_string(),
@@ -1606,13 +1606,13 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
                     })),
                 });
             }
-            blocks.push(overnight_protocol::v1::AgentPromptBlock {
+            blocks.push(farcooler_protocol::v1::AgentPromptBlock {
                 content: Some(Content::Text(text)),
             });
 
             link.call(with(
                 req("terminal.agent_prompt"),
-                request::Payload::AgentPrompt(overnight_protocol::v1::AgentPrompt {
+                request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
                     terminal_id: id_bytes(id),
                     blocks,
                 }),
@@ -1625,7 +1625,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(with(
                 req("terminal.agent_answer"),
-                request::Payload::AgentAnswer(overnight_protocol::v1::AgentAnswer {
+                request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
                     terminal_id: id_bytes(id),
                     request_id,
                     option_id,
@@ -1639,7 +1639,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(with(
                 req("terminal.agent_set_mode"),
-                request::Payload::AgentSetMode(overnight_protocol::v1::AgentSetMode {
+                request::Payload::AgentSetMode(farcooler_protocol::v1::AgentSetMode {
                     terminal_id: id_bytes(id),
                     agent_mode: agent_mode.clone(),
                 }),
@@ -1652,7 +1652,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(with(
                 req("terminal.agent_set_model"),
-                request::Payload::AgentSetModel(overnight_protocol::v1::AgentSetModel {
+                request::Payload::AgentSetModel(farcooler_protocol::v1::AgentSetModel {
                     terminal_id: id_bytes(id),
                     model: model.clone(),
                 }),
@@ -1665,7 +1665,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(with(
                 req("terminal.agent_set_config"),
-                request::Payload::AgentSetConfig(overnight_protocol::v1::AgentSetConfig {
+                request::Payload::AgentSetConfig(farcooler_protocol::v1::AgentSetConfig {
                     terminal_id: id_bytes(id),
                     config_id: config_id.clone(),
                     value: value.clone(),
@@ -1679,7 +1679,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(with(
                 req("terminal.agent_edit_queued"),
-                request::Payload::AgentEditQueued(overnight_protocol::v1::AgentEditQueued {
+                request::Payload::AgentEditQueued(farcooler_protocol::v1::AgentEditQueued {
                     terminal_id: id_bytes(id),
                     queued_id: queued_id.clone(),
                     text: text.clone(),
@@ -1693,7 +1693,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(with(
                 req("terminal.agent_cancel_queued"),
-                request::Payload::AgentCancelQueued(overnight_protocol::v1::AgentCancelQueued {
+                request::Payload::AgentCancelQueued(farcooler_protocol::v1::AgentCancelQueued {
                     terminal_id: id_bytes(id),
                     queued_id: queued_id.clone(),
                 }),
@@ -1706,7 +1706,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(with(
                 req("terminal.agent_steer_queued"),
-                request::Payload::AgentSteerQueued(overnight_protocol::v1::AgentSteerQueued {
+                request::Payload::AgentSteerQueued(farcooler_protocol::v1::AgentSteerQueued {
                     terminal_id: id_bytes(id),
                     queued_id: queued_id.clone(),
                 }),
@@ -1719,7 +1719,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(with(
                 req("terminal.agent_cancel"),
-                request::Payload::AgentCancel(overnight_protocol::v1::AgentCancel {
+                request::Payload::AgentCancel(farcooler_protocol::v1::AgentCancel {
                     terminal_id: id_bytes(id),
                 }),
             ))
@@ -1847,7 +1847,7 @@ async fn worktree(host: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible 
             let r = link
                 .call(with(
                     req("worktree.file_search"),
-                    request::Payload::WorktreeFileSearch(overnight_protocol::v1::WorktreeFileSearch {
+                    request::Payload::WorktreeFileSearch(farcooler_protocol::v1::WorktreeFileSearch {
                         workspace_id: id_bytes(id),
                         query,
                         limit,
@@ -1903,7 +1903,7 @@ async fn terminal_by_record(
 
 async fn host_get(
     link: &mut Link,
-) -> Result<overnight_protocol::v1::Host, Box<dyn std::error::Error>> {
+) -> Result<farcooler_protocol::v1::Host, Box<dyn std::error::Error>> {
     let r = link.call(req("host.health")).await?;
     match expect_value(r.value, "host")? {
         result::Value::Host(h) => Ok(h),
@@ -1930,7 +1930,7 @@ async fn list_repositories(link: &mut Link) -> Result<Vec<Repository>, Box<dyn s
 async fn discover_worktrees(
     link: &mut Link,
     repository: Uuid,
-) -> Result<Vec<overnight_protocol::v1::ExistingWorktree>, Box<dyn std::error::Error>> {
+) -> Result<Vec<farcooler_protocol::v1::ExistingWorktree>, Box<dyn std::error::Error>> {
     let r = link.call(req_for("worktree.list", repository)).await?;
     match expect_value(r.value, "worktrees")? {
         result::Value::WorktreeList(l) => Ok(l.items),
@@ -2023,14 +2023,14 @@ fn mime_for(path: &std::path::Path) -> &'static str {
 }
 
 fn pane_mode_label(mode: i32) -> &'static str {
-    match overnight_protocol::v1::PaneMode::try_from(mode) {
-        Ok(overnight_protocol::v1::PaneMode::Agent) => "agent",
+    match farcooler_protocol::v1::PaneMode::try_from(mode) {
+        Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
         _ => "terminal",
     }
 }
 
 fn activity_label(a: i32) -> &'static str {
-    use overnight_protocol::v1::AgentActivity;
+    use farcooler_protocol::v1::AgentActivity;
     match AgentActivity::try_from(a).unwrap_or(AgentActivity::Unspecified) {
         AgentActivity::None => "none",
         AgentActivity::Idle => "idle",
@@ -2047,7 +2047,7 @@ fn activity_label(a: i32) -> &'static str {
 /// The daemon resolves this from the running process and the screen together,
 /// so it says `claude` for a shell someone typed `claude` into. The preset is
 /// only a fallback for a terminal the watcher has not sampled yet.
-fn label(t: &overnight_protocol::v1::Terminal) -> String {
+fn label(t: &farcooler_protocol::v1::Terminal) -> String {
     if t.current_command.is_empty() { t.command_preset.clone() } else { t.current_command.clone() }
 }
 
@@ -2055,7 +2055,7 @@ fn label(t: &overnight_protocol::v1::Terminal) -> String {
 ///
 /// A client shows "working for 4m" from this rather than timing it locally,
 /// which would restart at every reconnect and lie after a laptop sleeps.
-fn activity_since(t: &overnight_protocol::v1::Terminal) -> Option<i64> {
+fn activity_since(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
     t.activity_changed_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
 }
 
@@ -2094,7 +2094,7 @@ fn normalise_id(text: &str) -> String {
 ///
 /// Names first, because a repository is the one resource people know by name:
 /// they typed it when they registered it, they see it in every listing, and
-/// `overnight workspace discover myrepo` is what anyone would write. Ids still
+/// `farcooler workspace discover myrepo` is what anyone would write. Ids still
 /// work, and an ambiguous name is refused rather than guessed at — two projects
 /// called `api` on one host is a thing that happens.
 fn resolve_repository<'a>(

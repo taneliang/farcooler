@@ -4,7 +4,7 @@
 //! or indexes. Names, indexes, and PID values are display or diagnostic data
 //! only and never establish identity.
 
-use overnight_core::{DomainError, Result, SCHEMA_VERSION, inventory::TaggedPane, tags};
+use farcooler_core::{DomainError, Result, SCHEMA_VERSION, inventory::TaggedPane, tags};
 use uuid::Uuid;
 
 use crate::server::{SESSION_NAME, TmuxServer};
@@ -628,7 +628,7 @@ pub struct ManagedLayout {
     /// tmux's own layout description — the split tree, verbatim.
     ///
     /// Carried opaquely and handed straight back to `select-layout` to restore an
-    /// arrangement. Overnight never parses it: it is tmux's format, tmux is the
+    /// arrangement. Far Cooler never parses it: it is tmux's format, tmux is the
     /// only thing that has to understand it, and a parser here would be a copy of
     /// tmux's tree that could drift from it.
     pub layout: String,

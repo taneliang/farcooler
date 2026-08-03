@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Overnight</string>
+	<string>Far Cooler</string>
 	<key>CFBundleDisplayName</key>
-	<string>Overnight</string>
+	<string>Far Cooler</string>
 	<key>CFBundleExecutable</key>
-	<string>Overnight</string>
+	<string>FarCooler</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.overnight.Overnight</string>
+	<string>com.farcooler.FarCooler</string>
 
 	<!-- APPL plus a principal class is what makes this a real application
 	     rather than a bare process. Without it macOS never grants a regular
@@ -51,10 +51,10 @@
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.overnight.auth</string>
+            <string>com.farcooler.auth</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>overnight</string>
+                <string>farcooler</string>
             </array>
         </dict>
     </array>
@@ -66,11 +66,11 @@
          scripts/version.sh. The whole reason it exists: a beta and a release
          that call themselves the same version make a bug report unanswerable —
          someone says "0.2.0" and there is no way to know which one they had. -->
-    <key>OvernightChannel</key>
+    <key>FarCoolerChannel</key>
     <string></string>
-    <key>OvernightDisplayVersion</key>
+    <key>FarCoolerDisplayVersion</key>
     <string></string>
-    <key>OvernightWorkOSClientID</key>
+    <key>FarCoolerWorkOSClientID</key>
     <string></string>
 </dict>
 </plist>

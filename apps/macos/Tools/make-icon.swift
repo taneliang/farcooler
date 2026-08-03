@@ -1,4 +1,4 @@
-// Renders the Overnight app icon and writes an .iconset.
+// Renders the Far Cooler app icon and writes an .iconset.
 //
 // Run via: swift Tools/make-icon.swift <output-iconset-dir>
 // Then: iconutil -c icns <output-iconset-dir>

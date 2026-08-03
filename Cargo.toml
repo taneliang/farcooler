@@ -20,14 +20,14 @@ rust-version = "1.85"
 license = "MIT"
 
 [workspace.dependencies]
-overnight-protocol = { path = "crates/protocol" }
-overnight-core = { path = "crates/core" }
-overnight-agent = { path = "crates/agent" }
-overnight-store = { path = "crates/store" }
-overnight-tmux = { path = "crates/tmux" }
-overnight-transport = { path = "crates/transport" }
-overnight-client = { path = "crates/client" }
-overnight-daemon = { path = "crates/daemon" }
+farcooler-protocol = { path = "crates/protocol" }
+farcooler-core = { path = "crates/core" }
+farcooler-agent = { path = "crates/agent" }
+farcooler-store = { path = "crates/store" }
+farcooler-tmux = { path = "crates/tmux" }
+farcooler-transport = { path = "crates/transport" }
+farcooler-client = { path = "crates/client" }
+farcooler-daemon = { path = "crates/daemon" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "process", "sync", "time", "signal", "fs"] }
 # The only HTTPS client in the workspace, and it exists for exactly one call:

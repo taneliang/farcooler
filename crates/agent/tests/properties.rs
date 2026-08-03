@@ -1,7 +1,7 @@
 //! The three invariants the whole design rests on.
 
-use overnight_agent::event::{AgentEvent, AgentGapReason, Role};
-use overnight_agent::ring::{AgentReplay, AgentRing};
+use farcooler_agent::event::{AgentEvent, AgentGapReason, Role};
+use farcooler_agent::ring::{AgentReplay, AgentRing};
 
 fn msg(i: usize) -> AgentEvent {
     AgentEvent::Message { role: Role::Agent, text: format!("m{i}") }

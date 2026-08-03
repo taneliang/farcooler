@@ -12,9 +12,9 @@
 
 use std::path::PathBuf;
 
-use overnight_client::session::Session;
+use farcooler_client::session::Session;
 
-/// Where cargo put `overnightd`.
+/// Where cargo put `farcoolerd`.
 ///
 /// `CARGO_BIN_EXE_*` only covers binaries in the same crate, and the daemon
 /// lives in another one. The test executable sits in `target/<profile>/deps/`,
@@ -25,10 +25,10 @@ fn daemon_binary() -> PathBuf {
     let mut path = std::env::current_exe().expect("test executable path");
     path.pop(); // deps/
     path.pop(); // <profile>/
-    path.push("overnightd");
+    path.push("farcoolerd");
     assert!(
         path.is_file(),
-        "no overnightd at {} — run `cargo build -p overnight-daemon` first",
+        "no farcoolerd at {} — run `cargo build -p farcooler-daemon` first",
         path.display()
     );
     path
@@ -50,14 +50,14 @@ impl Drop for Daemon {
 
 async fn start() -> Daemon {
     let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("overnightd.sock");
+    let socket = dir.path().join("farcoolerd.sock");
 
     let process = std::process::Command::new(daemon_binary())
-        .env("OVERNIGHT_HOME", dir.path())
+        .env("FARCOOLER_HOME", dir.path())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .expect("spawn overnightd");
+        .expect("spawn farcoolerd");
 
     // Wait for the socket rather than sleeping a fixed amount: a slow machine
     // would otherwise make this flaky and a fast one would waste the time.
@@ -115,7 +115,7 @@ async fn a_workspace_created_through_the_client_comes_back_in_the_fleet() {
     let repositories = session.repositories().await.expect("repositories");
     assert_eq!(repositories.len(), 1, "the repository must be visible to a second session");
 
-    let repository = overnight_client::session::uuid_of(&repositories[0].id);
+    let repository = farcooler_client::session::uuid_of(&repositories[0].id);
     let workspace = session
         .create_workspace(repository, "phone task", "feat/phone", "HEAD")
         .await
@@ -151,12 +151,12 @@ async fn archiving_and_restoring_round_trips_through_the_client() {
     register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
 
     let repositories = session.repositories().await.expect("repositories");
-    let repository = overnight_client::session::uuid_of(&repositories[0].id);
+    let repository = farcooler_client::session::uuid_of(&repositories[0].id);
     let workspace = session
         .create_workspace(repository, "reversible", "feat/rev", "HEAD")
         .await
         .expect("create");
-    let id = overnight_client::session::uuid_of(&workspace.id);
+    let id = farcooler_client::session::uuid_of(&workspace.id);
 
     session.archive_workspace(id).await.expect("archive");
     let fleet = session.fleet().await.expect("fleet");
@@ -189,18 +189,18 @@ async fn subscribing_to_a_terminal_with_no_agent_session_is_empty_not_an_error()
     register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
 
     let repositories = session.repositories().await.expect("repositories");
-    let repository = overnight_client::session::uuid_of(&repositories[0].id);
+    let repository = farcooler_client::session::uuid_of(&repositories[0].id);
     let workspace = session
         .create_workspace(repository, "agent test", "feat/agent-empty", "HEAD")
         .await
         .expect("create_workspace");
-    let workspace_id = overnight_client::session::uuid_of(&workspace.id);
+    let workspace_id = farcooler_client::session::uuid_of(&workspace.id);
 
     let terminal = session
         .create_terminal(workspace_id, "shell", "shell", false)
         .await
         .expect("create_terminal");
-    let terminal_id = overnight_client::session::uuid_of(&terminal.id);
+    let terminal_id = farcooler_client::session::uuid_of(&terminal.id);
 
     let batch = session.agent_subscribe(terminal_id, 0, 0).await.expect("subscribe succeeds");
     assert!(batch.events.is_empty());
@@ -226,11 +226,11 @@ async fn register_root_and_repository(
     root: &std::path::Path,
     repo: &std::path::Path,
 ) {
-    use overnight_protocol::v1::request::Payload;
+    use farcooler_protocol::v1::request::Payload;
 
     let stream = tokio::net::UnixStream::connect(socket).await.unwrap();
     let (read, write) = stream.into_split();
-    let mut client = overnight_transport::Client::over(
+    let mut client = farcooler_transport::Client::over(
         Box::new(read) as Box<dyn tokio::io::AsyncRead + Unpin + Send>,
         Box::new(write) as Box<dyn tokio::io::AsyncWrite + Unpin + Send>,
         "test",
@@ -239,16 +239,16 @@ async fn register_root_and_repository(
     .await
     .unwrap();
 
-    let mut add = overnight_transport::request("repository_root.add");
-    add.payload = Some(Payload::RepositoryRootAdd(overnight_protocol::v1::RepositoryRootAdd {
+    let mut add = farcooler_transport::request("repository_root.add");
+    add.payload = Some(Payload::RepositoryRootAdd(farcooler_protocol::v1::RepositoryRootAdd {
         absolute_path: root.to_string_lossy().into_owned(),
         typed_confirmation: String::new(),
     }));
     client.call(add).await.expect("root add");
 
-    let mut register = overnight_transport::request("repository.register");
+    let mut register = farcooler_transport::request("repository.register");
     register.payload = Some(Payload::RepositoryRegister(
-        overnight_protocol::v1::RepositoryRegister {
+        farcooler_protocol::v1::RepositoryRegister {
             relative_path: repo.to_string_lossy().into_owned(),
         },
     ));

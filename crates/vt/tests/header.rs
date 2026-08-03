@@ -6,14 +6,14 @@
 
 use std::collections::BTreeMap;
 
-const HEADER: &str = include_str!("../include/overnight_vt.h");
+const HEADER: &str = include_str!("../include/farcooler_vt.h");
 const FFI: &str = include_str!("../src/ffi.rs");
 
-/// Every `overnight_vt_*` the header declares.
+/// Every `farcooler_vt_*` the header declares.
 fn declared_functions() -> Vec<String> {
     let mut found = Vec::new();
     for line in HEADER.lines() {
-        let Some(start) = line.find("overnight_vt_") else { continue };
+        let Some(start) = line.find("farcooler_vt_") else { continue };
         let rest = &line[start..];
         let name: String =
             rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
@@ -25,18 +25,18 @@ fn declared_functions() -> Vec<String> {
     found
 }
 
-/// Every `#define OVERNIGHT_VT_<NAME> <value>` in the header.
+/// Every `#define FARCOOLER_VT_<NAME> <value>` in the header.
 fn header_constants() -> BTreeMap<String, u32> {
     let mut map = BTreeMap::new();
     for line in HEADER.lines() {
         let line = line.trim();
-        let Some(rest) = line.strip_prefix("#define OVERNIGHT_VT_") else { continue };
+        let Some(rest) = line.strip_prefix("#define FARCOOLER_VT_") else { continue };
         let mut parts = rest.split_whitespace();
         let (Some(name), Some(value)) = (parts.next(), parts.next()) else { continue };
         if let Some(v) = parse_c_value(&rest[name.len()..]) {
             map.insert(name.to_string(), v);
         } else {
-            panic!("cannot parse constant OVERNIGHT_VT_{name} = {value}");
+            panic!("cannot parse constant FARCOOLER_VT_{name} = {value}");
         }
     }
     map
@@ -81,7 +81,7 @@ fn every_exported_function_is_declared_in_the_header() {
     // and usually means someone forgot to publish it.
     let declared = declared_functions();
     for line in FFI.lines() {
-        let Some(idx) = line.find("extern \"C\" fn overnight_vt_") else { continue };
+        let Some(idx) = line.find("extern \"C\" fn farcooler_vt_") else { continue };
         let rest = &line[idx + "extern \"C\" fn ".len()..];
         let name: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
         assert!(
@@ -93,7 +93,7 @@ fn every_exported_function_is_declared_in_the_header() {
 
 #[test]
 fn the_constants_agree() {
-    use overnight_vt::ffi::*;
+    use farcooler_vt::ffi::*;
 
     let header = header_constants();
     let rust: BTreeMap<&str, u32> = BTreeMap::from([
@@ -134,13 +134,13 @@ fn the_constants_agree() {
         match header.get(*name) {
             Some(actual) => assert_eq!(
                 actual, expected,
-                "OVERNIGHT_VT_{name} is {actual} in the header but {expected} in Rust"
+                "FARCOOLER_VT_{name} is {actual} in the header but {expected} in Rust"
             ),
-            None => panic!("the header is missing OVERNIGHT_VT_{name}"),
+            None => panic!("the header is missing FARCOOLER_VT_{name}"),
         }
     }
 
     for name in header.keys() {
-        assert!(rust.contains_key(name.as_str()), "the header defines an unknown OVERNIGHT_VT_{name}");
+        assert!(rust.contains_key(name.as_str()), "the header defines an unknown FARCOOLER_VT_{name}");
     }
 }

@@ -1,11 +1,11 @@
 //! Private tmux server lifecycle.
 //!
-//! Overnight never mixes managed windows into the user's default tmux server and
+//! Far Cooler never mixes managed windows into the user's default tmux server and
 //! never depends on the user's tmux configuration. It runs its own server on a
 //! dedicated socket with minimal config:
 //!
 //! ```text
-//! tmux -L overnight-<install-id> -f <overnight-managed.conf>
+//! tmux -L farcooler-<install-id> -f <farcooler-managed.conf>
 //! ```
 //!
 //! A workspace is a daemon grouping of TAGGED WINDOWS, not a tmux session. There
@@ -14,13 +14,13 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 
-use overnight_core::{DomainError, Result, SCHEMA_VERSION, tags};
+use farcooler_core::{DomainError, Result, SCHEMA_VERSION, tags};
 use tokio::process::Command;
 use uuid::Uuid;
 
 /// Display name of the single host-wide session. Addressed internally by its
 /// stable tmux session id, never by this name.
-pub const SESSION_NAME: &str = "overnight";
+pub const SESSION_NAME: &str = "farcooler";
 
 #[derive(Debug, Clone)]
 pub struct TmuxServer {
@@ -29,7 +29,7 @@ pub struct TmuxServer {
     config_path: PathBuf,
 }
 
-/// Overnight's own minimal tmux configuration.
+/// Far Cooler's own minimal tmux configuration.
 ///
 /// This is NOT the user's config: the server starts with `-f` pointing here, so
 /// nothing in `~/.tmux.conf` can change managed behaviour, and these two options
@@ -63,12 +63,12 @@ const TMUX_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 
 impl TmuxServer {
     pub fn new(install_id: &str, daemon_id: Uuid) -> Self {
-        let config_path = std::env::temp_dir().join(format!("overnight-{install_id}.tmux.conf"));
+        let config_path = std::env::temp_dir().join(format!("farcooler-{install_id}.tmux.conf"));
         Self::with_config(install_id, daemon_id, config_path)
     }
 
     pub fn with_config(install_id: &str, daemon_id: Uuid, config_path: PathBuf) -> Self {
-        Self { socket: format!("overnight-{install_id}"), daemon_id, config_path }
+        Self { socket: format!("farcooler-{install_id}"), daemon_id, config_path }
     }
 
     /// Write the managed config if it is not already in place.

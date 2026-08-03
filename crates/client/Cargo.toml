@@ -1,12 +1,12 @@
 [package]
-name = "overnight-client"
+name = "farcooler-client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [lib]
-name = "overnight_client"
+name = "farcooler_client"
 # Both, so iOS links statically and macOS development can link dynamically.
 # staticlib for Apple platforms and the NDK; rlib so the workspace can
 # use it directly. No cdylib: iOS does not load dynamic libraries from an
@@ -15,9 +15,9 @@ name = "overnight_client"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-overnight-core.workspace = true
-overnight-protocol.workspace = true
-overnight-transport.workspace = true
+farcooler-core.workspace = true
+farcooler-protocol.workspace = true
+farcooler-transport.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 uuid.workspace = true
@@ -33,4 +33,4 @@ rand = "0.10"
 [dev-dependencies]
 tempfile = "3"
 # The tests drive the real daemon binary, not a stub.
-overnight-daemon.workspace = true
+farcooler-daemon.workspace = true

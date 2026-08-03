@@ -1,6 +1,6 @@
-# Overnight relay
+# Far Cooler relay
 
-The only server Overnight has, and it exists for one reason: a phone that is
+The only server Far Cooler has, and it exists for one reason: a phone that is
 asleep cannot be reached over ssh. Everything else in this product is
 daemon-to-device over a connection the user already owns; push is the exception,
 because Apple and Google will only deliver a notification that came from a

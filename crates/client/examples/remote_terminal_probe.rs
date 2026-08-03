@@ -13,15 +13,15 @@ use std::ffi::CString;
 // `no_mangle` symbols are only in the staticlib the framework is built from.
 // Same functions, same bodies — this is the layer under Swift, not a stand-in
 // for it.
-use overnight_client::ffi::{
-    overnight_client_call, overnight_client_connect, overnight_client_new, overnight_client_poll,
-    overnight_client_stream_start, overnight_client_stream_stop,
+use farcooler_client::ffi::{
+    farcooler_client_call, farcooler_client_connect, farcooler_client_new, farcooler_client_poll,
+    farcooler_client_stream_start, farcooler_client_stream_stop,
 };
 
 fn poll_for(handle: *mut std::ffi::c_void, ticket: u64) -> serde_json::Value {
     let mut held: Vec<serde_json::Value> = Vec::new();
     for _ in 0..900 {
-        let raw = unsafe { overnight_client_poll(handle) };
+        let raw = unsafe { farcooler_client_poll(handle) };
         if !raw.is_null() {
             let text = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -42,7 +42,7 @@ fn poll_for(handle: *mut std::ffi::c_void, ticket: u64) -> serde_json::Value {
 fn call(handle: *mut std::ffi::c_void, method: &str, args: serde_json::Value) -> serde_json::Value {
     let m = CString::new(method).unwrap();
     let a = CString::new(args.to_string()).unwrap();
-    let ticket = unsafe { overnight_client_call(handle, m.as_ptr(), a.as_ptr()) };
+    let ticket = unsafe { farcooler_client_call(handle, m.as_ptr(), a.as_ptr()) };
     let reply = poll_for(handle, ticket);
     assert_eq!(reply["ok"], serde_json::json!(true), "{method} failed: {reply}");
     reply["result"].clone()
@@ -55,7 +55,7 @@ fn main() {
     let (host, port) = rest.rsplit_once(':').unwrap_or((rest, "22"));
     let key = std::fs::read_to_string(key_path).expect("private key");
 
-    let handle = overnight_client_new();
+    let handle = farcooler_client_new();
     let config = serde_json::json!({
         "host": host, "port": port.parse::<u16>().unwrap(), "user": user,
         "private_key": key,
@@ -64,7 +64,7 @@ fn main() {
         "host_fingerprint": "accept-any",
     });
     let c = CString::new(config.to_string()).unwrap();
-    let ticket = unsafe { overnight_client_connect(handle, c.as_ptr()) };
+    let ticket = unsafe { farcooler_client_connect(handle, c.as_ptr()) };
     let started = poll_for(handle, ticket);
     assert_eq!(started["ok"], serde_json::json!(true), "connect failed: {started}");
     println!("connected over ssh");
@@ -112,7 +112,7 @@ fn main() {
     // The data plane: a second ssh channel carrying the pane's bytes.
     let term = CString::new(terminal.as_str()).unwrap();
     assert!(
-        unsafe { overnight_client_stream_start(handle, term.as_ptr()) },
+        unsafe { farcooler_client_stream_start(handle, term.as_ptr()) },
         "a stream needs an ssh session"
     );
 
@@ -142,7 +142,7 @@ fn main() {
         serde_json::json!({ "terminal": terminal, "hex": hex }).to_string(),
     )
     .unwrap();
-    unsafe { overnight_client_call(handle, method.as_ptr(), payload.as_ptr()) };
+    unsafe { farcooler_client_call(handle, method.as_ptr(), payload.as_ptr()) };
 
     let mut seen = None;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -158,7 +158,7 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
-    unsafe { overnight_client_stream_stop(handle, term.as_ptr()) };
+    unsafe { farcooler_client_stream_stop(handle, term.as_ptr()) };
 
     let elapsed = seen.expect("what was typed has to come back down the stream");
     println!("keystroke echoed through the stream in {} ms", elapsed.as_millis());
@@ -169,7 +169,7 @@ fn main() {
 
 /// The next streamed chunk, if one has arrived.
 fn next_chunk(handle: *mut std::ffi::c_void) -> Option<Vec<u8>> {
-    let raw = unsafe { overnight_client_poll(handle) };
+    let raw = unsafe { farcooler_client_poll(handle) };
     if raw.is_null() {
         return None;
     }

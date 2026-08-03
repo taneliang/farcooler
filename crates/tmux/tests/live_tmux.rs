@@ -5,8 +5,8 @@
 //! another. Each test uses its own install id so runs cannot collide, and tears
 //! its server down afterwards.
 
-use overnight_core::inventory::RuntimeInventory;
-use overnight_tmux::{LiveInventory, TmuxServer};
+use farcooler_core::inventory::RuntimeInventory;
+use farcooler_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
 fn unique_server() -> TmuxServer {

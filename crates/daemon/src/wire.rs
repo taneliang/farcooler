@@ -14,9 +14,9 @@
 //! to write a handler that reports a stale `running` for a pane that died an
 //! hour ago.
 
-use overnight_agent::event::{AgentEvent, AgentGapReason, Sequenced};
-use overnight_protocol::v1::{self as wire, Scope};
-use overnight_store::models;
+use farcooler_agent::event::{AgentEvent, AgentGapReason, Sequenced};
+use farcooler_protocol::v1::{self as wire, Scope};
+use farcooler_store::models;
 use uuid::Uuid;
 
 use crate::agent_supervisor::AgentSupervisor;
@@ -54,7 +54,7 @@ fn path_token(id: Uuid) -> String {
 pub fn host(
     daemon_version: &str,
     host_id: Uuid,
-    runtime: &overnight_core::inventory::RuntimeSnapshot,
+    runtime: &farcooler_core::inventory::RuntimeSnapshot,
     replay_bytes: u64,
 ) -> wire::Host {
     let healthy = runtime.inventory_healthy;
@@ -63,7 +63,7 @@ pub fn host(
         resource_version: 1,
         platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         daemon_version: daemon_version.to_string(),
-        protocol_version: overnight_protocol::PROTOCOL_VERSION,
+        protocol_version: farcooler_protocol::PROTOCOL_VERSION,
         self_health: if healthy {
             wire::SelfHealth::Healthy as i32
         } else {
@@ -191,7 +191,7 @@ pub fn terminal_with_agent_state(view: &TerminalView, agents: &AgentSupervisor) 
     // A terminal's stored title is what it was created as — usually the task,
     // sometimes "Terminal 19". The agent names the conversation after what is
     // actually being worked on and revises it as that changes, which is a
-    // better answer to "which pane is which" than anything Overnight knows.
+    // better answer to "which pane is which" than anything Far Cooler knows.
     // Only ever an upgrade: without a title the stored one stands.
     if let Some(title) = agents.title(id) {
         message.title = title;
@@ -201,7 +201,7 @@ pub fn terminal_with_agent_state(view: &TerminalView, agents: &AgentSupervisor) 
 
 /// A replay or fast-attach batch, for one terminal.
 ///
-/// Each event is JSON because the shape is `overnight_agent::event::
+/// Each event is JSON because the shape is `farcooler_agent::event::
 /// AgentEvent`, the single Rust definition both apps decode; see
 /// `AgentEventFrame` in the proto for why. A value that fails to serialize is
 /// never simply skipped: skipping would leave a hole between two seq numbers
@@ -221,10 +221,10 @@ pub fn agent_batch(
         events: events
             .into_iter()
             .map(|s| {
-                let payload_json = overnight_agent::link::encode_line(&s.event)
+                let payload_json = farcooler_agent::link::encode_line(&s.event)
                     .map(|line| line.trim_end().to_string())
                     .unwrap_or_else(|_| {
-                        overnight_agent::link::encode_line(&AgentEvent::Gap {
+                        farcooler_agent::link::encode_line(&AgentEvent::Gap {
                             reason: AgentGapReason::Unparsed,
                         })
                         .map(|line| line.trim_end().to_string())
@@ -248,14 +248,14 @@ pub fn agent_batch(
 /// These used to be dropped on the floor here — `prompt_text` matched
 /// `Image(_) => None` — so a picture attached in either app travelled as far as
 /// the daemon and no further. The protocol has carried `ImageBlock` all along.
-pub fn prompt_images(blocks: &[wire::AgentPromptBlock]) -> Vec<overnight_agent::event::PromptImage> {
+pub fn prompt_images(blocks: &[wire::AgentPromptBlock]) -> Vec<farcooler_agent::event::PromptImage> {
     blocks
         .iter()
         .filter_map(|b| match &b.content {
             Some(wire::agent_prompt_block::Content::Image(image)) => {
-                Some(overnight_agent::event::PromptImage {
+                Some(farcooler_agent::event::PromptImage {
                     mime: image.mime_type.clone(),
-                    base64: overnight_core::base64::encode(&image.data),
+                    base64: farcooler_core::base64::encode(&image.data),
                 })
             }
             _ => None,
@@ -303,16 +303,16 @@ pub fn timestamp(unix_millis: i64) -> prost_types::Timestamp {
 pub fn pane_group_list(
     workspace: Uuid,
     layouts: &[crate::layout::LayoutView],
-) -> overnight_protocol::v1::PaneGroupList {
-    overnight_protocol::v1::PaneGroupList {
+) -> farcooler_protocol::v1::PaneGroupList {
+    farcooler_protocol::v1::PaneGroupList {
         workspace_id: id_bytes(workspace),
         items: layouts.iter().map(pane_group).collect(),
     }
 }
 
-pub fn pane_group(view: &crate::layout::LayoutView) -> overnight_protocol::v1::PaneGroup {
+pub fn pane_group(view: &crate::layout::LayoutView) -> farcooler_protocol::v1::PaneGroup {
     let (columns, rows) = view.size();
-    overnight_protocol::v1::PaneGroup {
+    farcooler_protocol::v1::PaneGroup {
         id: view.window.window_id.clone(),
         workspace_id: id_bytes(view.window.workspace_id),
         name: view.window.name.clone(),
@@ -323,7 +323,7 @@ pub fn pane_group(view: &crate::layout::LayoutView) -> overnight_protocol::v1::P
         panes: view
             .panes
             .iter()
-            .map(|p| overnight_protocol::v1::PaneRect {
+            .map(|p| farcooler_protocol::v1::PaneRect {
                 terminal_id: id_bytes(p.terminal_id),
                 left: p.left,
                 top: p.top,
@@ -396,15 +396,15 @@ mod tests {
             id: Uuid::now_v7(),
             host_id: Uuid::now_v7(),
             repository_root_id: Uuid::now_v7(),
-            display_name: "overnight".into(),
-            canonical_git_dir: "/Users/someone/overnight/.git".into(),
+            display_name: "farcooler".into(),
+            canonical_git_dir: "/Users/someone/farcooler/.git".into(),
             remote_summary: "github".into(),
             resource_version: 1,
         };
         assert_eq!(repository(&model, Scope::Read).canonical_git_dir, None);
         assert!(repository(&model, Scope::HostAdmin).canonical_git_dir.is_some());
         // The display name is not a path and is how a user recognises the repo.
-        assert_eq!(repository(&model, Scope::Read).display_name, "overnight");
+        assert_eq!(repository(&model, Scope::Read).display_name, "farcooler");
     }
 
     #[test]

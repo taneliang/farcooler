@@ -1,5 +1,5 @@
-use overnight_tmux::TmuxServer;
-use overnight_tmux::windows::{Axis, Preset};
+use farcooler_tmux::TmuxServer;
+use farcooler_tmux::windows::{Axis, Preset};
 use uuid::Uuid;
 
 #[tokio::main]

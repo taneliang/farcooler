@@ -1,13 +1,13 @@
 [package]
-name = "overnight-store"
+name = "farcooler-store"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-overnight-core.workspace = true
-overnight-protocol.workspace = true
+farcooler-core.workspace = true
+farcooler-protocol.workspace = true
 rusqlite.workspace = true
 uuid.workspace = true
 thiserror.workspace = true

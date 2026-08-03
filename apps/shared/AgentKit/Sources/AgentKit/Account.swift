@@ -5,7 +5,7 @@ import SwiftUI
 
 /// Who you are, so a machine you own can reach a phone you carry.
 ///
-/// This is the ONLY place in Overnight that knows about WorkOS, and it lives in
+/// This is the ONLY place in Far Cooler that knows about WorkOS, and it lives in
 /// the apps rather than in the daemon on purpose. A daemon signs in to nothing:
 /// it holds an opaque token this app asked the relay for and handed over ssh, so
 /// a headless Linux box never needs a browser and a stolen daemon token is worth
@@ -34,7 +34,7 @@ public final class Account: NSObject, ObservableObject {
         set { defaults.set(newValue, forKey: "account.relay") }
     }
 
-    public static let defaultRelay = "https://relay.overnight.sh"
+    public static let defaultRelay = "https://relay.farcooler.com"
 
     /// The AuthKit client id for this project. Public: it names the app, not the
     /// bearer, and every OAuth public client ships one.
@@ -45,7 +45,7 @@ public final class Account: NSObject, ObservableObject {
     /// Overridable through Info.plist so a fork can point at its own WorkOS
     /// project without editing source.
     private static var bundledClientID: String {
-        Bundle.main.object(forInfoDictionaryKey: "OvernightWorkOSClientID") as? String ?? ""
+        Bundle.main.object(forInfoDictionaryKey: "FarCoolerWorkOSClientID") as? String ?? ""
     }
 
     private let defaults = UserDefaults.standard
@@ -75,7 +75,7 @@ public final class Account: NSObject, ObservableObject {
     /// auth was meant to avoid.
     public func signIn() async {
         guard !clientID.isEmpty else {
-            lastError = "This build has no WorkOS client id. Set OvernightWorkOSClientID."
+            lastError = "This build has no WorkOS client id. Set FarCoolerWorkOSClientID."
             return
         }
         signingIn = true
@@ -93,7 +93,7 @@ public final class Account: NSObject, ObservableObject {
         // Bound to this sign-in, so a callback that did not come from it is
         // rejected. PKCE already defeats the practical code-injection attack —
         // an injected code was issued against someone else's challenge — but
-        // `overnight://` is a scheme any app on the device may claim, and a
+        // `farcooler://` is a scheme any app on the device may claim, and a
         // flow with no request binding of its own has nothing to say about a
         // callback it never asked for.
         let state = Self.randomVerifier()
@@ -133,7 +133,7 @@ public final class Account: NSObject, ObservableObject {
     /// Forget the session on this device.
     ///
     /// Paired machines keep working: they hold tokens, not your session, and
-    /// signing out of a phone should not silence the fleet. `overnight push
+    /// signing out of a phone should not silence the fleet. `farcooler push
     /// forget` or the app's revoke button is how a machine is unpaired.
     public func signOut() async {
         // Told to the relay first, while there is still a token to tell it
@@ -334,8 +334,8 @@ public final class Account: NSObject, ObservableObject {
         return Date(timeIntervalSince1970: exp)
     }
 
-    private static let scheme = "overnight"
-    private static let redirectURI = "overnight://auth"
+    private static let scheme = "farcooler"
+    private static let redirectURI = "farcooler://auth"
 
     /// Nil rather than zeros if the system has no randomness for us.
     ///

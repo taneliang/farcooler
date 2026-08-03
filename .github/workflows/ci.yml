@@ -84,14 +84,14 @@ jobs:
       # The full bundle, not `swift build`. `build-app.sh` is the thing that has
       # gone wrong before — it once copied a stale Rust binary instead of
       # building one — so the assembly step is what CI should exercise.
-      - name: Build Overnight.app
+      - name: Build FarCooler.app
         run: apps/macos/build-app.sh
 
       - name: Check the bundle is stamped with this commit's version
         run: |
           expected="$(scripts/version.sh)"
           actual="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-            apps/macos/build/Overnight.app/Contents/Info.plist)"
+            apps/macos/build/FarCooler.app/Contents/Info.plist)"
           [ "$expected" = "$actual" ] || {
             echo "bundle says $actual, the workspace says $expected"; exit 1; }
 
@@ -99,13 +99,13 @@ jobs:
       # would have caught a Mac driving a host running different source.
       #
       # It compares them, which the first version of this step did not: it ran
-      # `overnight --version`, threw the output away, and asserted only that the
+      # `farcooler --version`, threw the output away, and asserted only that the
       # process exited 0. The regression it names would have sailed through.
       - name: Check the CLI and daemon agree
         run: |
-          resources=apps/macos/build/Overnight.app/Contents/Resources
-          cli="$("$resources/overnight" --version | awk '{print $2}')"
-          daemon="$("$resources/overnightd" --version | awk '{print $2}')"
+          resources=apps/macos/build/FarCooler.app/Contents/Resources
+          cli="$("$resources/farcooler" --version | awk '{print $2}')"
+          daemon="$("$resources/farcoolerd" --version | awk '{print $2}')"
           echo "cli $cli / daemon $daemon"
           [ "$cli" = "$daemon" ] || {
             echo "the bundled pair disagree — they must be built together"; exit 1; }
@@ -148,8 +148,8 @@ jobs:
       # different set of simulators, which it does without warning.
       - name: Build
         run: |
-          xcodebuild -project apps/ios/Overnight.xcodeproj \
-            -scheme Overnight \
+          xcodebuild -project apps/ios/FarCooler.xcodeproj \
+            -scheme FarCooler \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             ARCHS=arm64 \

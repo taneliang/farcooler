@@ -6,15 +6,15 @@
 
 use std::path::{Path, PathBuf};
 
-use overnight_core::{
+use farcooler_core::{
     DomainError, Result,
     derive::{self, DerivedTerminal},
     inventory::RuntimeInventory,
     validate,
 };
-use overnight_protocol::v1::{TerminalIntent, TerminalState, WorkspaceState};
-use overnight_store::{Store, models};
-use overnight_tmux::{LiveInventory, TmuxServer};
+use farcooler_protocol::v1::{TerminalIntent, TerminalState, WorkspaceState};
+use farcooler_store::{Store, models};
+use farcooler_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
 use crate::runtime::Runtime;
@@ -40,10 +40,10 @@ use crate::{agent_supervisor, git, paths, session_discovery};
 /// `claude` understands the flag, so every other preset ignores it.
 /// The binary that hosts `agent-host`, next to the daemon that is asking.
 ///
-/// NOT `current_exe()`. The daemon is `overnightd` and `agent-host` is a
-/// subcommand of the `overnight` CLI — two binaries from one workspace. Using
-/// the daemon's own path put `overnightd agent-host …` into the pane, where
-/// `overnightd` ignored the arguments, saw a daemon already listening, and
+/// NOT `current_exe()`. The daemon is `farcoolerd` and `agent-host` is a
+/// subcommand of the `farcooler` CLI — two binaries from one workspace. Using
+/// the daemon's own path put `farcoolerd agent-host …` into the pane, where
+/// `farcoolerd` ignored the arguments, saw a daemon already listening, and
 /// exited 0. The pane then died instantly and the terminal derived as an exit
 /// the user never caused, which is the most confusing possible failure: agent
 /// mode reported success and left nothing behind.
@@ -54,10 +54,10 @@ use crate::{agent_supervisor, git, paths, session_discovery};
 pub fn shim_binary(daemon_exe: Option<&std::path::Path>) -> String {
     daemon_exe
         .and_then(|p| p.parent())
-        .map(|dir| dir.join("overnight"))
+        .map(|dir| dir.join("farcooler"))
         .filter(|p| p.exists())
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "overnight".to_string())
+        .unwrap_or_else(|| "farcooler".to_string())
 }
 
 /// Wrap a value so a shell treats it as exactly one word.
@@ -67,7 +67,7 @@ pub fn shim_binary(daemon_exe: Option<&std::path::Path>) -> String {
 /// that needs handling is a single quote itself, which is closed, escaped and
 /// reopened.
 ///
-/// This exists for paths that Overnight did not choose: a worktree under
+/// This exists for paths that Far Cooler did not choose: a worktree under
 /// `~/My Projects` splits into two arguments unquoted, which takes agent mode
 /// down entirely for anyone whose directories have spaces in them.
 pub fn shell_quote(value: &str) -> String {
@@ -120,7 +120,7 @@ fn is_safe_model(text: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
-/// Agents Overnight can render natively.
+/// Agents Far Cooler can render natively.
 ///
 /// One entry, honestly. `crates/cli`'s `default_adapter` speaks to Claude Code
 /// and nothing else, so this list is the truth about what chat mode can do —
@@ -153,7 +153,7 @@ const SKIP_DIRS: &[&str] = &[
 ];
 
 
-/// Whether Overnight can render this agent as a chat.
+/// Whether Far Cooler can render this agent as a chat.
 pub fn chat_capable(harness: &str) -> bool {
     CHAT_CAPABLE.contains(&harness)
 }
@@ -165,7 +165,7 @@ pub struct Service {
     pub host_id: Uuid,
     /// Where this service's runtime data lives.
     ///
-    /// Held rather than re-derived from `OVERNIGHT_HOME` at each use. The
+    /// Held rather than re-derived from `FARCOOLER_HOME` at each use. The
     /// environment is process-global, so a service that consulted it on every
     /// call could be moved out from under itself — which is exactly what
     /// happens when two tests run in parallel, and would happen in production
@@ -209,7 +209,7 @@ impl Service {
     /// depends on a process-global that another thread can change.
     pub async fn open_in(root: PathBuf) -> Result<Self> {
         let install_id = paths::load_or_create_install_id_in(&root)?;
-        let store = Store::open(root.join("overnight.db"))?;
+        let store = Store::open(root.join("farcooler.db"))?;
 
         // The daemon identity is stable per install, so tags written by a prior
         // run of this same daemon remain provable after a restart.
@@ -378,13 +378,13 @@ impl Service {
     /// The other half of `create_workspace`. Work arrives on a branch as often
     /// as it starts on one: pushed from another machine, handed over by someone
     /// else, or produced by an agent running somewhere else entirely. Without
-    /// this, picking that work up meant doing it by hand outside Overnight and
-    /// then having Overnight not know about it.
+    /// this, picking that work up meant doing it by hand outside Far Cooler and
+    /// then having Far Cooler not know about it.
     /// Worktrees that exist on disk but are not yet task workspaces.
     ///
     /// The onboarding path. Someone arrives with a repository they have been
     /// working in for months and several worktrees already checked out, and
-    /// until Overnight can see those it only knows about work it started itself
+    /// until Far Cooler can see those it only knows about work it started itself
     /// — which means re-creating by hand everything you already have.
     ///
     /// The main checkout is excluded. It is where you work directly, and turning
@@ -624,11 +624,11 @@ impl Service {
         )
     }
 
-    /// Stop allowing Overnight to operate under a directory.
+    /// Stop allowing Far Cooler to operate under a directory.
     ///
     /// Refused while any workspace under this root is still live, because a
     /// root is the thing that makes those workspaces legal: removing it while
-    /// they exist would leave records Overnight can no longer act on. Archived
+    /// they exist would leave records Far Cooler can no longer act on. Archived
     /// workspaces do not block it — they are already out of the way — and
     /// nothing on disk is touched either way.
     pub async fn remove_root(&self, id: Uuid) -> Result<models::RepositoryRoot> {
@@ -640,7 +640,7 @@ impl Service {
         // The design's rule was "refused while non-archived workspaces exist",
         // which is the right instinct but leaves a gap: an archived workspace
         // still has a worktree directory on disk. Deleting its record with the
-        // root would strand that directory somewhere Overnight is no longer
+        // root would strand that directory somewhere Far Cooler is no longer
         // allowed to touch, so it could never be cleaned up. Removing the
         // worktree already deletes the record, so "remove the worktrees first"
         // is a reachable instruction rather than a dead end.
@@ -780,7 +780,7 @@ impl Service {
         Ok(term)
     }
 
-    /// Whether this pane has an agent in it that Overnight can host as a chat.
+    /// Whether this pane has an agent in it that Far Cooler can host as a chat.
     ///
     /// Adoption only makes sense for a pane that IS an agent — a shell has no
     /// conversation to continue, and letting one adopt a session is how a
@@ -805,7 +805,7 @@ impl Service {
         // Supported, not merely recognised. Offering chat for an agent that
         // would be replaced by a different one on arrival is how the offer
         // becomes a trap.
-        overnight_core::activity::identify(&pane.command, &screen)
+        farcooler_core::activity::identify(&pane.command, &screen)
             .is_some_and(|rules| chat_capable(rules.preset))
     }
 
@@ -882,7 +882,7 @@ impl Service {
         &self,
         workspace_id: Uuid,
         target: Uuid,
-        side: overnight_protocol::v1::SplitSide,
+        side: farcooler_protocol::v1::SplitSide,
         title: &str,
         command_preset: &str,
     ) -> Result<models::Terminal> {
@@ -1182,12 +1182,12 @@ impl Service {
 
         // Named after the agent it is hosting, before the pane stops being able
         // to say. Every surface labels a terminal by what is running in it, and
-        // in agent mode that is `overnight agent-host` — so a Claude session
+        // in agent mode that is `farcooler agent-host` — so a Claude session
         // rendered natively appeared in the sidebar as "agent", which is the one
         // thing every agent pane has in common and therefore says nothing. The
         // screen is still the old agent's at this instant; a moment later it is
         // the shim's and the answer is gone.
-        let harness = overnight_core::activity::identify(
+        let harness = farcooler_core::activity::identify(
             &pane.command,
             &self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default(),
         )
@@ -1354,7 +1354,7 @@ impl Service {
         self.inventory.backstop_reconcile().await;
     }
 
-    pub fn inventory_snapshot(&self) -> overnight_core::inventory::RuntimeSnapshot {
+    pub fn inventory_snapshot(&self) -> farcooler_core::inventory::RuntimeSnapshot {
         self.inventory.snapshot()
     }
 
@@ -1644,30 +1644,30 @@ mod preset_tests {
 
     #[test]
     fn the_shim_is_the_cli_beside_the_daemon_not_the_daemon_itself() {
-        // Found end to end, not by a test: the pane ran `overnightd agent-host`,
+        // Found end to end, not by a test: the pane ran `farcoolerd agent-host`,
         // which ignored its arguments and exited 0. The pane died instantly and
         // the terminal derived as an exit nobody caused, while set-pane-mode
         // reported success — agent mode was completely broken and said nothing.
-        let dir = std::env::temp_dir().join(format!("overnight-shim-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("farcooler-shim-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let daemon = dir.join("overnightd");
+        let daemon = dir.join("farcoolerd");
         std::fs::write(&daemon, "").unwrap();
-        std::fs::write(dir.join("overnight"), "").unwrap();
+        std::fs::write(dir.join("farcooler"), "").unwrap();
 
-        assert_eq!(shim_binary(Some(&daemon)), dir.join("overnight").display().to_string());
-        assert!(!shim_binary(Some(&daemon)).ends_with("overnightd"));
+        assert_eq!(shim_binary(Some(&daemon)), dir.join("farcooler").display().to_string());
+        assert!(!shim_binary(Some(&daemon)).ends_with("farcoolerd"));
     }
 
     #[test]
     fn a_daemon_installed_without_its_cli_beside_it_falls_back_to_the_path() {
-        let dir = std::env::temp_dir().join(format!("overnight-shim-alone-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("farcooler-shim-alone-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let daemon = dir.join("overnightd");
+        let daemon = dir.join("farcoolerd");
         std::fs::write(&daemon, "").unwrap();
-        // No sibling `overnight`: naming a path that does not exist would fail
+        // No sibling `farcooler`: naming a path that does not exist would fail
         // in the pane with no explanation, so PATH is the better guess.
-        assert_eq!(shim_binary(Some(&daemon)), "overnight");
-        assert_eq!(shim_binary(None), "overnight");
+        assert_eq!(shim_binary(Some(&daemon)), "farcooler");
+        assert_eq!(shim_binary(None), "farcooler");
     }
 
     #[test]
