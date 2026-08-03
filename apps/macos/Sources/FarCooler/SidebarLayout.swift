@@ -110,11 +110,26 @@ struct SidebarMenuButton: View {
             menu.addItem(entry)
         }
         // Below the control, aligned to its leading edge.
+        //
+        // The two coordinate systems here disagree about which way is up, and
+        // the conversion has to be done by hand because nothing in AppKit
+        // knows the point came from SwiftUI.
+        //
+        // `anchor` is a SwiftUI `.global` frame: origin top-left, y growing
+        // DOWNWARD. An `NSView` is origin bottom-left, y growing UPWARD unless
+        // it says otherwise. Handing one straight to the other — which is what
+        // `view.convert(_:from: nil)` did, since that reads its argument as
+        // AppKit window coordinates — mirrors the point about the window's
+        // middle. A `+` near the top of the sidebar opened its menu near the
+        // bottom of the window, and `+ 4` ("just below") pushed it further
+        // away rather than nearer, because down in one system is up in the
+        // other.
         if let view = NSApp.keyWindow?.contentView {
-            let local = view.convert(
-                NSPoint(x: anchor.minX, y: anchor.maxY + 4),
-                from: nil)
-            menu.popUp(positioning: nil, at: local, in: view)
+            let top = anchor.maxY + 4
+            let point = NSPoint(
+                x: anchor.minX,
+                y: view.isFlipped ? top : view.bounds.height - top)
+            menu.popUp(positioning: nil, at: point, in: view)
         } else {
             menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
         }
