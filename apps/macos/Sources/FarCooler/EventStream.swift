@@ -53,15 +53,22 @@ final class EventStream {
     private var process: Process?
     private let onEvent: @Sendable (TerminalEvent) -> Void
     private let onLayout: @Sendable (LayoutEvent) -> Void
+    /// The set of workspaces changed — a worktree appeared, vanished, or moved
+    /// between shown and hidden. Carries nothing; the reconciler that emits it
+    /// can both create and delete rows in one pass, and a client re-reads the
+    /// fleet rather than applying this as a delta.
+    private let onFleet: @Sendable () -> Void
     private let onEnd: @Sendable () -> Void
 
     init(
         onEvent: @escaping @Sendable (TerminalEvent) -> Void,
         onLayout: @escaping @Sendable (LayoutEvent) -> Void = { _ in },
+        onFleet: @escaping @Sendable () -> Void = {},
         onEnd: @escaping @Sendable () -> Void = {}
     ) {
         self.onEvent = onEvent
         self.onLayout = onLayout
+        self.onFleet = onFleet
         self.onEnd = onEnd
     }
 
@@ -86,7 +93,7 @@ final class EventStream {
         // state across threads, which the compiler is right to refuse.
         let buffer = LineBuffer()
         let handle = out.fileHandleForReading
-        handle.readabilityHandler = { [onEvent, onLayout] h in
+        handle.readabilityHandler = { [onEvent, onLayout, onFleet] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
             let decoder = JSONDecoder()
@@ -105,6 +112,8 @@ final class EventStream {
                     if let event = try? decoder.decode(LayoutEvent.self, from: line) {
                         onLayout(event)
                     }
+                case "fleet":
+                    onFleet()
                 // Resources this app does not track yet are skipped, not an error.
                 default: continue
                 }

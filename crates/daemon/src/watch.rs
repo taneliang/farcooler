@@ -50,6 +50,14 @@ const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 /// it exists to catch goes unreported forever.
 const BACKSTOP_INTERVAL: Duration = Duration::from_secs(60);
 
+/// How often every repository is reconciled regardless of what the gate says.
+///
+/// The gate watches one directory, and something could change a worktree
+/// without touching it — a filesystem with no mtime granularity, a `git
+/// worktree repair`, a restore from backup. Thirty seconds is well under how
+/// long anyone would stare at a stale sidebar and far above what the scan costs.
+const RECONCILE_BACKSTOP: Duration = Duration::from_secs(30);
+
 /// How many events a slow client may fall behind before it starts losing them.
 ///
 /// Losing them is the right failure. Dropping the connection would be worse
@@ -83,6 +91,10 @@ pub struct Watcher {
     /// Last reported activity per terminal, which is what makes `Done`
     /// possible: it exists only as a transition out of `Working`.
     state: tokio::sync::Mutex<HashMap<Uuid, Observed>>,
+    /// Last observed mtime of each repository's `worktrees` directory.
+    ///
+    /// A std mutex: held only across a map lookup, never across an await.
+    worktree_marks: std::sync::Mutex<HashMap<Uuid, std::time::SystemTime>>,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +125,7 @@ impl Watcher {
             service,
             events,
             state: tokio::sync::Mutex::new(HashMap::new()),
+            worktree_marks: std::sync::Mutex::new(HashMap::new()),
             push: reqwest::Client::builder()
                 // A notification is worth a few seconds and no more. The
                 // sampling loop is not held either way — see
@@ -211,21 +224,93 @@ impl Watcher {
         });
     }
 
+    /// Tell every connected client that the set of workspaces changed.
+    ///
+    /// Carries nothing: reconciliation can both create and delete workspace
+    /// rows in one pass, and a deletion has no resource left to describe.
+    /// Sent once per reconcile pass that changed anything, not once per
+    /// workspace — a client re-reads the fleet rather than applying this as
+    /// a delta.
+    ///
+    /// Also called directly by the RPC layer after `repository.register`,
+    /// `workspace.hide`, and `workspace.unhide` — mutations that change the
+    /// fleet without touching git, so the mtime gate in `reconcile_worktrees`
+    /// never fires for them and other connected clients would otherwise learn
+    /// about them only at the next `RECONCILE_BACKSTOP` tick.
+    pub fn announce_fleet_changed(&self) {
+        let _ = self.events.send(Event {
+            event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+            sequence: 0,
+            payload: Some(farcooler_protocol::v1::event::Payload::FleetChanged(
+                farcooler_protocol::v1::Empty {},
+            )),
+        });
+    }
+
+    /// Reconcile repositories whose worktrees moved, or all of them if forced.
+    ///
+    /// Broadcasts only when something actually changed, for the same reason
+    /// `sample` does: a fleet where nothing is happening produces no traffic,
+    /// which is what makes a phone holding an SSH session overnight reasonable.
+    async fn reconcile_worktrees(&self, force: bool) {
+        let Ok(repositories) = self.service.list_repositories() else { return };
+
+        let mut changed = false;
+        for repo in repositories {
+            let common = std::path::PathBuf::from(&repo.canonical_git_dir);
+            let previous = self
+                .worktree_marks
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&repo.id)
+                .copied();
+
+            let moved = worktrees_changed(&common, previous);
+            if moved.is_none() && !force {
+                continue;
+            }
+            if let Some(mark) = moved {
+                self.worktree_marks
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(repo.id, mark);
+            }
+
+            match crate::reconcile::repository(&self.service, repo.id).await {
+                Ok(outcome) => changed |= !outcome.is_quiet(),
+                Err(e) => tracing::warn!(repository = %repo.id, error = ?e, "reconcile failed"),
+            }
+        }
+
+        if changed {
+            self.announce_fleet_changed();
+        }
+    }
+
     /// Run until cancelled.
     pub async fn run(self: Arc<Self>) {
         let mut ticker = tokio::time::interval(SAMPLE_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut backstop = tokio::time::interval(BACKSTOP_INTERVAL);
         backstop.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut worktrees = tokio::time::interval(RECONCILE_BACKSTOP);
+        worktrees.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // The first tick of an interval completes immediately, and comparing
         // the inventory against itself before anything has had a chance to
         // diverge would only ever report a false alarm.
         backstop.tick().await;
+        worktrees.tick().await;
 
         loop {
             tokio::select! {
-                _ = ticker.tick() => self.sample().await,
+                _ = ticker.tick() => {
+                    self.sample().await;
+                    // Gated: one stat per repository, and a git process only
+                    // for repositories whose worktrees actually moved.
+                    self.reconcile_worktrees(false).await;
+                }
                 _ = backstop.tick() => self.service.backstop_reconcile().await,
+                _ = worktrees.tick() => self.reconcile_worktrees(true).await,
             }
         }
     }
@@ -454,6 +539,28 @@ impl Watcher {
     }
 }
 
+/// Whether a repository's worktrees have changed since we last looked.
+///
+/// `git worktree add` creates a directory under `$GIT_COMMON_DIR/worktrees` and
+/// `git worktree remove` deletes one; either moves that directory's mtime. One
+/// `stat` per repository per tick is nothing, where one `git worktree list` per
+/// repository per tick is a process spawn per repository per second, almost
+/// always to learn that nothing happened.
+///
+/// Returns the new mtime when it moved, `None` when it did not. A repository
+/// with no linked worktrees has no such directory and reports no change, which
+/// is correct: the backstop pass in `run` still covers anything this misses.
+pub fn worktrees_changed(
+    git_common_dir: &std::path::Path,
+    since: Option<std::time::SystemTime>,
+) -> Option<std::time::SystemTime> {
+    let modified = std::fs::metadata(git_common_dir.join("worktrees")).ok()?.modified().ok()?;
+    match since {
+        Some(previous) if previous >= modified => None,
+        _ => Some(modified),
+    }
+}
+
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -488,5 +595,40 @@ mod tests {
         let (title, subtitle) = notification(AgentActivity::Done, "claude").expect("done");
         assert_eq!(title, "claude finished");
         assert!(subtitle.is_empty());
+    }
+
+    /// The gate that keeps this off the hot path.
+    ///
+    /// Both `worktree add` and `worktree remove` create or delete a directory
+    /// under `$GIT_COMMON_DIR/worktrees`, which moves its mtime. Scanning every
+    /// repository every second would spawn a git process per repository per
+    /// second to learn nothing.
+    #[test]
+    fn the_gate_opens_only_when_the_worktrees_directory_moves() {
+        let dir = tempfile::tempdir().unwrap();
+        let common = dir.path().join(".git");
+        let worktrees = common.join("worktrees");
+        std::fs::create_dir_all(&worktrees).unwrap();
+
+        let first = worktrees_changed(&common, None).expect("no baseline means changed");
+        assert_eq!(worktrees_changed(&common, Some(first)), None, "unchanged stays shut");
+
+        // Coarse filesystem timestamps: without this the write can land inside
+        // the same tick as the read and the mtime genuinely does not move.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::create_dir(worktrees.join("side")).unwrap();
+
+        assert!(worktrees_changed(&common, Some(first)).is_some(), "adding a worktree opens it");
+    }
+
+    /// A repository with no linked worktrees has no such directory, and that is
+    /// not a change — it is the normal state of most repositories.
+    #[test]
+    fn a_repository_with_no_linked_worktrees_does_not_thrash_the_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let common = dir.path().join(".git");
+        std::fs::create_dir_all(&common).unwrap();
+
+        assert_eq!(worktrees_changed(&common, None), None, "nothing there, nothing to scan");
     }
 }

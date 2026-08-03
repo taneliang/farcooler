@@ -84,7 +84,8 @@ struct WorkspaceSection: View {
     @Binding var selection: ContentView.Selection?
     let onToggle: () -> Void
     let onNewTerminal: () -> Void
-    let onArchive: () -> Void
+    let onHide: () -> Void
+    let onUnhide: () -> Void
     let onRemove: () -> Void
     let onTerminalAction: (Terminal, TerminalAction) -> Void
     /// Where a terminal can be sent: each existing layout, plus one of its own.
@@ -212,6 +213,18 @@ struct WorkspaceSection: View {
                 .padding(.leading, 7)
                 .layoutPriority(-1)
 
+            if workspace.worktreeMissing {
+                // Said plainly, because every terminal in it is dead and
+                // the reason is not something the user can work out from
+                // a colour. The row survives at all because it holds
+                // terminals worth keeping — an empty one is deleted by
+                // the daemon without asking.
+                Text("worktree gone")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .padding(.leading, 7)
+            }
+
             Spacer(minLength: 6)
 
             if !showsTerminals {
@@ -238,10 +251,26 @@ struct WorkspaceSection: View {
                     showsSettingsItem: false)
                 Divider()
                 Button("New terminal", action: onNewTerminal)
-                if !workspace.isMainCheckout {
-                    Divider()
-                    Button("Archive", action: onArchive)
-                    Button("Remove worktree…", role: .destructive, action: onRemove)
+                Divider()
+                if workspace.isHidden {
+                    Button("Unhide", action: onUnhide)
+                } else {
+                    Button("Hide", action: onHide)
+                }
+                // Absent, not disabled, for the main checkout. A daemon-side
+                // refusal is a safety net; the button should not be there to
+                // press.
+                if workspace.worktreeMissing && !workspace.isMainCheckout {
+                    // A worktree whose directory is already gone needs no
+                    // confirmation: `removal_needs_confirmation` (Task 8)
+                    // answers false once the path is not a directory, so this
+                    // routes to the same removal path as everything else.
+                    // Excluded for the main checkout the same way "Remove
+                    // Worktree…" below is: `remove_worktree` refuses it
+                    // outright, so the button should not be offered at all.
+                    Button("Dismiss", action: onRemove)
+                } else if !workspace.isMainCheckout {
+                    Button("Remove Worktree…", role: .destructive, action: onRemove)
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -485,7 +514,8 @@ struct WorkspaceDot: View {
         switch StateKind.parse(state) {
         case .active: return .green
         case .error: return .red
-        case .archived: return Color.secondary.opacity(0.4)
+        case .hidden: return Color.secondary.opacity(0.4)
+        case .worktreeMissing: return Color.orange.opacity(0.7)
         default: return .secondary
         }
     }
@@ -504,7 +534,8 @@ struct WorkspaceDot: View {
 struct WorkspaceDetail: View {
     let workspace: Workspace
     let onNewTerminal: () -> Void
-    let onArchive: () -> Void
+    let onHide: () -> Void
+    let onUnhide: () -> Void
     let onRemove: () -> Void
     let onOpenTerminal: (Terminal) -> Void
 
@@ -591,13 +622,16 @@ struct WorkspaceDetail: View {
                 // Destructive actions live in a menu rather than sitting as
                 // permanent buttons next to the one you press constantly.
                 Menu {
-                    if workspace.isMainCheckout {
-                        // Nothing destructive for the repository's own checkout
-                        // — see `Workspace.isMainCheckout`.
-                        Text("The repository's own checkout")
+                    if workspace.isHidden {
+                        Button("Unhide", action: onUnhide)
                     } else {
-                        Button("Archive", action: onArchive)
-                        Button("Remove worktree…", role: .destructive, action: onRemove)
+                        Button("Hide", action: onHide)
+                    }
+                    // Absent, not disabled, for the main checkout. A
+                    // daemon-side refusal is a safety net; the button should
+                    // not be there to press.
+                    if !workspace.isMainCheckout {
+                        Button("Remove Worktree…", role: .destructive, action: onRemove)
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -668,6 +702,83 @@ struct WorkspaceDetail: View {
                 .textSelection(.enabled)
                 .lineLimit(2)
                 .truncationMode(.middle)
+        }
+    }
+}
+
+/// The worktrees a project has been told to stop showing.
+///
+/// A section rather than a filter, because hiding is reversible and something
+/// reversible needs a way back that is not the Settings window. Collapsed by
+/// default: the whole point of hiding is that these are not in the way.
+///
+/// The attention dot on the header is what makes hiding safe to allow while an
+/// agent runs. The daemon no longer refuses that — a view preference that fails
+/// with an error reads as a bug — so this is where "something in here wants you"
+/// gets said.
+struct HiddenWorktrees: View {
+    let project: String
+    let worktrees: [Workspace]
+    let isExpanded: Bool
+    let onToggle: () -> Void
+    let onUnhide: (Workspace) -> Void
+
+    private var attention: Int {
+        worktrees.flatMap(\.terminals).filter(\.status.wantsAttention).count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SidebarRow(indent: 0) {
+                Button(action: onToggle) {
+                    HStack(spacing: SidebarGrid.gap) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: SidebarGrid.gutter - SidebarGrid.gap, alignment: .leading)
+                        Text("Hidden")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("\(worktrees.count)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                        if attention > 0 {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(width: 5, height: 5)
+                                .help("\(attention) waiting on you, inside a hidden worktree")
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 3)
+
+            if isExpanded {
+                ForEach(worktrees) { ws in
+                    SidebarRow(indent: 1) {
+                        HStack(spacing: SidebarGrid.gap) {
+                            Text(ws.task)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Text(ws.branch)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Button("Unhide") { onUnhide(ws) }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
         }
     }
 }

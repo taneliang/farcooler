@@ -124,16 +124,19 @@ async fn a_workspace_created_through_the_client_comes_back_in_the_fleet() {
 
     let fleet = session.fleet().await.expect("fleet");
     let workspaces = fleet["workspaces"].as_array().unwrap();
-    assert_eq!(workspaces.len(), 1);
-    assert_eq!(workspaces[0]["task"], "phone task");
-    assert_eq!(workspaces[0]["branch"], "feat/phone");
+    // Two: the one just created, plus the main checkout that registering the
+    // repository adopts automatically.
+    assert_eq!(workspaces.len(), 2);
+    let created =
+        workspaces.iter().find(|w| w["task"] == "phone task").expect("created workspace present");
+    assert_eq!(created["branch"], "feat/phone");
     // Derived, never stored — and a fresh workspace with no terminals is ready.
-    assert_eq!(workspaces[0]["state"], "ready");
-    assert!(workspaces[0]["terminals"].as_array().unwrap().is_empty());
+    assert_eq!(created["state"], "ready");
+    assert!(created["terminals"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn archiving_and_restoring_round_trips_through_the_client() {
+async fn hiding_and_unhiding_round_trips_through_the_client() {
     let daemon = start().await;
     let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
 
@@ -158,13 +161,19 @@ async fn archiving_and_restoring_round_trips_through_the_client() {
         .expect("create");
     let id = farcooler_client::session::uuid_of(&workspace.id);
 
-    session.archive_workspace(id).await.expect("archive");
+    session.hide_workspace(id).await.expect("hide");
     let fleet = session.fleet().await.expect("fleet");
-    assert_eq!(fleet["workspaces"][0]["state"], "archived");
+    let workspaces = fleet["workspaces"].as_array().unwrap();
+    let reversible =
+        workspaces.iter().find(|w| w["task"] == "reversible").expect("its own workspace present");
+    assert_eq!(reversible["state"], "hidden");
 
-    session.restore_workspace(id).await.expect("restore");
+    session.unhide_workspace(id).await.expect("unhide");
     let fleet = session.fleet().await.expect("fleet");
-    assert_eq!(fleet["workspaces"][0]["state"], "ready");
+    let workspaces = fleet["workspaces"].as_array().unwrap();
+    let reversible =
+        workspaces.iter().find(|w| w["task"] == "reversible").expect("its own workspace present");
+    assert_eq!(reversible["state"], "ready");
 }
 
 #[tokio::test]
@@ -214,7 +223,7 @@ async fn a_failed_call_arrives_as_an_error_not_a_dropped_session() {
     let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let missing = uuid::Uuid::now_v7();
-    assert!(session.archive_workspace(missing).await.is_err());
+    assert!(session.hide_workspace(missing).await.is_err());
 
     // Still usable.
     assert!(session.fleet().await.is_ok());

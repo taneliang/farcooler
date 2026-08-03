@@ -49,14 +49,23 @@ struct Workspace: Decodable, Identifiable, Hashable {
 
     /// Whether this workspace IS the repository's own checkout.
     ///
-    /// Adopted deliberately (`workspace main`) so a terminal can run there, and
-    /// then never removable: the daemon refuses it, and the UI does not offer
-    /// it. A refusal is a safety net, not a design — the button should not be
-    /// there to press.
+    /// From the daemon, which gets it from `git worktree list`. It used to be
+    /// `task == "main"`, which a linked worktree in a directory called `main`
+    /// would defeat — and what it guards is whether this app offers to delete
+    /// the directory you work in.
     ///
-    /// Recognised by task name because that is what the daemon writes and what
-    /// the fleet carries; the worktree path is not on every client.
-    var isMainCheckout: Bool { task == "main" }
+    /// Optional because every field added after the first release is: a client
+    /// meeting an older daemon must not fail to decode the entire fleet over
+    /// one absent key and show "no workspaces" for a host full of them.
+    var isMainCheckout: Bool { is_main_checkout ?? false }
+    // swiftlint:disable:next identifier_name
+    var is_main_checkout: Bool?
+
+    /// The user asked not to see this one.
+    var isHidden: Bool { state == "hidden" }
+
+    /// git no longer lists this worktree, but the row carries terminals.
+    var worktreeMissing: Bool { state == "worktree_missing" }
     var state: String
     var terminals: [Terminal]
 
@@ -362,7 +371,7 @@ enum AgentActivity: String {
 // never invents a state that the daemon did not report.
 
 enum StateKind {
-    case running, starting, exited, lost, error, ready, active, archived, unknown
+    case running, starting, exited, lost, error, ready, active, hidden, worktreeMissing, unknown
 
     static func parse(_ s: String) -> StateKind {
         switch s {
@@ -373,7 +382,8 @@ enum StateKind {
         case "ERROR", "error": return .error
         case "ready": return .ready
         case "active": return .active
-        case "archived": return .archived
+        case "hidden": return .hidden
+        case "worktree_missing": return .worktreeMissing
         default: return .unknown
         }
     }

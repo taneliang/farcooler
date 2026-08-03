@@ -51,7 +51,7 @@ impl Runtime {
     ///
     /// Runtime commands resolve against tmux rather than the database on
     /// purpose: these operate on a running terminal, so a name that matches
-    /// only an archived record is not a match at all. It also means they need
+    /// only a stopped record is not a match at all. It also means they need
     /// no database, which is what lets them run beside the daemon.
     pub fn resolve_terminal(&self, prefix: &str) -> Result<Uuid> {
         // Dashless, so a short id and a full hyphenated UUID both work.

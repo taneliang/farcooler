@@ -77,8 +77,14 @@ pub struct Workspace {
     pub task_name: String,
     pub branch: String,
     pub worktree_path: String,
-    pub archived: bool,
+    /// The user asked not to see it. Never touches git.
+    pub hidden: bool,
     pub creation_failed: bool,
+    /// The repository's own checkout, as git reports it. Never removable.
+    pub is_main_checkout: bool,
+    /// git no longer lists this worktree, but the row carries terminals worth
+    /// keeping. Set by the reconciler; cleared if the worktree comes back.
+    pub worktree_missing: bool,
     pub resource_version: u64,
 }
 
@@ -89,9 +95,11 @@ pub(crate) fn row_to_workspace(row: &Row) -> rusqlite::Result<Workspace> {
         task_name: row.get(2)?,
         branch: row.get(3)?,
         worktree_path: row.get(4)?,
-        archived: row.get(5)?,
+        hidden: row.get(5)?,
         creation_failed: row.get(6)?,
         resource_version: row.get::<_, i64>(7)? as u64,
+        is_main_checkout: row.get(8)?,
+        worktree_missing: row.get(9)?,
     })
 }
 

@@ -283,20 +283,12 @@ impl Session {
         }
     }
 
-    /// The repository's own checkout, as a workspace. Idempotent.
-    pub async fn main_workspace(&mut self, repository: Uuid) -> Result<Workspace, SessionError> {
-        match self.value("workspace.main", Some(repository), None).await? {
-            result::Value::Workspace(w) => Ok(w),
-            other => Err(wrong("workspace", &other)),
-        }
+    pub async fn hide_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
+        self.value("workspace.hide", Some(workspace), None).await.map(|_| ())
     }
 
-    pub async fn archive_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
-        self.value("workspace.archive", Some(workspace), None).await.map(|_| ())
-    }
-
-    pub async fn restore_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
-        self.value("workspace.restore", Some(workspace), None).await.map(|_| ())
+    pub async fn unhide_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
+        self.value("workspace.unhide", Some(workspace), None).await.map(|_| ())
     }
 
     pub async fn stop_terminal(&mut self, terminal: Uuid) -> Result<(), SessionError> {
@@ -664,7 +656,8 @@ fn workspace_label(s: WorkspaceState) -> &'static str {
         WorkspaceState::Ready => "ready",
         WorkspaceState::Active => "active",
         WorkspaceState::Error => "ERROR",
-        WorkspaceState::Archived => "archived",
+        WorkspaceState::Hidden => "hidden",
+        WorkspaceState::WorktreeMissing => "worktree_missing",
     }
 }
 

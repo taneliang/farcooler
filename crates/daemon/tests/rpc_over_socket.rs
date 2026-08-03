@@ -211,7 +211,7 @@ async fn a_mutation_without_its_target_is_refused() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
 
-    match client.call(request("workspace.archive")).await {
+    match client.call(request("workspace.hide")).await {
         Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::NotFound as i32),
         other => panic!("expected NOT_FOUND, got {other:?}"),
     }
@@ -433,6 +433,171 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
         }
         other => panic!("expected WORKSPACES_EXIST, got {other:?}"),
     }
+}
+
+/// Regression for a bug the first cut of the reconciler introduced: since
+/// registering a repository now auto-adopts its main checkout as a workspace
+/// (see `crates/daemon/src/reconcile.rs`), that row's `is_main_checkout` flag
+/// exempts it from `WorkspacesExist` -- otherwise no root could ever be
+/// removed again, because `workspace.remove_worktree` refuses the main
+/// checkout on purpose. But the row still existed, and `terminals.workspace_id`
+/// carries a foreign key with no `ON DELETE CASCADE`, so deleting the
+/// repository underneath a surviving terminal row failed with a `ResourceConflict`
+/// ("resource version is stale") -- a misleading error for what was actually a
+/// constraint violation, and one that left the root permanently unremovable.
+/// A dead terminal record -- created, then stopped -- must not be able to do
+/// that: `remove_root` has to clear it along with everything else.
+#[tokio::test]
+async fn removing_a_root_survives_a_stopped_terminal_in_the_main_checkout() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let name = dir.path().file_name().unwrap().to_string_lossy().into_owned();
+    let repo_path = dir.path().join("demo");
+    std::fs::create_dir(&repo_path).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo_path).status().unwrap();
+    }
+
+    let mut add = request("repository_root.add");
+    add.payload = Some(request::Payload::RepositoryRootAdd(
+        farcooler_protocol::v1::RepositoryRootAdd {
+            absolute_path: dir.path().to_string_lossy().into_owned(),
+            typed_confirmation: String::new(),
+        },
+    ));
+    let result = client.call(add).await.expect("add");
+    let Some(result::Value::RepositoryRoot(root)) = result.value else { panic!("wrong result") };
+
+    let mut register = request("repository.register");
+    register.payload = Some(request::Payload::RepositoryRegister(
+        farcooler_protocol::v1::RepositoryRegister {
+            relative_path: repo_path.to_string_lossy().into_owned(),
+        },
+    ));
+    let result = client.call(register).await.expect("register");
+    let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
+
+    // `workspace.main` is gone -- the reconciler adopted the main checkout
+    // the moment `repository.register` ran, synchronously. Find that row by
+    // its worktree path rather than by a method that no longer exists; the
+    // wire `Workspace` carries no `is_main_checkout` flag, only the path.
+    let result = client.call(request("workspace.list")).await.expect("workspace.list");
+    let Some(result::Value::WorkspaceList(list)) = result.value else { panic!("wrong result") };
+    let canonical_repo_path = repo_path.canonicalize().unwrap().to_string_lossy().into_owned();
+    let workspace = list
+        .items
+        .into_iter()
+        .find(|w| {
+            w.worktree_path.as_deref() == Some(canonical_repo_path.as_str())
+                && w.repository_id == repository.id
+        })
+        .expect("the reconciler must have adopted the main checkout");
+
+    let terminal = a_terminal(&mut client, &workspace.id, "shell").await;
+    let mut stop = request("terminal.stop");
+    stop.target_resource_id = Some(terminal.id.clone());
+    client.call(stop).await.expect("terminal.stop");
+
+    let mut remove = request("repository_root.remove");
+    remove.target_resource_id = Some(root.id.clone());
+    remove.payload = Some(request::Payload::TypedConfirmation(
+        farcooler_protocol::v1::TypedConfirmation { typed_confirmation: name },
+    ));
+    client.call(remove).await.expect("a stopped terminal's record must not block this");
+
+    let result = client.call(request("repository.list")).await.expect("list");
+    let Some(result::Value::RepositoryList(list)) = result.value else { panic!("wrong result") };
+    assert!(
+        list.items.is_empty(),
+        "the repository, its main checkout and its terminal all go with the root"
+    );
+}
+
+/// The other half of the fix above: a LIVE terminal is still somebody's work,
+/// and must refuse the removal cleanly rather than either deleting its only
+/// record or failing with the same unactionable `ResourceConflict` a dead one
+/// used to produce. `RunningProcesses` is the existing vocabulary for exactly
+/// this situation in `remove_terminal` and `remove_worktree`.
+#[tokio::test]
+async fn removing_a_root_is_refused_while_a_terminal_is_actually_running() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let name = dir.path().file_name().unwrap().to_string_lossy().into_owned();
+    let repo_path = dir.path().join("demo");
+    std::fs::create_dir(&repo_path).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo_path).status().unwrap();
+    }
+
+    let mut add = request("repository_root.add");
+    add.payload = Some(request::Payload::RepositoryRootAdd(
+        farcooler_protocol::v1::RepositoryRootAdd {
+            absolute_path: dir.path().to_string_lossy().into_owned(),
+            typed_confirmation: String::new(),
+        },
+    ));
+    let result = client.call(add).await.expect("add");
+    let Some(result::Value::RepositoryRoot(root)) = result.value else { panic!("wrong result") };
+
+    let mut register = request("repository.register");
+    register.payload = Some(request::Payload::RepositoryRegister(
+        farcooler_protocol::v1::RepositoryRegister {
+            relative_path: repo_path.to_string_lossy().into_owned(),
+        },
+    ));
+    let result = client.call(register).await.expect("register");
+    let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
+
+    // `workspace.main` is gone -- the reconciler adopted the main checkout
+    // the moment `repository.register` ran, synchronously. Find that row by
+    // its worktree path rather than by a method that no longer exists; the
+    // wire `Workspace` carries no `is_main_checkout` flag, only the path.
+    let result = client.call(request("workspace.list")).await.expect("workspace.list");
+    let Some(result::Value::WorkspaceList(list)) = result.value else { panic!("wrong result") };
+    let canonical_repo_path = repo_path.canonicalize().unwrap().to_string_lossy().into_owned();
+    let workspace = list
+        .items
+        .into_iter()
+        .find(|w| {
+            w.worktree_path.as_deref() == Some(canonical_repo_path.as_str())
+                && w.repository_id == repository.id
+        })
+        .expect("the reconciler must have adopted the main checkout");
+
+    // Left running -- never stopped.
+    let _terminal = a_terminal(&mut client, &workspace.id, "shell").await;
+
+    let mut remove = request("repository_root.remove");
+    remove.target_resource_id = Some(root.id.clone());
+    remove.payload = Some(request::Payload::TypedConfirmation(
+        farcooler_protocol::v1::TypedConfirmation { typed_confirmation: name },
+    ));
+    match client.call(remove).await {
+        Err(ClientError::Daemon { code, retryable, .. }) => {
+            assert_eq!(code, ErrorCode::RunningProcesses as i32);
+            assert!(!retryable, "stopping the terminal is the remedy, not a retry");
+        }
+        other => panic!("expected RUNNING_PROCESSES, got {other:?}"),
+    }
+
+    // Still there afterwards: a refusal must not have half-applied anything.
+    let result = client.call(request("repository.list")).await.expect("list");
+    let Some(result::Value::RepositoryList(list)) = result.value else { panic!("wrong result") };
+    assert_eq!(list.items.len(), 1, "a refused removal changes nothing");
 }
 
 /// A workspace, over the wire, ready to have things tiled in it.
@@ -939,6 +1104,50 @@ async fn a_terminal_reports_its_pane_mode_to_a_client() {
     let terminal = a_terminal(&mut client, &workspace.id, "claude").await;
 
     assert_eq!(terminal.pane_mode, farcooler_protocol::v1::PaneMode::Terminal as i32);
+}
+
+/// The real case `hiding_does_not_consult_terminal_state`
+/// (`crates/daemon/src/service.rs`) cannot manufacture: a terminal whose
+/// derived state is genuinely `Running`, which needs a live tmux pane behind
+/// it rather than just a `TerminalIntent::Running` row with nothing backing
+/// it. `a_terminal` spawns a real pane, so this is the scenario the old
+/// `archive_workspace` guard (`== TerminalState::Running`) actually refused,
+/// and hiding must allow it unconditionally.
+#[tokio::test]
+async fn hiding_succeeds_while_a_terminal_is_genuinely_running() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let terminal = a_terminal(&mut client, &workspace.id, "agent").await;
+
+    let mut list = request("terminal.list");
+    list.target_resource_id = Some(workspace.id.clone());
+    let result = client.call(list).await.expect("terminal.list");
+    let Some(result::Value::TerminalList(terminals)) = result.value else { panic!("wrong result") };
+    let live = terminals.items.iter().find(|t| t.id == terminal.id).expect("its own terminal");
+    assert_eq!(
+        live.state(),
+        farcooler_protocol::v1::TerminalState::Running,
+        "this test needs a genuinely running terminal to mean anything: {live:?}"
+    );
+
+    let mut hide = request("workspace.hide");
+    hide.target_resource_id = Some(workspace.id.clone());
+    let result =
+        client.call(hide).await.expect("workspace.hide must not refuse a running terminal");
+    let Some(result::Value::Workspace(hidden)) = result.value else { panic!("wrong result") };
+    assert_eq!(hidden.state(), farcooler_protocol::v1::WorkspaceState::Hidden);
+
+    let mut unhide = request("workspace.unhide");
+    unhide.target_resource_id = Some(workspace.id.clone());
+    let result = client.call(unhide).await.expect("workspace.unhide");
+    let Some(result::Value::Workspace(back)) = result.value else { panic!("wrong result") };
+    assert_eq!(
+        back.state(),
+        farcooler_protocol::v1::WorkspaceState::Active,
+        "the terminal is still running, so unhiding must not hide that"
+    );
 }
 
 #[tokio::test]

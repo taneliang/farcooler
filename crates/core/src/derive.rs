@@ -109,14 +109,24 @@ pub fn orphaned_panes<'a>(
         .collect()
 }
 
-/// Workspace state is derived from its terminals on every read.
+/// A workspace's state, from the durable facts plus its terminals.
+///
+/// Ordered by what the user must act on. Hidden first because it is the user's
+/// own decision and outranks anything the machine noticed; a missing worktree
+/// next because every terminal in it is lost as a consequence, and reporting
+/// the consequence would send someone to restart a process in a directory that
+/// is not there.
 pub fn derive_workspace(
-    archived: bool,
+    hidden: bool,
+    worktree_missing: bool,
     creation_failed: bool,
     terminals: &[(TerminalRecord, DerivedTerminal)],
 ) -> WorkspaceState {
-    if archived {
-        return WorkspaceState::Archived;
+    if hidden {
+        return WorkspaceState::Hidden;
+    }
+    if worktree_missing {
+        return WorkspaceState::WorktreeMissing;
     }
     if creation_failed {
         return WorkspaceState::Error;
@@ -288,21 +298,21 @@ mod tests {
     #[test]
     fn workspace_is_active_when_a_terminal_runs() {
         let r = record(TerminalIntent::Running, true);
-        let s = derive_workspace(false, false, &[(r, derived(TerminalState::Running))]);
+        let s = derive_workspace(false, false, false, &[(r, derived(TerminalState::Running))]);
         assert_eq!(s, WorkspaceState::Active);
     }
 
     #[test]
     fn workspace_is_ready_with_no_live_terminal() {
         let r = record(TerminalIntent::Stopped, true);
-        let s = derive_workspace(false, false, &[(r, derived(TerminalState::Exited))]);
+        let s = derive_workspace(false, false, false, &[(r, derived(TerminalState::Exited))]);
         assert_eq!(s, WorkspaceState::Ready);
     }
 
     #[test]
     fn a_lost_terminal_holds_workspace_in_error() {
         let r = record(TerminalIntent::Running, true);
-        let s = derive_workspace(false, false, &[(r, derived(TerminalState::Lost))]);
+        let s = derive_workspace(false, false, false, &[(r, derived(TerminalState::Lost))]);
         assert_eq!(s, WorkspaceState::Error);
     }
 
@@ -310,14 +320,33 @@ mod tests {
     fn dismissing_the_loss_clears_the_error_by_removing_the_record() {
         // What dismissal does is delete the row — see `Service::dismiss_lost` —
         // so from here it is simply a workspace with one terminal fewer.
-        let s = derive_workspace(false, false, &[]);
+        let s = derive_workspace(false, false, false, &[]);
         assert_eq!(s, WorkspaceState::Ready);
     }
 
     #[test]
-    fn archived_wins_over_everything() {
+    fn hidden_beats_everything_else() {
         let r = record(TerminalIntent::Running, true);
-        let s = derive_workspace(true, false, &[(r, derived(TerminalState::Lost))]);
-        assert_eq!(s, WorkspaceState::Archived);
+        let s = derive_workspace(true, false, false, &[(r, derived(TerminalState::Running))]);
+        assert_eq!(s, WorkspaceState::Hidden, "hiding is the user's decision, not a symptom");
+    }
+
+    #[test]
+    fn hidden_wins_over_a_lost_terminal_too() {
+        let r = record(TerminalIntent::Running, true);
+        let s = derive_workspace(true, false, false, &[(r, derived(TerminalState::Lost))]);
+        assert_eq!(s, WorkspaceState::Hidden);
+    }
+
+    /// A missing worktree outranks a lost terminal.
+    ///
+    /// Both are errors, and the terminal is lost BECAUSE the directory went
+    /// away. Reporting the symptom would send someone to restart a terminal in
+    /// a directory that no longer exists.
+    #[test]
+    fn a_missing_worktree_outranks_a_lost_terminal() {
+        let r = record(TerminalIntent::Running, true);
+        let s = derive_workspace(false, true, false, &[(r, derived(TerminalState::Lost))]);
+        assert_eq!(s, WorkspaceState::WorktreeMissing);
     }
 }

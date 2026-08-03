@@ -266,20 +266,36 @@ impl Store {
 
     // ---- workspaces ----
 
+    /// Every column of `workspaces`, in the order `row_to_workspace` reads them.
+    /// Named once because three queries share it and a drifting column order is
+    /// a silent field swap rather than a compile error.
+    const WORKSPACE_COLUMNS: &'static str = "id, repository_id, task_name, branch, \
+         worktree_path, hidden, creation_failed, resource_version, is_main_checkout, \
+         worktree_missing";
+
     pub fn create_workspace(
         &self,
         repository_id: Uuid,
         task_name: &str,
         branch: &str,
         worktree_path: &str,
+        is_main_checkout: bool,
     ) -> Result<Workspace> {
         let id = Uuid::now_v7();
         self.conn()
             .execute(
                 "INSERT INTO workspaces
-                 (id, repository_id, task_name, branch, worktree_path, archived, creation_failed, resource_version)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 1)",
-                params![uuid_blob(id), uuid_blob(repository_id), task_name, branch, worktree_path],
+                 (id, repository_id, task_name, branch, worktree_path, hidden,
+                  creation_failed, resource_version, is_main_checkout, worktree_missing)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 1, ?6, 0)",
+                params![
+                    uuid_blob(id),
+                    uuid_blob(repository_id),
+                    task_name,
+                    branch,
+                    worktree_path,
+                    is_main_checkout
+                ],
             )
             .map_err(map_err)?;
         Ok(Workspace {
@@ -288,8 +304,10 @@ impl Store {
             task_name: task_name.to_string(),
             branch: branch.to_string(),
             worktree_path: worktree_path.to_string(),
-            archived: false,
+            hidden: false,
             creation_failed: false,
+            is_main_checkout,
+            worktree_missing: false,
             resource_version: 1,
         })
     }
@@ -297,8 +315,7 @@ impl Store {
     pub fn get_workspace(&self, id: Uuid) -> Result<Workspace> {
         self.conn()
             .query_row(
-                "SELECT id, repository_id, task_name, branch, worktree_path, archived, creation_failed, resource_version
-                 FROM workspaces WHERE id = ?1",
+                &format!("SELECT {} FROM workspaces WHERE id = ?1", Self::WORKSPACE_COLUMNS),
                 params![uuid_blob(id)],
                 row_to_workspace,
             )
@@ -308,10 +325,10 @@ impl Store {
     pub fn list_workspaces_for_repository(&self, repository_id: Uuid) -> Result<Vec<Workspace>> {
         let conn = self.conn();
         let mut stmt = conn
-            .prepare(
-                "SELECT id, repository_id, task_name, branch, worktree_path, archived, creation_failed, resource_version
-                 FROM workspaces WHERE repository_id = ?1",
-            )
+            .prepare(&format!(
+                "SELECT {} FROM workspaces WHERE repository_id = ?1",
+                Self::WORKSPACE_COLUMNS
+            ))
             .map_err(map_err)?;
         let rows =
             stmt.query_map(params![uuid_blob(repository_id)], row_to_workspace).map_err(map_err)?;
@@ -326,19 +343,80 @@ impl Store {
         task_name: &str,
         branch: &str,
         worktree_path: &str,
-        archived: bool,
+        hidden: bool,
         creation_failed: bool,
     ) -> Result<Workspace> {
         self.run_versioned(
             "UPDATE workspaces
-             SET task_name = ?1, branch = ?2, worktree_path = ?3, archived = ?4, creation_failed = ?5, resource_version = ?6
+             SET task_name = ?1, branch = ?2, worktree_path = ?3, hidden = ?4, creation_failed = ?5, resource_version = ?6
              WHERE id = ?7 AND resource_version = ?8",
             &[
                 &task_name,
                 &branch,
                 &worktree_path,
-                &archived,
+                &hidden,
                 &creation_failed,
+                &(expected_version as i64 + 1),
+                &uuid_blob(id),
+                &(expected_version as i64),
+            ],
+            "SELECT 1 FROM workspaces WHERE id = ?1",
+            &[&uuid_blob(id)],
+        )?;
+        self.get_workspace(id)
+    }
+
+    /// The two flags that are opinions rather than facts about the work.
+    ///
+    /// Separate from `update_workspace` because both callers — hide/unhide and
+    /// the reconciler — want to change exactly one thing, and passing the other
+    /// five fields back unchanged is how a rename gets silently reverted by a
+    /// concurrent write.
+    pub fn set_workspace_flags(
+        &self,
+        id: Uuid,
+        expected_version: u64,
+        hidden: bool,
+        worktree_missing: bool,
+    ) -> Result<Workspace> {
+        self.run_versioned(
+            "UPDATE workspaces
+             SET hidden = ?1, worktree_missing = ?2, resource_version = ?3
+             WHERE id = ?4 AND resource_version = ?5",
+            &[
+                &hidden,
+                &worktree_missing,
+                &(expected_version as i64 + 1),
+                &uuid_blob(id),
+                &(expected_version as i64),
+            ],
+            "SELECT 1 FROM workspaces WHERE id = ?1",
+            &[&uuid_blob(id)],
+        )?;
+        self.get_workspace(id)
+    }
+
+    /// Correct `is_main_checkout` when the reconciler finds it disagrees with
+    /// what git reports.
+    ///
+    /// Migration 0006 added the column with `DEFAULT 0`, so every row written
+    /// before that migration says "not the main checkout" regardless of
+    /// whether it is one -- this is what the reconciler calls to fix that.
+    /// Separate from `set_workspace_flags` for the same reason that one is
+    /// separate from `update_workspace`: one field, one writer, so a
+    /// concurrent rename or hide/unhide cannot be reverted by passing its
+    /// unrelated columns back unchanged.
+    pub fn set_workspace_is_main_checkout(
+        &self,
+        id: Uuid,
+        expected_version: u64,
+        is_main_checkout: bool,
+    ) -> Result<Workspace> {
+        self.run_versioned(
+            "UPDATE workspaces SET is_main_checkout = ?1, resource_version = ?2
+             WHERE id = ?3 AND resource_version = ?4",
+            &[
+                &is_main_checkout,
                 &(expected_version as i64 + 1),
                 &uuid_blob(id),
                 &(expected_version as i64),
@@ -705,13 +783,31 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/x").unwrap();
-        assert!(!ws.archived);
+        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/workspace", false).unwrap();
+        assert!(!ws.hidden);
         assert_eq!(s.get_workspace(ws.id).unwrap(), ws);
 
-        let updated = s.update_workspace(ws.id, 1, "task", "feature/x", "/wt/x", true, false).unwrap();
-        assert!(updated.archived);
+        let updated =
+            s.update_workspace(ws.id, 1, "task", "feature/x", "/wt/workspace", true, false).unwrap();
+        assert!(updated.hidden);
         assert_eq!(updated.resource_version, 2);
+    }
+
+    #[test]
+    fn workspace_flags_round_trip() {
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+        let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
+        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/flags", false).unwrap();
+        assert!(!ws.hidden && !ws.worktree_missing);
+
+        let hidden = s.set_workspace_flags(ws.id, ws.resource_version, true, false).unwrap();
+        assert!(hidden.hidden, "hidden is set");
+        assert_eq!(hidden.task_name, "task", "the name is untouched");
+
+        let missing = s.set_workspace_flags(hidden.id, hidden.resource_version, true, true).unwrap();
+        assert!(missing.hidden && missing.worktree_missing);
     }
 
     #[test]
@@ -720,7 +816,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/x").unwrap();
+        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/terminal", false).unwrap();
         let term =
             s.create_terminal(ws.id, "shell", "claude", TerminalIntent::Running, 80, 24).unwrap();
         assert!(!term.runtime_confirmed);
@@ -760,7 +856,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/x").unwrap();
+        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/pane-mode", false).unwrap();
         let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
         assert_eq!(t.pane_mode, PaneMode::Terminal);
         assert_eq!(t.agent_session_id, None);
@@ -774,7 +870,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/x").unwrap();
+        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/session-id", false).unwrap();
         let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
         let updated =
             s.set_pane_mode(t.id, t.resource_version, PaneMode::Agent, Some("abc-123".into())).unwrap();

@@ -17,6 +17,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0003_drop_pane_groups,
     migration_0004_pane_mode,
     migration_0005_drop_loss_dismissed,
+    migration_0006_worktrees_are_managed,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -219,6 +220,38 @@ fn migration_0005_drop_loss_dismissed(tx: &Transaction) -> rusqlite::Result<()> 
     tx.execute_batch("ALTER TABLE terminals DROP COLUMN loss_dismissed;")
 }
 
+/// Far Cooler manages worktrees, so the table describes worktrees.
+///
+/// `archived` becomes `hidden` because there was only ever one concept.
+/// Archiving meant "hide it without touching git", which is what hiding means,
+/// and having both words for it made users guess which one deleted files.
+///
+/// `is_main_checkout` replaces a comparison against the task name. The old
+/// client test was `task == "main"`, which a linked worktree in a directory
+/// called `main` would defeat — and the thing that guarded was whether the UI
+/// offers to delete the directory you work in. Now that every worktree is
+/// adopted automatically that collision is ordinary rather than exotic.
+///
+/// `worktree_missing` is stored rather than derived because the reconciler is
+/// the only thing that knows. `derive::derive_workspace` runs on every read and
+/// has no business shelling out to git.
+///
+/// The unique index is a backstop, not the mechanism: `Service` serializes per
+/// repository so the race cannot normally happen. It exists so that if that
+/// lock is ever lost in a refactor, the symptom is an error rather than two
+/// sidebar rows for one directory.
+fn migration_0006_worktrees_are_managed(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        ALTER TABLE workspaces RENAME COLUMN archived TO hidden;
+        ALTER TABLE workspaces ADD COLUMN is_main_checkout INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE workspaces ADD COLUMN worktree_missing INTEGER NOT NULL DEFAULT 0;
+        CREATE UNIQUE INDEX workspaces_one_per_path
+            ON workspaces (repository_id, worktree_path);
+        "#,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +315,58 @@ mod tests {
                 "{gone} was dropped: tiling is tmux's, not ours"
             );
         }
+    }
+
+    /// A database written before 0006 opens, and its archived rows land hidden.
+    ///
+    /// Against a hand-built v5 schema rather than a fixture file: the thing
+    /// under test is that the rename carries data, and a fixture would only
+    /// prove the fixture was written correctly.
+    #[test]
+    fn archived_rows_become_hidden() {
+        let mut conn = open();
+        // Everything up to and including 0005, which is where `archived` lived.
+        for m in &MIGRATIONS[..5] {
+            let tx = conn.transaction().unwrap();
+            m(&tx).unwrap();
+            tx.commit().unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1);
+             INSERT INTO workspaces VALUES (x'04', x'03', 'old', 'main', '/r/wt', 1, 0, 1);",
+        )
+        .unwrap();
+
+        migrate(&mut conn, 5).unwrap();
+
+        let hidden: bool = conn
+            .query_row("SELECT hidden FROM workspaces WHERE id = x'04'", [], |r| r.get(0))
+            .unwrap();
+        assert!(hidden, "an archived workspace is a hidden one");
+
+        let main: bool = conn
+            .query_row("SELECT is_main_checkout FROM workspaces WHERE id = x'04'", [], |r| r.get(0))
+            .unwrap();
+        assert!(!main, "pre-existing rows default to not-main; reconcile corrects them");
+    }
+
+    /// One path, one row. The reconciler and `create_workspace` can race, and
+    /// the index is what turns that into an error instead of a duplicate.
+    #[test]
+    fn one_row_per_worktree_path() {
+        let mut conn = open();
+        migrate(&mut conn, 0).unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1);
+             INSERT INTO workspaces VALUES (x'04', x'03', 'a', 'main', '/r/wt', 0, 0, 1, 0, 0);",
+        )
+        .unwrap();
+
+        let second = conn.execute_batch(
+            "INSERT INTO workspaces VALUES (x'05', x'03', 'b', 'main', '/r/wt', 0, 0, 1, 0, 0);",
+        );
+        assert!(second.is_err(), "a second row for the same path is refused");
     }
 }

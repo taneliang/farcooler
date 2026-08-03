@@ -7,6 +7,9 @@ struct ContentView: View {
     @ObservedObject private var preferences = Preferences.shared
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
+    /// Which projects have their hidden worktrees showing. Collapsed is the
+    /// point of hiding, so absence means collapsed.
+    @State private var hiddenExpanded: Set<String> = []
 
     @State private var showNewWorkspace = false
     /// Which repository the new-workspace sheet should open on, when it was
@@ -32,7 +35,6 @@ struct ContentView: View {
     /// Quick-create's draft, reachable from here so that what was typed into
     /// the palette arrives in the panel that acts on it. See `perform`.
     @AppStorage("tasks.draft") private var taskDraft = ""
-    @State private var showImportWorktrees = false
     /// One divider resize at a time. See `resizeDivider`.
     @State private var resizingDivider = false
     /// Set when `setPaneMode` comes back `confirmationRequired` — a turn is in
@@ -114,7 +116,7 @@ struct ContentView: View {
         .onChange(of: client.fleet) { _, _ in
             // One rule for every way a terminal can disappear: exiting on its
             // own, being closed here, being closed from a phone, or its
-            // workspace being archived. Hooking each path separately meant the
+            // workspace being hidden. Hooking each path separately meant the
             // common one — you press Ctrl-D in the terminal you are looking at —
             // left the selection pointing at something that no longer existed.
             healSelection()
@@ -154,16 +156,6 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
         .sheet(isPresented: $showAbout) { AboutSheet() }
-        .sheet(isPresented: $showImportWorktrees) {
-            ImportWorktrees(
-                projects: client.repositories,
-                project: $lastProject,
-                load: { await client.existingWorktrees(project: $0) },
-                onImport: { worktrees, project in
-                    await client.importWorktrees(worktrees, project: project)
-                }
-            )
-        }
         .sheet(isPresented: $showResumeBranch) {
             ResumeBranch(
                 projects: client.repositories,
@@ -252,15 +244,11 @@ struct ContentView: View {
                 onRegister: { path in await client.registerRepository(path) },
                 onRegistered: {
                     Task {
+                        // Registering adopts every worktree the repository
+                        // already has, main checkout included, so there is
+                        // nothing left to offer to import.
                         await client.refreshRepositories()
-                        // Only if there is something to offer. A sheet that opens
-                        // to say "nothing to import" is worse than no sheet.
-                        if let newest = client.repositories.last,
-                            !(await client.existingWorktrees(project: newest.id)).isEmpty
-                        {
-                            lastProject = newest.id
-                            showImportWorktrees = true
-                        }
+                        await client.refresh()
                     }
                 }
             )
@@ -276,12 +264,19 @@ struct ContentView: View {
         .sheet(item: $removeWorkspace) { ws in
             RemoveWorkspaceSheet(
                 workspace: ws,
+                // Matches the daemon's own gate (`Running | Starting`): a
+                // terminal that has not finished starting yet is still one
+                // the daemon will refuse to remove out from under.
                 hasRunningTerminals: ws.terminals.contains {
-                    StateKind.parse($0.state) == .running
+                    let kind = StateKind.parse($0.state)
+                    return kind == .running || kind == .starting
                 }
             ) { typed in
-                await client.removeWorktree(ws.short, confirm: typed)
-                if case .terminal(let w, _) = selection, w == ws.id { selection = nil }
+                let result = await client.removeWorktree(ws.short, confirm: typed)
+                if case .ok = result, case .terminal(let w, _) = selection, w == ws.id {
+                    selection = nil
+                }
+                return result
             }
         }
         .sheet(item: $pendingPaneModeSwitch) { pending in
@@ -295,12 +290,13 @@ struct ContentView: View {
 
     /// Worktrees matching the search, grouped by project.
     ///
-    /// Grouped rather than filtered by host: you work across machines at once,
-    /// and a host picker would make a remote agent something to go and look for
-    /// instead of something already in the list. Where a project name appears
-    /// on more than one machine, the host is appended to tell them apart —
-    /// which is the only time it needs saying.
-    private var groups: [(String, [Workspace])] {
+    /// Hidden ones are separated rather than filtered out: they still belong to
+    /// the project, and a collapsed section at the bottom is how you get back to
+    /// one. Grouped rather than filtered by host: you work across machines at
+    /// once, and a host picker would make a remote agent something to go and
+    /// look for — the host is appended to the key only when there is more than
+    /// one machine to tell apart.
+    private var groups: [(String, [Workspace], [Workspace])] {
         let visible = client.fleet.workspaces.filter { $0.matches(query) }
         let hosts = Set(visible.map { $0.host ?? "" })
         var order: [String] = []
@@ -314,7 +310,22 @@ struct ContentView: View {
             if byProject[key] == nil { order.append(key) }
             byProject[key, default: []].append(workspace)
         }
-        return order.map { ($0, byProject[$0] ?? []) }
+
+        return order.map { key in
+            let all = byProject[key] ?? []
+            // The main checkout first, then everything else in the order the
+            // daemon listed it. The one row you cannot delete is the one row
+            // that should not move around.
+            //
+            // Partitioned rather than `sorted(by:)`: Swift's `sorted(by:)`
+            // does not guarantee stability, and with `FleetChanged` now
+            // driving a `refresh()` on every broadcast (Fix 1), an unstable
+            // sort would let the non-main rows visibly reshuffle on every
+            // fleet event even though their relative order never changed.
+            let visible = all.filter { !$0.isHidden }
+            let shown = visible.filter(\.isMainCheckout) + visible.filter { !$0.isMainCheckout }
+            return (key, shown, all.filter(\.isHidden))
+        }
     }
 
     /// Start a worktree in a named project.
@@ -328,10 +339,18 @@ struct ContentView: View {
     }
 
     /// A terminal in the repository's own checkout.
+    ///
+    /// The main checkout is always present in the fleet — the daemon adopts it
+    /// the moment a repository is registered — so this finds it rather than
+    /// asking the CLI to produce or locate it.
     private func newMainTerminal(in project: String) async {
-        guard let workspace = await client.mainWorkspace(repo: repositoryName(from: project))
+        let repo = repositoryName(from: project)
+        guard
+            let workspace = client.fleet.workspaces.first(where: {
+                $0.isMainCheckout && $0.repository == repo
+            })
         else { return }
-        await client.createTerminal(workspace: workspace, preset: "shell", title: "")
+        await client.createTerminal(workspace: workspace.short, preset: "shell", title: "")
         await client.refresh()
     }
 
@@ -361,7 +380,7 @@ struct ContentView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(groups, id: \.0) { project, workspaces in
+                        ForEach(groups, id: \.0) { project, workspaces, hidden in
                             ProjectHeader(
                                 name: project,
                                 count: workspaces.count,
@@ -375,7 +394,8 @@ struct ContentView: View {
                                     selection: $selection,
                                     onToggle: { toggle(ws.id) },
                                     onNewTerminal: { newTerminal(in: ws) },
-                                    onArchive: { Task { await client.archiveWorkspace(ws.short) } },
+                                    onHide: { Task { await client.hideWorkspace(ws.short) } },
+                                    onUnhide: { Task { await client.unhideWorkspace(ws.short) } },
                                     onRemove: { removeWorkspace = ws },
                                     onTerminalAction: { term, action in
                                         Task { await run(action, on: term) }
@@ -389,6 +409,23 @@ struct ContentView: View {
                                     },
                                     tiled: Set(client.activeGroup(ws.id)?.terminals ?? []),
                                     onEditorError: { editorError = $0 }
+                                )
+                            }
+                            if !hidden.isEmpty {
+                                HiddenWorktrees(
+                                    project: project,
+                                    worktrees: hidden,
+                                    isExpanded: hiddenExpanded.contains(project),
+                                    onToggle: {
+                                        if hiddenExpanded.contains(project) {
+                                            hiddenExpanded.remove(project)
+                                        } else {
+                                            hiddenExpanded.insert(project)
+                                        }
+                                    },
+                                    onUnhide: { ws in
+                                        Task { await client.unhideWorkspace(ws.short) }
+                                    }
                                 )
                             }
                         }
@@ -483,8 +520,6 @@ struct ContentView: View {
                         newWorkspaceRepository = ""
                         showNewWorkspace = true
                     },
-                    SidebarMenuItem(title: "Import existing worktrees…") { openImport() },
-                    .separator,
                     SidebarMenuItem(title: "Add repository…") { showAddRepository = true },
                     // Here as well as in the picker, because this is the menu
                     // people open looking for "add a thing" — and a machine is
@@ -654,7 +689,8 @@ struct ContentView: View {
                 WorkspaceDetail(
                     workspace: ws,
                     onNewTerminal: { newTerminal(in: ws) },
-                    onArchive: { Task { await client.archiveWorkspace(ws.short) } },
+                    onHide: { Task { await client.hideWorkspace(ws.short) } },
+                    onUnhide: { Task { await client.unhideWorkspace(ws.short) } },
                     onRemove: { removeWorkspace = ws },
                     onOpenTerminal: { t in
                         selection = .terminal(workspace: ws.id, terminal: t.id)
@@ -956,14 +992,6 @@ struct ContentView: View {
             }
             reveal(groups, in: workspace, preferring: terminal.id)
         }
-    }
-
-    /// Open the import sheet against a project that exists.
-    private func openImport() {
-        if lastProject.isEmpty || !client.repositories.contains(where: { $0.id == lastProject }) {
-            lastProject = client.repositories.first?.id ?? ""
-        }
-        showImportWorktrees = true
     }
 
     /// Drop a terminal on an edge of a pane: it splits that pane on that edge.

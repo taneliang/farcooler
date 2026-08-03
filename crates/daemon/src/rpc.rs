@@ -74,11 +74,8 @@ fn required_scope(method: &str) -> Option<Scope> {
         "worktree.list" => Scope::HostAdmin,
         "repository.register"
         | "workspace.create"
-        // Adopting the repository's own checkout so a terminal can run there.
-        // The same gate as creating a worktree: it writes a workspace record.
-        | "workspace.main"
-        | "workspace.archive"
-        | "workspace.restore"
+        | "workspace.hide"
+        | "workspace.unhide"
         | "terminal.create"
         | "terminal.resize"
         | "terminal.stop"
@@ -125,11 +122,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         "repository_root.list"
         | "repository_root.add"
         | "repository_root.remove"
-        | "workspace.remove_worktree"
-        // Importing touches no git data — it writes a record pointing at a
-        // directory that already exists — but it needs a path to name, and
-        // naming one is the admin part.
-        | "workspace.import" => Scope::HostAdmin,
+        | "workspace.remove_worktree" => Scope::HostAdmin,
         _ => return None,
     })
 }
@@ -307,6 +300,13 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let repo = svc.register_repository(std::path::Path::new(&p.relative_path)).await?;
+                // Registering adopts every worktree the repository already
+                // has, which changes the fleet without touching git — so the
+                // reconciler's mtime gate never fires for this. Without an
+                // explicit announce, other connected clients would not learn
+                // about the new workspaces until the next RECONCILE_BACKSTOP
+                // tick (30s).
+                self.watcher.announce_fleet_changed();
                 Ok(result::Value::Repository(wire::repository(&repo, scope)))
             }
 
@@ -351,17 +351,6 @@ impl Rpc {
                 Ok(result::Value::WorktreeList(farcooler_protocol::v1::WorktreeList { items }))
             }
 
-            "workspace.import" => {
-                let repository = Self::target(&req)?;
-                let Some(request::Payload::WorktreeImport(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let name = (!p.task_name.trim().is_empty()).then(|| p.task_name.trim());
-                let ws = svc.import_worktree(repository, &p.path, name).await?;
-                let view = svc.workspace_view(&ws).await?;
-                Ok(result::Value::Workspace(wire::workspace(&view, scope)))
-            }
-
             "workspace.create" => {
                 let repository = Self::target(&req)?;
                 let Some(request::Payload::WorkspaceCreate(p)) = req.payload else {
@@ -373,26 +362,37 @@ impl Rpc {
                     svc.create_workspace(repository, &p.task_name, &p.branch, &p.base_revision)
                         .await?
                 };
+                // The mutation writes the workspace row itself, so the
+                // reconcile pass that follows finds nothing to adopt — the
+                // fleet already matches git by the time it runs, which makes
+                // `Outcome::is_quiet()` true and skips its own broadcast.
+                // Hoisted above `workspace_view` so a transient store error
+                // there does not cost the announce too: nothing else would
+                // ever raise it.
+                self.watcher.announce_fleet_changed();
                 let view = svc.workspace_view(&ws).await?;
                 Ok(result::Value::Workspace(wire::workspace(&view, scope)))
             }
 
-            // Takes a repository and no payload: there is no path to get wrong,
-            // which is the difference between this and importing a worktree.
-            "workspace.main" => {
-                let ws = svc.main_workspace(Self::target(&req)?).await?;
+            "workspace.hide" => {
+                let ws = svc.hide_workspace(Self::target(&req)?).await?;
+                // Hoisted above `workspace_view`: hiding changes the fleet
+                // without touching git, so the reconciler's mtime gate never
+                // sees it, and a transient store error from `workspace_view`
+                // must not cost the announce too — nothing else will ever
+                // raise it.
+                self.watcher.announce_fleet_changed();
                 let view = svc.workspace_view(&ws).await?;
                 Ok(result::Value::Workspace(wire::workspace(&view, scope)))
             }
 
-            "workspace.archive" => {
-                let ws = svc.archive_workspace(Self::target(&req)?).await?;
-                let view = svc.workspace_view(&ws).await?;
-                Ok(result::Value::Workspace(wire::workspace(&view, scope)))
-            }
-
-            "workspace.restore" => {
-                let ws = svc.restore_workspace(Self::target(&req)?).await?;
+            "workspace.unhide" => {
+                let ws = svc.unhide_workspace(Self::target(&req)?).await?;
+                // Same reasoning as `workspace.hide`: unhiding never touches
+                // git either, so this is the only signal other clients get
+                // before the next backstop tick, and it must not depend on
+                // `workspace_view` succeeding.
+                self.watcher.announce_fleet_changed();
                 let view = svc.workspace_view(&ws).await?;
                 Ok(result::Value::Workspace(wire::workspace(&view, scope)))
             }
@@ -423,21 +423,30 @@ impl Rpc {
 
             "workspace.remove_worktree" => {
                 let id = Self::target(&req)?;
-                // The typed confirmation is checked HERE rather than in the
-                // client, because a client that skips the dialog must still be
-                // refused.
-                let Some(request::Payload::TypedConfirmation(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
                 let ws = svc
                     .list_workspaces()?
                     .into_iter()
                     .find(|w| w.id == id)
                     .ok_or(DomainError::NotFound)?;
-                if p.typed_confirmation.trim() != ws.task_name {
-                    return Err(DomainError::ConfirmationRequired);
+                // Checked HERE rather than in the client, because a client that
+                // skips the dialog must still be refused. Demanded only for a
+                // dirty worktree: everything committed lives in the branch,
+                // which this never touches.
+                if svc.removal_needs_confirmation(id).await? {
+                    let Some(request::Payload::TypedConfirmation(p)) = req.payload else {
+                        return Err(DomainError::ConfirmationRequired);
+                    };
+                    if p.typed_confirmation.trim() != ws.task_name {
+                        return Err(DomainError::ConfirmationRequired);
+                    }
                 }
                 svc.remove_worktree(id).await?;
+                // Same reasoning as `workspace.create`: this mutation writes
+                // the workspace row itself, so the reconcile pass that
+                // follows finds nothing gone and stays quiet. Without this,
+                // other connected clients would not learn the worktree is
+                // gone until the next RECONCILE_BACKSTOP tick (30s), if ever.
+                self.watcher.announce_fleet_changed();
                 let view = svc.workspace_view(&ws).await?;
                 Ok(result::Value::Workspace(wire::workspace(&view, scope)))
             }
@@ -958,13 +967,11 @@ mod tests {
             "terminal.list",
             "branch.list",
             "worktree.list",
-            "workspace.import",
             "repository_root.add",
             "repository.register",
             "workspace.create",
-            "workspace.main",
-            "workspace.archive",
-            "workspace.restore",
+            "workspace.hide",
+            "workspace.unhide",
             "terminal.seen",
             "terminal.remove",
             "repository_root.remove",

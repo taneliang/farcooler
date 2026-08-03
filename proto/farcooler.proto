@@ -63,7 +63,9 @@ message Request {
     TypedConfirmation typed_confirmation = 27;
     TerminalAttach terminal_attach = 28;
     LayoutUpdate layout_update = 29;
-    WorktreeImport worktree_import = 30;
+    // 30 was WorktreeImport. Worktrees are adopted by the daemon's reconciler
+    // now, so there is nothing for a client to import. The tag is retired
+    // rather than reused.
     TerminalWrite terminal_write = 31;
     TerminalScreenRequest terminal_screen_request = 32;
     SetPaneMode set_pane_mode = 33;
@@ -284,6 +286,14 @@ message Event {
     // New events for one terminal's agent session, in seq order. A client that
     // missed some asks for them by cursor rather than reconstructing.
     AgentEventBatch agent_events = 17;
+    // The set of workspaces changed — re-read.
+    //
+    // Reconciliation can both create and delete workspace rows in the same
+    // pass, and a deletion has no resource to carry: there is no `Workspace`
+    // left to describe. This fires once per reconcile pass that changed
+    // anything, not once per workspace, so a client re-reads the fleet rather
+    // than trying to apply it as a delta.
+    Empty fleet_changed = 18;
   }
 }
 
@@ -429,6 +439,11 @@ message Workspace {
   string worktree_path_token = 6;
   optional string worktree_path = 7; // host_admin only
   WorkspaceState state = 8;
+  // Whether this workspace IS the repository's own checkout, from `git
+  // worktree list`. Recognised this way rather than by task name, which a
+  // linked worktree in a directory called `main` would defeat — and what
+  // it guards is whether a client offers to delete the directory you work in.
+  bool is_main_checkout = 9;
 }
 
 message WorkspaceList { repeated Workspace items = 1; }
@@ -439,7 +454,14 @@ enum WorkspaceState {
   WORKSPACE_STATE_READY = 2;
   WORKSPACE_STATE_ACTIVE = 3;
   WORKSPACE_STATE_ERROR = 4;
-  WORKSPACE_STATE_ARCHIVED = 5;
+  // Tag 5 was ARCHIVED. Same state, one word: archiving never touched git and
+  // neither does hiding, so having both meant users guessing which one deleted
+  // files. Reusing the tag is correct here and only here — it is a rename, not
+  // a new meaning wearing an old number.
+  WORKSPACE_STATE_HIDDEN = 5;
+  // git no longer lists this worktree, but the row carries terminals worth
+  // keeping. A row with nothing in it is deleted instead, never shown.
+  WORKSPACE_STATE_WORKTREE_MISSING = 6;
 }
 
 // `intent` is durable. `state` is DERIVED at read time and never stored.
@@ -729,15 +751,6 @@ message ExistingWorktree {
 }
 
 message WorktreeList { repeated ExistingWorktree items = 1; }
-
-message WorktreeImport {
-  // Absolute path, as reported by `worktree.list`. Checked against git's own
-  // list on the host, so naming a directory that is not a worktree of this
-  // repository does not register it.
-  string path = 1;
-  // Defaults to the directory's name.
-  string task_name = 2;
-}
 
 message TerminalCreate {
   string title = 1;

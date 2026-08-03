@@ -125,6 +125,7 @@ pub fn workspace(view: &WorkspaceView, scope: Scope) -> wire::Workspace {
         worktree_path_token: path_token(ws.id),
         worktree_path: admin(scope).then(|| ws.worktree_path.clone()),
         state: view.state as i32,
+        is_main_checkout: ws.is_main_checkout,
     }
 }
 

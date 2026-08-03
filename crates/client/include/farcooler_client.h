@@ -86,8 +86,8 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   fleet                  {}                     -> workspaces with derived state
  *   repositories           {}                     -> registered repositories
  *   workspace.create       {repository, task, branch, base?}
- *   workspace.archive      {workspace}
- *   workspace.restore      {workspace}
+ *   workspace.hide         {workspace}
+ *   workspace.unhide       {workspace}
  *   terminal.create        {workspace, title, preset}
  *   terminal.stop          {terminal}
  *   terminal.restart       {terminal}

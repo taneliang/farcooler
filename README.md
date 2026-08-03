@@ -148,7 +148,12 @@ running.
 - Workspace creation never silently reuses an existing branch or worktree path.
 - A failed metadata write rolls back only a provably clean, untouched worktree.
   A dirty one is preserved with the artifacts left in place.
-- Archiving is refused while a managed terminal is running, and never touches git.
+- Hiding a workspace never touches git, and is never refused for a running
+  terminal — it is a view preference, not a lifecycle step. Removing a worktree
+  is the one that is refused while a managed terminal is running.
+- Git is the source of truth for which worktrees exist. Registering a
+  repository adopts every worktree it already has, and a reconcile pass keeps
+  the sidebar honest against `git worktree add`/`remove` run outside Far Cooler.
 - Identity comes only from exact tmux tags. Names, indexes, and PIDs are
   diagnostic and never establish identity, so Far Cooler never adopts a process it
   did not launch.
@@ -157,8 +162,8 @@ running.
 
 Working today: the Mac-first local slice. Repository roots, repositories,
 workspaces with real git worktrees, terminals in a private tmux server, derived
-fleet state, input and output, restart, loss dismissal, archive, and the SwiftUI
-app.
+fleet state, input and output, restart, loss dismissal, hide/unhide, and the
+SwiftUI app.
 
 Not built yet: the daemon's socket server is not wired to the CLI (the CLI links
 the service directly), the terminal channel streams via `capture-pane` rather

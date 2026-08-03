@@ -349,7 +349,7 @@ The founder-approved product boundary remains intact, but implementation is orde
 
 1. **Gate 0: observe the design partner.** Confirm that parallel mobile terminal control is the highest-value workflow and record the actual host, CLI, repository, and failure sequence.
 2. **Gate 1: local tmux and terminal-core correctness spike.** A local daemon creates one private tmux-backed workspace, streams it through control mode into a Mac surface backed by the shared core, supports `farcooler attach`, and survives Mac-app disconnect/reconnect. Build the same core for Android ARM64 and render the recorded fixture through a minimal React Native native component. Compare Mac and Android against the terminal, process, scrollback, resize, writer, and derivation acceptance suites, and score the go/no-go matrix on every target platform. A required dimension below 2 fails the gate and reopens the terminal architecture; the Android proof failing reopens the renderer architecture.
-3. **Milestone 1: Mac-first local vertical slice.** Native Swift Mac client with a terminal surface backed by the shared core, macOS arm64 daemon/CLI, Unix-socket protocol, SQLite metadata, existing repository, transactional worktree creation, one CLI preset, multiple terminal tabs, five concurrent workspaces, archive, and observable process states.
+3. **Milestone 1: Mac-first local vertical slice.** Native Swift Mac client with a terminal surface backed by the shared core, macOS arm64 daemon/CLI, Unix-socket protocol, SQLite metadata, existing repository, transactional worktree creation, one CLI preset, multiple terminal tabs, five concurrent workspaces, hide/unhide, and observable process states.
 4. **Gate 2: SSH transport and reconnect spike.** Expose the same daemon protocol through SSH stdio, connect a second client, disconnect repeatedly, transfer writer ownership, and prove ordered replay without duplicate input. `ssh host farcooler attach WORKSPACE` remains the terminal escape hatch rather than a GUI transport requirement.
 5. **Milestone 2: mobile vertical slice.** One React Native iOS screen connects through SSH, lists the Mac-proven workspaces, controls a terminal, and passes the mobile terminal acceptance suite. Run the same renderer on Android as architecture validation only.
 6. **Milestone 3: validated product workflow.** Multiple macOS/Linux hosts, remote daemon installation over SSH for Linux and WSL2, repository clone, five concurrent workspaces, Claude Code/Codex/Cursor presets, signed installers, upgrade/rollback path, and the Mac-based design-partner success criterion. The iPhone-based one is deferred until there is a real delivery channel.
@@ -380,20 +380,34 @@ Each client stores a local `HostConnection {host_id, active_route, state, last_c
 
 #### Workspace
 
+Git is the source of truth for which worktrees exist. Registering a repository
+adopts every worktree it has, main checkout included, and a reconcile pass keeps
+the two in agreement — a `git worktree add` typed in a terminal appears in the
+sidebar, and a `git worktree remove` takes its row with it.
+
+A row is deleted on the strength of git's word only when it holds no terminals.
+Anything else is kept and marked "worktree gone", because a `git worktree list`
+that raced a `mv` must not be able to destroy an agent transcript.
+
+Hiding takes a worktree out of the main list and never touches git. Removing one
+deletes its directory and never touches its branch.
+
 ```text
 creating ──→ ready ↔ active
     └──────→ error
 ready | active ──→ error ──→ ready | active
-ready | error ──→ archived ──→ ready | error
+ready | active | error ──→ hidden ──→ ready | active | error
+ready | active | error | hidden ──→ worktree_missing
 ```
 
 - **Creating:** repository/worktree transaction is in progress.
 - **Ready:** worktree exists and no terminal is currently running.
 - **Active:** at least one terminal is running.
-- **Error:** creation failed or at least one terminal is `lost` and unresolved. After every resolution, the daemon derives the workspace as `ready` or `active` from its children.
-- **Archived:** hidden from the default fleet until restored. Archiving is prohibited while any managed terminal is running and never deletes a branch or worktree.
+- **Error:** creation failed, or at least one terminal is `lost` and unresolved. After every resolution, the daemon derives the workspace as `ready` or `active` from its children.
+- **Hidden:** taken out of the default fleet by the user. Unlike its predecessor `archived`, hiding is never refused for a running terminal — it is a view preference, not a lifecycle step, and it never touches git. Outranks every other state in derivation: the user's own decision to hide a workspace is not overridden by anything the machine noticed about it.
+- **Worktree missing:** git no longer lists this worktree — removed from outside Far Cooler, or by a `git worktree remove` typed directly in a terminal — but the row still carries terminals worth keeping, so it is flagged rather than deleted. A row with no terminals is deleted outright instead of ever reaching this state. Ranks above `error`: every terminal in a missing worktree is necessarily lost as a consequence, and reporting that consequence would send someone to restart a process in a directory that no longer exists.
 
-There is no inferred **completed** state in MVP. The user archives a finished task.
+There is no inferred **completed** state in MVP. The user hides a finished task.
 
 #### Terminal
 
@@ -464,9 +478,9 @@ Repository clone uses host-managed credentials and git configuration. A failed o
 
 Workspace removal is conservative:
 
-- **Archive** is the default and never changes git data.
-- **Remove worktree** is disabled while Far Cooler-managed processes run.
-- Dirty files, untracked files, an unknown upstream, unpushed commits, missing remote freshness, or git errors require an exact typed confirmation naming the workspace.
+- **Hide** is the default and never changes git data. Unlike its predecessor `archive`, it is never refused for a running terminal — hiding is a view preference, not a lifecycle step.
+- **Remove worktree** is disabled while Far Cooler-managed processes run, and disabled outright for the repository's own main checkout: there is no worktree there for Far Cooler to remove, only the directory the user already owns and manages themselves.
+- A typed confirmation naming the workspace is required only when the worktree is dirty, untracked, unpushed, has an unknown upstream, or cannot be inspected — a worktree already gone from disk needs none, since there is nothing left to lose.
 - MVP never deletes a branch automatically.
 - Cleanup uses the same per-repository lock and is idempotent after interruption.
 
@@ -491,7 +505,7 @@ The single control client is a streaming failure domain, not a process-lifetime 
 
 The daemon uses supported tmux commands and control mode for create, attach, resize, input, output, exit, and runtime inventory. Every command targets stable session, window, or pane IDs rather than names or indexes. Users may opt to expose or import an existing tmux session later, but MVP never assumes ownership of an arbitrary user session.
 
-The host session contains managed terminal windows only; it does not keep a fake sentinel shell. The first terminal creates the session. Removing the final terminal may let the session and private server exit, after which the daemon recreates them on demand. Removing or archiving one workspace targets only windows whose fresh tags exactly match that workspace ID and never uses `kill-session`.
+The host session contains managed terminal windows only; it does not keep a fake sentinel shell. The first terminal creates the session. Removing the final terminal may let the session and private server exit, after which the daemon recreates them on demand. Removing or hiding one workspace targets only windows whose fresh tags exactly match that workspace ID and never uses `kill-session`.
 
 tmux is a hard dependency, not one of two interchangeable backends. There is no native-PTY fallback to switch to: after runtime state became a derivation from live tagged panes and the escape hatch became a tmux client, a native-PTY build would store runtime state again, lose every terminal on daemon restart, and have no `farcooler attach`. That is a different product, so Gate 1 is a go/no-go rather than a selection, and failing it reopens the architecture.
 
@@ -630,7 +644,7 @@ Restore policy is configurable per host, preset, workspace, and terminal, with n
 - `ask` offers the exact session and command but waits for confirmation.
 - `off` leaves the terminal `lost` and offers a new session.
 
-Client disconnect, app suspension, daemon restart, and transport switching normally reattach to the still-live tmux process and do not invoke a vendor resume command. Explicit user exit, stop, archive, logout, or session-clear never auto-restores. If delivery of the last input was uncertain, restoration shows that fact and does not replay it. If the exact vendor session is missing, incompatible, already active elsewhere, or rejected by the CLI, the operation fails visibly and requires the user to choose retry, new session, or a vendor-native picker.
+Client disconnect, app suspension, daemon restart, and transport switching normally reattach to the still-live tmux process and do not invoke a vendor resume command. Explicit user exit, stop, hide, logout, or session-clear never auto-restores. If delivery of the last input was uncertain, restoration shows that fact and does not replay it. If the exact vendor session is missing, incompatible, already active elsewhere, or rejected by the CLI, the operation fails visibly and requires the user to choose retry, new session, or a vendor-native picker.
 
 The MVP guarantee is precise:
 
@@ -679,13 +693,13 @@ If notifications return later, two constraints from this review carry forward. E
 #### 3. Native Swift macOS app
 
 - Sidebar hierarchy: hosts → repositories → workspaces.
-- Create, open, archive, and safely remove workspaces.
+- Create, open, hide, and safely remove workspaces.
 - Terminal tabs as the primary workspace surface.
 - Compact workspace facts for branch, worktree status, processes, clients, and connection health.
 - Attach to the same daemon-managed terminal session as the iPhone.
 - Transfer the terminal writer lease between Mac and iPhone.
 
-The Mac client is a founder-required part of the MVP because cross-device control is part of the thesis. The Mac-first slice covers fleet navigation, workspace creation, archive, worktree removal, terminal attachment, and writer handoff. IDE launch, rich inspection, and diff review are post-MVP.
+The Mac client is a founder-required part of the MVP because cross-device control is part of the thesis. The Mac-first slice covers fleet navigation, workspace creation, hide, worktree removal, terminal attachment, and writer handoff. IDE launch, rich inspection, and diff review are post-MVP.
 
 Worktree removal is the most destructive action in the product, so its interface is specified rather than left to a default dialog. The Mac app disables it outright while any managed terminal is running and names those terminals. When the worktree is dirty, has untracked files, has unpushed commits, has an unknown upstream, or cannot be assessed, the app states each reason in plain language and requires the user to type the exact workspace name. It never offers to delete the branch, and it says explicitly that the branch is being kept. A clean, fully pushed workspace still requires a deliberate confirmation, just not a typed one. The same daemon service contract is later exposed remotely to the iOS and Android clients.
 
@@ -750,8 +764,8 @@ MVP methods are explicitly bounded:
 host.get, host.health
 repository_root.list, repository_root.add, repository_root.remove
 repository.list, repository.register, repository.clone
-workspace.list, workspace.create, workspace.archive,
-workspace.restore, workspace.remove_worktree
+workspace.list, workspace.create, workspace.hide,
+workspace.unhide, workspace.remove_worktree
 terminal.list, terminal.create, terminal.attach, terminal.write,
 terminal.resize, terminal.take_writer, terminal.release_writer, terminal.stop,
 terminal.dismiss_lost, terminal.restart, terminal.restore_agent_session
@@ -777,7 +791,7 @@ The table is exhaustive for MVP. A method not listed here does not exist in MVP.
 | `daemon.version` | `read` | — | `{}` | `{daemon_version, protocol_versions, capabilities}` | read |
 | `repository_root.list` | `host_admin` | — | `{}` | `RepositoryRoot[]` | read |
 | `repository.list` | `read` | — | `{repository_root_id?}` | `Repository[]` | read |
-| `workspace.list` | `read` | — | `{repository_id?, include_archived}` | `Workspace[]` | read |
+| `workspace.list` | `read` | — | `{repository_id?, include_hidden}` | `Workspace[]` | read |
 | `terminal.list` | `read` | — | `{workspace_id?}` | `Terminal[]` | read |
 | `client.list` | `read` | — | `{}` | `Client[]`, fingerprints and scopes redacted below `host_admin` | read |
 | `operation.get` | `read` | — | `{operation_id, log_cursor?}` | `Operation` plus bounded log page | read |
@@ -786,8 +800,8 @@ The table is exhaustive for MVP. A method not listed here does not exist in MVP.
 | `repository.register` | `control` | `RepositoryRoot` | `{relative_path}` | `Repository` | sync |
 | `repository.clone` | `control` | `RepositoryRoot` | `{remote_url, destination_name}` | `Operation` | async, cancellable |
 | `workspace.create` | `control` | `Repository` | `{task_name, branch, base_revision, cli_preset}` | `Operation` | async, cancellable until the git mutation |
-| `workspace.archive` | `control` | `Workspace` | `{}` | `Workspace` | sync |
-| `workspace.restore` | `control` | `Workspace` | `{}` | `Workspace` | sync |
+| `workspace.hide` | `control` | `Workspace` | `{}` | `Workspace` | sync |
+| `workspace.unhide` | `control` | `Workspace` | `{}` | `Workspace` | sync |
 | `workspace.remove_worktree` | `host_admin` | `Workspace` | `{typed_confirmation}` | `Operation` | async |
 | `terminal.create` | `control` | `Workspace` | `{title, command_preset}` | `Terminal` in `starting` | sync |
 | `terminal.attach` | `read` | `Terminal`, unversioned | `{last_acked_sequence?, resume_token?}` | `{epoch, next_sequence, oldest_sequence, columns, rows}` then frames | stream |
@@ -812,7 +826,7 @@ Three contract notes the table cannot carry:
 Administrative semantics are explicit rather than implied:
 
 - `repository_root.add` takes an absolute host path plus a typed confirmation of that path. The daemon canonicalizes it, resolves symlinks, rejects a path that is not an existing readable directory, rejects one that nests inside or contains an existing root, and rejects sensitive locations such as `/`, a home directory root, and system directories. Adding a root does not scan or register anything inside it.
-- `repository_root.remove` is refused while any repository under that root has a non-archived workspace, and the error names them. Removing a root never touches files, worktrees, or branches; it only withdraws Far Cooler's permission to operate there. Repositories under a removed root become unavailable for new workspace creation and are shown as such.
+- `repository_root.remove` is refused while any repository under that root has a workspace, hidden or not — a hidden workspace still has a worktree directory on disk, and deleting its record with the root would strand that directory somewhere Far Cooler is no longer allowed to touch. (The main checkout is excluded from that count: the reconciler adopts it the moment a repository is registered, and it has no worktree to remove to clear it, so counting it would make every registered root permanently unremovable.) The error names the workspaces blocking it. Removing a root never touches files, worktrees, or branches; it only withdraws Far Cooler's permission to operate there. Repositories under a removed root become unavailable for new workspace creation and are shown as such.
 - `client.set_scopes` rewrites the forced command in that client's fenced `authorized_keys` entry through the same atomic, fence-verified write path as revocation. Raising a scope to `control` or `host_admin` requires a typed confirmation naming the device, because it grants full command execution as the host user. Lowering a scope takes effect on the client's next connection and immediately closes its live connections so it cannot continue at the old scope.
 - Enrolling a device needs no method. A device that cannot already reach the host over SSH cannot use an enrolled key, so every device self-enrolls with the SSH access it already has, exactly as the first one did.
 - All three are `host_admin`, carry idempotency keys, target and version their resource, and produce audit records.
@@ -835,7 +849,7 @@ What `host_admin` does buy is worth keeping: it prevents accidental repository-r
 |---|---|
 | List resources, attach terminal output read-only, read operation logs excluding paths and vendor session IDs | `read` |
 | Create/stop/restart/dismiss-lost terminals, write input, resize, take/release writer, restore an exact agent session | `control` |
-| Register/clone repositories, create/archive/restore workspaces | `control` within an administrator-approved repository root |
+| Register/clone repositories, create/hide/unhide workspaces | `control` within an administrator-approved repository root |
 | Reveal canonical paths, remove worktrees, add/remove repository roots, change an enrolled client's scopes, revoke clients, update daemon | `host_admin` |
 | Enroll the first device | Existing SSH access to the host, or local shell |
 | Enroll subsequent devices | Existing SSH access from that device; no protocol method |
@@ -1009,7 +1023,7 @@ Every mutating flow produces a durable `Operation` with progress, logs, retryabi
 | Client cannot reach host | Client-local last-event timestamp, attempted route, and no claim about process state | Retry connection, change route, or use another host |
 | Mac host reachable over SSH but the daemon is not running in agent mode | Named "host is logged out" condition rather than a generic failure, with the exact remedy | Log in at the Mac, or switch that host to unattended mode |
 | Unattended Mac booted, login keychain still locked | Named credential condition in host self-health reasons | Log in once at the Mac to unlock the keychain, or use credentials that do not depend on it |
-| Cleanup is uncertain | Exact dirty/unpushed/running reasons | Archive, cancel, or type the workspace name to remove the worktree |
+| Cleanup is uncertain | Exact dirty/unpushed/running reasons | Hide, cancel, or type the workspace name to remove the worktree |
 
 Mutating retries reuse idempotency keys where appropriate. Rollback itself is recorded as an operation and can be retried safely.
 
@@ -1108,7 +1122,7 @@ These questions have explicit decision gates and may not remain unresolved when 
 20. **Before Cursor enters Milestone 2:** Do the supported Cursor CLI versions pass exact session-start hook capture, exact-ID resume, authentication, custom-shell, and hook-composition tests? If not, Cursor does not satisfy the supported-preset exit criterion and the release cannot claim full Cursor support.
 21. **Before public source release:** Which open-source license supports adoption while preserving plausible commercial services?
 22. **Before telemetry exists:** Can any opt-in telemetry preserve the local-first trust model? Default remains no telemetry.
-23. **After design-partner observation:** Which existing orchestrator or CLI conventions should Far Cooler deliberately reuse for workspace naming, archive behavior, terminal shortcuts, and tmux session names?
+23. **After design-partner observation:** Which existing orchestrator or CLI conventions should Far Cooler deliberately reuse for workspace naming, hide behavior, terminal shortcuts, and tmux session names?
 
 ## Success Criteria
 
@@ -1124,7 +1138,7 @@ Every criterion binds to a named automated test or a named manual procedure with
 | 6 | `reconnect::under_buffer_full_replay` and `reconnect::overflow_emits_gap` | auto |
 | 7 | `input::ten_thousand_events_no_duplicate_reorder_loss` | auto, needs the loss-profile rig |
 | 8 | `handoff::mac_attaches_without_restart` | auto |
-| 9 | `destructive::archive_immutable`, `::running_blocks_removal`, `::branch_never_deleted`, `::typed_name_required` | auto |
+| 9 | `destructive::hide_never_mutates_git`, `::running_blocks_removal`, `::branch_never_deleted`, `::typed_name_required` | auto |
 | 10 | Design-partner session on the Mac client | **manual**, owner: founder, result recorded in the Gate 0 notes |
 | 11 | `terminal::android_fixture_corpus` | auto, CI on the Android reference target |
 | 12 | `restart::tagged_panes_survive`, `reboot::all_terminals_lost`, `tmux_loss::all_terminals_lost` | auto, needs the reboot fixture |
@@ -1150,7 +1164,7 @@ The MVP succeeds when all of the following are demonstrated:
 6. A Wi-Fi-to-cellular transition and a five-minute disconnection do not stop host processes. In the acceptance fixture, each terminal emits less than 8 MiB while disconnected so all missed output must replay; a separate overflow fixture must produce `GAP`.
 7. On a test profile with RTT ≤100 ms and 1% packet loss, input-to-host-ack p95 is below `RTT + 100 ms`; 10,000 generated input events produce zero silent duplicates, reordering, or loss.
 8. The Mac app attaches to the same daemon-managed workspace and terminal sessions without restarting them.
-9. Automated destructive-action tests prove that archive never changes git state, running processes block worktree removal, branches are never auto-deleted, and every uncertain git state requires the exact typed workspace name.
+9. Automated destructive-action tests prove that hiding never changes git state, running processes block worktree removal, branches are never auto-deleted, and every uncertain git state requires the exact typed workspace name.
 10. The anonymized ML-engineer design partner completes one real task while supervising at least three concurrent workspaces from the native Mac client, then asks to use Far Cooler again. This validates parallel workspaces, daemon-owned continuity, and cross-device handoff. It does not validate the mobile thesis; criterion 20 does, and it is deferred.
 11. The React Native terminal spike renders and accepts input on an Android reference device using the same application protocol and passes all compatibility fixtures except platform-specific accessibility checks before iOS architecture lock.
 12. A daemon crash test freshly verifies exact tags and keeps matching live tmux panes **running** without restarting them; missing/mismatched panes and any destroyed native PTYs become **lost**, and stale terminal state is never presented as live. A host reboot or tmux-server-loss fixture must make every formerly running tmux terminal **lost**.
@@ -1213,7 +1227,7 @@ CODE PATHS                                          USER FLOWS
                                                       └── [GAP] restore_agent_session → exact ID resumed
 [+] crates/tmux
   ├── control-mode parser                           [+] Destructive actions
-  │   ├── [GAP] split escape seq across reads         ├── [GAP] [→E2E] Archive never mutates git
+  │   ├── [GAP] split escape seq across reads         ├── [GAP] [→E2E] Hide never mutates git
   │   ├── [GAP] malformed → pause, not corrupt        ├── [GAP] Running terminal blocks removal
   │   └── [GAP] 5 workspaces, 1 MiB/s, no starve      ├── [GAP] Dirty state → exact typed name required
   ├── RuntimeInventory impl (CQ1)                     ├── [GAP] Branch never auto-deleted
@@ -1499,7 +1513,7 @@ P1 blocks ship, P2 lands on the same branch, P3 is a follow-up.
 - [ ] **T10 (P2, human: ~1 day / CC: ~20min)** — `crates/protocol` — Repository-root and scope administration methods
   - Surfaced by: D20 — Reviewer Concern 2, referenced without any method behind it
   - Files: `proto/admin.proto`, `crates/core/src/roots.rs`
-  - Verify: root removal refused while non-archived workspaces exist; scope lowering closes live connections
+  - Verify: root removal refused while non-hidden workspaces exist; scope lowering closes live connections
 - [ ] **T11 (P2, human: ~1 day / CC: ~20min)** — `apps/macos` — Worktree removal with its specified confirmation path
   - Surfaced by: D29 — the Mac section contradicted itself on whether this shipped
   - Files: `apps/macos/Sources/WorkspaceRemoval/`

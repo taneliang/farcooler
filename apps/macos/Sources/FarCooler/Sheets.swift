@@ -85,16 +85,30 @@ struct NewWorkspaceSheet: View {
 /// Destructive confirmation.
 ///
 /// Worktree removal is the one action that can lose work that was never
-/// committed, so it demands the exact workspace name typed out and says plainly
-/// what it will and will not touch.
+/// committed. The client cannot tell whether this worktree is dirty — only the
+/// daemon can see the working tree — so this starts with a plain Remove button
+/// and no field. If the daemon refuses without a confirmation, it reveals the
+/// field and says why. A worktree with nothing uncommitted in it is removed on
+/// the first click. Demanding the typed name every time would train people to
+/// type it without reading it, which spends the one gesture meant to stop a
+/// mistake.
 struct RemoveWorkspaceSheet: View {
     let workspace: Workspace
     let hasRunningTerminals: Bool
     /// Receives the exact text the user typed, which the daemon re-checks.
-    let onRemove: (String) async -> Void
+    ///
+    /// Answers `.ok`, `.confirmationRequired` (the worktree is dirty and the
+    /// name is needed), or `.failed` with the daemon's own message for every
+    /// other refusal — `RunningProcesses`, `TmuxUnavailable`, a failed `git
+    /// worktree remove`. Only the middle case means "there is uncommitted
+    /// work here"; the others are refused for reasons that typing the name
+    /// again does nothing about.
+    let onRemove: (String) async -> DaemonClient.RemoveWorktreeResult
     @Environment(\.dismiss) private var dismiss
 
     @State private var typed = ""
+    @State private var needsName = false
+    @State private var errorMessage: String?
     @State private var working = false
 
     private var matches: Bool { typed == workspace.task }
@@ -105,15 +119,26 @@ struct RemoveWorkspaceSheet: View {
             subtitle: workspace.task,
             confirmTitle: "Remove worktree",
             confirmRole: .destructive,
-            canConfirm: matches && !hasRunningTerminals && !working,
+            canConfirm: !hasRunningTerminals && !working && (!needsName || matches),
             working: working,
-            error: nil,
+            error: errorMessage,
             onCancel: { dismiss() },
             onConfirm: {
                 working = true
-                await onRemove(typed)
+                errorMessage = nil
+                let result = await onRemove(typed)
                 working = false
-                dismiss()
+                switch result {
+                case .ok:
+                    dismiss()
+                case .confirmationRequired:
+                    needsName = true
+                case .failed(let message):
+                    // Not "there is uncommitted work here" — that callout is
+                    // reserved for a genuine confirmation-required refusal.
+                    // The daemon's own message names what to actually fix.
+                    errorMessage = message
+                }
             }
         ) {
             VStack(alignment: .leading, spacing: 14) {
@@ -133,12 +158,20 @@ struct RemoveWorkspaceSheet: View {
                     )
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Type the workspace name to confirm")
-                        .font(.callout)
-                    TextField("", text: $typed, prompt: Text(workspace.task))
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(hasRunningTerminals)
+                if needsName {
+                    Callout(
+                        icon: "exclamationmark.triangle.fill",
+                        tone: .warning,
+                        text: "There is uncommitted work here. Type the workspace name to confirm you want it gone."
+                    )
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Type the workspace name to confirm")
+                            .font(.callout)
+                        TextField("", text: $typed, prompt: Text(workspace.task))
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(hasRunningTerminals)
+                    }
                 }
             }
         }

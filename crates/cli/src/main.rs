@@ -305,13 +305,6 @@ enum RepoCmd {
 
 #[derive(Subcommand)]
 enum WorkspaceCmd {
-    /// Register the repository's own checkout, so terminals can run there.
-    ///
-    /// Idempotent, and takes a repository rather than a path — which is what
-    /// separates it from `import`, where the path someone types is usually the
-    /// wrong one. The main checkout can never be removed through Far Cooler;
-    /// see `Service::remove_worktree`.
-    Main { repo: String },
     /// Create a worktree and branch for one task.
     Create {
         repo: String,
@@ -335,37 +328,21 @@ enum WorkspaceCmd {
         #[arg(long)]
         task: Option<String>,
     },
-    /// Show worktrees on disk that Far Cooler does not know about yet.
-    ///
-    /// The onboarding path: a repository you have used for months already has
-    /// worktrees checked out, and there is no reason to re-create them by hand.
-    Discover { repo: String },
-    /// Register worktrees that already exist, without touching git.
-    ///
-    /// Creates no branch, no directory and no checkout — the work is already
-    /// there, and the only thing missing is a record of it.
-    Import {
-        repo: String,
-        /// Paths to import. Omit to take everything `discover` found.
-        paths: Vec<String>,
-        /// Name for the workspace. Only meaningful with a single path.
-        #[arg(long)]
-        task: Option<String>,
-    },
     /// List branches you could resume work on.
     Branches {
         repo: String,
     },
-    /// Hide a workspace. Never changes git data.
-    Archive { workspace: String },
-    /// Bring an archived workspace back.
-    Restore { workspace: String },
+    /// Take a worktree out of the main list. Never changes git data.
+    Hide { workspace: String },
+    /// Bring a hidden worktree back.
+    Unhide { workspace: String },
     /// Remove the worktree. Keeps the branch and everything committed.
     RemoveWorktree {
         workspace: String,
-        /// The workspace's exact task name. Required, because this deletes files.
+        /// The workspace's exact name. Required only when the worktree has
+        /// uncommitted work in it; the daemon is what decides.
         #[arg(long)]
-        confirm: String,
+        confirm: Option<String>,
     },
 }
 
@@ -883,19 +860,6 @@ async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
 async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
     let mut link = connect_to(host).await?;
     match cmd {
-        WorkspaceCmd::Main { repo } => {
-            let repos = list_repositories(&mut link).await?;
-            let target = resolve_repository(&repos, &repo)?;
-            let r = link.call(req_for("workspace.main", uuid_of(&target.id))).await?;
-            let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
-                return Err("the daemon returned the wrong resource".into());
-            };
-            if json {
-                println!("{}", serde_json::json!({ "id": uuid_of(&ws.id).to_string() }));
-            } else {
-                println!("{}", short_bytes(&ws.id));
-            }
-        }
         WorkspaceCmd::Create { repo, task, branch, base } => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;
@@ -951,6 +915,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                                 .unwrap_or_default(),
                             "worktree": w.worktree_path,
                             "state": workspace_label(w.state()),
+                            "is_main_checkout": w.is_main_checkout,
                             "terminals": terminals.iter()
                                 .filter(|t| t.workspace_id == w.id)
                                 .map(|t| serde_json::json!({
@@ -1012,94 +977,6 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                         label(t)
                     );
                 }
-            }
-        }
-
-        WorkspaceCmd::Discover { repo } => {
-            let mut link = connect_to(host).await?;
-            let repos = list_repositories(&mut link).await?;
-            let target = resolve_repository(&repos, &repo)?;
-            let found = discover_worktrees(&mut link, uuid_of(&target.id)).await?;
-
-            if json {
-                let items: Vec<_> = found
-                    .iter()
-                    .map(|w| {
-                        serde_json::json!({
-                            "path": w.path,
-                            "branch": w.branch,
-                            "head": w.head,
-                            "name": w.suggested_name,
-                            "locked": w.locked,
-                        })
-                    })
-                    .collect();
-                println!("{}", serde_json::json!({ "worktrees": items }));
-                return Ok(());
-            }
-
-            if found.is_empty() {
-                println!("no unregistered worktrees");
-                return Ok(());
-            }
-            for w in &found {
-                let branch = w.branch.clone().unwrap_or_else(|| "(detached)".into());
-                let lock = if w.locked { "  (locked)" } else { "" };
-                println!("{:28}  {:24}{}  {}", truncate(&w.suggested_name, 28), truncate(&branch, 24), lock, w.path);
-            }
-            println!("\nimport them with: farcooler workspace import {repo}");
-        }
-
-        WorkspaceCmd::Import { repo, paths, task } => {
-            let mut link = connect_to(host).await?;
-            let repos = list_repositories(&mut link).await?;
-            let target = resolve_repository(&repos, &repo)?;
-            let repository = uuid_of(&target.id);
-
-            let wanted: Vec<String> = if paths.is_empty() {
-                discover_worktrees(&mut link, repository).await?.into_iter().map(|w| w.path).collect()
-            } else {
-                paths
-            };
-            if wanted.is_empty() {
-                println!("no unregistered worktrees");
-                return Ok(());
-            }
-            if wanted.len() > 1 && task.is_some() {
-                return Err("--task names one workspace; import them one at a time".into());
-            }
-
-            // One at a time, and a failure does not abandon the rest: importing
-            // eight worktrees where one has been deleted underneath us should
-            // still import seven.
-            let mut imported = 0;
-            for path in &wanted {
-                let r = link
-                    .call(with(
-                        req_for("workspace.import", repository),
-                        request::Payload::WorktreeImport(
-                            farcooler_protocol::v1::WorktreeImport {
-                                path: path.clone(),
-                                task_name: task.clone().unwrap_or_default(),
-                            },
-                        ),
-                    ))
-                    .await;
-                let outcome = match r {
-                    Ok(response) => expect_value(response.value, "workspace"),
-                    Err(e) => Err(Box::new(e) as Box<dyn std::error::Error>),
-                };
-                match outcome {
-                    Ok(result::Value::Workspace(ws)) => {
-                        imported += 1;
-                        println!("imported {}  {}  {}", short_bytes(&ws.id), ws.task_name, ws.branch);
-                    }
-                    Ok(_) => eprintln!("{path}: the daemon returned the wrong resource"),
-                    Err(e) => eprintln!("{path}: {e}"),
-                }
-            }
-            if imported == 0 {
-                return Err("nothing was imported".into());
             }
         }
 
@@ -1167,18 +1044,18 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
             }
         }
 
-        WorkspaceCmd::Archive { workspace } => {
+        WorkspaceCmd::Hide { workspace } => {
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
-            link.call(req_for("workspace.archive", uuid_of(&ws.id))).await?;
-            println!("archived {}  (git data untouched)", short_bytes(&ws.id));
+            link.call(req_for("workspace.hide", uuid_of(&ws.id))).await?;
+            println!("hidden {}  (git data untouched)", short_bytes(&ws.id));
         }
 
-        WorkspaceCmd::Restore { workspace } => {
+        WorkspaceCmd::Unhide { workspace } => {
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
-            link.call(req_for("workspace.restore", uuid_of(&ws.id))).await?;
-            println!("restored {}", short_bytes(&ws.id));
+            link.call(req_for("workspace.unhide", uuid_of(&ws.id))).await?;
+            println!("unhidden {}", short_bytes(&ws.id));
         }
 
         WorkspaceCmd::RemoveWorktree { workspace, confirm } => {
@@ -1189,7 +1066,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
             link.call(with(
                 req_for("workspace.remove_worktree", uuid_of(&ws.id)),
                 request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
-                    typed_confirmation: confirm,
+                    typed_confirmation: confirm.unwrap_or_default(),
                 }),
             ))
             .await?;
@@ -1283,6 +1160,9 @@ async fn events(host: Option<&str>) -> Fallible {
                         "focused": p.focused, "zoomed": p.zoomed,
                     })).collect::<Vec<_>>(),
                 })).collect::<Vec<_>>(),
+            }),
+            farcooler_protocol::v1::event::Payload::FleetChanged(_) => serde_json::json!({
+                "kind": "fleet",
             }),
             // Other resources have no events yet. Skipping is right: a client
             // that reacts to a line it cannot read would be worse.
@@ -1990,17 +1870,6 @@ async fn list_repositories(link: &mut Link) -> Result<Vec<Repository>, Box<dyn s
     }
 }
 
-async fn discover_worktrees(
-    link: &mut Link,
-    repository: Uuid,
-) -> Result<Vec<farcooler_protocol::v1::ExistingWorktree>, Box<dyn std::error::Error>> {
-    let r = link.call(req_for("worktree.list", repository)).await?;
-    match expect_value(r.value, "worktrees")? {
-        result::Value::WorktreeList(l) => Ok(l.items),
-        _ => Err("the daemon returned the wrong list".into()),
-    }
-}
-
 async fn list_workspaces(link: &mut Link) -> Result<Vec<Workspace>, Box<dyn std::error::Error>> {
     let r = link.call(req("workspace.list")).await?;
     match expect_value(r.value, "workspaces")? {
@@ -2129,7 +1998,8 @@ fn workspace_label(s: WorkspaceState) -> &'static str {
         WorkspaceState::Ready => "ready",
         WorkspaceState::Active => "active",
         WorkspaceState::Error => "ERROR",
-        WorkspaceState::Archived => "archived",
+        WorkspaceState::Hidden => "hidden",
+        WorkspaceState::WorktreeMissing => "worktree_missing",
     }
 }
 

@@ -407,17 +407,12 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             Ok(json!({ "id": uuid_of(&workspace.id).to_string() }))
         }
 
-        "workspace.main" => {
-            let workspace = session.main_workspace(id("repository")?).await.map_err(|e| e.to_string())?;
-            Ok(json!({ "id": uuid_of(&workspace.id).to_string() }))
-        }
-
-        "workspace.archive" => {
-            session.archive_workspace(id("workspace")?).await.map_err(|e| e.to_string())?;
+        "workspace.hide" => {
+            session.hide_workspace(id("workspace")?).await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         }
-        "workspace.restore" => {
-            session.restore_workspace(id("workspace")?).await.map_err(|e| e.to_string())?;
+        "workspace.unhide" => {
+            session.unhide_workspace(id("workspace")?).await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         }
 

@@ -1,9 +1,14 @@
 //! Git worktree transaction.
 //!
-//! Workspace creation is serialized per repository and never silently reuses an
-//! existing branch or worktree path. If metadata fails after git succeeded, only
-//! a newly created CLEAN worktree and newly created UNPUSHED branch are removed;
-//! otherwise the artifacts are preserved and manual recovery is surfaced.
+//! Never silently reuses an existing branch or worktree path. If metadata fails
+//! after git succeeded, only a newly created CLEAN worktree and newly created
+//! UNPUSHED branch are removed; otherwise the artifacts are preserved and
+//! manual recovery is surfaced.
+//!
+//! Serialization is NOT this module's job. `Service::repo_lock` holds a mutex
+//! across the whole mutate-git-then-write-the-row sequence, because that is the
+//! span the reconciler must not observe half of, and nothing at this level can
+//! see the metadata half.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -316,15 +321,19 @@ mod tests {
             vec!["config", "user.email", "t@example.com"],
             vec!["config", "user.name", "t"],
         ] {
-            SyncCommand::new("git").current_dir(dir).args(&args).status().unwrap();
+            let status = SyncCommand::new("git").current_dir(dir).args(&args).status().unwrap();
+            assert!(status.success(), "git {:?} failed in {}", args, dir.display());
         }
         std::fs::write(dir.join("README.md"), "hello").unwrap();
-        SyncCommand::new("git").current_dir(dir).args(["add", "."]).status().unwrap();
-        SyncCommand::new("git")
+        let status =
+            SyncCommand::new("git").current_dir(dir).args(["add", "."]).status().unwrap();
+        assert!(status.success(), "git add failed in {}", dir.display());
+        let status = SyncCommand::new("git")
             .current_dir(dir)
             .args(["commit", "-qm", "init"])
             .status()
             .unwrap();
+        assert!(status.success(), "git commit failed in {}", dir.display());
     }
 
     #[tokio::test]

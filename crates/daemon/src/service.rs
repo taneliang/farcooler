@@ -5,6 +5,7 @@
 //! stored runtime state, because none exists.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use farcooler_core::{
     DomainError, Result,
@@ -175,6 +176,23 @@ pub struct Service {
     /// event window. See `agent_supervisor` for why the transcript itself is
     /// not here.
     agents: agent_supervisor::AgentSupervisor,
+    /// One mutex per repository, created on first use and never removed.
+    ///
+    /// Held across any sequence that mutates git and then writes a workspace
+    /// row. `create_workspace` runs `git worktree add` and then inserts; the
+    /// reconciler lists worktrees and then adopts what has no row. Without
+    /// this, a reconcile landing between those two halves sees a worktree with
+    /// no row, adopts it under the directory name, and the original call then
+    /// inserts a second row for the same path.
+    ///
+    /// `git.rs` has claimed since it was written that creation "is serialized
+    /// per repository". It was not; nothing depended on it until the reconciler
+    /// existed.
+    ///
+    /// Never pruned. A `Mutex<()>` is two words, repositories are counted in
+    /// tens, and a registry that removes entries has to prove nobody is waiting
+    /// on the one it is removing.
+    repo_locks: std::sync::Mutex<std::collections::HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 /// A workspace plus its derived state and terminals.
@@ -218,12 +236,29 @@ impl Service {
         let inventory = LiveInventory::new(tmux.clone());
         inventory.refresh().await;
 
-        Ok(Self { store, tmux, inventory, host_id, root, agents: agent_supervisor::AgentSupervisor::new() })
+        Ok(Self {
+            store,
+            tmux,
+            inventory,
+            host_id,
+            root,
+            agents: agent_supervisor::AgentSupervisor::new(),
+            repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
+        })
     }
 
     /// The supervisor for every terminal's agent session.
     pub fn agents(&self) -> &agent_supervisor::AgentSupervisor {
         &self.agents
+    }
+
+    /// The lock guarding one repository's git-plus-metadata sequences.
+    pub fn repo_lock(&self, repository_id: Uuid) -> Arc<tokio::sync::Mutex<()>> {
+        // A std mutex, not a tokio one: this holds only long enough to clone an
+        // Arc out of a map, and awaiting to look up a lock would be a lock to
+        // reach a lock.
+        let mut locks = self.repo_locks.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(locks.entry(repository_id).or_default())
     }
 
     /// Where managed worktrees are created, one directory per workspace.
@@ -293,13 +328,23 @@ impl Service {
 
         let remote = git::remote_summary(&canonical).await;
 
-        self.store.create_repository(
+        let repository = self.store.create_repository(
             self.host_id,
             root.id,
             &display_name,
             &git_dir.to_string_lossy(),
             &remote,
-        )
+        )?;
+
+        // Synchronously, before returning: adding a project should fill the
+        // sidebar by the time the sheet closes, not a tick later. A failure
+        // here is logged rather than propagated — the repository IS registered,
+        // and the next tick reconciles it anyway.
+        if let Err(e) = crate::reconcile::repository(self, repository.id).await {
+            tracing::warn!(error = ?e, "could not reconcile a freshly registered repository");
+        }
+
+        Ok(repository)
     }
 
     pub fn list_repositories(&self) -> Result<Vec<models::Repository>> {
@@ -314,7 +359,7 @@ impl Service {
     ///
     /// `canonical_git_dir` is the `.git` directory, so the working tree is its
     /// parent for an ordinary non-bare repository.
-    fn repository_worktree(&self, repo: &models::Repository) -> PathBuf {
+    pub fn repository_worktree(&self, repo: &models::Repository) -> PathBuf {
         let git_dir = PathBuf::from(&repo.canonical_git_dir);
         git_dir.parent().map(|p| p.to_path_buf()).unwrap_or(git_dir)
     }
@@ -336,6 +381,11 @@ impl Service {
         validate::task_name(task_name)?;
         validate::branch_name(branch)?;
 
+        // Held until this function returns: everything below is "mutate git,
+        // then write the row", and the reconciler must not see the gap.
+        let lock = self.repo_lock(repository_id);
+        let _guard = lock.lock().await;
+
         let repo = self.store.get_repository(repository_id)?;
         let repo_path = self.repository_worktree(&repo);
 
@@ -353,6 +403,7 @@ impl Service {
             task_name,
             branch,
             &dest.to_string_lossy(),
+            false,
         ) {
             Ok(ws) => Ok(ws),
             Err(e) => {
@@ -373,6 +424,19 @@ impl Service {
         git::list_branches(&self.repository_worktree(&repo)).await
     }
 
+    /// Every worktree git reports for a repository.
+    ///
+    /// A diagnostic view for `worktree.list`, a host-admin surface — not a
+    /// list of candidates for a client to act on. Task 4's reconciler adopts
+    /// every worktree it sees automatically, main checkout included, so
+    /// "not yet registered" stopped being a meaningful filter: everything git
+    /// reports either already has a workspace row or will on the next tick.
+    pub async fn discover_worktrees(&self, repository_id: Uuid) -> Result<Vec<git::WorktreeInfo>> {
+        let repo = self.store.get_repository(repository_id)?;
+        let repo_path = self.repository_worktree(&repo);
+        git::list_worktrees(&repo_path).await
+    }
+
     /// Create a workspace on a branch that already exists.
     ///
     /// The other half of `create_workspace`. Work arrives on a branch as often
@@ -380,134 +444,6 @@ impl Service {
     /// else, or produced by an agent running somewhere else entirely. Without
     /// this, picking that work up meant doing it by hand outside Far Cooler and
     /// then having Far Cooler not know about it.
-    /// Worktrees that exist on disk but are not yet task workspaces.
-    ///
-    /// The onboarding path. Someone arrives with a repository they have been
-    /// working in for months and several worktrees already checked out, and
-    /// until Far Cooler can see those it only knows about work it started itself
-    /// — which means re-creating by hand everything you already have.
-    ///
-    /// The main checkout is excluded. It is where you work directly, and turning
-    /// it into a task workspace would put an agent in it. So is anything already
-    /// registered, matched by canonical path so a symlinked or relative spelling
-    /// of the same directory is not offered as new.
-    pub async fn discover_worktrees(&self, repository_id: Uuid) -> Result<Vec<git::WorktreeInfo>> {
-        let repo = self.store.get_repository(repository_id)?;
-        let repo_path = self.repository_worktree(&repo);
-
-        let known: std::collections::HashSet<PathBuf> = self
-            .store
-            .list_workspaces_for_repository(repository_id)?
-            .iter()
-            .map(|w| canonical_or_raw(&w.worktree_path))
-            .collect();
-
-        Ok(git::list_worktrees(&repo_path)
-            .await?
-            .into_iter()
-            .filter(|w| !w.is_main)
-            // A prunable record points at a directory that is gone. Offering it
-            // would create a workspace whose worktree does not exist.
-            .filter(|w| !w.prunable)
-            .filter(|w| !known.contains(&canonical_or_raw(&w.path)))
-            .collect())
-    }
-
-    /// Register a worktree that already exists, without touching git.
-    ///
-    /// Deliberately creates nothing: no branch, no directory, no checkout. The
-    /// worktree is already there and already someone's work in progress, so the
-    /// only thing missing is a record — and if importing could modify it, nobody
-    /// would risk pointing this at a directory they cared about.
-    pub async fn import_worktree(
-        &self,
-        repository_id: Uuid,
-        path: &str,
-        task_name: Option<&str>,
-    ) -> Result<models::Workspace> {
-        let repo = self.store.get_repository(repository_id)?;
-        let repo_path = self.repository_worktree(&repo);
-
-        // Taken from git's own list rather than from the caller, so a path that
-        // is not actually a worktree of this repository cannot be registered by
-        // asking nicely.
-        let found = git::list_worktrees(&repo_path)
-            .await?
-            .into_iter()
-            .find(|w| canonical_or_raw(&w.path) == canonical_or_raw(path))
-            .ok_or(DomainError::NotFound)?;
-
-        if found.is_main {
-            // The repository's own checkout. Refused for the same reason it is
-            // not offered: it is where the human works.
-            return Err(DomainError::InvalidArgument { what: "the main checkout" });
-        }
-        if !std::path::Path::new(&found.path).is_dir() {
-            return Err(DomainError::NotFound);
-        }
-
-        let branch = found.branch.clone().unwrap_or_else(|| {
-            // A detached worktree still has a commit, and that is the honest
-            // thing to call it rather than inventing a branch name.
-            format!("detached at {}", found.head.chars().take(8).collect::<String>())
-        });
-
-        let name = match task_name {
-            Some(given) => given.to_string(),
-            // The directory's own name, which is what the person who made the
-            // worktree already chose to call this piece of work.
-            None => std::path::Path::new(&found.path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| branch.clone()),
-        };
-        validate::task_name(&name)?;
-
-        self.store.create_workspace(repository_id, &name, &branch, &found.path)
-    }
-
-    /// The repository's own checkout, as a workspace, creating the record once.
-    ///
-    /// `import_worktree` refuses the main checkout and still does — importing
-    /// it by path is a footgun, because the path someone types is usually the
-    /// wrong one. This is the deliberate door instead: it takes a repository,
-    /// not a path, so there is nothing to get wrong, and it is idempotent
-    /// because "open a terminal in main" should not make a second workspace
-    /// every time.
-    ///
-    /// It exists because the main checkout is where a great deal of work
-    /// happens — a build, a glance at `main` while a worktree is mid-review —
-    /// and it was the one directory this app could not open a terminal in.
-    /// `remove_worktree` refuses it, so adopting it cannot lead to deleting it.
-    pub async fn main_workspace(&self, repository_id: Uuid) -> Result<models::Workspace> {
-        let repo = self.store.get_repository(repository_id)?;
-        let repo_path = self.repository_worktree(&repo);
-        let canonical = canonical_or_raw(&repo_path.to_string_lossy());
-
-        if let Some(existing) = self
-            .store
-            .list_workspaces_for_repository(repository_id)?
-            .into_iter()
-            .find(|w| canonical_or_raw(&w.worktree_path) == canonical)
-        {
-            return Ok(existing);
-        }
-
-        // git's own answer for which checkout is main and what it is on, rather
-        // than assuming the repository path is a worktree at all.
-        let main = git::list_worktrees(&repo_path)
-            .await?
-            .into_iter()
-            .find(|w| w.is_main)
-            .ok_or(DomainError::NotFound)?;
-
-        let branch = main.branch.clone().unwrap_or_else(|| {
-            format!("detached at {}", main.head.chars().take(8).collect::<String>())
-        });
-
-        self.store.create_workspace(repository_id, "main", &branch, &main.path)
-    }
-
     pub async fn adopt_branch(
         &self,
         repository_id: Uuid,
@@ -516,6 +452,11 @@ impl Service {
     ) -> Result<models::Workspace> {
         validate::task_name(task_name)?;
         validate::branch_name(branch)?;
+
+        // Held until this function returns: everything below is "mutate git,
+        // then write the row", and the reconciler must not see the gap.
+        let lock = self.repo_lock(repository_id);
+        let _guard = lock.lock().await;
 
         let repo = self.store.get_repository(repository_id)?;
         let repo_path = self.repository_worktree(&repo);
@@ -533,6 +474,7 @@ impl Service {
             task_name,
             branch,
             &dest.to_string_lossy(),
+            false,
         ) {
             Ok(workspace) => Ok(workspace),
             Err(e) => {
@@ -556,25 +498,23 @@ impl Service {
         Ok(all)
     }
 
-    /// Archive hides a workspace and never changes git data. It is prohibited
-    /// while any managed terminal is running.
-    pub async fn archive_workspace(&self, id: Uuid) -> Result<models::Workspace> {
+    /// Take a workspace out of the main list. Never changes git data.
+    ///
+    /// Deliberately unconditional. Its predecessor refused while a managed
+    /// terminal was running, which fit "archive" — a lifecycle step meaning
+    /// done with this — and does not fit hiding, which is a view preference.
+    /// A view preference that fails with an error reads as a bug.
+    ///
+    /// The risk that refusal guarded is real: hide a worktree and its running
+    /// agent stops being visible. It is handled where it belongs, in the
+    /// sidebar, whose `Hidden (n)` header carries an attention dot when
+    /// anything inside it wants the user.
+    pub async fn hide_workspace(&self, id: Uuid) -> Result<models::Workspace> {
         let ws = self.store.get_workspace(id)?;
-        let view = self.workspace_view(&ws).await?;
-
-        if view.terminals.iter().any(|t| t.state() == TerminalState::Running) {
-            return Err(DomainError::RunningProcesses);
+        if ws.hidden {
+            return Ok(ws);
         }
-
-        self.store.update_workspace(
-            id,
-            ws.resource_version,
-            &ws.task_name,
-            &ws.branch,
-            &ws.worktree_path,
-            true,
-            ws.creation_failed,
-        )
+        self.store.set_workspace_flags(id, ws.resource_version, true, ws.worktree_missing)
     }
 
     /// Delete a terminal's record.
@@ -602,56 +542,127 @@ impl Service {
         self.store.delete_terminal(id, record.resource_version)
     }
 
-    /// Bring an archived workspace back.
+    /// Bring a hidden workspace back into the main list.
     ///
-    /// Archiving hides; it never touched git, so restoring never has to
-    /// reconstruct anything. If the worktree was separately removed the
-    /// workspace comes back without one and derives its state accordingly,
-    /// which is more honest than refusing to show it at all.
-    pub async fn restore_workspace(&self, id: Uuid) -> Result<models::Workspace> {
+    /// Hiding never touched git, so this never has to reconstruct anything. If
+    /// the worktree went away while it was hidden the reconciler has already
+    /// said so, and the row comes back carrying that fact rather than pretending
+    /// otherwise.
+    pub async fn unhide_workspace(&self, id: Uuid) -> Result<models::Workspace> {
         let ws = self.store.get_workspace(id)?;
-        if !ws.archived {
+        if !ws.hidden {
             return Ok(ws);
         }
-        self.store.update_workspace(
-            id,
-            ws.resource_version,
-            &ws.task_name,
-            &ws.branch,
-            &ws.worktree_path,
-            false,
-            ws.creation_failed,
-        )
+        self.store.set_workspace_flags(id, ws.resource_version, false, ws.worktree_missing)
     }
 
     /// Stop allowing Far Cooler to operate under a directory.
     ///
-    /// Refused while any workspace under this root is still live, because a
-    /// root is the thing that makes those workspaces legal: removing it while
-    /// they exist would leave records Far Cooler can no longer act on. Archived
+    /// Refused while any task workspace under this root is still live, because
+    /// a root is the thing that makes those workspaces legal: removing it while
+    /// they exist would leave records Far Cooler can no longer act on. Hidden
     /// workspaces do not block it — they are already out of the way — and
     /// nothing on disk is touched either way.
+    ///
+    /// Every refusal is checked before anything is deleted, and every
+    /// repository's `repo_lock` is held for the whole function, acquired
+    /// before the first check. `reconcile::repository` takes the identical
+    /// lock and Task 5 runs it on a ticker; without holding it here, a
+    /// reconcile could insert a workspace row between the checks below and the
+    /// deletes, reproducing the FK violation this function exists to avoid.
+    /// That lock is what closes THAT race, specifically — it says nothing
+    /// about `terminal.create` or a pane going live through tmux directly,
+    /// neither of which takes `repo_lock`. So the delete loop below is safe
+    /// against a repository gaining a workspace out from under it, but not
+    /// airtight against a terminal's state changing in the vanishingly narrow
+    /// window between the running check and its own delete; `remove_terminal`
+    /// would refuse that one on the spot rather than silently drop it, and the
+    /// caller sees the same `RunningProcesses` it would have seen a moment
+    /// earlier.
     pub async fn remove_root(&self, id: Uuid) -> Result<models::RepositoryRoot> {
         let root = self.store.get_repository_root(id)?;
         let repositories = self.store.list_repositories_for_root(id)?;
 
-        // Refused while ANY workspace remains, archived or not.
+        // Held until this function returns. `repo_locks` outlives `_guards`
+        // (declared first, so dropped last), which is what lets each guard
+        // borrow its own lock for the whole function body.
+        let repo_locks: Vec<_> = repositories.iter().map(|r| self.repo_lock(r.id)).collect();
+        let mut _guards = Vec::with_capacity(repo_locks.len());
+        for lock in &repo_locks {
+            _guards.push(lock.lock().await);
+        }
+
+        let mut all_workspaces: Vec<models::Workspace> = Vec::new();
+        for repository in &repositories {
+            all_workspaces.extend(self.store.list_workspaces_for_repository(repository.id)?);
+        }
+
+        // Refused while ANY task workspace remains, hidden or not.
         //
-        // The design's rule was "refused while non-archived workspaces exist",
-        // which is the right instinct but leaves a gap: an archived workspace
+        // The design's rule was "refused while non-hidden workspaces exist",
+        // which is the right instinct but leaves a gap: a hidden workspace
         // still has a worktree directory on disk. Deleting its record with the
         // root would strand that directory somewhere Far Cooler is no longer
         // allowed to touch, so it could never be cleaned up. Removing the
         // worktree already deletes the record, so "remove the worktrees first"
         // is a reachable instruction rather than a dead end.
-        let mut remaining = 0;
-        for repository in &repositories {
-            remaining += self.store.list_workspaces_for_repository(repository.id)?.len();
-        }
+        //
+        // The main checkout is excluded from this count. Since the reconciler
+        // adopts it the moment a repository is registered, counting it here
+        // would make every registered repository's root permanently
+        // unremovable — there is no worktree to "remove" to clear it, because
+        // `remove_worktree` refuses the main checkout on purpose. Its worktree
+        // is the directory the user already owns and manages themselves;
+        // de-registering the root touches no disk either way, main checkout
+        // included, so there is nothing here for it to strand.
+        let remaining = all_workspaces.iter().filter(|w| !w.is_main_checkout).count();
         if remaining > 0 {
             return Err(DomainError::WorkspacesExist);
         }
 
+        // Refused outright if the tmux inventory cannot be trusted at all.
+        // `derive_terminal` reports EVERY terminal as `Lost` when the inventory
+        // is unhealthy (`crates/core/src/derive.rs`), which would otherwise let
+        // a momentarily unreachable tmux server sail straight past the running
+        // check below and delete the only record of a process that may still
+        // be alive — exactly what `remove_terminal`'s own guard exists to
+        // prevent.
+        if !self.inventory_snapshot().inventory_healthy {
+            return Err(DomainError::TmuxUnavailable);
+        }
+
+        // Refused while any terminal anywhere under this root — main checkout
+        // included — is running OR starting. `Running | Starting`, matching
+        // `remove_terminal` exactly rather than the narrower `Running` alone:
+        // a terminal mid-launch is exactly as alive as one already confirmed.
+        // `RunningProcesses` is the same vocabulary `remove_terminal` and
+        // `remove_worktree` already use for "something is alive under here",
+        // and a stopped-but-recorded terminal does not qualify.
+        for ws in &all_workspaces {
+            let view = self.workspace_view(ws).await?;
+            if view
+                .terminals
+                .iter()
+                .any(|t| matches!(t.state(), TerminalState::Running | TerminalState::Starting))
+            {
+                return Err(DomainError::RunningProcesses);
+            }
+        }
+
+        // Deleted in foreign-key order: terminals, then workspaces, then
+        // repositories, then the root. Terminals go through `remove_terminal`
+        // rather than a second hand-rolled deletion path beside it, so the
+        // pane `remain-on-exit` retains for an already-exited terminal is
+        // killed along with the record — left to a bare `delete_terminal` it
+        // would be orphaned in tmux with nothing left that knows about it.
+        for ws in &all_workspaces {
+            for term in self.store.list_terminals_for_workspace(ws.id)? {
+                self.remove_terminal(term.id).await?;
+            }
+        }
+        for ws in &all_workspaces {
+            self.store.delete_workspace(ws.id, ws.resource_version)?;
+        }
         // The repositories go with it. They exist only as members of a root,
         // and leaving them behind would strand rows pointing at nothing.
         for repository in repositories {
@@ -661,35 +672,94 @@ impl Service {
         Ok(root)
     }
 
+    /// Whether removing this worktree should demand its name typed out.
+    ///
+    /// Only when there is uncommitted or untracked work in it. Everything
+    /// committed survives in the branch, which removal never touches, so a
+    /// clean worktree is recoverable by re-adding it.
+    ///
+    /// Demanding the name every time is worse than demanding it sometimes:
+    /// people type it without reading it, and then the one gesture meant to
+    /// stop a mistake is the mistake's accomplice.
+    ///
+    /// A worktree whose directory is already gone is not dirty and cannot be
+    /// inspected, so it needs no confirmation either — there is nothing left
+    /// to lose.
+    pub async fn removal_needs_confirmation(&self, id: Uuid) -> Result<bool> {
+        let ws = self.store.get_workspace(id)?;
+        if !std::path::Path::new(&ws.worktree_path).is_dir() {
+            return Ok(false);
+        }
+        // A worktree we cannot inspect is treated as dirty. Guessing "clean"
+        // here would skip the confirmation on exactly the repositories where
+        // something is already wrong.
+        Ok(git::is_dirty(std::path::Path::new(&ws.worktree_path)).await.unwrap_or(true))
+    }
+
     /// Remove a workspace's worktree.
     ///
     /// The most destructive action in the product. Refused while any managed
-    /// terminal is running, and it never deletes the branch: git history and
-    /// anything pushed survive untouched. A dirty worktree still requires the
-    /// caller to have confirmed, which the client enforces by demanding the
-    /// exact workspace name.
+    /// terminal is running OR starting, matching `remove_terminal` exactly —
+    /// a terminal mid-launch is exactly as alive as one already confirmed.
+    /// Also refused outright when the tmux inventory cannot be trusted at
+    /// all: `derive_terminal` reports EVERY terminal as `Lost` when the
+    /// inventory is unhealthy (`crates/core/src/derive.rs`), which would
+    /// otherwise let a momentarily unreachable tmux server sail straight past
+    /// the running check and delete the directory out from under a process
+    /// that may still be alive — exactly what `remove_root`'s identical guard
+    /// exists to prevent.
+    ///
+    /// It never deletes the branch: git history and anything pushed survive
+    /// untouched. A dirty worktree still requires the caller to have
+    /// confirmed, decided by `removal_needs_confirmation`.
     pub async fn remove_worktree(&self, id: Uuid) -> Result<()> {
         let ws = self.store.get_workspace(id)?;
-        let view = self.workspace_view(&ws).await?;
+        let repo = self.store.get_repository(ws.repository_id)?;
+        let repo_path = self.repository_worktree(&repo);
 
-        if view.terminals.iter().any(|t| t.state() == TerminalState::Running) {
+        // Never the repository's own checkout. The flag comes from git's own
+        // worktree list, so this does not depend on a path comparison
+        // agreeing with however the repository was registered.
+        if ws.is_main_checkout {
+            return Err(DomainError::InvalidArgument { what: "the main checkout" });
+        }
+
+        // A second, independent check of the same fact, kept alongside the
+        // flag rather than in place of it. Migration 0006 added
+        // `is_main_checkout` with `DEFAULT 0`, so on any database written
+        // before this feature existed the main checkout's row says it is an
+        // ordinary worktree until `reconcile::repository` runs and heals it
+        // -- and the flag can end up wrong for other reasons a future bug
+        // might introduce, too. Comparing paths directly means this refusal
+        // never depends on that flag having been correct, so the only thing
+        // standing between a stale row and deleting the directory the user
+        // works in is never just git's own refusal to remove its primary
+        // working tree -- which is precisely the safety net this check
+        // exists to not rely on.
+        if canonical_or_raw(&ws.worktree_path) == canonical_or_raw(&repo_path.to_string_lossy()) {
+            return Err(DomainError::InvalidArgument { what: "the main checkout" });
+        }
+
+        // Refused outright if the tmux inventory cannot be trusted at all.
+        // Must come before the running check below, since an unhealthy
+        // inventory is exactly what would make that check lie.
+        if !self.inventory_snapshot().inventory_healthy {
+            return Err(DomainError::TmuxUnavailable);
+        }
+
+        let view = self.workspace_view(&ws).await?;
+        if view
+            .terminals
+            .iter()
+            .any(|t| matches!(t.state(), TerminalState::Running | TerminalState::Starting))
+        {
             return Err(DomainError::RunningProcesses);
         }
 
-        let repo = self.store.get_repository(ws.repository_id)?;
-        let repo_path = self.repository_worktree(&repo);
-        let dest = PathBuf::from(&ws.worktree_path);
+        let lock = self.repo_lock(repo.id);
+        let _guard = lock.lock().await;
 
-        // Never the repository's own checkout. `main_workspace` can adopt it so
-        // a terminal can be opened there, and the moment that record exists
-        // this operation is one click from `git worktree remove --force` on the
-        // directory the person actually works in. git would refuse, but relying
-        // on that is relying on an error message to be a safety feature.
-        if canonical_or_raw(&dest.to_string_lossy())
-            == canonical_or_raw(&repo_path.to_string_lossy())
-        {
-            return Err(DomainError::InvalidArgument { what: "the main checkout" });
-        }
+        let dest = PathBuf::from(&ws.worktree_path);
 
         let out = git::git(
             &repo_path,
@@ -1386,7 +1456,12 @@ impl Service {
             .map(|v| (to_record(&v.terminal), v.derived.clone()))
             .collect();
 
-        let state = derive::derive_workspace(ws.archived, ws.creation_failed, &pairs);
+        let state = derive::derive_workspace(
+            ws.hidden,
+            ws.worktree_missing,
+            ws.creation_failed,
+            &pairs,
+        );
 
         Ok(WorkspaceView { workspace: ws.clone(), state, terminals: views })
     }
@@ -1551,7 +1626,7 @@ mod tests {
             .unwrap();
         service
             .store
-            .create_workspace(repo.id, "task", "branch", &worktree.display().to_string())
+            .create_workspace(repo.id, "task", "branch", &worktree.display().to_string(), false)
             .unwrap()
     }
 
@@ -1578,6 +1653,50 @@ mod tests {
         std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main").unwrap();
         let hits = service.search_worktree_files(ws.id, "", 500).await.unwrap();
         assert!(!hits.iter().any(|p| p.starts_with(".git/")), "{hits:?}");
+    }
+
+    /// Hiding never consults terminal state at all — proven structurally,
+    /// since a genuinely `Running` derived state cannot be manufactured
+    /// here.
+    ///
+    /// This is a store-level fixture with no live tmux pane behind it, so a
+    /// terminal created with `TerminalIntent::Running` derives `Starting`,
+    /// not `Running` (see `a_starting_terminal_blocks_removal_same_as_a_running_one`
+    /// below, which asserts exactly that for the identical call — the old
+    /// `archive_workspace` guard checked `== TerminalState::Running` only,
+    /// so this scenario would not have been refused under the old code
+    /// either). What this test can honestly prove instead: the workspace is
+    /// demonstrably not idle — `workspace_view` reports it `Active`, the
+    /// same state a truly running terminal would produce — and `hide_workspace`
+    /// still succeeds unconditionally, because it never reads terminal state
+    /// in the first place. The case of a truly `Running` terminal needs a
+    /// live pane and belongs in an integration test with real tmux instead.
+    #[tokio::test]
+    async fn hiding_does_not_consult_terminal_state() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        svc.store
+            .create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+
+        let view = svc.workspace_view(&ws).await.unwrap();
+        assert_eq!(
+            view.state,
+            WorkspaceState::Active,
+            "the workspace must actually carry something alive for this test to mean anything: {view:?}"
+        );
+
+        let hidden = svc.hide_workspace(ws.id).await.unwrap();
+        assert!(hidden.hidden);
+
+        let back = svc.unhide_workspace(hidden.id).await.unwrap();
+        assert!(!back.hidden);
     }
 }
 
@@ -1728,7 +1847,7 @@ mod preset_tests {
 /// differently — a symlinked home, a trailing slash, `/var` against
 /// `/private/var`. A path that no longer exists cannot be canonicalised, and
 /// falling back to the raw string keeps it comparable with itself.
-fn canonical_or_raw(path: &str) -> PathBuf {
+pub fn canonical_or_raw(path: &str) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path))
 }
 
@@ -1746,4 +1865,298 @@ mod chat_capability_tests {
         assert!(!CHAT_CAPABLE.contains(&"codex"));
         assert!(!CHAT_CAPABLE.contains(&"cursor"));
     }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    /// Two calls for the same repository get the same lock; different
+    /// repositories do not block each other.
+    ///
+    /// The identity matters more than it looks: a lock built fresh per call
+    /// would compile, pass a casual reading, and serialize nothing at all.
+    #[tokio::test]
+    async fn one_lock_per_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = Service::open_in(dir.path().to_path_buf()).await.unwrap();
+
+        let a = Uuid::now_v7();
+        let b = Uuid::now_v7();
+
+        assert!(Arc::ptr_eq(&svc.repo_lock(a), &svc.repo_lock(a)), "same repository, same lock");
+        assert!(!Arc::ptr_eq(&svc.repo_lock(a), &svc.repo_lock(b)), "one repository never blocks another");
+
+        let held = svc.repo_lock(a).lock_owned().await;
+        assert!(svc.repo_lock(a).try_lock().is_err(), "a held lock excludes a second holder");
+        assert!(svc.repo_lock(b).try_lock().is_ok(), "and only that repository");
+        drop(held);
+    }
+}
+
+#[cfg(test)]
+mod remove_root_tests {
+    use super::*;
+
+    /// A registered repository with one workspace already in it, all created
+    /// through the store directly. `remove_root` never touches git, so a
+    /// store-level fixture is enough — the point of these tests is the
+    /// refusal logic, not worktree mechanics.
+    async fn fixture_with_workspace() -> (Service, models::RepositoryRoot, models::Workspace) {
+        let dir = tempfile::tempdir().unwrap().keep();
+        let service = Service::open_in(dir).await.unwrap();
+        let root = service
+            .store
+            .create_repository_root(service.host_id, "/tmp/remove-root-tests", now_millis())
+            .unwrap();
+        let repository = service
+            .store
+            .create_repository(service.host_id, root.id, "repo", "/tmp/remove-root-tests/.git", "")
+            .unwrap();
+        let workspace = service
+            .store
+            .create_workspace(repository.id, "main", "main", "/tmp/remove-root-tests", true)
+            .unwrap();
+        (service, root, workspace)
+    }
+
+    /// A terminal that was just created and has never been confirmed alive
+    /// derives `Starting`, not `Running` — created here through the store
+    /// directly with no tmux window behind it, so it stays that way as long
+    /// as the inventory itself is healthy (true here: `Service::open_in`
+    /// refreshes against a real, if idle, private tmux server on startup).
+    /// `remove_root` must refuse rather than delete its record.
+    ///
+    /// Honest note on what this does and does not isolate: the up-front check
+    /// in `remove_root` was widened from `Running` alone to `Running |
+    /// Starting`, matching `remove_terminal`. But `remove_terminal` — which
+    /// the delete loop now calls for every terminal, and which already
+    /// refused `Running | Starting` before this fix — provides the same
+    /// refusal as a second, independent enforcement of the identical rule
+    /// during deletion. So this test proves the OUTCOME the fix exists to
+    /// guarantee (a starting terminal's record is never silently deleted),
+    /// but does not by itself distinguish "caught by the up-front check" from
+    /// "caught by `remove_terminal` a moment later" — flipping the up-front
+    /// check back to `Running` alone does not turn this red, because the
+    /// second guard still catches it. Confirmed by hand rather than left
+    /// implied.
+    #[tokio::test]
+    async fn a_starting_terminal_blocks_removal_same_as_a_running_one() {
+        let (service, root, workspace) = fixture_with_workspace().await;
+        assert!(
+            service.inventory_snapshot().inventory_healthy,
+            "this test needs a healthy inventory to mean anything"
+        );
+
+        let term = service
+            .store
+            .create_terminal(workspace.id, "shell", "shell", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        let derived = service.derive_one(&term);
+        assert_eq!(
+            derived.state,
+            TerminalState::Starting,
+            "an unconfirmed terminal with no pane must derive as starting, not running, for \
+             this test to prove what it claims to: {derived:?}"
+        );
+
+        match service.remove_root(root.id).await {
+            Err(DomainError::RunningProcesses) => {}
+            other => panic!("expected RunningProcesses for a starting terminal, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod remove_worktree_tests {
+    use super::*;
+
+    /// Uncommitted work is the whole reason the typed confirmation exists;
+    /// a worktree with none of it needs no typed name at all.
+    #[tokio::test]
+    async fn a_clean_worktree_needs_no_typed_confirmation() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let side = dir.path().join("side");
+        git::git(
+            &dir.path().join("repo"),
+            &["worktree", "add", "-q", "-b", "feat/side", side.to_str().unwrap()],
+        )
+        .await
+        .unwrap();
+        crate::reconcile::repository(&svc, repo).await.unwrap();
+
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| !w.is_main_checkout)
+            .unwrap();
+
+        assert!(!svc.removal_needs_confirmation(ws.id).await.unwrap());
+    }
+
+    /// Uncommitted work is the whole reason the typed confirmation exists.
+    #[tokio::test]
+    async fn a_dirty_worktree_demands_the_name() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let side = dir.path().join("side");
+        git::git(
+            &dir.path().join("repo"),
+            &["worktree", "add", "-q", "-b", "feat/side", side.to_str().unwrap()],
+        )
+        .await
+        .unwrap();
+        std::fs::write(side.join("scratch.txt"), "work in progress").unwrap();
+        crate::reconcile::repository(&svc, repo).await.unwrap();
+
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| !w.is_main_checkout)
+            .unwrap();
+
+        assert!(svc.removal_needs_confirmation(ws.id).await.unwrap());
+    }
+
+    /// A worktree whose directory is already gone cannot be inspected for
+    /// dirt, and there is nothing left in it to lose either way — so it must
+    /// need no confirmation. This is deliberate: it is how a "worktree gone"
+    /// row gets dismissed without ever asking for a name to type.
+    #[tokio::test]
+    async fn a_worktree_whose_directory_is_already_gone_needs_no_confirmation() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let side = dir.path().join("side");
+        git::git(
+            &dir.path().join("repo"),
+            &["worktree", "add", "-q", "-b", "feat/side", side.to_str().unwrap()],
+        )
+        .await
+        .unwrap();
+        crate::reconcile::repository(&svc, repo).await.unwrap();
+
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| !w.is_main_checkout)
+            .unwrap();
+
+        std::fs::remove_dir_all(&side).unwrap();
+
+        assert!(!svc.removal_needs_confirmation(ws.id).await.unwrap());
+    }
+
+    /// `remove_worktree` must refuse a `Starting` terminal exactly as it
+    /// refuses a `Running` one, matching `remove_terminal`'s own guard. Built
+    /// the same way `remove_root_tests::a_starting_terminal_blocks_removal_same_as_a_running_one`
+    /// is: a terminal created through the store directly, with no live pane
+    /// behind it, derives `Starting` rather than `Running` as long as the
+    /// inventory itself is healthy.
+    #[tokio::test]
+    async fn a_starting_terminal_blocks_worktree_removal_same_as_a_running_one() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let side = dir.path().join("side");
+        git::git(
+            &dir.path().join("repo"),
+            &["worktree", "add", "-q", "-b", "feat/side", side.to_str().unwrap()],
+        )
+        .await
+        .unwrap();
+        crate::reconcile::repository(&svc, repo).await.unwrap();
+
+        assert!(
+            svc.inventory_snapshot().inventory_healthy,
+            "this test needs a healthy inventory to mean anything"
+        );
+
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| !w.is_main_checkout)
+            .unwrap();
+
+        let term = svc
+            .store
+            .create_terminal(ws.id, "shell", "shell", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        let derived = svc.derive_one(&term);
+        assert_eq!(
+            derived.state,
+            TerminalState::Starting,
+            "an unconfirmed terminal with no pane must derive as starting, not running, for \
+             this test to prove what it claims to: {derived:?}"
+        );
+
+        match svc.remove_worktree(ws.id).await {
+            Err(DomainError::RunningProcesses) => {}
+            other => panic!("expected RunningProcesses for a starting terminal, got {other:?}"),
+        }
+    }
+
+    /// The main checkout is refused by `ws.is_main_checkout`, a fact read
+    /// straight from `git worktree list`, not by comparing paths.
+    #[tokio::test]
+    async fn the_main_checkout_is_never_removable() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| w.is_main_checkout)
+            .unwrap();
+
+        match svc.remove_worktree(ws.id).await {
+            Err(DomainError::InvalidArgument { what }) => assert_eq!(what, "the main checkout"),
+            other => panic!("expected InvalidArgument(\"the main checkout\"), got {other:?}"),
+        }
+    }
+
+    /// The upgraded-database case: migration 0006 added `is_main_checkout`
+    /// with `DEFAULT 0`, so a database written before this feature existed
+    /// has the main checkout's row saying "not main" — and
+    /// `set_workspace_is_main_checkout` is used here to put a row into
+    /// exactly that state deliberately, standing in for that database,
+    /// rather than relying on `ws.is_main_checkout` ever having been right.
+    /// The path comparison in `remove_worktree` must refuse it anyway.
+    ///
+    /// Deleting that path check (and keeping only the `ws.is_main_checkout`
+    /// guard above it) turns this red, since the row's flag is false here on
+    /// purpose. Verified by hand.
+    #[tokio::test]
+    async fn a_wrong_flag_does_not_defeat_the_path_backstop() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| w.is_main_checkout)
+            .unwrap();
+
+        let ws =
+            svc.store.set_workspace_is_main_checkout(ws.id, ws.resource_version, false).unwrap();
+        assert!(!ws.is_main_checkout, "the test must start from the wrong flag to mean anything");
+
+        match svc.remove_worktree(ws.id).await {
+            Err(DomainError::InvalidArgument { what }) => assert_eq!(what, "the main checkout"),
+            other => panic!("expected InvalidArgument(\"the main checkout\"), got {other:?}"),
+        }
+    }
+
+    // No test here for the unhealthy-inventory refusal (`TmuxUnavailable`).
+    // `Service::inventory` is a concrete `LiveInventory`, not a trait object —
+    // there is no seam to hand it a `FakeInventory::unavailable()` the way
+    // `derive::tests` can for the pure derivation rule. Forcing it unhealthy
+    // for real would mean starving or killing the private tmux server a
+    // `fixture()` service just started, which is exactly the kind of live-tmux
+    // dependency this task was told not to chase. The guard is exercised
+    // instead by direct code inspection against `remove_root`'s identical
+    // check, which this was copied from.
 }

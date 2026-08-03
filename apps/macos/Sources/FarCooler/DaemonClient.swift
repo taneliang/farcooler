@@ -61,6 +61,9 @@ final class DaemonClient: ObservableObject {
                     self?.layouts[event.workspace] = event.groups
                 }
             },
+            onFleet: { [weak self] in
+                Task { @MainActor in await self?.refresh() }
+            },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     self?.eventStream = nil
@@ -426,25 +429,6 @@ final class DaemonClient: ObservableObject {
         return list.groups
     }
 
-    /// Worktrees on disk that Far Cooler does not know about yet.
-    func existingWorktrees(project: String) async -> [ExistingWorktree] {
-        guard let data = await run(["workspace", "discover", project, "--json"]) else { return [] }
-        return (try? JSONDecoder().decode(WorktreeList.self, from: data))?.worktrees ?? []
-    }
-
-    /// Register worktrees that already exist. Returns how many were taken.
-    ///
-    /// Not all-or-nothing: importing six where one has been deleted underneath
-    /// us should still import five, so the count comes from re-reading rather
-    /// than from assuming the request succeeded.
-    func importWorktrees(_ worktrees: [ExistingWorktree], project: String) async -> Int {
-        guard !worktrees.isEmpty else { return 0 }
-        let before = fleet.workspaces.count
-        _ = await run(["workspace", "import", project] + worktrees.map(\.path))
-        await refresh()
-        return max(fleet.workspaces.count - before, 0)
-    }
-
     /// Branches in a project that work could be resumed on.
     func branches(project: String) async -> [BranchInfo] {
         guard let data = await run(["workspace", "branches", project, "--json"]) else { return [] }
@@ -526,34 +510,63 @@ final class DaemonClient: ObservableObject {
         await refresh()
     }
 
-    /// The repository's own checkout, as a workspace, so a terminal can run
-    /// there. Idempotent — the daemon returns the same record every time.
-    ///
-    /// Returns its short id, because the only thing the caller does next is
-    /// open a terminal in it.
-    func mainWorkspace(repo: String) async -> String? {
-        guard let data = await run(["--json", "workspace", "main", repo]),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let id = body["id"] as? String
-        else { return nil }
-        await refresh()
-        // The fleet speaks in short ids everywhere else.
-        return fleet.workspaces.first(where: { $0.id == id })?.short
-    }
-
-    func archiveWorkspace(_ workspace: String) async {
-        _ = await run(["workspace", "archive", workspace])
+    func hideWorkspace(_ workspace: String) async {
+        _ = await run(["workspace", "hide", workspace])
         await refresh()
     }
 
-    /// Remove a worktree. `confirm` must be the workspace's exact task name.
+    func unhideWorkspace(_ workspace: String) async {
+        _ = await run(["workspace", "unhide", workspace])
+        await refresh()
+    }
+
+    /// What asking the daemon to remove a worktree came back with.
+    enum RemoveWorktreeResult {
+        case ok
+        /// The daemon needs the typed workspace name because the worktree is
+        /// dirty (`DomainError::ConfirmationRequired`). Carries no message:
+        /// the sheet has fixed wording for this one specific refusal.
+        case confirmationRequired
+        /// Refused for any other reason — running terminals, tmux
+        /// unavailable, a failed `git worktree remove` — carrying the
+        /// daemon's own message so the sheet can show what actually went
+        /// wrong instead of guessing "uncommitted work".
+        case failed(String)
+    }
+
+    /// Remove a worktree. `confirm` must be the workspace's exact task name,
+    /// unless the worktree is clean (or its directory is already gone), in
+    /// which case it may be empty and is omitted entirely — Task 8 made
+    /// `--confirm` optional on the CLI side for exactly this.
     ///
     /// Forwarded rather than checked only here: the daemon refuses a mismatch
     /// itself, so the dialog is a courtesy and the daemon's check is the one
     /// that actually protects the files.
-    func removeWorktree(_ workspace: String, confirm: String) async {
-        _ = await run(["workspace", "remove-worktree", workspace, "--confirm", confirm])
+    ///
+    /// Distinguishes "confirmation required" from every other refusal the
+    /// same way `setPaneMode` distinguishes its own: a non-zero exit alone
+    /// does not mean the worktree is dirty, and reporting every refusal —
+    /// `RunningProcesses`, `TmuxUnavailable`, a failed `git worktree remove`
+    /// — as "there is uncommitted work here" tells the user to type a name
+    /// that will never make the real problem go away.
+    @discardableResult
+    func removeWorktree(_ workspace: String, confirm: String) async -> RemoveWorktreeResult {
+        var args = ["workspace", "remove-worktree", workspace]
+        if !confirm.isEmpty { args += ["--confirm", confirm] }
+
+        let before = lastError
+        guard await run(args) != nil else {
+            let message = lastError ?? "command failed"
+            if message.localizedCaseInsensitiveContains("confirmation") {
+                // Leave the banner clean: this refusal becomes the sheet's
+                // own field and callout, not a banner behind it.
+                lastError = before
+                return .confirmationRequired
+            }
+            return .failed(message)
+        }
         await refresh()
+        return .ok
     }
 
     /// The rendered visible screen, colour escapes intact.
