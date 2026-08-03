@@ -237,10 +237,10 @@ The first slice may ship separate `farcoolerd` and `farcooler` executables from 
 
 ### Mac packaging and daemon lifecycle
 
-The Mac-first slice targets macOS 13 or later and ships one native `FarCooler.app` containing the Swift client, Rust daemon, Rust CLI, LaunchAgent property list, protobuf descriptors, and the terminal core static library:
+The Mac-first slice targets macOS 13 or later and ships one native `Far Cooler.app` containing the Swift client, Rust daemon, Rust CLI, LaunchAgent property list, protobuf descriptors, and the terminal core static library:
 
 ```text
-FarCooler.app/
+Far Cooler.app/
 └── Contents/
     ├── MacOS/Far Cooler
     ├── Resources/farcoolerd
@@ -980,7 +980,7 @@ Onboarding requires no physical presence at the host. With working SSH access an
 
 1. In the app, add a host by entering its SSH target: a tailnet MagicDNS name, an address, or an existing `ssh_config` alias, plus a bastion or `ProxyJump` if the user's configuration names one.
 2. Verify and accept the host-key fingerprint on first use, then authenticate with an existing key, agent, or host-permitted password.
-3. The app checks whether a compatible daemon is already running. If none is installed and the host is Linux or WSL2, it offers `farcooler host install`, which verifies the binary checksum, installs the `systemd --user` unit, and runs `loginctl enable-linger` so the daemon runs with nobody logged in. A macOS host installs `FarCooler.app` instead.
+3. The app checks whether a compatible daemon is already running. If none is installed and the host is Linux or WSL2, it offers `farcooler host install`, which verifies the binary checksum, installs the `systemd --user` unit, and runs `loginctl enable-linger` so the daemon runs with nobody logged in. A macOS host installs `Far Cooler.app` instead.
 4. The app generates a device key in the Keychain and enrolls it at the chosen scope. It uses only the device key from this point forward, and the bootstrap credential is never stored.
 5. The host appears with its health, route, and daemon version.
 6. Add an allowlisted repository root.

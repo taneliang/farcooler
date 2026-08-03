@@ -88,7 +88,7 @@ the results to a GitHub release:
 
 - Linux `x86_64` and `aarch64`, static musl, in the `dist/<arch>-linux/` layout
   `farcooler host install` already reads
-- `FarCooler.app`, signed and notarised if the secrets are present
+- `Far Cooler.app`, signed and notarised if the secrets are present
 - iOS to TestFlight
 
 Signing is conditional throughout. Without a Developer ID the Mac job still

@@ -105,7 +105,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k actions "$keychain"
           rm certificate.p12
 
-      - name: Build FarCooler.app
+      - name: Build Far Cooler.app
         run: apps/macos/build-app.sh
         env:
           FARCOOLER_WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
@@ -118,7 +118,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          app=apps/macos/build/FarCooler.app
+          app='apps/macos/build/Far Cooler.app'
           # --deep is deprecated and wrong for a bundle carrying its own
           # binaries: the CLI and daemon inside Resources are separate
           # executables and each needs its own signature and hardened runtime.
@@ -129,8 +129,8 @@ jobs:
           codesign --force --options runtime --timestamp \
             --sign "$MACOS_SIGN_IDENTITY" "$app"
 
-          ditto -c -k --keepParent "$app" FarCooler.zip
-          xcrun notarytool submit FarCooler.zip \
+          ditto -c -k --keepParent "$app" 'Far Cooler.zip'
+          xcrun notarytool submit 'Far Cooler.zip' \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
@@ -139,11 +139,11 @@ jobs:
           # it runs — otherwise Gatekeeper has to phone home and a plane is
           # exactly where someone tries a new tool.
           xcrun stapler staple "$app"
-          rm FarCooler.zip
+          rm 'Far Cooler.zip'
 
       - name: Package
         run: |
-          ditto -c -k --keepParent apps/macos/build/FarCooler.app \
+          ditto -c -k --keepParent 'apps/macos/build/Far Cooler.app' \
             "Far Cooler-$(scripts/version.sh)-macos.zip"
 
       - uses: actions/upload-artifact@v4

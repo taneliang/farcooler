@@ -84,14 +84,14 @@ jobs:
       # The full bundle, not `swift build`. `build-app.sh` is the thing that has
       # gone wrong before — it once copied a stale Rust binary instead of
       # building one — so the assembly step is what CI should exercise.
-      - name: Build FarCooler.app
+      - name: Build Far Cooler.app
         run: apps/macos/build-app.sh
 
       - name: Check the bundle is stamped with this commit's version
         run: |
           expected="$(scripts/version.sh)"
           actual="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-            apps/macos/build/FarCooler.app/Contents/Info.plist)"
+            'apps/macos/build/Far Cooler.app/Contents/Info.plist')"
           [ "$expected" = "$actual" ] || {
             echo "bundle says $actual, the workspace says $expected"; exit 1; }
 
@@ -103,7 +103,7 @@ jobs:
       # process exited 0. The regression it names would have sailed through.
       - name: Check the CLI and daemon agree
         run: |
-          resources=apps/macos/build/FarCooler.app/Contents/Resources
+          resources='apps/macos/build/Far Cooler.app/Contents/Resources'
           cli="$("$resources/farcooler" --version | awk '{print $2}')"
           daemon="$("$resources/farcoolerd" --version | awk '{print $2}')"
           echo "cli $cli / daemon $daemon"

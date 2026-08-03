@@ -136,7 +136,7 @@ final class ServiceRegistration: ObservableObject {
 
 /// Drive registration from the command line, for checking it without a window.
 ///
-///     FARCOOLER_SERVICE_PROBE=status ./FarCooler.app/Contents/MacOS/Far Cooler
+///     FARCOOLER_SERVICE_PROBE=status './Far Cooler.app/Contents/MacOS/Far Cooler'
 ///
 /// Login-item registration is one of those things that behaves differently for
 /// a signed app, an ad-hoc-signed one, and a bare executable. A probe makes
