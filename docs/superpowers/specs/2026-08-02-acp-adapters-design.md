@@ -260,8 +260,28 @@ could not get past sign-in. codex, cursor-agent, opencode and claude are all
 installed on this machine, so opencode's rules get read off a running agent and
 cursor's finally get verified rather than assumed.
 
-**Integration, one per built-in.** Spawn the adapter for real and assert that
-`initialize` and `session/new` complete. This is the test that would have caught
-the deprecated `@zed-industries/codex-acp` before it shipped, and the only kind
-that can. Marked `#[ignore]` so a machine without the CLIs installed still has a
-green suite, and run deliberately.
+**Integration, one per built-in — and not ignored.** There is not a single
+`#[ignore]` in the workspace today and this design does not add the first. CI
+runs `cargo test --workspace` on a matrix, so these run there too.
+
+Two tests, split by what each actually needs:
+
+*Package health.* For every built-in launched through `npx`, resolve the package
+against the npm registry and fail if it is deprecated. This is the deprecation
+trap stated directly: it is exactly what `@zed-industries/codex-acp` would have
+tripped, and unlike a spawn it is fast and deterministic.
+
+*Handshake.* Spawn each built-in adapter and assert ACP `initialize` completes.
+
+It asserts `initialize` and deliberately **not** `session/new`. The handshake
+proves the adapter exists, starts and speaks the protocol, which is the whole
+question. `session/new` additionally needs the underlying CLI authenticated and
+able to reach a model provider — untestable in CI, and a failure there would say
+nothing about whether Far Cooler wired the adapter up correctly.
+
+Nothing is skipped when a program is missing; a missing program is a failure.
+Three of the four built-ins are `npx` packages and therefore need only node and
+a network, which CI has. The fourth, opencode, is a native binary, so CI gains
+an install step for it — alongside the one it already has for tmux. A test that
+quietly skips itself on the machines where it matters is `#[ignore]` wearing a
+different hat.
