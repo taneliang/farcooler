@@ -23,7 +23,7 @@ import SwiftUI
 /// bindings means the tiling has no learning curve for them at all.
 ///
 /// ⌃B ⌃B sends a literal ⌃B through, exactly as tmux does, so running tmux inside
-/// an Far Cooler pane still works.
+/// a Far Cooler pane still works.
 ///
 /// Moving between panes is the one thing bound WITHOUT the prefix, because it is
 /// the one thing done constantly: ⌃hjkl, as vim-tmux-navigator taught everyone.

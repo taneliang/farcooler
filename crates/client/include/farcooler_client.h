@@ -1,7 +1,7 @@
 /*
  * Far Cooler client core — the C ABI.
  *
- * The whole of "talk to an Far Cooler host", for clients that are not the host:
+ * The whole of "talk to a Far Cooler host", for clients that are not the host:
  * SSH transport, protocol, and the shapes of the answers. iOS and Android
  * consume this; the Mac app and CLI can shell out to `ssh` instead, but a phone
  * has no `ssh` binary and no way to run one.

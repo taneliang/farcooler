@@ -61,7 +61,7 @@ pub enum ToggleRefusal {
 ///
 /// SHORT, and that is not tidiness. A Unix socket path cannot exceed
 /// `sun_path` — 104 bytes on macOS — and the default runtime directory is
-/// `~/Library/Application Support/com.farcooler.FarCooler`, which is already
+/// `~/Library/Application Support/com.farcooler.Far Cooler`, which is already
 /// 66 of them. A full uuid took the total to 113: `bind` failed, the daemon
 /// never listened, the shim dialled a socket nobody was on, and the chat sat
 /// blank forever with the pane cheerfully reporting "connected". It worked in

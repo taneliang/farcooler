@@ -17,6 +17,26 @@ enum Grid {
     /// children appeared to hang outside the workspace containing them. That is
     /// what made the list feel off balance: the indent said one thing and the
     /// highlight said the opposite.
+    /// The sidebar's outer edge.
+    ///
+    /// The search field, the header above it and every `+` in the column share
+    /// this, because they are the sidebar's chrome — the list's own titles sit
+    /// deeper, on `rail`. Three hand-tuned constants used to do this job and
+    /// they had drifted to three different edges.
+    static let edge: CGFloat = 14
+
+    /// What `.menuStyle(.borderlessButton)` insets its own label by.
+    ///
+    /// Invisible, unavoidable, and only partly correctable. A trailing `+`
+    /// lands on `edge` once this is cancelled. A LEADING label does not: the
+    /// control clamps how far a negative pad may move it, so the machine picker
+    /// still sits about 9pt inside the search field below it. Closing that last
+    /// gap means not using `Menu` for the picker at all — a plain `Button`
+    /// presenting an `NSMenu` — which is a deliberate change, not a padding
+    /// tweak, and is why this constant stops where it does.
+    static let menuChromeLeading: CGFloat = 9
+    static let menuChrome: CGFloat = 5
+
     static let margin: CGFloat = 6
 
     /// The disclosure chevron's column — a gutter, like every outline view.
@@ -280,7 +300,7 @@ struct ProjectHeader: View {
                     }
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.tertiary)
                 }
                 .menuStyle(.borderlessButton)
@@ -291,10 +311,22 @@ struct ProjectHeader: View {
                 // column of plus signs down a list that is meant to read as
                 // quiet section labels.
                 .opacity(hovering ? 1 : 0)
+                .padding(.trailing, -Grid.menuChrome)
                 .help("Add to \(name)")
             }
         }
-        .padding(.horizontal, Grid.margin + Grid.chevron)
+        // The title on the rail it shares with every workspace name.
+        //
+        // The `+` is trickier and the number is measured rather than derived.
+        // This row lives inside a `ScrollView`'s content, the sidebar header's
+        // `+` does not, and the difference between them is not the 8pt inset
+        // that content carries — it is consistently 9pt more than any padding
+        // arithmetic here predicts. Three attempts to derive it landed the
+        // button visibly left of the one it has to line up with; this is what
+        // actually puts them in the same column. Verified by screenshot, which
+        // is the only thing that settles it.
+        .padding(.leading, Grid.margin + Grid.chevron)
+        .padding(.trailing, Grid.edge - 8 - 9)
         .padding(.top, 14)
         .padding(.bottom, 3)
         .contentShape(Rectangle())

@@ -313,8 +313,14 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            sidebarHeader
-            searchField
+            // The chrome above the list, sharing ONE edge. They used to carry
+            // their own horizontal padding — 14 on the search field, the title
+            // rail on the header — and drifted apart by a step nobody chose.
+            VStack(spacing: 0) {
+                sidebarHeader
+                searchField
+            }
+            .padding(.horizontal, Grid.edge)
 
             if client.fleet.workspaces.isEmpty {
                 fleetPlaceholder
@@ -401,7 +407,6 @@ struct ContentView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
-        .padding(.horizontal, 14)
         .padding(.bottom, 6)
     }
 
@@ -464,14 +469,12 @@ struct ContentView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .padding(.trailing, -Grid.menuChrome)
             .help("Add a workspace, a repository, or a machine")
         }
-        // The same rail as `ProjectHeader` and every workspace name below it.
-        // It used to carry an extra 8pt, tuned when this was a plain `Text`;
-        // once it became a menu the label picked up the control's own inset on
-        // top of that and the whole band sat visibly right of its column.
-        .padding(.leading, Grid.rail)
-        .padding(.trailing, 14)
+        // The sidebar's edge, shared with the search field directly below —
+        // they are the two pieces of chrome above the list and a reader sees
+        // them stacked. The list's own titles sit deeper, on `Grid.rail`.
         .padding(.top, 12)
         .padding(.bottom, 8)
     }

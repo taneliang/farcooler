@@ -15,17 +15,17 @@ let repoRoot = URL(fileURLWithPath: #filePath)
 let rustLibDir = repoRoot.appendingPathComponent("target/release").path
 
 let package = Package(
-    name: "FarCooler",
+    name: "Far Cooler",
     platforms: [.macOS("26.0")],
     dependencies: [.package(path: "../shared/AgentKit")],
     targets: [
         // The Rust terminal core. One emulator, in the language the daemon
-        // already speaks, behind an Far Cooler-owned C ABI — so the same core
+        // already speaks, behind a Far Cooler-owned C ABI — so the same core
         // serves Mac, iOS and Android, and each platform writes only a
         // renderer. See crates/vt.
         .systemLibrary(name: "CFarCoolerVT", path: "Sources/CFarCoolerVT"),
         .executableTarget(
-            name: "FarCooler",
+            name: "Far Cooler",
             dependencies: ["CFarCoolerVT", .product(name: "AgentKit", package: "AgentKit")],
             path: "Sources/FarCooler",
             linkerSettings: [

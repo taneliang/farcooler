@@ -1,6 +1,6 @@
 import Foundation
 
-// Ported from apps/macos/Sources/Far Cooler/QuickCreate.swift (`Branch`) and
+// Ported from apps/macos/Sources/FarCooler/QuickCreate.swift (`Branch`) and
 // Composer.swift (`Agents`). Pure logic, no UI and no host calls, so it can be
 // copied verbatim rather than re-derived: the whole point is that a phone and
 // a Mac describing the same task land on the same branch name and offer the

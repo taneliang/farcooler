@@ -728,8 +728,8 @@ git commit -m "feat(agentkit): one parse of slash and at, so both apps pop the s
 
 **Files:**
 - Modify: `crates/client/src/session.rs`
-- Modify: `apps/macos/Sources/Far Cooler/Model.swift`
-- Modify: `apps/ios/Far Cooler/Model.swift`
+- Modify: `apps/macos/Sources/FarCooler/Model.swift`
+- Modify: `apps/ios/FarCooler/Model.swift`
 
 **Interfaces:**
 - Produces: `paneMode`, `agentSessionId`, `agentMode`, `availableAgentModes` on the Swift `Terminal` in both apps.
@@ -785,7 +785,7 @@ Add to the JSON object built around line 183:
                             "availableAgentModes": t.available_agent_modes.clone(),
 ```
 
-Add to `struct Terminal` in BOTH `apps/macos/Sources/Far Cooler/Model.swift` and `apps/ios/Far Cooler/Model.swift`:
+Add to `struct Terminal` in BOTH `apps/macos/Sources/FarCooler/Model.swift` and `apps/ios/FarCooler/Model.swift`:
 
 ```swift
     /// What this terminal's pane is hosting. Absent on older daemons, which is
@@ -810,7 +810,7 @@ Then: `cd apps/macos && swift build`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/client apps/macos/Sources/Far Cooler/Model.swift apps/ios/Far Cooler/Model.swift
+git add crates/client apps/macos/Sources/FarCooler/Model.swift apps/ios/FarCooler/Model.swift
 git commit -m "feat(client): a terminal says which surface to draw"
 ```
 
@@ -821,12 +821,12 @@ git commit -m "feat(client): a terminal says which surface to draw"
 **Files:**
 - Modify: `crates/client/src/session.rs`
 - Modify: `crates/client/src/ffi.rs`
-- Create: `apps/macos/Sources/Far Cooler/AgentStream.swift`
+- Create: `apps/macos/Sources/FarCooler/AgentStream.swift`
 
 **Interfaces:**
 - Produces: a client call that subscribes from a cursor and returns `[(seq, payload_json)]`, and `AgentStream`, an `ObservableObject` holding a `Transcript` for one terminal.
 
-Read `crates/client/src/ffi.rs` and `apps/macos/Sources/Far Cooler/TerminalStream.swift` first — the terminal stream is the pattern this follows, and the FFI boundary has an established shape that must be matched rather than reinvented.
+Read `crates/client/src/ffi.rs` and `apps/macos/Sources/FarCooler/TerminalStream.swift` first — the terminal stream is the pattern this follows, and the FFI boundary has an established shape that must be matched rather than reinvented.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -854,7 +854,7 @@ Expected: FAIL — no `agent_subscribe` method
 
 Add `agent_subscribe`, `agent_prompt`, `agent_answer`, `agent_set_mode`, `agent_cancel`, `set_pane_mode` and `worktree_file_search` to the client session, each a thin wrapper over the request payloads added in the core plan's Task 16, following the existing method style exactly. Expose them across the FFI in the same shape `ffi.rs` already uses for terminal calls.
 
-Create `apps/macos/Sources/Far Cooler/AgentStream.swift`:
+Create `apps/macos/Sources/FarCooler/AgentStream.swift`:
 
 ```swift
 import AgentKit
@@ -922,7 +922,7 @@ final class AgentStream: ObservableObject {
 }
 ```
 
-Match `DaemonClient`'s real method names and error handling to what exists in `apps/macos/Sources/Far Cooler/DaemonClient.swift`; the names above are the shape, not a promise about that file's API.
+Match `DaemonClient`'s real method names and error handling to what exists in `apps/macos/Sources/FarCooler/DaemonClient.swift`; the names above are the shape, not a promise about that file's API.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -932,7 +932,7 @@ Expected: PASS and a clean build
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/client apps/macos/Sources/Far Cooler/AgentStream.swift
+git add crates/client apps/macos/Sources/FarCooler/AgentStream.swift
 git commit -m "feat(client): subscribe to an agent session by cursor"
 ```
 
@@ -941,11 +941,11 @@ git commit -m "feat(client): subscribe to an agent session by cursor"
 ### Task 6: `AgentSurface` — the pane
 
 **Files:**
-- Create: `apps/macos/Sources/Far Cooler/AgentSurface.swift`
-- Create: `apps/macos/Sources/Far Cooler/AgentRows.swift`
-- Create: `apps/macos/Sources/Far Cooler/DiffView.swift`
-- Modify: `apps/macos/Sources/Far Cooler/TileView.swift`
-- Modify: `apps/macos/Sources/Far Cooler/TerminalPane.swift`
+- Create: `apps/macos/Sources/FarCooler/AgentSurface.swift`
+- Create: `apps/macos/Sources/FarCooler/AgentRows.swift`
+- Create: `apps/macos/Sources/FarCooler/DiffView.swift`
+- Modify: `apps/macos/Sources/FarCooler/TileView.swift`
+- Modify: `apps/macos/Sources/FarCooler/TerminalPane.swift`
 
 **Interfaces:**
 - Consumes: `AgentStream` (Task 5), `Terminal.isAgentPane` (Task 4), `AgentKit.TranscriptRow`.
@@ -954,7 +954,7 @@ Read `TerminalSurface.swift`, `TerminalPane.swift` and `TileView.swift` first. `
 
 - [ ] **Step 1: Write the failing test**
 
-macOS views are not unit-testable here without adding a UI test harness, which is out of scope. Instead assert the routing decision, which is the part that can silently be wrong. Add to a new `apps/macos/Sources/Far Cooler/AgentSurface.swift` test-free helper and cover it in `AgentKit`:
+macOS views are not unit-testable here without adding a UI test harness, which is out of scope. Instead assert the routing decision, which is the part that can silently be wrong. Add to a new `apps/macos/Sources/FarCooler/AgentSurface.swift` test-free helper and cover it in `AgentKit`:
 
 Add to `apps/shared/AgentKit/Tests/AgentKitTests/TranscriptTests.swift`:
 
@@ -1019,10 +1019,10 @@ git commit -m "feat(macos): a chat is a pane, drawn where a terminal would be"
 ### Task 7: Composer, slash commands, mentions, images, mode switcher
 
 **Files:**
-- Create: `apps/macos/Sources/Far Cooler/AgentComposer.swift`
-- Modify: `apps/macos/Sources/Far Cooler/AgentSurface.swift`
-- Modify: `apps/macos/Sources/Far Cooler/Shortcuts.swift`
-- Modify: `apps/macos/Sources/Far Cooler/CommandPalette.swift`
+- Create: `apps/macos/Sources/FarCooler/AgentComposer.swift`
+- Modify: `apps/macos/Sources/FarCooler/AgentSurface.swift`
+- Modify: `apps/macos/Sources/FarCooler/Shortcuts.swift`
+- Modify: `apps/macos/Sources/FarCooler/CommandPalette.swift`
 
 **Interfaces:**
 - Consumes: `AgentKit.activeToken` (Task 3), `transcript.availableCommands`, `transcript.availableModes`, the worktree file-search call (Task 5).
@@ -1042,9 +1042,9 @@ Verify with `swift build` and by exercising each affordance against a live agent
 ### Task 8: iOS
 
 **Files:**
-- Create: `apps/ios/Far Cooler/AgentView.swift`
-- Create: `apps/ios/Far Cooler/AgentStream.swift`
-- Modify: `apps/ios/Far Cooler/TerminalView.swift`
+- Create: `apps/ios/FarCooler/AgentView.swift`
+- Create: `apps/ios/FarCooler/AgentStream.swift`
+- Modify: `apps/ios/FarCooler/TerminalView.swift`
 - Modify: `apps/ios/generate-project.py`
 
 **Interfaces:**

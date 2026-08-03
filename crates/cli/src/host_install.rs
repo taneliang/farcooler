@@ -284,7 +284,7 @@ pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
 
     let mut blockers = Vec::new();
     if matches!(platform, Platform::Unsupported) {
-        blockers.push(format!("{os} is not a platform FarCooler can install on."));
+        blockers.push(format!("{os} is not a platform Far Cooler can install on."));
     }
     if tmux == "none" {
         blockers.push(

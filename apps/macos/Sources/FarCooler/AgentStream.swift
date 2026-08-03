@@ -10,7 +10,7 @@ import Foundation
 ///
 /// DEVIATION FROM THE PLAN, recorded honestly, the same way `DaemonClient`
 /// records its own: the accepted architecture has this talk to
-/// `farcooler-client`'s C ABI directly, the way `apps/ios/Far Cooler/ClientCore.swift`
+/// `farcooler-client`'s C ABI directly, the way `apps/ios/FarCooler/ClientCore.swift`
 /// already does against `FarCoolerClient.xcframework`. The Mac target links no
 /// such library today — `Package.swift` only vends `CFarCoolerVT`, the VT core
 /// — and wiring one is outside the four files this task may touch. So this

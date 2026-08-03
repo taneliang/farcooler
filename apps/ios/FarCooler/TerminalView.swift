@@ -177,7 +177,7 @@ struct TerminalView: View {
         // waste the one line of title bar a phone has on something already on
         // screen.
         // Same reasoning as the Mac's `Workspace.windowTitle`/`windowSubtitle`
-        // (apps/macos/Sources/Far Cooler/Model.swift): the place you are is
+        // (apps/macos/Sources/FarCooler/Model.swift): the place you are is
         // the workspace, and that's true regardless of which of its
         // terminals is focused. The host itself is left out — unlike the
         // Mac, this screen is already scoped to one host by the time you're

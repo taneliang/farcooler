@@ -89,7 +89,7 @@ git add Cargo.toml Cargo.lock
 git commit -q -m "release: $VERSION"
 fi
 
-git tag -a "$TAG" -m "FarCooler $WHAT"
+git tag -a "$TAG" -m "Far Cooler $WHAT"
 
 cat <<EOF
 

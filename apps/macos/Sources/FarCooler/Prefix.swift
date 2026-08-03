@@ -56,7 +56,7 @@ enum TileCommand: Equatable {
 /// curve for them at all.
 ///
 /// `⌃B ⌃B` sends a literal `⌃B` through to the program, exactly as tmux does, so
-/// running tmux *inside* an Far Cooler pane still works. Without that this would
+/// running tmux *inside* a Far Cooler pane still works. Without that this would
 /// have quietly broken the one tool its own design is borrowed from.
 @MainActor
 final class PrefixMode: ObservableObject {
