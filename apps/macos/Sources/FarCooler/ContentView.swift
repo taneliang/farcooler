@@ -313,14 +313,8 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            // The chrome above the list, sharing ONE edge. They used to carry
-            // their own horizontal padding — 14 on the search field, the title
-            // rail on the header — and drifted apart by a step nobody chose.
-            VStack(spacing: 0) {
-                sidebarHeader
-                searchField
-            }
-            .padding(.horizontal, Grid.edge)
+            sidebarHeader
+            searchField
 
             if client.fleet.workspaces.isEmpty {
                 fleetPlaceholder
@@ -368,7 +362,6 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 8)
                     .padding(.bottom, 10)
                 }
             }
@@ -387,7 +380,8 @@ struct ContentView: View {
     /// containing it — which is how you reach an agent on another machine
     /// without going looking for the machine.
     private var searchField: some View {
-        HStack(spacing: 6) {
+        SidebarRow {
+            HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
@@ -404,9 +398,11 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+
+        }
         .padding(.bottom, 6)
     }
 
@@ -420,7 +416,8 @@ struct ContentView: View {
     }
 
     private var sidebarHeader: some View {
-        HStack(spacing: 8) {
+        SidebarRow {
+            HStack(spacing: 8) {
             // The machine, not the word "Fleet". This pane IS the fleet — the
             // thing it could not tell you was whose.
             MachinePicker()
@@ -447,34 +444,28 @@ struct ContentView: View {
             // reachable at all times. It used to live only in the empty state,
             // so once you had one workspace there was no way to add a second
             // repository without dropping to the terminal.
-            Menu {
-                Button("New workspace…") {
-                    newWorkspaceRepository = ""
-                    showNewWorkspace = true
-                }
-                .disabled(client.repositories.isEmpty)
-                Button("Import existing worktrees…") { openImport() }
-                    .disabled(client.repositories.isEmpty)
-                Divider()
-                Button("Add repository…") { showAddRepository = true }
-                // Here as well as in the picker above, because this is the
-                // menu people open looking for "add a thing" — and a machine
-                // is a thing you add.
-                SettingsLink { Text("Add a machine…") }
-                    .simultaneousGesture(
-                        TapGesture().onEnded { Preferences.shared.settingsTab = "machines" })
-            } label: {
-                Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
+            SidebarMenuButton(
+                systemImage: "plus",
+                help: "Add a workspace, a repository, or a machine",
+                items: [
+                    SidebarMenuItem(title: "New workspace…") {
+                        newWorkspaceRepository = ""
+                        showNewWorkspace = true
+                    },
+                    SidebarMenuItem(title: "Import existing worktrees…") { openImport() },
+                    .separator,
+                    SidebarMenuItem(title: "Add repository…") { showAddRepository = true },
+                    // Here as well as in the picker, because this is the menu
+                    // people open looking for "add a thing" — and a machine is
+                    // a thing you add.
+                    SidebarMenuItem(title: "Add a machine…") {
+                        Preferences.shared.settingsTab = "machines"
+                        NSApp.sendAction(
+                            Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    },
+                ])
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .padding(.trailing, -Grid.menuChrome)
-            .help("Add a workspace, a repository, or a machine")
         }
-        // The sidebar's edge, shared with the search field directly below —
-        // they are the two pieces of chrome above the list and a reader sees
-        // them stacked. The list's own titles sit deeper, on `Grid.rail`.
         .padding(.top, 12)
         .padding(.bottom, 8)
     }

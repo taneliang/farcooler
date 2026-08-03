@@ -243,11 +243,12 @@ struct WorkspaceSection: View {
             .padding(.leading, 2)
         }
         .padding(.vertical, 4)
-        .padding(.horizontal, Grid.margin)
+        .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Color.primary.opacity(0.08) : (hovering ? Color.primary.opacity(0.04) : .clear))
         )
+        .padding(.horizontal, SidebarGrid.highlightInset)
         .contentShape(Rectangle())
         .onTapGesture { selection = .workspace(workspace.id) }
         .onHover { hovering = $0 }
@@ -275,58 +276,47 @@ struct ProjectHeader: View {
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(name.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .tracking(0.6)
-            Text("\(count)")
-                .font(.system(size: 10))
-                .foregroundStyle(.quaternary)
-                .monospacedDigit()
-            Spacer()
+        // One band, one indent level for the title's gutter, and a `+` that is
+        // a Button rather than a Menu — so it sits in exactly the same column
+        // as the sidebar header's, which no amount of padding on a `Menu` could
+        // achieve.
+        SidebarRow {
+            HStack(spacing: 6) {
+                Text(name.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .tracking(0.6)
+                Text("\(count)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.quaternary)
+                    .monospacedDigit()
+                Spacer()
 
-            if onNewWorktree != nil || onNewTerminal != nil {
-                Menu {
-                    if let onNewWorktree {
-                        Button("New worktree in \(name)…", action: onNewWorktree)
-                    }
-                    if let onNewTerminal {
-                        // The main checkout is a place people work — a quick
-                        // build, a look at main while a worktree is mid-review —
-                        // and it was the one directory this app could not open a
-                        // terminal in.
-                        Button("New terminal in \(name)", action: onNewTerminal)
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                if onNewWorktree != nil || onNewTerminal != nil {
+                    SidebarMenuButton(
+                        systemImage: "plus",
+                        help: "Add to \(name)",
+                        items: [
+                            onNewWorktree.map {
+                                SidebarMenuItem(title: "New worktree in \(name)…", action: $0)
+                            },
+                            // The main checkout is a place people work — a quick
+                            // build, a look at main while a worktree is
+                            // mid-review — and it was the one directory this app
+                            // could not open a terminal in.
+                            onNewTerminal.map {
+                                SidebarMenuItem(title: "New terminal in \(name)", action: $0)
+                            },
+                        ].compactMap { $0 })
+                    // Shown on hover, like every other per-row control in a
+                    // sidebar. A `+` on every project header at all times is a
+                    // column of plus signs down a list meant to read as quiet
+                    // section labels.
+                    .opacity(hovering ? 1 : 0)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                // Shown on hover, like every other per-row control in a
-                // sidebar. A `+` on every project header at all times is a
-                // column of plus signs down a list that is meant to read as
-                // quiet section labels.
-                .opacity(hovering ? 1 : 0)
-                .padding(.trailing, -Grid.menuChrome)
-                .help("Add to \(name)")
             }
+            .padding(.leading, SidebarGrid.gutter)
         }
-        // The title on the rail it shares with every workspace name.
-        //
-        // The `+` is trickier and the number is measured rather than derived.
-        // This row lives inside a `ScrollView`'s content, the sidebar header's
-        // `+` does not, and the difference between them is not the 8pt inset
-        // that content carries — it is consistently 9pt more than any padding
-        // arithmetic here predicts. Three attempts to derive it landed the
-        // button visibly left of the one it has to line up with; this is what
-        // actually puts them in the same column. Verified by screenshot, which
-        // is the only thing that settles it.
-        .padding(.leading, Grid.margin + Grid.chevron)
-        .padding(.trailing, Grid.edge - 8 - 9)
         .padding(.top, 14)
         .padding(.bottom, 3)
         .contentShape(Rectangle())
@@ -421,8 +411,10 @@ struct TerminalRow: View {
             }
         }
         .padding(.vertical, 4)
-        .padding(.leading, Grid.child)
-        .padding(.trailing, Grid.margin)
+        // A terminal is one level in from its worktree; the highlight sits
+        // inside the band exactly as the worktree row's does.
+        .padding(.leading, SidebarGrid.edge - SidebarGrid.highlightInset + SidebarGrid.gutter)
+        .padding(.trailing, SidebarGrid.edge - SidebarGrid.highlightInset)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Color.primary.opacity(0.08) : (hovering ? Color.primary.opacity(0.04) : .clear))
@@ -430,6 +422,7 @@ struct TerminalRow: View {
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(Color.accentColor, lineWidth: targeted ? 2 : 0))
         )
+        .padding(.horizontal, SidebarGrid.highlightInset)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }

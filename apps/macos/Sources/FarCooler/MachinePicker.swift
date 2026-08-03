@@ -16,68 +16,78 @@ struct MachinePicker: View {
     @ObservedObject private var preferences = Preferences.shared
 
     var body: some View {
-        Menu {
-            Button {
-                hosts.active = ""
-            } label: {
-                Label("This Mac", systemImage: "laptopcomputer")
-            }
-
-            if !hosts.all.isEmpty {
-                Section("Machines") {
-                    ForEach(hosts.all) { host in
-                        Button {
-                            hosts.active = host.target
-                        } label: {
-                            Label(host.target, systemImage: icon(for: host))
-                        }
-                        // A machine with nothing installed on it has no daemon
-                        // to drive, so offering it would be offering an error.
-                        // It is still listed, because "the one I added is greyed
-                        // out" sends you to Settings, and "it is missing" sends
-                        // you to add it a second time.
-                        .disabled(host.probe?.isInstalled != true)
-                    }
-                }
-            }
-
-            Divider()
-            // Both go to the same pane. Two verbs because someone with no
-            // machines is looking for the first, and someone with three is
-            // looking for the second.
-            SettingsLink { Text(hosts.all.isEmpty ? "Add a machine…" : "Manage machines…") }
-                .simultaneousGesture(TapGesture().onEnded { preferences.settingsTab = "machines" })
-        } label: {
-            // The compensation lives INSIDE the label, not on the `Menu`.
-            // A borderless menu stops honouring negative padding on itself past
-            // a few points — 20 and 29 rendered identically — so the only way
-            // to reach the sidebar's edge is to move the label within the box
-            // the menu gives it.
+        // A `SidebarMenuButton`-style Button rather than a `Menu`: a borderless
+        // menu positions its own label, and no padding here could bring it out
+        // to the same edge as the search field directly below. See
+        // `SidebarLayout.swift`.
+        Button { present() } label: {
             HStack(spacing: 5) {
                 Image(systemName: currentIcon)
                     .font(.system(size: 11))
                 Text(currentName)
                     .font(.headline)
                     .lineLimit(1)
-                // Drawn rather than left to `menuIndicator`, which sits too far
-                // from the text and at the wrong weight for a title.
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .padding(.leading, 1)
             }
-            .padding(.leading, -Grid.menuChromeLeading)
+            .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        // A borderless menu insets its own label, so the icon landed several
-        // points right of the section headers below it and the whole band read
-        // as misaligned. The header pads to the same rail as everything else
-        // and this takes the chrome back out.
-        // Named in full here even though the label truncates: an ssh alias and
-        // the machine it points at are not always the same word.
+        .buttonStyle(.plain)
+        // Named in full even though the label truncates: an ssh alias and the
+        // machine it points at are not always the same word.
         .help(hosts.active.isEmpty ? "Driving this Mac" : "Driving \(hosts.active)")
+    }
+
+    private func present() {
+        let menu = NSMenu()
+
+        let local = NSMenuItem(title: "This Mac", action: #selector(Invoker.fire), keyEquivalent: "")
+        let localInvoker = Invoker { hosts.active = "" }
+        local.target = localInvoker
+        local.representedObject = localInvoker
+        local.state = hosts.active.isEmpty ? .on : .off
+        menu.addItem(local)
+
+        if !hosts.all.isEmpty {
+            menu.addItem(.separator())
+            for host in hosts.all {
+                let item = NSMenuItem(
+                    title: host.target, action: #selector(Invoker.fire), keyEquivalent: "")
+                let invoker = Invoker { hosts.active = host.target }
+                item.target = invoker
+                item.representedObject = invoker
+                item.state = hosts.active == host.target ? .on : .off
+                // A machine with nothing installed has no daemon to drive, so
+                // offering it would be offering an error. Still listed, because
+                // "the one I added is missing" sends you to add it twice.
+                item.isEnabled = host.probe?.isInstalled == true
+                menu.addItem(item)
+            }
+        }
+
+        menu.addItem(.separator())
+        // Two verbs because someone with no machines is looking for the first
+        // and someone with three is looking for the second.
+        let manage = NSMenuItem(
+            title: hosts.all.isEmpty ? "Add a machine…" : "Manage machines…",
+            action: #selector(Invoker.fire), keyEquivalent: "")
+        let manageInvoker = Invoker {
+            preferences.settingsTab = "machines"
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+        manage.target = manageInvoker
+        manage.representedObject = manageInvoker
+        menu.addItem(manage)
+
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    private final class Invoker: NSObject {
+        private let action: () -> Void
+        init(_ action: @escaping () -> Void) { self.action = action }
+        @objc func fire() { action() }
     }
 
     private var currentName: String {

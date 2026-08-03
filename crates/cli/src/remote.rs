@@ -96,7 +96,7 @@ fn explain(target: &str, error: ClientError) -> String {
         // not exist rather than that the protocol went wrong.
         ClientError::Closed | ClientError::NoHello => format!(
             "Connected to {target}, but `farcoolerd --stdio` did not answer.\n\
-             Is FarCooler installed there?  farcooler host install {target}"
+             Is Far Cooler installed there?  farcooler host install {target}"
         ),
         ClientError::VersionMismatch { daemon, client } => format!(
             "{target} runs protocol {daemon}; this client speaks {client}.\n\

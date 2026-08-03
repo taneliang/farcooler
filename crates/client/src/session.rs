@@ -32,7 +32,7 @@ pub enum SessionError {
     #[error("the daemon returned {got} where {expected} was expected")]
     WrongResult { expected: &'static str, got: &'static str },
     #[error(
-        "connected, but `farcoolerd --stdio` did not answer. Is FarCooler installed on that host?"
+        "connected, but `farcoolerd --stdio` did not answer. Is Far Cooler installed on that host?"
     )]
     DaemonMissing,
     #[error("the host runs protocol {daemon}; this client speaks {client}")]

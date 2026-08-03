@@ -42,10 +42,10 @@ pub enum SshError {
     #[error("the private key could not be read: {0}")]
     BadKey(String),
     #[error(
-        "the host key for {host} is not the one FarCooler has recorded.\n\
+        "the host key for {host} is not the one Far Cooler has recorded.\n\
          Expected {expected}\n\
          Got      {actual}\n\
-         This is either a changed server or an interception. FarCooler will not connect."
+         This is either a changed server or an interception. Far Cooler will not connect."
     )]
     HostKeyChanged { host: String, expected: String, actual: String },
     #[error("{host} is unknown. Its key fingerprint is {fingerprint}")]

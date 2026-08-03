@@ -51,7 +51,7 @@ const LAUNCH_AGENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 /// The systemd user unit. Written to ~/.config/systemd/user/farcooler.service.
 const UNIT: &str = "\
 [Unit]
-Description=FarCooler daemon
+Description=Far Cooler daemon
 Documentation=https://github.com/farcooler
 After=default.target
 
@@ -288,7 +288,7 @@ pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
     }
     if tmux == "none" {
         blockers.push(
-            "No tmux. FarCooler keeps every terminal inside one, so without it \
+            "No tmux. Far Cooler keeps every terminal inside one, so without it \
              the daemon runs and every terminal derives lost."
                 .to_string(),
         );
