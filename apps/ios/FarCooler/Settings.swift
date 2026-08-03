@@ -153,11 +153,7 @@ struct SettingsView: View {
             } header: {
                 Text("Notifications")
             } footer: {
-                Text(
-                    "Only these two. A working agent is the normal case, and something "
-                        + "that buzzes for the normal case is something you turn off — after "
-                        + "which it cannot tell you the thing that mattered."
-                )
+                Text("A working agent never notifies you.")
             }
 
             Section("Terminal font") {

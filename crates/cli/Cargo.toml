@@ -16,6 +16,7 @@ farcooler-protocol.workspace = true
 farcooler-daemon.workspace = true
 farcooler-transport.workspace = true
 bytes.workspace = true
+libc.workspace = true
 tokio.workspace = true
 clap.workspace = true
 tracing.workspace = true

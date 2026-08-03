@@ -808,6 +808,7 @@ dependencies = [
  "farcooler-daemon",
  "farcooler-protocol",
  "farcooler-transport",
+ "libc",
  "serde_json",
  "tokio",
  "tracing",

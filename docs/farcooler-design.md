@@ -408,7 +408,7 @@ starting → running → exited
 - **Lost:** a terminal expected to be running has no exact live tmux match, or a non-tmux PTY was destroyed by daemon loss. Terminals never use `unknown`: exact runtime identity is either freshly proved or it is lost.
 - **Quiet:** an activity indicator meaning no output for a selected interval, not a workflow state and never labeled “needs input.”
 
-A lost terminal retains its truthful `lost` state plus an optional reconciliation resolution. `terminal.dismiss_lost` records that the user acknowledged the loss so it no longer keeps the workspace in `error`; it never relabels the terminal `exited`. `terminal.restart` launches a new terminal epoch from the same preset, while `terminal.restore_agent_session` starts the exact stored vendor session when its adapter permits restoration.
+A lost terminal keeps its truthful `lost` state until the user resolves it. `terminal.dismiss_lost` deletes the record: a lost terminal has no pane, no output and no exit code, so once the user has acknowledged it there is nothing left for the row to say. It never relabels the terminal `exited` — no exit is ever claimed that was not observed, and forgetting a terminal on request is not the same as inventing an exit code for it. `terminal.restart` launches a new terminal epoch from the same preset, while `terminal.restore_agent_session` starts the exact stored vendor session when its adapter permits restoration.
 
 #### Declared servers are not a product concept
 
@@ -418,7 +418,7 @@ Reaching that server from a phone needs no product feature. Tailscale already su
 
 The tradeoff is explicit: a crashed development server is something the user notices by reading its terminal, not something the fleet view flags. Reintroducing declared servers is a post-MVP question that must re-justify the duplicate lifecycle it brings with it.
 
-Workspace state is derived from its terminals on every read, not recomputed at restart. Any unresolved `lost` terminal makes the workspace `error` until the user dismisses, restarts, or exactly restores it.
+Workspace state is derived from its terminals on every read, not recomputed at restart. Any `lost` terminal makes the workspace `error` until the user dismisses, restarts, or exactly restores it — a loss is unresolved for exactly as long as its record exists.
 
 #### Connection
 
@@ -794,7 +794,7 @@ The table is exhaustive for MVP. A method not listed here does not exist in MVP.
 | `terminal.resize` | `control` | `Terminal` | `{columns, rows, view_activity_id}` | `Terminal` | sync, no lease required |
 | `terminal.take_writer` | `control` | `Terminal` + `lease_generation` | `{}` | `Terminal` | sync |
 | `terminal.release_writer` | `control` | `Terminal` + `lease_generation` | `{}` | `Terminal` | sync |
-| `terminal.dismiss_lost` | `control` | `Terminal` | `{}` | `Terminal` | sync |
+| `terminal.dismiss_lost` | `control` | `Terminal` | `{}` | `TerminalList` (empty) | sync |
 | `terminal.restart` | `control` | `Terminal` | `{}` | `Operation` | async |
 | `terminal.restore_agent_session` | `control` | `AgentSession` | `{user_confirmed}` | `Operation` | async |
 | `terminal.stop` | `control` | `Terminal` | `{force, typed_confirmation?}` | `Operation` | async, non-cancellable after the first signal |
@@ -1208,7 +1208,7 @@ CODE PATHS                                          USER FLOWS
                                                       ├── [GAP] Daemon restart → tagged panes still running
 [+] crates/store                                      ├── [GAP] Host reboot → all terminals lost
   ├── [GAP] forward-only migration + backup           ├── [GAP] tmux server loss → all terminals lost
-  ├── [GAP] durable record survives tmux loss         ├── [GAP] dismiss_lost → not relabelled exited
+  ├── [GAP] durable record survives tmux loss         ├── [GAP] dismiss_lost → record deleted, never exited
   └── [GAP] no runtime state column exists            ├── [GAP] restart → new epoch
                                                       └── [GAP] restore_agent_session → exact ID resumed
 [+] crates/tmux
@@ -1543,7 +1543,7 @@ The adversarial review reached its three-round limit at a quality score of 8.7/1
 
 ### Completeness
 
-1. **Resolved in engineering review:** the bounded protocol now includes typed dismiss/restart methods for lost terminals plus the existing exact-agent restoration method; dismissed uncertainty remains historically truthful rather than being relabeled as an observed exit.
+1. **Resolved in engineering review:** the bounded protocol now includes typed dismiss/restart methods for lost terminals plus the existing exact-agent restoration method; dismissal forgets the terminal outright rather than relabeling the uncertainty as an observed exit.
 2. **Resolved in engineering review:** a `RepositoryRoot` resource plus `repository_root.list/add/remove` and `client.set_scopes` are `host_admin` protocol methods with typed confirmation, idempotency keys, audit records, and defined refusal rules. `repository.register` now targets a root rather than a host. Device enrollment needs no method, because a device that cannot already reach the host over SSH cannot use an enrolled key.
 3. **Resolved in engineering review:** host-local CLI presets now define configurable shell launch modes, safe configuration ownership, adapter validation, exact session-ID capture, stored session metadata, and configurable exact-ID restoration.
 4. **Resolved in engineering review:** the method-contract table is exhaustive and states scope, envelope target, version target, payload, result, and synchronous/asynchronous kind for every MVP method. One stated rule decides sync from async: a mutating method returns its resource unless the client needs logs, progress, or cancellation. The saga's internal `Operation` record is documented as distinct from a method result, resolving the contradiction with `terminal.create`.

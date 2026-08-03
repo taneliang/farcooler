@@ -16,6 +16,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0002_pane_groups,
     migration_0003_drop_pane_groups,
     migration_0004_pane_mode,
+    migration_0005_drop_loss_dismissed,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -201,6 +202,21 @@ fn migration_0004_pane_mode(tx: &Transaction) -> rusqlite::Result<()> {
         ALTER TABLE terminals ADD COLUMN agent_session_id TEXT;
         "#,
     )
+}
+
+/// Dismissing a loss deletes the record, so there is nothing left to flag.
+///
+/// The column held "the user has seen this loss", which kept a terminal listed
+/// as lost forever while no longer holding its workspace in `error`. That is a
+/// row that can never say anything again and cannot be got rid of — every
+/// client drew a Dismiss button that visibly did nothing. Dismissal now removes
+/// the terminal, which is what the button always claimed to do.
+///
+/// The invariant it was protecting is untouched: no exit is ever claimed that
+/// was not observed. Forgetting a terminal at the user's explicit request is
+/// not the same as inventing an exit code for it.
+fn migration_0005_drop_loss_dismissed(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE terminals DROP COLUMN loss_dismissed;")
 }
 
 #[cfg(test)]

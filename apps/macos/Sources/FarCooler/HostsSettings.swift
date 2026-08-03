@@ -30,11 +30,7 @@ struct HostsSettings: View {
             } header: {
                 Text("Machines")
             } footer: {
-                Text(
-                    "A user@host or an ssh config alias. Far Cooler reaches every machine "
-                        + "over ssh — there is no Far Cooler listener to set up anywhere, so a "
-                        + "host you can ssh to is a host you can drive."
-                )
+                Text("Connect to any machine you can reach over SSH.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }

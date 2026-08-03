@@ -99,8 +99,7 @@ final class AgentStream: ObservableObject {
             // different words.
             if batch.epoch == 0 && batch.events.isEmpty && transcript.rows.isEmpty {
                 connectionError =
-                    "No agent session on pane \(terminal.prefix(8)) yet. If it was just "
-                    + "switched to chat, the agent is still starting."
+                    "No agent session on pane \(terminal.prefix(8)) yet. It may still be starting."
                 return
             }
 

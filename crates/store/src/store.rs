@@ -375,9 +375,9 @@ impl Store {
             .execute(
                 r#"INSERT INTO terminals
                  (id, workspace_id, title, command_preset, intent, runtime_confirmed,
-                  exit_code, exit_signal, loss_dismissed, lease_generation, epoch,
+                  exit_code, exit_signal, lease_generation, epoch,
                   "columns", "rows", resource_version)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, NULL, 0, 0, 0, ?6, ?7, 1)"#,
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, NULL, 0, 0, ?6, ?7, 1)"#,
                 params![
                     uuid_blob(id),
                     uuid_blob(workspace_id),
@@ -398,7 +398,6 @@ impl Store {
             runtime_confirmed: false,
             exit_code: None,
             exit_signal: None,
-            loss_dismissed: false,
             lease_generation: 0,
             epoch: 0,
             columns,
@@ -413,7 +412,7 @@ impl Store {
         self.conn()
             .query_row(
                 r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
-                          exit_code, exit_signal, loss_dismissed, lease_generation, epoch,
+                          exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id
                    FROM terminals WHERE id = ?1"#,
                 params![uuid_blob(id)],
@@ -427,7 +426,7 @@ impl Store {
         let mut stmt = conn
             .prepare(
                 r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
-                          exit_code, exit_signal, loss_dismissed, lease_generation, epoch,
+                          exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id
                    FROM terminals WHERE workspace_id = ?1"#,
             )
@@ -449,7 +448,6 @@ impl Store {
                 runtime_confirmed: t.runtime_confirmed,
                 exit_code: t.exit_code,
                 exit_signal: t.exit_signal,
-                loss_dismissed: t.loss_dismissed,
             })
             .collect())
     }
@@ -463,9 +461,9 @@ impl Store {
         self.run_versioned(
             r#"UPDATE terminals
                SET title = ?1, command_preset = ?2, intent = ?3, runtime_confirmed = ?4,
-                   exit_code = ?5, exit_signal = ?6, loss_dismissed = ?7, lease_generation = ?8,
-                   epoch = ?9, "columns" = ?10, "rows" = ?11, resource_version = ?12
-               WHERE id = ?13 AND resource_version = ?14"#,
+                   exit_code = ?5, exit_signal = ?6, lease_generation = ?7,
+                   epoch = ?8, "columns" = ?9, "rows" = ?10, resource_version = ?11
+               WHERE id = ?12 AND resource_version = ?13"#,
             &[
                 &update.title,
                 &update.command_preset,
@@ -473,7 +471,6 @@ impl Store {
                 &update.runtime_confirmed,
                 &update.exit_code,
                 &update.exit_signal,
-                &update.loss_dismissed,
                 &(update.lease_generation as i64),
                 &(update.epoch as i64),
                 &update.columns,
@@ -649,7 +646,6 @@ mod tests {
             "runtime_confirmed",
             "exit_code",
             "exit_signal",
-            "loss_dismissed",
             "lease_generation",
             "epoch",
             "columns",
@@ -737,7 +733,6 @@ mod tests {
             runtime_confirmed: true,
             exit_code: None,
             exit_signal: None,
-            loss_dismissed: false,
             lease_generation: 1,
             epoch: 1,
             columns: 100,

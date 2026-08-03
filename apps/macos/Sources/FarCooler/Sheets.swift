@@ -121,9 +121,7 @@ struct RemoveWorkspaceSheet: View {
                     Callout(
                         icon: "exclamationmark.triangle.fill",
                         tone: .warning,
-                        text:
-                            "Terminals are still running in this workspace. Stop them first; "
-                            + "Far Cooler will not remove a worktree out from under a live process."
+                        text: "Stop the terminals in this workspace before removing it."
                     )
                 } else {
                     Callout(
@@ -357,9 +355,8 @@ struct AddRepositorySheet: View {
                         icon: "lock.open.fill",
                         tone: .neutral,
                         text:
-                            "Far Cooler will also allowlist \(rootToAdd.lastPathComponent), the "
-                            + "folder containing it. Far Cooler only ever operates inside folders "
-                            + "you have allowlisted, and this one covers its siblings too."
+                            "This also grants access to \(rootToAdd.lastPathComponent), "
+                            + "the enclosing folder."
                     )
                 } else if let coveringRoot, let path = coveringRoot.path {
                     Callout(

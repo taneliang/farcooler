@@ -959,8 +959,18 @@ impl Service {
         )
     }
 
-    /// Acknowledge a loss without ever relabelling the terminal as exited.
-    pub async fn dismiss_lost(&self, id: Uuid) -> Result<models::Terminal> {
+    /// Forget a lost terminal, without ever claiming it exited.
+    ///
+    /// It used to only set a flag, which cleared the workspace error and left
+    /// the terminal listed as lost with a Dismiss button that could not change
+    /// anything a second time. A lost terminal has no pane, no output and no
+    /// exit code: once the user has acknowledged it there is nothing left for
+    /// the record to say, so dismissing it deletes it.
+    ///
+    /// Still no exit is invented. `restart` remains the other answer, and it is
+    /// the one to reach for when the work mattered — this is the answer for a
+    /// row you want gone.
+    pub async fn dismiss_lost(&self, id: Uuid) -> Result<()> {
         let term = self.store.get_terminal(id)?;
         let derived = self.derive_one(&term);
 
@@ -968,11 +978,7 @@ impl Service {
             return Err(DomainError::InvalidArgument { what: "terminal is not lost" });
         }
 
-        self.store.update_terminal(
-            id,
-            term.resource_version,
-            terminal_update(&term, |u| u.loss_dismissed = true),
-        )
+        self.store.delete_terminal(id, term.resource_version)
     }
 
     /// Restart a lost or exited terminal as a NEW epoch from the same preset.
@@ -1006,7 +1012,6 @@ impl Service {
             terminal_update(&term, |u| {
                 u.intent = TerminalIntent::Running;
                 u.runtime_confirmed = true;
-                u.loss_dismissed = false;
                 u.exit_code = None;
                 u.exit_signal = None;
                 // A new runtime means a new epoch: offsets restart at zero.
@@ -1405,7 +1410,6 @@ fn to_record(t: &models::Terminal) -> derive::TerminalRecord {
         runtime_confirmed: t.runtime_confirmed,
         exit_code: t.exit_code,
         exit_signal: t.exit_signal,
-        loss_dismissed: t.loss_dismissed,
     }
 }
 
@@ -1420,7 +1424,6 @@ fn terminal_update(
         runtime_confirmed: t.runtime_confirmed,
         exit_code: t.exit_code,
         exit_signal: t.exit_signal,
-        loss_dismissed: t.loss_dismissed,
         lease_generation: t.lease_generation,
         epoch: t.epoch,
         columns: t.columns,

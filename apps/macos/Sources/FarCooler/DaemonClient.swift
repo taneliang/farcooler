@@ -69,6 +69,10 @@ final class DaemonClient: ObservableObject {
                     // anything that changed while we were deaf is only visible
                     // in a full read.
                     try? await Task.sleep(for: .seconds(2))
+                    // A daemon going away is also the moment another build
+                    // could take the socket, so the app claims it back before
+                    // reading anything through it. See `LocalDaemon`.
+                    await LocalDaemon.shared.ensure()
                     await self?.refresh()
                     self?.startEvents()
                 }
@@ -682,8 +686,16 @@ final class DaemonClient: ObservableObject {
         await refresh()
     }
 
-    func dismissLost(terminal: String) async {
-        _ = await run(["terminal", "dismiss-lost", terminal])
+    /// Be rid of a terminal whose pane cannot be found.
+    ///
+    /// The daemon deletes the record — a lost terminal has no pane, no output
+    /// and no exit code, so once it has been acknowledged there is nothing left
+    /// for the row to say. Its notification and its place in the switcher go
+    /// with it: both point at something that no longer exists.
+    func dismissLost(_ terminal: Terminal) async {
+        _ = await run(["terminal", "dismiss-lost", terminal.short])
+        Notifier.shared.forget(terminal.id)
+        VisitLog.shared.forget(terminal.id)
         await refresh()
     }
 

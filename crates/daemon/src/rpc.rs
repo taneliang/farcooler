@@ -33,6 +33,8 @@ pub struct Rpc {
     watcher: Arc<crate::watch::Watcher>,
     scope: Scope,
     daemon_version: String,
+    /// Fired by `daemon.shutdown`; the process's own stop signal, from inside.
+    stop: Arc<tokio::sync::Notify>,
 }
 
 impl Rpc {
@@ -40,8 +42,15 @@ impl Rpc {
         service: Arc<Service>,
         watcher: Arc<crate::watch::Watcher>,
         scope: Scope,
+        stop: Arc<tokio::sync::Notify>,
     ) -> Self {
-        Self { service, watcher, scope, daemon_version: farcooler_protocol::BUILD.to_string() }
+        Self {
+            service,
+            watcher,
+            scope,
+            daemon_version: farcooler_protocol::BUILD.to_string(),
+            stop,
+        }
     }
 }
 
@@ -53,6 +62,11 @@ impl Rpc {
 fn required_scope(method: &str) -> Option<Scope> {
     Some(match method {
         "host.get" | "host.health" | "daemon.version" => Scope::Read,
+        // Stopping the daemon stops nothing a user is watching — terminals are
+        // tmux's — but it is the one method that ends the process, so it sits
+        // at the highest scope. A local caller already holds it; a remote one
+        // gets it only where ssh has proved who they are.
+        "daemon.shutdown" => Scope::HostAdmin,
         "repository.list" | "workspace.list" | "terminal.list" | "branch.list" => Scope::Read,
         "layout.list" => Scope::Read,
         // Discovery reveals paths, which live behind the same gate as every
@@ -198,6 +212,31 @@ impl Rpc {
                     &svc.inventory_snapshot(),
                     0,
                 )))
+            }
+
+            // Stop, so a differently-built daemon can take over.
+            //
+            // The Mac app owns the local daemon's lifecycle: at launch it makes
+            // sure the one answering this socket was built from the same source
+            // as the app, and replaces it when it was not. Two components built
+            // from different source behave like two different programs, and the
+            // symptom is a bug you already fixed still happening.
+            //
+            // Scheduled rather than performed here, because this handler's
+            // return value IS the reply: exiting before it is written would
+            // leave every caller unable to tell "stopped" from "died". The
+            // delay is the write, and nothing else depends on its length.
+            //
+            // Nothing is lost by stopping. Terminals are tmux windows, agent
+            // shims reconnect on the next start (`resume_agent_listeners`), and
+            // durable state is in SQLite, committed per call.
+            "daemon.shutdown" => {
+                let stop = self.stop.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                    stop.notify_one();
+                });
+                Ok(result::Value::Empty(Empty {}))
             }
 
             "daemon.version" => Ok(result::Value::DaemonVersion(
@@ -555,7 +594,11 @@ impl Rpc {
             "terminal.dismiss_lost" => {
                 let id = Self::target(&req)?;
                 svc.dismiss_lost(id).await?;
-                self.terminal_result(id).await
+                // Gone, so there is no record to echo — the same shape
+                // `terminal.remove` answers with, for the same reason.
+                Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList {
+                    items: Vec::new(),
+                }))
             }
 
             "terminal.restart" => {

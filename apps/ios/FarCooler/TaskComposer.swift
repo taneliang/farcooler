@@ -238,8 +238,7 @@ struct TaskComposerView: View {
                 // description into a question it hasn't finished asking.
                 case .blocked:
                     phase = .failed(
-                        "\(agentName) is asking something before it can take a task — "
-                        + "open \(title) to answer it.")
+                        "\(agentName) is waiting on a question. Open \(title) to answer it.")
                     return
                 default:
                     continue
@@ -252,8 +251,8 @@ struct TaskComposerView: View {
                 // half the job with no explanation — is exactly what this
                 // screen exists to avoid, so it says so instead.
                 phase = .failed(
-                    "\(agentName) did not become ready within a minute. Nothing was "
-                    + "sent — open \(title) to check on it.")
+                    "\(agentName) was not ready within a minute. Nothing was sent — "
+                    + "open \(title) to check on it.")
                 return
             }
 

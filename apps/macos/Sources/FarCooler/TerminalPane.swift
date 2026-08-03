@@ -94,23 +94,26 @@ struct TerminalPane: View {
     /// Everything else removes itself: a terminal is its process, and when that
     /// exits there is nothing to look at. `lost` is the exception, because it
     /// is the one case Far Cooler cannot explain and will not pretend to.
+    ///
+    /// Two answers, because there are two: restart it from the same preset, or
+    /// be rid of the row. Dismiss used to be the only one and it did nothing
+    /// visible — it set a flag and left the terminal listed as lost forever.
     private var inactive: some View {
         VStack(spacing: 12) {
             Spacer()
             StatusGlyph(status: terminal.status, size: 14)
             Text(terminal.status.label).font(.title3.weight(.medium))
-            Text(
-                "This terminal was expected to be running, but no live pane proves it. "
-                + "Far Cooler will not guess between an exit it never saw and a session it "
-                + "cannot reach."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: 420)
+            Text("This terminal has no running session. It may have exited, or its session may be unreachable.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
 
-            Button("Dismiss") { onAction(.dismissLost) }
-                .padding(.top, 4)
+            HStack(spacing: 10) {
+                Button("Restart") { onAction(.restart) }
+                Button("Dismiss") { onAction(.dismissLost) }
+            }
+            .padding(.top, 4)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

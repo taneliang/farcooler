@@ -33,9 +33,6 @@ pub struct TerminalRecord {
     /// Set only when an exit was actually observed.
     pub exit_code: Option<i32>,
     pub exit_signal: Option<i32>,
-    /// The user acknowledged a loss. Stops it holding the workspace in `error`
-    /// without ever relabelling it `exited`.
-    pub loss_dismissed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,10 +122,11 @@ pub fn derive_workspace(
         return WorkspaceState::Error;
     }
 
-    let unresolved_loss = terminals
-        .iter()
-        .any(|(rec, d)| d.state == TerminalState::Lost && !rec.loss_dismissed);
-    if unresolved_loss {
+    // A loss is unresolved for exactly as long as the record exists: dismissing
+    // one deletes it, and restarting one replaces it. There is no acknowledged
+    // -but-still-listed state, because a row that can never say anything again
+    // is not evidence, it is clutter.
+    if terminals.iter().any(|(_, d)| d.state == TerminalState::Lost) {
         return WorkspaceState::Error;
     }
 
@@ -181,7 +179,6 @@ mod tests {
             runtime_confirmed: confirmed,
             exit_code: None,
             exit_signal: None,
-            loss_dismissed: false,
         }
     }
 
@@ -303,20 +300,18 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_loss_holds_workspace_in_error() {
+    fn a_lost_terminal_holds_workspace_in_error() {
         let r = record(TerminalIntent::Running, true);
         let s = derive_workspace(false, false, &[(r, derived(TerminalState::Lost))]);
         assert_eq!(s, WorkspaceState::Error);
     }
 
     #[test]
-    fn dismissing_the_loss_clears_the_error_without_claiming_an_exit() {
-        let mut r = record(TerminalIntent::Running, true);
-        r.loss_dismissed = true;
-        let s = derive_workspace(false, false, &[(r.clone(), derived(TerminalState::Lost))]);
-        assert_eq!(s, WorkspaceState::Ready, "dismissal resolves the workspace");
-        // and the terminal itself stays truthfully lost
-        assert_eq!(r.intent, TerminalIntent::Running);
+    fn dismissing_the_loss_clears_the_error_by_removing_the_record() {
+        // What dismissal does is delete the row — see `Service::dismiss_lost` —
+        // so from here it is simply a workspace with one terminal fewer.
+        let s = derive_workspace(false, false, &[]);
+        assert_eq!(s, WorkspaceState::Ready);
     }
 
     #[test]

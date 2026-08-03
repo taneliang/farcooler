@@ -157,17 +157,28 @@ async fn run() -> Result<(), i32> {
 
     // Stop on a signal rather than being killed, so the socket is unlinked and
     // the next start does not have to reason about whether it is stale.
-    let shutdown = async {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("SIGTERM handler");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = term.recv() => {}
+    //
+    // `daemon.shutdown` arrives on the third arm. A client that has just found
+    // a daemon built from different source than itself asks for exactly this,
+    // and it has to be the same orderly stop a signal gets — not a kill — or
+    // the replacement would start by inheriting a socket nobody unlinked.
+    let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+    let shutdown = {
+        let stop = stop.clone();
+        async move {
+            let mut term =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("SIGTERM handler");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+                _ = stop.notified() => {}
+            }
         }
     };
 
     let result = tokio::select! {
-        served = server.serve(cfg, RpcFactory { service, watcher }) => served.map_err(|e| {
+        served = server.serve(cfg, RpcFactory { service, watcher, stop: stop.clone() }) => served.map_err(|e| {
             tracing::error!(error = %e, "listener stopped");
             1
         }),
@@ -274,10 +285,23 @@ async fn serve_stdio_session() -> Result<(), i32> {
         granted_scope: Scope::HostAdmin,
     };
 
-    farcooler_transport::serve_stdio(cfg, RpcFactory { service, watcher }).await.map_err(|e| {
-        eprintln!("stdio session ended: {e}");
-        1
-    })
+    // `daemon.shutdown` ends this session, which is the whole of what this
+    // process is. Nothing else here is shared, so there is no other daemon for
+    // it to stop — when one exists, the branch above made this a pipe to it and
+    // the request went there instead.
+    let stop = Arc::new(tokio::sync::Notify::new());
+    let served = farcooler_transport::serve_stdio(
+        cfg,
+        RpcFactory { service, watcher, stop: stop.clone() },
+    );
+
+    tokio::select! {
+        result = served => result.map_err(|e| {
+            eprintln!("stdio session ended: {e}");
+            1
+        }),
+        _ = stop.notified() => Ok(()),
+    }
 }
 
 /// One `Rpc` per request, over one shared `Service`.
@@ -289,11 +313,14 @@ async fn serve_stdio_session() -> Result<(), i32> {
 struct RpcFactory {
     service: Arc<Service>,
     watcher: Arc<Watcher>,
+    /// Shared with whatever is waiting to stop this process. See `daemon.shutdown`.
+    stop: Arc<tokio::sync::Notify>,
 }
 
 impl Handler for RpcFactory {
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
-        let rpc = Rpc::new(self.service.clone(), self.watcher.clone(), Scope::HostAdmin);
+        let rpc =
+            Rpc::new(self.service.clone(), self.watcher.clone(), Scope::HostAdmin, self.stop.clone());
         async move { rpc.handle(req).await }
     }
 

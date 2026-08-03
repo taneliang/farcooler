@@ -67,6 +67,13 @@ struct Cli {
 enum Command {
     /// Show host and daemon facts.
     Status,
+    /// Start, stop, or replace this machine's daemon.
+    ///
+    /// Local only. `--host` reaches another machine's daemon through ssh, and
+    /// stopping one from here would take away the connection carrying the
+    /// request; installing and inspecting a remote daemon is `host`'s job.
+    #[command(subcommand)]
+    Daemon(DaemonCmd),
     /// Manage allowlisted repository roots.
     #[command(subcommand)]
     Root(RootCmd),
@@ -126,6 +133,19 @@ enum Command {
         #[arg(long)]
         adapter: Option<String>,
     },
+}
+
+/// The local daemon's lifecycle, for whoever owns it.
+///
+/// On a Mac that is the app: it ships the daemon inside its own bundle and runs
+/// `daemon ensure` at launch, so the pair that is talking is always the pair
+/// that was built together. Elsewhere it is systemd or a person.
+#[derive(Subcommand)]
+enum DaemonCmd {
+    /// Leave a daemon built from this same source running, replacing one that is not.
+    Ensure,
+    /// Stop the local daemon. Terminals keep running — they belong to tmux.
+    Stop,
 }
 
 /// Tiling, in tmux's vocabulary — because it IS tmux.
@@ -405,7 +425,7 @@ enum TerminalCmd {
     },
     /// Stop a terminal.
     Stop { terminal: String },
-    /// Acknowledge a loss without claiming an exit.
+    /// Forget a lost terminal. Refused unless it is lost.
     DismissLost { terminal: String },
     /// Relaunch from the same preset as a new epoch.
     Restart { terminal: String },
@@ -594,6 +614,7 @@ async fn run() -> Fallible {
     let host = cli.host.as_deref();
     match cli.command {
         Command::Status => status(host, cli.json).await,
+        Command::Daemon(c) => daemon(host, c, cli.json).await,
         Command::Root(c) => root(host, c, cli.json).await,
         Command::Repo(c) => repo(host, c, cli.json).await,
         Command::Workspace(c) => workspace(host, c, cli.json).await,
@@ -626,6 +647,48 @@ async fn run() -> Fallible {
         }
         Command::AgentHost { terminal, socket, worktree, session, adapter } => {
             agent_host::run(terminal, socket, worktree, session, adapter).await
+        }
+    }
+}
+
+/// Start, stop, or replace the daemon on THIS machine.
+async fn daemon(host: Option<&str>, cmd: DaemonCmd, json: bool) -> Fallible {
+    if host.is_some() {
+        return Err("daemon manages this machine's daemon; drop --host".into());
+    }
+
+    match cmd {
+        DaemonCmd::Ensure => {
+            let (action, build) = daemon_link::ensure_local().await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "action": action.as_str(), "daemonVersion": build })
+                );
+            } else {
+                println!("{} {build}", action.as_str());
+            }
+            Ok(())
+        }
+        DaemonCmd::Stop => {
+            let mut link = match daemon_link::connect_existing().await? {
+                Some(link) => link,
+                None => {
+                    if json {
+                        println!("{}", serde_json::json!({ "action": "not_running" }));
+                    } else {
+                        println!("not running");
+                    }
+                    return Ok(());
+                }
+            };
+            daemon_link::stop(&mut link).await?;
+            if json {
+                println!("{}", serde_json::json!({ "action": "stopped" }));
+            } else {
+                println!("stopped");
+            }
+            Ok(())
         }
     }
 }
@@ -1509,7 +1572,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         TerminalCmd::DismissLost { terminal } => {
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
             link.call(req_for("terminal.dismiss_lost", id)).await?;
-            println!("dismissed {} (still truthfully lost, no exit claimed)", short(id));
+            println!("dismissed {}", short(id));
         }
 
         TerminalCmd::Remove { terminal } => {

@@ -115,6 +115,10 @@ message Result {
     TerminalScreen terminal_screen = 16;
     AgentEventBatch agent_event_batch = 17;
     WorktreeFileList worktree_file_list = 18;
+    // "It worked and there is nothing to describe" — `daemon.shutdown`, whose
+    // whole result is that the daemon is going away. Echoing any resource back
+    // would be describing a process that is about to stop existing.
+    Empty empty = 19;
   }
 }
 

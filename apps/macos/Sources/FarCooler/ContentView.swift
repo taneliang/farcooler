@@ -65,6 +65,12 @@ struct ContentView: View {
             Notifier.shared.requestAuthorisation()
             PushRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
             AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
+            // Before the first read, not after: a stale daemon left over from an
+            // earlier build would otherwise answer it, and everything from that
+            // point on would be this app talking to a different program.
+            if let problem = await LocalDaemon.shared.ensure().problem {
+                client.lastError = problem
+            }
             await client.refresh()
             await client.refreshRepositories()
             await client.refreshRoots()
@@ -695,7 +701,7 @@ struct ContentView: View {
     private func run(_ action: TerminalAction, on term: Terminal) async {
         switch action {
         case .restart: await client.restart(terminal: term.short)
-        case .dismissLost: await client.dismissLost(terminal: term.short)
+        case .dismissLost: await client.dismissLost(term)
         case .stop: await client.stop(terminal: term.short)
         }
     }
@@ -879,9 +885,7 @@ struct ContentView: View {
             // a Codex pane did nothing and explained nothing.
             guard target.canSwitchPaneMode || target.isAgentPane else {
                 let agent = target.agentLabel
-                client.lastError =
-                    "\(agent) has no chat view — Far Cooler can only render Claude as a chat. "
-                    + "The terminal keeps working."
+                client.lastError = "\(agent) has no chat view. Only Claude renders as a chat."
                 return
             }
             await togglePaneMode(target)

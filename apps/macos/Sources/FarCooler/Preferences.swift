@@ -147,6 +147,41 @@ final class Preferences: ObservableObject {
     }
 }
 
+/// A control and the line explaining it, in ONE cell.
+///
+/// A `Text` written as a sibling of a control inside a `Form` is a row of its
+/// own: separator above, full cell height, indistinguishable at a glance from a
+/// setting. Six of them made the Behaviour pane read as twelve settings, half
+/// of them unclickable, and the last one sat under the control it did not
+/// describe — a paragraph about lost terminals hanging beneath the tiling
+/// prefix.
+///
+/// Text that explains one control belongs in that control's cell. Text that
+/// covers a whole group belongs in the section's `footer`, which is what the
+/// notification section uses.
+private struct Setting<Control: View>: View {
+    private let caption: LocalizedStringKey
+    private let control: Control
+
+    init(_ caption: LocalizedStringKey, @ViewBuilder control: () -> Control) {
+        self.caption = caption
+        self.control = control()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            control
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                // Wraps instead of truncating: a form column is narrower than
+                // most of these sentences.
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject private var preferences = Preferences.shared
     @StateObject private var service = ServiceRegistration()
@@ -160,7 +195,10 @@ struct SettingsView: View {
             account.tabItem { Label("Account", systemImage: "person.crop.circle") }.tag("account")
             host.tabItem { Label("Startup", systemImage: "bolt") }.tag("startup")
         }
-        .frame(width: 520, height: 400)
+        // Tall enough for the longest tab. Behaviour is five settings and a
+        // notification group, and at 400 it clipped the last group mid-row —
+        // a settings window that scrolls to reach a checkbox reads as broken.
+        .frame(width: 520, height: 520)
     }
 
     /// Signing in, which buys notifications and nothing else.
@@ -189,26 +227,19 @@ struct SettingsView: View {
     /// information about the fleet.
     private var host: some View {
         Form {
-            Section {
+            Setting("Keeps this Mac reachable from your iPhone while Far Cooler is closed.") {
                 switch service.state {
                 case .registered:
-                    Toggle("Start Far Cooler's daemon at login", isOn: .constant(true))
+                    Toggle("Start the daemon at login", isOn: .constant(true))
                         .onTapGesture { service.unregister() }
                 case .notRegistered:
-                    Toggle("Start Far Cooler's daemon at login", isOn: .constant(false))
+                    Toggle("Start the daemon at login", isOn: .constant(false))
                         .onTapGesture { service.register() }
                 case .awaitingApproval:
                     Button("Approve in System Settings") { service.register() }
                 case .unavailable(let why):
                     Text(why).font(.callout).foregroundStyle(.secondary)
                 }
-
-                Text(
-                    "With this on, agents stay reachable from your phone after you close "
-                    + "the app. Terminals keep running either way — they belong to tmux."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -249,42 +280,36 @@ struct SettingsView: View {
     private var behaviour: some View {
         Form {
             Section {
-                Picker("New tasks start with", selection: $preferences.defaultAgent) {
-                    Text("Claude Code").tag("claude")
-                    Text("Codex").tag("codex")
-                    Text("Cursor").tag("cursor")
+                Setting("⌘T opens a plain shell.") {
+                    Picker("New tasks start with", selection: $preferences.defaultAgent) {
+                        Text("Claude Code").tag("claude")
+                        Text("Codex").tag("codex")
+                        Text("Cursor").tag("cursor")
+                    }
                 }
-                Text("⌘T still opens a plain shell.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section {
-                Picker("Appearance", selection: $preferences.appearance) {
-                    ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+                Setting("Terminal colours are set separately.") {
+                    Picker("Appearance", selection: $preferences.appearance) {
+                        ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
-                Text("Terminal colours are unaffected.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
-                Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
+                Setting("Lost terminals are kept until you dismiss them.") {
+                    Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
+                }
 
-                Toggle("Open coding agents as a chat", isOn: $preferences.preferChatMode)
-                Text(
-                    "Applies to agents Far Cooler can render natively. "
-                        + "Every pane can still be switched with ⌃B a."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Setting("Available for Claude. Switch any pane with ⌃B A.") {
+                    Toggle("Open coding agents as a chat", isOn: $preferences.preferChatMode)
+                }
 
-                Toggle("Move between panes with ⌃H ⌃J ⌃K ⌃L", isOn: $preferences.directTraversal)
-                Text(
-                    "Only while more than one pane is on screen. With a single "
-                    + "terminal these stay backspace, newline, kill-line and clear."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Setting("Active only while more than one pane is on screen.") {
+                    Toggle(
+                        "Move between panes with ⌃H ⌃J ⌃K ⌃L",
+                        isOn: $preferences.directTraversal)
+                }
 
                 Picker("Tiling prefix", selection: $preferences.prefixKey) {
                     // ⌃B is tmux's, which is why it is the default. The
@@ -295,20 +320,16 @@ struct SettingsView: View {
                     Text("⌃A").tag("a")
                     Text("⌃Space").tag(" ")
                 }
-                Text(
-                    "A terminal is its process. When that exits there is nothing left to "
-                    + "show. A lost terminal is always kept — that is the one case Far Cooler "
-                    + "cannot explain."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
 
+            // A section footer, not a row: this one line covers both toggles,
+            // and a `Text` written beside them would become a third setting.
             Section {
                 Toggle("Notify when an agent needs you", isOn: $preferences.notifyOnAttention)
                 Toggle("Notify when an agent finishes", isOn: $preferences.notifyOnDone)
                     .disabled(!preferences.notifyOnAttention)
-                Text("Working agents are never notified about. That is the normal case.")
+            } footer: {
+                Text("You are not notified while an agent is working.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

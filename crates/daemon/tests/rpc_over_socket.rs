@@ -100,7 +100,15 @@ impl farcooler_transport::Handler for Factory {
         &self,
         req: farcooler_protocol::v1::Request,
     ) -> impl std::future::Future<Output = farcooler_protocol::v1::Response> + Send {
-        let rpc = Rpc::new(self.service.clone(), self.watcher.clone(), self.scope);
+        // Nothing waits on this harness's stop signal: the test server has no
+        // process to end, and `daemon.shutdown` is exercised where it matters —
+        // against a real daemon, by `daemon ensure`.
+        let rpc = Rpc::new(
+            self.service.clone(),
+            self.watcher.clone(),
+            self.scope,
+            Arc::new(tokio::sync::Notify::new()),
+        );
         async move { farcooler_transport::Handler::handle(&rpc, req).await }
     }
 }

@@ -84,7 +84,7 @@ Recover one that died:
 
 ```sh
 farcooler terminal restart <term-id>       # new epoch, same preset
-farcooler terminal dismiss-lost <term-id>  # acknowledge without claiming an exit
+farcooler terminal dismiss-lost <term-id>  # forget it, without claiming an exit
 ```
 
 Attach to the real tmux session:
@@ -108,6 +108,19 @@ FARCOOLER_BIN=$PWD/target/release/farcooler ./apps/macos/.build/debug/Far Cooler
 A fleet sidebar, per-terminal output, and an input box. It renders the state the
 daemon derived and never computes state itself, so two clients cannot disagree
 about the same terminal.
+
+The app owns this Mac's daemon. It ships one inside its own bundle and runs
+`farcooler daemon ensure` at launch, which replaces any daemon built from
+different source than the app:
+
+```sh
+farcooler daemon ensure   # start one, or replace a mismatched one
+farcooler daemon stop     # terminals keep running: they belong to tmux
+```
+
+Two components built from different source speak the same protocol perfectly and
+still behave like two different programs, and the symptom is a bug you already
+fixed still happening.
 
 ## Layout
 
