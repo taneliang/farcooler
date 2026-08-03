@@ -396,26 +396,40 @@ impl Store {
         self.get_workspace(id)
     }
 
-    /// Correct `is_main_checkout` when the reconciler finds it disagrees with
-    /// what git reports.
+    /// The columns git owns, rewritten when the reconciler finds the row
+    /// disagrees with `git worktree list`.
     ///
-    /// Migration 0006 added the column with `DEFAULT 0`, so every row written
-    /// before that migration says "not the main checkout" regardless of
-    /// whether it is one -- this is what the reconciler calls to fix that.
-    /// Separate from `set_workspace_flags` for the same reason that one is
-    /// separate from `update_workspace`: one field, one writer, so a
-    /// concurrent rename or hide/unhide cannot be reverted by passing its
-    /// unrelated columns back unchanged.
-    pub fn set_workspace_is_main_checkout(
+    /// A workspace row is a cache of a worktree, and these three are the part
+    /// of it git decides: what the worktree is called, what branch is checked
+    /// out there, and whether it is the repository's own checkout rather than
+    /// a linked one. Nothing else revisits them once the row exists, so
+    /// without this the cache is written once and then diverges forever — a
+    /// `git checkout` by hand leaves the sidebar naming a stale branch, and
+    /// migration 0006's `is_main_checkout DEFAULT 0` leaves every pre-0006
+    /// main checkout claiming not to be one.
+    ///
+    /// Three columns in one statement because they are one fact from one
+    /// writer, taken from a single `git worktree list` record: splitting them
+    /// would mean two versioned updates, the second racing the version the
+    /// first just bumped. `hidden` and `creation_failed` are deliberately
+    /// absent for the reason `set_workspace_flags` exists at all — those are
+    /// the user's opinions, not git's facts, and passing them back unchanged
+    /// is how a concurrent hide gets silently reverted.
+    pub fn set_workspace_identity(
         &self,
         id: Uuid,
         expected_version: u64,
+        task_name: &str,
+        branch: &str,
         is_main_checkout: bool,
     ) -> Result<Workspace> {
         self.run_versioned(
-            "UPDATE workspaces SET is_main_checkout = ?1, resource_version = ?2
-             WHERE id = ?3 AND resource_version = ?4",
+            "UPDATE workspaces
+             SET task_name = ?1, branch = ?2, is_main_checkout = ?3, resource_version = ?4
+             WHERE id = ?5 AND resource_version = ?6",
             &[
+                &task_name,
+                &branch,
                 &is_main_checkout,
                 &(expected_version as i64 + 1),
                 &uuid_blob(id),

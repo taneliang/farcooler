@@ -43,14 +43,22 @@ pub struct Outcome {
     /// than merely harmless, and a nonzero count is worth a client noticing
     /// rather than the daemon quietly absorbing it.
     pub conflicts: usize,
-    /// A row that already existed, for a worktree git still reports, whose
-    /// `is_main_checkout` disagreed with git's own `is_main` and just got
-    /// corrected. Migration 0006 added the column with `DEFAULT 0`, so every
-    /// database written before this feature existed has this disagreement on
-    /// its main checkout's row, permanently, until a pass notices — this is
-    /// that noticing. Folded into `is_quiet()` for the same reason
-    /// `recovered` is: a row that just started telling the truth about
-    /// itself is news a client should see, not something to swallow.
+    /// A row that already existed, for a worktree git still reports, which
+    /// disagreed with git about something git owns — the branch checked out
+    /// there, whether it is the main checkout, or (for the main checkout) what
+    /// it is called — and just got rewritten to match. One per row, not per
+    /// column: a row with two things wrong is still one row that started
+    /// telling the truth.
+    ///
+    /// Every one of these is permanent without a pass like this one, because
+    /// nothing else revisits those columns after the row is created. `branch`
+    /// goes stale the moment someone types `git checkout` in the worktree;
+    /// `is_main_checkout` is wrong from birth on every database written before
+    /// migration 0006 added the column with `DEFAULT 0`; and a main checkout
+    /// adopted by an older Far Cooler is called `main` rather than named after
+    /// its directory. Folded into `is_quiet()` for the same reason `recovered`
+    /// is: a row that just started telling the truth about itself is news a
+    /// client should see, not something to swallow.
     pub healed: usize,
 }
 
@@ -72,6 +80,43 @@ impl Outcome {
         self.recovered += other.recovered;
         self.conflicts += other.conflicts;
         self.healed += other.healed;
+    }
+}
+
+/// What to call the branch a worktree is on.
+///
+/// Shared by adoption and healing on purpose. Two spellings of the detached
+/// case would put those two out of step, and a row healing to a string the
+/// next pass disagrees with is not a one-off correction — it is every pass
+/// finding a disagreement, rewriting the row, and bumping `resource_version`
+/// on a timer for as long as the daemon runs.
+fn branch_of(worktree: &git::WorktreeInfo) -> String {
+    worktree.branch.clone().unwrap_or_else(|| {
+        // A detached worktree still has a commit, and that is the honest
+        // thing to call it rather than inventing a branch name.
+        format!("detached at {}", worktree.head.chars().take(8).collect::<String>())
+    })
+}
+
+/// The worktree's directory name, if it is one that can be stored as a task
+/// name.
+///
+/// A name git handed us, not one a user typed. If the directory is named
+/// something the validator refuses, skipping it silently would make a worktree
+/// permanently invisible with no way to find out why — hence the warning here
+/// rather than at each call site.
+fn usable_name(worktree: &git::WorktreeInfo, branch: &str) -> Option<String> {
+    let name = Path::new(&worktree.path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| branch.to_string());
+
+    match farcooler_core::validate::task_name(&name) {
+        Ok(()) => Some(name),
+        Err(e) => {
+            tracing::warn!(path = %worktree.path, error = ?e, "worktree name is not usable");
+            None
+        }
     }
 }
 
@@ -103,23 +148,43 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             continue;
         }
         let path = canonical_or_raw(&worktree.path);
+        let branch = branch_of(worktree);
+
         if registered.contains(&path) {
-            // A row for this path already exists. Its `is_main_checkout`
-            // may still be wrong: migration 0006 added the column with
-            // `DEFAULT 0`, so every row written before it exists says
-            // "not main" regardless of what git actually reports, and
-            // nothing else ever revisits the value once the row is
-            // created. Correct it here rather than leave it wrong forever.
+            // A row for this path already exists, and git has just re-read the
+            // worktree it caches. Everything git owns about that row can have
+            // drifted since it was written, because nothing else ever revisits
+            // any of it: `branch` goes stale the moment someone types
+            // `git checkout` here, and `is_main_checkout` is wrong from birth
+            // on any database written before migration 0006 added the column
+            // with `DEFAULT 0`. Correct it here rather than leave it wrong
+            // forever.
             if let Some(ws) = known.iter().find(|w| canonical_or_raw(&w.worktree_path) == path) {
-                if ws.is_main_checkout != worktree.is_main {
-                    match svc.store.set_workspace_is_main_checkout(
+                // The name is git's to correct for the main checkout only. A
+                // task workspace is named by whoever created it, and sits in a
+                // directory slugged from the project and the task together —
+                // re-deriving that name from the directory would rename every
+                // task in the sidebar into its slug on the next tick.
+                let name = if worktree.is_main {
+                    usable_name(worktree, &branch).unwrap_or_else(|| ws.task_name.clone())
+                } else {
+                    ws.task_name.clone()
+                };
+
+                if ws.task_name != name
+                    || ws.branch != branch
+                    || ws.is_main_checkout != worktree.is_main
+                {
+                    match svc.store.set_workspace_identity(
                         ws.id,
                         ws.resource_version,
+                        &name,
+                        &branch,
                         worktree.is_main,
                     ) {
                         Ok(_) => outcome.healed += 1,
                         Err(e) => {
-                            tracing::warn!(path = %worktree.path, error = ?e, "could not heal is_main_checkout")
+                            tracing::warn!(path = %worktree.path, error = ?e, "could not heal a workspace against git")
                         }
                     }
                 }
@@ -130,24 +195,9 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             continue;
         }
 
-        let branch = worktree.branch.clone().unwrap_or_else(|| {
-            // A detached worktree still has a commit, and that is the honest
-            // thing to call it rather than inventing a branch name.
-            format!("detached at {}", worktree.head.chars().take(8).collect::<String>())
-        });
-
-        let name = Path::new(&worktree.path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| branch.clone());
-
-        // A name git handed us, not one a user typed. If the directory is named
-        // something the validator refuses, skipping it silently would make a
-        // worktree permanently invisible with no way to find out why.
-        if let Err(e) = farcooler_core::validate::task_name(&name) {
-            tracing::warn!(path = %worktree.path, error = ?e, "worktree name is not usable");
+        let Some(name) = usable_name(worktree, &branch) else {
             continue;
-        }
+        };
 
         match svc.store.create_workspace(
             repository_id,
@@ -520,7 +570,15 @@ mod tests {
         let main = &all[0];
         assert!(main.is_main_checkout, "adoption must have gotten this right to start with");
 
-        svc.store.set_workspace_is_main_checkout(main.id, main.resource_version, false).unwrap();
+        svc.store
+            .set_workspace_identity(
+                main.id,
+                main.resource_version,
+                &main.task_name,
+                &main.branch,
+                false,
+            )
+            .unwrap();
         assert!(
             !svc.store.get_workspace(main.id).unwrap().is_main_checkout,
             "the test must actually start from the wrong flag to mean anything"
@@ -534,6 +592,148 @@ mod tests {
             svc.store.get_workspace(main.id).unwrap().is_main_checkout,
             "the pass must have corrected the row, not merely counted the disagreement"
         );
+    }
+
+    /// git owns which branch a worktree is on; the row is a cache of that.
+    ///
+    /// Nothing but this pass ever revisits `branch` once the row exists —
+    /// `Store::update_workspace` has no production caller at all — so a
+    /// `git checkout` typed by hand in the main checkout used to leave the
+    /// sidebar naming whatever branch happened to be current when the
+    /// repository was registered, permanently.
+    ///
+    /// Deleting the `branch` comparison in `reconcile::repository` turns this
+    /// red: `healed` stays `0` and the row keeps saying `main`.
+    #[tokio::test]
+    async fn a_branch_switched_by_hand_is_picked_up() {
+        let (dir, svc, repo) = fixture().await;
+        let all = svc.store.list_workspaces_for_repository(repo).unwrap();
+        assert_eq!(all.len(), 1, "just the main checkout: {all:?}");
+        let main = &all[0];
+        assert_eq!(main.branch, "main", "the fixture starts on main");
+
+        git::git(&dir.path().join("repo"), &["checkout", "-q", "-b", "feat/switched"])
+            .await
+            .unwrap();
+
+        let out = repository(&svc, repo).await.unwrap();
+
+        assert_eq!(out.healed, 1, "{out:?}");
+        assert!(!out.is_quiet(), "a row correcting itself is news, not nothing: {out:?}");
+        assert_eq!(
+            svc.store.get_workspace(main.id).unwrap().branch,
+            "feat/switched",
+            "the pass must have corrected the row, not merely counted the disagreement"
+        );
+    }
+
+    /// A detached main checkout heals to the same string adoption would have
+    /// written, rather than to a branch name git never reported.
+    ///
+    /// Worth its own test because the two derivations live in different
+    /// places: get them out of step and every pass would see a disagreement,
+    /// heal it to the other spelling, and bump `resource_version` forever —
+    /// a row that is never quiet, on a timer.
+    #[tokio::test]
+    async fn a_detached_main_checkout_heals_to_its_commit() {
+        let (dir, svc, repo) = fixture().await;
+        let repo_path = dir.path().join("repo");
+        let main = svc.store.list_workspaces_for_repository(repo).unwrap().remove(0);
+
+        git::git(&repo_path, &["checkout", "-q", "--detach"]).await.unwrap();
+        let head = git::git(&repo_path, &["rev-parse", "HEAD"]).await.unwrap();
+        let expected = format!("detached at {}", head.stdout.trim().chars().take(8).collect::<String>());
+
+        let out = repository(&svc, repo).await.unwrap();
+        assert_eq!(out.healed, 1, "{out:?}");
+        assert_eq!(svc.store.get_workspace(main.id).unwrap().branch, expected);
+
+        // And then stays put: a second pass over an unchanged detached HEAD
+        // must find nothing left to correct.
+        let again = repository(&svc, repo).await.unwrap();
+        assert!(again.is_quiet(), "healing must converge, not oscillate: {again:?}");
+    }
+
+    /// The row an older Far Cooler wrote for a main checkout said `main` — the
+    /// name was a literal in `Service::register_repository`, not the
+    /// directory. Adoption stopped doing that, but nothing re-derived the rows
+    /// already written, so those repositories are still labelled `main` in the
+    /// sidebar instead of by their project directory.
+    ///
+    /// Deleting the `task_name` comparison in `reconcile::repository` turns
+    /// this red.
+    #[tokio::test]
+    async fn a_legacy_main_checkout_row_stops_calling_itself_main() {
+        let (_dir, svc, repo) = fixture().await;
+        let main = svc.store.list_workspaces_for_repository(repo).unwrap().remove(0);
+        assert_eq!(main.task_name, "repo", "adoption names it after its directory");
+
+        svc.store
+            .update_workspace(
+                main.id,
+                main.resource_version,
+                "main",
+                &main.branch,
+                &main.worktree_path,
+                false,
+                false,
+            )
+            .unwrap();
+
+        let out = repository(&svc, repo).await.unwrap();
+
+        assert_eq!(out.healed, 1, "{out:?}");
+        assert_eq!(
+            svc.store.get_workspace(main.id).unwrap().task_name,
+            "repo",
+            "the pass must re-derive the name the way adoption would have"
+        );
+    }
+
+    /// Names are healed for the main checkout ONLY, because that is the only
+    /// one whose name git can be said to own.
+    ///
+    /// A task workspace is named by the person who created it — "refactor
+    /// api" — and lives in a directory named after the project and the task
+    /// together. Healing its name from its directory the way the main
+    /// checkout's is healed would rewrite every task in the sidebar into a
+    /// slug on the next tick. Widening the `worktree.is_main` guard turns this
+    /// red.
+    #[tokio::test]
+    async fn a_task_workspaces_own_name_is_left_alone() {
+        let (dir, svc, repo) = fixture().await;
+        let side = dir.path().join("repo-refactor-api");
+        git::git(
+            &dir.path().join("repo"),
+            &["worktree", "add", "-q", "-b", "feat/api", side.to_str().unwrap()],
+        )
+        .await
+        .unwrap();
+        repository(&svc, repo).await.unwrap();
+
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| !w.is_main_checkout)
+            .expect("the adopted worktree");
+        svc.store
+            .update_workspace(
+                ws.id,
+                ws.resource_version,
+                "refactor api",
+                &ws.branch,
+                &ws.worktree_path,
+                false,
+                false,
+            )
+            .unwrap();
+
+        let out = repository(&svc, repo).await.unwrap();
+
+        assert!(out.is_quiet(), "nothing about this repository changed: {out:?}");
+        assert_eq!(svc.store.get_workspace(ws.id).unwrap().task_name, "refactor api");
     }
 
     #[tokio::test]

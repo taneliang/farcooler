@@ -2121,9 +2121,9 @@ mod remove_worktree_tests {
     /// The upgraded-database case: migration 0006 added `is_main_checkout`
     /// with `DEFAULT 0`, so a database written before this feature existed
     /// has the main checkout's row saying "not main" — and
-    /// `set_workspace_is_main_checkout` is used here to put a row into
-    /// exactly that state deliberately, standing in for that database,
-    /// rather than relying on `ws.is_main_checkout` ever having been right.
+    /// `set_workspace_identity` is used here to put a row into exactly that
+    /// state deliberately, standing in for that database, rather than relying
+    /// on `ws.is_main_checkout` ever having been right.
     /// The path comparison in `remove_worktree` must refuse it anyway.
     ///
     /// Deleting that path check (and keeping only the `ws.is_main_checkout`
@@ -2140,8 +2140,10 @@ mod remove_worktree_tests {
             .find(|w| w.is_main_checkout)
             .unwrap();
 
-        let ws =
-            svc.store.set_workspace_is_main_checkout(ws.id, ws.resource_version, false).unwrap();
+        let ws = svc
+            .store
+            .set_workspace_identity(ws.id, ws.resource_version, &ws.task_name, &ws.branch, false)
+            .unwrap();
         assert!(!ws.is_main_checkout, "the test must start from the wrong flag to mean anything");
 
         match svc.remove_worktree(ws.id).await {
