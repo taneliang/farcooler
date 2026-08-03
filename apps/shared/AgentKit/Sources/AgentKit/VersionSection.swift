@@ -12,6 +12,13 @@ import SwiftUI
 /// beta and a release share a marketing version, so `0.2.0` alone is not an
 /// answer; `0.2.0 (beta 3) · 1284` is.
 public struct VersionSection: View {
+    /// The ownership and license information shipped with every app build.
+    ///
+    /// Kept next to the version rather than in a platform-specific About view,
+    /// so the Mac's About sheet, iOS Settings, and copied diagnostics all say
+    /// the same thing.
+    private static let copyrightNotice = "© 2026 E-Liang Tan · MIT License"
+
     /// What the daemon reported, or nil if nothing has asked it yet.
     private let daemon: DaemonBuild?
     /// Which machine that daemon is on, for when it is not this one. Blank
@@ -30,6 +37,7 @@ public struct VersionSection: View {
         Section {
             LabeledContent("App", value: AppVersion.display)
             LabeledContent("Build", value: AppVersion.build)
+            LabeledContent("Copyright", value: Self.copyrightNotice)
 
             if let daemon {
                 LabeledContent(host.isEmpty ? "Daemon" : "Daemon on \(host)", value: daemon.readable)
@@ -61,6 +69,7 @@ public struct VersionSection: View {
         var lines = [
             "Far Cooler \(AppVersion.display)",
             "build \(AppVersion.build) · \(AppVersion.channel)",
+            Self.copyrightNotice,
         ]
         if let daemon {
             // The RAW stamp here, not the readable one. This string is going

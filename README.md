@@ -165,3 +165,12 @@ the service directly), the terminal channel streams via `capture-pane` rather
 than control-mode streaming, and there is no SSH transport, iOS client, or
 libghostty terminal core. See the final section of the design doc for the full
 picture.
+
+## License
+
+Copyright © 2026 E-Liang Tan. Far Cooler is licensed under the
+[MIT License](LICENSE).
+
+The bundled Iosevka Nerd Font Mono files remain licensed under the SIL Open Font
+License 1.1; see
+[`apps/ios/FarCooler/Fonts/IOSEVKA-LICENSE.md`](apps/ios/FarCooler/Fonts/IOSEVKA-LICENSE.md).
