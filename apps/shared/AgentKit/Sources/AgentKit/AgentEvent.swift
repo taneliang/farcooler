@@ -13,10 +13,67 @@ public enum ToolStatus: String, Decodable, Sendable {
     case failed = "Failed"
 }
 
-public enum GapReason: String, Decodable, Sendable {
-    case ringTrimmed = "RingTrimmed"
-    case loadUnsupported = "LoadUnsupported"
-    case unparsed = "Unparsed"
+/// Why history is missing, as the daemon named it.
+///
+/// Every case but `loadFailed` is a serde unit variant, which travels as a
+/// bare JSON string. `loadFailed` carries the adapter's own message, so serde
+/// encodes it as a struct variant instead — a single-key object wrapping
+/// `{"detail": ...}` — and `init(from:)` below has to try the string shape
+/// first and fall back to the keyed shape only for that one case.
+public enum GapReason: Sendable, Equatable {
+    case ringTrimmed
+    /// The agent declared, at `initialize`, that it does not implement
+    /// `session/load` at all. `session/load` was never even attempted.
+    case loadUnsupported
+    /// Nothing was recorded for this session yet.
+    ///
+    /// Not a failure: a claude or codex terminal switched to chat before its
+    /// first turn has no transcript to load, and that is the common case, not
+    /// an exotic one.
+    case loadEmpty
+    /// `session/load` was attempted and the agent refused it for a reason
+    /// other than "nothing recorded yet". Carries the adapter's own message.
+    case loadFailed(detail: String)
+    case unparsed
+}
+
+extension GapReason: Decodable {
+    private struct LoadFailedPayload: Decodable { let detail: String }
+
+    private struct Key: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    public init(from decoder: Decoder) throws {
+        // The common shape first: every case but `loadFailed` is a bare
+        // string on the wire.
+        if let single = try? decoder.singleValueContainer(),
+            let raw = try? single.decode(String.self)
+        {
+            switch raw {
+            case "RingTrimmed": self = .ringTrimmed
+            case "LoadUnsupported": self = .loadUnsupported
+            case "LoadEmpty": self = .loadEmpty
+            case "Unparsed": self = .unparsed
+            // A reason a later daemon invented and this build does not know
+            // about yet — same rule as the top-level event: a gap this build
+            // cannot name precisely is still a gap, never a silent drop.
+            default: self = .unparsed
+            }
+            return
+        }
+        // Otherwise the one keyed shape: `{"LoadFailed": {"detail": "..."}}`.
+        let container = try decoder.container(keyedBy: Key.self)
+        if let key = container.allKeys.first(where: { $0.stringValue == "LoadFailed" }) {
+            let payload = try container.decode(LoadFailedPayload.self, forKey: key)
+            self = .loadFailed(detail: payload.detail)
+            return
+        }
+        self = .unparsed
+    }
 }
 
 public struct Diff: Decodable, Sendable, Equatable {

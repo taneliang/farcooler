@@ -200,13 +200,36 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Whether to offer the terminal/chat switch at all.
     var canSwitchPaneMode: Bool { chatCapable == true }
 
+    /// Whether an agent is running here at all, as opposed to a plain shell.
+    ///
+    /// The same distinction the daemon's own refusal draws — `"nothing in
+    /// this pane is an agent"` versus `"this agent has no chat adapter"` —
+    /// so the client can tell the two apart too: a shell that never ran an
+    /// agent and an agent that ran but has no adapter fail for different
+    /// reasons, and only one of them is fixed by writing a `config.toml`
+    /// entry.
+    ///
+    /// A *live* plain shell pane reports its real process name — `zsh`,
+    /// `fish`, `bash` — not the literal string `"shell"`; the daemon only
+    /// collapses to `"shell"` for a pane it read as empty or all-numeric.
+    /// Testing against the literal string alone would tell a zsh pane it
+    /// has no chat adapter and to go add one to `config.toml`, which is
+    /// exactly the bad advice this distinction exists to avoid. So this
+    /// checks the same `shells` set `name(of:)` uses to fold process names
+    /// to one word, instead of re-deriving that knowledge here.
+    var hasDetectedAgent: Bool {
+        let name = preset.split(separator: ":").first.map(String.init) ?? ""
+        guard !name.isEmpty else { return false }
+        return name != "shell" && !Self.shells.contains(name.lowercased())
+    }
+
     /// What is running here, for a sentence about it.
     ///
     /// The preset when there is one — "codex", "cursor" — and something
     /// truthful rather than a guess when there is not.
     var agentLabel: String {
-        let name = (preset ?? "").split(separator: ":").first.map(String.init) ?? ""
-        guard !name.isEmpty, name != "shell" else { return "This pane" }
+        guard hasDetectedAgent else { return "This pane" }
+        let name = preset.split(separator: ":").first.map(String.init) ?? ""
         return name.prefix(1).uppercased() + name.dropFirst()
     }
 

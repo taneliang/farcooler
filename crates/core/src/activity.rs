@@ -25,6 +25,27 @@
 
 use farcooler_protocol::v1::AgentActivity;
 
+/// How to launch an agent's ACP adapter.
+///
+/// Three real shapes have to fit: an npm package run through `npx`, a native
+/// subcommand on an installed binary, and a script with flags. The previous
+/// representation — a bare program with no arguments — could express none of
+/// them, so a user-supplied adapter silently lost everything after the program
+/// name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdapterSpec {
+    pub program: String,
+    pub args: Vec<String>,
+    /// Set in the adapter's environment before it starts. For secrets and
+    /// endpoints an agent needs and Far Cooler has no opinion about.
+    ///
+    /// A map, not a list of pairs: TOML writes this as `env = { KEY = "v" }`,
+    /// which is a table and will not deserialize into tuples. `BTreeMap` rather
+    /// than `HashMap` so the order an adapter's environment is built in is
+    /// stable, and a test can assert on it.
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
 /// One agent's screen signatures.
 ///
 /// Order matters within a screen: `blocked` is checked before `working`,
@@ -34,7 +55,7 @@ use farcooler_protocol::v1::AgentActivity;
 #[derive(Debug, Clone)]
 pub struct AgentRules {
     /// What to call this agent.
-    pub preset: &'static str,
+    pub preset: String,
 
     /// Process-name PREFIXES, as `pane_current_command` reports them.
     ///
@@ -43,142 +64,372 @@ pub struct AgentRules {
     /// Claude Code renames itself to its version (`2.1.220`) and cursor-agent
     /// runs as plain `node`, which is far too generic to claim. Screen identity
     /// is what actually carries this.
-    pub commands: &'static [&'static str],
+    pub commands: Vec<String>,
 
     /// Screen text that means "this IS this agent".
     ///
     /// Furniture the agent always draws, never a phrase a user could type, so a
     /// shell echoing "do you want to proceed?" is not promoted to an agent.
-    pub identity: &'static [&'static str],
+    pub identity: Vec<String>,
 
     /// Waiting on the user.
     ///
     /// The list that has to be right. A missed blocked state is a notification
     /// that never arrives, which is the one failure that makes the whole
     /// feature pointless — so these are deliberately generous.
-    pub blocked: &'static [&'static str],
+    pub blocked: Vec<String>,
 
     /// Actively doing something.
-    pub working: &'static [&'static str],
+    pub working: Vec<String>,
+
+    /// How to host this agent as a native chat, when Far Cooler can.
+    ///
+    /// `None` means recognised-but-terminal-only, which is a real and honest
+    /// state rather than a gap: an agent with no adapter renders as the TUI it
+    /// is. This field replaces the separate `CHAT_CAPABLE` list in the daemon,
+    /// which was maintained by hand beside these rules and disagreed with them.
+    pub adapter: Option<AdapterSpec>,
 }
 
-/// The built-in rules.
-///
-/// Every signature below was read off a running agent rather than guessed. The
-/// first version of this file was guesswork and it matched no real screen.
-///
-/// There is deliberately no `idle` list. An agent that is identified, not
-/// blocked and not working IS idle, and requiring positive idle furniture meant
-/// a version bump renaming a footer left an agent stuck on `unknown` — never
-/// reaching `done`, never notifying.
-pub const RULES: &[AgentRules] = &[
-    AgentRules {
-        preset: "claude",
-        commands: &["claude"],
-        identity: &["? for shortcuts", "Claude Code", "auto-accept edits", "esc to interrupt"],
-        blocked: &[
-            "Do you want to",
-            "Do you want me to",
-            "❯ 1. Yes",
-            "1. Yes, and don't ask again",
-            // The footer under every approval prompt.
-            "Esc to cancel · Tab to amend",
-            "[y/n]",
-            "(y/N)",
-        ],
-        working: &["esc to interrupt", "Thinking…"],
-    },
-    AgentRules {
-        preset: "codex",
-        // Truncated by tmux to `codex-aarch64-a`, hence the prefix.
-        commands: &["codex"],
-        identity: &["OpenAI Codex", "/model to change"],
-        blocked: &[
-            // Codex draws every choice as a numbered list under a `›` marker.
-            "\u{203a} 1.",
-            "Press enter to continue",
-            "Allow command",
-            "Do you want to",
-            "[y/n]",
-            "(y/N)",
-        ],
-        working: &["esc to interrupt", "Working ("],
-    },
-    AgentRules {
-        preset: "cursor",
-        // cursor-agent runs as `node`, which cannot be claimed — matching it
-        // would label every node process a coding agent. Kept for installs that
-        // expose a real name; screen identity is what finds it here.
-        commands: &["cursor-agent"],
-        identity: &["Cursor Agent", "cursor-agent", "Press any key to sign in"],
-        // UNVERIFIED. This install could not get past its sign-in screen, so
-        // unlike the two above these were not read off a running agent. They
-        // follow the same shapes and should be checked against a signed-in
-        // cursor-agent before being trusted.
-        blocked: &["Do you want to", "Allow?", "[y/n]", "(y/N)", "\u{203a} 1."],
-        working: &["esc to interrupt", "Generating"],
-    },
-];
-
-/// Which agent, if any, is running in a pane.
-///
-/// Matched on the foreground process. That is the only thing that answers the
-/// question honestly: a terminal launched as a shell in which someone typed
-/// `claude` IS a Claude Code terminal, and one launched as an agent that has
-/// since exited to a prompt is not.
-pub fn rules_for_command(command: &str) -> Option<&'static AgentRules> {
-    // The program, not the whole command line: identity comes from what was run,
-    // and `claude --model opus` is still claude.
-    let first = command.split_whitespace().next().unwrap_or(command);
-    let name = first.rsplit('/').next().unwrap_or(first).trim();
-    if name.is_empty() {
-        return None;
-    }
-    // Prefix, because tmux truncates: `codex-aarch64-a` must match `codex`.
-    RULES.iter().find(|r| r.commands.iter().any(|c| name.starts_with(c)))
+/// A short-hand so the built-in table reads as it did when it was a `const`.
+fn s(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| s.to_string()).collect()
 }
 
-
-/// Which agent is in this pane: by process, or failing that, by what it drew.
-///
-/// Both are needed. Process matching is exact when it works, and it does not
-/// always work — Claude Code renames itself to its version number, so tmux
-/// reports `2.1.220` and no name matching will ever find it. Screen matching
-/// catches that, and is why the identity markers are agent furniture rather
-/// than anything a user could type.
-pub fn identify(command: &str, screen: &str) -> Option<&'static AgentRules> {
-    if let Some(rules) = rules_for_command(command) {
-        return Some(rules);
-    }
-    let text = plain_text(screen);
-    RULES.iter().find(|r| r.identity.iter().any(|needle| text.contains(needle)))
+fn npx(package: &str) -> Option<AdapterSpec> {
+    Some(AdapterSpec {
+        program: "npx".to_string(),
+        args: vec!["-y".to_string(), package.to_string()],
+        env: Default::default(),
+    })
 }
 
-/// What to call whatever is running here.
+/// Every agent Far Cooler knows, and how to host the ones it can.
 ///
-/// The agent's name when one is recognised, otherwise the process itself. A row
-/// then reads `claude` or `zsh` rather than the preset a terminal was created
-/// with, which after the first command is usually a lie.
-pub fn describe(command: &str, screen: &str) -> String {
-    if let Some(rules) = identify(command, screen) {
-        return rules.preset.to_string();
+/// One table rather than two. Recognition and hostability were separate lists
+/// maintained by hand, and they drifted: codex was recognised in a pane and
+/// absent from the chat list, so `⌃B a` on a codex pane did nothing and said
+/// nothing. Hostability is now a field on the entry, so there is no second list
+/// to disagree with.
+#[derive(Debug, Clone)]
+pub struct Registry {
+    rules: Vec<AgentRules>,
+}
+
+impl Registry {
+    /// The built-in rules.
+    ///
+    /// Every signature below was read off a running agent rather than guessed.
+    /// The first version of this file was guesswork and it matched no real
+    /// screen.
+    ///
+    /// There is deliberately no `idle` list. An agent that is identified, not
+    /// blocked and not working IS idle, and requiring positive idle furniture
+    /// meant a version bump renaming a footer left an agent stuck on `unknown`
+    /// — never reaching `done`, never notifying.
+    pub fn built_in() -> Self {
+        Registry {
+            rules: vec![
+                AgentRules {
+                    preset: "claude".to_string(),
+                    commands: s(&["claude"]),
+                    identity: s(&[
+                        "? for shortcuts",
+                        "Claude Code",
+                        "auto-accept edits",
+                        "esc to interrupt",
+                    ]),
+                    blocked: s(&[
+                        "Do you want to",
+                        "Do you want me to",
+                        "❯ 1. Yes",
+                        "1. Yes, and don't ask again",
+                        // The footer under every approval prompt.
+                        "Esc to cancel · Tab to amend",
+                        "[y/n]",
+                        "(y/N)",
+                    ]),
+                    working: s(&["esc to interrupt", "Thinking…"]),
+                    adapter: npx("@agentclientprotocol/claude-agent-acp"),
+                },
+                AgentRules {
+                    preset: "codex".to_string(),
+                    // Truncated by tmux to `codex-aarch64-a`, hence the prefix.
+                    commands: s(&["codex"]),
+                    identity: s(&["OpenAI Codex", "/model to change"]),
+                    blocked: s(&[
+                        // Codex draws every choice as a numbered list under a `›` marker.
+                        "\u{203a} 1.",
+                        "Press enter to continue",
+                        "Allow command",
+                        "Do you want to",
+                        "[y/n]",
+                        "(y/N)",
+                    ]),
+                    working: s(&["esc to interrupt", "Working ("]),
+                    // NOT `@zed-industries/codex-acp`: npm reports it deprecated
+                    // and replaced by this one, and it stalled at 0.16.0 against
+                    // this package's 1.1.9. The same rename that caught the
+                    // Claude adapter.
+                    adapter: npx("@agentclientprotocol/codex-acp"),
+                },
+                AgentRules {
+                    preset: "opencode".to_string(),
+                    // Confirmed by `tmux display-message -p '#{pane_current_command}'`
+                    // against a running opencode: it does not rename itself, unlike
+                    // claude and codex. This is the reliable path; see the identity
+                    // comment below for what breaks if that ever stops being true.
+                    commands: s(&["opencode"]),
+                    // Two markers, for two different failure modes of the other one.
+                    //
+                    // "ctrl+p commands" is the command-palette hint bar: present on
+                    // the first blank prompt and after every completed turn
+                    // (captures/opencode-idle.txt, captures/opencode-idle2.txt,
+                    // captures/opencode-working2.txt,
+                    // captures/opencode-fresh-dir-risky.txt). But it shares the
+                    // bottom line with variable-length status text, and long status
+                    // crowds it off entirely: it is ABSENT from
+                    // captures/opencode-blocked.txt, captures/opencode-after-retries.txt
+                    // and captures/opencode-working.txt, where a long provider error
+                    // pushed it past the terminal's right edge. Any sufficiently long
+                    // footer does this, not just that provider's error text, and it
+                    // gets worse below the 120-column width these captures were taken
+                    // at.
+                    //
+                    // "Build ·" is the current-agent-mode label opencode draws on its
+                    // own status line, one line above the crowded footer and always
+                    // first on that line, so it is never pushed off by trailing model
+                    // or status text. It is present in every capture taken this
+                    // session, including all three where "ctrl+p commands" was
+                    // crowded out (captures/opencode-blocked.txt,
+                    // captures/opencode-after-retries.txt,
+                    // captures/opencode-working.txt) — confirmed with
+                    // `grep -c 'Build ·'`. Caveat: "Build" is the default mode; the
+                    // idle screen's "tab agents" hint implies opencode has other
+                    // agent modes (a "Plan"-style one, going by the palette's
+                    // abbreviated "Ask"/"Buil[d]" row), and no capture this session
+                    // ever showed one of those, so this string is only confirmed for
+                    // the default mode.
+                    //
+                    // Between the two: if opencode ever renamed its process (it has
+                    // not, per captures/opencode-process-name.txt, unlike claude and
+                    // codex), a screen in a non-Build mode with a crowded footer would
+                    // go unidentified. Real, but narrow enough not to invent a third
+                    // marker for on top of two things that were never observed.
+                    identity: s(&["ctrl+p commands", "Build ·"]),
+                    // Deliberately empty. Real attempts to trigger a permission
+                    // prompt — a file write, a file delete, a network fetch (`curl`),
+                    // and `sudo -n` — all ran with no approval screen at all in this
+                    // environment, including repeated in a directory opencode had
+                    // never touched before to rule out a remembered per-directory
+                    // trust grant (captures/opencode-autoapproved-write.txt,
+                    // captures/opencode-autoapproved-delete-attempt.txt,
+                    // captures/opencode-autoapproved-delete-done.txt,
+                    // captures/opencode-autoapproved-curl.txt,
+                    // captures/opencode-sudo-attempt.txt,
+                    // captures/opencode-fresh-dir-risky.txt,
+                    // captures/opencode-fresh-dir-risky2.txt). A billing error from
+                    // the account's paid provider (captures/opencode-blocked.txt,
+                    // captures/opencode-after-retries.txt) did produce a screen a
+                    // human needs to act on, but that text is the provider's own
+                    // error message passed through opencode's footer, not opencode's
+                    // furniture — a user on a different provider, or with balance,
+                    // would never see it, so it does not belong here. This list is
+                    // empty by observation, not omission: opencode's own
+                    // permission-prompt screen has never actually been seen.
+                    blocked: Vec::new(),
+                    // The escape-to-cancel hint, drawn only while a turn is in flight
+                    // and gone the moment it finishes (captures/opencode-working2.txt
+                    // has it, captures/opencode-idle2.txt right after does not).
+                    working: s(&["esc interrupt"]),
+                    // Native ACP subcommand, so no npm package to be renamed
+                    // or deprecated out from under it — unlike every other
+                    // adapter in this table.
+                    adapter: Some(AdapterSpec {
+                        program: "opencode".to_string(),
+                        args: vec!["acp".to_string()],
+                        env: Default::default(),
+                    }),
+                },
+                AgentRules {
+                    preset: "cursor".to_string(),
+                    // cursor-agent runs as `node`, which cannot be claimed —
+                    // matching it would label every node process a coding
+                    // agent. Kept for installs that expose a real name; screen
+                    // identity is what finds it here.
+                    commands: s(&["cursor-agent"]),
+                    // "Press any key to sign in" is now confirmed: it is the exact
+                    // screen this install draws (captures/cursor-idle.txt). Pressing
+                    // that key starts an OAuth sign-in flow, which this task was told
+                    // not to attempt, so this install still could not get past it.
+                    // "Cursor Agent" and "cursor-agent" remain UNVERIFIED — that
+                    // sign-in screen renders its banner as block-graphic ASCII art,
+                    // not literal text, so neither string actually appears in the
+                    // one real cursor-agent screen reachable this session. They are
+                    // left in place rather than removed on no evidence either way,
+                    // but should be checked against a signed-in cursor-agent.
+                    identity: s(&["Cursor Agent", "cursor-agent", "Press any key to sign in"]),
+                    // UNVERIFIED. This install still could not get past its
+                    // sign-in screen (see above), so unlike opencode's and the two
+                    // above claude/codex sets, these were not read off a running
+                    // agent. They follow the same shapes and should be checked
+                    // against a signed-in cursor-agent before being trusted.
+                    blocked: s(&["Do you want to", "Allow?", "[y/n]", "(y/N)", "\u{203a} 1."]),
+                    working: s(&["esc to interrupt", "Generating"]),
+                    // Best-effort, and knowingly so. `cursor-agent-acp` is
+                    // third-party, sits at 0.1.1 and was last published in
+                    // September 2025; there is no first-party alternative and
+                    // no `@agentclientprotocol/cursor-acp`. It is shipped
+                    // because failing to start is already handled honestly —
+                    // `AdapterMissing` keeps the pane alive and says terminal
+                    // mode is unaffected — and a toggle that might work beats
+                    // one that certainly does not.
+                    adapter: npx("cursor-agent-acp"),
+                },
+            ],
+        }
     }
-    // A command line with arguments is already the label: `pnpm dev` says more
-    // than `pnpm`, and taking a basename of it would cut it back to one word.
-    if command.contains(' ') {
-        return command.trim().to_string();
+
+    /// Every entry, for callers that need the whole table.
+    pub fn all(&self) -> &[AgentRules] {
+        &self.rules
     }
-    // A command line with arguments is already the label: `pnpm dev` says more
-    // than `pnpm`, and taking a basename would cut it back to one word.
-    if command.trim().contains(' ') {
-        return command.trim().to_string();
+
+    /// How to host this preset as a chat, if Far Cooler can.
+    pub fn adapter(&self, preset: &str) -> Option<&AdapterSpec> {
+        self.rules
+            .iter()
+            .find(|r| r.preset == preset)
+            .and_then(|r| r.adapter.as_ref())
     }
-    let name = command.rsplit('/').next().unwrap_or(command).trim();
-    // A process whose name is a version number tells a user nothing. Better to
-    // say "shell" than to label a row `2.1.220`.
-    let meaningless = name.is_empty()
-        || name.chars().all(|c| c.is_ascii_digit() || c == '.');
-    if meaningless { "shell".to_string() } else { name.to_string() }
+
+    /// Whether Far Cooler can render this agent as a chat.
+    ///
+    /// Derived, never listed. This being a second hand-maintained list is what
+    /// let it disagree with the rules it was supposed to match.
+    pub fn chat_capable(&self, preset: &str) -> bool {
+        self.adapter(preset).is_some()
+    }
+
+    /// Which agent, if any, is running in a pane.
+    ///
+    /// Matched on the foreground process. That is the only thing that answers
+    /// the question honestly: a terminal launched as a shell in which someone
+    /// typed `claude` IS a Claude Code terminal, and one launched as an agent
+    /// that has since exited to a prompt is not.
+    pub fn rules_for_command(&self, command: &str) -> Option<&AgentRules> {
+        // The program, not the whole command line: identity comes from what was
+        // run, and `claude --model opus` is still claude.
+        let first = command.split_whitespace().next().unwrap_or(command);
+        let name = first.rsplit('/').next().unwrap_or(first).trim();
+        if name.is_empty() {
+            return None;
+        }
+        // Prefix, because tmux truncates: `codex-aarch64-a` must match `codex`.
+        self.rules
+            .iter()
+            .find(|r| r.commands.iter().any(|c| name.starts_with(c.as_str())))
+    }
+
+    /// Which agent is in this pane: by process, or failing that, by what it drew.
+    ///
+    /// Both are needed. Process matching is exact when it works, and it does not
+    /// always work — Claude Code renames itself to its version number, so tmux
+    /// reports `2.1.220` and no name matching will ever find it. Screen matching
+    /// catches that, and is why the identity markers are agent furniture rather
+    /// than anything a user could type.
+    pub fn identify(&self, command: &str, screen: &str) -> Option<&AgentRules> {
+        if let Some(rules) = self.rules_for_command(command) {
+            return Some(rules);
+        }
+        let text = plain_text(screen);
+        self.rules.iter().find(|r| {
+            r.identity
+                .iter()
+                .any(|needle| text.contains(needle.as_str()))
+        })
+    }
+
+    /// What to call whatever is running here.
+    ///
+    /// The agent's name when one is recognised, otherwise the process itself. A row
+    /// then reads `claude` or `zsh` rather than the preset a terminal was created
+    /// with, which after the first command is usually a lie.
+    pub fn describe(&self, command: &str, screen: &str) -> String {
+        if let Some(rules) = self.identify(command, screen) {
+            return rules.preset.clone();
+        }
+        // A command line with arguments is already the label: `pnpm dev` says more
+        // than `pnpm`, and taking a basename of it would cut it back to one word.
+        if command.contains(' ') {
+            return command.trim().to_string();
+        }
+        // A command line with arguments is already the label: `pnpm dev` says more
+        // than `pnpm`, and taking a basename would cut it back to one word.
+        if command.trim().contains(' ') {
+            return command.trim().to_string();
+        }
+        let name = command.rsplit('/').next().unwrap_or(command).trim();
+        // A process whose name is a version number tells a user nothing. Better to
+        // say "shell" than to label a row `2.1.220`.
+        let meaningless = name.is_empty() || name.chars().all(|c| c.is_ascii_digit() || c == '.');
+        if meaningless {
+            "shell".to_string()
+        } else {
+            name.to_string()
+        }
+    }
+
+    /// Overlay configured adapters onto the built-in table.
+    ///
+    /// By preset name: a name that already exists replaces that entry's
+    /// adapter and any detection field the user supplied; a new name appends a
+    /// new entry. Appended rather than prepended so a user cannot accidentally
+    /// shadow a built-in's detection by adding a broad `identity` string.
+    pub fn merge(&mut self, entries: Vec<(String, crate::config::ConfigAdapter)>) {
+        for (preset, cfg) in entries {
+            // An adapter with no program cannot start, and offering the toggle
+            // for one would produce exactly the silent failure this work exists
+            // to remove.
+            if cfg.program.trim().is_empty() {
+                tracing::warn!(%preset, "ignoring a configured adapter with no program");
+                continue;
+            }
+            let spec = AdapterSpec {
+                program: cfg.program,
+                args: cfg.args,
+                env: cfg.env,
+            };
+            match self.rules.iter_mut().find(|r| r.preset == preset) {
+                Some(existing) => {
+                    existing.adapter = Some(spec);
+                    // Only what was actually supplied. An empty list in TOML is
+                    // indistinguishable from an absent one, and wiping a
+                    // built-in's identity strings would make it undetectable.
+                    if !cfg.commands.is_empty() {
+                        existing.commands = cfg.commands;
+                    }
+                    if !cfg.identity.is_empty() {
+                        existing.identity = cfg.identity;
+                    }
+                    if !cfg.blocked.is_empty() {
+                        existing.blocked = cfg.blocked;
+                    }
+                    if !cfg.working.is_empty() {
+                        existing.working = cfg.working;
+                    }
+                }
+                None => self.rules.push(AgentRules {
+                    preset,
+                    commands: cfg.commands,
+                    identity: cfg.identity,
+                    blocked: cfg.blocked,
+                    working: cfg.working,
+                    adapter: Some(spec),
+                }),
+            }
+        }
+    }
 }
 
 /// Strip escape sequences and collapse whitespace.
@@ -239,27 +490,37 @@ pub fn plain_text(screen: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Classify a rendered screen.
-///
-/// `screen` is the visible pane, with or without escape sequences.
-pub fn classify(command: &str, screen: &str) -> AgentActivity {
-    let Some(rules) = identify(command, screen) else {
-        return AgentActivity::None;
-    };
-    let screen = &plain_text(screen);
+impl Registry {
+    /// Classify a rendered screen.
+    ///
+    /// `screen` is the visible pane, with or without escape sequences.
+    pub fn classify(&self, command: &str, screen: &str) -> AgentActivity {
+        let Some(rules) = self.identify(command, screen) else {
+            return AgentActivity::None;
+        };
+        let screen = &plain_text(screen);
 
-    // Blocked first. An agent asking permission still shows its working
-    // furniture, so checking working first would hide every question.
-    if rules.blocked.iter().any(|needle| screen.contains(needle)) {
-        return AgentActivity::Blocked;
+        // Blocked first. An agent asking permission still shows its working
+        // furniture, so checking working first would hide every question.
+        if rules
+            .blocked
+            .iter()
+            .any(|needle| screen.contains(needle.as_str()))
+        {
+            return AgentActivity::Blocked;
+        }
+        if rules
+            .working
+            .iter()
+            .any(|needle| screen.contains(needle.as_str()))
+        {
+            return AgentActivity::Working;
+        }
+        // Identified, not asking, not busy: it is sitting there. Requiring positive
+        // idle furniture left an agent whose footer changed between versions stuck
+        // on `unknown` forever — never reaching `done`, never notifying.
+        AgentActivity::Idle
     }
-    if rules.working.iter().any(|needle| screen.contains(needle)) {
-        return AgentActivity::Working;
-    }
-    // Identified, not asking, not busy: it is sitting there. Requiring positive
-    // idle furniture left an agent whose footer changed between versions stuck
-    // on `unknown` forever — never reaching `done`, never notifying.
-    AgentActivity::Idle
 }
 
 /// Fold a fresh classification against what was last reported.
@@ -315,8 +576,9 @@ mod tests {
         // Reporting a shell as idle would put it in the same visual language as
         // an agent waiting for work, in the list a user scans for something
         // that needs them.
-        assert_eq!(classify("zsh", "e-liang@Mac project % "), None);
-        assert_eq!(classify("bash", "anything at all"), None);
+        let r = Registry::built_in();
+        assert_eq!(r.classify("zsh", "e-liang@Mac project % "), None);
+        assert_eq!(r.classify("bash", "anything at all"), None);
     }
 
     #[test]
@@ -324,93 +586,107 @@ mod tests {
         // The whole point: terminals are created as plain shells and the user
         // types `claude` into them. Keying on the launch preset would report a
         // live agent as a shell forever.
-        assert!(rules_for_command("claude").is_some());
-        assert!(rules_for_command("/opt/homebrew/bin/claude").is_some());
-        assert!(rules_for_command("cursor-agent").is_some());
-        assert!(rules_for_command("zsh").is_none());
-        assert!(rules_for_command("").is_none());
+        let r = Registry::built_in();
+        assert!(r.rules_for_command("claude").is_some());
+        assert!(r.rules_for_command("/opt/homebrew/bin/claude").is_some());
+        assert!(r.rules_for_command("cursor-agent").is_some());
+        assert!(r.rules_for_command("zsh").is_none());
+        assert!(r.rules_for_command("").is_none());
     }
 
     #[test]
     fn a_row_is_labelled_by_what_is_actually_running() {
-        assert_eq!(describe("claude", ""), "claude");
-        assert_eq!(describe("cursor-agent", ""), "cursor");
+        let r = Registry::built_in();
+        assert_eq!(r.describe("claude", ""), "claude");
+        assert_eq!(r.describe("cursor-agent", ""), "cursor");
         // Not an agent: say what it is rather than inventing a category.
-        assert_eq!(describe("zsh", ""), "zsh");
-        assert_eq!(describe("cargo", ""), "cargo");
-        assert_eq!(describe("", ""), "shell");
+        assert_eq!(r.describe("zsh", ""), "zsh");
+        assert_eq!(r.describe("cargo", ""), "cargo");
+        assert_eq!(r.describe("", ""), "shell");
     }
 
     #[test]
     fn an_agent_that_renamed_itself_is_still_found() {
         // The real case that broke process matching: Claude Code sets its
         // process name to its version, so tmux reports `2.1.220`.
+        let r = Registry::built_in();
         let screen = "❯ hello?\n  ⏸ manual mode on · ? for shortcuts";
-        assert!(identify("2.1.220", screen).is_some());
-        assert_eq!(describe("2.1.220", screen), "claude");
-        assert_eq!(classify("2.1.220", screen), Idle);
+        assert!(r.identify("2.1.220", screen).is_some());
+        assert_eq!(r.describe("2.1.220", screen), "claude");
+        assert_eq!(r.classify("2.1.220", screen), Idle);
     }
 
     #[test]
     fn a_version_number_is_never_shown_as_a_name() {
         // Whatever it is, `2.1.220` is not a useful label for a row.
-        assert_eq!(describe("2.1.220", "nothing recognisable"), "shell");
-        assert_eq!(describe("1.2", ""), "shell");
+        let r = Registry::built_in();
+        assert_eq!(r.describe("2.1.220", "nothing recognisable"), "shell");
+        assert_eq!(r.describe("1.2", ""), "shell");
     }
 
     #[test]
     fn a_shell_showing_agent_like_text_is_not_promoted_to_an_agent() {
         // Identity markers are agent furniture, not phrases a user might type.
-        assert!(identify("zsh", "$ echo 'do you want to proceed?'").is_none());
-        assert_eq!(classify("zsh", "$ echo '[y/n]'"), None);
+        let r = Registry::built_in();
+        assert!(
+            r.identify("zsh", "$ echo 'do you want to proceed?'")
+                .is_none()
+        );
+        assert_eq!(r.classify("zsh", "$ echo '[y/n]'"), None);
     }
 
     #[test]
     fn claude_working_is_recognised() {
+        let r = Registry::built_in();
         let screen = "\
 ✻ Cooked for 6s
   Running 2 shell commands · 4s
   esc to interrupt";
-        assert_eq!(classify("claude", screen), Working);
+        assert_eq!(r.classify("claude", screen), Working);
     }
 
     #[test]
     fn claude_idle_is_recognised() {
+        let r = Registry::built_in();
         let screen = "\
 ❯ hello?
 ────────────────────────
   ⏸ manual mode on · ? for shortcuts";
-        assert_eq!(classify("claude", screen), Idle);
+        assert_eq!(r.classify("claude", screen), Idle);
     }
 
     #[test]
     fn codex_is_recognised_through_a_truncated_process_name() {
         // tmux caps the field, so a real codex arrives as `codex-aarch64-a`.
         // Exact matching found nothing and every codex reported as a shell.
-        assert!(rules_for_command("codex-aarch64-a").is_some());
-        assert_eq!(describe("codex-aarch64-a", ""), "codex");
+        let r = Registry::built_in();
+        assert!(r.rules_for_command("codex-aarch64-a").is_some());
+        assert_eq!(r.describe("codex-aarch64-a", ""), "codex");
     }
 
     #[test]
     fn codex_states_come_from_its_real_screen() {
-        let idle = "› Explain this codebase\n  gpt-5.6-sol high · ~/project\n  >_ OpenAI Codex (v0.145.0)";
-        assert_eq!(classify("codex-aarch64-a", idle), Idle);
+        let r = Registry::built_in();
+        let idle =
+            "› Explain this codebase\n  gpt-5.6-sol high · ~/project\n  >_ OpenAI Codex (v0.145.0)";
+        assert_eq!(r.classify("codex-aarch64-a", idle), Idle);
 
         let working = "• Working (6s • esc to interrupt) · 1 background terminal running";
-        assert_eq!(classify("codex-aarch64-a", working), Working);
+        assert_eq!(r.classify("codex-aarch64-a", working), Working);
 
         let blocked = "› 1. Update now\n  2. Skip\n  Press enter to continue";
-        assert_eq!(classify("codex-aarch64-a", blocked), Blocked);
+        assert_eq!(r.classify("codex-aarch64-a", blocked), Blocked);
     }
 
     #[test]
     fn cursor_cannot_be_claimed_by_its_process() {
         // cursor-agent runs as plain `node`. Matching that would label every
         // node process a coding agent, which is worse than missing it.
-        assert!(rules_for_command("node").is_none());
-        assert_eq!(describe("node", ""), "node");
+        let r = Registry::built_in();
+        assert!(r.rules_for_command("node").is_none());
+        assert_eq!(r.describe("node", ""), "node");
         // It is found by what it draws instead.
-        assert!(identify("node", "Press any key to sign in...").is_some());
+        assert!(r.identify("node", "Press any key to sign in...").is_some());
     }
 
     #[test]
@@ -418,8 +694,9 @@ mod tests {
         // The failure this replaced: an agent whose footer changed between
         // versions matched no idle signature and reported `unknown` forever,
         // so it never reached `done` and never notified.
+        let r = Registry::built_in();
         let unfamiliar = "OpenAI Codex\nsome screen nobody wrote a rule for";
-        assert_eq!(classify("codex", unfamiliar), Idle);
+        assert_eq!(r.classify("codex", unfamiliar), Idle);
     }
 
     #[test]
@@ -427,12 +704,13 @@ mod tests {
         // The case that decides whether this feature is worth having. An agent
         // asking permission still shows its spinner chrome, so checking
         // "working" first would mean never noticing that something needs you.
+        let r = Registry::built_in();
         let screen = "\
 Do you want to allow this command?
 ❯ 1. Yes
   2. No
   esc to interrupt";
-        assert_eq!(classify("claude", screen), Blocked);
+        assert_eq!(r.classify("claude", screen), Blocked);
     }
 
     #[test]
@@ -440,7 +718,11 @@ Do you want to allow this command?
         // The important half of the honesty: a screen we cannot identify is not
         // promoted to an agent, so a shell never appears in the list of things
         // that might need you.
-        assert_eq!(classify("zsh", "some output nobody wrote a rule for"), None);
+        let r = Registry::built_in();
+        assert_eq!(
+            r.classify("zsh", "some output nobody wrote a rule for"),
+            None
+        );
     }
 
     #[test]
@@ -495,10 +777,29 @@ Do you want to allow this command?
     #[test]
     fn every_rule_set_has_signatures_for_all_three_states() {
         // A preset with an empty list can never report that state, which would
-        // be a silent hole rather than a visible bug.
-        for rules in RULES {
-            assert!(!rules.blocked.is_empty(), "{} has no blocked rules", rules.preset);
-            assert!(!rules.working.is_empty(), "{} has no working rules", rules.preset);
+        // be a silent hole rather than a visible bug — EXCEPT opencode's
+        // `blocked`, which is empty on purpose. Every real attempt to trigger
+        // its permission prompt (write, delete, curl, `sudo -n`, repeated in a
+        // directory it had never touched) ran with no approval screen at all;
+        // the one "needs a human" screen this session ever produced was a
+        // provider's own billing-error text, not opencode's furniture, so it
+        // was left out rather than shipped as a rule that looks like coverage
+        // but fires for almost nobody. See the field's own comment in
+        // `built_in()` for the full account. A silent hole is a rule nobody
+        // wrote; this is a rule nobody has seen yet — worth distinguishing.
+        for rules in Registry::built_in().all() {
+            if rules.preset != "opencode" {
+                assert!(
+                    !rules.blocked.is_empty(),
+                    "{} has no blocked rules",
+                    rules.preset
+                );
+            }
+            assert!(
+                !rules.working.is_empty(),
+                "{} has no working rules",
+                rules.preset
+            );
         }
     }
 
@@ -506,9 +807,12 @@ Do you want to allow this command?
     fn no_signature_appears_in_two_states_of_the_same_agent() {
         // An overlapping signature makes the result depend on check order,
         // which is exactly the kind of thing that works until it does not.
-        for rules in RULES {
-            for needle in rules.blocked {
-                assert!(!rules.working.contains(needle), "{needle:?} is both blocked and working");
+        for rules in Registry::built_in().all() {
+            for needle in &rules.blocked {
+                assert!(
+                    !rules.working.contains(needle),
+                    "{needle:?} is both blocked and working"
+                );
             }
         }
     }
@@ -518,8 +822,12 @@ Do you want to allow this command?
         // Process names are unreliable, so identity markers are what actually
         // has to hold. An agent with none is invisible the moment it renames
         // itself.
-        for rules in RULES {
-            assert!(!rules.identity.is_empty(), "{} has no identity markers", rules.preset);
+        for rules in Registry::built_in().all() {
+            assert!(
+                !rules.identity.is_empty(),
+                "{} has no identity markers",
+                rules.preset
+            );
         }
     }
 
@@ -527,8 +835,160 @@ Do you want to allow this command?
     fn every_agent_declares_a_process_to_match() {
         // A rule set with no command can never be selected, which is a silent
         // hole rather than a visible bug.
-        for rules in RULES {
-            assert!(!rules.commands.is_empty(), "{} matches no process", rules.preset);
+        for rules in Registry::built_in().all() {
+            assert!(
+                !rules.commands.is_empty(),
+                "{} matches no process",
+                rules.preset
+            );
+        }
+    }
+
+    #[test]
+    fn an_agent_is_chat_capable_exactly_when_it_has_an_adapter() {
+        // The bug this replaces: `CHAT_CAPABLE` was a second list maintained by
+        // hand beside the rules, and the two disagreed. Derived, they cannot.
+        //
+        // `opencode` is back in this list as of Task 5: it now has a real,
+        // screen-verified entry in `built_in()`. See task-1-report.md for why
+        // it was dropped from here in Task 1.
+        let r = Registry::built_in();
+        for preset in ["claude", "codex", "cursor", "opencode"] {
+            assert!(r.chat_capable(preset), "{preset} ships an adapter");
+            assert!(r.adapter(preset).is_some());
+        }
+        assert!(!r.chat_capable("zsh"));
+        assert!(r.adapter("zsh").is_none());
+    }
+
+    #[test]
+    fn opencode_needs_no_npm_package() {
+        // Its ACP mode is a native subcommand, which is the whole reason it is
+        // preferred over an npm-packaged ACP adapter. Restored from Task 1,
+        // which had to omit it because `opencode` did not exist in the
+        // registry yet.
+        let spec = Registry::built_in()
+            .adapter("opencode")
+            .expect("opencode ships an adapter")
+            .clone();
+        assert_eq!(spec.program, "opencode");
+        assert_eq!(spec.args, vec!["acp".to_string()]);
+    }
+
+    #[test]
+    fn opencode_is_recognised_by_process_name() {
+        // Confirmed with `tmux display-message -p '#{pane_current_command}'`
+        // against a running opencode (captures/opencode-process-name.txt): it
+        // reports itself as plain `opencode`, unlike claude and codex.
+        let r = Registry::built_in();
+        assert_eq!(r.describe("opencode", ""), "opencode");
+    }
+
+    #[test]
+    fn opencode_states_come_from_its_real_screen() {
+        // Substrings pasted verbatim from captures/opencode-idle.txt and
+        // captures/opencode-working2.txt — real screens from a running
+        // opencode, not invented ones. No Blocked case here: opencode's
+        // `blocked` list is deliberately empty (see the comment on it in
+        // `built_in()`), so there is no real screen to assert one against.
+        let r = Registry::built_in();
+
+        let idle = "\
+                       ┃  Ask anything... \"Fix a TODO in the codebase\"
+                       ┃
+                       ┃  Build · GLM-5.2 Z.AI Coding Plan
+                       tab agents  ctrl+p commands";
+        assert_eq!(r.classify("opencode", idle), Idle);
+
+        let working = "\
+  ┃  Build · Laguna S 2.1 Free OpenCode Zen
+   ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                                                 17.7K (7%)  ctrl+p commands";
+        assert_eq!(r.classify("opencode", working), Working);
+
+        // The screen a billing-crippled account actually produced. It IS a
+        // real screen a human needs to act on, but the text is the provider's
+        // own error message, not opencode's — so it classifies as Working
+        // (its "esc interrupt" hint is still present) rather than Blocked,
+        // and that is the honest result of leaving `blocked` empty rather
+        // than a bug to paper over.
+        let billing_error = "\
+   ⬝⬝⬝⬝⬝⬝⬝⬝ Insufficient balance or no resource package. Please recharge. [retrying in 11s attempt #4]   esc interrupt";
+        assert_eq!(r.classify("opencode", billing_error), Working);
+    }
+
+    #[test]
+    fn every_adapter_belongs_to_an_agent_that_can_be_detected() {
+        // An adapter on a preset nothing can identify is dead config: `⌃B a`
+        // chooses the adapter from the DETECTED preset, so an entry no screen and
+        // no process name can reach could never be selected.
+        //
+        // Non-empty `commands`/`identity` is not enough to prove that, though —
+        // a preset shadowed by an EARLIER entry's command prefix (`identify`
+        // returns the first match, in table order) would carry a non-empty list
+        // and still never be reachable. So this drives `identify` itself, by
+        // both paths, and asserts it resolves to THIS preset rather than merely
+        // to something.
+        let r = Registry::built_in();
+        for rules in r.all() {
+            if rules.adapter.is_none() {
+                continue;
+            }
+            let Some(command) = rules.commands.first() else {
+                assert!(
+                    !rules.identity.is_empty(),
+                    "{} has an adapter but no commands and no identity to detect it",
+                    rules.preset
+                );
+                continue;
+            };
+            // Screen left blank: `identify` checks the process first and never
+            // looks at the screen when that hits, so a blank screen isolates
+            // this to the command path.
+            let by_command = r.identify(command, "");
+            assert_eq!(
+                by_command.map(|found| found.preset.as_str()),
+                Some(rules.preset.as_str()),
+                "{}'s command `{command}` resolves to {:?}, not {} — shadowed by an \
+                 earlier entry's command prefix",
+                rules.preset,
+                by_command.map(|found| found.preset.as_str()),
+                rules.preset
+            );
+
+            let Some(identity) = rules.identity.first() else {
+                continue;
+            };
+            // Command left as something no built-in claims, so this run
+            // isolates the screen path the same way the one above isolated
+            // the command path.
+            let by_identity = r.identify("nothing-recognisable", identity);
+            assert_eq!(
+                by_identity.map(|found| found.preset.as_str()),
+                Some(rules.preset.as_str()),
+                "{}'s identity string `{identity}` resolves to {:?}, not {} — shadowed \
+                 by an earlier entry's identity string",
+                rules.preset,
+                by_identity.map(|found| found.preset.as_str()),
+                rules.preset
+            );
+        }
+    }
+
+    #[test]
+    fn no_built_in_adapter_uses_a_deprecated_zed_package() {
+        // Every `@zed-industries/*` ACP package has moved to
+        // `@agentclientprotocol/*`. The old codex one is deprecated and stalled at
+        // 0.16.0 while the live package is at 1.1.9 — the identical trap already
+        // recorded for the Claude adapter.
+        for rules in Registry::built_in().all() {
+            let Some(spec) = &rules.adapter else { continue };
+            for arg in &spec.args {
+                assert!(
+                    !arg.contains("@zed-industries/"),
+                    "{} uses a deprecated package: {arg}",
+                    rules.preset
+                );
+            }
         }
     }
 }

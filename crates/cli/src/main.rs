@@ -130,8 +130,12 @@ enum Command {
         worktree: std::path::PathBuf,
         #[arg(long)]
         session: Option<String>,
+        /// Which agent this pane hosts. The shim resolves it to an adapter
+        /// through the same registry and config file the daemon used, so the
+        /// two can never disagree about what a preset means — and so a program
+        /// and its argument vector never have to survive tmux's shell quoting.
         #[arg(long)]
-        adapter: Option<String>,
+        preset: Option<String>,
     },
 }
 
@@ -622,8 +626,8 @@ async fn run() -> Fallible {
             }
             Ok(())
         }
-        Command::AgentHost { terminal, socket, worktree, session, adapter } => {
-            agent_host::run(terminal, socket, worktree, session, adapter).await
+        Command::AgentHost { terminal, socket, worktree, session, preset } => {
+            agent_host::run(terminal, socket, worktree, session, preset).await
         }
     }
 }
@@ -933,7 +937,6 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                                     // forever, so an agent pane silently drew
                                     // a terminal and chat mode looked missing.
                                     "paneMode": pane_mode_label(t.pane_mode),
-                "chatCapable": t.chat_capable,
                                     "chatCapable": t.chat_capable,
                                     "agentSessionId": t.agent_session_id,
                                     "agentMode": t.agent_mode,
@@ -1117,24 +1120,7 @@ async fn events(host: Option<&str>) -> Fallible {
         let Some(payload) = event.payload else { continue };
 
         let line = match payload {
-            farcooler_protocol::v1::event::Payload::TerminalChanged(t) => serde_json::json!({
-                "kind": "terminal",
-                "id": uuid_of(&t.id).to_string(),
-                "short": short_bytes(&t.id),
-                "workspace": uuid_of(&t.workspace_id).to_string(),
-                "title": t.title,
-                "preset": label(&t),
-                "state": terminal_label(t.state()),
-                "activity": activity_label(t.activity),
-                "activitySince": activity_since(&t),
-                // Watched as well as listed. A pane mode that only arrived on
-                // a full refresh would mean toggling to chat did nothing until
-                // something else happened to reload the fleet.
-                "paneMode": pane_mode_label(t.pane_mode),
-                "agentSessionId": t.agent_session_id,
-                "agentMode": t.agent_mode,
-                "availableAgentModes": t.available_agent_modes,
-            }),
+            farcooler_protocol::v1::event::Payload::TerminalChanged(t) => terminal_event_json(&t),
             farcooler_protocol::v1::event::Payload::WorkspaceChanged(w) => serde_json::json!({
                 "kind": "workspace",
                 "id": uuid_of(&w.id).to_string(),
@@ -1991,6 +1977,41 @@ fn activity_since(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
     t.activity_changed_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
 }
 
+/// The JSON line `events` pushes for a `TerminalChanged` message.
+///
+/// A free function rather than an inline object literal in the event loop:
+/// this is exactly the shape `chatCapable` went missing from. The daemon
+/// broadcasts it (see `watch.rs`) and `list --json` prints it, but this
+/// projection built its own object field by field and simply left it out —
+/// so a shell pane the user typed `codex` into relabelled itself live from
+/// this same event, while `canSwitchPaneMode` on the client stayed false
+/// forever, because the app is push-only and never re-fetches a terminal it
+/// already knows. `⌃B a` then refused, on the exact agent this branch
+/// shipped an adapter for. Pulling the object out where a test can call it
+/// directly is what keeps the next field from going missing the same way.
+fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "terminal",
+        "id": uuid_of(&t.id).to_string(),
+        "short": short_bytes(&t.id),
+        "workspace": uuid_of(&t.workspace_id).to_string(),
+        "title": t.title,
+        "preset": label(t),
+        "state": terminal_label(t.state()),
+        "activity": activity_label(t.activity),
+        "activitySince": activity_since(t),
+        // Watched as well as listed. A pane mode that only arrived on a full
+        // refresh would mean toggling to chat did nothing until something
+        // else happened to reload the fleet.
+        "paneMode": pane_mode_label(t.pane_mode),
+        // Watched for the identical reason — see the function comment above.
+        "chatCapable": t.chat_capable,
+        "agentSessionId": t.agent_session_id,
+        "agentMode": t.agent_mode,
+        "availableAgentModes": t.available_agent_modes,
+    })
+}
+
 fn workspace_label(s: WorkspaceState) -> &'static str {
     match s {
         WorkspaceState::Unspecified => "?",
@@ -2068,5 +2089,28 @@ fn resolve<'a, T>(
         1 => Ok(matches[0]),
         0 => Err(format!("no {kind} matching {prefix:?}")),
         n => Err(format!("{prefix:?} matches {n} {kind}s, be more specific")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_terminal_changed_event_carries_chat_capable() {
+        // The regression this test exists to catch: `events` used to build
+        // its own JSON object field by field and simply left `chatCapable`
+        // out, so a codex pane that relabelled itself live from this exact
+        // event never told the client it could be switched to chat.
+        let t = farcooler_protocol::v1::Terminal { chat_capable: true, ..Default::default() };
+        let json = terminal_event_json(&t);
+        assert_eq!(json["chatCapable"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn a_chat_incapable_terminal_says_so_rather_than_omitting_the_key() {
+        let t = farcooler_protocol::v1::Terminal { chat_capable: false, ..Default::default() };
+        let json = terminal_event_json(&t);
+        assert_eq!(json["chatCapable"], serde_json::json!(false));
     }
 }

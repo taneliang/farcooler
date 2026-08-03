@@ -215,9 +215,22 @@ impl AcpConnection {
                     // failure to attribute. Seen for real: `session/load`
                     // answering "Session not found" for an id whose transcript
                     // does not exist yet.
-                    return Err(AcpError::Refused(
-                        error["message"].as_str().unwrap_or("the adapter refused").to_string(),
-                    ));
+                    let message =
+                        error["message"].as_str().unwrap_or("the adapter refused").to_string();
+                    // `message` is not always where the substance is. Probed
+                    // directly against `@agentclientprotocol/codex-acp` on
+                    // 2026-08-03 by sending `session/load` for an unknown id:
+                    // it answers `message: "Internal error"` — which says
+                    // nothing — and puts the actual explanation at
+                    // `data.details`: `"no rollout found for thread id
+                    // 00000000-0000-7000-8000-000000000000"`. Appended rather
+                    // than substituted, so an adapter that puts something
+                    // useful in both fields loses neither.
+                    let detail = match error["data"]["details"].as_str() {
+                        Some(details) if !details.is_empty() => format!("{message}: {details}"),
+                        _ => message,
+                    };
+                    return Err(AcpError::Refused(detail));
                 }
                 if rpc.result.is_some() {
                     return Ok(rpc.result.unwrap_or(serde_json::Value::Null));
@@ -504,6 +517,42 @@ mod tests {
 
         match outcome {
             Err(AcpError::Refused(message)) => assert!(message.contains("Session not found")),
+            other => panic!("expected the adapter's own refusal, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_error_with_data_details_folds_the_details_in() {
+        // The exact bytes `@agentclientprotocol/codex-acp` answered when
+        // probed directly on 2026-08-03: `session/load` for an unknown id.
+        // `message` alone says nothing ("Internal error"); the explanation is
+        // in `data.details`. A caller reading only `message` — which is what
+        // this connection did before this test existed — would show the user
+        // "Internal error" and throw away the one useful sentence.
+        let program = "/bin/sh".to_string();
+        let args = vec![
+            "-c".to_string(),
+            r#"read line; printf '{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Internal error","data":{"details":"no rollout found for thread id 00000000-0000-7000-8000-000000000000"}}}\n'"#
+                .to_string(),
+        ];
+        let mut conn =
+            AcpConnection::spawn(&program, &args, std::env::temp_dir()).await.expect("spawn");
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            conn.request("session/load", serde_json::json!({})),
+        )
+        .await
+        .expect("must not hang");
+
+        match outcome {
+            Err(AcpError::Refused(message)) => {
+                assert!(message.contains("Internal error"), "{message}");
+                assert!(
+                    message.contains("no rollout found for thread id"),
+                    "{message}"
+                );
+            }
             other => panic!("expected the adapter's own refusal, got {other:?}"),
         }
     }

@@ -67,6 +67,10 @@ struct ContentView: View {
         NavigationSplitView {
             sidebar
         } detail: {
+            // Top-aligned over the detail pane specifically, not the sidebar —
+            // `fleetPlaceholder` already owns the sidebar's pre-load state, and
+            // `ErrorBanner` guards on `client.hasLoaded` itself so the two never
+            // draw at once.
             detail
                 // Attached here rather than beside each of the four
                 // `navigationTitle` calls, which sit in three different views
@@ -74,6 +78,12 @@ struct ContentView: View {
                 // them. This is the one place that decides which worktree the
                 // window is showing, which is exactly what the control acts on.
                 .openInEditorToolbar(workspace: detailWorkspace) { editorError = $0 }
+                .overlay(alignment: .top) {
+                    ErrorBanner(client: client)
+                }
+                // A message arriving on a keystroke, so the same snappy preset
+                // `PrefixHintOverlay` uses for its chip.
+                .animation(.snappy(duration: 0.22), value: client.lastError)
         }
         .task {
             Notifier.shared.requestAuthorisation()
@@ -122,6 +132,26 @@ struct ContentView: View {
             healSelection()
         }
         .onChange(of: selection) { _, new in
+            // `lastError` is one flat field with no notion of which pane it was
+            // about. Nothing used to clear it on navigation because nothing
+            // rendered it after startup — so the staleness cost nothing to
+            // leave in place. Now that `ErrorBanner` shows it, a message a
+            // refused `⌃B a` left behind on one pane would otherwise still be
+            // on screen after the user moved to another, describing a pane
+            // they are no longer looking at. Selection is the one thing every
+            // navigation path — sidebar click, `⌘P`, `⌘]`, `⌃B o`, closing a
+            // terminal — funnels through, which makes it the narrowest point
+            // that sees every one of them.
+            //
+            // Gated on `hasLoaded`: before the fleet has loaded, this same
+            // field is what `fleetPlaceholder` is showing as "could not read
+            // the fleet," and a selection change made while restoring the
+            // last-open terminal at startup must not blank that out from
+            // under it.
+            if client.hasLoaded {
+                client.lastError = nil
+            }
+
             // Selecting a pane focuses it, which is also what switches to its
             // layout. Done here rather than in `detail`, because it is a write and
             // a view must not perform one while it is being evaluated.
@@ -945,8 +975,20 @@ struct ContentView: View {
             // for a pane that cannot switch; the keystroke was not, so ⌃B a on
             // a Codex pane did nothing and explained nothing.
             guard target.canSwitchPaneMode || target.isAgentPane else {
-                let agent = target.agentLabel
-                client.lastError = "\(agent) has no chat view. Only Claude renders as a chat."
+                // Two different refusals, not one. A plain shell was never an
+                // agent and telling it to add a config.toml entry is bad
+                // advice; an agent Far Cooler recognises but cannot host
+                // needs exactly that entry. Mirrors the daemon's own two
+                // refusal strings in `Service::set_pane_mode`.
+                if target.hasDetectedAgent {
+                    let agent = target.agentLabel
+                    client.lastError =
+                        "\(agent) has no chat adapter, so it stays a terminal. Add one in "
+                        + "~/.config/farcooler/config.toml, then restart the daemon "
+                        + "(farcooler daemon ensure) — it only reads the file at startup."
+                } else {
+                    client.lastError = "Nothing here to chat with — this pane isn't running an agent."
+                }
                 return
             }
             await togglePaneMode(target)
@@ -1354,3 +1396,42 @@ struct ContentView: View {
 }
 
 enum TerminalAction { case restart, dismissLost, stop }
+
+/// Errors the app writes but nothing else shows.
+///
+/// `client.lastError` had one reader — the fleet placeholder — which draws only
+/// before the fleet has loaded. Every message written after that point was
+/// discarded, so a refused keystroke was indistinguishable from a broken
+/// feature. That is the exact failure `toggleAgentPane` writes its message to
+/// prevent.
+private struct ErrorBanner: View {
+    @ObservedObject var client: DaemonClient
+
+    var body: some View {
+        if let error = client.lastError, client.hasLoaded {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(error)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                Spacer(minLength: 8)
+                Button {
+                    client.lastError = nil
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
+            .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+    }
+}

@@ -6,6 +6,7 @@
 
 pub mod activity;
 pub mod base64;
+pub mod config;
 pub mod derive;
 pub mod error;
 pub mod inventory;

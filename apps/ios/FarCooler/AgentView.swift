@@ -686,19 +686,34 @@ private struct SubagentBlockView: View {
 private struct GapRow: View {
     let reason: GapReason
 
+    // `.loadEmpty` is news, not a failure — a fresh chat pane has nothing to
+    // restore because nothing happened yet, and the same orange "something
+    // broke" language a real gap gets would tell the user the opposite of the
+    // truth. It still gets a row: "nothing was lost" is exactly what this row
+    // exists to say plainly rather than leave the user to infer from silence.
+    private var isInformational: Bool {
+        if case .loadEmpty = reason { return true }
+        return false
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "scissors")
+            Image(systemName: isInformational ? "info.circle" : "scissors")
                 .font(.caption)
             Text(sentence)
                 .font(.footnote.weight(.medium))
             Spacer(minLength: 0)
         }
-        .foregroundStyle(.orange)
+        // `Color.secondary`, not `.secondary` — that shorthand resolves to
+        // `HierarchicalShapeStyle`, a different type from `Color.orange`, and
+        // a ternary needs both branches to agree.
+        .foregroundStyle(isInformational ? Color.secondary : Color.orange)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(
+            isInformational ? Color.secondary.opacity(0.10) : Color.orange.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var sentence: String {
@@ -707,6 +722,10 @@ private struct GapRow: View {
             return "Some earlier history was trimmed and is not shown here."
         case .loadUnsupported:
             return "This session could not be loaded from where it left off."
+        case .loadEmpty:
+            return "This session has no recorded turns yet — there is nothing to restore."
+        case .loadFailed(let detail):
+            return "This session could not be loaded from where it left off: \(detail)"
         case .unparsed:
             return "Something happened here that this version cannot show."
         }

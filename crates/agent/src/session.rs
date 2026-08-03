@@ -81,9 +81,61 @@ pub fn permission_event(request_id: &str, params: &serde_json::Value) -> AgentEv
     }
 }
 
-/// What a reconnect emits when the agent cannot replay its own history.
+/// What a reconnect emits when the agent never even offered `session/load`.
+///
+/// Only reachable when `initialize` did not set `agentCapabilities.loadSession`
+/// — the one case the name is still literally true for. A failed ATTEMPT at
+/// `session/load` is a different thing and goes through `load_failed_event`.
 pub fn load_unsupported_event() -> AgentEvent {
     AgentEvent::Gap { reason: AgentGapReason::LoadUnsupported }
+}
+
+/// What a reconnect emits when `session/load` was attempted and refused.
+///
+/// Splits `detail` into the benign case and the genuine one, because the two
+/// read completely differently to a person: "there is nothing to restore" is
+/// not a failure, and folding it into "this broke, here is why" would make the
+/// ordinary, expected path — a claude or codex terminal switched to chat
+/// before its first turn — look like something went wrong when nothing did.
+pub fn load_failed_event(detail: &str) -> AgentEvent {
+    if is_missing_transcript(detail) {
+        AgentEvent::Gap { reason: AgentGapReason::LoadEmpty }
+    } else {
+        AgentEvent::Gap { reason: AgentGapReason::LoadFailed { detail: detail.to_string() } }
+    }
+}
+
+/// Whether a `session/load` refusal means "nothing recorded for this id",
+/// rather than a genuine failure.
+///
+/// Matched by phrase, not by anything structural, because there is nothing
+/// structural to use: JSON-RPC gives every `session/load` refusal the same
+/// generic error code regardless of cause (`-32603`, "Internal error" — seen
+/// from BOTH adapters below, for this case and, presumably, for others), so
+/// the adapter's own wording is the only signal that exists. `code` was
+/// considered and rejected as a discriminator for exactly that reason: it
+/// does not vary with what went wrong, only `message`/`data.details` do.
+///
+/// Two adapters have been read directly, not guessed at:
+/// - `claude-agent-acp` answers exactly `"Session not found"` — pinned in
+///   `acp::conn`'s `an_error_reply_is_returned_rather_than_waited_on_forever`.
+/// - `@agentclientprotocol/codex-acp`, probed on 2026-08-03 by sending
+///   `session/load` for an unknown id with stdin held open, answered
+///   `{"code":-32603,"message":"Internal error","data":{"details":"no
+///   rollout found for thread id 00000000-0000-7000-8000-000000000000"}}` —
+///   pinned in `acp::conn`'s `an_error_with_data_details_folds_the_details_in`.
+///   `AcpConnection::request` folds `data.details` into the message it
+///   returns, so `detail` here reads `"Internal error: no rollout found for
+///   thread id …"`.
+///
+/// Matched by phrase rather than by adapter identity: an id this build does
+/// not recognise still falls through to `LoadFailed` and shows its raw
+/// message, which is the right default on both sides of the split — erring
+/// toward showing a message the user did not need beats erring toward hiding
+/// one they did.
+fn is_missing_transcript(detail: &str) -> bool {
+    let lower = detail.to_lowercase();
+    lower.contains("not found") || lower.contains("no rollout found")
 }
 
 /// The modes an agent offers, from a `session/new` or `session/load` result.
@@ -261,14 +313,28 @@ impl AgentSession {
                     // people down.
                     //
                     // Starting fresh is right, and the gap is the honest part:
-                    // whatever the old id referred to is not being shown.
+                    // whatever the old id referred to is not being shown. But
+                    // `load_failed_event` is what decides whether that gap
+                    // reads as "nothing to restore" or "this broke" — this
+                    // arm is NOT the agent refusing to implement `session/load`
+                    // (that is the `can_load == false` arm below), so it must
+                    // not claim to be. Blaming that arm's reason on this one is
+                    // the exact bug this event exists to fix.
                     Err(e) => {
                         // The pane is this process's log surface — see
                         // `agent_host`'s module doc. A `tracing` warning here
                         // goes nowhere, and this is the failure that silently
                         // costs a user their conversation.
                         println!("farcooler: could not load session {id}: {e}");
-                        prelude.push(load_unsupported_event());
+                        // `AcpError::Refused` carries the adapter's own words;
+                        // anything else (a closed pipe, a malformed frame) is
+                        // this connection's own description of what happened,
+                        // which is the next best thing to the adapter's.
+                        let detail = match &e {
+                            AcpError::Refused(message) => message.clone(),
+                            other => other.to_string(),
+                        };
+                        prelude.push(load_failed_event(&detail));
                         let result = conn
                             .request(
                                 "session/new",
@@ -281,8 +347,10 @@ impl AgentSession {
                 }
             }
             Some(id) => {
-                // Honest rather than convenient: the conversation continues, but
-                // the history before this point cannot be shown.
+                // `can_load` was false: this agent never claimed `session/load`
+                // at `initialize`, so nothing was even attempted. Honest rather
+                // than convenient: the conversation continues, but the history
+                // before this point cannot be shown.
                 prelude.push(load_unsupported_event());
                 let result = conn
                     .request("session/new", serde_json::json!({ "cwd": cwd, "mcpServers": [] }))
@@ -945,10 +1013,63 @@ mod tests {
     }
 
     #[test]
-    fn a_reconnect_without_session_load_produces_a_visible_gap() {
+    fn a_reconnect_to_an_agent_that_never_offered_load_produces_a_visible_gap() {
         assert_eq!(
             load_unsupported_event(),
             AgentEvent::Gap { reason: AgentGapReason::LoadUnsupported }
+        );
+    }
+
+    #[test]
+    fn a_session_load_refused_as_not_found_reads_as_empty_not_broken() {
+        // The bug this pins: `claude-agent-acp` answers exactly "Session not
+        // found" for a `--session-id` nobody has typed into yet — the ordinary
+        // path a fresh chat-mode pane takes — and that used to render as
+        // "This session could not be loaded from where it left off", which
+        // blames the adapter for something it did not do.
+        assert_eq!(
+            load_failed_event("Session not found"),
+            AgentEvent::Gap { reason: AgentGapReason::LoadEmpty }
+        );
+        // Case-insensitively, and regardless of what surrounds the phrase —
+        // no adapter has promised this exact sentence, only the word choice.
+        assert_eq!(
+            load_failed_event("session NOT FOUND: 019fc8af"),
+            AgentEvent::Gap { reason: AgentGapReason::LoadEmpty }
+        );
+    }
+
+    #[test]
+    fn a_codex_session_load_refused_as_no_rollout_found_also_reads_as_empty() {
+        // Codex's real wording, read directly off `@agentclientprotocol/codex-acp`
+        // on 2026-08-03 by probing `session/load` for an unknown id: `message`
+        // is the useless "Internal error", and `AcpConnection::request` folds
+        // `data.details` in, producing exactly this string. It does NOT
+        // contain "not found" — "no rollout found" reads "found", negated by
+        // the leading "no" — so it needs its own phrase in the sniff, not a
+        // looser match on the first one.
+        assert_eq!(
+            load_failed_event(
+                "Internal error: no rollout found for thread id \
+                 00000000-0000-7000-8000-000000000000"
+            ),
+            AgentEvent::Gap { reason: AgentGapReason::LoadEmpty }
+        );
+    }
+
+    #[test]
+    fn a_session_load_refused_for_any_other_reason_carries_the_adapters_detail() {
+        // The other defect this fixes: the adapter's own message used to reach
+        // only a `println!` on the pane's log surface, which is exactly the
+        // surface chat mode replaces — so the user saw a dead end and nothing
+        // else. It has to survive into the event to reach them at all.
+        assert_eq!(
+            load_failed_event("permission denied: /var/db/is/root-owned"),
+            AgentEvent::Gap {
+                reason: AgentGapReason::LoadFailed {
+                    detail: "permission denied: /var/db/is/root-owned".to_string()
+                }
+            }
         );
     }
 

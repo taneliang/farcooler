@@ -203,9 +203,11 @@ struct TerminalView: View {
             //
             // The Mac puts this in the pane header; a phone has no pane header,
             // so it goes in the bar that is already this screen's chrome. Shown
-            // only where it would work — offering it for a Codex pane would
-            // hand back a Claude session in its place, since the shim knows one
-            // adapter.
+            // only where it would work — `canSwitchPaneMode` already reflects
+            // the daemon's own registry-backed `chat_capable` check, so a pane
+            // whose agent has no adapter never gets the button in the first
+            // place; the shim itself is told which adapter to speak via
+            // `--preset`, rather than assuming one for everything.
             if live.canSwitchPaneMode {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

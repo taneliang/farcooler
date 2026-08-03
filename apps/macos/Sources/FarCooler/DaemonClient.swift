@@ -125,6 +125,18 @@ final class DaemonClient: ObservableObject {
             // run `node` in stayed labelled `shell` until something forced a full
             // re-read. The whole point of pushing events is not needing one.
             fleet.workspaces[w].terminals[t].preset = event.preset
+            // What can be switched to a chat, which is also what `⌃B a`
+            // checks before it will even try.
+            //
+            // This was missed the same way `preset` was missed above, and
+            // the omission was the branch's own headline bug surviving its
+            // own fix: the daemon pushes `chatCapable` the instant a shell
+            // pane's foreground process becomes `codex`, but until this line
+            // existed the app applied everything else out of that event and
+            // dropped this field — so `canSwitchPaneMode` stayed false
+            // forever, since this app is push-only and never re-fetches a
+            // terminal it already knows.
+            fleet.workspaces[w].terminals[t].chatCapable = event.chatCapable
 
             let terminal = fleet.workspaces[w].terminals[t]
             Notifier.shared.report(terminal: terminal, workspace: fleet.workspaces[w].task)

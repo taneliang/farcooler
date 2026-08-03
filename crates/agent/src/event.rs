@@ -128,8 +128,28 @@ pub enum EndReason {
 pub enum AgentGapReason {
     /// The ring dropped events the subscriber had not read.
     RingTrimmed,
-    /// Reconnected, but the agent does not implement `session/load`.
+    /// Reconnected to an agent that declared, at `initialize`, that it does
+    /// not implement `session/load` at all — `session/load` was never even
+    /// attempted. Distinct from `LoadFailed`: nothing here says the id was
+    /// wrong, only that this agent cannot replay history for any id.
     LoadUnsupported,
+    /// Reconnected to a session id with nothing recorded for it yet.
+    ///
+    /// The common case, not an exotic one: Far Cooler hands every claude and
+    /// codex terminal a `--session-id` at launch, and a terminal switched to
+    /// chat before anyone typed into it has no transcript to load. Nothing
+    /// was lost — there was nothing to lose yet — which is why this is kept
+    /// distinct from `LoadFailed` rather than folded into it: one is news,
+    /// the other is a problem.
+    LoadEmpty,
+    /// `session/load` was attempted and the agent refused or errored for a
+    /// reason other than "nothing recorded yet".
+    ///
+    /// Carries the adapter's own message. The pane the raw error would
+    /// otherwise reach — the `println!` in `session.rs` — is exactly the
+    /// surface chat mode replaces, so without this the detail never gets to
+    /// whoever is actually looking at the conversation.
+    LoadFailed { detail: String },
     /// An update arrived that this adapter could not interpret.
     Unparsed,
 }

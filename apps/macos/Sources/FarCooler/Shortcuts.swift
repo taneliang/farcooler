@@ -59,8 +59,6 @@ enum Shortcut {
         (
             "Tiling — press ⌃B, then",
             [
-                Item(keys: "a", action: "Add this terminal to the layout"),
-                Item(keys: "⇧T", action: "Un-tile — panes keep running, off screen"),
                 Item(keys: "z", action: "Zoom the focused pane; again to come back"),
                 Item(keys: "space", action: "Next arrangement"),
                 Item(keys: "o  /  ;", action: "Next / previous pane"),
@@ -69,7 +67,6 @@ enum Shortcut {
                 Item(keys: "1 … 9", action: "Focus pane by number"),
                 Item(keys: "%  /  \"", action: "Split right / down — a new pane here"),
                 Item(keys: "!", action: "Move the focused pane out of the layout"),
-                Item(keys: "{  /  }", action: "Move the focused pane along"),
                 Item(keys: "x", action: "Close the focused pane's terminal"),
                 Item(keys: "c", action: "New group — several layouts per worktree"),
                 Item(keys: "n  /  p", action: "Next / previous group"),

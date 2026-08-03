@@ -99,6 +99,11 @@ farcooler attach <ws-id>     # prints the exact command
 configured shell as an interactive login shell, so version managers, `direnv`,
 aliases, and startup files behave exactly as in a hand-launched terminal.
 
+A pane running one of the recognised agents can be flipped from a terminal
+into a native chat (`⌃B a` in the Mac app). That needs an ACP adapter, which
+not every agent has — see [`docs/adapters.md`](docs/adapters.md) for which
+agents ship one, the config file for adding your own, and known gaps.
+
 ## The macOS app
 
 ```sh

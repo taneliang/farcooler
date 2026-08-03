@@ -109,6 +109,63 @@ pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
     }
 }
 
+/// The command to respawn a pane that just switched back to `Terminal` mode.
+///
+/// `preset` is `command_preset` off the terminal record — this function's
+/// only job is to read it honestly instead of assuming claude. That
+/// assumption was correct back when claude was the only hostable agent; once
+/// codex, opencode and cursor joined it, a pane switched to chat and back
+/// came back running claude regardless of what it actually hosted — the same
+/// "handed a different agent wearing the same pane" failure the `Agent` arm
+/// of `set_pane_mode` refuses to cause, happening in the opposite direction.
+/// `command_preset` is written every time a pane switches INTO agent mode
+/// (see the bottom of `set_pane_mode`), so it is the daemon's own record of
+/// what was on screen a moment ago, not a guess.
+///
+/// An empty preset does not mean claude either: `create_terminal` always
+/// writes one, so empty means this terminal has never been through agent
+/// mode (or predates this column) — not that it forgot a claude session. The
+/// honest fallback is the same clean shell a brand new terminal gets.
+///
+/// `resumable` is computed by the caller, which has filesystem access this
+/// pure function deliberately does not: whether `session_id` names a
+/// transcript (claude) or a rollout (codex) that actually exists on disk —
+/// see `session_discovery::transcript_exists` and `::codex_rollout_exists`.
+///
+/// Only claude and codex get a resume flag here. Both have been verified end
+/// to end on this machine: `claude --resume` and `codex resume` each restore
+/// a real conversation given a session id with a transcript/rollout behind
+/// it. opencode and cursor have not — inventing a flag for an unverified CLI
+/// would trade a silent agent-swap for a silent wrong-flag failure, no better
+/// for the user, so they keep starting clean. That is a statement about what
+/// has been checked, not about what those CLIs can do; either may well
+/// support resuming, unverified rather than unsupported.
+fn terminal_mode_command(preset: &str, session_id: &str, resumable: bool) -> String {
+    let preset = if preset.is_empty() { "shell" } else { preset };
+    let shell = || std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    if preset.starts_with("claude") {
+        if resumable {
+            format!("{} -ilc 'claude --resume {session_id}'", shell())
+        } else {
+            // Nothing to continue: start claude clean rather than fail into
+            // an error message the user cannot act on.
+            preset_command("claude", None)
+        }
+    } else if preset.starts_with("codex") {
+        if resumable {
+            format!("{} -ilc 'codex resume {session_id}'", shell())
+        } else {
+            // Same reasoning as claude's clean-start branch above: a codex
+            // session with no completed turn wrote no rollout, and `codex
+            // resume` on an id with nothing behind it fails with an error the
+            // user cannot act on.
+            preset_command("codex", None)
+        }
+    } else {
+        preset_command(preset, None)
+    }
+}
+
 /// A plain identifier: letters, digits, dot, dash, underscore.
 ///
 /// Deliberately narrower than what a shell would accept. Every real model name
@@ -121,13 +178,24 @@ fn is_safe_model(text: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
-/// Agents Far Cooler can render natively.
+/// Whether `command`/`screen` identify Claude Code specifically — not merely
+/// an agent Far Cooler can host as a chat.
 ///
-/// One entry, honestly. `crates/cli`'s `default_adapter` speaks to Claude Code
-/// and nothing else, so this list is the truth about what chat mode can do —
-/// and the place to add to when a second adapter exists, rather than
-/// discovering the gap as a pane that renders the wrong agent.
-const CHAT_CAPABLE: &[&str] = &["claude"];
+/// Pulled out of `Service::pane_can_adopt_a_claude_session` so the one
+/// decision that actually matters — `claude`, not `chat_capable` — is
+/// reachable by a test with no live tmux pane or screen capture behind it.
+/// `is_some_and(|rules| rules.preset == "claude")` looks trivial in isolation;
+/// it is exactly the line that regressed to `chat_capable` once codex and
+/// cursor got adapters, so it is worth pinning on its own.
+fn identifies_claude(
+    registry: &farcooler_core::activity::Registry,
+    command: &str,
+    screen: &str,
+) -> bool {
+    registry
+        .identify(command, screen)
+        .is_some_and(|rules| rules.preset == "claude")
+}
 
 /// Directories the `@`-mention picker never walks.
 ///
@@ -153,12 +221,6 @@ const SKIP_DIRS: &[&str] = &[
     "venv",
 ];
 
-
-/// Whether Far Cooler can render this agent as a chat.
-pub fn chat_capable(harness: &str) -> bool {
-    CHAT_CAPABLE.contains(&harness)
-}
-
 pub struct Service {
     pub store: Store,
     pub tmux: TmuxServer,
@@ -172,6 +234,13 @@ pub struct Service {
     /// happens when two tests run in parallel, and would happen in production
     /// the first time anything set the variable after startup.
     root: PathBuf,
+    /// Which agents are recognised, and which can be hosted as a chat.
+    ///
+    /// Held rather than re-read per call, for the same reason `root` is: the
+    /// config file and the environment that locates it are process-global, and
+    /// a service that consulted them on every call could be moved out from
+    /// under itself — which is what happens when two tests run in parallel.
+    registry: farcooler_core::activity::Registry,
     /// Every terminal's agent session: activity, cursor, and the fast-attach
     /// event window. See `agent_supervisor` for why the transcript itself is
     /// not here.
@@ -236,12 +305,15 @@ impl Service {
         let inventory = LiveInventory::new(tmux.clone());
         inventory.refresh().await;
 
+        let registry = farcooler_core::config::load_registry();
+
         Ok(Self {
             store,
             tmux,
             inventory,
             host_id,
             root,
+            registry,
             agents: agent_supervisor::AgentSupervisor::new(),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
@@ -260,6 +332,12 @@ impl Service {
         let mut locks = self.repo_locks.lock().unwrap_or_else(|e| e.into_inner());
         Arc::clone(locks.entry(repository_id).or_default())
     }
+
+    /// Which agents are recognised, and which can be hosted as a chat.
+    pub fn registry(&self) -> &farcooler_core::activity::Registry {
+        &self.registry
+    }
+
 
     /// Where managed worktrees are created, one directory per workspace.
     fn worktrees_dir(&self) -> Result<PathBuf> {
@@ -850,33 +928,37 @@ impl Service {
         Ok(term)
     }
 
-    /// Whether this pane has an agent in it that Far Cooler can host as a chat.
+    /// Whether this pane is running Claude Code specifically, and so has a
+    /// session on disk this daemon knows how to find.
     ///
-    /// Adoption only makes sense for a pane that IS an agent — a shell has no
-    /// conversation to continue, and letting one adopt a session is how a
-    /// terminal ends up showing somebody else's transcript.
-    ///
-    /// Narrowed from "any agent" to "a chat-capable one" deliberately, though
-    /// the two questions are not the same and it is worth saying why they share
-    /// an answer here: the only thing this gates is adopting a CLAUDE session
-    /// id (`discover_claude_session`), and Claude is the only harness with an
-    /// adapter. If a second one ever ships, this splits back into two
-    /// questions.
+    /// This used to ask the broader question — any chat-capable agent — on
+    /// the theory that the two questions had the same answer: the only thing
+    /// this gates is adopting a CLAUDE session id (`discover_claude_session`
+    /// reads `~/.claude/projects/<worktree>` and nothing else), and Claude
+    /// used to be the only harness with an adapter. That stopped being true
+    /// the moment codex and cursor got adapters too. Left asking the broad
+    /// question, a codex pane with no `agent_session_id` of its own would
+    /// pass this check, `discover_claude_session` would still be the only
+    /// thing on the other side of it, and the codex pane would adopt and
+    /// launch with somebody else's CLAUDE conversation — the exact bait the
+    /// comments on `set_pane_mode`'s refusal below warn about, reached
+    /// through this door instead. So this asks the narrow question again,
+    /// permanently: adoption here is Claude-specific because what is being
+    /// adopted is a Claude session, and nothing generalises that until
+    /// something exists to discover a codex or cursor session from disk. Until
+    /// then, `None` from this function is correct for them — they start
+    /// fresh, which is the honest answer.
     ///
     /// Screen as well as process name, for the reason `activity::identify`
     /// exists: Claude Code renames itself to its version, so `2.1.220` is an
     /// agent that process matching alone would never find.
-    async fn pane_runs_an_agent(&self, id: Uuid) -> bool {
+    async fn pane_can_adopt_a_claude_session(&self, id: Uuid) -> bool {
         let snapshot = self.inventory.snapshot();
         let Some(pane) = snapshot.panes.iter().find(|p| p.terminal_id == id) else {
             return false;
         };
         let screen = self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default();
-        // Supported, not merely recognised. Offering chat for an agent that
-        // would be replaced by a different one on arrival is how the offer
-        // becomes a trap.
-        farcooler_core::activity::identify(&pane.command, &screen)
-            .is_some_and(|rules| chat_capable(rules.preset))
+        identifies_claude(&self.registry, &pane.command, &screen)
     }
 
     /// Re-open a socket for every terminal already in agent pane mode.
@@ -1143,7 +1225,7 @@ impl Service {
             // session happened to exist in the worktree — routinely the
             // conversation belonging to a different pane, which then showed
             // the same transcript under two identities.
-            None if self.pane_runs_an_agent(id).await => {
+            None if self.pane_can_adopt_a_claude_session(id).await => {
                 let home = directories::UserDirs::new()
                     .map(|d| d.home_dir().to_path_buf())
                     .ok_or(DomainError::NotFound)?;
@@ -1194,10 +1276,30 @@ impl Service {
         // so.
         let session_id = self.agents.session_id(id).or(session_id);
 
+        // Named after the agent it is hosting, before the pane stops being able
+        // to say. Every surface labels a terminal by what is running in it, and
+        // in agent mode that is `farcooler agent-host` — so a Claude session
+        // rendered natively appeared in the sidebar as "agent", which is the one
+        // thing every agent pane has in common and therefore says nothing. The
+        // screen is still the old agent's at this instant; a moment later it is
+        // the shim's and the answer is gone.
+        //
+        // Computed here, ABOVE the command built below, because the `Agent` arm
+        // needs it: the shim is handed `--preset` explicitly now rather than
+        // guessing at one adapter for everything, and the preset it is handed
+        // has to be this same value or the daemon's chat-capability check below
+        // and the shim's own resolution could disagree.
+        let harness = self
+            .registry
+            .identify(
+                &pane.command,
+                &self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default(),
+            )
+            .map(|rules| rules.preset.clone());
+
         let command = match pane_mode {
             models::PaneMode::Terminal => {
                 let sid = session_id.clone().unwrap_or_default();
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
                 // Resumable only if there is something on disk to resume.
                 //
                 // Claude Code writes a transcript when a turn happens, not
@@ -1205,22 +1307,24 @@ impl Service {
                 // without a word has a perfectly real session id and no file.
                 // `--resume` answers "No conversation found with session ID"
                 // for those, which is what a user got every time they looked
-                // at a chat and switched straight back.
+                // at a chat and switched straight back. Codex writes its
+                // rollout under the identical rule, verified end to end on
+                // this machine, so it gets the same guard rather than the
+                // silent-conversation-loss `preset_command(preset, None)`
+                // fallback that every other preset still gets.
                 let resumable = Uuid::parse_str(&sid).is_ok()
                     && directories::UserDirs::new().is_some_and(|dirs| {
-                        session_discovery::transcript_exists(
-                            dirs.home_dir(),
-                            Path::new(&ws.worktree_path),
-                            &sid,
-                        )
+                        if term.command_preset.starts_with("codex") {
+                            session_discovery::codex_rollout_exists(dirs.home_dir(), &sid)
+                        } else {
+                            session_discovery::transcript_exists(
+                                dirs.home_dir(),
+                                Path::new(&ws.worktree_path),
+                                &sid,
+                            )
+                        }
                     });
-                if resumable {
-                    format!("{shell} -ilc 'claude --resume {sid}'")
-                } else {
-                    // Nothing to continue: start claude clean rather than fail
-                    // into an error message the user cannot act on.
-                    preset_command("claude", None)
-                }
+                terminal_mode_command(&term.command_preset, &sid, resumable)
             }
             models::PaneMode::Agent => {
                 let binary = shim_binary(std::env::current_exe().ok().as_deref());
@@ -1238,35 +1342,21 @@ impl Service {
                     .as_deref()
                     .map(|s| format!(" --session {}", shell_quote(s)))
                     .unwrap_or_default();
+                // Quoted like every other interpolation here: tmux hands this
+                // string to a shell, and a preset containing a space would
+                // otherwise split into two arguments the shim never asked for.
+                let preset = harness
+                    .as_deref()
+                    .map(|h| format!(" --preset {}", shell_quote(h)))
+                    .unwrap_or_default();
                 format!(
-                    "{} agent-host --terminal {id} --socket {} --worktree {}{session}",
+                    "{} agent-host --terminal {id} --socket {} --worktree {}{session}{preset}",
                     shell_quote(&binary),
                     shell_quote(&socket),
                     shell_quote(&ws.worktree_path),
                 )
             }
         };
-
-        // Bound BEFORE the pane is respawned. The shim dials on startup and
-        // retries, so a later bind would still be found — but only after a
-        // backoff the user spends staring at an empty chat, and only if the
-        // retry loop outlives the gap.
-        if pane_mode == models::PaneMode::Agent {
-            self.agents.ensure_listening(&self.root, id);
-        }
-
-        // Named after the agent it is hosting, before the pane stops being able
-        // to say. Every surface labels a terminal by what is running in it, and
-        // in agent mode that is `farcooler agent-host` — so a Claude session
-        // rendered natively appeared in the sidebar as "agent", which is the one
-        // thing every agent pane has in common and therefore says nothing. The
-        // screen is still the old agent's at this instant; a moment later it is
-        // the shim's and the answer is gone.
-        let harness = farcooler_core::activity::identify(
-            &pane.command,
-            &self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default(),
-        )
-        .map(|rules| rules.preset.to_string());
 
         // An agent we cannot actually host is refused, not quietly replaced.
         //
@@ -1278,13 +1368,20 @@ impl Service {
         // wearing the same pane is a much larger one.
         //
         // A pane with NO agent in it is refused for a related reason. It used
-        // to be allowed, and `pane_runs_an_agent` would then look for a session
-        // to adopt — so switching a plain shell into chat showed whatever
-        // conversation happened to be lying around in that worktree, usually
-        // one belonging to a different pane.
+        // to be allowed, and `pane_can_adopt_a_claude_session` would then look
+        // for a session to adopt — so switching a plain shell into chat showed
+        // whatever conversation happened to be lying around in that worktree,
+        // usually one belonging to a different pane.
+        //
+        // Checked BEFORE the bind below: a refused switch must not bind a
+        // socket or spawn a listener for a shim that will never dial. That
+        // listener is idempotent per terminal, so it would only ever be inert
+        // rather than harmful — but it is still state created by a call that
+        // then fails, and there is no reason to pay even that much for a
+        // toggle that goes nowhere.
         if pane_mode == models::PaneMode::Agent {
             match harness.as_deref() {
-                Some(h) if CHAT_CAPABLE.contains(&h) => {}
+                Some(h) if self.registry.chat_capable(h) => {}
                 Some(_) => {
                     return Err(DomainError::InvalidArgument {
                         what: "this agent has no chat adapter; it stays in terminal mode",
@@ -1296,6 +1393,14 @@ impl Service {
                     });
                 }
             }
+        }
+
+        // Bound BEFORE the pane is respawned. The shim dials on startup and
+        // retries, so a later bind would still be found — but only after a
+        // backoff the user spends staring at an empty chat, and only if the
+        // retry loop outlives the gap.
+        if pane_mode == models::PaneMode::Agent {
+            self.agents.ensure_listening(&self.root, id);
         }
 
         self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
@@ -1698,6 +1803,80 @@ mod tests {
         let back = svc.unhide_workspace(hidden.id).await.unwrap();
         assert!(!back.hidden);
     }
+
+    #[test]
+    fn switching_a_codex_pane_back_to_terminal_respawns_codex_not_claude() {
+        // The regression this whole function exists to prevent: a codex pane
+        // switched to chat and back used to hardcode `claude`, silently
+        // handing the user a different agent in the same pane.
+        let cmd = terminal_mode_command("codex", "", false);
+        assert!(cmd.contains("codex"), "must respawn codex: {cmd}");
+        assert!(!cmd.contains("claude"), "must not respawn claude: {cmd}");
+    }
+
+    #[test]
+    fn switching_an_opencode_or_cursor_pane_back_never_runs_claude() {
+        // Not "cannot resume" — "not verified to". Neither CLI has been
+        // checked end to end the way claude's and codex's have, so both keep
+        // starting clean rather than guess at a flag.
+        for preset in ["opencode", "cursor"] {
+            let cmd = terminal_mode_command(preset, "", false);
+            assert!(!cmd.contains("claude"), "{preset} must not respawn claude: {cmd}");
+        }
+    }
+
+    #[test]
+    fn opencode_and_cursor_never_get_a_resume_flag_even_when_marked_resumable() {
+        // `resumable: true` from a caller would be a caller bug for these two
+        // presets — nothing computes it that way today — but this function's
+        // own job is to never invent a flag for a CLI nobody has verified one
+        // for, regardless of what it is told.
+        for preset in ["opencode", "cursor"] {
+            let cmd = terminal_mode_command(preset, "some-id", true);
+            assert!(!cmd.contains("resume"), "{preset} must not resume: {cmd}");
+        }
+    }
+
+    #[test]
+    fn a_resumable_claude_pane_still_gets_resume() {
+        let sid = Uuid::now_v7().to_string();
+        let cmd = terminal_mode_command("claude", &sid, true);
+        assert!(cmd.contains(&format!("claude --resume {sid}")), "{cmd}");
+    }
+
+    #[test]
+    fn a_non_resumable_claude_pane_starts_clean() {
+        let cmd = terminal_mode_command("claude", "some-id", false);
+        assert!(!cmd.contains("--resume"), "{cmd}");
+        assert!(cmd.contains("claude"), "{cmd}");
+    }
+
+    #[test]
+    fn a_resumable_codex_pane_gets_codex_resume() {
+        // Verified end to end on a real machine: `codex resume <uuid>`
+        // restores the conversation when `codex-acp` wrote a rollout for it.
+        let sid = Uuid::now_v7().to_string();
+        let cmd = terminal_mode_command("codex", &sid, true);
+        assert!(cmd.contains(&format!("codex resume {sid}")), "{cmd}");
+    }
+
+    #[test]
+    fn a_non_resumable_codex_pane_starts_clean() {
+        // The codex equivalent of claude's "No conversation found": a session
+        // id with no completed turn wrote no rollout, and `codex resume`
+        // on it fails with an error the user cannot act on.
+        let cmd = terminal_mode_command("codex", "some-id", false);
+        assert!(!cmd.contains("resume"), "{cmd}");
+        assert!(cmd.contains("codex"), "{cmd}");
+    }
+
+    #[test]
+    fn an_empty_preset_falls_back_to_a_clean_shell_not_claude() {
+        // `command_preset` is always written by `create_terminal`, so empty
+        // means "never been an agent pane", not "forgot it was claude".
+        let cmd = terminal_mode_command("", "", false);
+        assert!(!cmd.contains("claude"), "{cmd}");
+    }
 }
 
 #[cfg(test)]
@@ -1853,17 +2032,16 @@ pub fn canonical_or_raw(path: &str) -> PathBuf {
 
 #[cfg(test)]
 mod chat_capability_tests {
-    use super::CHAT_CAPABLE;
-
     #[test]
-    fn an_agent_with_no_adapter_is_not_chat_capable() {
-        // Codex and cursor-agent are recognised by `activity::identify` and
-        // have no ACP adapter here. Treating recognition as support is what
-        // made a Codex pane switch to chat and quietly render a brand new
-        // Claude session in its place.
-        assert!(CHAT_CAPABLE.contains(&"claude"));
-        assert!(!CHAT_CAPABLE.contains(&"codex"));
-        assert!(!CHAT_CAPABLE.contains(&"cursor"));
+    fn recognition_and_hostability_can_no_longer_disagree() {
+        // This test exists because they did. Codex was recognised by
+        // `activity::identify` and absent from the daemon's separate chat list, so
+        // `⌃B a` on a codex pane did nothing and explained nothing. There is now
+        // one table, and hostability is a field on it.
+        let r = farcooler_core::activity::Registry::built_in();
+        assert!(r.chat_capable("claude"));
+        assert!(r.chat_capable("codex"), "codex is recognised AND hostable");
+        assert!(!r.chat_capable("zsh"), "a shell is neither");
     }
 }
 
@@ -2161,4 +2339,54 @@ mod remove_worktree_tests {
     // dependency this task was told not to chase. The guard is exercised
     // instead by direct code inspection against `remove_root`'s identical
     // check, which this was copied from.
+}
+
+#[cfg(test)]
+mod claude_session_adoption_tests {
+    use super::identifies_claude;
+
+    #[test]
+    fn a_chat_capable_agent_that_is_not_claude_cannot_adopt_a_claude_session() {
+        // Regression test for a real bug: `pane_can_adopt_a_claude_session`
+        // (the sole caller of `identifies_claude`) used to gate adoption on
+        // `chat_capable`, which was correct back when Claude was the only
+        // chat-capable harness — the two questions had the same answer. Once
+        // codex and cursor got adapters, `chat_capable` stopped implying
+        // "claude", and a codex pane with no session of its own would pass
+        // the old gate, then `discover_claude_session` — which only ever
+        // returns a CLAUDE session id — would hand it somebody else's Claude
+        // conversation to launch the codex adapter against.
+        //
+        // This asserts against `identifies_claude` directly rather than
+        // through `set_pane_mode`: the real predicate needs a live tmux pane
+        // and a screen capture behind `pane_can_adopt_a_claude_session`, which
+        // this crate's test seams do not build without a running tmux server.
+        // Reverting `identifies_claude` to
+        // `registry.identify(..).is_some_and(|r| registry.chat_capable(&r.preset))`
+        // makes this test fail, which is the point.
+        let r = farcooler_core::activity::Registry::built_in();
+
+        // The exact fact that made the old gate wrong: codex answers
+        // `chat_capable` yes.
+        assert!(r.chat_capable("codex"));
+
+        // But it must never be treated as adoptable through this path.
+        let codex_screen = "\u{203a} Explain this codebase\n  >_ OpenAI Codex (v0.145.0)";
+        assert!(!identifies_claude(&r, "codex-aarch64-a", codex_screen));
+
+        // cursor-agent too, for the same reason.
+        assert!(r.chat_capable("cursor"));
+        assert!(!identifies_claude(
+            &r,
+            "node",
+            "Press any key to sign in..."
+        ));
+
+        // Claude itself is unaffected: it still says yes.
+        let claude_screen = "Claude Code\n? for shortcuts";
+        assert!(identifies_claude(&r, "claude", claude_screen));
+
+        // A shell is neither chat-capable nor claude.
+        assert!(!identifies_claude(&r, "zsh", "e-liang@Mac project % "));
+    }
 }

@@ -315,7 +315,7 @@ struct SettingsView: View {
                     Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
                 }
 
-                Setting("Available for Claude. Switch any pane with ⌃B A.") {
+                Setting("Available for agents the registry recognises. Switch any pane with ⌃B a.") {
                     Toggle("Open coding agents as a chat", isOn: $preferences.preferChatMode)
                 }
 

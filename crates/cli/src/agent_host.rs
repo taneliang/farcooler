@@ -28,22 +28,28 @@ use uuid::Uuid;
 type Fallible<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 pub enum Status {
-    AdapterMissing { program: String },
+    /// `preset` is what to call the agent (`claude`, `cursor`, …); `command` is
+    /// what was actually run. Every npx-wrapped adapter shares the same
+    /// `program` — `npx` — so a message keyed on `program` alone cannot say
+    /// which of the four agents failed. It has to be `command` (`program` plus
+    /// its args, which for an npx adapter is where the real package name
+    /// lives) and `preset` together.
+    AdapterMissing { preset: String, command: String },
     /// Started, then said nothing. Distinct from missing, because the advice is
     /// different and "it did not start" would be a lie.
-    AdapterSilent { program: String },
+    AdapterSilent { preset: String, command: String },
     Connected { session_id: String },
 }
 
 pub fn status_line(status: &Status) -> String {
     match status {
-        Status::AdapterMissing { program } => format!(
-            "farcooler: could not start the ACP adapter `{program}`.\n\
+        Status::AdapterMissing { preset, command } => format!(
+            "farcooler: could not start the ACP adapter for `{preset}` (`{command}`).\n\
              Install it, or switch this terminal back to terminal mode — \
              terminal mode needs no adapter and is unaffected."
         ),
-        Status::AdapterSilent { program } => format!(
-            "farcooler: the ACP adapter `{program}` started but never answered.\n\
+        Status::AdapterSilent { preset, command } => format!(
+            "farcooler: the ACP adapter for `{preset}` (`{command}`) started but never answered.\n\
              Nothing is wrong with this terminal — switch it back to terminal mode \
              and it will work as it always has.\n\
              One known cause: the Claude SDK refuses to launch inside another \
@@ -56,18 +62,28 @@ pub fn status_line(status: &Status) -> String {
     }
 }
 
-/// The adapter Far Cooler uses when preferences name none.
+/// The adapter for a preset, or nothing.
 ///
-/// `@agentclientprotocol/claude-agent-acp`, NOT `@zed-industries/claude-code-acp`.
-/// npm reports the latter as renamed and it stopped at 0.16.2 while this one is
-/// at 0.64.x — which is why it advertised Opus 4.6 as a current model. The new
-/// one also carries what the old one had no notion of: `configOptions`, nested
-/// subagent transcripts, and terminals.
-pub fn default_adapter() -> (String, Vec<String>) {
-    (
-        "npx".to_string(),
-        vec!["-y".to_string(), "@agentclientprotocol/claude-agent-acp".to_string()],
-    )
+/// Nothing rather than a default, deliberately. The shim used to know exactly
+/// one adapter, so a pane hosting any other agent got Claude: a codex pane
+/// switched to chat started a brand new Claude session in the same worktree and
+/// rendered that, with nothing anywhere saying the agent had been swapped.
+/// Refusing is a small disappointment; a different agent wearing the same pane
+/// is a much larger one.
+pub fn resolve(
+    registry: &farcooler_core::activity::Registry,
+    preset: Option<&str>,
+) -> Option<farcooler_core::activity::AdapterSpec> {
+    registry.adapter(preset?).cloned()
+}
+
+/// Whether this preset needs `CLAUDE_CODE_EXECUTABLE` resolved for it.
+///
+/// Claude alone. `claude_executable` probes the filesystem for Claude Code, so
+/// applying it generally would put a Claude-specific variable into every other
+/// agent's environment.
+pub fn wants_claude_executable(preset: &str) -> bool {
+    preset == "claude"
 }
 
 /// Where the Claude Agent SDK should find Claude Code.
@@ -99,23 +115,58 @@ pub async fn run(
     socket: PathBuf,
     worktree: PathBuf,
     session: Option<String>,
-    adapter: Option<String>,
+    preset: Option<String>,
 ) -> Fallible {
-    let (program, args) = match adapter {
-        Some(a) => (a, Vec::new()),
-        None => default_adapter(),
+    let registry = farcooler_core::config::load_registry();
+    let Some(spec) = resolve(&registry, preset.as_deref()) else {
+        // Reached only if the daemon's check and this one disagree, which
+        // means a config file changed between them. Loud, because the symptom
+        // is otherwise an empty pane.
+        let name = preset.unwrap_or_else(|| "this pane".to_string());
+        println!(
+            "farcooler: no ACP adapter is configured for `{name}`.\n\
+             Switch this terminal back to terminal mode — it needs no adapter \
+             and is unaffected."
+        );
+        std::future::pending::<()>().await;
+        unreachable!()
     };
+    let (program, args) = (spec.program.clone(), spec.args.clone());
 
-    if let Some(executable) = claude_executable() {
+    // Named here rather than read off `program` at the point of failure:
+    // `resolve` only returns `Some(spec)` when `preset` was `Some`, so this is
+    // always the real agent name, and it is what a missing/silent report needs
+    // to say — `program` alone is `npx` for three of the four built-ins and
+    // tells nobody which agent that was.
+    let agent_label = preset.clone().unwrap_or_else(|| "this agent".to_string());
+    let command = std::iter::once(program.as_str())
+        .chain(args.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    for (key, value) in &spec.env {
         // SAFETY: set before any thread is spawned that reads the environment,
         // and this process exists to host exactly one adapter.
-        unsafe { std::env::set_var("CLAUDE_CODE_EXECUTABLE", executable) };
+        unsafe { std::env::set_var(key, value) };
+    }
+
+    if preset.as_deref().is_some_and(wants_claude_executable) {
+        if let Some(executable) = claude_executable() {
+            // SAFETY: as above.
+            unsafe { std::env::set_var("CLAUDE_CODE_EXECUTABLE", executable) };
+        }
     }
 
     let conn = match AcpConnection::spawn(&program, &args, &worktree).await {
         Ok(c) => c,
         Err(_) => {
-            println!("{}", status_line(&Status::AdapterMissing { program }));
+            println!(
+                "{}",
+                status_line(&Status::AdapterMissing {
+                    preset: agent_label,
+                    command
+                })
+            );
             // Stay alive so the pane does not vanish and derive as an exit the
             // user never caused. They read the message and switch modes.
             std::future::pending::<()>().await;
@@ -141,7 +192,13 @@ pub async fn run(
     let (agent, prelude) = match started {
         Ok(result) => result?,
         Err(_) => {
-            println!("{}", status_line(&Status::AdapterSilent { program }));
+            println!(
+                "{}",
+                status_line(&Status::AdapterSilent {
+                    preset: agent_label,
+                    command
+                })
+            );
             // Alive on purpose, exactly as `AdapterMissing` is: a pane that
             // exits here derives as an exit nobody caused, and the message the
             // user needs to read goes with it.
@@ -466,27 +523,63 @@ mod tests {
         // The pane is a real pane and the user can attach to it. When the
         // adapter cannot start, what is written here is the entire error
         // message they get, so it has to stand alone.
-        let line = status_line(&Status::AdapterMissing { program: "claude-code-acp".into() });
-        assert!(line.contains("claude-code-acp"));
+        let line = status_line(&Status::AdapterMissing {
+            preset: "cursor".into(),
+            command: "npx -y cursor-agent-acp".into(),
+        });
+        assert!(line.contains("cursor"), "must name the agent, not just the runner: {line}");
+        assert!(line.contains("npx -y cursor-agent-acp"));
         assert!(line.contains("terminal mode"), "must name the working fallback: {line}");
     }
 
     #[test]
-    fn the_default_adapter_is_the_maintained_package_not_the_renamed_one() {
-        // npm reports `@zed-industries/claude-code-acp` as renamed, and it
-        // stopped at 0.16.2 while its successor is at 0.64.x. Pointing at the
-        // dead one is not a cosmetic mistake: it advertised Opus 4.6 as a
-        // current model and knew nothing of config options or subagents.
-        let (program, args) = default_adapter();
-        assert_eq!(program, "npx");
-        assert!(
-            args.iter().any(|a| a.contains("@agentclientprotocol/claude-agent-acp")),
-            "{args:?}"
-        );
-        assert!(
-            !args.iter().any(|a| a.contains("@zed-industries/")),
-            "the renamed package no longer receives updates: {args:?}"
-        );
+    fn the_status_line_names_the_agent_not_just_npx() {
+        // The failure this replaced: `AdapterMissing`/`AdapterSilent` used to
+        // carry only `program`, which is `npx` for three of the four built-ins.
+        // Claude, codex and cursor all failing with an identical message —
+        // "could not start the ACP adapter `npx`" — told a user nothing about
+        // which agent had actually broken.
+        let claude = status_line(&Status::AdapterMissing {
+            preset: "claude".into(),
+            command: "npx -y @agentclientprotocol/claude-agent-acp".into(),
+        });
+        let codex = status_line(&Status::AdapterMissing {
+            preset: "codex".into(),
+            command: "npx -y @agentclientprotocol/codex-acp".into(),
+        });
+        assert!(claude.contains("claude"));
+        assert!(codex.contains("codex"));
+        assert_ne!(claude, codex, "two different agents must not read as the same failure");
+    }
+
+    #[test]
+    fn the_preset_chooses_the_adapter() {
+        let registry = farcooler_core::activity::Registry::built_in();
+        let spec = resolve(&registry, Some("codex")).expect("codex has an adapter");
+        assert_eq!(spec.program, "npx");
+        assert!(spec.args.iter().any(|a| a == "@agentclientprotocol/codex-acp"));
+        // The maintained package, not the renamed one. npm reports
+        // `@zed-industries/codex-acp` deprecated and it stalled at 0.16.0.
+        assert!(!spec.args.iter().any(|a| a.contains("@zed-industries/")));
+    }
+
+    #[test]
+    fn an_unknown_preset_resolves_to_nothing_rather_than_to_claude() {
+        // The failure this prevents: the shim knew one adapter, so a codex pane
+        // switched to chat started a brand new CLAUDE session in the same worktree
+        // and drew that, with nothing saying the agent had been swapped.
+        let registry = farcooler_core::activity::Registry::built_in();
+        assert!(resolve(&registry, Some("nothing-by-this-name")).is_none());
+        assert!(resolve(&registry, None).is_none());
+    }
+
+    #[test]
+    fn only_claude_gets_the_claude_executable_treatment() {
+        // It probes the filesystem for Claude Code specifically. Applying it to
+        // every adapter would set a Claude variable in codex's environment.
+        assert!(wants_claude_executable("claude"));
+        assert!(!wants_claude_executable("codex"));
+        assert!(!wants_claude_executable("opencode"));
     }
 
     #[test]
@@ -494,7 +587,11 @@ mod tests {
         // Different cause, different advice. Telling a user it "could not
         // start" when it started and went quiet sends them to reinstall a
         // package that is already there.
-        let silent = status_line(&Status::AdapterSilent { program: "npx".into() });
+        let silent = status_line(&Status::AdapterSilent {
+            preset: "opencode".into(),
+            command: "opencode acp".into(),
+        });
+        assert!(silent.contains("opencode"), "must name the agent: {silent}");
         assert!(silent.contains("never answered"), "{silent}");
         assert!(silent.contains("terminal mode"), "must name the working fallback: {silent}");
         assert!(!silent.contains("could not start"), "{silent}");

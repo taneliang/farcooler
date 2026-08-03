@@ -10,3 +10,8 @@ farcooler-protocol.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 tracing.workspace = true
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

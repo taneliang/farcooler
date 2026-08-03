@@ -328,6 +328,11 @@ impl Watcher {
         // loop, and a fleet of thirty panes must not mean thirty processes a
         // second.
         let foreground = crate::foreground::read().await;
+        // Bound once per tick rather than looked up per pane: the registry
+        // lives on `Service` for the same reason `root` does — re-reading the
+        // config file's location on every pane would let it disagree with
+        // itself mid-tick if the environment changed underneath.
+        let registry = self.service.registry();
 
         let mut live = Vec::new();
         for workspace in &fleet {
@@ -371,7 +376,7 @@ impl Watcher {
             // that process matching alone would never find.
             let (label, observed, chat_capable) = if !matches!(terminal_state, TerminalState::Running)
             {
-                (activity::describe(&command, ""), AgentActivity::None, false)
+                (registry.describe(&command, ""), AgentActivity::None, false)
             } else if pane_mode == farcooler_store::models::PaneMode::Agent {
                 // The protocol, not the screen. An agent-mode pane shows the
                 // shim's status log, which matches no agent signature, so the
@@ -384,7 +389,7 @@ impl Watcher {
                 // distinguishes nothing — and `set_pane_mode` recorded which
                 // harness this is at the moment the pane could still say.
                 (
-                    if crate::service::chat_capable(&preset) {
+                    if registry.chat_capable(&preset) {
                         preset.clone()
                     } else {
                         "agent".to_string()
@@ -396,7 +401,7 @@ impl Watcher {
                     // row predating the capability check — is in agent mode
                     // with a preset that cannot actually be hosted, and saying
                     // otherwise offers a switch that would refuse.
-                    crate::service::chat_capable(&preset),
+                    registry.chat_capable(&preset),
                 )
             } else {
                 // The screen is read for any live terminal, not only one whose
@@ -405,16 +410,17 @@ impl Watcher {
                 // process matching alone would never find.
                 match runtime.screen(id).await {
                     Ok((screen, _, _)) => (
-                        activity::describe(&command, &screen),
-                        activity::classify(&command, &screen),
+                        registry.describe(&command, &screen),
+                        registry.classify(&command, &screen),
                         // Recognised AND hostable. Codex is recognised here and
                         // has no adapter, so offering it a chat would hand the
                         // user a Claude session in its place.
-                        activity::identify(&command, &screen)
-                            .is_some_and(|rules| crate::service::chat_capable(rules.preset)),
+                        registry
+                            .identify(&command, &screen)
+                            .is_some_and(|rules| registry.chat_capable(&rules.preset)),
                     ),
                     Err(_) => (
-                        activity::describe(&command, ""),
+                        registry.describe(&command, ""),
                         AgentActivity::Unspecified,
                         false,
                     ),

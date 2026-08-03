@@ -48,6 +48,61 @@ pub fn transcript_exists(home: &Path, worktree: &Path, session_id: &str) -> bool
         .exists()
 }
 
+/// The exact identical guard as `transcript_exists`, for codex.
+///
+/// Verified end to end, not assumed: after a real turn in an ACP session with
+/// id `019fc8af-daff-7692-b7be-4457fda0b01c`, `@agentclientprotocol/codex-acp`
+/// had written
+/// `~/.codex/sessions/2026/08/03/rollout-2026-08-03T10-33-15-019fc8af-daff-7692-b7be-4457fda0b01c.jsonl`,
+/// and `codex resume 019fc8af-daff-7692-b7be-4457fda0b01c` in that session's
+/// worktree restored the conversation. A session with no completed turn — the
+/// same ordinary case `transcript_exists` exists for — writes no rollout at
+/// all, and `codex resume` on an id with nothing behind it fails with an error
+/// a user cannot act on, same as `claude --resume` does.
+///
+/// A recursive search under `<home>/.codex/sessions`, not a direct path build:
+/// the filename embeds the timestamp of when the session STARTED, which
+/// nothing on this side of the connection ever learns, so the date directory
+/// cannot be computed — only searched for.
+pub fn codex_rollout_exists(home: &Path, session_id: &str) -> bool {
+    let root = home.join(".codex/sessions");
+    let suffix = format!("-{session_id}.jsonl");
+    find_rollout(&root, &suffix, 0)
+}
+
+/// Deep enough for codex's documented `YYYY/MM/DD` nesting with room to
+/// spare, shallow enough that a stray symlink loop under `~/.codex` cannot
+/// turn a resumability check into a hang.
+const MAX_ROLLOUT_SEARCH_DEPTH: u32 = 6;
+
+fn find_rollout(dir: &Path, suffix: &str, depth: u32) -> bool {
+    if depth > MAX_ROLLOUT_SEARCH_DEPTH {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    for entry in entries.flatten() {
+        // A file type that cannot be read is skipped, not assumed either way
+        // — the same caution `discover_claude_session` takes with an unreadable
+        // mtime just above.
+        let Ok(file_type) = entry.file_type() else { continue };
+        let path = entry.path();
+        if file_type.is_dir() {
+            if find_rollout(&path, suffix, depth + 1) {
+                return true;
+            }
+        } else if file_type.is_file() {
+            let matches = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| name.starts_with("rollout-") && name.ends_with(suffix));
+            if matches {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// The session id for a hand-started claude in `worktree`.
 ///
 /// `started_after` is the pane's start time. A session file older than the pane
@@ -263,5 +318,44 @@ mod tests {
 
         std::fs::write(dir.join("has-spoken.jsonl"), "{}").unwrap();
         assert!(transcript_exists(&home, worktree, "has-spoken"));
+    }
+
+    #[test]
+    fn a_codex_session_with_no_turn_yet_has_no_rollout_to_resume() {
+        // Codex's version of the claude bug above: a session id is declared
+        // and real, but `@agentclientprotocol/codex-acp` writes nothing under
+        // `~/.codex/sessions` until a turn actually happens.
+        let home = scratch("codex-no-rollout");
+        std::fs::create_dir_all(home.join(".codex/sessions/2026/08/03")).unwrap();
+
+        assert!(!codex_rollout_exists(&home, "019fc8af-daff-7692-b7be-4457fda0b01c"));
+    }
+
+    #[test]
+    fn a_codex_rollout_is_found_nested_under_its_date_directory() {
+        // The exact shape verified on a real machine: a session id with a
+        // completed turn has a file named `rollout-<timestamp>-<uuid>.jsonl`
+        // three directories deep, and nothing on this side of the connection
+        // knows which date directory without looking.
+        let home = scratch("codex-rollout");
+        let id = "019fc8af-daff-7692-b7be-4457fda0b01c";
+        let dir = home.join(".codex/sessions/2026/08/03");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("rollout-2026-08-03T10-33-15-{id}.jsonl")), "{}").unwrap();
+
+        assert!(codex_rollout_exists(&home, id));
+        // A different id must not match merely because it shares a directory
+        // with one that does.
+        assert!(!codex_rollout_exists(&home, "00000000-0000-0000-0000-000000000000"));
+    }
+
+    #[test]
+    fn a_missing_codex_sessions_directory_is_simply_not_resumable() {
+        // No `.codex/sessions` at all — codex has never run on this machine,
+        // or `$HOME` in the test is a bare scratch directory. Either way this
+        // must report false rather than error: the caller's fallback (start
+        // clean) is exactly the right behaviour for "nothing to find".
+        let home = scratch("codex-no-dir");
+        assert!(!codex_rollout_exists(&home, "019fc8af-daff-7692-b7be-4457fda0b01c"));
     }
 }

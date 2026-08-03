@@ -86,6 +86,25 @@ import Testing
     #expect(reason == .ringTrimmed)
 }
 
+@Test func aLoadFailedGapDecodesWithTheAdaptersDetail() throws {
+    // The defect this pins: the adapter's own refusal used to reach only a
+    // `println!` on the pane's log surface, which chat mode replaces — so it
+    // never reached a client at all. It has to survive decoding to reach one.
+    let json = #"{"Gap":{"reason":{"LoadFailed":{"detail":"permission denied"}}}}"#
+    let event = try AgentEvent.decode(from: json)
+    guard case let .gap(reason) = event else {
+        Issue.record("expected a gap, got \(event)")
+        return
+    }
+    #expect(reason == .loadFailed(detail: "permission denied"))
+}
+
+@Test func aLoadEmptyGapDecodesAsTheUnitVariantItIs() throws {
+    let json = #"{"Gap":{"reason":"LoadEmpty"}}"#
+    let event = try AgentEvent.decode(from: json)
+    #expect(event == .gap(.loadEmpty))
+}
+
 @Test func anEventFromALaterDaemonBecomesAGapRatherThanAThrow() throws {
     // A client one release behind its daemon must still render the session.
     // Throwing would blank the whole transcript over one unknown event;

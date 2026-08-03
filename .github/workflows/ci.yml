@@ -57,6 +57,14 @@ jobs:
             brew install tmux
           fi
 
+      # The other three built-in adapters are `npx` packages, which need only
+      # node and a network — both of which the runner already has. opencode's
+      # is a native subcommand on a binary, so unlike the others the binary
+      # itself has to be installed before crates/core/tests/adapters.rs can
+      # start it.
+      - name: Install opencode
+        run: npm install -g opencode-ai
+
       # No `cargo fmt --check`, deliberately, and it is worth saying why rather
       # than leaving it looking forgotten. This workspace predates any
       # formatter, and default rustfmt wants to reformat sixty files — mostly by
