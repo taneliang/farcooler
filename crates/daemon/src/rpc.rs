@@ -637,6 +637,19 @@ impl Rpc {
                     _ => return Err(DomainError::InvalidArgument { what: "pane_mode" }),
                 };
                 svc.set_pane_mode(id, mode, p.force).await?;
+                // Same reasoning as `workspace.hide`: this changes a pane
+                // WITHOUT changing anything the watcher observes. Activity,
+                // current command, and liveness all stay exactly as they were,
+                // so the runtime poll has nothing to notice and never
+                // announces — and the reply below reaches only the client that
+                // asked.
+                //
+                // Every other client therefore kept rendering the pane in its
+                // old mode until something unrelated happened to it, or until
+                // a human reached for "Reload Fleet". A pane switched to agent
+                // mode from the CLI stayed a terminal on screen while its
+                // agent talked into a view nobody was showing.
+                self.watcher.announce_fleet_changed();
                 self.terminal_result(id).await
             }
 

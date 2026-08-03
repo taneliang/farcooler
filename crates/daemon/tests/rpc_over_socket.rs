@@ -29,6 +29,12 @@ struct Harness {
     _permit: tokio::sync::OwnedSemaphorePermit,
     /// The private tmux socket this harness started a server on.
     tmux_socket: String,
+    /// Held so a test can subscribe to what the RPC layer broadcasts.
+    ///
+    /// The harness server does not stream events to clients, so a test that
+    /// cares whether a mutation ANNOUNCED — rather than merely succeeding —
+    /// listens here instead.
+    watcher: Arc<farcooler_daemon::watch::Watcher>,
 }
 
 /// Take the tmux server down with the test that started it.
@@ -78,6 +84,7 @@ async fn start(scope: Scope) -> Harness {
     let watcher = farcooler_daemon::watch::Watcher::new(service.clone());
 
     let cfg = HandshakeConfig { daemon_version: "test".into(), granted_scope: scope };
+    let observed = watcher.clone();
     tokio::spawn(async move {
         let _ = server.serve(cfg, Factory { service, watcher, scope }).await;
     });
@@ -85,7 +92,7 @@ async fn start(scope: Scope) -> Harness {
     // The listener is bound before serve() is spawned, so a connect cannot race
     // it — but give the task a turn so the first accept is already pending.
     tokio::task::yield_now().await;
-    Harness { _dir: dir, socket, _permit: permit, tmux_socket }
+    Harness { _dir: dir, socket, _permit: permit, tmux_socket, watcher: observed }
 }
 
 #[derive(Clone)]
@@ -1178,4 +1185,62 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted() {
         panic!("wrong result")
     };
     assert!(batch.events.is_empty(), "nothing has happened on this pane yet");
+}
+
+#[tokio::test]
+async fn switching_a_panes_mode_tells_every_client_and_not_just_the_caller() {
+    // A pane-mode change alters nothing the watcher samples — same activity,
+    // same command, same liveness — so the runtime poll has nothing to notice
+    // and never announces on its own. The RPC reply reaches only the client
+    // that asked.
+    //
+    // Without an explicit announce, every OTHER client kept rendering the pane
+    // in its old mode until something unrelated happened to it, or until a
+    // human found "Reload Fleet". A pane switched to agent mode from the CLI
+    // sat there as a terminal while its agent talked into a view nobody was
+    // showing.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = h._dir.path().to_path_buf();
+    let workspace = a_workspace(&mut client, &dir).await;
+    let terminal = a_terminal(&mut client, &workspace.id, "pane").await;
+
+    // Subscribed AFTER the setup above, so the fleet traffic that creating a
+    // workspace and a terminal legitimately produces cannot be mistaken for
+    // the announce this test is about.
+    let mut events = h.watcher.subscribe();
+
+    let mut req = request("terminal.set_pane_mode");
+    req.payload = Some(request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
+        terminal_id: terminal.id.clone(),
+        // Terminal rather than Agent: switching TO agent demands a pane
+        // already running one, and this is about the announce, not about what
+        // a mode change is allowed to do.
+        pane_mode: farcooler_protocol::v1::PaneMode::Terminal as i32,
+        force: false,
+    }));
+    client.call(req).await.expect("set_pane_mode");
+
+    let announced = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            match events.recv().await {
+                Ok(event) => {
+                    if matches!(
+                        event.payload,
+                        Some(farcooler_protocol::v1::event::Payload::FleetChanged(_))
+                    ) {
+                        return true;
+                    }
+                }
+                Err(_) => return false,
+            }
+        }
+    })
+    .await;
+
+    assert_eq!(
+        announced,
+        Ok(true),
+        "a pane-mode change reached only the caller; every other client stayed wrong"
+    );
 }
