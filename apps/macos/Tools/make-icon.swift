@@ -1,17 +1,28 @@
-// Renders the Far Cooler app icon and writes an .iconset.
+// Renders the shared Far Cooler app-icon master into a macOS .iconset.
 //
-// Run via: swift Tools/make-icon.swift <output-iconset-dir>
-// Then: iconutil -c icns <output-iconset-dir>
-//
-// A crescent over a terminal prompt: night, plus a shell.
+// Run via: swift Tools/make-icon.swift <output-iconset-dir> [output-icns] [source-png]
 
 import AppKit
 import CoreGraphics
 import Foundation
 
 let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
+let icnsPath = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : nil
+let sourcePath =
+    CommandLine.arguments.count > 3
+    ? CommandLine.arguments[3]
+    : "../shared/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
 try? FileManager.default.createDirectory(
     atPath: outDir, withIntermediateDirectories: true)
+
+guard
+    let sourceImage = NSImage(contentsOfFile: sourcePath),
+    let source = sourceImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+else {
+    FileHandle.standardError.write(
+        "could not load icon master at \(sourcePath)\n".data(using: .utf8)!)
+    exit(1)
+}
 
 /// Sizes macOS expects in an iconset.
 let specs: [(name: String, px: Int)] = [
@@ -31,61 +42,29 @@ func render(px: Int) -> Data? {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     else { return nil }
 
-    // Rounded squircle background, deep indigo to near-black.
+    // iOS applies its own icon mask. macOS does not, so place the same master
+    // inside a padded rounded tile and leave the outer corners transparent.
     let radius = size * 0.2237  // macOS icon corner ratio
     let rect = CGRect(x: size * 0.06, y: size * 0.06, width: size * 0.88, height: size * 0.88)
     let path = CGPath(
         roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 
+    // A restrained baked shadow keeps the ivory tile legible on pale desktops.
+    ctx.saveGState()
+    ctx.setShadow(
+        offset: CGSize(width: 0, height: -size * 0.012),
+        blur: size * 0.025,
+        color: CGColor(gray: 0, alpha: 0.22))
+    ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+    ctx.addPath(path)
+    ctx.fillPath()
+    ctx.restoreGState()
+
     ctx.saveGState()
     ctx.addPath(path)
     ctx.clip()
-
-    let colors =
-        [
-            CGColor(red: 0.16, green: 0.17, blue: 0.31, alpha: 1),
-            CGColor(red: 0.06, green: 0.06, blue: 0.12, alpha: 1),
-        ] as CFArray
-    if let grad = CGGradient(
-        colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])
-    {
-        ctx.drawLinearGradient(
-            grad, start: CGPoint(x: 0, y: size), end: CGPoint(x: size, y: 0), options: [])
-    }
-
-    // Crescent moon, upper right.
-    let moonR = size * 0.15
-    let moonC = CGPoint(x: size * 0.68, y: size * 0.70)
-    ctx.setFillColor(CGColor(red: 0.96, green: 0.93, blue: 0.78, alpha: 1))
-    ctx.addArc(
-        center: moonC, radius: moonR, startAngle: 0, endAngle: .pi * 2, clockwise: false)
-    ctx.fillPath()
-    // Bite out of it, in the background colour, to make the crescent.
-    ctx.setBlendMode(.destinationOut)
-    ctx.addArc(
-        center: CGPoint(x: moonC.x - moonR * 0.45, y: moonC.y + moonR * 0.30),
-        radius: moonR * 0.92, startAngle: 0, endAngle: .pi * 2, clockwise: false)
-    ctx.fillPath()
-    ctx.setBlendMode(.normal)
-
-    // Terminal prompt: a chevron and a cursor bar.
-    let lw = max(size * 0.045, 1.5)
-    ctx.setStrokeColor(CGColor(red: 0.55, green: 0.85, blue: 0.62, alpha: 1))
-    ctx.setLineWidth(lw)
-    ctx.setLineCap(.round)
-    ctx.setLineJoin(.round)
-
-    let bx = size * 0.26, by = size * 0.36, arm = size * 0.11
-    ctx.move(to: CGPoint(x: bx, y: by + arm))
-    ctx.addLine(to: CGPoint(x: bx + arm * 0.9, y: by))
-    ctx.addLine(to: CGPoint(x: bx, y: by - arm))
-    ctx.strokePath()
-
-    ctx.setFillColor(CGColor(red: 0.55, green: 0.85, blue: 0.62, alpha: 1))
-    ctx.fill(
-        CGRect(
-            x: bx + arm * 1.5, y: by - arm, width: size * 0.22, height: lw * 1.1))
-
+    ctx.interpolationQuality = .high
+    ctx.draw(source, in: rect)
     ctx.restoreGState()
 
     guard let image = ctx.makeImage() else { return nil }
@@ -103,3 +82,57 @@ for spec in specs {
 }
 
 print("wrote \(specs.count) icon sizes to \(outDir)")
+
+// iconutil on macOS 26.5 rejects even an iconset it just unpacked. An ICNS
+// container is only a big-endian header plus typed PNG chunks, so write the
+// modern Retina chunk set directly and keep the build independent of that bug.
+if let icnsPath {
+    let chunks: [(type: String, filename: String)] = [
+        ("ic07", "icon_128x128.png"),
+        ("ic08", "icon_256x256.png"),
+        ("ic09", "icon_512x512.png"),
+        ("ic10", "icon_512x512@2x.png"),
+        ("ic11", "icon_16x16@2x.png"),
+        ("ic12", "icon_32x32@2x.png"),
+        ("ic13", "icon_128x128@2x.png"),
+        ("ic14", "icon_256x256@2x.png"),
+    ]
+
+    func fourCC(_ value: String) -> Data {
+        precondition(value.utf8.count == 4)
+        return Data(value.utf8)
+    }
+
+    func bigEndian(_ value: Int) -> Data {
+        var encoded = UInt32(value).bigEndian
+        return Data(bytes: &encoded, count: MemoryLayout<UInt32>.size)
+    }
+
+    let payloads: [(type: String, data: Data)] = try chunks.map { chunk in
+        let url = URL(fileURLWithPath: "\(outDir)/\(chunk.filename)")
+        return (chunk.type, try Data(contentsOf: url))
+    }
+
+    var tableOfContents = Data()
+    for payload in payloads {
+        tableOfContents.append(fourCC(payload.type))
+        tableOfContents.append(bigEndian(payload.data.count + 8))
+    }
+
+    var encodedChunks = Data()
+    encodedChunks.append(fourCC("TOC "))
+    encodedChunks.append(bigEndian(tableOfContents.count + 8))
+    encodedChunks.append(tableOfContents)
+    for payload in payloads {
+        encodedChunks.append(fourCC(payload.type))
+        encodedChunks.append(bigEndian(payload.data.count + 8))
+        encodedChunks.append(payload.data)
+    }
+
+    var icns = Data()
+    icns.append(fourCC("icns"))
+    icns.append(bigEndian(encodedChunks.count + 8))
+    icns.append(encodedChunks)
+    try icns.write(to: URL(fileURLWithPath: icnsPath))
+    print("wrote \(icnsPath)")
+}

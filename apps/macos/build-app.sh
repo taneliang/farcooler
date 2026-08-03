@@ -1,5 +1,5 @@
 #!/bin/bash
-# Assemble a real FarCooler.app bundle.
+# Assemble a real Far Cooler.app bundle.
 #
 # `swift build` alone produces a bare Unix executable. macOS gives such a process
 # no activation policy, so its window cannot become key, it never receives
@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 CONFIG="${1:-release}"
-APP="build/FarCooler.app"
+APP="build/Far Cooler.app"
 
 # SwiftPM cannot build a Rust crate, and the app will not link without it.
 ./build-vt.sh >/dev/null
@@ -100,9 +100,9 @@ cp Resources/com.farcooler.daemon.plist "$APP/Contents/Library/LaunchAgents/"
 
 echo "==> Rendering icon"
 ICONSET="build/AppIcon.iconset"
+ICON="$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
-if swift Tools/make-icon.swift "$ICONSET" >/dev/null 2>&1; then
-  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+if swift Tools/make-icon.swift "$ICONSET" "$ICON" >/dev/null 2>&1; then
   rm -rf "$ICONSET"
 else
   echo "    (icon render failed, continuing without one)"

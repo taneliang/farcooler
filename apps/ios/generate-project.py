@@ -79,6 +79,10 @@ FONTS = [
     "IosevkaNerdFontMono-Bold.ttf",
 ]
 
+# One icon source for both Apple apps. The asset catalog lives under `apps/shared`
+# so iOS can compile it directly and the macOS renderer can use the same master.
+ASSET_CATALOG = "Assets.xcassets"
+
 KEYS = [
     "project", "target", "mainGroup", "productsGroup", "sourcesGroup",
     "frameworksGroup", "fontsGroup", "agentKitGroup", "product", "sourcesPhase",
@@ -92,9 +96,13 @@ def oid(seed):
     return uuid.uuid5(uuid.NAMESPACE_URL, "farcooler-ios/" + seed).hex[:24].upper()
 
 
-ids = {name: oid(name) for name in SOURCES + AGENTKIT_SOURCES + FRAMEWORKS + FONTS}
+ids = {
+    name: oid(name)
+    for name in SOURCES + AGENTKIT_SOURCES + FRAMEWORKS + FONTS + [ASSET_CATALOG]
+}
 build_ids = {
-    name: oid("build/" + name) for name in SOURCES + AGENTKIT_SOURCES + FRAMEWORKS + FONTS
+    name: oid("build/" + name)
+    for name in SOURCES + AGENTKIT_SOURCES + FRAMEWORKS + FONTS + [ASSET_CATALOG]
 }
 P = {key: oid(key) for key in KEYS}
 
@@ -117,6 +125,11 @@ def file_refs():
             f"\t\t{ids[name]} /* {name} */ = {{isa = PBXFileReference; "
             f"lastKnownFileType = file; path = {name}; sourceTree = \"<group>\"; }};"
         )
+    lines.append(
+        f"\t\t{ids[ASSET_CATALOG]} /* {ASSET_CATALOG} */ = {{isa = PBXFileReference; "
+        f"lastKnownFileType = folder.assetcatalog; name = {ASSET_CATALOG}; "
+        f"path = ../shared/{ASSET_CATALOG}; sourceTree = SOURCE_ROOT; }};"
+    )
     lines.append(
         f"\t\t{P['product']} /* FarCooler.app */ = {{isa = PBXFileReference; "
         "explicitFileType = wrapper.application; includeInIndex = 0; "
@@ -142,6 +155,10 @@ def build_files():
             f"\t\t{build_ids[name]} /* {name} in Resources */ = {{isa = PBXBuildFile; "
             f"fileRef = {ids[name]}; }};"
         )
+    lines.append(
+        f"\t\t{build_ids[ASSET_CATALOG]} /* {ASSET_CATALOG} in Resources */ = "
+        f"{{isa = PBXBuildFile; fileRef = {ids[ASSET_CATALOG]}; }};"
+    )
     return "\n".join(lines)
 
 
@@ -149,7 +166,9 @@ source_list = "\n".join(
     f"\t\t\t\t{build_ids[n]} /* {n} in Sources */," for n in SOURCES + AGENTKIT_SOURCES
 )
 framework_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Frameworks */," for n in FRAMEWORKS)
-resource_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Resources */," for n in FONTS)
+resource_list = "\n".join(
+    f"\t\t\t\t{build_ids[n]} /* {n} in Resources */," for n in FONTS + [ASSET_CATALOG]
+)
 source_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in SOURCES)
 framework_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FRAMEWORKS)
 font_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FONTS)
@@ -217,7 +236,8 @@ TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tENABLE_USER_SCRIPT_SANDBOXING = NO;
 \t\t\t\tOTHER_LDFLAGS = "-lc++";
 \t\t\t\tSWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
-\t\t\t\tHEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";"""
+\t\t\t\tHEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";
+\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;"""
 
 PBXPROJ = f"""// !$*UTF8*$!
 {{
@@ -251,6 +271,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tchildren = (
 \t\t\t\t{P['sourcesGroup']} /* FarCooler */,
 \t\t\t\t{P['agentKitGroup']} /* AgentKit */,
+\t\t\t\t{ids[ASSET_CATALOG]} /* {ASSET_CATALOG} */,
 \t\t\t\t{P['frameworksGroup']} /* Frameworks */,
 \t\t\t\t{P['productsGroup']} /* Products */,
 \t\t\t);

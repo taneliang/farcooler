@@ -38,6 +38,7 @@
 		1590685CD3625030B862EAED /* farcooler_client.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 78C00FC7C5AC5565A723E44C; };
 		6C87999BD8695773BC9A037A /* IosevkaNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E57A0A7090B459EA8D69806B; };
 		D461E214179654D68E69ABD2 /* IosevkaNerdFontMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 718EE640EBC05D97A1B17342; };
+		8F1B001C907B5268A8EBA5BE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1AD44E8CEF485BABA3BB3DE1; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -73,6 +74,7 @@
 		78C00FC7C5AC5565A723E44C /* farcooler_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_client.xcframework; path = Frameworks/farcooler_client.xcframework; sourceTree = "<group>"; };
 		E57A0A7090B459EA8D69806B /* IosevkaNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Regular.ttf; sourceTree = "<group>"; };
 		718EE640EBC05D97A1B17342 /* IosevkaNerdFontMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Bold.ttf; sourceTree = "<group>"; };
+		1AD44E8CEF485BABA3BB3DE1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = ../shared/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		A133A464581D57FABB4108BE /* FarCooler.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FarCooler.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -94,6 +96,7 @@
 			children = (
 				DC2B394B789C517AA24120A8 /* FarCooler */,
 				4C4542875C415F8685B9A60E /* AgentKit */,
+				1AD44E8CEF485BABA3BB3DE1 /* Assets.xcassets */,
 				7BF7610560DA5A64A5782FD6 /* Frameworks */,
 				1DC6147A6B3C5E5D8ACDF5DE /* Products */,
 			);
@@ -219,6 +222,7 @@
 			files = (
 				6C87999BD8695773BC9A037A /* IosevkaNerdFontMono-Regular.ttf in Resources */,
 				D461E214179654D68E69ABD2 /* IosevkaNerdFontMono-Bold.ttf in Resources */,
+				8F1B001C907B5268A8EBA5BE /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -312,6 +316,7 @@
 				OTHER_LDFLAGS = "-lc++";
 				SWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
 				HEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 			};
 			name = Debug;
 		};
@@ -335,6 +340,7 @@
 				OTHER_LDFLAGS = "-lc++";
 				SWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
 				HEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 			};
 			name = Release;
 		};
