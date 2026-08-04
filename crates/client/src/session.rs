@@ -158,7 +158,8 @@ impl Session {
         let ssh = self._ssh.as_mut().ok_or_else(|| {
             SessionError::Protocol("streaming needs an ssh session".into())
         })?;
-        let streams = ssh.exec(&format!("farcoolerd --stream {terminal}")).await?;
+        // Named by tilde, not bare: see connect_ssh above.
+        let streams = ssh.exec(&format!("~/.local/bin/farcoolerd --stream {terminal}")).await?;
         // The write half is kept, though nothing is ever written to it.
         //
         // Dropping it closes that side of the channel, and ssh reports a closed

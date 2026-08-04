@@ -550,13 +550,17 @@ async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
                 let token = read_token()?;
                 return host_install::remote_run_with_stdin(
                     target,
-                    &format!("farcooler push pair{relay}"),
+                    &format!("~/.local/bin/farcooler push pair{relay}"),
                     &token,
                 )
                 .await;
             }
-            PushCmd::Status => return host_install::remote_run(target, "farcooler push status").await,
-            PushCmd::Forget => return host_install::remote_run(target, "farcooler push forget").await,
+            PushCmd::Status => {
+                return host_install::remote_run(target, "~/.local/bin/farcooler push status").await;
+            }
+            PushCmd::Forget => {
+                return host_install::remote_run(target, "~/.local/bin/farcooler push forget").await;
+            }
         }
     }
 

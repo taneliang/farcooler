@@ -200,7 +200,10 @@ pub async fn exec(
         command.arg("-t");
     }
     command.args(ssh_args(target));
-    command.arg(format!("farcooler {}", shell_join(args)));
+    // Named by tilde, not bare: a non-login ssh exec's PATH often lacks
+    // ~/.local/bin, where `host install` puts the binary — same reason
+    // `connect` above does not exec a bare `farcoolerd` either.
+    command.arg(format!("~/.local/bin/farcooler {}", shell_join(args)));
     command.kill_on_drop(true);
 
     let status = command.status().await.map_err(|e| format!("cannot run ssh: {e}"))?;
