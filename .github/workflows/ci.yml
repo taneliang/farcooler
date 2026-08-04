@@ -7,9 +7,13 @@
 # (they bill at 10× Linux), and that is the point at which CircleCI's open-source
 # plan would be worth the move.
 #
-# Four jobs because there are four things that can independently break: the Rust
-# workspace, the Swift that both apps share, the iOS app, and the relay. They run
-# in parallel; none depends on another's artefacts.
+# Five jobs because there are five things that can independently break: the Rust
+# workspace, the Swift that both Apple apps share, the iOS app, the Android app,
+# and the relay. They run in parallel; none depends on another's artefacts.
+#
+# Android is on Linux, unlike the two Apple jobs: nothing in that build needs a
+# Mac, and a macOS runner for it would be ten times the minutes for the same
+# result.
 name: CI
 
 on:
@@ -164,6 +168,54 @@ jobs:
             build
         env:
           NSUnbufferedIO: YES
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `versionCode` is `git rev-list --count HEAD` through
+          # scripts/version.sh, which refuses a shallow clone outright rather
+          # than silently emitting 1 — so without this the Gradle configure step
+          # fails instead of stamping a build number that would go backwards.
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The NDK is not in the runner image by default, and the version is
+      # pinned: `build-android-libs.sh` discovers which API wrapper to use from
+      # what the NDK ships, so an unpinned one changes the floor the `.so` links
+      # against without anybody asking for it.
+      - name: Install the NDK
+        run: |
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'ndk;29.0.14206865' 'platforms;android-37.1' 'build-tools;37.0.0'
+
+      # The `.so` is gitignored — it is build output — so CI has to build it
+      # before the Gradle project that packages it. Without this the APK ships
+      # for an ABI with no core in it and the failure arrives as an
+      # UnsatisfiedLinkError on the first screen rather than here.
+      - name: Build the Rust core for Android
+        run: ./scripts/build-android-libs.sh
+
+      # The ported logic, against the same fixtures the Swift suite uses. This
+      # is the job that catches the transcript reducer drifting from the Apple
+      # apps', which is the one thing about this client that must not happen.
+      - name: Test
+        working-directory: apps/android
+        run: ./gradlew testInstrumentedUnitTest
+
+      - name: Build
+        working-directory: apps/android
+        run: ./gradlew assembleDebug
 
   relay:
     name: Relay

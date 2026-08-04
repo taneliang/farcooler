@@ -104,6 +104,23 @@ into a native chat (`⌃B a` in the Mac app). That needs an ACP adapter, which
 not every agent has — see [`docs/adapters.md`](docs/adapters.md) for which
 agents ship one, the config file for adding your own, and known gaps.
 
+## The phone apps
+
+```sh
+# iOS
+./scripts/build-ios-frameworks.sh --device && open apps/ios/FarCooler.xcodeproj
+
+# Android
+./scripts/build-android-libs.sh && (cd apps/android && ./gradlew installDebug)
+```
+
+Both connect over SSH with a key the device generates and never hands out, and
+both render from the same Rust cores the Mac does. The Android client is the
+newer of the two and connects to every configured machine at once, the way the
+Mac does; the iOS client still switches between them.
+[`apps/android/README.md`](apps/android/README.md) has the full list of what
+differs and why.
+
 ## The macOS app
 
 ```sh
@@ -146,14 +163,26 @@ crates/
 ├── tmux        private tmux server, control mode, the live runtime inventory
 ├── transport   Unix socket and stdio adapters, backpressure
 ├── daemon      git worktree transactions, domain services
-└── cli         the farcooler command
+├── cli         the farcooler command
+├── vt          the terminal emulator every client renders from
+├── client      "talk to a host": ssh, protocol, and a C ABI over both
+└── android     a JNI shim over `client` and `vt`, and nothing else
 apps/macos      SwiftUI client
+apps/ios        SwiftUI client, over `client`'s C ABI
+apps/android    Compose client, over the same ABI through JNI
+apps/shared     the logic the two Apple apps must agree on, bit for bit
 proto/          canonical protocol source of truth
 ```
 
 `core` defines the `RuntimeInventory` trait and `tmux` implements it, so crate
 dependencies point one way and the derivation rule is unit-testable with no tmux
 running.
+
+`vt` and `client` exist for the same reason as each other: the parts that must
+not differ between clients live in Rust, once, and each platform writes only a
+renderer. `apps/android`'s Kotlin never parses an escape sequence, never decides
+what an arrow key sends, and never speaks the protocol — see
+[`apps/android/README.md`](apps/android/README.md).
 
 ## Safety properties
 
@@ -183,10 +212,14 @@ Also working: every configured machine connects over SSH at once, alongside
 this Mac, with its own reconnection and backoff — see `docs/farcooler-design.md`
 for the connection states this is built on.
 
+Also working: iOS and Android clients, over one Rust implementation of the SSH
+transport, the protocol and the terminal emulator — a C ABI that Swift imports
+directly and Kotlin reaches through the JNI shim in `crates/android`.
+
 Not built yet: the daemon's socket server is not wired to the CLI (the CLI links
-the service directly), the terminal channel streams via `capture-pane` rather
-than control-mode streaming, and there is no iOS client. See the final section
-of the design doc for the full picture.
+the service directly), and the terminal channel streams via `capture-pane`
+rather than control-mode streaming. See the final section of the design doc for
+the full picture.
 
 ## License
 
@@ -196,3 +229,4 @@ Copyright © 2026 E-Liang Tan. Far Cooler is licensed under the
 The bundled Iosevka Nerd Font Mono files remain licensed under the SIL Open Font
 License 1.1; see
 [`apps/ios/FarCooler/Fonts/IOSEVKA-LICENSE.md`](apps/ios/FarCooler/Fonts/IOSEVKA-LICENSE.md).
+The Android app ships the same files under the same licence.

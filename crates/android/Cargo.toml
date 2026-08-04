@@ -1,0 +1,25 @@
+[package]
+name = "farcooler-jni"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "farcooler_jni"
+# One shared object, because that is the only thing Android's class loader can
+# open. `System.loadLibrary` maps a `.so` out of the APK; it has no notion of a
+# static archive, so the staticlib the Apple platforms link is no use here.
+#
+# One rather than two: `libfarcooler_client.so` and `libfarcooler_vt.so` would
+# be two libraries with two load orders and two chances for a missing
+# dependency to surface as `UnsatisfiedLinkError` at the first terminal
+# someone opens. This crate links both cores in as rlibs and exports one
+# surface, so there is exactly one thing to load and it either loads or does
+# not.
+crate-type = ["cdylib"]
+
+[dependencies]
+farcooler-client.workspace = true
+farcooler-vt = { path = "../vt" }
+jni = "0.21"

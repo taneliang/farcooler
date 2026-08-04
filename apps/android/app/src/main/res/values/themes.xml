@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The launch window only. Everything a person actually looks at is drawn
+         by Compose in `FarCoolerTheme`; this exists so the fraction of a second
+         before the first frame is the app's own dark rather than a white flash
+         handing off to a terminal. -->
+    <style name="Theme.FarCooler" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/launch_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

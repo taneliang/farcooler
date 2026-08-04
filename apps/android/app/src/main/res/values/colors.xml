@@ -1,0 +1,10 @@
+<resources>
+    <!-- Sampled from the shared app icon so the launcher badge and the icon
+         artwork are the same cream, with no seam where one meets the other. -->
+    <color name="ic_launcher_background">#F9F1E8</color>
+
+    <!-- The terminal's own background, shared with `TerminalPalette` in Kotlin
+         and with the Mac and iOS apps, so the same terminal is the same colour
+         on all three. -->
+    <color name="launch_background">#121419</color>
+</resources>

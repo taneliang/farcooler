@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A notification icon is a silhouette: Android throws away every colour and
+    keeps the alpha, so this is drawn as solid white on nothing rather than as a
+    small copy of the launcher icon. The bear would arrive as a filled circle.
+
+    A terminal prompt — the caret and its line — because what every one of these
+    notifications is about is a pane on a machine.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5.3,6.3 L4,7.6 L8.4,12 L4,16.4 L5.3,17.7 L11,12 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,16 H20 V18 H12 Z" />
+</vector>
