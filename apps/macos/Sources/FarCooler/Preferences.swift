@@ -181,6 +181,7 @@ private struct Setting<Control: View>: View {
 struct SettingsView: View {
     @ObservedObject private var preferences = Preferences.shared
     @StateObject private var service = ServiceRegistration()
+    @StateObject private var cliTools = CommandLineTools()
 
     var body: some View {
         TabView(selection: $preferences.settingsTab) {
@@ -240,10 +241,26 @@ struct SettingsView: View {
                     Text(why).font(.callout).foregroundStyle(.secondary)
                 }
             }
+
+            Setting("Puts farcooler and farcoolerd on your PATH, so a terminal or an SSH session can find them.") {
+                switch cliTools.state {
+                case .installed:
+                    Toggle("Command-line tools", isOn: .constant(true))
+                        .onTapGesture { cliTools.uninstall() }
+                case .notInstalled:
+                    Toggle("Command-line tools", isOn: .constant(false))
+                        .onTapGesture { cliTools.install() }
+                case .conflict(let why), .unavailable(let why):
+                    Text(why).font(.callout).foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
-        .onAppear { service.refresh() }
+        .onAppear {
+            service.refresh()
+            cliTools.refresh()
+        }
     }
 
     private var terminal: some View {
