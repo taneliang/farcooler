@@ -630,6 +630,41 @@ final class DaemonClient: ObservableObject {
         return error
     }
 
+    /// What asking the daemon to remove a root came back with.
+    enum RemoveRootResult {
+        case ok
+        /// `confirm` did not match the root's own name. Unlike
+        /// `RemoveWorktreeResult`'s identical case, this should not happen in
+        /// ordinary use — the caller always supplies the root's own name, not
+        /// something a user typed — so it means the sheet's own idea of the
+        /// name and the daemon's disagree, which is a bug worth surfacing
+        /// rather than an expected turn in the flow.
+        case confirmationRequired
+        case failed(String)
+    }
+
+    /// Remove an allowlisted root, and with it every repository registered
+    /// under it. `confirm` must be the root's own folder name — the daemon
+    /// checks it server-side regardless of what is passed here, the same way
+    /// `removeWorktree`'s check is a courtesy for the same reason.
+    ///
+    /// Touches nothing on disk, same as the CLI's own `root remove` promises.
+    @discardableResult
+    func removeRoot(_ id: String, confirm: String) async -> RemoveRootResult {
+        let before = lastError
+        guard await run(["root", "remove", id, "--confirm", confirm]) != nil else {
+            let message = lastError ?? "command failed"
+            if message.localizedCaseInsensitiveContains("confirmation") {
+                lastError = before
+                return .confirmationRequired
+            }
+            return .failed(message)
+        }
+        await refreshRepositories()
+        await refreshRoots()
+        return .ok
+    }
+
     /// Everything a task needs, from one sentence.
     ///
     /// Creates the worktree, launches an agent in it, waits for the agent to

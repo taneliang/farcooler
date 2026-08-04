@@ -847,6 +847,13 @@ async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
                             "short": short_bytes(&r.id),
                             "displayName": r.display_name,
                             "remote": r.remote_summary,
+                            // Which root this repository is allowlisted under.
+                            // Two repositories under the same root are removed
+                            // together — there is no "remove just this one" at
+                            // the daemon — so the Mac app needs this to warn
+                            // about siblings before someone removes more than
+                            // they meant to.
+                            "repositoryRootId": uuid_of(&r.repository_root_id).to_string(),
                         })
                     })
                     .collect();

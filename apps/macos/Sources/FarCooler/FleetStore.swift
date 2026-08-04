@@ -252,6 +252,27 @@ final class FleetStore: ObservableObject {
         }
     }
 
+    /// The root a repository lives under, and every other repository on the
+    /// same host that shares it.
+    ///
+    /// Removing a repository actually removes its whole root — the daemon
+    /// has no narrower operation — so anything sharing that root goes with
+    /// it. A caller has to know that before it can say so honestly rather
+    /// than after the fact. `nil` means the root this repository was
+    /// supposedly registered under is not in `roots` — stale data rather
+    /// than an ordinary case, and worth refusing rather than guessing at.
+    func rootAndSiblings(of repository: Repository, host: String) -> (root: RepositoryRoot, siblings: [Repository])? {
+        guard let root = roots.first(where: { $0.host == host && $0.root.id == repository.repositoryRootId })
+        else { return nil }
+        let siblings = repositories
+            .filter {
+                $0.host == host && $0.repository.repositoryRootId == repository.repositoryRootId
+                    && $0.repository.id != repository.id
+            }
+            .map(\.repository)
+        return (root.root, siblings)
+    }
+
     /// One workspace's layout is per-machine as well as per-workspace, so the
     /// key carries both — a flat `[String: [PaneGroup]]` across several
     /// machines could let one machine's layout answer for another's

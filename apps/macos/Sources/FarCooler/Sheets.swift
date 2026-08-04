@@ -235,6 +235,101 @@ struct RemoveWorkspaceSheet: View {
     }
 }
 
+/// Removing a repository — which really means removing the root it lives
+/// under, since the daemon has no operation narrower than that.
+///
+/// Solo on its root, this is a plain destructive click: the sheet already
+/// knows and shows the exact folder name being revoked, so it supplies that
+/// as the confirmation itself rather than asking someone to retype what is
+/// already on screen — the same trust `RemoveWorkspaceSheet` places in a
+/// click that follows a name it already displayed. Sharing a root with other
+/// repositories is the one case with real blast radius — removing one takes
+/// every sibling with it — and gets the friction worktree removal reserves
+/// for a dirty one: every name that would disappear, said once, and the
+/// folder name typed by hand before the button does anything.
+struct RemoveRepositorySheet: View {
+    let repository: Repository
+    let root: RepositoryRoot
+    /// Every other repository sharing `root`, on the same host. Empty means
+    /// this repository has the root to itself.
+    let siblings: [Repository]
+    /// Receives the confirmation text — the app's own for a solo root, typed
+    /// by hand for a shared one — and answers what the daemon said.
+    let onRemove: (_ confirm: String) async -> DaemonClient.RemoveRootResult
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var typed = ""
+    @State private var errorMessage: String?
+    @State private var working = false
+
+    /// The daemon confirms by folder name, not repository name — `root.path`
+    /// when this Mac can see it, the repository's own name otherwise, since
+    /// a remote root's path is only ever visible to a `host_admin` client.
+    private var rootName: String {
+        root.path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? repository.displayName
+    }
+    private var isShared: Bool { !siblings.isEmpty }
+    private var matches: Bool { typed == rootName }
+    private var siblingNames: String {
+        ListFormatter.localizedString(byJoining: siblings.map(\.displayName).sorted())
+    }
+
+    var body: some View {
+        SheetFrame(
+            title: "Remove \(repository.displayName)",
+            confirmTitle: "Remove",
+            confirmRole: .destructive,
+            canConfirm: !working && (!isShared || matches),
+            working: working,
+            error: errorMessage,
+            onCancel: { dismiss() },
+            onConfirm: {
+                working = true
+                errorMessage = nil
+                let result = await onRemove(isShared ? typed : rootName)
+                working = false
+                switch result {
+                case .ok:
+                    dismiss()
+                case .confirmationRequired:
+                    // The app's own idea of the name and the daemon's
+                    // disagree — not the ordinary "you mistyped it" this
+                    // reads as for a worktree, but there is nothing more
+                    // specific to say from here.
+                    errorMessage = "That did not match — try again."
+                case .failed(let message):
+                    errorMessage = message
+                }
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                Callout(
+                    icon: "info.circle.fill",
+                    tone: .neutral,
+                    text: "Revokes access to \(rootName). Nothing on disk is touched."
+                )
+
+                if isShared {
+                    Callout(
+                        icon: "exclamationmark.triangle.fill",
+                        tone: .warning,
+                        text:
+                            "\(siblings.count == 1 ? "\(siblingNames) shares" : "\(siblingNames) share") "
+                            + "this folder and would be removed too."
+                    )
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Type the folder name to confirm")
+                            .font(.callout)
+                        TextField("", text: $typed, prompt: Text(rootName))
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Confirms cancelling an in-flight turn to switch a pane's mode.
 ///
 /// `DaemonClient.setPaneMode` answers `confirmationRequired` rather than just

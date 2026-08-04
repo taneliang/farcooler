@@ -338,6 +338,10 @@ struct ProjectHeader: View {
     var onNewWorktree: (() -> Void)?
     /// A terminal in the repository's own checkout, not in a worktree.
     var onNewTerminal: (() -> Void)?
+    /// Opens `RemoveRepositorySheet` for this project. `nil` for a silent
+    /// host's placeholder header — it names a machine, not a repository,
+    /// and there is nothing there to remove.
+    var onRemove: (() -> Void)?
     /// Which machine this project's worktrees are on.
     var host: String = ""
     var hostState: HostState = .connected
@@ -391,6 +395,18 @@ struct ProjectHeader: View {
                     // sidebar. A `+` on every project header at all times is a
                     // column of plus signs down a list meant to read as quiet
                     // section labels.
+                    .opacity(hovering ? 1 : 0)
+                }
+
+                if let onRemove {
+                    // Its own button rather than a second item on the `+`
+                    // menu: that menu is for adding things, and a destructive
+                    // action one row below "New worktree" is a misclick away
+                    // from removing a repository instead of branching one.
+                    SidebarMenuButton(
+                        systemImage: "ellipsis",
+                        help: "\(name) options",
+                        items: [SidebarMenuItem(title: "Remove \(name)…", action: onRemove)])
                     .opacity(hovering ? 1 : 0)
                 }
             }

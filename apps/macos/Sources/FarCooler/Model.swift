@@ -140,6 +140,11 @@ struct Repository: Decodable, Identifiable, Hashable {
     var short: String
     var displayName: String
     var remote: String
+    /// Which `RepositoryRoot` this repository is allowlisted under. Two
+    /// repositories can share one root — the daemon only removes a whole
+    /// root, never a single repository under it — so this is what lets the
+    /// app warn about siblings before removing one takes the other with it.
+    var repositoryRootId: String
 }
 
 /// An allowlisted directory Far Cooler may operate under.

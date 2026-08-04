@@ -43,6 +43,7 @@ struct ContentView: View {
     @AppStorage("fleet.lastTerminal") private var lastTerminal = ""
     @FocusState private var searchFocused: Bool
     @State private var removeWorkspace: Workspace?
+    @State private var removeRepository: RepositoryToRemove?
     @State private var showResumeBranch = false
     @State private var showPalette = false
     /// Quick-create's draft, reachable from here so that what was typed into
@@ -398,6 +399,31 @@ struct ContentView: View {
                 return result
             }
         }
+        .sheet(item: $removeRepository) { target in
+            if let found = store.rootAndSiblings(of: target.repository, host: target.host) {
+                RemoveRepositorySheet(
+                    repository: target.repository,
+                    root: found.root,
+                    siblings: found.siblings
+                ) { confirm in
+                    if let why = store.refusal(for: target.host) { return .failed(why) }
+                    guard let client = store.clients[target.host] else {
+                        return .failed("that machine is not connected")
+                    }
+                    return await client.removeRoot(found.root.id, confirm: confirm)
+                }
+            } else {
+                // Stale data: this repository's own root is missing from
+                // `store.roots`. Refreshing rather than presenting a sheet
+                // with nothing true to say about what it would remove.
+                ProgressView()
+                    .frame(width: 200, height: 120)
+                    .task {
+                        await store.clients[target.host]?.refreshRoots()
+                        removeRepository = nil
+                    }
+            }
+        }
         .sheet(item: $pendingPaneModeSwitch) { pending in
             PaneModeConfirmSheet(message: pending.message) {
                 await act(
@@ -435,6 +461,14 @@ struct ContentView: View {
         let shown: [Workspace]
         let hidden: [Workspace]
         var id: String { "\(host)\u{1}\(project)" }
+    }
+
+    /// A project header's repository, on its way to `RemoveRepositorySheet`.
+    /// `.sheet(item:)` needs `Identifiable`; a bare tuple is not one.
+    private struct RepositoryToRemove: Identifiable {
+        let host: String
+        let repository: Repository
+        var id: String { "\(host)\u{1}\(repository.id)" }
     }
 
     private var groups: [ProjectGroup] {
@@ -505,6 +539,16 @@ struct ContentView: View {
     /// "hidden expanded on that one." Same value as `ProjectGroup.id` above.
     private func groupKey(host: String, project: String) -> String {
         "\(host)\u{1}\(project)"
+    }
+
+    /// The repository a project header's name and host actually stand for.
+    ///
+    /// `ProjectGroup.project` is a display name, not an id — see
+    /// `groups`'s own use of `workspace.repository` — so removing it needs
+    /// this lookup rather than something already in hand.
+    private func repository(host: String, project: String) -> Repository? {
+        store.repositories.first { $0.host == host && $0.repository.displayName == project }?
+            .repository
     }
 
     /// Start a worktree in a named project.
@@ -595,6 +639,16 @@ struct ContentView: View {
                                 onNewTerminal: isSilentHost
                                     ? nil
                                     : { startMainTerminal(host: group.host, project: group.project) },
+                                onRemove: isSilentHost
+                                    ? nil
+                                    : {
+                                        guard
+                                            let repo = repository(
+                                                host: group.host, project: group.project)
+                                        else { return }
+                                        removeRepository = RepositoryToRemove(
+                                            host: group.host, repository: repo)
+                                    },
                                 host: group.host,
                                 hostState: store.state(of: group.host),
                                 showHost: isSilentHost ? false : showHosts,
