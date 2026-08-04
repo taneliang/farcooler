@@ -86,7 +86,9 @@ impl Session {
     /// Connect over SSH and start a daemon session on the far side.
     pub async fn connect_ssh(destination: &ssh::Destination) -> Result<Self, SessionError> {
         let mut transport = ssh::Session::open(destination).await?;
-        let streams = transport.exec("farcoolerd --stdio").await?;
+        // Named by tilde, not bare: a non-login ssh exec's PATH often lacks
+        // ~/.local/bin, where `host install` puts the binary.
+        let streams = transport.exec("~/.local/bin/farcoolerd --stdio").await?;
 
         let client = Client::over(
             Box::new(streams.reader) as Reader,

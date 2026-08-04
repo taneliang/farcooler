@@ -237,8 +237,14 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
 /// only resolves correctly relative to wherever this binary happens to be
 /// invoked from — a real path, but a weaker guarantee than "next to the exe
 /// that is asking" — so it is the fallback, not the default.
+///
+/// `current_exe()` hands back whatever path was used to invoke the process,
+/// symlink and all — it does not resolve one. The app symlinks itself into
+/// `~/.local/bin` so it lands on PATH, so without `canonicalize` every CLI
+/// invocation from PATH would look for `dist/<slug>` next to that symlink
+/// instead of next to the bundle it points at, and never find it.
 fn locate_dist(slug: &str) -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
+    if let Ok(exe) = std::env::current_exe().and_then(|exe| exe.canonicalize()) {
         if let Some(dir) = exe.parent() {
             let bundled = dir.join("dist").join(slug);
             if bundled.join("farcoolerd").is_file() && bundled.join("farcooler").is_file() {

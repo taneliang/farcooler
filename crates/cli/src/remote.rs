@@ -83,11 +83,11 @@ fn ssh_args(target: &str) -> Vec<String> {
 pub async fn connect(target: &str) -> Result<RemoteLink, Box<dyn std::error::Error>> {
     let mut command = Command::new("ssh");
     command.args(ssh_args(target));
-    // `farcoolerd` is found on the remote user's PATH. `host install` puts it in
-    // ~/.local/bin, and the login shell is what puts that on PATH, so this runs
-    // through a shell rather than exec'ing an absolute path we would have to
-    // guess.
-    command.arg("farcoolerd --stdio");
+    // `host install` puts it in ~/.local/bin, but a non-login ssh command's
+    // PATH is whatever the remote shell config gives it — often not that.
+    // Naming it by tilde (expanded by the remote shell, not guessed here)
+    // finds it regardless of PATH.
+    command.arg("~/.local/bin/farcoolerd --stdio");
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
