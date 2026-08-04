@@ -88,20 +88,29 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
     };
     let dir = match from {
         Some(p) => p.to_path_buf(),
-        None => PathBuf::from("dist").join(&slug),
+        None => locate_dist(&slug),
     };
     let daemon = dir.join("farcoolerd");
     let cli = dir.join("farcooler");
     for path in [&daemon, &cli] {
         if !path.is_file() {
-            return Err(format!(
-                "No Linux binary at {}.\n\
-                 Build them first:\n\
-                 \n    ./scripts/build-linux.sh {arch}\n\n\
-                 or pass --from <dir> with `farcooler` and `farcoolerd` inside.",
-                path.display()
-            )
-            .into());
+            // A packaged app has no `scripts/build-linux.sh` to point at — its
+            // copy is either bundled next to it already or it never will be,
+            // since the toolchain that builds one is a developer's, not a
+            // download's. Telling someone without a checkout to run a script
+            // they do not have sends them nowhere.
+            let hint = if has_dev_checkout() {
+                format!(
+                    "Build them first:\n\n    ./scripts/build-linux.sh {arch}\n\n\
+                     or pass --from <dir> with `farcooler` and `farcoolerd` inside."
+                )
+            } else {
+                "This copy of Far Cooler was not built with a Linux install \
+                 bundled in.\nPass --from <dir> with `farcooler` and `farcoolerd` \
+                 inside, built for this host's architecture."
+                    .to_string()
+            };
+            return Err(format!("No Linux binary at {}.\n{hint}", path.display()).into());
         }
     }
 
@@ -216,6 +225,34 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
 
         other => Ok(other),
     }
+}
+
+/// Where the Linux `farcooler`/`farcoolerd` this executable would upload live.
+///
+/// A packaged app bundles them next to itself — `Resources/dist/<slug>` inside
+/// Far Cooler.app, alongside the macOS `farcooler`/`farcoolerd` it always
+/// carries — so installing on a remote Linux host needs nothing beyond the
+/// app itself. That is tried first. A checkout that built its own copy with
+/// `build-linux.sh` instead writes to `dist/<slug>` at the repo root, which
+/// only resolves correctly relative to wherever this binary happens to be
+/// invoked from — a real path, but a weaker guarantee than "next to the exe
+/// that is asking" — so it is the fallback, not the default.
+fn locate_dist(slug: &str) -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let bundled = dir.join("dist").join(slug);
+            if bundled.join("farcoolerd").is_file() && bundled.join("farcooler").is_file() {
+                return bundled;
+            }
+        }
+    }
+    PathBuf::from("dist").join(slug)
+}
+
+/// Whether this is a checkout with `scripts/build-linux.sh` to point someone
+/// at, versus a downloaded app with no source beside it.
+fn has_dev_checkout() -> bool {
+    Path::new("scripts/build-linux.sh").is_file()
 }
 
 /// What a host IS, before anything is changed on it.

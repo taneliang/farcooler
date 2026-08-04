@@ -94,6 +94,33 @@ cp "$CLI" "$APP/Contents/Resources/farcooler"
 cp "$DAEMON" "$APP/Contents/Resources/farcoolerd"
 echo "    bundled $("$CLI" --version 2>/dev/null || echo cli) + farcoolerd"
 
+# The Linux binaries `farcooler host install` uploads to a remote host, if this
+# machine has built any.
+#
+# An end user only ever has the app — no checkout, no `scripts/build-linux.sh`,
+# no Rust toolchain — so "Install" on a Linux or WSL machine can only work if
+# its own copy of `farcooler`/`farcoolerd` already travelled inside this
+# bundle. `host_install.rs` looks for them at `Resources/dist/<arch>-linux`
+# next to itself before it looks anywhere else.
+#
+# Building a musl target needs `cross` (Docker) or a musl cross-compiler this
+# script does not assume every machine has, so this bundles whatever already
+# exists in `dist/` and says so rather than failing the whole app build over
+# it — the WorkOS client id a few lines up makes the same trade for the same
+# reason. Run `./scripts/build-linux.sh <arch>` first to have something here.
+echo "==> Bundling Linux binaries, if built"
+BUNDLED_LINUX=0
+for SLUG in x86_64-linux aarch64-linux; do
+  SRC="../../dist/$SLUG"
+  if [ -f "$SRC/farcoolerd" ] && [ -f "$SRC/farcooler" ]; then
+    mkdir -p "$APP/Contents/Resources/dist/$SLUG"
+    cp "$SRC/farcoolerd" "$SRC/farcooler" "$APP/Contents/Resources/dist/$SLUG/"
+    echo "    bundled $SLUG"
+    BUNDLED_LINUX=$((BUNDLED_LINUX + 1))
+  fi
+done
+[ "$BUNDLED_LINUX" -eq 0 ] && echo "    (none found — run ./scripts/build-linux.sh to bundle remote-host installs)"
+
 # SMAppService looks for the agent plist at exactly this path inside the bundle.
 # Anywhere else and registration reports notFound.
 cp Resources/com.farcooler.daemon.plist "$APP/Contents/Library/LaunchAgents/"

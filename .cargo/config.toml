@@ -1,0 +1,10 @@
+# Linkers for the musl targets `scripts/build-linux.sh` builds.
+#
+# Cross-compiling to Linux from macOS needs a linker that knows how to produce
+# a Linux binary; the host's own `cc` does not. `brew install
+# filosottile/musl-cross/musl-cross` puts these on PATH.
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-musl-gcc"
