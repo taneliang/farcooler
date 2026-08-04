@@ -556,7 +556,13 @@ struct FleetList: View {
     let onAction: (Connection.Action, Terminal) -> Void
     var onRemove: (Workspace) -> Void = { _ in }
 
+    @State private var hiddenExpanded = false
+
     private var shown: [Workspace] { fleet.workspaces.filter { !$0.isHidden } }
+    private var hidden: [Workspace] { fleet.workspaces.filter(\.isHidden) }
+    private var hiddenAttention: Int {
+        hidden.flatMap(\.terminals).filter(\.agent.wantsAttention).count
+    }
 
     var body: some View {
         List {
@@ -631,6 +637,51 @@ struct FleetList: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                }
+            }
+
+            if !hidden.isEmpty {
+                Section {
+                    if hiddenExpanded {
+                        ForEach(hidden) { workspace in
+                            let numbering = workspace.ordinals()
+                            ForEach(workspace.terminals) { terminal in
+                                Button { onSelect(terminal) } label: {
+                                    TerminalRow(
+                                        terminal: terminal, ordinal: numbering[terminal.id]
+                                    ) { action in
+                                        onAction(action, terminal)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            HStack {
+                                Text(workspace.task).font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Unhide") {
+                                    Task { await connection.unhideWorkspace(workspace) }
+                                }
+                                .font(.caption)
+                            }
+                        }
+                    }
+                } header: {
+                    Button {
+                        hiddenExpanded.toggle()
+                    } label: {
+                        HStack {
+                            Image(systemName: hiddenExpanded ? "chevron.down" : "chevron.right")
+                                .font(.caption2)
+                            Text("Hidden")
+                            Text("\(hidden.count)")
+                                .foregroundStyle(.tertiary)
+                            if hiddenAttention > 0 {
+                                Circle().fill(Color.orange).frame(width: 6, height: 6)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
