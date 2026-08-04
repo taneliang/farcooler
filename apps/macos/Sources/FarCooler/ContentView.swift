@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var store = FleetStore()
     @ObservedObject private var preferences = Preferences.shared
+    @Environment(\.openSettings) private var openSettings
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
     /// Which projects have their hidden worktrees showing. Collapsed is the
@@ -749,8 +750,14 @@ struct ContentView: View {
                     // a thing you add.
                     SidebarMenuItem(title: "Add a machine…") {
                         Preferences.shared.settingsTab = "machines"
-                        NSApp.sendAction(
-                            Selector(("showSettingsWindow:")), to: nil, from: nil)
+                        // `NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil,
+                        // from: nil)` was here before, and never worked: nil-target
+                        // sendAction walks the responder chain, and nothing in it
+                        // implements that selector. The real "Settings…" menu item and
+                        // its ⌘, equivalent don't go through that search at all — AppKit
+                        // invokes their own bound target directly. `openSettings` is the
+                        // actual supported way to trigger the same thing from code.
+                        openSettings()
                     },
                 ])
             }

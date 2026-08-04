@@ -15,6 +15,7 @@ struct EditorMenuItems: View {
     var showsSettingsItem = true
 
     @ObservedObject private var editors = Editors.shared
+    @Environment(\.openSettings) private var openSettings
 
     private var host: String { workspace.host ?? "" }
     private var usable: [Editor] { editors.available.filter { $0.unavailability(host: host) == nil } }
@@ -43,7 +44,7 @@ struct EditorMenuItems: View {
         if showsSettingsItem {
             Divider()
             Button(editors.available.isEmpty ? "Add an editor…" : "Editors…") {
-                EditorSettingsLink.open()
+                EditorSettingsLink.open(openSettings)
             }
         }
     }
@@ -61,11 +62,18 @@ struct EditorMenuItems: View {
 /// Settings is a scene, not a sheet, so nothing that opens it can hand it a
 /// parameter — the tab is set first and read by `SettingsView`. Same shape as
 /// "Add a machine…" in `ContentView`.
+///
+/// Takes the caller's own `openSettings` rather than reaching for
+/// `NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)`:
+/// that nil-target send searches the responder chain, and nothing in it
+/// answers to that selector outside of the real "Settings…" menu item — which
+/// AppKit invokes by calling its own bound target directly, never through that
+/// search. The call looked plausible and silently did nothing.
 @MainActor
 enum EditorSettingsLink {
-    static func open() {
+    static func open(_ openSettings: OpenSettingsAction) {
         Preferences.shared.settingsTab = "editors"
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        openSettings()
     }
 }
 
@@ -84,6 +92,7 @@ struct OpenInEditorButton: View {
     let onError: (String) -> Void
 
     @ObservedObject private var editors = Editors.shared
+    @Environment(\.openSettings) private var openSettings
 
     private var host: String { workspace.host ?? "" }
 
@@ -94,7 +103,7 @@ struct OpenInEditorButton: View {
             Image(systemName: "chevron.left.forwardslash.chevron.right")
         } primaryAction: {
             guard let editor = editors.preferred(host: host) else {
-                EditorSettingsLink.open()
+                EditorSettingsLink.open(openSettings)
                 return
             }
             // Deliberately not remembered. A click uses what is already
