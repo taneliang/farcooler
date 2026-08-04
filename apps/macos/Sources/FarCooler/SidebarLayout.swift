@@ -71,7 +71,9 @@ struct SidebarMenuButton: View {
     let help: String
     let items: [SidebarMenuItem]
 
-    @State private var anchor = CGRect.zero
+    /// A real `NSView` sitting exactly where the button is, so the menu can be
+    /// popped in the button's own coordinate system.
+    @State private var anchor = MenuAnchor()
 
     var body: some View {
         Button {
@@ -84,16 +86,7 @@ struct SidebarMenuButton: View {
         }
         .buttonStyle(.plain)
         .help(help)
-        .background(
-            // The button's own frame in screen terms, so the menu opens under
-            // it rather than under the mouse — which is what a menu attached to
-            // a control is supposed to do.
-            GeometryReader { proxy in
-                Color.clear
-                    .onChange(of: proxy.frame(in: .global)) { _, new in anchor = new }
-                    .onAppear { anchor = proxy.frame(in: .global) }
-            }
-        )
+        .background(MenuAnchorView(anchor: anchor))
     }
 
     private func present() {
@@ -109,27 +102,11 @@ struct SidebarMenuButton: View {
             entry.representedObject = invoker
             menu.addItem(entry)
         }
-        // Below the control, aligned to its leading edge.
-        //
-        // The two coordinate systems here disagree about which way is up, and
-        // the conversion has to be done by hand because nothing in AppKit
-        // knows the point came from SwiftUI.
-        //
-        // `anchor` is a SwiftUI `.global` frame: origin top-left, y growing
-        // DOWNWARD. An `NSView` is origin bottom-left, y growing UPWARD unless
-        // it says otherwise. Handing one straight to the other — which is what
-        // `view.convert(_:from: nil)` did, since that reads its argument as
-        // AppKit window coordinates — mirrors the point about the window's
-        // middle. A `+` near the top of the sidebar opened its menu near the
-        // bottom of the window, and `+ 4` ("just below") pushed it further
-        // away rather than nearer, because down in one system is up in the
-        // other.
-        if let view = NSApp.keyWindow?.contentView {
-            let top = anchor.maxY + 4
-            let point = NSPoint(
-                x: anchor.minX,
-                y: view.isFlipped ? top : view.bounds.height - top)
-            menu.popUp(positioning: nil, at: point, in: view)
+        // Below the control, aligned to its leading edge — expressed in the
+        // control's own bounds, which is the only frame of reference here that
+        // cannot be misread.
+        if let view = anchor.view, view.window != nil {
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.maxY + 4), in: view)
         } else {
             menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
         }
@@ -142,6 +119,41 @@ struct SidebarMenuButton: View {
         private let action: () -> Void
         init(_ action: @escaping () -> Void) { self.action = action }
         @objc func fire() { action() }
+    }
+}
+
+/// Somewhere to hang the button's `NSView` between drawing it and using it.
+///
+/// A class, not a captured frame: a `CGRect` from a `GeometryReader` is measured
+/// in SwiftUI's coordinates — origin top-left, y growing downward — and
+/// `NSView.convert(_:from: nil)` reads whatever it is handed as AppKit window
+/// coordinates, origin bottom-left, y growing upward. The two are mirror images,
+/// so a project header near the bottom of the sidebar opened its menu near the
+/// top of the window, and only a control at the exact vertical middle would have
+/// looked right. Popping the menu inside the view means there is no axis left to
+/// get backwards.
+final class MenuAnchor {
+    fileprivate(set) weak var view: NSView?
+}
+
+private struct MenuAnchorView: NSViewRepresentable {
+    let anchor: MenuAnchor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = FlippedAnchorView()
+        anchor.view = view
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        anchor.view = nsView
+    }
+
+    /// Flipped so `bounds.maxY` means the bottom edge, as it reads. Invisible to
+    /// the mouse, because it sits on top of the button it is measuring.
+    private final class FlippedAnchorView: NSView {
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
 
