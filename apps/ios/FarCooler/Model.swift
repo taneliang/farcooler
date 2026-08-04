@@ -27,6 +27,20 @@ struct Workspace: Decodable, Identifiable, Hashable {
     var state: String
     var terminals: [Terminal]
 
+    /// The user asked not to see this one.
+    var isHidden: Bool { state == "hidden" }
+
+    /// git no longer lists this worktree, but the row carries terminals.
+    var worktreeMissing: Bool { state == "worktree_missing" }
+
+    /// Whether this workspace IS the repository's own checkout — offering to
+    /// remove it would offer to delete the directory the repository itself
+    /// lives in. Optional because an older daemon never sent this key, and
+    /// decoding must not fail the entire fleet over one absent field.
+    var isMainCheckout: Bool { is_main_checkout ?? false }
+    // swiftlint:disable:next identifier_name
+    var is_main_checkout: Bool?
+
     /// Which of several identically-labeled terminals each one is, keyed by
     /// terminal id.
     ///

@@ -405,7 +405,7 @@ struct WorkspaceListView: View {
     @State private var showQuickTask = false
 
     var body: some View {
-        FleetList(fleet: connection.fleet, onSelect: onSelect) { action, terminal in
+        FleetList(fleet: connection.fleet, connection: connection, onSelect: onSelect) { action, terminal in
             Task { await connection.act(action, on: terminal) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -551,8 +551,12 @@ struct HostSwitcherBar: View {
 /// `List` content itself carries no opinion about what encloses it.
 struct FleetList: View {
     let fleet: Fleet
+    @ObservedObject var connection: Connection
     let onSelect: (Terminal) -> Void
     let onAction: (Connection.Action, Terminal) -> Void
+    var onRemove: (Workspace) -> Void = { _ in }
+
+    private var shown: [Workspace] { fleet.workspaces.filter { !$0.isHidden } }
 
     var body: some View {
         List {
@@ -561,7 +565,7 @@ struct FleetList: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(fleet.workspaces) { workspace in
+            ForEach(shown) { workspace in
                 let numbering = workspace.ordinals()
                 Section {
                     // Creation order, always. Sorting whatever needs you to the
@@ -583,6 +587,12 @@ struct FleetList: View {
                     if workspace.terminals.isEmpty {
                         Text("No terminals").font(.callout).foregroundStyle(.secondary)
                     }
+                    Button {
+                        Task { await connection.createTerminal(workspace: workspace) }
+                    } label: {
+                        Label("New terminal", systemImage: "plus")
+                    }
+                    .font(.callout)
                 } header: {
                     HStack {
                         Text(workspace.task)
@@ -590,6 +600,36 @@ struct FleetList: View {
                         Text(workspace.branch)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
+                        Menu {
+                            Button {
+                                Task { await connection.createTerminal(workspace: workspace) }
+                            } label: {
+                                Label("New terminal", systemImage: "plus")
+                            }
+                            if workspace.isHidden {
+                                Button {
+                                    Task { await connection.unhideWorkspace(workspace) }
+                                } label: {
+                                    Label("Unhide", systemImage: "eye")
+                                }
+                            } else {
+                                Button {
+                                    Task { await connection.hideWorkspace(workspace) }
+                                } label: {
+                                    Label("Hide", systemImage: "eye.slash")
+                                }
+                            }
+                            if !workspace.isMainCheckout {
+                                Button(role: .destructive) {
+                                    onRemove(workspace)
+                                } label: {
+                                    Label("Remove Worktree…", systemImage: "trash")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

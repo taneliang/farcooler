@@ -175,6 +175,12 @@ impl Session {
                     "branch": w.branch,
                     "worktree": w.worktree_path,
                     "state": workspace_label(w.state()),
+                    // Offering to remove the repository's own checkout would
+                    // offer to delete the directory the repository itself
+                    // lives in — the client keeps the button off the menu
+                    // entirely rather than relying only on the daemon's own
+                    // refusal, same reasoning macOS's sidebar already uses.
+                    "isMainCheckout": w.is_main_checkout,
                     "terminals": terminals.iter()
                         .filter(|t| t.workspace_id == w.id)
                         .map(|t| json!({
