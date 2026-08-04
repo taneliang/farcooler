@@ -10,7 +10,7 @@ rather than scraped off a terminal screen.
 Chat mode needs an **ACP adapter**: a small process that speaks the
 [Agent Client Protocol](https://agentclientprotocol.com) on one side and
 drives the real agent on the other. Far Cooler ships one for each agent it
-recognises out of the box. An agent with no adapter simply stays a terminal —
+recognizes out of the box. An agent with no adapter simply stays a terminal —
 that is a real, supported state, not a bug. Pressing `⌃B a` on a pane Far
 Cooler cannot chat-host says so and does nothing else:
 

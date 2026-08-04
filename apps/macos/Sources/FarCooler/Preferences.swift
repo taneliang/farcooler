@@ -46,7 +46,7 @@ final class Preferences: ObservableObject {
     /// is offered at all because a great many people who run four agents farcooler
     /// keep every window dark regardless of what the OS is doing at noon.
     ///
-    /// It never touches the terminal. Terminal colours come from `Palette`, which
+    /// It never touches the terminal. Terminal colors come from `Palette`, which
     /// is a fixed dark palette — the emulator's background is the program's
     /// business, not the app chrome's, and a terminal that went white under a
     /// light theme would be a different terminal.
@@ -147,7 +147,7 @@ final class Preferences: ObservableObject {
 ///
 /// A `Text` written as a sibling of a control inside a `Form` is a row of its
 /// own: separator above, full cell height, indistinguishable at a glance from a
-/// setting. Six of them made the Behaviour pane read as twelve settings, half
+/// setting. Six of them made the Behavior pane read as twelve settings, half
 /// of them unclickable, and the last one sat under the control it did not
 /// describe — a paragraph about lost terminals hanging beneath the tiling
 /// prefix.
@@ -185,7 +185,7 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $preferences.settingsTab) {
             terminal.tabItem { Label("Terminal", systemImage: "terminal") }.tag("terminal")
-            behaviour.tabItem { Label("Behaviour", systemImage: "gearshape") }.tag("behaviour")
+            behavior.tabItem { Label("Behavior", systemImage: "gearshape") }.tag("behavior")
             HostsSettings().tabItem { Label("Machines", systemImage: "server.rack") }
                 .tag("machines")
             EditorsSettings()
@@ -194,7 +194,7 @@ struct SettingsView: View {
             account.tabItem { Label("Account", systemImage: "person.crop.circle") }.tag("account")
             host.tabItem { Label("Startup", systemImage: "bolt") }.tag("startup")
         }
-        // Tall enough for the longest tab. Behaviour is five settings and a
+        // Tall enough for the longest tab. Behavior is five settings and a
         // notification group, and at 400 it clipped the last group mid-row —
         // a settings window that scrolls to reach a checkbox reads as broken.
         .frame(width: 520, height: 520)
@@ -276,7 +276,7 @@ struct SettingsView: View {
         .padding()
     }
 
-    private var behaviour: some View {
+    private var behavior: some View {
         Form {
             Section {
                 Setting("⌘T opens a plain shell.") {
@@ -289,7 +289,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Setting("Terminal colours are set separately.") {
+                Setting("Terminal colors are set separately.") {
                     Picker("Appearance", selection: $preferences.appearance) {
                         ForEach(Appearance.allCases) { Text($0.label).tag($0) }
                     }
@@ -300,7 +300,7 @@ struct SettingsView: View {
                     Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
                 }
 
-                Setting("Available for agents the registry recognises. Switch any pane with ⌃B a.") {
+                Setting("Available for agents the registry recognizes. Switch any pane with ⌃B a.") {
                     Toggle("Open coding agents as a chat", isOn: $preferences.preferChatMode)
                 }
 

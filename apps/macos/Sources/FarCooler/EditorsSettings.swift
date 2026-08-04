@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Which editors this Mac has, which one opens a worktree, and any you add.
 ///
-/// Its own tab rather than a row under Behaviour: a list of applications with a
+/// Its own tab rather than a row under Behavior: a list of applications with a
 /// form for adding to it is not a checkbox, and the reason someone comes here is
 /// usually the one question the rest of the app cannot answer for them — "why is
 /// my editor not in the menu?" That question is answered by showing the list of

@@ -108,7 +108,7 @@ struct PaneDividers: View {
 /// divider.
 ///
 /// The terminal beneath is an `NSView` too, so this also puts the two on the same
-/// footing instead of asking SwiftUI to arbitrate between a gesture recogniser and
+/// footing instead of asking SwiftUI to arbitrate between a gesture recognizer and
 /// a view that wants every event it can get.
 struct DividerHandle: NSViewRepresentable {
     let divider: PaneDivider
@@ -147,7 +147,7 @@ final class DividerView: NSView {
     ///
     /// The gesture knows a total travel and `resize-pane` takes a relative amount,
     /// so what goes out is the difference. Crucially this only advances when the
-    /// request was ACCEPTED: resizes are serialised, so one arriving while another
+    /// request was ACCEPTED: resizes are serialized, so one arriving while another
     /// is still in flight is dropped, and counting a dropped request as sent threw
     /// its cells away for good. Over a fast drag that lost most of them, and the
     /// divider trailed the pointer by a fraction that got worse the faster you

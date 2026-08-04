@@ -340,7 +340,7 @@ public final class Account: NSObject, ObservableObject {
     /// Nil rather than zeros if the system has no randomness for us.
     ///
     /// The discarded status was the bug: on failure `bytes` stays the all-zero
-    /// buffer it was initialised with, the verifier becomes a fixed publicly
+    /// buffer it was initialized with, the verifier becomes a fixed publicly
     /// known constant, sign-in still appears to work, and PKCE silently
     /// protects nothing — which is the one thing standing between a custom URL
     /// scheme any app can claim and account takeover.

@@ -418,7 +418,7 @@ private struct ToolRowView: View {
     var body: some View {
         // The Mac's grey box, not a `DisclosureGroup`.
         //
-        // `DisclosureGroup` tints its label with the accent colour, so every
+        // `DisclosureGroup` tints its label with the accent color, so every
         // tool call rendered as blue link text — a command looked like
         // something to navigate to rather than something that ran. It also put
         // the chevron OUTSIDE any container, which left an expanded detail
@@ -506,7 +506,7 @@ private struct ToolRowView: View {
             // for everything in between. Orange is reserved for "needs you",
             // which a tool call never is.
             Circle()
-                .fill(toolStatusColour(tool.status))
+                .fill(toolStatusColor(tool.status))
                 .frame(width: 7, height: 7)
             Text(tool.title)
                 .font(.subheadline.weight(.medium))
@@ -525,7 +525,7 @@ private struct ToolRowView: View {
     }
 }
 
-private func toolStatusColour(_ status: ToolStatus) -> Color {
+private func toolStatusColor(_ status: ToolStatus) -> Color {
     switch status {
     case .pending: return .secondary.opacity(0.35)
     case .inProgress: return .secondary
@@ -639,7 +639,7 @@ private struct SubagentBlockView: View {
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(showing ? 90 : 0))
             Circle()
-                .fill(dotColour)
+                .fill(dotColor)
                 .frame(width: 7, height: 7)
             Text(block.tool.title)
                 .font(.callout.weight(.medium))
@@ -666,8 +666,8 @@ private struct SubagentBlockView: View {
     /// block cut off mid-flight is still `inProgress` on the wire, and a
     /// subagent whose outcome nobody knows must never wear the mark of one that
     /// came back.
-    private var dotColour: Color {
-        block.interrupted ? .red : toolStatusColour(block.tool.status)
+    private var dotColor: Color {
+        block.interrupted ? .red : toolStatusColor(block.tool.status)
     }
 
     /// The request, on the child it names.
@@ -900,7 +900,7 @@ private struct QueuedRow: View {
 /// than an answer to this question — sits under it in small type.
 ///
 /// Reject is NOT red. Red is for destructive; declining a command destroys
-/// nothing, and spending the alarm colour here leaves none for when it matters.
+/// nothing, and spending the alarm color here leaves none for when it matters.
 struct ApprovalControls: View {
     let options: [PermissionOption]
     let onChoose: (String) -> Void
@@ -1205,7 +1205,7 @@ private struct AgentComposer: View {
                 // Grey, not accent.
                 //
                 // A `Menu` and a `PhotosPicker` tint their labels with the app's
-                // accent colour, and `.foregroundStyle` on the label inside does
+                // accent color, and `.foregroundStyle` on the label inside does
                 // not survive it. So the whole row came out blue and read as a
                 // line of links — things that navigate — rather than as controls
                 // that change what the next message costs. Tinting the row is
@@ -1256,7 +1256,7 @@ private struct AgentComposer: View {
     // MARK: Field
 
     private var fieldWithPlaceholder: some View {
-        // `.topLeading`, not `.leading`: centred, the placeholder sat halfway
+        // `.topLeading`, not `.leading`: centered, the placeholder sat halfway
         // down a box that was itself too tall, which read as a text field that
         // had lost its text rather than one waiting for some.
         ZStack(alignment: .topLeading) {
@@ -1808,12 +1808,12 @@ private struct WorkingRow: View {
     }
 
     private func stops(at phase: Double) -> [Gradient.Stop] {
-        let centre = -0.35 + phase * 1.7
+        let center = -0.35 + phase * 1.7
         let width = 0.3
         return [
-            .init(color: .secondary, location: min(max(centre - width, 0), 1)),
-            .init(color: .primary, location: min(max(centre, 0), 1)),
-            .init(color: .secondary, location: min(max(centre + width, 0), 1)),
+            .init(color: .secondary, location: min(max(center - width, 0), 1)),
+            .init(color: .primary, location: min(max(center, 0), 1)),
+            .init(color: .secondary, location: min(max(center + width, 0), 1)),
         ]
     }
 }

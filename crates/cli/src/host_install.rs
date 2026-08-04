@@ -590,7 +590,7 @@ async fn remote_capture(target: &str, command: &str) -> Result<String, Box<dyn s
     //
     // This returned stdout regardless of exit status, so a host that refused
     // the connection came back as a host that answered with nothing — and a
-    // probe then read those empty fields as "some OS I do not recognise". The
+    // probe then read those empty fields as "some OS I do not recognize". The
     // user was told their machine was an unsupported platform when the truth
     // was that ssh could not reach it, which sends them to fix the wrong thing.
     if !out.status.success() {
@@ -734,7 +734,7 @@ mod tests {
         for kernel in ["5.15.153.1-microsoft-standard-WSL2", "4.4.0-19041-Microsoft"] {
             assert!(
                 kernel.to_lowercase().contains("microsoft"),
-                "{kernel} must be recognised as WSL"
+                "{kernel} must be recognized as WSL"
             );
         }
         assert!(!"6.8.0-45-generic".to_lowercase().contains("microsoft"));

@@ -35,28 +35,24 @@ struct FleetView: View {
     /// from `TerminalView`) selects in place instead of navigating.
     @State private var pushed: Terminal?
 
+    /// Whether to offer a way off the spinner yet. See `waitedLongEnough`.
+    @State private var stalled = false
+
+    /// Open when correcting this machine's details, from any phase that has a
+    /// reason to doubt them.
+    @State private var editing = false
+
     var body: some View {
         Group {
             switch connection.phase {
             case .connecting:
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Connecting to \(host.address)…")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                .navigationTitle(host.label)
-                .navigationBarTitleDisplayMode(.inline)
+                escapable { connecting }
 
             case .needsApproval(let fingerprint):
-                approval(fingerprint)
-                    .navigationTitle(host.label)
-                    .navigationBarTitleDisplayMode(.inline)
+                escapable { approval(fingerprint) }
 
             case .failed(let message):
-                failure(message)
-                    .navigationTitle(host.label)
-                    .navigationBarTitleDisplayMode(.inline)
+                escapable { failure(message) }
 
             case .connected:
                 connected
@@ -65,7 +61,72 @@ struct FleetView: View {
         .navigationDestination(item: $pushed) { terminal in
             TerminalView(terminal: terminal, connection: connection, hosts: store)
         }
+        .sheet(isPresented: $editing) {
+            HostEditorView(
+                existing: host,
+                onSave: { store.update($0) },
+                onRemove: { store.remove($0) })
+        }
         .task { await connect(host) }
+    }
+
+    /// Every screen shown BEFORE a connection exists, wrapped in the ways out of
+    /// it.
+    ///
+    /// This is the bug those screens all had. `FleetView` is the root of the
+    /// app's only navigation stack — the app opens onto a machine rather than a
+    /// list of them — so it has no back button, and the host switcher lives
+    /// inside `WorkspaceListView`, which only exists once a connection has
+    /// succeeded. Any phase short of `.connected` was therefore a room with no
+    /// doors: "Could not connect" offered "Try again" and nothing else, and if
+    /// trying again could not work — the wrong address, a machine that never
+    /// authorized this phone — there was no way to reach another machine, add
+    /// one, fix this one, or even see this device's key. Force-quitting was the
+    /// only exit.
+    ///
+    /// So the switcher comes out of the connected screen and goes under all four
+    /// phases instead, in the same place with the same behavior. The bar is
+    /// what makes each of these a screen you can leave.
+    private func escapable<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HostSwitcherBar(hosts: store, connection: connection)
+            }
+            .navigationTitle(host.label)
+            .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The wait, and a way to end it.
+    ///
+    /// The button is held back for a few seconds rather than shown immediately:
+    /// a healthy connection resolves well inside that, and a "Stop waiting"
+    /// flashing up during every successful launch would read as though something
+    /// were wrong every time. After that it is the honest offer, because an
+    /// address that routes nowhere takes over a minute to fail on its own — see
+    /// `Connection.giveUp(on:)`.
+    private var connecting: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Connecting to \(host.address)…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if stalled {
+                Button("Stop Waiting") { connection.giveUp(on: host) }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 8)
+                    .transition(.opacity)
+            }
+        }
+        .task(id: host.id) { await waitedLongEnough() }
+    }
+
+    private func waitedLongEnough() async {
+        stalled = false
+        try? await Task.sleep(for: .seconds(4))
+        guard !Task.isCancelled else { return }
+        withAnimation { stalled = true }
     }
 
     @ViewBuilder
@@ -102,7 +163,7 @@ struct FleetView: View {
     /// interception invisible.
     private func approval(_ fingerprint: String) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Unrecognised host", systemImage: "questionmark.circle")
+            Label("Unrecognized Machine", systemImage: "questionmark.circle")
                 .font(.headline)
             Text("\(host.address) presented this key:")
                 .font(.callout)
@@ -113,38 +174,210 @@ struct FleetView: View {
                 .background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             Text(
-                "Check it against the host: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
+                "Check it against the machine: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
             )
             .font(.footnote)
             .foregroundStyle(.secondary)
 
-            Button("Trust this host") {
+            Button("Trust This Machine") {
                 store.trust(host, fingerprint: fingerprint)
                 var trusted = host
                 trusted.fingerprint = fingerprint
                 Task { await connect(trusted) }
             }
             .buttonStyle(.borderedProminent)
+
+            // The other answer. Saying no used to have nowhere to go — this
+            // screen had one button on it — which made "I am not sure about this
+            // fingerprint" and "yes, trust it" the same tap for anyone who just
+            // wanted out. It leaves the host untrusted and lands on the failure
+            // screen, which is where the switcher and the editor are.
+            Button("Not Now") {
+                connection.declineHostKey(host)
+            }
+            .buttonStyle(.bordered)
+
             Spacer()
         }
         .padding()
     }
 
+    /// What went wrong, and the one thing worth doing about it.
+    ///
+    /// The old version of this screen said "Could not connect" and offered "Try
+    /// again" whatever had happened. That is right for a machine that was
+    /// asleep and wrong for everything else: retrying cannot authorize a key the
+    /// host has never seen, cannot install a daemon, and must not be the offered
+    /// response to a host key that changed — the one failure where doing it
+    /// again is guaranteed to fail and the appearance of a glitch hides a
+    /// decision someone needs to make. See `Connection.Failure`.
+    /// Laid out like the first-run screen, because it is the same kind of
+    /// screen: a mark, a headline, a sentence, and the actions anchored at the
+    /// bottom where a thumb is. It used to center three pill buttons of three
+    /// different widths in the middle of the view, which read as a ragged
+    /// staircase and gave the eye no line to follow — and left the bottom third
+    /// of a very tall screen empty while the controls floated in the middle of
+    /// it.
+    ///
+    /// One full-width prominent action, then plain text for the alternatives.
+    /// Three bordered pills gave three things the same visual weight when only
+    /// one of them is the thing to do.
     private func failure(_ message: String) -> some View {
-        VStack(spacing: 14) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-                .foregroundStyle(.orange)
-            Text("Could not connect").font(.headline)
-            Text(message)
+        let kind = Connection.Failure(message: message)
+
+        return VStack(spacing: 0) {
+            Spacer()
+
+            // Quiet by default, and red only for the key change. An orange
+            // warning triangle over "Not authorized yet" shouts about a step
+            // you simply have not taken yet; the headline already carries what
+            // this is, and alarm is worth reserving for the one case that
+            // genuinely warrants it.
+            Image(systemName: symbol(kind))
+                .font(.system(size: 42, weight: .thin))
+                .foregroundStyle(kind == .hostKeyChanged ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
+                .padding(.bottom, 22)
+
+            Text(headline(kind))
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .padding(.bottom, 8)
+
+            Text(detail(kind, message))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .textSelection(.enabled)
-            Button("Try again") { Task { await connect(host) } }
-                .buttonStyle(.bordered)
+                .frame(maxWidth: 320)
+
+            Spacer()
+
+            VStack(spacing: 18) {
+                primaryAction(kind)
+
+                if kind.worthRetryingAsAlternative {
+                    Button("Try Again") { Task { await connect(host) } }
+                }
+                if kind != .noIdentity {
+                    Button("Edit This Machine…") { editing = true }
+                }
+            }
+            .padding(.horizontal, 40)
+            .padding(.bottom, 40)
         }
-        .padding()
+        .padding(.horizontal)
+    }
+
+    /// The one action that fits what happened, full width and prominent.
+    @ViewBuilder
+    private func primaryAction(_ kind: Connection.Failure) -> some View {
+        switch kind {
+        case .keyRejected:
+            // The fix is on the screen this links to: the public key, and the
+            // one line to paste on the machine. It was already in the app and
+            // unreachable from the only screen that ever sends you looking for
+            // it.
+            NavigationLink {
+                AuthorizeView()
+            } label: {
+                Text("Authorize This Device").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+        case .hostKeyChanged:
+            Button(role: .destructive) {
+                store.forgetKey(host)
+                var untrusted = host
+                untrusted.fingerprint = nil
+                Task { await connect(untrusted) }
+            } label: {
+                Text("Review the New Key").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+        case .keyNotTrusted:
+            // Straight back to the fingerprint. Deliberately not "Try again":
+            // nothing failed, the question is simply still open.
+            Button {
+                var untrusted = host
+                untrusted.fingerprint = nil
+                Task { await connect(untrusted) }
+            } label: {
+                Text("Show the Key Again").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+        case .unreachable, .daemonMissing, .noIdentity, .stopped, .other:
+            Button {
+                Task { await connect(host) }
+            } label: {
+                Text("Try Again").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+    }
+
+    private func symbol(_ kind: Connection.Failure) -> String {
+        switch kind {
+        case .keyRejected, .noIdentity: return "key.slash"
+        case .hostKeyChanged: return "exclamationmark.shield"
+        case .keyNotTrusted: return "key"
+        case .unreachable: return "network.slash"
+        case .daemonMissing: return "square.and.arrow.down"
+        case .stopped: return "clock"
+        case .other: return "exclamationmark.triangle"
+        }
+    }
+
+    /// The sentence under the headline.
+    ///
+    /// Ours wherever we know what happened, the core's own text only where we
+    /// do not. The raw string crossing up from Rust is written for whoever is
+    /// reading a log — lowercase, and ending in things like "(os error 61)" —
+    /// and putting that in front of someone who just wants their machine back
+    /// is asking them to translate. Two cases keep it deliberately: the changed
+    /// host key, whose message carries the two fingerprints being compared and
+    /// must not be paraphrased, and the unclassified failure, where the core's
+    /// account is the only account there is.
+    /// Deliberately does not repeat the headline. The address is already up
+    /// there in most of these, and "Not Authorized Yet" over "…doesn't have
+    /// this device's key yet" said "yet" twice in two lines.
+    private func detail(_ kind: Connection.Failure, _ message: String) -> String {
+        switch kind {
+        case .keyRejected:
+            return "\(host.user)@\(host.address) hasn’t been given this device’s key."
+        case .unreachable:
+            return
+                "Nothing answered on port \(host.port). The machine may be asleep, "
+                + "or the address may be wrong."
+        case .daemonMissing:
+            return "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
+        case .hostKeyChanged, .noIdentity, .keyNotTrusted, .stopped, .other:
+            return message
+        }
+    }
+
+    private func headline(_ kind: Connection.Failure) -> String {
+        switch kind {
+        case .keyRejected: return "Not Authorized Yet"
+        case .hostKeyChanged: return "This Machine’s Key Changed"
+        case .unreachable: return "Can’t Reach \(host.address)"
+        case .daemonMissing: return "Far Cooler Isn’t Installed"
+        case .noIdentity: return "This Device Has No Key"
+        case .keyNotTrusted: return "Key Not Trusted"
+        case .stopped: return "Stopped Waiting"
+        case .other: return "Can’t Connect"
+        }
+    }
+
+    @ViewBuilder
+    private func retry(_ style: some PrimitiveButtonStyle) -> some View {
+        Button("Try Again") { Task { await connect(host) } }
+            .buttonStyle(style)
     }
 }
 
@@ -170,16 +403,14 @@ struct WorkspaceListView: View {
 
     @State private var showNewWorkspace = false
     @State private var showQuickTask = false
-    @State private var showAddHost = false
-    @State private var showSettings = false
 
     var body: some View {
         FleetList(fleet: connection.fleet, onSelect: onSelect) { action, terminal in
             Task { await connection.act(action, on: terminal) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let hosts, hosts.hosts.count > 1 || hosts.selected != nil {
-                hostSwitcher(hosts)
+            if let hosts {
+                HostSwitcherBar(hosts: hosts, connection: connection, onSwitch: onDismiss)
             }
         }
         .refreshable { await connection.refresh() }
@@ -209,28 +440,38 @@ struct WorkspaceListView: View {
         .sheet(isPresented: $showQuickTask) {
             TaskComposerView(connection: connection)
         }
-        .sheet(isPresented: $showAddHost) {
-            AddHostView { host in hosts?.add(host) }
-        }
-        .sheet(isPresented: $showSettings) {
-            NavigationStack {
-                SettingsView(connection: connection)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            NavigationLink("Authorise") { AuthoriseView() }
-                        }
-                    }
-            }
-        }
     }
+}
 
-    /// Which machine these terminals are on, and how to change it.
-    ///
-    /// A strip along the bottom rather than a section in the list: the list is
-    /// worktrees on ONE host, and putting the host inside it would read as one
-    /// more thing in the same collection. This says what the collection belongs
-    /// to.
-    private func hostSwitcher(_ hosts: HostStore) -> some View {
+/// Which machine you are looking at, and every way of changing that.
+///
+/// A strip along the bottom rather than a section in a list: the list above it
+/// is worktrees on ONE machine, and putting the machine inside it would read as
+/// one more thing in the same collection. This says what the collection belongs
+/// to.
+///
+/// Split out of `WorkspaceListView` because it turned out to be the app's only
+/// escape hatch, and it was attached to the one screen you cannot reach when you
+/// need an escape hatch — the connected one. `FleetView` now puts it under the
+/// connecting, approval and failure screens too, which is what makes those
+/// screens leaveable at all.
+struct HostSwitcherBar: View {
+    @ObservedObject var hosts: HostStore
+    /// Only so the settings screen can name the daemon it is talking to. Absent
+    /// before a connection exists, which is most of the time this bar matters.
+    var connection: Connection?
+    /// Called after picking a different machine, for the caller that is a sheet
+    /// and needs to close itself. Nil where the bar is part of the screen.
+    var onSwitch: (() -> Void)?
+
+    @State private var showAddHost = false
+    /// The host being edited, rather than a bare flag: a flag plus a separate
+    /// `hosts.selected` lookup can present a sheet with nothing in it if the
+    /// selection changes between the tap and the presentation.
+    @State private var editingHost: Host?
+    @State private var showSettings = false
+
+    var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "server.rack")
                 .font(.caption)
@@ -240,7 +481,7 @@ struct WorkspaceListView: View {
                 ForEach(hosts.hosts) { host in
                     Button {
                         hosts.selected = host
-                        onDismiss?()
+                        onSwitch?()
                     } label: {
                         if host.id == hosts.selected?.id {
                             Label(host.label, systemImage: "checkmark")
@@ -250,7 +491,15 @@ struct WorkspaceListView: View {
                     }
                 }
                 Divider()
-                Button("Add a host…") { showAddHost = true }
+                Button("Add a Machine…") { showAddHost = true }
+                if let selected = hosts.selected {
+                    // Editing and removing were unreachable from anywhere in the
+                    // app: `HostStore.remove` existed and had no caller, so a
+                    // machine typed in wrong was permanent, and permanent plus
+                    // unreachable meant the app opened onto a screen it could
+                    // never get past.
+                    Button("Edit This Machine…") { editingHost = selected }
+                }
                 // Reachable from here because there is nowhere else left.
                 //
                 // Settings and the device's public key used to live on the root
@@ -258,10 +507,10 @@ struct WorkspaceListView: View {
                 // now, so that screen only appears when there are no hosts —
                 // and everything that was on it would have become unreachable
                 // the moment you added one.
-                Button("This device…") { showSettings = true }
+                Button("This Device…") { showSettings = true }
             } label: {
                 HStack(spacing: 4) {
-                    Text(hosts.selected?.label ?? "No host")
+                    Text(hosts.selected?.label ?? "No Machine")
                         .font(.callout.weight(.medium))
                     Image(systemName: "chevron.up.chevron.down").font(.caption2)
                 }
@@ -272,6 +521,25 @@ struct WorkspaceListView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+        .sheet(isPresented: $showAddHost) {
+            HostEditorView { hosts.add($0) }
+        }
+        .sheet(item: $editingHost) { host in
+            HostEditorView(
+                existing: host,
+                onSave: { hosts.update($0) },
+                onRemove: { hosts.remove($0) })
+        }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                SettingsView(connection: connection)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            NavigationLink("Authorize") { AuthorizeView() }
+                        }
+                    }
+            }
+        }
     }
 }
 
@@ -289,7 +557,7 @@ struct FleetList: View {
     var body: some View {
         List {
             if fleet.workspaces.isEmpty {
-                Text("No workspaces on this host.")
+                Text("No workspaces on this machine.")
                     .foregroundStyle(.secondary)
             }
 
@@ -346,7 +614,7 @@ struct FleetList: View {
 
 struct TerminalRow: View {
     let terminal: Terminal
-    /// Which of several identically-labelled siblings this is, from
+    /// Which of several identically-labeled siblings this is, from
     /// `Workspace.ordinals()`, or nil when its label is unique in the
     /// workspace and numbering it would answer a question nobody asked.
     var ordinal: Int?
@@ -356,7 +624,7 @@ struct TerminalRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle().fill(processColour(kind)).frame(width: 8, height: 8)
+            Circle().fill(processColor(kind)).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text(terminal.label).font(.body)
@@ -373,12 +641,12 @@ struct TerminalRow: View {
             Spacer()
 
             // The reason to have opened the app. Only the two states worth
-            // acting on get colour, so a list of twenty still reads at a glance.
+            // acting on get color, so a list of twenty still reads at a glance.
             if terminal.agent.isAgent && terminal.agent != .unknown {
                 Label(terminal.agent.label, systemImage: terminal.agent.symbol)
                     .labelStyle(.iconOnly)
                     .font(.system(size: 13, weight: terminal.agent.wantsAttention ? .semibold : .regular))
-                    .foregroundStyle(attentionColour(terminal.agent))
+                    .foregroundStyle(attentionColor(terminal.agent))
                     .accessibilityLabel(terminal.agent.label)
             }
         }
@@ -394,10 +662,10 @@ struct TerminalRow: View {
     }
 }
 
-/// The dot colour for "is the process alive" — shared by the fleet list and
+/// The dot color for "is the process alive" — shared by the fleet list and
 /// the terminal tab strip (`TerminalTabStrip`), so the same terminal cannot
 /// read green in one screen and red in the other.
-func processColour(_ kind: StateKind) -> Color {
+func processColor(_ kind: StateKind) -> Color {
     switch kind {
     case .running: return .green
     case .starting: return .yellow
@@ -408,9 +676,9 @@ func processColour(_ kind: StateKind) -> Color {
     }
 }
 
-/// The colour behind an agent's activity glyph, shared with the tab strip for
-/// the same reason as `processColour` above.
-func attentionColour(_ agent: AgentActivity) -> Color {
+/// The color behind an agent's activity glyph, shared with the tab strip for
+/// the same reason as `processColor` above.
+func attentionColor(_ agent: AgentActivity) -> Color {
     switch agent {
     case .blocked: return .orange
     case .done: return .green

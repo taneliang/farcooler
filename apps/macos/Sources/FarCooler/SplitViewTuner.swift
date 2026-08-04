@@ -19,7 +19,7 @@ import SwiftUI
 ///   - Pinning the window's `minSize`/`maxSize` across the toggle. Those constrain
 ///     only interactive resizing; `setFrame` ignores them. It never prevented the
 ///     resize, and holding a frame mid-animation could wedge the sidebar half-open.
-///   - Serialising toggles so two could not overlap. Overlap was never the cause.
+///   - Serializing toggles so two could not overlap. Overlap was never the cause.
 ///
 /// The window moved, and the reveal jerked, because the column widths did not add
 /// up: the root view declared a 900pt minimum while the window sat at 900pt wide,

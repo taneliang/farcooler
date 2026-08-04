@@ -17,6 +17,69 @@ final class Connection: ObservableObject {
         case connected
     }
 
+    /// What a failure MEANS, as opposed to what it says.
+    ///
+    /// A failure screen that offers the same button for every failure is a
+    /// failure screen that is wrong most of the time: "Try again" fixes a host
+    /// that was asleep and fixes nothing at all about a key this device was
+    /// never authorized with, or a host key that changed underneath us. Each of
+    /// these has exactly one useful next move and they are not the same move.
+    ///
+    /// Read off the message rather than a typed error because the message is
+    /// all that crosses the FFI boundary — the core hands back Rust's `Display`
+    /// output as a string and there is no code to switch on. The substrings are
+    /// the ones in `crates/client/src/ssh.rs` and `session.rs`; each is a
+    /// distinctive phrase from the middle of its message rather than a prefix,
+    /// so wrapping the error in more context does not stop it matching.
+    enum Failure {
+        /// The host answered but does not know this device's key.
+        /// `SshError::AuthRejected` — fixed by authorizing, not by retrying.
+        case keyRejected
+        /// The key presented is not the one we pinned. `SshError::HostKeyChanged`.
+        /// Retrying is guaranteed to fail, and offering it would suggest this is
+        /// a glitch rather than a decision someone has to make.
+        case hostKeyChanged
+        /// Nothing answered: wrong address, machine asleep, off the network.
+        /// `SshError::Connect` — the one case where retrying is the right move.
+        case unreachable
+        /// SSH worked; Far Cooler is not installed over there.
+        /// `SessionError::DaemonMissing`.
+        case daemonMissing
+        /// This device has no usable key, so no host will ever accept it.
+        case noIdentity
+        /// The user was shown a fingerprint and did not say yes. Not a fault at
+        /// all — a decision that has been deferred — and the way back is the
+        /// same screen again, not a retry that pretends something broke.
+        case keyNotTrusted
+        /// The user stopped waiting. Also not a fault, and it must not be
+        /// headlined as one.
+        case stopped
+        case other
+
+        init(message: String) {
+            if message.contains("rejected this key") { self = .keyRejected }
+            else if message.contains("is not the one Far Cooler has recorded") {
+                self = .hostKeyChanged
+            } else if message.contains("cannot reach") { self = .unreachable }
+            else if message.contains("did not answer") { self = .daemonMissing }
+            else if message.contains("no SSH key") { self = .noIdentity }
+            else if message.contains("has not been trusted") { self = .keyNotTrusted }
+            else if message.contains("Stopped waiting") { self = .stopped }
+            else { self = .other }
+        }
+
+        /// Whether "Try Again" belongs BELOW the primary action as a second
+        /// option. False where retrying is already the primary action (it would
+        /// then appear twice) and false where it cannot work at all.
+        var worthRetryingAsAlternative: Bool {
+            switch self {
+            case .keyRejected: return true
+            case .hostKeyChanged, .keyNotTrusted: return false
+            case .unreachable, .daemonMissing, .noIdentity, .stopped, .other: return false
+            }
+        }
+    }
+
     enum Action {
         case restart, stop, dismissLost
     }
@@ -31,28 +94,74 @@ final class Connection: ObservableObject {
     let core = ClientCore()
     private var poller: Task<Void, Never>?
 
+    /// Which connection attempt is current.
+    ///
+    /// `start` awaits the core, and that wait cannot be interrupted from here:
+    /// the call is a ticket the core resolves whenever the network gets round
+    /// to it, and a routable address with nothing listening takes as long as the
+    /// OS's TCP timeout — over a minute — to say so. Giving up therefore cannot
+    /// stop the work. What it can do is stop this object caring about the
+    /// answer, which is what the counter is for: every write to `phase` is
+    /// guarded on the attempt that produced it still being the current one, so
+    /// an attempt someone abandoned two screens ago cannot reach up later and
+    /// change what they are looking at now.
+    private var attempt = 0
+
     deinit { poller?.cancel() }
 
     func start(host: Host) async {
         poller?.cancel()
+        attempt += 1
+        let mine = attempt
         phase = .connecting
 
         guard let key = Identity.privateKey() else {
-            phase = .failed("This device has no SSH key and one could not be generated.")
+            if mine == attempt {
+                phase = .failed("This device has no SSH key and one could not be generated.")
+            }
             return
         }
 
         do {
             _ = try await core.connect(config: host.config(privateKey: key))
         } catch {
-            phase = classify(error)
+            if mine == attempt { phase = classify(error) }
             return
         }
 
+        guard mine == attempt else { return }
         phase = .connected
         await refresh()
         await loadRepositories()
         startPolling()
+    }
+
+    /// Stop waiting, and say so.
+    ///
+    /// Not a way to abort the SSH attempt — see `attempt` — but a way off the
+    /// spinner, which is the thing that was actually missing. A connection to a
+    /// machine that is asleep shows the same indefinite spinner as one that is
+    /// about to succeed, and until this existed the only way out of that was to
+    /// kill the app.
+    func giveUp(on host: Host) {
+        abandon("Stopped waiting for \(host.address). It may be asleep or off the network.")
+    }
+
+    /// Back out of the fingerprint question without answering it.
+    ///
+    /// Lands on the failure screen rather than the spinner, because that is the
+    /// screen with the machine switcher, the editor and this device's key on it.
+    /// The wording is what `Failure.keyNotTrusted` matches on.
+    func declineHostKey(_ host: Host) {
+        abandon(
+            "The key \(host.address) presented has not been trusted on this device. "
+                + "Far Cooler won’t connect until it is.")
+    }
+
+    private func abandon(_ message: String) {
+        attempt += 1
+        poller?.cancel()
+        phase = .failed(message)
     }
 
     /// Turn the core's message into a phase a view can act on.

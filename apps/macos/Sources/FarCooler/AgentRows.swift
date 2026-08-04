@@ -622,12 +622,12 @@ struct WorkingRow: View {
     /// The highlight enters from before the first letter and leaves past the
     /// last, rather than appearing at one edge and vanishing at the other.
     private func stops(at phase: Double) -> [Gradient.Stop] {
-        let centre = -0.35 + phase * 1.7
+        let center = -0.35 + phase * 1.7
         let width = 0.3
         return [
-            .init(color: .secondary, location: min(max(centre - width, 0), 1)),
-            .init(color: .primary, location: min(max(centre, 0), 1)),
-            .init(color: .secondary, location: min(max(centre + width, 0), 1)),
+            .init(color: .secondary, location: min(max(center - width, 0), 1)),
+            .init(color: .primary, location: min(max(center, 0), 1)),
+            .init(color: .secondary, location: min(max(center + width, 0), 1)),
         ]
     }
 }

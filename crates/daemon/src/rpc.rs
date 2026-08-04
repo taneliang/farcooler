@@ -7,7 +7,7 @@
 //!    the check happens before the payload is even read. A method that forgets
 //!    to declare one does not exist.
 //! 2. **Method to service call.** A thin mapping. Business rules live in
-//!    `service`, so a second transport cannot acquire different behaviour.
+//!    `service`, so a second transport cannot acquire different behavior.
 //! 3. **Errors to wire codes.** Through `DomainError::wire()`, which is
 //!    exhaustively matched, so an unmapped variant fails the build rather than
 //!    reaching a phone as a generic failure at the moment the user needs to

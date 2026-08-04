@@ -47,13 +47,13 @@ fn main() {
         term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN),
     );
 
-    // Colour is the other half of correctness, and a text dump hides it.
-    let coloured = snap
+    // Color is the other half of correctness, and a text dump hides it.
+    let colored = snap
         .rows
         .iter()
         .flat_map(|r| r.cells.iter())
         .filter(|c| c.fg != farcooler_vt::grid::DEFAULT_FG)
         .count();
     let styled = snap.rows.iter().flat_map(|r| r.cells.iter()).filter(|c| c.bold).count();
-    println!("{coloured} cells carry a non-default colour, {styled} are bold");
+    println!("{colored} cells carry a non-default color, {styled} are bold");
 }

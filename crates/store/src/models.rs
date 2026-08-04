@@ -126,7 +126,7 @@ impl PaneMode {
     pub fn from_i64(raw: i64) -> Self {
         match raw {
             1 => PaneMode::Agent,
-            // Anything unrecognised is the mode that always works.
+            // Anything unrecognized is the mode that always works.
             _ => PaneMode::Terminal,
         }
     }

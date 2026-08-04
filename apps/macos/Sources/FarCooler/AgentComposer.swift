@@ -50,7 +50,7 @@ struct AgentComposer: View {
         // Two rows, and everything sits on one of them.
         //
         // Before this the card held a status line, a field, a send button
-        // vertically centred against a field of changing height, and a wrapping
+        // vertically centered against a field of changing height, and a wrapping
         // strip of selectors — four things at four different alignments, which
         // is why it read as crowded with no structure. Now: what you are
         // writing, then everything that acts on it, left to right, on one

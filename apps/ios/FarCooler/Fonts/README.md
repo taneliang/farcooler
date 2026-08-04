@@ -1,7 +1,7 @@
 # Bundled fonts
 
 **Iosevka Nerd Font Mono**, Regular and Bold, under the SIL Open Font License
-1.1 — see `IOSEVKA-LICENSE.md`, which the licence requires be distributed with
+1.1 — see `IOSEVKA-LICENSE.md`, which the license requires be distributed with
 the font.
 
 The Nerd Font build rather than plain Iosevka, and the extra 12 MB is the reason

@@ -459,7 +459,7 @@ final class DaemonClient: ObservableObject {
             // started being derived from it: the daemon broadcasts the moment a
             // pane's command changes, the app applied the state and the activity
             // out of that event and dropped the command — so a shell you had just
-            // run `node` in stayed labelled `shell` until something forced a full
+            // run `node` in stayed labeled `shell` until something forced a full
             // re-read. The whole point of pushing events is not needing one.
             fleet.workspaces[w].terminals[t].preset = event.preset
             // What can be switched to a chat, which is also what `⌃B a`
@@ -996,7 +996,7 @@ final class DaemonClient: ObservableObject {
         return .ok
     }
 
-    /// The rendered visible screen, colour escapes intact.
+    /// The rendered visible screen, color escapes intact.
     func screen(terminal: String) async -> String {
         guard let data = await run(["terminal", "screen", terminal, "--json"]) else { return "" }
         struct Screen: Decodable { var screen: String }

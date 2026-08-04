@@ -282,10 +282,10 @@ public struct Sequenced: Sendable, Equatable {
 }
 
 extension AgentEvent {
-    /// Decode one serialised `farcooler_agent::event::AgentEvent`.
+    /// Decode one serialized `farcooler_agent::event::AgentEvent`.
     ///
     /// Serde's externally-tagged representation: a single-key object whose key
-    /// names the variant. An unrecognised key is a `.gap(.unparsed)` rather
+    /// names the variant. An unrecognized key is a `.gap(.unparsed)` rather
     /// than a throw, because a client one release behind its daemon must still
     /// render the session — and rather than a silent skip, because a shorter
     /// transcript that looks complete is the one failure this design refuses.

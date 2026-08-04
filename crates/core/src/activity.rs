@@ -84,7 +84,7 @@ pub struct AgentRules {
 
     /// How to host this agent as a native chat, when Far Cooler can.
     ///
-    /// `None` means recognised-but-terminal-only, which is a real and honest
+    /// `None` means recognized-but-terminal-only, which is a real and honest
     /// state rather than a gap: an agent with no adapter renders as the TUI it
     /// is. This field replaces the separate `CHAT_CAPABLE` list in the daemon,
     /// which was maintained by hand beside these rules and disagreed with them.
@@ -107,7 +107,7 @@ fn npx(package: &str) -> Option<AdapterSpec> {
 /// Every agent Far Cooler knows, and how to host the ones it can.
 ///
 /// One table rather than two. Recognition and hostability were separate lists
-/// maintained by hand, and they drifted: codex was recognised in a pane and
+/// maintained by hand, and they drifted: codex was recognized in a pane and
 /// absent from the chat list, so `⌃B a` on a codex pane did nothing and said
 /// nothing. Hostability is now a field on the entry, so there is no second list
 /// to disagree with.
@@ -352,7 +352,7 @@ impl Registry {
 
     /// What to call whatever is running here.
     ///
-    /// The agent's name when one is recognised, otherwise the process itself. A row
+    /// The agent's name when one is recognized, otherwise the process itself. A row
     /// then reads `claude` or `zsh` rather than the preset a terminal was created
     /// with, which after the first command is usually a lie.
     pub fn describe(&self, command: &str, screen: &str) -> String {
@@ -435,7 +435,7 @@ impl Registry {
 /// Strip escape sequences and collapse whitespace.
 ///
 /// This is not defensive tidying; without it nothing matches. Claude Code
-/// colours every WORD separately, so a line that reads
+/// colors every WORD separately, so a line that reads
 ///
 /// ```text
 /// ❯ 1. Yes, I trust this folder
@@ -595,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_is_labelled_by_what_is_actually_running() {
+    fn a_row_is_labeled_by_what_is_actually_running() {
         let r = Registry::built_in();
         assert_eq!(r.describe("claude", ""), "claude");
         assert_eq!(r.describe("cursor-agent", ""), "cursor");
@@ -620,7 +620,7 @@ mod tests {
     fn a_version_number_is_never_shown_as_a_name() {
         // Whatever it is, `2.1.220` is not a useful label for a row.
         let r = Registry::built_in();
-        assert_eq!(r.describe("2.1.220", "nothing recognisable"), "shell");
+        assert_eq!(r.describe("2.1.220", "nothing recognizable"), "shell");
         assert_eq!(r.describe("1.2", ""), "shell");
     }
 
@@ -636,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_working_is_recognised() {
+    fn claude_working_is_recognized() {
         let r = Registry::built_in();
         let screen = "\
 ✻ Cooked for 6s
@@ -646,7 +646,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_idle_is_recognised() {
+    fn claude_idle_is_recognized() {
         let r = Registry::built_in();
         let screen = "\
 ❯ hello?
@@ -656,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_is_recognised_through_a_truncated_process_name() {
+    fn codex_is_recognized_through_a_truncated_process_name() {
         // tmux caps the field, so a real codex arrives as `codex-aarch64-a`.
         // Exact matching found nothing and every codex reported as a shell.
         let r = Registry::built_in();
@@ -818,7 +818,7 @@ Do you want to allow this command?
     }
 
     #[test]
-    fn every_agent_can_be_recognised_without_its_process_name() {
+    fn every_agent_can_be_recognized_without_its_process_name() {
         // Process names are unreliable, so identity markers are what actually
         // has to hold. An agent with none is invisible the moment it renames
         // itself.
@@ -876,7 +876,7 @@ Do you want to allow this command?
     }
 
     #[test]
-    fn opencode_is_recognised_by_process_name() {
+    fn opencode_is_recognized_by_process_name() {
         // Confirmed with `tmux display-message -p '#{pane_current_command}'`
         // against a running opencode (captures/opencode-process-name.txt): it
         // reports itself as plain `opencode`, unlike claude and codex.
@@ -961,7 +961,7 @@ Do you want to allow this command?
             // Command left as something no built-in claims, so this run
             // isolates the screen path the same way the one above isolated
             // the command path.
-            let by_identity = r.identify("nothing-recognisable", identity);
+            let by_identity = r.identify("nothing-recognizable", identity);
             assert_eq!(
                 by_identity.map(|found| found.preset.as_str()),
                 Some(rules.preset.as_str()),

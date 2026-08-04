@@ -39,7 +39,7 @@ mod meta_tests {
     use super::*;
 
     #[test]
-    fn a_dispatch_is_recognised_as_one() {
+    fn a_dispatch_is_recognized_as_one() {
         // The Task row and an ordinary tool row are the same `tool_call` on
         // the wire; `subagent` is the only thing telling them apart, and
         // without it a subagent's block has no row to hang from.
@@ -242,12 +242,12 @@ Add to the existing `mod tests` in `crates/agent/src/acp/normalize.rs`:
     }
 
     #[test]
-    fn an_event_without_a_parent_serialises_exactly_as_it_used_to() {
+    fn an_event_without_a_parent_serializes_exactly_as_it_used_to() {
         // Stored transcripts and one-release-behind clients both read this
         // JSON. A new key on every ordinary event would bloat every row and
         // change bytes nothing asked to change.
         let event = AgentEvent::Message { role: Role::Agent, text: "hi".into(), parent: None };
-        let json = serde_json::to_string(&event).expect("serialises");
+        let json = serde_json::to_string(&event).expect("serializes");
         assert_eq!(json, r#"{"Message":{"role":"Agent","text":"hi"}}"#);
     }
 ```
@@ -1161,7 +1161,7 @@ In `AgentRows.swift`, add to `AgentRowView.body`:
 
 - [ ] **Step 2: Write the block view**
 
-Add to `AgentRows.swift`. This reuses the file's existing disclosure idiom (`ThoughtRow` at `:173`, `ToolRowView` at `:226`) rather than a `DisclosureGroup`, which was rejected for tinting labels with the accent colour:
+Add to `AgentRows.swift`. This reuses the file's existing disclosure idiom (`ThoughtRow` at `:173`, `ToolRowView` at `:226`) rather than a `DisclosureGroup`, which was rejected for tinting labels with the accent color:
 
 ```swift
 /// A subagent's dispatch and everything it did.
@@ -1381,7 +1381,7 @@ private struct SubagentBlockView: View {
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(showing ? 90 : 0))
             Circle()
-                .fill(dotColour)
+                .fill(dotColor)
                 .frame(width: 7, height: 7)
             Text(block.tool.title)
                 .font(.callout.weight(.medium))
@@ -1410,7 +1410,7 @@ private struct SubagentBlockView: View {
         return "\(summary.agentType) · \(summary.toolUses) tools · \(tokens) · \(seconds)"
     }
 
-    private var dotColour: Color {
+    private var dotColor: Color {
         if block.interrupted { return .red }
         switch block.tool.status {
         case .pending: return .secondary.opacity(0.35)

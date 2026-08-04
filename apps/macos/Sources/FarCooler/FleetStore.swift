@@ -192,7 +192,7 @@ final class FleetStore: ObservableObject {
     ///
     /// `fleet.runtimeHealthy` above ORs across every machine, and stays an OR
     /// on purpose — ANDing would paint the whole status bar orange every time
-    /// any one laptop was merely asleep, which is not news worth a colour
+    /// any one laptop was merely asleep, which is not news worth a color
     /// change. But a single merged boolean is also the whole story only if
     /// nobody needs to know WHICH machine is the problem, and with more than
     /// one machine configured that is exactly the question a green dot can no

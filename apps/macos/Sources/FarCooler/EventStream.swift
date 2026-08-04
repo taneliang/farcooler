@@ -25,7 +25,7 @@ struct TerminalEvent: Sendable, Decodable {
     var state: String
     var activity: String?
     // Pushed for the same reason `preset` is: without it, a shell pane the
-    // user typed `codex` into relabelled itself live from this very event,
+    // user typed `codex` into relabeled itself live from this very event,
     // but `canSwitchPaneMode` stayed false until something else forced a
     // full re-read — so `⌃B a` refused an agent this branch shipped an
     // adapter for. See `DaemonClient.apply(_:)`.

@@ -141,11 +141,11 @@ final class PaletteTextView: NSTextView {
         // this panel floats on, where whatever is behind the window shows through
         // and the hint disappears into it.
         //
-        // The appearance matters as much as the colour: these are dynamic colours
+        // The appearance matters as much as the color: these are dynamic colors
         // resolved against whatever appearance is current when they are drawn, and
         // an `NSView` hosted inside a SwiftUI overlay is not reliably drawn with
         // its own. Setting it explicitly is what stops a light-mode placeholder
-        // being painted in the dark-mode colour.
+        // being painted in the dark-mode color.
         effectiveAppearance.performAsCurrentDrawingAppearance {
             placeholder.draw(
                 at: NSPoint(x: textContainerInset.width + 5, y: textContainerInset.height),

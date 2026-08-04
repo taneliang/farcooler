@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn colour_and_bold_survive_into_the_grid() {
+    fn color_and_bold_survive_into_the_grid() {
         let mut t = Terminal::new(40, 6);
         t.feed(b"\x1b[1;31mR\x1b[0mp");
         let snap = snapshot(&t);
@@ -224,7 +224,7 @@ mod tests {
 
         assert_eq!(red.ch, 'R');
         assert!(red.bold, "bold attribute must reach the grid");
-        assert_ne!(red.fg, plain.fg, "the styled cell must differ in colour");
+        assert_ne!(red.fg, plain.fg, "the styled cell must differ in color");
         assert!(!plain.bold, "reset must clear bold");
     }
 
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn replaying_a_full_screen_must_not_end_with_a_newline() {
         // The rule the daemon's replay has to respect, stated where the
-        // behaviour actually lives.
+        // behavior actually lives.
         //
         // A captured screen is exactly as many lines as the screen is tall
         // whenever the program fills it, which a full-screen agent always does.

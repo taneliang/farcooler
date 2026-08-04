@@ -390,7 +390,7 @@ enum EditorLaunch {
     /// that does block cannot hang the app.
     ///
     /// What this CANNOT catch: VS Code's CLI exits 0 for almost everything,
-    /// including flags it does not recognise, and reports a failed SSH
+    /// including flags it does not recognize, and reports a failed SSH
     /// connection or a missing Remote-SSH extension inside its own window
     /// rather than to whoever spawned it. So a zero exit here means "the
     /// launcher ran", not "the worktree opened". Detection resolves the app and

@@ -129,7 +129,7 @@ pub fn load_failed_event(detail: &str) -> AgentEvent {
 ///   thread id …"`.
 ///
 /// Matched by phrase rather than by adapter identity: an id this build does
-/// not recognise still falls through to `LoadFailed` and shows its raw
+/// not recognize still falls through to `LoadFailed` and shows its raw
 /// message, which is the right default on both sides of the split — erring
 /// toward showing a message the user did not need beats erring toward hiding
 /// one they did.
@@ -236,7 +236,7 @@ fn choices(list: &serde_json::Value, id_key: &str) -> Vec<AgentChoice> {
 
 /// A turn's `stopReason`, as the reason it ended.
 ///
-/// An unrecognised reason is `EndTurn` rather than an error: the turn IS over
+/// An unrecognized reason is `EndTurn` rather than an error: the turn IS over
 /// whatever the adapter chose to call it, and refusing to admit that would
 /// leave the row stuck on `Working` forever.
 pub fn end_reason(stop_reason: &str) -> EndReason {
@@ -256,7 +256,7 @@ pub struct AgentSession {
     /// The id of the `session/prompt` we are waiting to see answered.
     ///
     /// Without this a response cannot be told apart from any other, and the
-    /// one frame that reports a turn's end goes unrecognised.
+    /// one frame that reports a turn's end goes unrecognized.
     pending_prompt: Option<u64>,
 }
 
@@ -584,7 +584,7 @@ impl RunningSession {
     /// The adapter advertises `promptQueueing` and `steering`, meaning it will
     /// accept a prompt while a turn is running and Claude picks it up between
     /// tool calls rather than after everything finishes. That is the better
-    /// behaviour when what you are sending is a correction — "stop, do it this
+    /// behavior when what you are sending is a correction — "stop, do it this
     /// way" is worth nothing once the wrong thing is done.
     ///
     /// It is not the default, because the reason the queue exists is that a

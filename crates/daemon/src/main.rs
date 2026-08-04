@@ -44,7 +44,7 @@ async fn run() -> Result<(), i32> {
     // who owns the database and could read it directly anyway.
     // `farcoolerd --version` answers instead of starting a daemon.
     //
-    // It used to do neither: the flag was unrecognised, so the process started
+    // It used to do neither: the flag was unrecognized, so the process started
     // up, logged, and exited — and `host probe`, which runs
     // `farcoolerd --version` over ssh to find out what is installed, captured
     // that log line as the version. There was no way to ask this binary what it
@@ -70,7 +70,7 @@ async fn run() -> Result<(), i32> {
     // This is a separate ssh channel carrying nothing but the pane's bytes, so
     // the floor becomes the network's round trip and nothing else. It is a
     // second channel rather than frames multiplexed onto the control connection
-    // because that connection serialises calls: a stream sharing it would sit
+    // because that connection serializes calls: a stream sharing it would sit
     // behind every fleet refresh, and a fleet refresh behind every byte. ssh
     // already multiplexes channels, so the simplest correct answer is to let it.
     let args: Vec<String> = std::env::args().collect();

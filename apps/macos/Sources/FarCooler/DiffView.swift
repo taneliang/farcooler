@@ -5,7 +5,7 @@ import SwiftUI
 /// carries.
 ///
 /// No syntax highlighting — cut in the spec. What earns the pixels here is
-/// which lines changed, not what language they are in; colouring keywords on
+/// which lines changed, not what language they are in; coloring keywords on
 /// top of an add/remove background fights the one signal that actually
 /// matters, and a diff view that also has opinions about Rust vs TOML is a
 /// second thing to keep correct for no reader benefit.

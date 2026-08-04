@@ -45,7 +45,7 @@ struct BranchList: Decodable {
 /// knowing the worktree existed.
 ///
 /// A branch that exists only on a remote is the interesting case, and it is
-/// labelled as one: it has no local ref here yet, so adopting it has to create a
+/// labeled as one: it has no local ref here yet, so adopting it has to create a
 /// tracking branch, which is what makes pushing back go where it came from.
 struct ResumeBranch: View {
     /// Every machine's repositories, tagged the same way `FleetStore.repositories`

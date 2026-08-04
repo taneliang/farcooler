@@ -354,7 +354,7 @@ mod tests {
         // No `.codex/sessions` at all — codex has never run on this machine,
         // or `$HOME` in the test is a bare scratch directory. Either way this
         // must report false rather than error: the caller's fallback (start
-        // clean) is exactly the right behaviour for "nothing to find".
+        // clean) is exactly the right behavior for "nothing to find".
         let home = scratch("codex-no-dir");
         assert!(!codex_rollout_exists(&home, "019fc8af-daff-7692-b7be-4457fda0b01c"));
     }

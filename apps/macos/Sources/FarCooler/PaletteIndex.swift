@@ -56,7 +56,7 @@ struct PaletteEntry: Identifiable, Equatable {
 enum PaletteIndex {
     /// How many tiles the switcher shows before it stops being a switcher.
     ///
-    /// A grid is for recognising something, and recognition does not scale: past
+    /// A grid is for recognizing something, and recognition does not scale: past
     /// a dozen tiles the eye starts reading rather than seeing, which is what
     /// typing is for. The cap is not a limit on what you can reach — everything
     /// is one keystroke away in the filtered list — it is a limit on what is

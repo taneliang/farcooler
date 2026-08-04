@@ -52,7 +52,7 @@ struct PaneGroup: Decodable, Identifiable, Hashable, Sendable {
 
         for other in panes where other.id != terminal {
             guard direction.isAhead(other, of: from) else { continue }
-            // Distance along the axis first, then how far off-centre across it:
+            // Distance along the axis first, then how far off-center across it:
             // the nearest pane in the direction pressed, preferring one you are
             // level with over one that merely starts sooner.
             let score = direction.distance(from: from, to: other)
@@ -130,7 +130,7 @@ enum TileDirection: String, CaseIterable, Sendable {
     ///
     /// VS Code's rule, because it is the one everybody already has: the pane
     /// splits on the edge you dropped nearest. The middle is a dead zone that
-    /// means `right` rather than "nearest edge", so a drop aimed at the centre of
+    /// means `right` rather than "nearest edge", so a drop aimed at the center of
     /// a pane does one predictable thing instead of flickering between four
     /// answers as the pointer shakes.
     static func drop(at point: CGPoint, in size: CGSize) -> TileDirection {

@@ -104,7 +104,7 @@ struct TerminalView: View {
         connection.fleet.workspaces.first { $0.terminals.contains { $0.id == current.id } }
     }
 
-    /// Which of several identically-labelled siblings `current` is — the
+    /// Which of several identically-labeled siblings `current` is — the
     /// same numbering `FleetView` and `TerminalTabStrip` use, so a terminal
     /// reads as "claude 2" everywhere or nowhere.
     private var currentOrdinal: Int? {
@@ -877,7 +877,7 @@ private final class KeystrokeSink: UIView, UIKeyInput {
 
     // Every trait below exists to stop iOS from "helping": autocorrect
     // rewriting a flag, smart quotes producing a character no shell
-    // recognises, autocapitalization upper-casing the first letter of a
+    // recognizes, autocapitalization upper-casing the first letter of a
     // command nobody typed that way.
     var autocorrectionType: UITextAutocorrectionType = .no
     var autocapitalizationType: UITextAutocapitalizationType = .none

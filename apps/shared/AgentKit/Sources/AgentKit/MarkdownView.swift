@@ -129,7 +129,7 @@ public enum Markdown {
                 continue
             }
 
-            // A table is recognised by its SECOND line, not its first: the
+            // A table is recognized by its SECOND line, not its first: the
             // header alone is indistinguishable from a sentence containing a
             // pipe. So the separator is peeked at before either is consumed.
             if trimmed.contains("|"), let next = lines.first, isTableRule(next) {
@@ -483,7 +483,7 @@ public enum PlanStatus: Sendable {
 
     public var isDone: Bool { self == .done }
 
-    /// Green finished, accent running, quiet otherwise — the same three colours
+    /// Green finished, accent running, quiet otherwise — the same three colors
     /// on both clients.
     public var tint: Color {
         switch self {

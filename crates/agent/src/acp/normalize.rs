@@ -119,7 +119,7 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
             // visible break telling the user their transcript is incomplete.
             // Nothing was lost — an agent resent its slash-command menu, which
             // it does once per turn whether or not anyone asked. The old
-            // behaviour routed this through `Unknown` and turned every single
+            // behavior routed this through `Unknown` and turned every single
             // turn into a false "history missing" break.
             //
             // Not a second `SessionStarted` either, even though that event has
@@ -396,12 +396,12 @@ mod tests {
     }
 
     #[test]
-    fn an_event_without_a_parent_serialises_exactly_as_it_used_to() {
+    fn an_event_without_a_parent_serializes_exactly_as_it_used_to() {
         // Stored transcripts and one-release-behind clients both read this
         // JSON. A new key on every ordinary event would change bytes nothing
         // asked to change, on every row ever written.
         let event = AgentEvent::Message { role: Role::Agent, text: "hi".into(), parent: None };
-        let json = serde_json::to_string(&event).expect("serialises");
+        let json = serde_json::to_string(&event).expect("serializes");
         assert_eq!(json, r#"{"Message":{"role":"Agent","text":"hi"}}"#);
     }
 

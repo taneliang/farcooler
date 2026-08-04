@@ -22,7 +22,7 @@ use crate::activity::Registry;
 /// Detection fields as well as launch fields, because `⌃B a` chooses the
 /// adapter from the preset a pane was DETECTED as. An adapter belonging to a
 /// preset nothing can ever detect could never be selected, so a genuinely new
-/// agent has to say how to recognise it.
+/// agent has to say how to recognize it.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ConfigAdapter {
     pub program: String,
@@ -230,7 +230,7 @@ mod tests {
         // field alone", so a table supplying only `program` and `args` must
         // not blank out codex's identity, blocked and working strings —
         // `Registry::merge` only overwrites a detection field when the config
-        // actually supplied one. Asserted through behaviour, matching how
+        // actually supplied one. Asserted through behavior, matching how
         // every other test here checks the registry, rather than reaching
         // into `AgentRules` and checking the fields directly.
         let dir = scratch("override-detection");

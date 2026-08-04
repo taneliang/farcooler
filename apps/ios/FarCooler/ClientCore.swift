@@ -203,7 +203,7 @@ actor ClientCore {
     }
 }
 
-/// Serialise a dictionary and hand it to C as a NUL-terminated string.
+/// Serialize a dictionary and hand it to C as a NUL-terminated string.
 ///
 /// Scoped rather than returned: the C side copies what it needs during the
 /// call, so the buffer must outlive the call and nothing more.

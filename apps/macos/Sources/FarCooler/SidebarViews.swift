@@ -233,7 +233,7 @@ struct WorkspaceSection: View {
             if workspace.worktreeMissing {
                 // Said plainly, because every terminal in it is dead and
                 // the reason is not something the user can work out from
-                // a colour. The row survives at all because it holds
+                // a color. The row survives at all because it holds
                 // terminals worth keeping — an empty one is deleted by
                 // the daemon without asking.
                 Text("worktree gone")
@@ -487,7 +487,7 @@ struct TerminalRow: View {
     ///
     /// Two shells in a worktree are genuinely alike, so they get `2` and `3` —
     /// but only when there is something to tell apart. Numbering everything was
-    /// the old behaviour and it labelled a lone `claude` as "Terminal 7", which
+    /// the old behavior and it labeled a lone `claude` as "Terminal 7", which
     /// answers a question nobody asked.
     var ordinal: Int?
     /// Whether this terminal's machine can be acted on right now. See
@@ -609,7 +609,7 @@ struct TerminalRow: View {
 struct WorkspaceDot: View {
     let state: String
 
-    private var colour: Color {
+    private var color: Color {
         switch StateKind.parse(state) {
         case .active: return .green
         case .error: return .red
@@ -620,7 +620,7 @@ struct WorkspaceDot: View {
     }
 
     var body: some View {
-        Circle().fill(colour).frame(width: 8, height: 8).help(state)
+        Circle().fill(color).frame(width: 8, height: 8).help(state)
     }
 }
 

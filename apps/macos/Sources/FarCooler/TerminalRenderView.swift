@@ -31,7 +31,7 @@ enum TerminalMetrics {
 ///
 /// The whole of this view's job is pixels and events. It does not parse an
 /// escape sequence, does not know what an arrow key means, and does not decide
-/// what colour `\e[31m` is — the Rust core answers all of that, which is what
+/// what color `\e[31m` is — the Rust core answers all of that, which is what
 /// lets the same answers serve iOS and Android. What remains here is genuinely
 /// platform work: fonts, glyph rasterisation, NSEvent, the pasteboard.
 @MainActor
@@ -264,17 +264,17 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         for row in 0..<snapshot.rows {
             var column = 0
             while column < snapshot.columns {
-                let colour = effectiveBackground(snapshot[row, column])
-                if colour == defaultBG {
+                let color = effectiveBackground(snapshot[row, column])
+                if color == defaultBG {
                     column += 1
                     continue
                 }
                 var end = column + 1
-                while end < snapshot.columns, effectiveBackground(snapshot[row, end]) == colour {
+                while end < snapshot.columns, effectiveBackground(snapshot[row, end]) == color {
                     end += 1
                 }
                 let start = origin(row: row, column: column)
-                context.setFillColor(Palette.cgColor(colour))
+                context.setFillColor(Palette.cgColor(color))
                 context.fill(
                     CGRect(
                         x: start.x, y: start.y,
@@ -323,9 +323,9 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
                     continue
                 }
 
-                // A run is a stretch of cells sharing colour and face, which is
+                // A run is a stretch of cells sharing color and face, which is
                 // what a whole word or a whole log line usually is.
-                let colour = effectiveForeground(cell)
+                let color = effectiveForeground(cell)
                 let face = self.face(for: cell)
                 glyphs.removeAll(keepingCapacity: true)
                 positions.removeAll(keepingCapacity: true)
@@ -334,7 +334,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
                 var underlineStart = cell.isUnderlined ? column : -1
                 while end < snapshot.columns {
                     let next = snapshot[row, end]
-                    guard effectiveForeground(next) == colour, self.face(for: next) === face,
+                    guard effectiveForeground(next) == color, self.face(for: next) === face,
                         next.isUnderlined == cell.isUnderlined
                     else { break }
                     if let ch = next.character {
@@ -345,18 +345,18 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
                         } else {
                             // Emoji and anything outside the mono font. Rare, so
                             // it can afford an individual draw.
-                            fallbacks.append((ch, baseline, colour, face))
+                            fallbacks.append((ch, baseline, color, face))
                         }
                     }
                     end += next.isWide ? 2 : 1
                 }
 
                 if !glyphs.isEmpty {
-                    context.setFillColor(Palette.cgColor(colour))
+                    context.setFillColor(Palette.cgColor(color))
                     CTFontDrawGlyphs(face, glyphs, positions, glyphs.count, context)
                 }
                 if underlineStart >= 0 {
-                    context.setStrokeColor(Palette.cgColor(colour))
+                    context.setStrokeColor(Palette.cgColor(color))
                     context.setLineWidth(1)
                     let y = bounds.height - (origin(row: row, column: 0).y + cellHeight - 1.5)
                     context.move(to: CGPoint(x: origin(row: row, column: underlineStart).x, y: y))
@@ -368,8 +368,8 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
             }
         }
 
-        for (character, point, colour, face) in fallbacks {
-            draw(character: character, at: point, colour: colour, preferring: face, in: context)
+        for (character, point, color, face) in fallbacks {
+            draw(character: character, at: point, color: color, preferring: face, in: context)
         }
     }
 
@@ -393,7 +393,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// Draw one character the mono font cannot, letting CoreText pick a font
     /// that can. This is how emoji in agent output render at all.
     private func draw(
-        character: Character, at point: CGPoint, colour: UInt32, preferring face: NSFont,
+        character: Character, at point: CGPoint, color: UInt32, preferring face: NSFont,
         in context: CGContext
     ) {
         let string = String(character) as NSString
@@ -401,7 +401,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
             string: string as String,
             attributes: [
                 .font: face,
-                .foregroundColor: NSColor(cgColor: Palette.cgColor(colour)) ?? .white,
+                .foregroundColor: NSColor(cgColor: Palette.cgColor(color)) ?? .white,
             ])
         let line = CTLineCreateWithAttributedString(attributed)
         context.textPosition = point
@@ -439,7 +439,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
             draw(
                 character: character,
                 at: baselinePoint(row: snapshot.cursorRow, column: snapshot.cursorColumn),
-                colour: Palette.backgroundPacked,
+                color: Palette.backgroundPacked,
                 preferring: face(for: cell), in: context)
             context.restoreGState()
         }
@@ -751,7 +751,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     }
 }
 
-/// Colours the renderer owns. Cell colours come from the core already resolved;
+/// Colors the renderer owns. Cell colors come from the core already resolved;
 /// these are the chrome around them.
 enum Palette {
     static let backgroundPacked: UInt32 = 0x12_14_19

@@ -115,7 +115,7 @@ async fn host_health_is_reported_by_the_daemon_not_sampled_by_the_client() {
 // `rpc_over_socket.rs` proves these against the Unix socket. Mirrored here
 // against a real `farcoolerd --stdio` process rather than in-process dispatch,
 // because the whole point of this file is that nothing about the daemon's
-// behaviour may depend on which listener accepted the connection.
+// behavior may depend on which listener accepted the connection.
 
 /// A workspace, over stdio, ready to hold a terminal.
 async fn a_workspace(

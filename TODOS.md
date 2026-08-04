@@ -36,7 +36,7 @@ reserving megabytes to hold nothing.
 which is built around a five-minute disconnection fitting inside the buffer, must be
 rechecked against whatever floor the allocation guarantees.
 
-**Depends on / blocked by:** Nothing. Reconnect behaviour does not change in kind, since a
+**Depends on / blocked by:** Nothing. Reconnect behavior does not change in kind, since a
 terminal exceeding its share emits the same honest `Gap` it already would.
 
 **Where the full reasoning lives:** `docs/farcooler-design.md`, the protocol framing and

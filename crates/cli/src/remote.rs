@@ -279,7 +279,7 @@ mod tests {
     /// dies, which is exactly when nobody is reading test output.
     ///
     /// The values are asserted exactly, not just their presence, because the
-    /// timing is the behaviour here, not an implementation detail: silently
+    /// timing is the behavior here, not an implementation detail: silently
     /// loosening `ServerAliveInterval` from 15 to 999 would mean fifty minutes
     /// to notice a dead machine instead of forty-five seconds, and that change
     /// should have to touch this test on purpose.

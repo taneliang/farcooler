@@ -76,7 +76,7 @@ final class ServiceRegistration: ObservableObject {
                 ? .notRegistered
                 : .unavailable("This build has no LaunchAgent to register.")
         @unknown default:
-            state = .unavailable("The system reported a status Far Cooler does not recognise.")
+            state = .unavailable("The system reported a status Far Cooler does not recognize.")
         }
     }
 

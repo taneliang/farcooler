@@ -150,10 +150,10 @@ struct AgentSurface: View {
             // The native content background, NOT `Palette.background`.
             //
             // That constant is the VT grid's own near-black, and it is right
-            // for a terminal because a terminal draws its own colours into
+            // for a terminal because a terminal draws its own colors into
             // every cell. A chat draws none: it uses `.primary` and
             // `.secondary`, which resolve against the SYSTEM appearance. So
-            // painting the VT colour under them put black text on a near-black
+            // painting the VT color under them put black text on a near-black
             // panel in light mode — unreadable, and sitting in the middle of an
             // otherwise light window like a hole.
             //

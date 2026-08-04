@@ -10,7 +10,7 @@
 //!
 //! - **Live runtime** — streaming, keystrokes, resize, screen capture — speaks
 //!   to tmux directly. tmux is the authority for what is running and is safe
-//!   for several readers, so serialising those through the daemon would buy
+//!   for several readers, so serializing those through the daemon would buy
 //!   nothing and would put a long-lived stream inside a request/response
 //!   conversation where it does not belong.
 //!
@@ -390,7 +390,7 @@ enum TerminalCmd {
     Send { terminal: String, data: String },
     /// Send exact input bytes as hex. This is the terminal client input path.
     SendHex { terminal: String, hex: String },
-    /// Print the rendered visible screen with colour escapes intact.
+    /// Print the rendered visible screen with color escapes intact.
     Screen { terminal: String },
     /// Stream live output bytes to stdout until killed. The terminal data plane.
     Stream { terminal: String },
@@ -1990,7 +1990,7 @@ fn activity_since(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
 /// this is exactly the shape `chatCapable` went missing from. The daemon
 /// broadcasts it (see `watch.rs`) and `list --json` prints it, but this
 /// projection built its own object field by field and simply left it out —
-/// so a shell pane the user typed `codex` into relabelled itself live from
+/// so a shell pane the user typed `codex` into relabeled itself live from
 /// this same event, while `canSwitchPaneMode` on the client stayed false
 /// forever, because the app is push-only and never re-fetches a terminal it
 /// already knows. `⌃B a` then refused, on the exact agent this branch
@@ -2042,12 +2042,12 @@ fn terminal_label(s: TerminalState) -> &'static str {
     }
 }
 
-/// Normalise an id for matching.
+/// Normalize an id for matching.
 ///
 /// Ids are compared in their dashless form, so a short id and a full hyphenated
 /// UUID both work. Without this, pasting an id straight out of `--json` — which
 /// is hyphenated — matched nothing, because the stored form is not.
-fn normalise_id(text: &str) -> String {
+fn normalize_id(text: &str) -> String {
     text.trim().to_lowercase().replace('-', "")
 }
 
@@ -2086,7 +2086,7 @@ fn resolve<'a, T>(
     id_of: impl Fn(&T) -> &[u8],
     kind: &str,
 ) -> Result<&'a T, String> {
-    let needle = normalise_id(prefix);
+    let needle = normalize_id(prefix);
     let matches: Vec<&T> = items
         .iter()
         .filter(|i| uuid_of(id_of(i)).simple().to_string().ends_with(&needle))
@@ -2107,7 +2107,7 @@ mod tests {
     fn a_terminal_changed_event_carries_chat_capable() {
         // The regression this test exists to catch: `events` used to build
         // its own JSON object field by field and simply left `chatCapable`
-        // out, so a codex pane that relabelled itself live from this exact
+        // out, so a codex pane that relabeled itself live from this exact
         // event never told the client it could be switched to chat.
         let t = farcooler_protocol::v1::Terminal { chat_capable: true, ..Default::default() };
         let json = terminal_event_json(&t);

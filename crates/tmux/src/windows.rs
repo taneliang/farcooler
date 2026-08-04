@@ -313,7 +313,7 @@ impl TmuxServer {
     }
 
 
-    /// Everything tmux still holds for a pane, scrollback included, with colour.
+    /// Everything tmux still holds for a pane, scrollback included, with color.
     ///
     /// Sent once before live streaming begins so a client opens onto the session
     /// as it already is rather than onto a blank screen.

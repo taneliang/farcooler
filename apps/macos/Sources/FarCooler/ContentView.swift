@@ -128,7 +128,7 @@ struct ContentView: View {
                 .animation(.snappy(duration: 0.22), value: errorBanner)
         }
         .task {
-            Notifier.shared.requestAuthorisation()
+            Notifier.shared.requestAuthorization()
             PushRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
             AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
             // Before the first read, not after: a stale daemon left over from an
@@ -291,7 +291,7 @@ struct ContentView: View {
             }
         }
         .animation(.snappy(duration: 0.16), value: editorError)
-        // Centred and over everything, unlike quick-create. This one is not
+        // Centered and over everything, unlike quick-create. This one is not
         // something you work alongside — it is a switcher, it is on screen for
         // about a second, and while it is there every keystroke belongs to it.
         // The scrim is what makes that true for the mouse as well: a panel this
@@ -763,7 +763,7 @@ struct ContentView: View {
             // could not otherwise say whose. Now it is every machine's at
             // once, and each row already names its own machine below, so a
             // header naming one would be naming the wrong thing, or picking
-            // a favourite among rows that are not ranked.
+            // a favorite among rows that are not ranked.
             Text("Fleet")
                 .font(.headline)
             if store.clients.values.contains(where: \.busy) { ProgressView().controlSize(.mini) }
@@ -775,7 +775,7 @@ struct ContentView: View {
             // name read as part of the name, which is the one thing it is not.
             if attentionCount > 0 {
                 // A dot and a number, not a filled capsule. A solid block of
-                // colour in the header shouts louder than the row it points at,
+                // color in the header shouts louder than the row it points at,
                 // which leaves it pointing at itself.
                 Button {
                     AppCommand.nextAttention.post()
@@ -972,7 +972,7 @@ struct ContentView: View {
         }
     }
 
-    /// A trouble dot's colour, for a machine `store.unhealthyHosts` has
+    /// A trouble dot's color, for a machine `store.unhealthyHosts` has
     /// already decided is not fully well.
     ///
     /// Not `HostDot`'s palette reused outright: `HostDot` renders nothing at
@@ -1205,7 +1205,7 @@ struct ContentView: View {
         return ""
     }
 
-    // MARK: - Behaviour
+    // MARK: - Behavior
 
     private func run(_ action: TerminalAction, on term: Terminal, in workspace: Workspace) async {
         switch action {
@@ -1238,7 +1238,7 @@ struct ContentView: View {
         //
         // Split with empty subsequences kept: the host component is empty for
         // this Mac, so the saved string starts with "/" and the default
-        // omitting behaviour would swallow that leading empty piece and shift
+        // omitting behavior would swallow that leading empty piece and shift
         // everything over by one.
         let saved = lastTerminal
             .split(separator: "/", maxSplits: 2, omittingEmptySubsequences: false)
@@ -1490,7 +1490,7 @@ struct ContentView: View {
             guard target.canSwitchPaneMode || target.isAgentPane else {
                 // Two different refusals, not one. A plain shell was never an
                 // agent and telling it to add a config.toml entry is bad
-                // advice; an agent Far Cooler recognises but cannot host
+                // advice; an agent Far Cooler recognizes but cannot host
                 // needs exactly that entry. Mirrors the daemon's own two
                 // refusal strings in `Service::set_pane_mode`.
                 if target.hasDetectedAgent {
@@ -1566,7 +1566,7 @@ struct ContentView: View {
     ///
     /// Move a divider, in cells. Answers whether the request was taken.
     ///
-    /// Serialised rather than queued. A drag produces one of these per cell
+    /// Serialized rather than queued. A drag produces one of these per cell
     /// crossed and each is a round trip, so a fast drag would stack up dozens of
     /// requests that land after the pointer has stopped and walk the divider past
     /// where it was let go.
@@ -1709,7 +1709,7 @@ struct ContentView: View {
 
         case .toggleSidebar:
             // See `Sidebar.toggle`: AppKit's own action, with the collapse
-            // behaviour set first so the detail pane absorbs the space instead of
+            // behavior set first so the detail pane absorbs the space instead of
             // the window growing.
             Sidebar.toggle()
         }

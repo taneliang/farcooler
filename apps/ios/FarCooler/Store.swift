@@ -12,8 +12,8 @@ import Security
 /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` is deliberate on both
 /// halves. *AfterFirstUnlock* so a background refresh works while the phone is
 /// in a pocket; *ThisDeviceOnly* so the key is never in an iCloud backup and a
-/// restore onto a new phone produces a device that has to be authorised
-/// separately — which is the behaviour you want the day a phone is lost.
+/// restore onto a new phone produces a device that has to be authorized
+/// separately — which is the behavior you want the day a phone is lost.
 enum Identity {
     private static let service = "com.farcooler.ssh-key"
     private static let account = "device"
@@ -51,7 +51,7 @@ enum Identity {
     /// sources for one fact — and they diverge, because the keychain and the
     /// preferences file do not have the same lifetime. A reinstall keeps the
     /// keychain and takes the preferences, so the app went on authenticating
-    /// with one key while showing a human a different one to authorise. Every
+    /// with one key while showing a human a different one to authorize. Every
     /// connection was then refused with a correct-looking key on screen.
     static var publicKey: String? {
         guard let key = privateKey() else { return nil }
@@ -65,7 +65,7 @@ enum Identity {
         let derived = String(decoding: buffer[0..<written], as: UTF8.self)
 
         // Also written where tooling can read it — `scripts/demo-host.sh` needs
-        // it to authorise this device, and it has no way to ask the app.
+        // it to authorize this device, and it has no way to ask the app.
         //
         // A projection of the private key, refreshed from it on every read, not
         // a second place the answer lives. That distinction is the whole fix:
@@ -116,7 +116,7 @@ enum Identity {
     /// `errSecMissingEntitlement` every time. And because the failure was
     /// swallowed, the next call found nothing, generated another key, failed to
     /// store that one too, and so on — so the device had a NEW identity on every
-    /// call, authenticated with one, and displayed another for you to authorise.
+    /// call, authenticated with one, and displayed another for you to authorize.
     /// It looked exactly like a host rejecting a correct key.
     @discardableResult
     private static func write(_ key: String) -> OSStatus {
@@ -149,7 +149,7 @@ extension Host {
     /// It exists because the app is useless without a host and getting one
     /// normally means turning on Remote Login and copying a key between two
     /// screens. This grants nothing — a host entry is only an address, and the
-    /// device still has to be authorised on the far end before it can connect —
+    /// device still has to be authorized on the far end before it can connect —
     /// and it is not persisted, so removing the argument removes the host.
     ///
     /// `scripts/demo-host.sh` is what passes it.
@@ -246,6 +246,48 @@ final class HostStore: ObservableObject {
         save()
     }
 
+    /// Correct a host that was typed in wrong.
+    ///
+    /// The reason this exists is that a host you cannot connect to is a host you
+    /// cannot get past — the app opens onto it — so a mistyped address used to
+    /// be permanent, and the app's own screens gave no way to fix or delete it.
+    ///
+    /// Clears the pinned fingerprint when the machine the pin was ABOUT changes.
+    /// A fingerprint is a promise about one host at one address; carrying it
+    /// across to a corrected address would meet the new machine with a
+    /// changed-key warning describing a machine nobody ever trusted.
+    func update(_ host: Host) {
+        guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return }
+        var edited = host
+        let previous = hosts[index]
+        if edited.address != previous.address || edited.port != previous.port {
+            edited.fingerprint = nil
+        }
+        hosts[index] = edited
+        // Kept in step deliberately: `selected` is a copy, and `RootView` keys
+        // the whole screen on it, so this is what makes an edit reconnect
+        // instead of leaving the old connection running under new details.
+        if selected?.id == edited.id { selected = edited }
+        save()
+    }
+
+    /// Forget a host key we pinned, so the next connection asks about it again.
+    ///
+    /// The only honest answer to "this key is not the one recorded". Either the
+    /// machine was rebuilt, in which case the new key is fine and someone should
+    /// look at its fingerprint and say so, or it is an interception, in which
+    /// case nothing this app offers should quietly paper over it. Both roads go
+    /// through the approval screen, which is where this leads.
+    ///
+    /// Does NOT touch `selected`: the value there carries no fingerprint of its
+    /// own worth preserving, and reassigning it would rebuild the screen out
+    /// from under the reconnection this is about to trigger.
+    func forgetKey(_ host: Host) {
+        guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return }
+        hosts[index].fingerprint = nil
+        save()
+    }
+
     func remove(_ host: Host) {
         hosts.removeAll { $0.id == host.id }
         if selected?.id == host.id { selected = hosts.first }
@@ -253,6 +295,12 @@ final class HostStore: ObservableObject {
     }
 
     /// Record the fingerprint a user has approved.
+    ///
+    /// `selected` is left alone on purpose. `RootView` keys its whole hierarchy
+    /// on the selected host, so writing the fingerprint back there would tear
+    /// down and rebuild the connection at the exact moment approval succeeded —
+    /// the one moment it must not. The caller reconnects with its own approved
+    /// copy, and the next launch reads the saved fingerprint back out of `hosts`.
     func trust(_ host: Host, fingerprint: String) {
         guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return }
         hosts[index].fingerprint = fingerprint

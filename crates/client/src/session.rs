@@ -3,7 +3,7 @@
 //! Above this line nothing knows whether it is talking to a local Unix socket
 //! or to a daemon on the other side of an SSH connection. That is the property
 //! worth protecting: a remote host is not a different product with its own
-//! subtly different behaviour.
+//! subtly different behavior.
 //!
 //! Answers come back as JSON rather than protobuf. Not because JSON is better —
 //! it is not, and the wire stays protobuf — but because the alternative is a

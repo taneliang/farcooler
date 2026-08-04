@@ -26,7 +26,7 @@
 //! The contract: pointers are either null or valid for the call's duration, a
 //! handle came from this module's constructor and has not been freed, and no
 //! handle is used concurrently from two threads without the caller's own
-//! synchronisation. Null is checked everywhere and is never a crash — a
+//! synchronization. Null is checked everywhere and is never a crash — a
 //! renderer bug must not take down the app.
 #![allow(clippy::missing_safety_doc)]
 

@@ -301,9 +301,9 @@ renderer   renderer   renderer
 If `libghostty-vt` later ships a stable, packaged C API, only `crates/vt` changes; the ABI and every renderer stay put. That property is the reason this section describes a *boundary* rather than a dependency.
 
 - The core consumes terminal output bytes and produces terminal/render state. It does not own the daemon connection, replay sequence, writer lease, workspace model, or tmux lifecycle.
-- `FarCoolerTerminalCore` (`crates/vt/include/farcooler_vt.h`) is a narrow C-ABI adapter owned by FarCooler. Platform code depends on this adapter rather than on upstream structs or function signatures. A test compares the header against the exported ABI in both directions, and compares every constant, because a renamed function fails at link time but a drifted constant fails silently at runtime — sending the wrong key, painting the wrong colour.
+- `FarCoolerTerminalCore` (`crates/vt/include/farcooler_vt.h`) is a narrow C-ABI adapter owned by FarCooler. Platform code depends on this adapter rather than on upstream structs or function signatures. A test compares the header against the exported ABI in both directions, and compares every constant, because a renamed function fails at link time but a drifted constant fails silently at runtime — sending the wrong key, painting the wrong color.
 - **Key and mouse encoding live in the core, not in the renderers.** The correct bytes for an arrow key depend on application cursor mode; the wheel becomes arrow keys in the alternate screen; mouse reports have four encodings and the program chooses. Those modes are held by the emulator, so a renderer that encodes input itself is guessing — which is how `[A` ends up typed into a prompt. Ownership here is also what stops Mac, iOS, and Android disagreeing about what Ctrl-C is.
-- **Colour resolution is likewise in the core.** Named and 256-colour palette entries are resolved to packed RGB before crossing the ABI, so three renderers cannot drift into three different palettes.
+- **Color resolution is likewise in the core.** Named and 256-color palette entries are resolved to packed RGB before crossing the ABI, so three renderers cannot drift into three different palettes.
 - The ABI is shaped for a 60–120 Hz redraw: one call per frame rather than one per cell, filling a buffer owned by the handle and reused, so a steady redraw allocates nothing. A revision counter lets an idle terminal — most of a night — skip the frame for the cost of one integer comparison.
 - Far Cooler ships two native cores across three platforms: this terminal core and the shared SSH client. They are separate artifacts with separate versions, because the terminal core's pinned upstream cadence and the SSH client's security-patch cadence must not drag each other, but they follow **one** documented FFI convention:
 
@@ -572,7 +572,7 @@ Terminal creation is a short saga rather than a false cross-system transaction:
 
 On daemon startup the daemon opens SQLite, attaches its control client, and inventories the private tmux server once. That inventory primes a cache; it is not a reconciliation pass, because it resolves nothing and decides nothing. If the private tmux server cannot be inventoried safely, the daemon serves durable state with every terminal derived as `lost` and shows a visible degraded state rather than guessing.
 
-Because derivation sits on the fleet-render path, the inventory is performance-sensitive. It is a **live view, not a timed cache**, and the distinction is load-bearing: a view aged by a clock would report a terminal as `running` because it used to be, which is precisely what D25 removed. A timer would have reintroduced that as a performance optimisation nobody would think to question.
+Because derivation sits on the fleet-render path, the inventory is performance-sensitive. It is a **live view, not a timed cache**, and the distinction is load-bearing: a view aged by a clock would report a terminal as `running` because it used to be, which is precisely what D25 removed. A timer would have reintroduced that as a performance optimization nobody would think to question.
 
 The control actor already holds one long-lived control-mode client receiving these notifications, so the view updates when tmux says something changed: pane exit, window close, session close, and layout change. Derivation reads it with no round trip, and a dead pane is reflected at the moment it dies rather than at the next tick.
 
@@ -1248,7 +1248,7 @@ CODE PATHS                                          USER FLOWS
 [+] crates/daemon                                     ├── [GAP] Unattended runs as user, not root
   ├── [GAP] startup inventory primes cache only       ├── [GAP] FileVault reboot → nothing runs, said so
   ├── [GAP] inventory fails → all lost + degraded     ├── [GAP] Keychain locked → named condition
-  └── authorized_keys fence editing                   └── [GAP] Linux linger on/off behaviour
+  └── authorized_keys fence editing                   └── [GAP] Linux linger on/off behavior
       ├── [GAP] atomic write, mode 0600 preserved
       ├── [GAP] foreign entries never reordered      [+] External attach
       └── [GAP] fence damaged → refuse, no rewrite     ├── [GAP] Warns which terminals have writers
@@ -1256,7 +1256,7 @@ CODE PATHS                                          USER FLOWS
 [+] crates/cli                                        └── [GAP] Attach + detach audited
   ├── [GAP] attach selects last active window
   ├── [GAP] host install verifies checksum          [+] Terminal quality (conformance corpus)
-  └── [GAP] protocol inspect redacts by default       ├── [GAP] [→CONF] UTF-8, ANSI, alt-screen, colour
+  └── [GAP] protocol inspect redacts by default       ├── [GAP] [→CONF] UTF-8, ANSI, alt-screen, color
                                                       ├── [GAP] [→CONF] Key encoding, control chords
 [+] apps/macos                                        ├── [GAP] [→CONF] 10,000-line scrollback
   ├── [GAP] renders derived state, never re-derives   ├── [GAP] [→CONF] 1 MiB/s sustained output
@@ -1266,7 +1266,7 @@ COVERAGE: 0/104 paths tested (0%)  |  Code paths: 0/56  |  User flows: 0/48
 QUALITY:  ★★★:0  ★★:0  ★:0         |  GAPS: 104 (7 E2E, 5 conformance)
 ```
 
-Legend: ★★★ behaviour + edge + error | ★★ happy path | ★ smoke
+Legend: ★★★ behavior + edge + error | ★★ happy path | ★ smoke
 `[→E2E]` needs an integration test | `[→CONF]` belongs in the cross-platform conformance corpus
 
 Zero coverage is the correct reading for a repository containing one design document. The number that matters is 104, because it is the size of the suite that has to exist for this plan's promises to be checkable, and it is why tests are written with each feature rather than after.
@@ -1525,7 +1525,7 @@ P1 blocks ship, P2 lands on the same branch, P3 is a follow-up.
   - Files: `native/ssh/`, platform signer bindings
   - Verify: crate meets the written acceptance criteria; hardware-backed signing never exposes the private key; bastion hop works on all clients
 - [ ] **T13 (P2, human: ~1 day / CC: ~20min)** — `apps/macos` — Unattended-mode registration and its limits
-  - Surfaced by: D27 — logout, reboot, FileVault, and keychain behaviour were untested and unstated
+  - Surfaced by: D27 — logout, reboot, FileVault, and keychain behavior were untested and unstated
   - Files: `apps/macos/Sources/ServiceRegistration/`
   - Verify: service-lifetime matrix passes; daemon runs as the enrolling user, never root; keychain-locked state is a named condition
 - [ ] **T14 (P3, human: ~2h / CC: ~10min)** — `crates/daemon` — Report replay memory in host self-health
@@ -1612,7 +1612,7 @@ The SSH/tmux and Apple-platform changes were added after the three-round review 
 | Architecture | 20 raised, 17 landed | 3 superseded mid-review as later decisions changed their ground |
 | Code Quality | 4 | All folded; 3 closed gaps this review's own edits created |
 | Tests | Diagram produced | 104 required paths mapped, 0 covered, all 21 criteria bound to named verification |
-| Performance | 2 | Both folded; 1 corrected a correctness regression introduced by an optimisation |
+| Performance | 2 | Both folded; 1 corrected a correctness regression introduced by an optimization |
 | Failure modes | 14 codepaths | 0 critical gaps; 1 partial flagged for adversarial testing |
 | Parallelization | 11 steps | 6 lanes, 2 conflict flags |
 | Implementation tasks | 14 | 9 P1, 4 P2, 1 P3 |

@@ -10,7 +10,7 @@ use alacritty_terminal::term::cell::Flags;
 
 use crate::Terminal;
 
-/// One character cell, already resolved to concrete colours.
+/// One character cell, already resolved to concrete colors.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cell {
     pub ch: char,
@@ -97,9 +97,9 @@ pub fn snapshot(term: &Terminal) -> Snapshot {
     }
 }
 
-/// Resolve a colour to packed RGB.
+/// Resolve a color to packed RGB.
 ///
-/// Named and indexed colours are resolved HERE rather than in each renderer, so
+/// Named and indexed colors are resolved HERE rather than in each renderer, so
 /// Mac, iOS and Android cannot drift into three different palettes.
 fn resolve(color: alacritty_terminal::vte::ansi::Color, foreground: bool) -> u32 {
     use alacritty_terminal::vte::ansi::{Color, NamedColor};
@@ -145,7 +145,7 @@ fn pack(r: u8, g: u8, b: u8) -> u32 {
     ((r as u32) << 16) | ((g as u32) << 8) | b as u32
 }
 
-/// The xterm 256-colour cube, tuned to stay legible on a dark ground.
+/// The xterm 256-color cube, tuned to stay legible on a dark ground.
 fn indexed(i: u8) -> u32 {
     const BASE: [u32; 16] = [
         0x42_47_54, 0xF0_61_66, 0x6B_D1_82, 0xE6_C0_5C, 0x70_A9_F2, 0xCA_8C_F0, 0x5C_C9_D1,
@@ -183,14 +183,14 @@ mod tests {
     }
 
     #[test]
-    fn truecolour_is_preserved_exactly() {
+    fn truecolor_is_preserved_exactly() {
         let mut t = Terminal::new(20, 4);
         t.feed(b"\x1b[38;2;18;52;86mX");
         assert_eq!(snapshot(&t).rows[0].cells[0].fg, 0x12_34_56);
     }
 
     #[test]
-    fn the_256_colour_cube_is_deterministic() {
+    fn the_256_color_cube_is_deterministic() {
         // Every renderer must agree, so this is resolved once here.
         assert_eq!(indexed(16), 0x00_00_00);
         assert_eq!(indexed(231), 0xFF_FF_FF);

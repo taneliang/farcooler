@@ -27,7 +27,7 @@ struct Workspace: Decodable, Identifiable, Hashable {
     var state: String
     var terminals: [Terminal]
 
-    /// Which of several identically-labelled terminals each one is, keyed by
+    /// Which of several identically-labeled terminals each one is, keyed by
     /// terminal id.
     ///
     /// Ported from the Mac app's `WorkspaceSection.ordinals`. Two `claude`
@@ -129,7 +129,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
         if running.isEmpty { return "shell" }
         // The host reports whatever tmux sees running, so the same plain
         // shell arrives as `zsh` from a pane the watcher has looked at and as
-        // `shell` from one it has not. Normalising both to `shell` is what
+        // `shell` from one it has not. Normalizing both to `shell` is what
         // keeps two identical shells from reading as different things.
         return shells.contains(running) ? "shell" : running
     }

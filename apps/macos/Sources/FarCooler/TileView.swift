@@ -59,7 +59,7 @@ struct TileView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Only when there is more than one, so a single arrangement is not
-            // labelled for the benefit of a choice nobody has.
+            // labeled for the benefit of a choice nobody has.
             if groups.count > 1 {
                 GroupBar(groups: groups, onSelect: onSelectGroup)
             }

@@ -50,7 +50,7 @@ enum TokenStore {
     /// Written as a delete-then-add rather than an update.
     ///
     /// `SecItemUpdate` fails when there is nothing to update, so the add path
-    /// would be needed anyway; doing it in one direction means one behaviour to
+    /// would be needed anyway; doing it in one direction means one behavior to
     /// reason about instead of two.
     @discardableResult
     static func write(_ key: String, _ value: String) -> Bool {

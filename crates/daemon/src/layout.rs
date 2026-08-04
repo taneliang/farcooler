@@ -219,7 +219,7 @@ impl Service {
         // agents is a reading posture, and being dropped back into the grid
         // between each one is not what anyone meant. So the zoom is re-applied to
         // wherever focus landed. This is the one place Far Cooler overrides tmux's
-        // own behaviour rather than borrowing it, and it is deliberate.
+        // own behavior rather than borrowing it, and it is deliberate.
         let was_zoomed = self
             .tmux
             .list_tagged_panes()

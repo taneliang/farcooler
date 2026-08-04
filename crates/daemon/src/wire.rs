@@ -404,7 +404,7 @@ mod tests {
         };
         assert_eq!(repository(&model, Scope::Read).canonical_git_dir, None);
         assert!(repository(&model, Scope::HostAdmin).canonical_git_dir.is_some());
-        // The display name is not a path and is how a user recognises the repo.
+        // The display name is not a path and is how a user recognizes the repo.
         assert_eq!(repository(&model, Scope::Read).display_name, "farcooler");
     }
 

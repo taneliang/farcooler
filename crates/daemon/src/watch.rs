@@ -391,7 +391,7 @@ impl Watcher {
 
         for (id, command, terminal_state, pane_mode, preset) in live {
             // The screen is read for any live terminal, not only one whose
-            // process name we recognise. That is the point: Claude Code renames
+            // process name we recognize. That is the point: Claude Code renames
             // itself to its version, so a pane reporting `2.1.220` is an agent
             // that process matching alone would never find.
             let (label, observed, chat_capable) = if !matches!(terminal_state, TerminalState::Running)
@@ -426,14 +426,14 @@ impl Watcher {
                 )
             } else {
                 // The screen is read for any live terminal, not only one whose
-                // process name we recognise: Claude Code renames itself to its
+                // process name we recognize: Claude Code renames itself to its
                 // version, so a pane reporting `2.1.220` is an agent that
                 // process matching alone would never find.
                 match runtime.screen(id).await {
                     Ok((screen, _, _)) => (
                         registry.describe(&command, &screen),
                         registry.classify(&command, &screen),
-                        // Recognised AND hostable. Codex is recognised here and
+                        // Recognized AND hostable. Codex is recognized here and
                         // has no adapter, so offering it a chat would hand the
                         // user a Claude session in its place.
                         registry

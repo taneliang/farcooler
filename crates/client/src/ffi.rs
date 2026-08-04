@@ -298,7 +298,7 @@ pub unsafe extern "C" fn farcooler_client_stream_stop(
 /// one fact: clear one and they disagree silently, which is what happened — an
 /// app whose keychain survived a reinstall but whose preferences did not went on
 /// offering a key it no longer knew the name of, and reported a stale one to the
-/// human trying to authorise it.
+/// human trying to authorize it.
 ///
 /// Returns the number of bytes needed, as `farcooler_client_generate_key` does.
 #[unsafe(no_mangle)]

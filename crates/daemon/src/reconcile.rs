@@ -657,7 +657,7 @@ mod tests {
     /// The row an older Far Cooler wrote for a main checkout said `main` — the
     /// name was a literal in `Service::register_repository`, not the
     /// directory. Adoption stopped doing that, but nothing re-derived the rows
-    /// already written, so those repositories are still labelled `main` in the
+    /// already written, so those repositories are still labeled `main` in the
     /// sidebar instead of by their project directory.
     ///
     /// Deleting the `task_name` comparison in `reconcile::repository` turns

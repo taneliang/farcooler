@@ -254,7 +254,7 @@ mod meta_tests {
     use super::*;
 
     #[test]
-    fn a_dispatch_is_recognised_as_one() {
+    fn a_dispatch_is_recognized_as_one() {
         // The Task row and an ordinary tool row are the same `tool_call` on
         // the wire; `subagent` is the only thing telling them apart, and
         // without it a subagent's block has no row to hang from.

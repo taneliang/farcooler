@@ -8,7 +8,7 @@ import SwiftUI
 /// there was no way to tell they existed, let alone that `⌃B n` switched between
 /// them.
 ///
-/// Hidden at one group, because a bar labelled "1" beside a single arrangement is
+/// Hidden at one group, because a bar labeled "1" beside a single arrangement is
 /// a control for a choice nobody has. It appears the moment there is a choice,
 /// which is the moment it starts meaning something.
 struct GroupBar: View {

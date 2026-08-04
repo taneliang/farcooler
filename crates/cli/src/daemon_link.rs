@@ -9,7 +9,7 @@
 //! protocol: one over a Unix socket, one over ssh's stdin and stdout. Every
 //! command above this file is written once and works against either, which is
 //! the property that keeps a remote host from being a second-class citizen with
-//! its own subtly different behaviour.
+//! its own subtly different behavior.
 //!
 //! Auto-start is local-only and deliberate: the first thing a user does is run
 //! a command, not install a service. Two commands racing to start the daemon is

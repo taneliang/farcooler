@@ -174,7 +174,7 @@ one item, then a submenu for the rest. This reaches a worktree you are not
 currently looking at, which the title bar cannot.
 
 **Settings → Editors**, a new tab: which editors were detected, which is the
-default, and the custom list. Its own tab rather than a row in Behaviour,
+default, and the custom list. Its own tab rather than a row in Behavior,
 because a list with an editor form in it is not a checkbox.
 
 ## Failure
@@ -195,7 +195,7 @@ Custom templates are where this matters. A mistyped binary path should say what
 it tried to run, not do nothing.
 
 What it cannot catch: VS Code's CLI exits 0 for almost anything, including flags
-it does not recognise, and reports a failed SSH connection or a missing
+it does not recognize, and reports a failed SSH connection or a missing
 Remote-SSH extension inside its own window rather than to whoever spawned it. A
 zero exit means "the launcher ran". Resolving the application and its launcher
 on disk before spawning is the part that can be checked honestly, and that is

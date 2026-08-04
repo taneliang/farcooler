@@ -88,10 +88,10 @@ private struct TabChip: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 5) {
-                // Same dot, same colours as the fleet list — `processColour`
+                // Same dot, same colors as the fleet list — `processColor`
                 // is shared rather than redefined here so a terminal cannot
                 // read green in one screen and red in the other.
-                Circle().fill(processColour(kind)).frame(width: 6, height: 6)
+                Circle().fill(processColor(kind)).frame(width: 6, height: 6)
                 // Not monospaced. The strip names TERMINALS, which are things
                 // in this app, not text a terminal is showing — and monospace
                 // beside a chat's body font is what made it read as a piece of
@@ -115,7 +115,7 @@ private struct TabChip: View {
             .overlay(
                 Capsule()
                     .strokeBorder(
-                        wantsAttention ? attentionColour(terminal.agent) : .clear, lineWidth: 1.5)
+                        wantsAttention ? attentionColor(terminal.agent) : .clear, lineWidth: 1.5)
             )
             .foregroundStyle(isCurrent ? Color.white : Color.white.opacity(0.75))
         }

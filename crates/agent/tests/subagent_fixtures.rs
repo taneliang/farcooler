@@ -131,21 +131,21 @@ fn the_json_the_apps_decode_is_the_json_this_emits() {
         .iter()
         .find(|e| matches!(e, AgentEvent::Message { parent: Some(_), .. }))
         .expect("a subagent message");
-    let json = serde_json::to_value(nested).expect("serialises");
+    let json = serde_json::to_value(nested).expect("serializes");
     assert!(json["Message"]["parent"].is_string(), "got {json}");
 
     let dispatch = events
         .iter()
         .find(|e| matches!(e, AgentEvent::ToolCall { subagent: true, .. }))
         .expect("a dispatch");
-    let json = serde_json::to_value(dispatch).expect("serialises");
+    let json = serde_json::to_value(dispatch).expect("serializes");
     assert_eq!(json["ToolCall"]["subagent"], serde_json::json!(true), "got {json}");
 
     let finished = events
         .iter()
         .find(|e| matches!(e, AgentEvent::ToolUpdate { subagent: Some(_), .. }))
         .expect("a finished dispatch");
-    let json = serde_json::to_value(finished).expect("serialises");
+    let json = serde_json::to_value(finished).expect("serializes");
     let summary = &json["ToolUpdate"]["subagent"];
     // Exactly the keys `AgentKit.SubagentSummary.CodingKeys` names.
     for key in ["agent_type", "model", "tokens", "tool_uses", "duration_ms", "status"] {

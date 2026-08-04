@@ -4,10 +4,10 @@ import SwiftUI
 ///
 /// Three rules, and everything here follows from them.
 ///
-/// **Colour means one thing.** Selection is structural — where am I — and
-/// status is semantic — what is happening. Encoding both in colour put an
+/// **Color means one thing.** Selection is structural — where am I — and
+/// status is semantic — what is happening. Encoding both in color put an
 /// orange label on an accent-blue row and made a list of four terminals look
-/// like a warning panel. Selection is now neutral, and colour belongs entirely
+/// like a warning panel. Selection is now neutral, and color belongs entirely
 /// to status.
 ///
 /// **Silence is the default.** An idle terminal shows no indicator at all.
@@ -32,11 +32,11 @@ struct StatusGlyph: View {
                 Color.clear
             case .lost, .failed:
                 // Hollow: something is missing, and the shape says so before
-                // the colour does.
+                // the color does.
                 Circle()
-                    .strokeBorder(colour, lineWidth: 1.5)
+                    .strokeBorder(color, lineWidth: 1.5)
             default:
-                Circle().fill(colour)
+                Circle().fill(color)
             }
         }
         .frame(width: size, height: size)
@@ -47,8 +47,8 @@ struct StatusGlyph: View {
     }
 
     /// Warm for "you", green for "finished", red for "missing", and nothing
-    /// else. Four colours in an application is already generous.
-    private var colour: Color {
+    /// else. Four colors in an application is already generous.
+    private var color: Color {
         switch status {
         case .blocked: return .orange
         case .done: return .green
@@ -61,8 +61,8 @@ struct StatusGlyph: View {
 
 /// The count of everything waiting on you.
 ///
-/// Deliberately not a filled capsule. A solid block of colour in the header
-/// competes with the one place colour is supposed to matter — the row that
+/// Deliberately not a filled capsule. A solid block of color in the header
+/// competes with the one place color is supposed to matter — the row that
 /// actually needs you — and a badge that shouts louder than the thing it points
 /// at is pointing at itself.
 struct AttentionBadge: View {

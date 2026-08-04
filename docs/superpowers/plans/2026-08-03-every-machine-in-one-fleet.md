@@ -195,7 +195,7 @@ Replace `cliHostArguments`:
 
 Remove the whole method (`DaemonClient.swift:89-102`). It exists to re-point one client at a different machine, which is the model being replaced. Remove its call site in `ContentView.swift` — an `.onChange(of: preferences.remoteHost)` around line 97.
 
-- [ ] **Step 3: Keep the app working, unchanged in behaviour**
+- [ ] **Step 3: Keep the app working, unchanged in behavior**
 
 In `ContentView.swift:6`:
 
@@ -203,7 +203,7 @@ In `ContentView.swift:6`:
     @StateObject private var client = DaemonClient(target: Preferences.shared.remoteHost)
 ```
 
-This is deliberately temporary and preserves today's behaviour exactly: one client, aimed at whatever the picker last selected. Task 5 replaces it with `FleetStore`. Leaving the app in a working state at every commit is what makes the intermediate commits reviewable.
+This is deliberately temporary and preserves today's behavior exactly: one client, aimed at whatever the picker last selected. Task 5 replaces it with `FleetStore`. Leaving the app in a working state at every commit is what makes the intermediate commits reviewable.
 
 - [ ] **Step 4: Build and check**
 
@@ -599,7 +599,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 ./apps/macos/build-app.sh
 ```
 
-Expected: builds. `FleetStore` is not wired into any view yet, so the app is unchanged — Task 5 does that. If the compiler reports `Fleet`'s initialiser is inaccessible, add a memberwise `init` to it in `Model.swift` rather than making `remerge` construct it some other way.
+Expected: builds. `FleetStore` is not wired into any view yet, so the app is unchanged — Task 5 does that. If the compiler reports `Fleet`'s initializer is inaccessible, add a memberwise `init` to it in `Model.swift` rather than making `remerge` construct it some other way.
 
 - [ ] **Step 3: Commit**
 

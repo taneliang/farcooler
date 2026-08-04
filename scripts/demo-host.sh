@@ -105,7 +105,7 @@ chmod 600 "$DIR/authorized_keys"
 # it just means a fixed `authorized_keys` goes stale under you mid-demo. So this
 # follows the key rather than snapshotting it.
 #
-# It authorises whatever this simulator currently claims, which is fine for a
+# It authorizes whatever this simulator currently claims, which is fine for a
 # throwaway sshd on the loopback that nothing else can reach, and would be
 # indefensible anywhere else.
 cat > "$DIR/sync-key.sh" <<SYNC

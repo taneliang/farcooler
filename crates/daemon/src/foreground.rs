@@ -44,7 +44,7 @@ pub async fn read() -> Foreground {
         }
         // First wins. `ps` lists a foreground pipeline's members in order, and the
         // first is the one that was typed — `rg foo | less` should read as `rg`.
-        found.entry(tty.to_string()).or_insert_with(|| summarise(args));
+        found.entry(tty.to_string()).or_insert_with(|| summarize(args));
     }
     found
 }
@@ -54,7 +54,7 @@ pub async fn read() -> Foreground {
 /// The program plus one argument. Two is where a pane header stops being
 /// readable, and the first argument is nearly always the distinguishing part:
 /// `pnpm dev` against `pnpm test`, `cargo build` against `cargo test`.
-fn summarise(args: &str) -> String {
+fn summarize(args: &str) -> String {
     let mut parts = args.split_whitespace();
     let Some(program) = parts.next() else { return String::new() };
     // A path tells you where a binary lives, which is not what the pane is doing.
@@ -78,29 +78,29 @@ mod tests {
 
     #[test]
     fn a_subcommand_survives_because_it_is_the_distinguishing_part() {
-        assert_eq!(summarise("pnpm dev"), "pnpm dev");
-        assert_eq!(summarise("cargo build --release"), "cargo build");
-        assert_eq!(summarise("/opt/homebrew/bin/rg pattern"), "rg pattern");
+        assert_eq!(summarize("pnpm dev"), "pnpm dev");
+        assert_eq!(summarize("cargo build --release"), "cargo build");
+        assert_eq!(summarize("/opt/homebrew/bin/rg pattern"), "rg pattern");
     }
 
     #[test]
     fn a_flag_does_not() {
-        assert_eq!(summarise("npm --silent run dev"), "npm");
-        assert_eq!(summarise("tail -f log"), "tail");
+        assert_eq!(summarize("npm --silent run dev"), "npm");
+        assert_eq!(summarize("tail -f log"), "tail");
     }
 
     #[test]
     fn a_long_argument_is_dropped_rather_than_truncated() {
         // Half a path is worse than none: it looks like a name and is not one.
-        assert_eq!(summarise("vim src/some/deeply/nested/module.rs"), "vim module.rs");
+        assert_eq!(summarize("vim src/some/deeply/nested/module.rs"), "vim module.rs");
         assert_eq!(
-            summarise("python a_very_long_script_name_indeed_here.py"),
+            summarize("python a_very_long_script_name_indeed_here.py"),
             "python"
         );
     }
 
     #[test]
     fn nothing_in_means_nothing_out() {
-        assert_eq!(summarise(""), "");
+        assert_eq!(summarize(""), "");
     }
 }

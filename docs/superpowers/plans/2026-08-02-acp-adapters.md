@@ -4,7 +4,7 @@
 
 **Goal:** Chat mode works for codex, opencode and cursor as well as claude, with user-supplied adapters via `~/.config/farcooler/config.toml`.
 
-**Architecture:** The two hand-maintained lists that must agree — `activity::RULES` (what is recognised) and `CHAT_CAPABLE` (what can be hosted) — merge into one `Registry` in `crates/core`. An agent is chat-capable exactly when its registry entry carries an `AdapterSpec`, so the lists can no longer drift. The `Registry` is a value held by `Service`, not a process global. The daemon passes `--preset` to the shim, and both resolve the same registry from the same config file.
+**Architecture:** The two hand-maintained lists that must agree — `activity::RULES` (what is recognized) and `CHAT_CAPABLE` (what can be hosted) — merge into one `Registry` in `crates/core`. An agent is chat-capable exactly when its registry entry carries an `AdapterSpec`, so the lists can no longer drift. The `Registry` is a value held by `Service`, not a process global. The daemon passes `--preset` to the shim, and both resolve the same registry from the same config file.
 
 **Tech Stack:** Rust (tokio, serde, toml, clap), Swift/SwiftUI for the Mac app, tmux for pane capture.
 
@@ -192,7 +192,7 @@ pub struct AgentRules {
 
     /// How to host this agent as a native chat, when Far Cooler can.
     ///
-    /// `None` means recognised-but-terminal-only, which is a real and honest
+    /// `None` means recognized-but-terminal-only, which is a real and honest
     /// state rather than a gap: an agent with no adapter renders as the TUI it
     /// is. This field replaces the separate `CHAT_CAPABLE` list in the daemon,
     /// which was maintained by hand beside these rules and disagreed with them.
@@ -221,7 +221,7 @@ fn npx(package: &str) -> Option<AdapterSpec> {
 /// Every agent Far Cooler knows, and how to host the ones it can.
 ///
 /// One table rather than two. Recognition and hostability were separate lists
-/// maintained by hand, and they drifted: codex was recognised in a pane and
+/// maintained by hand, and they drifted: codex was recognized in a pane and
 /// absent from the chat list, so `⌃B a` on a codex pane did nothing and said
 /// nothing. Hostability is now a field on the entry, so there is no second list
 /// to disagree with.
@@ -378,7 +378,7 @@ git add Cargo.toml crates/core/Cargo.toml crates/core/src/activity.rs
 git commit -m "feat(core): one registry for recognition and hostability
 
 Recognition and chat-hostability were two lists maintained by hand, and they
-drifted — codex was recognised in a pane and missing from the chat list, so
+drifted — codex was recognized in a pane and missing from the chat list, so
 the toggle did nothing. Hostability is now a field, so there is no second
 list to disagree with."
 ```
@@ -512,7 +512,7 @@ use crate::activity::{AdapterSpec, AgentRules, Registry};
 /// Detection fields as well as launch fields, because `⌃B a` chooses the
 /// adapter from the preset a pane was DETECTED as. An adapter belonging to a
 /// preset nothing can ever detect could never be selected, so a genuinely new
-/// agent has to say how to recognise it.
+/// agent has to say how to recognize it.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ConfigAdapter {
     pub program: String,
@@ -678,13 +678,13 @@ Replace the existing test at `crates/daemon/src/service.rs:1737-1748` (which ass
 ```rust
 #[test]
 fn recognition_and_hostability_can_no_longer_disagree() {
-    // This test exists because they did. Codex was recognised by
+    // This test exists because they did. Codex was recognized by
     // `activity::identify` and absent from the daemon's separate chat list, so
     // `⌃B a` on a codex pane did nothing and explained nothing. There is now
     // one table, and hostability is a field on it.
     let r = farcooler_core::activity::Registry::built_in();
     assert!(r.chat_capable("claude"));
-    assert!(r.chat_capable("codex"), "codex is recognised AND hostable");
+    assert!(r.chat_capable("codex"), "codex is recognized AND hostable");
     assert!(!r.chat_capable("zsh"), "a shell is neither");
 }
 ```
@@ -699,7 +699,7 @@ Expected: FAIL — `Registry` does not exist yet from this crate's view until Ta
 Delete the `CHAT_CAPABLE` const and the `chat_capable` free function (`service.rs:123-129` and `156-159`). Add to the `Service` struct, after `root`:
 
 ```rust
-    /// Which agents are recognised, and which can be hosted as a chat.
+    /// Which agents are recognized, and which can be hosted as a chat.
     ///
     /// Held rather than re-read per call, for the same reason `root` is: the
     /// config file and the environment that locates it are process-global, and
@@ -717,7 +717,7 @@ In `open_in`, before the `Ok(Self { … })`:
 and add `registry` to the struct literal. Add the accessor beside `agents()`:
 
 ```rust
-    /// Which agents are recognised, and which can be hosted as a chat.
+    /// Which agents are recognized, and which can be hosted as a chat.
     pub fn registry(&self) -> &farcooler_core::activity::Registry {
         &self.registry
     }
@@ -758,7 +758,7 @@ and add `registry` to the struct literal. Add the accessor beside `agents()`:
 - [ ] **Step 5: Run the whole daemon suite**
 
 Run: `cargo test -p farcooler-daemon 2>&1 | tail -30`
-Expected: PASS. Every existing test must still pass; `set_pane_mode` behaviour is unchanged for claude and still refuses a shell.
+Expected: PASS. Every existing test must still pass; `set_pane_mode` behavior is unchanged for claude and still refuses a shell.
 
 - [ ] **Step 6: Commit**
 
@@ -1009,7 +1009,7 @@ fn opencode_states_come_from_its_real_screen() {
 }
 
 #[test]
-fn opencode_is_recognised_by_process_name() {
+fn opencode_is_recognized_by_process_name() {
     let r = Registry::built_in();
     assert_eq!(r.describe("<observed pane_current_command>", ""), "opencode");
 }
@@ -1052,7 +1052,7 @@ Expected: PASS, including `every_adapter_belongs_to_an_agent_that_can_be_detecte
 ```bash
 cargo fmt && cargo clippy -p farcooler-core --all-targets
 git add crates/core/src/activity.rs
-git commit -m "feat(core): opencode recognised, cursor's rules verified
+git commit -m "feat(core): opencode recognized, cursor's rules verified
 
 Read off running agents, not guessed — the first version of this file was
 guesswork and matched no real screen. cursor's UNVERIFIED marker goes only
@@ -1340,7 +1340,7 @@ git commit -m "docs: which agents render as a chat, and how to add one"
 
 ## Self-Review
 
-**Spec coverage.** Registry merge → Task 1. Owned fields and the `const`→function change → Task 1. `crates/core` gaining `serde`/`toml` → Task 1. Config path, resolution order, merge semantics, malformed-file behaviour → Task 2. `chat_capable` derived and `CHAT_CAPABLE` deleted → Task 3. `Registry` as a held value rather than a global → Task 3. `--preset` replacing `--adapter` → Task 4. `claude_executable` scoped to claude → Task 4. Built-in adapter table → Tasks 1 and 5. opencode and cursor rules read off real screens → Task 5. Package-health and handshake tests, not ignored, plus the CI install → Task 6. The `lastError` renderer and the duplicate shortcut row → Task 7. The cursor comment recording why it ships anyway → Task 1, Step 5.
+**Spec coverage.** Registry merge → Task 1. Owned fields and the `const`→function change → Task 1. `crates/core` gaining `serde`/`toml` → Task 1. Config path, resolution order, merge semantics, malformed-file behavior → Task 2. `chat_capable` derived and `CHAT_CAPABLE` deleted → Task 3. `Registry` as a held value rather than a global → Task 3. `--preset` replacing `--adapter` → Task 4. `claude_executable` scoped to claude → Task 4. Built-in adapter table → Tasks 1 and 5. opencode and cursor rules read off real screens → Task 5. Package-health and handshake tests, not ignored, plus the CI install → Task 6. The `lastError` renderer and the duplicate shortcut row → Task 7. The cursor comment recording why it ships anyway → Task 1, Step 5.
 
 **Ordering.** Tasks 1→2→3→4 are a dependency chain. Task 5 needs Task 1. Task 6 needs Tasks 1 and 5. Task 7 is independent of all of them and can land at any point. Task 8 comes last.
 

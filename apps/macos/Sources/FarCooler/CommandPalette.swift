@@ -13,7 +13,7 @@ import SwiftUI
 /// So: two modes, one field, and which one you get is decided by whether you
 /// have typed anything rather than by a control you have to find.
 ///
-///   empty      a recency-ordered grid of live screens. You recognise the
+///   empty      a recency-ordered grid of live screens. You recognize the
 ///              terminal you want instead of recalling its name, which is the
 ///              whole reason Alt-Tab shows pictures.
 ///   anything   a flat list of everything that word could mean — terminals,
@@ -42,13 +42,13 @@ struct CommandPalette: View {
 
     /// Three across, and the tile width follows from it rather than the other
     /// way round. Four would put the preview below the width where a wrapped
-    /// agent transcript is still recognisable, which is the only thing the
+    /// agent transcript is still recognizable, which is the only thing the
     /// picture is for.
     private static let columns = 3
     private static let panelWidth: CGFloat = 720
     private static let gutter: CGFloat = 14
     private static let gap: CGFloat = 10
-    /// Enough to recognise a screen by, not enough to read it. Eight lines
+    /// Enough to recognize a screen by, not enough to read it. Eight lines
     /// catches a prompt and the question above it, which is what a tile is for.
     fileprivate static let previewLines = 8
 
@@ -129,7 +129,7 @@ struct CommandPalette: View {
             guard !targets.isEmpty else { return }
             while !Task.isCancelled {
                 await previews.refresh(targets, lines: Self.previewLines, using: screen)
-                // Slow on purpose. These are pictures for recognising a terminal
+                // Slow on purpose. These are pictures for recognizing a terminal
                 // by, not a second place to watch one work — the pane behind the
                 // panel is already that. Two seconds is under the time it takes
                 // to read a grid of twelve, so nothing is ever visibly stale

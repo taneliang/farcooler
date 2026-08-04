@@ -1,7 +1,7 @@
 //! The header is the contract every renderer compiles against, and nothing in
 //! the compiler checks it against the Rust side. A function renamed here and
 //! not there fails at link time — but a CONSTANT that drifts fails silently and
-//! at runtime, sending the wrong key or painting the wrong colour. So the two
+//! at runtime, sending the wrong key or painting the wrong color. So the two
 //! are compared here instead.
 
 use std::collections::BTreeMap;

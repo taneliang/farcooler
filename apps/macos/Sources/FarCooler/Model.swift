@@ -292,7 +292,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
 
     /// The ONE thing this terminal's indicator should say.
     ///
-    /// A terminal used to carry two indicators — a coloured dot for whether the
+    /// A terminal used to carry two indicators — a colored dot for whether the
     /// process was alive, and a glyph for what the agent was doing. They
     /// competed for the same glance and forced a reader to learn two
     /// vocabularies for one row. They are not independent: activity only means
@@ -336,8 +336,8 @@ struct Terminal: Decodable, Identifiable, Hashable {
 
 /// What a terminal's single indicator says.
 ///
-/// Shape carries the meaning and colour reinforces it, never the other way
-/// round: a colour-only indicator says nothing to a colourblind reader and
+/// Shape carries the meaning and color reinforces it, never the other way
+/// round: a color-only indicator says nothing to a colorblind reader and
 /// nothing at all in a screenshot.
 enum Status: Equatable {
     case starting, running, idle, working, blocked, done, exited, failed, lost
@@ -395,7 +395,7 @@ enum AgentActivity: String {
 
 // MARK: - State vocabulary
 //
-// The labels come from the daemon. The app maps them to colour and wording but
+// The labels come from the daemon. The app maps them to color and wording but
 // never invents a state that the daemon did not report.
 
 enum StateKind {

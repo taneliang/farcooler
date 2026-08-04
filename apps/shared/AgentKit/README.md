@@ -31,10 +31,10 @@ run has no business having.
 
 ## What must not change
 
-Three behaviours here are load-bearing, and each has a test whose name says so:
+Three behaviors here are load-bearing, and each has a test whose name says so:
 
 - **An unknown event decodes to `.gap(.unparsed)`** — never a throw, which
-  would blank a whole transcript over one unrecognised event on a client a
+  would blank a whole transcript over one unrecognized event on a client a
   release behind its daemon, and never a silent skip, which produces a
   transcript that is wrong and looks complete.
 - **A `Gap` row is never merged into a neighbour and never dropped.** If a gap

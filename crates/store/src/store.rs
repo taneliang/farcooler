@@ -35,7 +35,7 @@ pub struct Store {
     /// but not `Sync`. The daemon serves connections from a multi-threaded
     /// runtime and one `Service` is shared by all of them, so the store has to
     /// cross threads. A mutex is also the honest model of the thing underneath:
-    /// SQLite serialises writes regardless, and every call here is short.
+    /// SQLite serializes writes regardless, and every call here is short.
     db: std::sync::Mutex<Connection>,
 }
 

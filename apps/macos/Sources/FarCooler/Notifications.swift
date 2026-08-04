@@ -18,18 +18,18 @@ import UserNotifications
 final class Notifier {
     static let shared = Notifier()
 
-    private var authorised = false
+    private var authorized = false
     /// What was last announced per terminal, so a state that persists is
     /// announced once. The daemon sends only changes, but a reconnect replays
     /// current state, and being told twice that the same agent finished is how
     /// people learn to ignore notifications.
     private var announced: [String: AgentActivity] = [:]
 
-    func requestAuthorisation() {
+    func requestAuthorization() {
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
                 Task { @MainActor in
-                    self?.authorised = granted
+                    self?.authorized = granted
                     guard granted else { return }
                     // A Mac gets remote notifications for the same reason a
                     // phone does: it can be closed, asleep, or simply not the
@@ -48,7 +48,7 @@ final class Notifier {
         guard activity.wantsAttention else { return }
         guard activity != announced[terminal.id] else { return }
         if activity == .done && !Preferences.shared.notifyOnDone { return }
-        guard authorised else { return }
+        guard authorized else { return }
 
         let content = UNMutableNotificationContent()
         switch activity {

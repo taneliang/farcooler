@@ -4,7 +4,7 @@
 //! than an accident. tmux is the sole authority for what is live, and unlike a
 //! database it is safe for several processes to read at once. So streaming a
 //! terminal, sending it keystrokes, or resizing it does not have to be
-//! serialised through the daemon: a client can do it directly, and the daemon
+//! serialized through the daemon: a client can do it directly, and the daemon
 //! keeps its exclusive hold on the one thing that genuinely needs one owner —
 //! durable intent.
 //!
@@ -100,7 +100,7 @@ impl Runtime {
         self.tmux.send_bytes_hex(&pane, hex).await
     }
 
-    /// The rendered visible screen with colour, plus the pane geometry so a
+    /// The rendered visible screen with color, plus the pane geometry so a
     /// client can size itself to what it is actually showing.
     pub async fn screen(&self, id: Uuid) -> Result<(String, u32, u32)> {
         let snapshot = self.inventory.snapshot();

@@ -33,7 +33,7 @@
 **Interfaces:**
 - Produces: `AgentKit.AgentEvent` (enum), `AgentKit.Sequenced`, `AgentKit.Role`, `AgentKit.ToolStatus`, `AgentKit.Diff`, `AgentKit.PlanEntry`, `AgentKit.PermissionOption`, `AgentKit.GapReason`.
 
-The Rust side serialises `farcooler_agent::event::AgentEvent` with serde's default externally-tagged representation. These are the **measured** outputs, printed from a scratch test against the real types — not a guess, and the decoder must match them exactly:
+The Rust side serializes `farcooler_agent::event::AgentEvent` with serde's default externally-tagged representation. These are the **measured** outputs, printed from a scratch test against the real types — not a guess, and the decoder must match them exactly:
 
 ```json
 {"Message":{"role":"Agent","text":"hi"}}
@@ -190,10 +190,10 @@ public struct Sequenced: Sendable, Equatable {
 }
 
 extension AgentEvent {
-    /// Decode one serialised `farcooler_agent::event::AgentEvent`.
+    /// Decode one serialized `farcooler_agent::event::AgentEvent`.
     ///
     /// Serde's externally-tagged representation: a single-key object whose key
-    /// names the variant. An unrecognised key is a `.gap(.unparsed)` rather
+    /// names the variant. An unrecognized key is a `.gap(.unparsed)` rather
     /// than a throw, because a client one release behind its daemon must still
     /// render the session — and rather than a silent skip, because a shorter
     /// transcript that looks complete is the one failure this design refuses.
@@ -973,7 +973,7 @@ Add to `apps/shared/AgentKit/Tests/AgentKitTests/TranscriptTests.swift`:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/shared/AgentKit && swift test`
-Expected: PASS already if Task 2 is correct — this is a guard, not a new behaviour. If it fails, Task 2's gap handling is wrong; fix that first.
+Expected: PASS already if Task 2 is correct — this is a guard, not a new behavior. If it fails, Task 2's gap handling is wrong; fix that first.
 
 - [ ] **Step 3: Build the views**
 

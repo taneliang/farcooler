@@ -3,7 +3,7 @@
 //! The distinction is load-bearing. A view aged by a clock would report a
 //! terminal as `running` because it used to be, which is precisely what the
 //! derivation design removed. A timer would have reintroduced that as a
-//! performance optimisation nobody would think to question.
+//! performance optimization nobody would think to question.
 //!
 //! So the view updates when tmux says something changed: pane exit, window
 //! close, session close. A low-frequency full reconcile runs as a backstop

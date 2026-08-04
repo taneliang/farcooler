@@ -5,7 +5,7 @@ import FarCoolerVT
 ///
 /// A thin, safe wrapper: it owns the handle's lifetime, converts between Swift
 /// and C types, and nothing else. Every decision about what bytes mean — what
-/// colour an escape sequence produces, what an arrow key encodes to under the
+/// color an escape sequence produces, what an arrow key encodes to under the
 /// program's current mode — lives on the other side of this boundary. That is
 /// what let the Mac app's renderer and this one answer to the same handle
 /// without agreeing on a single line of emulator logic between them.

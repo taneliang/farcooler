@@ -113,7 +113,7 @@ final class AgentStream: ObservableObject {
             let decoded = batch.events.compactMap { frame -> Sequenced? in
                 // A malformed single frame does not need to fail the whole
                 // batch — `AgentEvent.decode` already turns an event this
-                // client does not recognise into `.gap(.unparsed)` rather
+                // client does not recognize into `.gap(.unparsed)` rather
                 // than throwing; only truly unreadable JSON reaches here.
                 guard let event = try? AgentEvent.decode(from: frame.payloadJson) else { return nil }
                 return Sequenced(seq: frame.seq, event: event)

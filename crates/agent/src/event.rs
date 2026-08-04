@@ -54,7 +54,7 @@ pub struct QueuedPrompt {
     pub images: Vec<PromptImage>,
 }
 
-/// An image travelling WITH a prompt rather than as a path beside it.
+/// An image traveling WITH a prompt rather than as a path beside it.
 ///
 /// Base64 because that is what an ACP image content block carries, and because
 /// the alternative — a path — is only meaningful on the machine that produced

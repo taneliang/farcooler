@@ -53,7 +53,7 @@ extension View {
         padding(Pane.inset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // `underPageBackgroundColor` is deliberately dark in BOTH appearances
-            // — it is the colour behind a document page — which reads well against
+            // — it is the color behind a document page — which reads well against
             // a dark terminal and far too heavy in light mode. The window's own
             // background follows the appearance, which is what a backdrop should
             // do.
@@ -67,7 +67,7 @@ extension View {
     /// was the loudest thing on screen: a blue ring (fine over a VT grid, awful
     /// around a chat), a drop shadow (which a full-window pane smeared across
     /// the chrome above it), and a thicker grey edge (just as heavy as the blue
-    /// one, minus the colour).
+    /// one, minus the color).
     ///
     /// The border is not where this belongs. A pane already says it has the
     /// keyboard in its own header — the number goes accent, the title goes

@@ -639,7 +639,7 @@ In `crates/daemon/src/service.rs`, add a field to `Service`:
     repo_locks: std::sync::Mutex<std::collections::HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>,
 ```
 
-Initialise it in `Service::open_in` alongside the other fields:
+Initialize it in `Service::open_in` alongside the other fields:
 
 ```rust
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -1222,7 +1222,7 @@ holds nothing, and is flagged missing if it holds terminals.
 
 That last rule is the important one. A git worktree list that raced a mv
 must not be able to delete an agent transcript, so emptiness -- zero
-terminal rows, which is also zero agent sessions -- is the only licence to
+terminal rows, which is also zero agent sessions -- is the only license to
 remove a record.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
@@ -1340,7 +1340,7 @@ Add a field to `Watcher`:
     worktree_marks: std::sync::Mutex<HashMap<Uuid, std::time::SystemTime>>,
 ```
 
-Initialise it in `Watcher::new`:
+Initialize it in `Watcher::new`:
 
 ```rust
             worktree_marks: std::sync::Mutex::new(HashMap::new()),
@@ -1679,7 +1679,7 @@ cargo build --workspace 2>&1 | grep -E "^error" -A 5
 cargo test --workspace
 ```
 
-Expected: PASS. Any test that exercised import or main is deleted, not weakened — the behaviour it covered is now covered by Task 4's reconciler tests.
+Expected: PASS. Any test that exercised import or main is deleted, not weakened — the behavior it covered is now covered by Task 4's reconciler tests.
 
 - [ ] **Step 7: Commit**
 
@@ -1884,7 +1884,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Modify: `apps/macos/Sources/FarCooler/Model.swift:31-130, 365-380` (`Workspace`, `WorkspaceState`)
 - Modify: `apps/macos/Sources/FarCooler/DaemonClient.swift:544-560` (hide/unhide/remove)
 - Modify: `apps/macos/Sources/FarCooler/ContentView.swift:272-381, 449-470` (grouping, sidebar, `+` menu)
-- Modify: `apps/macos/Sources/FarCooler/SidebarViews.swift:87, 230, 475, 494, 586` (row menus, state colour)
+- Modify: `apps/macos/Sources/FarCooler/SidebarViews.swift:87, 230, 475, 494, 586` (row menus, state color)
 - Delete: `apps/macos/Sources/FarCooler/ImportWorktrees.swift`
 - Modify: `apps/macos/generate-project.py` or `apps/macos/build-app.sh` if either lists sources explicitly
 
@@ -2182,7 +2182,7 @@ In `apps/macos/Sources/FarCooler/SidebarViews.swift`, rename the `onArchive` clo
 
 Remove any existing `onRemove` menu item that was unconditional, so removal appears exactly once.
 
-At line 475, replace the archived colour case:
+At line 475, replace the archived color case:
 
 ```swift
         case .hidden: return Color.secondary.opacity(0.4)
@@ -2248,7 +2248,7 @@ In `WorkspaceSection`'s header row, beside the branch label:
                     if workspace.worktreeMissing {
                         // Said plainly, because every terminal in it is dead and
                         // the reason is not something the user can work out from
-                        // a colour. The row survives at all because it holds
+                        // a color. The row survives at all because it holds
                         // terminals worth keeping — an empty one is deleted by
                         // the daemon without asking.
                         Text("worktree gone")

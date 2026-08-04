@@ -7,7 +7,7 @@ Extends `docs/superpowers/specs/2026-08-01-native-agent-view-design.md`.
 ## Problem
 
 Chat mode speaks to Claude Code and nothing else. The pane knows better — a
-codex pane is recognised, labelled `codex`, and reports live activity — but
+codex pane is recognized, labeled `codex`, and reports live activity — but
 `⌃B a` on it does nothing, because `CHAT_CAPABLE` in `crates/daemon/src/service.rs`
 holds one entry.
 
@@ -30,7 +30,7 @@ nothing.
 Underneath both sits a structural fault. Two lists must agree and are maintained
 by hand, separately:
 
-- `activity::RULES` in `crates/core` — which agents are *recognised* in a pane.
+- `activity::RULES` in `crates/core` — which agents are *recognized* in a pane.
 - `CHAT_CAPABLE` in `crates/daemon` — which agents can be *hosted* as a chat.
 
 Nothing enforces their relationship. They already disagree, which is exactly

@@ -32,7 +32,7 @@ pub struct TmuxServer {
 /// Far Cooler's own minimal tmux configuration.
 ///
 /// This is NOT the user's config: the server starts with `-f` pointing here, so
-/// nothing in `~/.tmux.conf` can change managed behaviour, and these two options
+/// nothing in `~/.tmux.conf` can change managed behavior, and these two options
 /// are in force from the very first window rather than being applied afterwards.
 ///
 /// `remain-on-exit` is the load-bearing one. Applied post-hoc it would race a

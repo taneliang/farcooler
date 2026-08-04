@@ -6,14 +6,14 @@
 //! again, and the first question is whether the emulator is responsible. This
 //! answers it without guessing: if feeding and snapshotting are a rounding
 //! error against a 120 Hz frame budget of 8.3 ms, the lag is somewhere else —
-//! drawing, or the transport — and optimising here would be wasted work.
+//! drawing, or the transport — and optimizing here would be wasted work.
 
 use std::hint::black_box;
 use std::time::Instant;
 
 fn main() {
     // One full-screen redraw from a busy agent: an absolute cursor move and a
-    // colour change per row, then a screenful of text. This is the shape of the
+    // color change per row, then a screenful of text. This is the shape of the
     // traffic that actually arrives, not a synthetic stream of plain bytes.
     let mut redraw = Vec::new();
     for row in 1..=40 {

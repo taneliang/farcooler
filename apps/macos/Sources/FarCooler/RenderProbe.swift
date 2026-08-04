@@ -7,7 +7,7 @@ import Foundation
 ///
 /// Terminal rendering is the one part of this app that cannot be asserted in a
 /// unit test — "the glyphs are upright, in the right cells, in the right
-/// colours" is a claim about pixels. This makes those pixels inspectable
+/// colors" is a claim about pixels. This makes those pixels inspectable
 /// without a window, a human, or a screenshot, so a rendering regression can be
 /// caught by looking at a file.
 @MainActor
@@ -63,11 +63,11 @@ enum RenderProbe {
         for y in 0..<bitmap.pixelsHigh {
             var count = 0
             for x in stride(from: 0, to: bitmap.pixelsWide, by: 2) {
-                guard let colour = bitmap.colorAt(x: x, y: y) else { continue }
+                guard let color = bitmap.colorAt(x: x, y: y) else { continue }
                 let packed =
-                    (UInt32(colour.redComponent * 255) << 16)
-                    | (UInt32(colour.greenComponent * 255) << 8)
-                    | UInt32(colour.blueComponent * 255)
+                    (UInt32(color.redComponent * 255) << 16)
+                    | (UInt32(color.greenComponent * 255) << 8)
+                    | UInt32(color.blueComponent * 255)
                 // Anti-aliasing means "not exactly the background" is too
                 // sensitive; require a visible difference.
                 if difference(packed, background) > 24 { count += 1 }

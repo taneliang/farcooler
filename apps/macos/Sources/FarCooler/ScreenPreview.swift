@@ -66,12 +66,12 @@ final class ScreenPreviews: ObservableObject {
 
     /// Escape sequences out, text in.
     ///
-    /// `terminal screen` returns the rendered screen with its colour escapes
+    /// `terminal screen` returns the rendered screen with its color escapes
     /// intact, because that is what a real renderer wants. A tile is not one:
-    /// it draws a paragraph of `Text`, so the escapes have to go, and colour
-    /// goes with them. Losing the colour costs less than it sounds — at nine
+    /// it draws a paragraph of `Text`, so the escapes have to go, and color
+    /// goes with them. Losing the color costs less than it sounds — at nine
     /// points, syntax highlighting is noise, and the shape of the text is what
-    /// makes a screen recognisable.
+    /// makes a screen recognizable.
     static func plain(_ raw: String) -> String {
         var out = String.UnicodeScalarView()
         let scalars = Array(raw.unicodeScalars)
@@ -144,7 +144,7 @@ final class ScreenPreviews: ObservableObject {
 /// A terminal's last few lines, on a terminal's background.
 ///
 /// The background is `Palette.background` and not a material or a system
-/// colour, and that is deliberate in an app that follows the system appearance
+/// color, and that is deliberate in an app that follows the system appearance
 /// everywhere else: a terminal is always dark here, `Palette` is fixed for that
 /// reason, and a preview that turned white at noon would be a picture of a
 /// different terminal than the one behind it.
