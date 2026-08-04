@@ -539,9 +539,22 @@ struct AddRepositorySheet: View {
         working = true
         defer { working = false }
 
-        if let rootToAdd, let failure = await onAddRoot(host, rootToAdd.path) {
-            error = failure
-            return
+        if let rootToAdd, await onAddRoot(host, rootToAdd.path) != nil {
+            // The enclosing folder can be refused for reasons that say
+            // nothing about the repository itself — it is a whole home
+            // directory, a system path, already covered by a root nested
+            // the other way. None of those make the repository's own folder
+            // un-allowlistable, and it is exactly what "This also grants
+            // access to…" already showed, just narrower than what was
+            // offered rather than something unseen. A repository living
+            // directly inside `$HOME` — an ordinary way to keep one — would
+            // otherwise be impossible to add from this sheet at all: its
+            // enclosing folder always fails and there is no error to read to
+            // find out why.
+            if let fallbackFailure = await onAddRoot(host, path.path) {
+                error = fallbackFailure
+                return
+            }
         }
         if let failure = await onRegister(host, path.path) {
             error = failure

@@ -906,4 +906,9 @@ enum ErrorCode {
   // Workspaces still exist under the resource being removed. Distinct from
   // RUNNING_PROCESSES: nothing is running, but records would be orphaned.
   ERROR_CODE_WORKSPACES_EXIST = 20;
+  // Distinct from PATH_NOT_ALLOWED: that one means "not covered by any
+  // root you've allowlisted yet, allowlist it"; this one means "this exact
+  // location — a whole home directory or a system path — will never be
+  // allowlistable, pick something narrower inside it instead."
+  ERROR_CODE_SENSITIVE_ROOT = 21;
 }

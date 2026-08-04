@@ -1626,13 +1626,13 @@ fn reject_sensitive_root(path: &Path) -> Result<()> {
         || s.starts_with("/var");
 
     if sensitive {
-        return Err(DomainError::PathNotAllowed);
+        return Err(DomainError::SensitiveRoot);
     }
 
     if let Some(home) = std::env::var_os("HOME")
         && Path::new(&home) == path
     {
-        return Err(DomainError::PathNotAllowed);
+        return Err(DomainError::SensitiveRoot);
     }
     Ok(())
 }

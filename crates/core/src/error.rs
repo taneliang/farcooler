@@ -60,6 +60,15 @@ pub enum DomainError {
     #[error("path is outside every allowlisted repository root")]
     PathNotAllowed,
 
+    /// Distinct from `PathNotAllowed`: that one is "allowlist this", this one
+    /// is "this will never be allowlistable". A whole home directory or a
+    /// system path reused `PathNotAllowed`'s message once, and someone trying
+    /// to add their `$HOME` as a root read "outside every allowlisted root"
+    /// for a path that was, from where they were sitting, obviously the root
+    /// they were trying to add.
+    #[error("that location is a whole home directory or a system path, and can never be allowlisted — pick a folder inside it")]
+    SensitiveRoot,
+
     #[error("exact typed confirmation required")]
     ConfirmationRequired,
 
@@ -93,6 +102,7 @@ impl DomainError {
             DomainError::IdempotencyMismatch => (ErrorCode::IdempotencyMismatch, false),
             DomainError::TmuxUnavailable => (ErrorCode::TmuxUnavailable, true),
             DomainError::PathNotAllowed => (ErrorCode::PathNotAllowed, false),
+            DomainError::SensitiveRoot => (ErrorCode::SensitiveRoot, false),
             DomainError::ConfirmationRequired => (ErrorCode::ConfirmationRequired, false),
             DomainError::WorkspacesExist => (ErrorCode::WorkspacesExist, false),
         }
@@ -142,6 +152,7 @@ mod tests {
             DomainError::IdempotencyMismatch,
             DomainError::TmuxUnavailable,
             DomainError::PathNotAllowed,
+            DomainError::SensitiveRoot,
             DomainError::ConfirmationRequired,
             DomainError::WorkspacesExist,
         ]
