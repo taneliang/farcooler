@@ -248,5 +248,16 @@ struct HostsSettings: View {
         // reason exists.
         log[target] = await hosts.install(target)
         await hosts.probe(target)
+
+        // `hosts.probe` only updates this row's own display. The
+        // `DaemonClient` everything else reads through — the sidebar, "Add
+        // repository", every `store.refusal(for:)` — is a separate object
+        // that landed in `.notInstalled` before this install ran, and by
+        // design does not recheck for minutes at a time so a host that
+        // genuinely has no Far Cooler is not hammered forever. Without this,
+        // an install that just succeeded here still refuses everywhere else
+        // until that backoff happens to elapse. The same call "Reconnect
+        // all" makes.
+        Reachability.shared.retryNow()
     }
 }
