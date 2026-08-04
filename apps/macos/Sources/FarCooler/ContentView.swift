@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var client = DaemonClient()
+    @StateObject private var store = FleetStore()
     @ObservedObject private var preferences = Preferences.shared
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
@@ -15,6 +15,14 @@ struct ContentView: View {
     /// Which repository the new-workspace sheet should open on, when it was
     /// reached from a project header rather than the sidebar's own `+`.
     @State private var newWorkspaceRepository = ""
+    /// The machine `newWorkspaceRepository` lives on, when the sheet was
+    /// reached from a project header. `nil` means "no header was clicked" —
+    /// the sidebar's own `+` and the empty-state button both mean "no host
+    /// named yet," and the sheet's own picker is left to choose one. A
+    /// header's `+` is never that ambiguous: the group key it was clicked on
+    /// already says which machine, and preselecting anything else would put
+    /// the worktree on a machine other than the one the row named.
+    @State private var newWorkspaceHost: String?
     @State private var showAddRepository = false
     @State private var showShortcuts = false
     @State private var showAbout = false
@@ -22,11 +30,15 @@ struct ContentView: View {
     @State private var showQuickCreate = false
     @AppStorage("tasks.lastProject") private var lastProject = ""
     /// The terminal that was open when the app last closed, as
-    /// `workspace/terminal`.
+    /// `host/workspace/terminal`.
     ///
     /// Reopening somewhere else is a small thing that costs a real one: the
     /// pane you were reading is the reason you came back, and finding it again
-    /// means walking a sidebar you had already navigated once.
+    /// means walking a sidebar you had already navigated once. The host is part
+    /// of the key now, same as `Selection`: a workspace id alone does not say
+    /// which machine to look for it on, and it does not need to — full ids are
+    /// unique per machine already — but resolving it needs the client, and the
+    /// client is looked up by host.
     @AppStorage("fleet.lastTerminal") private var lastTerminal = ""
     @FocusState private var searchFocused: Bool
     @State private var removeWorkspace: Workspace?
@@ -44,23 +56,48 @@ struct ContentView: View {
     @State private var pendingPaneModeSwitch: PaneModeConfirmation?
     /// What an editor said when it would not start.
     ///
-    /// Its own state rather than `client.lastError`, which is rendered only by
-    /// `fleetPlaceholder` and therefore only while no fleet has loaded — the
-    /// opposite of when this control exists. See `EditorErrorBanner`.
+    /// Its own state rather than routed through `errorBanner`, which is
+    /// rendered only by `fleetPlaceholder`'s error branch and by the general
+    /// banner below — the opposite of when this control exists. See
+    /// `EditorErrorBanner`.
     @State private var editorError: String?
     /// Terminals with a `terminal seen` call already in flight. See
     /// `markVisibleSeen`.
     @State private var markingSeen: Set<String> = []
+    /// What a refused or failed action said, shown by the banner over the
+    /// detail pane.
+    ///
+    /// Its own state now rather than one client's `lastError`: there is no
+    /// longer one client whose `lastError` could stand for "the last thing
+    /// that went wrong" — an action against one machine must not be reported
+    /// through, or cleared by, a banner bound to a different one. Set by
+    /// `act(on:default:_:)`, which is also the one place that clears it: on
+    /// refusal, and by copying back whatever the client itself set on
+    /// failure.
+    @State private var errorBanner: String?
 
     /// What the detail pane is showing.
+    ///
+    /// Carries the host alongside the id. A workspace's own id is a full
+    /// per-daemon UUID and is not expected to collide across machines, but
+    /// resolving a selection means finding both the workspace AND the client
+    /// that owns it, and `FleetStore.client(for:)` — deliberately, see its own
+    /// doc comment — never routes by id alone. Matching on host as well here
+    /// keeps that same rule rather than leaning on id uniqueness as the only
+    /// thing standing between a click and the right machine.
     enum Selection: Hashable {
-        case workspace(String)
-        case terminal(workspace: String, terminal: String)
+        case workspace(host: String, id: String)
+        case terminal(host: String, workspace: String, terminal: String)
     }
 
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
         let id = UUID()
+        /// Which machine `terminal` is on — routing is by workspace, not by
+        /// the client that was current when the confirmation was raised,
+        /// because by the time someone answers the sheet that may no longer
+        /// be the same machine.
+        let workspace: Workspace
         let terminal: String
         let mode: String
         let message: String
@@ -72,8 +109,8 @@ struct ContentView: View {
         } detail: {
             // Top-aligned over the detail pane specifically, not the sidebar —
             // `fleetPlaceholder` already owns the sidebar's pre-load state, and
-            // `ErrorBanner` guards on `client.hasLoaded` itself so the two never
-            // draw at once.
+            // this banner only appears once something has actually been acted
+            // on, so the two never draw at once.
             detail
                 // Attached here rather than beside each of the four
                 // `navigationTitle` calls, which sit in three different views
@@ -82,11 +119,11 @@ struct ContentView: View {
                 // window is showing, which is exactly what the control acts on.
                 .openInEditorToolbar(workspace: detailWorkspace) { editorError = $0 }
                 .overlay(alignment: .top) {
-                    ErrorBanner(client: client)
+                    ErrorBanner(message: errorBanner) { errorBanner = nil }
                 }
                 // A message arriving on a keystroke, so the same snappy preset
                 // `PrefixHintOverlay` uses for its chip.
-                .animation(.snappy(duration: 0.22), value: client.lastError)
+                .animation(.snappy(duration: 0.22), value: errorBanner)
         }
         .task {
             Notifier.shared.requestAuthorisation()
@@ -95,38 +132,43 @@ struct ContentView: View {
             // Before the first read, not after: a stale daemon left over from an
             // earlier build would otherwise answer it, and everything from that
             // point on would be this app talking to a different program.
+            //
+            // `FleetStore` already does this itself for the local machine's own
+            // bring-up — see `rebuild()` — so this call is almost always just
+            // confirming what is already running by the time it lands. Kept
+            // anyway so a daemon that failed to start is never silent even if
+            // that race is ever changed.
             if let problem = await LocalDaemon.shared.ensure().problem {
-                client.lastError = problem
+                store.clients[""]?.lastError = problem
             }
-            await client.refresh()
-            await client.refreshRepositories()
-            await client.refreshRoots()
-            await client.refreshLayouts()
+            // Every machine's own fleet, repositories, roots, and layouts are
+            // already being brought up by `FleetStore` — see `rebuild()`.
+            // Its event stream is a separate question: `rebuild()` starts
+            // one only the first time a client is added, and `.onDisappear`
+            // below stops every one of them on the way out. `resume()` is
+            // this `.task`'s half of that pair — without it, a window that
+            // closes and reopens (⌘W, then the Dock) comes back with every
+            // client's `state` still reading whatever it was, but nothing
+            // actually listening.
+            store.resume()
             selectFirstRunningTerminal()
-            // Pushed, not polled. The daemon derives once for every client and
-            // sends only what changed, so a quiet fleet costs nothing and a
-            // question from an agent arrives at once instead of up to a poll
-            // interval later.
-            client.startEvents()
         }
-        .onDisappear { client.stopEvents() }
+        .onDisappear {
+            for client in store.clients.values { client.stopEvents() }
+        }
         // Recorded as it changes rather than on quit: an app that is force
         // quit, crashes, or is killed by a rebuild never gets a last word, and
         // this is exactly the state worth surviving all three.
         .onChange(of: selection) { _, now in
-            if case let .terminal(workspace, terminal) = now {
-                lastTerminal = "\(workspace)/\(terminal)"
+            if case let .terminal(host, workspace, terminal) = now {
+                lastTerminal = "\(host)/\(workspace)/\(terminal)"
             }
         }
-        // The event stream is a long-lived process pointed at a machine when
-        // it starts, so changing which machine this window drives has to
-        // restart it rather than let it go on listening to the old one.
-        .onChange(of: preferences.remoteHost) { _, _ in Task { await client.hostChanged() } }
         .onCommand { command in run(command) }
         .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in selectTerminal(at: index) }
-        .onChange(of: client.layouts) { _, _ in followLayoutFocus() }
-        .onChange(of: client.fleet) { _, _ in
+        .onChange(of: store.layouts) { _, _ in followLayoutFocus() }
+        .onChange(of: store.fleet) { _, _ in
             // One rule for every way a terminal can disappear: exiting on its
             // own, being closed here, being closed from a phone, or its
             // workspace being hidden. Hooking each path separately meant the
@@ -137,6 +179,12 @@ struct ContentView: View {
             // else — no click, no selection change — so this is the only hook
             // that can catch the case where you were already watching it.
             markVisibleSeen()
+            // A machine's first read can land well after this view's own
+            // `.task` already ran and found nothing to select — `FleetStore`
+            // brings every client up in the background, on its own schedule.
+            // Guarded on `selection == nil` inside, so this is a no-op once
+            // something is already selected.
+            selectFirstRunningTerminal()
         }
         // Coming back to the app is reading whatever it comes back to. The
         // notification did its job while you were away; leaving the row lit
@@ -147,25 +195,13 @@ struct ContentView: View {
             markVisibleSeen()
         }
         .onChange(of: selection) { _, new in
-            // `lastError` is one flat field with no notion of which pane it was
-            // about. Nothing used to clear it on navigation because nothing
-            // rendered it after startup — so the staleness cost nothing to
-            // leave in place. Now that `ErrorBanner` shows it, a message a
-            // refused `⌃B a` left behind on one pane would otherwise still be
-            // on screen after the user moved to another, describing a pane
-            // they are no longer looking at. Selection is the one thing every
-            // navigation path — sidebar click, `⌘P`, `⌘]`, `⌃B o`, closing a
-            // terminal — funnels through, which makes it the narrowest point
-            // that sees every one of them.
-            //
-            // Gated on `hasLoaded`: before the fleet has loaded, this same
-            // field is what `fleetPlaceholder` is showing as "could not read
-            // the fleet," and a selection change made while restoring the
-            // last-open terminal at startup must not blank that out from
-            // under it.
-            if client.hasLoaded {
-                client.lastError = nil
-            }
+            // Cleared on every navigation, so a refusal or failure left behind
+            // on one pane does not go on describing a pane the user is no
+            // longer looking at. Selection is the one thing every navigation
+            // path — sidebar click, ⌘P, ⌘], ⌃B o, closing a terminal — funnels
+            // through, which makes it the narrowest point that sees every one
+            // of them.
+            errorBanner = nil
 
             // Selecting a pane focuses it, which is also what switches to its
             // layout. Done here rather than in `detail`, because it is a write and
@@ -176,16 +212,21 @@ struct ContentView: View {
             // charge — so clicking Terminal 6 landed you on whichever pane of that
             // layout you had used last. `⌘P` had the same fault for the same
             // reason: both set a selection and let the layout overrule it.
-            if case .terminal(let wsID, let termID) = new,
-                let workspace = client.fleet.workspaces.first(where: { $0.id == wsID }),
-                let holder = client.group(holding: termID, in: wsID),
+            if case .terminal(let host, let wsID, let termID) = new,
+                let workspace = workspace(host: host, id: wsID),
+                let c = store.client(for: workspace),
+                let holder = c.group(holding: termID, in: wsID),
                 let pane = holder.pane(termID),
                 !holder.isActive || !pane.focused
             {
-                Task { await client.focusPane(pane.short, in: workspace) }
+                Task {
+                    await act(on: workspace) { client in
+                        await client.focusPane(pane.short, in: workspace)
+                    }
+                }
             }
 
-            if case .terminal(_, let id) = new {
+            if case .terminal(_, _, let id) = new {
                 // Stamped here rather than in the palette, so every way of
                 // arriving counts: a sidebar click, ⌘], ⌃B o, a jump from the
                 // palette itself. A switcher that only learned from its own
@@ -204,12 +245,12 @@ struct ContentView: View {
         .sheet(isPresented: $showAbout) { AboutSheet() }
         .sheet(isPresented: $showResumeBranch) {
             ResumeBranch(
-                projects: client.repositories,
+                projects: store.repositories,
                 project: $lastProject,
-                load: { await client.branches(project: $0) },
-                onAdopt: { branch, project, preset in
+                load: { host, project in await store.clients[host]?.branches(project: project) ?? [] },
+                onAdopt: { branch, host, project, preset in
                     lastProject = project
-                    resume(branch: branch.name, project: project, agent: preset)
+                    resume(branch: branch.name, host: host, project: project, agent: preset)
                 }
             )
         }
@@ -219,11 +260,11 @@ struct ContentView: View {
         .overlay(alignment: .top) {
             if showQuickCreate {
                 QuickCreate(
-                    projects: client.repositories,
+                    projects: store.repositories,
                     project: $lastProject,
-                    onSubmit: { description, project, preset in
+                    onSubmit: { description, host, project, preset in
                         lastProject = project
-                        startTask(description: description, project: project, agent: preset)
+                        startTask(description: description, host: host, project: project, agent: preset)
                     },
                     onResume: {
                         showQuickCreate = false
@@ -261,9 +302,9 @@ struct ContentView: View {
                         .ignoresSafeArea()
                         .onTapGesture { showPalette = false }
                     CommandPalette(
-                        workspaces: client.fleet.workspaces,
+                        workspaces: store.fleet.workspaces,
                         current: selection,
-                        screen: { await client.screen(terminal: $0) },
+                        screen: { short in await screen(forTerminalShort: short) },
                         onRun: { perform($0) },
                         onClose: { showPalette = false }
                     )
@@ -281,30 +322,55 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showAddRepository) {
             AddRepositorySheet(
-                roots: client.roots,
-                onAddRoot: { path in
+                hosts: store.hosts,
+                roots: store.roots,
+                onAddRoot: { host, path in
+                    if let why = store.refusal(for: host) { return why }
+                    guard let client = store.clients[host] else {
+                        return "that machine is not connected"
+                    }
                     let failure = await client.addRoot(path)
                     await client.refreshRoots()
                     return failure
                 },
-                onRegister: { path in await client.registerRepository(path) },
-                onRegistered: {
+                onRegister: { host, path in
+                    if let why = store.refusal(for: host) { return why }
+                    guard let client = store.clients[host] else {
+                        return "that machine is not connected"
+                    }
+                    return await client.registerRepository(path)
+                },
+                onRegistered: { host in
                     Task {
                         // Registering adopts every worktree the repository
                         // already has, main checkout included, so there is
-                        // nothing left to offer to import.
-                        await client.refreshRepositories()
-                        await client.refresh()
+                        // nothing left to offer to import. Refreshed on the
+                        // machine it was registered on — there is no event
+                        // push for a repository or root change, so any other
+                        // host would leave that host's sidebar rows stale.
+                        await store.clients[host]?.refreshRepositories()
+                        await store.clients[host]?.refresh()
                     }
                 }
             )
         }
         .sheet(isPresented: $showNewWorkspace) {
             NewWorkspaceSheet(
-                repositories: client.repositories,
-                preselected: newWorkspaceRepository
-            ) { repo, task, branch, base in
-                await client.createWorkspace(repo: repo, task: task, branch: branch, base: base)
+                repositories: store.repositories,
+                preselected: newWorkspaceRepository,
+                // `newWorkspaceHost` is the machine the header's `+` was
+                // clicked on; nil is the sidebar's own `+` and the
+                // empty-state button, neither of which named a machine, so
+                // the sheet's own picker is left to choose one.
+                preselectedHost: newWorkspaceHost ?? ""
+            ) { host, repo, task, branch, base in
+                if let why = store.refusal(for: host) {
+                    return "Cannot do that: \(why)"
+                }
+                guard let client = store.clients[host] else {
+                    return "that machine is not connected"
+                }
+                return await client.createWorkspace(repo: repo, task: task, branch: branch, base: base)
             }
         }
         .sheet(item: $removeWorkspace) { ws in
@@ -318,8 +384,14 @@ struct ContentView: View {
                     return kind == .running || kind == .starting
                 }
             ) { typed in
-                let result = await client.removeWorktree(ws.short, confirm: typed)
-                if case .ok = result, case .terminal(let w, _) = selection, w == ws.id {
+                let result = await act(
+                    on: ws, default: .failed("This machine cannot be reached right now.")
+                ) { c in
+                    await c.removeWorktree(ws.short, confirm: typed)
+                }
+                if case .ok = result, case .terminal(let h, let w, _) = selection,
+                    h == (ws.host ?? ""), w == ws.id
+                {
                     selection = nil
                 }
                 return result
@@ -327,51 +399,111 @@ struct ContentView: View {
         }
         .sheet(item: $pendingPaneModeSwitch) { pending in
             PaneModeConfirmSheet(message: pending.message) {
-                await client.setPaneMode(pending.terminal, mode: pending.mode, force: true)
+                await act(
+                    on: pending.workspace, default: .failed("This machine cannot be reached right now.")
+                ) { c in
+                    await c.setPaneMode(pending.terminal, mode: pending.mode, force: true)
+                }
             }
         }
     }
 
     // MARK: - Sidebar
 
-    /// Worktrees matching the search, grouped by project.
+    /// Worktrees matching the search, grouped by machine and project.
     ///
-    /// Hidden ones are separated rather than filtered out: they still belong to
-    /// the project, and a collapsed section at the bottom is how you get back to
-    /// one. Grouped rather than filtered by host: you work across machines at
-    /// once, and a host picker would make a remote agent something to go and
-    /// look for — the host is appended to the key only when there is more than
-    /// one machine to tell apart.
-    private var groups: [(String, [Workspace], [Workspace])] {
-        let visible = client.fleet.workspaces.filter { $0.matches(query) }
-        let hosts = Set(visible.map { $0.host ?? "" })
+    /// The key carries the host because two machines can have a project of the
+    /// same name, and they are not the same project. The host is only DISPLAYED
+    /// when there is more than one machine — on a fleet of one, saying which
+    /// machine is noise.
+    ///
+    /// Hidden worktrees are separated rather than filtered out: they still
+    /// belong to the project, and a collapsed section at the bottom is how you
+    /// get back to one.
+    ///
+    /// A struct with a stable `id`, not a bare tuple keyed by array position:
+    /// `ForEach` used to key this list by `.offset`, so inserting a group
+    /// renumbered every header after it and any transient `@State` (row
+    /// hovering) followed the index instead of following the row it belonged
+    /// to. `groupKey(host:project:)` was already computed for `hiddenExpanded`
+    /// three lines below — `id` is the same value, just attached to the
+    /// element itself so `ForEach` can use it too.
+    private struct ProjectGroup: Identifiable {
+        let host: String
+        let project: String
+        let shown: [Workspace]
+        let hidden: [Workspace]
+        var id: String { "\(host)\u{1}\(project)" }
+    }
+
+    private var groups: [ProjectGroup] {
+        let visible = store.fleet.workspaces.filter { $0.matches(query) }
         var order: [String] = []
-        var byProject: [String: [Workspace]] = [:]
+        var byKey: [String: [Workspace]] = [:]
 
         for workspace in visible {
+            let host = workspace.host ?? ""
             let project = (workspace.repository ?? "").isEmpty
                 ? "Ungrouped" : workspace.repository!
-            let host = workspace.host ?? ""
-            let key = hosts.count > 1 && !host.isEmpty ? "\(project) · \(host)" : project
-            if byProject[key] == nil { order.append(key) }
-            byProject[key, default: []].append(workspace)
+            let key = "\(host)\u{1}\(project)"
+            if byKey[key] == nil { order.append(key) }
+            byKey[key, default: []].append(workspace)
         }
 
-        return order.map { key in
-            let all = byProject[key] ?? []
-            // The main checkout first, then everything else in the order the
-            // daemon listed it. The one row you cannot delete is the one row
-            // that should not move around.
-            //
-            // Partitioned rather than `sorted(by:)`: Swift's `sorted(by:)`
-            // does not guarantee stability, and with `FleetChanged` now
-            // driving a `refresh()` on every broadcast (Fix 1), an unstable
-            // sort would let the non-main rows visibly reshuffle on every
-            // fleet event even though their relative order never changed.
-            let visible = all.filter { !$0.isHidden }
-            let shown = visible.filter(\.isMainCheckout) + visible.filter { !$0.isMainCheckout }
-            return (key, shown, all.filter(\.isHidden))
+        var result: [ProjectGroup] = order.map { key in
+            let parts = key.split(separator: "\u{1}", maxSplits: 1, omittingEmptySubsequences: false)
+            let host = String(parts[0])
+            let project = String(parts.count > 1 ? parts[1] : "")
+            let all = byKey[key] ?? []
+            // Main checkout first, then the daemon's order. A stable partition,
+            // not a sort: sorted(by:) is not guaranteed stable and rows would
+            // reshuffle on every fleet event.
+            let shown = all.filter { !$0.isHidden && $0.isMainCheckout }
+                + all.filter { !$0.isHidden && !$0.isMainCheckout }
+            return ProjectGroup(host: host, project: project, shown: shown, hidden: all.filter(\.isHidden))
         }
+
+        // A machine that has never connected has no rows of its own, and
+        // without this it would simply be missing — leaving you to wonder
+        // where it went rather than seeing that it needs attention. Skipped
+        // while searching: a machine with nothing on it can never match a
+        // query, and a header appearing only here would look like a hit.
+        if query.isEmpty {
+            for host in silentHosts {
+                result.append(ProjectGroup(host: host, project: "", shown: [], hidden: []))
+            }
+        }
+
+        return result
+    }
+
+    /// Whether to name machines at all.
+    private var showHosts: Bool { store.hosts.count > 1 }
+
+    /// Machines with nothing to show yet still get a header.
+    ///
+    /// A machine that has never connected has no rows, and without this it
+    /// would simply be missing — leaving you to wonder where it went rather
+    /// than seeing that it needs attention.
+    ///
+    /// The local machine is excluded: it already has a dedicated placeholder
+    /// (`fleetPlaceholder`, below) that reads its loading/error state in more
+    /// detail than a bare header could say. Only a REMOTE machine that has
+    /// contributed nothing gets one of these instead.
+    private var silentHosts: [String] {
+        let present = Set(store.fleet.workspaces.map { $0.host ?? "" })
+        return store.hosts.filter { !present.contains($0) && !$0.isEmpty }
+    }
+
+    /// A group's identity for `hiddenExpanded`'s key.
+    ///
+    /// Two machines can have a project of the same name, and a lone project
+    /// name is no longer unique on its own now that the group carries the host
+    /// separately — so `hiddenExpanded`, keyed by this rather than by
+    /// `project` alone, cannot conflate "hidden expanded on this machine" with
+    /// "hidden expanded on that one." Same value as `ProjectGroup.id` above.
+    private func groupKey(host: String, project: String) -> String {
+        "\(host)\u{1}\(project)"
     }
 
     /// Start a worktree in a named project.
@@ -379,8 +511,9 @@ struct ContentView: View {
     /// The sheet already has a repository picker; this just answers it in
     /// advance, because someone clicking `+` on a project header has already
     /// said which one.
-    private func newWorktree(in project: String) {
-        newWorkspaceRepository = repositoryName(from: project)
+    private func newWorktree(host: String, project: String) {
+        newWorkspaceRepository = project
+        newWorkspaceHost = host
         showNewWorkspace = true
     }
 
@@ -389,21 +522,28 @@ struct ContentView: View {
     /// The main checkout is always present in the fleet — the daemon adopts it
     /// the moment a repository is registered — so this finds it rather than
     /// asking the CLI to produce or locate it.
-    private func newMainTerminal(in project: String) async {
-        let repo = repositoryName(from: project)
+    private func newMainTerminal(host: String, project: String) async {
         guard
-            let workspace = client.fleet.workspaces.first(where: {
-                $0.isMainCheckout && $0.repository == repo
+            let workspace = store.fleet.workspaces.first(where: {
+                $0.isMainCheckout && $0.repository == project && ($0.host ?? "") == host
             })
         else { return }
-        await client.createTerminal(workspace: workspace.short, preset: "shell", title: "")
-        await client.refresh()
+        await act(on: workspace) { client in
+            await client.createTerminal(workspace: workspace.short, preset: "shell", title: "")
+            await client.refresh()
+        }
     }
 
-    /// A group's key carries the host when a fleet spans machines
-    /// (`project · host`); the repository is the part before it.
-    private func repositoryName(from project: String) -> String {
-        project.components(separatedBy: " · ").first ?? project
+    /// A plain, non-optional entry point into `newMainTerminal(host:project:)`.
+    ///
+    /// `ProjectHeader.onNewTerminal` is optional — nil for a silent host's
+    /// placeholder — and a ternary handing back `Task { await ... }` directly
+    /// for the non-nil branch leaves the compiler unable to settle on which
+    /// `Task.init` overload the closure means, reported as an unhelpful
+    /// "ambiguous use of 'init(name:priority:operation:)'" with no line
+    /// pointing at the ternary itself. A named function sidesteps it.
+    private func startMainTerminal(host: String, project: String) {
+        Task { await newMainTerminal(host: host, project: project) }
     }
 
     private var sidebar: some View {
@@ -411,7 +551,18 @@ struct ContentView: View {
             sidebarHeader
             searchField
 
-            if client.fleet.workspaces.isEmpty {
+            // Gated on `groups`, not the raw merged workspace count: a
+            // machine that has never connected contributes no workspaces but
+            // still gets a `silentHosts` header in `groups` (unless it's the
+            // local machine, which has its own placeholder below). Gating on
+            // `workspaces.isEmpty` instead used to short-circuit straight to
+            // the LOCAL machine's empty state whenever the merged fleet had
+            // no rows — even with a remote machine configured and its header
+            // sitting in `groups` right below — making that remote machine
+            // vanish from the sidebar entirely rather than showing as
+            // unreachable. `query.isEmpty` keeps this from swallowing a
+            // plain "no search results" into the same screen.
+            if groups.isEmpty && query.isEmpty {
                 fleetPlaceholder
                 Spacer(minLength: 0)
             } else if groups.isEmpty {
@@ -426,51 +577,71 @@ struct ContentView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(groups, id: \.0) { project, workspaces, hidden in
+                        ForEach(groups) { group in
+                            let key = groupKey(host: group.host, project: group.project)
+                            // A silent host's placeholder has no project of its
+                            // own to name or add into — the header names the
+                            // machine instead, and there is nothing yet to
+                            // route a `+` to.
+                            let isSilentHost = group.project.isEmpty
+                            let usable = store.refusal(for: group.host) == nil
                             ProjectHeader(
-                                name: project,
-                                count: workspaces.count,
-                                onNewWorktree: { newWorktree(in: project) },
-                                onNewTerminal: { Task { await newMainTerminal(in: project) } }
+                                name: isSilentHost
+                                    ? (group.host.isEmpty ? "This Mac" : group.host) : group.project,
+                                count: group.shown.count,
+                                onNewWorktree: isSilentHost
+                                    ? nil : { newWorktree(host: group.host, project: group.project) },
+                                onNewTerminal: isSilentHost
+                                    ? nil
+                                    : { startMainTerminal(host: group.host, project: group.project) },
+                                host: group.host,
+                                hostState: store.state(of: group.host),
+                                showHost: isSilentHost ? false : showHosts,
+                                onReconnect: { store.reconnect(group.host) }
                             )
-                            ForEach(workspaces) { ws in
+                            ForEach(group.shown) { ws in
                                 WorkspaceSection(
                                     workspace: ws,
                                     isExpanded: expanded.contains(ws.id),
                                     selection: $selection,
                                     onToggle: { toggle(ws.id) },
                                     onNewTerminal: { newTerminal(in: ws) },
-                                    onHide: { Task { await client.hideWorkspace(ws.short) } },
-                                    onUnhide: { Task { await client.unhideWorkspace(ws.short) } },
+                                    onHide: {
+                                        Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } }
+                                    },
+                                    onUnhide: {
+                                        Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
+                                    },
                                     onRemove: { removeWorkspace = ws },
                                     onTerminalAction: { term, action in
-                                        Task { await run(action, on: term) }
+                                        Task { await run(action, on: term, in: ws) }
                                     },
-                                    layouts: client.layouts[ws.id] ?? [],
+                                    layouts: store.client(for: ws)?.layouts[ws.id] ?? [],
                                     onMoveToLayout: { term, group in
                                         moveToLayout(term, in: ws, group: group)
                                     },
                                     onDropTogether: { dragged, onto in
                                         placePane(dragged, onto: onto.id, side: .right, in: ws)
                                     },
-                                    tiled: Set(client.activeGroup(ws.id)?.terminals ?? []),
-                                    onEditorError: { editorError = $0 }
+                                    tiled: Set(store.client(for: ws)?.activeGroup(ws.id)?.terminals ?? []),
+                                    onEditorError: { editorError = $0 },
+                                    usable: usable
                                 )
                             }
-                            if !hidden.isEmpty {
+                            if !group.hidden.isEmpty {
                                 HiddenWorktrees(
-                                    project: project,
-                                    worktrees: hidden,
-                                    isExpanded: hiddenExpanded.contains(project),
+                                    project: key,
+                                    worktrees: group.hidden,
+                                    isExpanded: hiddenExpanded.contains(key),
                                     onToggle: {
-                                        if hiddenExpanded.contains(project) {
-                                            hiddenExpanded.remove(project)
+                                        if hiddenExpanded.contains(key) {
+                                            hiddenExpanded.remove(key)
                                         } else {
-                                            hiddenExpanded.insert(project)
+                                            hiddenExpanded.insert(key)
                                         }
                                     },
                                     onUnhide: { ws in
-                                        Task { await client.unhideWorkspace(ws.short) }
+                                        Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
                                     }
                                 )
                             }
@@ -526,16 +697,21 @@ struct ContentView: View {
     /// hosts: an agent blocked on a machine in another room is exactly as
     /// urgent as one on this desk.
     private var attentionCount: Int {
-        client.fleet.workspaces.flatMap(\.terminals).filter(\.status.wantsAttention).count
+        store.fleet.workspaces.flatMap(\.terminals).filter(\.status.wantsAttention).count
     }
 
     private var sidebarHeader: some View {
         SidebarRow {
             HStack(spacing: 8) {
-            // The machine, not the word "Fleet". This pane IS the fleet — the
-            // thing it could not tell you was whose.
-            MachinePicker()
-            if client.busy { ProgressView().controlSize(.mini) }
+            // Just the word, now. It used to be the one machine being driven,
+            // because the sidebar was that machine's workspaces and the pane
+            // could not otherwise say whose. Now it is every machine's at
+            // once, and each row already names its own machine below, so a
+            // header naming one would be naming the wrong thing, or picking
+            // a favourite among rows that are not ranked.
+            Text("Fleet")
+                .font(.headline)
+            if store.clients.values.contains(where: \.busy) { ProgressView().controlSize(.mini) }
 
             Spacer()
 
@@ -564,6 +740,7 @@ struct ContentView: View {
                 items: [
                     SidebarMenuItem(title: "New workspace…") {
                         newWorkspaceRepository = ""
+                        newWorkspaceHost = nil
                         showNewWorkspace = true
                     },
                     SidebarMenuItem(title: "Add repository…") { showAddRepository = true },
@@ -587,11 +764,19 @@ struct ContentView: View {
     /// Telling someone they have no workspaces when the truth is that we could
     /// not read them is worse than saying nothing, because it sends them to
     /// create one they already have.
+    ///
+    /// Reads the LOCAL machine's own load state, not a merged one across every
+    /// configured machine: this Mac is always present (`FleetStore.hosts` puts
+    /// it first), and it is the one machine whose failure to answer is worth a
+    /// dedicated screen here rather than a row in the sidebar saying so — which
+    /// is what an unreachable REMOTE machine gets instead, so its own trouble
+    /// does not blank out a sidebar the local machine is perfectly able to show.
     @ViewBuilder
     private var fleetPlaceholder: some View {
-        if client.hasLoaded {
+        let local = store.clients[""]
+        if local?.hasLoaded == true {
             emptyFleet
-        } else if let error = client.lastError {
+        } else if let error = local?.lastError {
             VStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 26))
@@ -603,7 +788,7 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
                 Button("Try again") {
-                    Task { await client.refresh() }
+                    Task { await local?.refresh() }
                 }
                 .padding(.top, 4)
             }
@@ -627,14 +812,17 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            if client.repositories.isEmpty {
+            if store.repositories.isEmpty {
                 Text("Add a repository to get started.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                 Button("Add repository…") { showAddRepository = true }.padding(.top, 4)
             } else {
-                Button("New workspace") { showNewWorkspace = true }.padding(.top, 4)
+                Button("New workspace") {
+                    newWorkspaceHost = nil
+                    showNewWorkspace = true
+                }.padding(.top, 4)
             }
         }
         .padding(.horizontal, 26)
@@ -653,22 +841,64 @@ struct ContentView: View {
             Divider()
             HStack(spacing: 7) {
                 Circle()
-                    .fill(client.fleet.runtimeHealthy ? Color.green : Color.orange)
+                    .fill(store.fleet.runtimeHealthy ? Color.green : Color.orange)
                     .frame(width: 7, height: 7)
                 Text(
-                    client.fleet.runtimeHealthy
-                        ? "\(client.fleet.livePanes) live"
+                    store.fleet.runtimeHealthy
+                        ? "\(store.fleet.livePanes) live"
                         : "tmux unavailable"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+                // The dot above is an OR across every machine, deliberately —
+                // ANDing would paint the bar orange every time one laptop was
+                // merely asleep. But on a fleet of more than one, an OR alone
+                // means it takes just ONE healthy machine to turn that dot
+                // green while a second sits there unreachable or without
+                // tmux at all, invisibly. These name that machine instead of
+                // letting the merged dot speak for it; a click retries it at
+                // once, same as a header's own dot.
+                //
+                // Built by hand here rather than calling `HostDot`, and
+                // deliberately so, not as an oversight: `HostDot` draws
+                // `EmptyView()` for `.connected`, which is right for a
+                // header naming only whether the MACHINE answers, but wrong
+                // here — a machine can be fully reachable and still be the
+                // reason this row reads orange (reachable, no tmux), and
+                // that case has to draw a dot. See `troubleColor(for:)`
+                // below for the resulting, deliberately different, palette.
+                if showHosts && !store.unhealthyHosts.isEmpty {
+                    ForEach(store.unhealthyHosts, id: \.self) { host in
+                        Button {
+                            store.reconnect(host)
+                        } label: {
+                            Circle()
+                                .fill(troubleColor(for: host))
+                                .frame(width: 6, height: 6)
+                        }
+                        .buttonStyle(.plain)
+                        .help(
+                            "\(host.isEmpty ? "this Mac" : host): \(troubleReason(for: host)) — click to retry"
+                        )
+                    }
+                }
+
                 Spacer()
 
                 Button {
                     Task {
-                        await client.refresh()
-                        await client.refreshRepositories()
+                        for client in store.clients.values {
+                            await client.refresh()
+                            // Roots and layouts too, not only repositories —
+                            // a reconnection now re-seeds all three on its
+                            // own (see `DaemonClient.onReconnect`), and this
+                            // button asking for less than that would be a
+                            // step backwards from what happens automatically.
+                            await client.refreshRepositories()
+                            await client.refreshRoots()
+                            await client.refreshLayouts()
+                        }
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise").font(.system(size: 11))
@@ -681,12 +911,38 @@ struct ContentView: View {
         }
     }
 
+    /// A trouble dot's colour, for a machine `store.unhealthyHosts` has
+    /// already decided is not fully well.
+    ///
+    /// Not `HostDot`'s palette reused outright: `HostDot` renders nothing at
+    /// all for `.connected`, which is right for a header naming only whether
+    /// the MACHINE is reachable — but a machine can be perfectly reachable
+    /// and still be the reason the fleet's tmux status reads orange, and that
+    /// case has to draw something here.
+    private func troubleColor(for host: String) -> Color {
+        switch store.state(of: host) {
+        case .unreachable: return .red
+        case .notInstalled: return .secondary
+        case .connecting, .connected, .reconnecting: return .orange
+        }
+    }
+
+    private func troubleReason(for host: String) -> String {
+        switch store.state(of: host) {
+        case .unreachable(let why): return why
+        case .notInstalled: return "Far Cooler is not installed here"
+        case .reconnecting: return "reconnecting"
+        case .connecting: return "connecting"
+        case .connected: return "tmux is not available here"
+        }
+    }
+
     // MARK: - Detail
 
     @ViewBuilder
     private var detail: some View {
         switch selection {
-        case .terminal(let wsID, let termID):
+        case .terminal(let host, let wsID, let termID):
             // Every terminal is in a layout now — it IS a tmux window, and a
             // window IS a layout — so the second branch is reached only in the
             // seconds before the first `layout show` comes back, and after that
@@ -699,47 +955,60 @@ struct ContentView: View {
             // selecting a pane belonging to a different layout showed it on its
             // own and the view bounced between arrangement and single terminal as
             // you clicked down the sidebar.
-            if let ws = workspace(wsID), client.group(holding: termID, in: wsID) != nil,
-                let group = client.activeGroup(wsID)
+            if let ws = workspace(host: host, id: wsID),
+                let c = store.client(for: ws), c.group(holding: termID, in: wsID) != nil,
+                let group = c.activeGroup(wsID)
             {
                 tiled(ws, group: group)
-            } else if let ws = workspace(wsID),
+            } else if let ws = workspace(host: host, id: wsID),
                 let term = ws.terminals.first(where: { $0.id == termID })
             {
                 TerminalPane(
                     terminal: term,
                     workspace: ws,
-                    binary: client.cliPath,
-                    environment: client.cliEnvironment,
-                    hostArguments: client.cliHostArguments,
+                    binary: store.client(for: ws)?.cliPath,
+                    environment: store.client(for: ws)?.cliEnvironment ?? [:],
+                    hostArguments: store.client(for: ws)?.cliHostArguments ?? [],
+                    refusal: { store.refusal(for: ws) },
                     onGeometry: { cols, rows in
-                        await client.resize(terminal: term.short, columns: cols, rows: rows)
+                        // Not routed through `act(on:_:)`, deliberately: this
+                        // fires from window and pane geometry, not a click —
+                        // the same reasoning `markVisibleSeen()` documents
+                        // above. Selecting a row on a sleeping machine is
+                        // exactly what the design wants readable, and a
+                        // window resize while it's selected must not put
+                        // "Cannot do that" over a pane nobody touched.
+                        await store.client(for: ws)?.resize(
+                            terminal: term.short, columns: cols, rows: rows)
                     },
-                    onSearchFiles: { query in await client.searchFiles(in: ws, query: query) },
-                    onAction: { action in Task { await run(action, on: term) } }
+                    onSearchFiles: { query in
+                        await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? []
+                    },
+                    onAction: { action in Task { await run(action, on: term, in: ws) } }
                 )
             } else {
                 placeholder
             }
 
-        case .workspace(let wsID):
+        case .workspace(let host, let wsID):
             // A worktree with a layout shows the layout. The card list was the
             // right answer when a workspace had no arrangement of its own; once
             // it does, showing a summary of the panes instead of the panes is a
             // click in the way.
-            if let ws = workspace(wsID), let group = client.activeGroup(wsID),
+            if let ws = workspace(host: host, id: wsID),
+                let group = store.client(for: ws)?.activeGroup(wsID),
                 !group.terminals.isEmpty
             {
                 tiled(ws, group: group)
-            } else if let ws = workspace(wsID) {
+            } else if let ws = workspace(host: host, id: wsID) {
                 WorkspaceDetail(
                     workspace: ws,
                     onNewTerminal: { newTerminal(in: ws) },
-                    onHide: { Task { await client.hideWorkspace(ws.short) } },
-                    onUnhide: { Task { await client.unhideWorkspace(ws.short) } },
+                    onHide: { Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } } },
+                    onUnhide: { Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } } },
                     onRemove: { removeWorkspace = ws },
                     onOpenTerminal: { t in
-                        selection = .terminal(workspace: ws.id, terminal: t.id)
+                        selection = .terminal(host: host, workspace: ws.id, terminal: t.id)
                     }
                 )
             } else {
@@ -760,34 +1029,41 @@ struct ContentView: View {
     /// depending on which sidebar row you had clicked last.
     private func tiled(_ ws: Workspace, group: PaneGroup) -> some View {
         TileView(
-            groups: client.layouts[ws.id] ?? [group],
+            groups: store.client(for: ws)?.layouts[ws.id] ?? [group],
             workspace: ws,
-            binary: client.cliPath,
-            environment: client.cliEnvironment,
-            hostArguments: client.cliHostArguments,
+            binary: store.client(for: ws)?.cliPath,
+            environment: store.client(for: ws)?.cliEnvironment ?? [:],
+            hostArguments: store.client(for: ws)?.cliHostArguments ?? [],
+            refusal: { store.refusal(for: ws) },
             onFocus: { id in
-                selection = .terminal(workspace: ws.id, terminal: id)
-                guard let pane = client.group(holding: id, in: ws.id)?.pane(id) else { return }
-                Task { await client.focusPane(pane.short, in: ws) }
+                selection = .terminal(host: ws.host ?? "", workspace: ws.id, terminal: id)
+                guard let pane = store.client(for: ws)?.group(holding: id, in: ws.id)?.pane(id)
+                else { return }
+                Task { await act(on: ws) { c in await c.focusPane(pane.short, in: ws) } }
             },
             onSelectGroup: { chosen in
                 Task {
                     // Land in the layout you just chose, not on whatever pane the
                     // previous one had focused.
-                    reveal(await client.selectLayout(chosen.id, in: ws), in: ws)
+                    let groups = await act(on: ws, default: []) { c in
+                        await c.selectLayout(chosen.id, in: ws)
+                    }
+                    reveal(groups, in: ws)
                 }
             },
             onDropOnPane: { dragged, target, side in
                 placePane(dragged, onto: target, side: side, in: ws)
             },
             onViewport: { columns, rows in
-                await client.viewport(columns: columns, rows: rows, in: ws)
+                // Not routed through `act(on:_:)` — see `onGeometry`'s
+                // comment above: this fires from pane geometry, not a click.
+                await store.client(for: ws)?.viewport(columns: columns, rows: rows, in: ws)
             },
             onResizeDivider: { terminal, side, cells in
                 resizeDivider(terminal, side: side, cells: cells, in: ws)
             },
-            onSearchFiles: { query in await client.searchFiles(in: ws, query: query) },
-            onSwitchPaneMode: { terminal in Task { await togglePaneMode(terminal) } }
+            onSearchFiles: { query in await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? [] },
+            onSwitchPaneMode: { terminal in Task { await togglePaneMode(terminal, in: ws) } }
         )
     }
 
@@ -797,24 +1073,89 @@ struct ContentView: View {
         } description: {
             Text("Each workspace is one worktree and branch for one task.")
         } actions: {
-            if !client.repositories.isEmpty {
-                Button("New workspace") { showNewWorkspace = true }
+            if !store.repositories.isEmpty {
+                Button("New workspace") {
+                    newWorkspaceHost = nil
+                    showNewWorkspace = true
+                }
             }
         }
     }
 
+    // MARK: - Routing
+
+    /// A repository to default the project picker to, when nothing was
+    /// chosen yet — the empty state's "New workspace" button, the sidebar's
+    /// own `+`, and the palette's "new task" all reach this with no project
+    /// and therefore no host in hand at all, which is the one case where a
+    /// default machine is legitimate rather than the picker again in
+    /// disguise. This Mac's own repositories come first: it is the machine
+    /// guaranteed to be present, the one everything else is optional next to.
+    /// Falls back to any repository so the picker still has something to
+    /// preselect the very first time, before this Mac has one of its own.
+    private var defaultProjectID: String? {
+        store.repositories.first { $0.host.isEmpty }?.repository.id
+            ?? store.repositories.first?.repository.id
+    }
+
+    /// Route a mutation to the machine a workspace is on, refusing it first.
+    ///
+    /// Checked here rather than at each call site — see `FleetStore.refusal(for:)`
+    /// for why. On refusal, `fallback` is handed back and nothing is called; on
+    /// success, whatever the client itself left in `lastError` is surfaced too,
+    /// which is how a command that reached its machine and failed there still
+    /// reaches the banner.
+    @discardableResult
+    private func act<T>(
+        on ws: Workspace, default fallback: T, _ body: (DaemonClient) async -> T
+    ) async -> T {
+        if let why = store.refusal(for: ws) {
+            errorBanner = "Cannot do that: \(why)"
+            return fallback
+        }
+        guard let client = store.client(for: ws) else { return fallback }
+        let result = await body(client)
+        if let failure = client.lastError { errorBanner = failure }
+        return result
+    }
+
+    private func act(on ws: Workspace, _ body: (DaemonClient) async -> Void) async {
+        await act(on: ws, default: ()) { client in await body(client) }
+    }
+
+    /// A terminal's rendered screen, for the palette's preview tiles.
+    ///
+    /// `short` is what `ScreenPreviews` keys everything by, and short ids can
+    /// collide across machines — the reason `Selection` carries a host at all.
+    /// This is the one place left that has to work backwards from a bare short
+    /// id with no host of its own to check against, because that is the whole
+    /// interface `ScreenPreviews` and `CommandPalette` were built around. Local
+    /// machine first, then the rest in the same order the sidebar lists them:
+    /// with one machine, or with short ids that do not collide, this finds the
+    /// right terminal every time; a genuine collision costs a preview tile
+    /// showing the wrong screen, never an action landing on the wrong machine.
+    private func screen(forTerminalShort short: String) async -> String {
+        for host in store.hosts {
+            guard let client = store.clients[host] else { continue }
+            if client.fleet.workspaces.contains(where: { $0.terminals.contains { $0.short == short } }) {
+                return await client.screen(terminal: short)
+            }
+        }
+        return ""
+    }
+
     // MARK: - Behaviour
 
-    private func run(_ action: TerminalAction, on term: Terminal) async {
+    private func run(_ action: TerminalAction, on term: Terminal, in workspace: Workspace) async {
         switch action {
-        case .restart: await client.restart(terminal: term.short)
-        case .dismissLost: await client.dismissLost(term)
-        case .stop: await client.stop(terminal: term.short)
+        case .restart: await act(on: workspace) { c in await c.restart(terminal: term.short) }
+        case .dismissLost: await act(on: workspace) { c in await c.dismissLost(term) }
+        case .stop: await act(on: workspace) { c in await c.stop(terminal: term.short) }
         }
     }
 
-    private func workspace(_ id: String) -> Workspace? {
-        client.fleet.workspaces.first { $0.id == id }
+    private func workspace(host: String, id: String) -> Workspace? {
+        store.fleet.workspaces.first { ($0.host ?? "") == host && $0.id == id }
     }
 
     private func toggle(_ id: String) {
@@ -833,32 +1174,41 @@ struct ContentView: View {
         // Where you left off, if it is still there. A terminal that has since
         // exited falls through to the rules below rather than selecting
         // nothing — the saved id is a preference, not a promise.
-        let saved = lastTerminal.split(separator: "/", maxSplits: 1).map(String.init)
-        if saved.count == 2,
-            let ws = client.fleet.workspaces.first(where: { $0.id == saved[0] }),
-            ws.terminals.contains(where: { $0.id == saved[1] })
+        //
+        // Split with empty subsequences kept: the host component is empty for
+        // this Mac, so the saved string starts with "/" and the default
+        // omitting behaviour would swallow that leading empty piece and shift
+        // everything over by one.
+        let saved = lastTerminal
+            .split(separator: "/", maxSplits: 2, omittingEmptySubsequences: false)
+            .map(String.init)
+        if saved.count == 3,
+            let ws = store.fleet.workspaces.first(where: {
+                ($0.host ?? "") == saved[0] && $0.id == saved[1]
+            }),
+            ws.terminals.contains(where: { $0.id == saved[2] })
         {
             expanded.insert(ws.id)
-            selection = .terminal(workspace: ws.id, terminal: saved[1])
+            selection = .terminal(host: saved[0], workspace: ws.id, terminal: saved[2])
             return
         }
 
-        for ws in client.fleet.workspaces {
+        for ws in store.fleet.workspaces {
             if let t = ws.terminals.first(where: { $0.status.wantsAttention }) {
                 expanded.insert(ws.id)
-                selection = .terminal(workspace: ws.id, terminal: t.id)
+                selection = .terminal(host: ws.host ?? "", workspace: ws.id, terminal: t.id)
                 return
             }
         }
-        for ws in client.fleet.workspaces {
+        for ws in store.fleet.workspaces {
             if let t = ws.terminals.first(where: { StateKind.parse($0.state) == .running }) {
                 expanded.insert(ws.id)
-                selection = .terminal(workspace: ws.id, terminal: t.id)
+                selection = .terminal(host: ws.host ?? "", workspace: ws.id, terminal: t.id)
                 return
             }
         }
-        if let ws = client.fleet.workspaces.first {
-            selection = .workspace(ws.id)
+        if let ws = store.fleet.workspaces.first {
+            selection = .workspace(host: ws.host ?? "", id: ws.id)
         }
     }
 
@@ -869,12 +1219,14 @@ struct ContentView: View {
     /// One definition, so ⌘1 and a click select the same thing and ⌘] walks the
     /// list a user can actually see.
     private var allTerminals: [Terminal] {
-        client.fleet.workspaces.flatMap(\.terminals)
+        store.fleet.workspaces.flatMap(\.terminals)
     }
 
     private var selectedTerminal: (workspace: Workspace, terminal: Terminal)? {
-        guard case .terminal(let workspaceID, let terminalID) = selection,
-            let workspace = client.fleet.workspaces.first(where: { $0.id == workspaceID }),
+        guard case .terminal(let host, let workspaceID, let terminalID) = selection,
+            let workspace = store.fleet.workspaces.first(where: {
+                ($0.host ?? "") == host && $0.id == workspaceID
+            }),
             let terminal = workspace.terminals.first(where: { $0.id == terminalID })
         else { return nil }
         return (workspace, terminal)
@@ -895,17 +1247,18 @@ struct ContentView: View {
     /// mistake worse than the bug it fixes.
     private var visibleTerminals: [Terminal] {
         switch selection {
-        case .terminal(let workspaceID, let terminalID):
-            guard let ws = workspace(workspaceID) else { return [] }
-            if client.group(holding: terminalID, in: workspaceID) != nil,
-                let group = client.activeGroup(workspaceID)
+        case .terminal(let host, let workspaceID, let terminalID):
+            guard let ws = workspace(host: host, id: workspaceID) else { return [] }
+            if let c = store.client(for: ws), c.group(holding: terminalID, in: workspaceID) != nil,
+                let group = c.activeGroup(workspaceID)
             {
                 return ws.terminals.filter { group.terminals.contains($0.id) }
             }
             return ws.terminals.filter { $0.id == terminalID }
 
-        case .workspace(let workspaceID):
-            guard let ws = workspace(workspaceID), let group = client.activeGroup(workspaceID),
+        case .workspace(let host, let workspaceID):
+            guard let ws = workspace(host: host, id: workspaceID),
+                let group = store.client(for: ws)?.activeGroup(workspaceID),
                 !group.terminals.isEmpty
             else { return [] }
             return ws.terminals.filter { group.terminals.contains($0.id) }
@@ -932,8 +1285,14 @@ struct ContentView: View {
     /// Only `done`. `blocked` is the agent waiting on an ANSWER, and looking at
     /// a question does not answer it — the daemon agrees, so sending anything
     /// else would only be a subprocess spent to be told no.
+    ///
+    /// Not routed through `act(on:_:)`: this is a best-effort background
+    /// bookkeeping call, not a user-initiated action, and a machine gone quiet
+    /// for a moment must not put "Cannot do that" on screen just because an
+    /// agent on it happened to finish.
     private func markVisibleSeen() {
         guard NSApp.isActive else { return }
+        guard let ws = detailWorkspace, let client = store.client(for: ws) else { return }
         for terminal in visibleTerminals where terminal.agent == .done {
             // The daemon is idempotent, but this is not free: each call is a
             // CLI subprocess, and a fleet event arrives for every terminal on
@@ -965,37 +1324,37 @@ struct ContentView: View {
     /// rectangles tmux reported, which is the only copy.
     private func tile(_ command: TileCommand) async {
         guard let workspace = tileTarget else { return }
-        let group = client.activeGroup(workspace.id)
+        let group = store.client(for: workspace)?.activeGroup(workspace.id)
         /// The pane a keystroke acts on: the selected one, else whatever tmux says
         /// is focused.
         let here: PaneRect? = {
-            if case .terminal(_, let id) = selection, let pane = group?.pane(id) { return pane }
+            if case .terminal(_, _, let id) = selection, let pane = group?.pane(id) { return pane }
             return group?.panes.first(where: \.focused)
         }()
 
         switch command {
         case .zoom:
-            await client.zoomPane(nil, in: workspace)
+            await act(on: workspace) { c in await c.zoomPane(nil, in: workspace) }
 
         case .focusNext:
-            await client.focusPane(step: "--next", in: workspace)
+            await act(on: workspace) { c in await c.focusPane(step: "--next", in: workspace) }
         case .focusPrevious:
-            await client.focusPane(step: "--prev", in: workspace)
+            await act(on: workspace) { c in await c.focusPane(step: "--prev", in: workspace) }
 
         case .focus(let direction):
             guard let group, let from = here,
                 let next = group.neighbour(of: from.id, direction)
             else { return }
-            await client.focusPane(next.short, in: workspace)
+            await act(on: workspace) { c in await c.focusPane(next.short, in: workspace) }
 
         case .focusIndex(let n):
-            await client.focusPane(number: n, in: workspace)
+            await act(on: workspace) { c in await c.focusPane(number: n, in: workspace) }
 
         case .cycle:
-            await client.cycleLayout(workspace)
+            await act(on: workspace) { c in await c.cycleLayout(workspace) }
 
         case .preset(let preset):
-            await client.applyPreset(preset, in: workspace)
+            await act(on: workspace) { c in await c.applyPreset(preset, in: workspace) }
 
         case .splitRight, .splitDown:
             // One call. It used to be create-then-join-then-apply-a-preset, three
@@ -1004,15 +1363,18 @@ struct ContentView: View {
             // four rebuilt the other three as well. `layout split` splits the pane
             // you name, on the side you name, and leaves the rest alone.
             let side: TileDirection = command == .splitRight ? .right : .bottom
-            let groups = await client.split(workspace, beside: here?.short, side: side)
+            let groups = await act(on: workspace, default: []) { c in
+                await c.split(workspace, beside: here?.short, side: side)
+            }
             // Land in the pane that was just made, which is the one tmux focuses.
             reveal(groups, in: workspace)
 
         case .breakPane:
             guard let here else { return }
-            reveal(
-                await client.breakPane(here.short, in: workspace),
-                in: workspace, preferring: here.id)
+            let groups = await act(on: workspace, default: []) { c in
+                await c.breakPane(here.short, in: workspace)
+            }
+            reveal(groups, in: workspace, preferring: here.id)
 
         case .closePane:
             // tmux's `x`, and it means the same thing: the pane's process ends.
@@ -1028,9 +1390,15 @@ struct ContentView: View {
             // this the selection stayed on a pane from the OLD layout, which the
             // detail view then showed on its own — so ⌃B n looked like it opened a
             // random terminal and came back.
-            reveal(await client.selectLayout("--next", in: workspace), in: workspace)
+            let groups = await act(on: workspace, default: []) { c in
+                await c.selectLayout("--next", in: workspace)
+            }
+            reveal(groups, in: workspace)
         case .previousGroup:
-            reveal(await client.selectLayout("--prev", in: workspace), in: workspace)
+            let groups = await act(on: workspace, default: []) { c in
+                await c.selectLayout("--prev", in: workspace)
+            }
+            reveal(groups, in: workspace)
 
         case .toggleAgentPane:
             // Falls back to the plain selection when there is no tmux group
@@ -1051,7 +1419,7 @@ struct ContentView: View {
             guard let target else {
                 // Never silent. A keystroke that does nothing and says nothing
                 // is indistinguishable from a broken feature.
-                client.lastError = "No pane to switch — select a terminal first."
+                errorBanner = "No pane to switch — select a terminal first."
                 return
             }
             // Said here rather than left to the daemon's refusal, because this
@@ -1066,16 +1434,16 @@ struct ContentView: View {
                 // refusal strings in `Service::set_pane_mode`.
                 if target.hasDetectedAgent {
                     let agent = target.agentLabel
-                    client.lastError =
+                    errorBanner =
                         "\(agent) has no chat adapter, so it stays a terminal. Add one in "
                         + "~/.config/farcooler/config.toml, then restart the daemon "
                         + "(farcooler daemon ensure) — it only reads the file at startup."
                 } else {
-                    client.lastError = "Nothing here to chat with — this pane isn't running an agent."
+                    errorBanner = "Nothing here to chat with — this pane isn't running an agent."
                 }
                 return
             }
-            await togglePaneMode(target)
+            await togglePaneMode(target, in: workspace)
 
         case .help:
             showShortcuts = true
@@ -1087,16 +1455,19 @@ struct ContentView: View {
     /// One call, and the daemon is the one deciding whether that is even
     /// possible — a client guessing "this preset can't be an agent" would be
     /// exactly the kind of state the design says clients never derive.
-    private func togglePaneMode(_ terminal: Terminal) async {
+    private func togglePaneMode(_ terminal: Terminal, in workspace: Workspace) async {
         let target = terminal.isAgentPane ? "terminal" : "agent"
-        switch await client.setPaneMode(terminal.short, mode: target) {
+        let result = await act(on: workspace, default: DaemonClient.PaneModeResult.ok) { c in
+            await c.setPaneMode(terminal.short, mode: target)
+        }
+        switch result {
         case .ok, .failed:
-            // A failure already reached `client.lastError`, which the banner
-            // already shows — nothing further to do from here.
+            // A failure already reached `errorBanner` via `act`, so there is
+            // nothing further to do from here.
             break
         case let .confirmationRequired(message):
             pendingPaneModeSwitch = PaneModeConfirmation(
-                terminal: terminal.short, mode: target, message: message)
+                workspace: workspace, terminal: terminal.short, mode: target, message: message)
         }
     }
 
@@ -1111,10 +1482,13 @@ struct ContentView: View {
         Task {
             let groups: [PaneGroup]
             if let group, let onto = group.panes.first(where: \.focused) ?? group.panes.first {
-                groups = await client.movePane(
-                    terminal.short, onto: onto.short, side: .right, in: workspace)
+                groups = await act(on: workspace, default: []) { c in
+                    await c.movePane(terminal.short, onto: onto.short, side: .right, in: workspace)
+                }
             } else {
-                groups = await client.breakPane(terminal.short, in: workspace)
+                groups = await act(on: workspace, default: []) { c in
+                    await c.breakPane(terminal.short, in: workspace)
+                }
             }
             reveal(groups, in: workspace, preferring: terminal.id)
         }
@@ -1147,12 +1521,16 @@ struct ContentView: View {
         _ terminal: String, side: TileDirection, cells: Int, in workspace: Workspace
     ) -> Bool {
         guard cells != 0, !resizingDivider else { return false }
-        guard let pane = client.group(holding: terminal, in: workspace.id)?.pane(terminal) else {
+        guard let pane = store.client(for: workspace)?.group(holding: terminal, in: workspace.id)?
+            .pane(terminal)
+        else {
             return false
         }
         resizingDivider = true
         Task {
-            await client.resizePane(pane.short, side: side, cells: cells, in: workspace)
+            await act(on: workspace) { c in
+                await c.resizePane(pane.short, side: side, cells: cells, in: workspace)
+            }
             resizingDivider = false
         }
         return true
@@ -1167,9 +1545,10 @@ struct ContentView: View {
         }
         guard shorts.count == 2 else { return }
         Task {
-            reveal(
-                await client.movePane(shorts[0], onto: shorts[1], side: side, in: workspace),
-                in: workspace, preferring: dragged)
+            let groups = await act(on: workspace, default: []) { c in
+                await c.movePane(shorts[0], onto: shorts[1], side: side, in: workspace)
+            }
+            reveal(groups, in: workspace, preferring: dragged)
         }
     }
 
@@ -1182,20 +1561,21 @@ struct ContentView: View {
     private func reveal(
         _ groups: [PaneGroup], in workspace: Workspace, preferring: String? = nil
     ) {
+        let host = workspace.host ?? ""
         guard let active = groups.first(where: { $0.isActive }) ?? groups.first else {
             // No layouts left, which now means no terminals left. Fall back to
             // the worktree rather than to a pane that no longer exists.
-            selection = .workspace(workspace.id)
+            selection = .workspace(host: host, id: workspace.id)
             return
         }
         let target = preferring.flatMap { active.terminals.contains($0) ? $0 : nil }
             ?? active.focused
             ?? active.terminals.first
         guard let target else {
-            selection = .workspace(workspace.id)
+            selection = .workspace(host: host, id: workspace.id)
             return
         }
-        selection = .terminal(workspace: workspace.id, terminal: target)
+        selection = .terminal(host: host, workspace: workspace.id, terminal: target)
     }
 
     /// Follow the layout's focus when something else moved it.
@@ -1204,13 +1584,14 @@ struct ContentView: View {
     /// to be looking at it — otherwise `farcooler layout focus` from a script
     /// draws a border around a pane whose keystrokes still go somewhere else.
     private func followLayoutFocus() {
-        guard case .terminal(let wsID, let termID) = selection,
-            let group = client.activeGroup(wsID),
+        guard case .terminal(let host, let wsID, let termID) = selection,
+            let workspace = workspace(host: host, id: wsID),
+            let group = store.client(for: workspace)?.activeGroup(wsID),
             let focused = group.focused,
             focused != termID,
             group.terminals.contains(termID)
         else { return }
-        selection = .terminal(workspace: wsID, terminal: focused)
+        selection = .terminal(host: host, workspace: wsID, terminal: focused)
     }
 
     private func run(_ command: AppCommand) {
@@ -1223,12 +1604,12 @@ struct ContentView: View {
             if let workspace = currentWorkspace { newTerminal(in: workspace) }
 
         case .closeTerminal:
-            guard let (_, terminal) = selectedTerminal else { return }
+            guard let (workspace, terminal) = selectedTerminal else { return }
             Task {
                 // Stop, then remove the record. Closing a terminal should leave
                 // nothing behind — that is what closing means everywhere else.
-                await client.stop(terminal: terminal.short)
-                await client.removeTerminal(terminal.short)
+                await act(on: workspace) { c in await c.stop(terminal: terminal.short) }
+                await act(on: workspace) { c in await c.removeTerminal(terminal.short) }
                 selectNeighbour(of: terminal)
             }
 
@@ -1248,14 +1629,14 @@ struct ContentView: View {
         case .newWorkspace:
             // Only reachable with a project registered; the panel has nothing
             // to create into otherwise.
-            if client.repositories.isEmpty {
+            if store.repositories.isEmpty {
                 showAddRepository = true
             } else {
-                if lastProject.isEmpty { lastProject = client.repositories[0].id }
+                if lastProject.isEmpty, let id = defaultProjectID { lastProject = id }
                 showQuickCreate = true
             }
         case .addRepository: showAddRepository = true
-        case .reload: Task { await client.refresh() }
+        case .reload: Task { for client in store.clients.values { await client.refresh() } }
         case .showShortcuts: showShortcuts = true
         case .about: showAbout = true
         case .search: searchFocused = true
@@ -1284,24 +1665,26 @@ struct ContentView: View {
         switch action {
         case .openTerminal(let workspace, let terminal):
             expanded.insert(workspace)
-            selection = .terminal(workspace: workspace, terminal: terminal)
+            let host = store.fleet.workspaces.first { $0.id == workspace }?.host ?? ""
+            selection = .terminal(host: host, workspace: workspace, terminal: terminal)
 
         case .openWorkspace(let workspace):
             expanded.insert(workspace)
-            selection = .workspace(workspace)
+            let host = store.fleet.workspaces.first { $0.id == workspace }?.host ?? ""
+            selection = .workspace(host: host, id: workspace)
 
         case .newTerminal(let id):
-            guard let workspace = client.fleet.workspaces.first(where: { $0.id == id }) else {
+            guard let workspace = store.fleet.workspaces.first(where: { $0.id == id }) else {
                 return
             }
             newTerminal(in: workspace)
 
         case .newTask(let described):
-            if client.repositories.isEmpty {
+            if store.repositories.isEmpty {
                 showAddRepository = true
                 return
             }
-            if lastProject.isEmpty { lastProject = client.repositories[0].id }
+            if lastProject.isEmpty, let id = defaultProjectID { lastProject = id }
             // What was typed into the palette carries over as the description,
             // because in this panel it nearly always was one. It never
             // overwrites a draft already in progress — that draft is often the
@@ -1311,10 +1694,10 @@ struct ContentView: View {
 
         case .togglePaneMode(let workspace, let terminal):
             guard
-                let target = client.fleet.workspaces.first(where: { $0.id == workspace })?
-                    .terminals.first(where: { $0.id == terminal })
+                let ws = store.fleet.workspaces.first(where: { $0.id == workspace }),
+                let target = ws.terminals.first(where: { $0.id == terminal })
             else { return }
-            Task { await togglePaneMode(target) }
+            Task { await togglePaneMode(target, in: ws) }
         }
     }
 
@@ -1323,8 +1706,22 @@ struct ContentView: View {
     /// Deliberately does not wait for the agent to boot before selecting. The
     /// point is to be looking at the thing you asked for while it starts, not
     /// to stare at the old screen for ten seconds first.
-    private func startTask(description: String, project: String, agent: String) {
+    ///
+    /// `host` is handed in rather than re-derived from `project` here — see
+    /// `QuickCreate.chosen`, which resolves both together from the same
+    /// picker selection. A lookup repeated at this end, from `project`
+    /// alone, is exactly the shape that goes silently wrong: `project` can
+    /// name a repository that has since been removed, or one on a machine
+    /// whose `repositories` has not been re-read since a reconnect, and a
+    /// lookup that finds nothing has to be answered with a refusal, not a
+    /// fallback to this Mac.
+    private func startTask(description: String, host: String, project: String, agent: String) {
         Task {
+            if let why = store.refusal(for: host) {
+                errorBanner = "Cannot do that: \(why)"
+                return
+            }
+            guard let client = store.clients[host] else { return }
             let created = await client.startTask(
                 project: project,
                 description: description,
@@ -1338,8 +1735,18 @@ struct ContentView: View {
     /// Same landing as starting a task, because it is the same act from the
     /// user's side: there is now a worktree with an agent in it and you want to
     /// be looking at it. The only difference is where the code came from.
-    private func resume(branch: String, project: String, agent: String) {
+    ///
+    /// Routed the same way `startTask` is: `host` comes from the resume
+    /// sheet's own picker selection rather than a `project`-keyed lookup
+    /// repeated here — see `startTask`'s own doc comment for why that lookup
+    /// belongs where the selection was made, not downstream of it.
+    private func resume(branch: String, host: String, project: String, agent: String) {
         Task {
+            if let why = store.refusal(for: host) {
+                errorBanner = "Cannot do that: \(why)"
+                return
+            }
+            guard let client = store.clients[host] else { return }
             let created = await client.adoptBranch(
                 project: project, branch: branch, agent: agent)
             reveal(created)
@@ -1350,12 +1757,12 @@ struct ContentView: View {
     private func reveal(_ workspace: String?) {
         guard let workspace else { return }
         expanded.insert(workspace)
-        if let found = client.fleet.workspaces.first(where: { $0.id == workspace }),
-            let terminal = found.terminals.first
-        {
-            selection = .terminal(workspace: workspace, terminal: terminal.id)
+        let found = store.fleet.workspaces.first { $0.id == workspace }
+        let host = found?.host ?? ""
+        if let terminal = found?.terminals.first {
+            selection = .terminal(host: host, workspace: workspace, terminal: terminal.id)
         } else {
-            selection = .workspace(workspace)
+            selection = .workspace(host: host, id: workspace)
         }
     }
 
@@ -1383,36 +1790,54 @@ struct ContentView: View {
     private func openTerminalInNewLayout(_ workspace: Workspace) async -> Terminal? {
         expanded.insert(workspace.id)
         guard
-            let created = await client.createTerminal(
-                in: workspace,
-                preset: "shell",
-                title: "Terminal \(workspace.terminals.count + 1)")
+            let created = await act(
+                on: workspace, default: nil as Terminal?,
+                { c in
+                    await c.createTerminal(
+                        in: workspace,
+                        preset: "shell",
+                        title: "Terminal \(workspace.terminals.count + 1)")
+                })
         else { return nil }
-        selection = .terminal(workspace: workspace.id, terminal: created.id)
+        selection = .terminal(host: workspace.host ?? "", workspace: workspace.id, terminal: created.id)
         return created
     }
 
     /// The workspace the detail pane is actually showing.
     ///
-    /// Not `currentWorkspace`, which falls back to the first in the fleet when
-    /// nothing is selected. That fallback is right for the commands that use it
-    /// — they act on "where you are" — and wrong here, where the placeholder is
-    /// on screen and offering to open a worktree the window is not showing
-    /// would be the control lying about what it points at.
+    /// Not `currentWorkspace` by name, though the two now compute the same
+    /// value: `currentWorkspace`'s own fallback to the first workspace in the
+    /// fleet is gone, removed for the same reason this property never had
+    /// one — with nothing selected, the placeholder is on screen, and
+    /// offering to open a worktree the window is not showing would be the
+    /// control lying about what it points at. Kept as a separate property so
+    /// each name still reads as what it answers: this one, what the detail
+    /// pane draws; `currentWorkspace`, what a keystroke acts on.
     private var detailWorkspace: Workspace? {
         switch selection {
-        case .workspace(let id): return workspace(id)
-        case .terminal(let id, _): return workspace(id)
+        case .workspace(let host, let id): return workspace(host: host, id: id)
+        case .terminal(let host, let id, _): return workspace(host: host, id: id)
         case nil: return nil
         }
     }
 
-    /// The workspace the selection is in, or the first one.
+    /// The workspace the selection is in — nil when nothing is selected.
+    ///
+    /// Used to be "or the first one": with nothing selected, that first
+    /// workspace could belong to ANY machine in the fleet, chosen by nothing
+    /// more meaningful than merge order. `tileTarget` and ⌘T both read this
+    /// to decide what a keystroke acts on, and a fallback here meant a ⌃B
+    /// command issued while the detail pane was blank still landed — split,
+    /// break, preset, cycle, zoom, focus, a new terminal — on whichever
+    /// machine happened to own that first row. Wrong-machine routing is the
+    /// one failure this feature must never produce, so with no selection
+    /// there is now no target, and `tileTarget`'s and `.newTerminal`'s own
+    /// `guard`/`if let` already do nothing rather than guess.
     private var currentWorkspace: Workspace? {
         switch selection {
-        case .workspace(let id): return client.fleet.workspaces.first { $0.id == id }
-        case .terminal(let id, _): return client.fleet.workspaces.first { $0.id == id }
-        case nil: return client.fleet.workspaces.first
+        case .workspace(let host, let id): return workspace(host: host, id: id)
+        case .terminal(let host, let id, _): return workspace(host: host, id: id)
+        case nil: return nil
         }
     }
 
@@ -1431,12 +1856,15 @@ struct ContentView: View {
     /// workspace, whatever wants attention first, then anything running. Only
     /// falls back to the workspace itself when the workspace is empty.
     private func healSelection() {
-        guard case .terminal(let workspaceID, let terminalID) = selection else { return }
-        guard let workspace = client.fleet.workspaces.first(where: { $0.id == workspaceID })
+        guard case .terminal(let host, let workspaceID, let terminalID) = selection else { return }
+        guard
+            let workspace = store.fleet.workspaces.first(where: {
+                ($0.host ?? "") == host && $0.id == workspaceID
+            })
         else {
             // The whole workspace went. Land on whatever is left rather than
             // on nothing.
-            selection = client.fleet.workspaces.first.map { .workspace($0.id) }
+            selection = store.fleet.workspaces.first.map { .workspace(host: $0.host ?? "", id: $0.id) }
             return
         }
         guard !workspace.terminals.contains(where: { $0.id == terminalID }) else { return }
@@ -1445,8 +1873,8 @@ struct ContentView: View {
         let next = candidates.first(where: { $0.status.wantsAttention })
             ?? candidates.first(where: { StateKind.parse($0.state) == .running })
             ?? candidates.first
-        selection = next.map { .terminal(workspace: workspaceID, terminal: $0.id) }
-            ?? .workspace(workspaceID)
+        selection = next.map { .terminal(host: host, workspace: workspaceID, terminal: $0.id) }
+            ?? .workspace(host: host, id: workspaceID)
     }
 
     private func selectTerminal(at index: Int) {
@@ -1457,11 +1885,11 @@ struct ContentView: View {
 
     private func select(_ terminal: Terminal) {
         guard
-            let workspace = client.fleet.workspaces
+            let workspace = store.fleet.workspaces
                 .first(where: { $0.terminals.contains(where: { $0.id == terminal.id }) })
         else { return }
         expanded.insert(workspace.id)
-        selection = .terminal(workspace: workspace.id, terminal: terminal.id)
+        selection = .terminal(host: workspace.host ?? "", workspace: workspace.id, terminal: terminal.id)
     }
 
     /// After closing one, land on the next terminal rather than on nothing.
@@ -1474,7 +1902,7 @@ struct ContentView: View {
         {
             select(next)
         } else {
-            selection = currentWorkspace.map { .workspace($0.id) }
+            selection = currentWorkspace.map { .workspace(host: $0.host ?? "", id: $0.id) }
         }
     }
 }
@@ -1483,25 +1911,25 @@ enum TerminalAction { case restart, dismissLost, stop }
 
 /// Errors the app writes but nothing else shows.
 ///
-/// `client.lastError` had one reader — the fleet placeholder — which draws only
-/// before the fleet has loaded. Every message written after that point was
-/// discarded, so a refused keystroke was indistinguishable from a broken
-/// feature. That is the exact failure `toggleAgentPane` writes its message to
-/// prevent.
+/// Backed by `ContentView`'s own `errorBanner` now rather than one client's
+/// `lastError` — see that property's doc comment for why a single client's
+/// field stopped being able to answer "what should this banner say" once
+/// there was more than one client to have said it.
 private struct ErrorBanner: View {
-    @ObservedObject var client: DaemonClient
+    let message: String?
+    let onDismiss: () -> Void
 
     var body: some View {
-        if let error = client.lastError, client.hasLoaded {
+        if let message {
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
-                Text(error)
+                Text(message)
                     .font(.callout)
                     .textSelection(.enabled)
                 Spacer(minLength: 8)
                 Button {
-                    client.lastError = nil
+                    onDismiss()
                 } label: {
                     Image(systemName: "xmark")
                 }

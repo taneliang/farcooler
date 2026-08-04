@@ -20,6 +20,13 @@ struct AgentSurface: View {
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
+    /// Why this pane's machine cannot be acted on, or nil if it can — the
+    /// same check every other mutation in the app runs through
+    /// `ContentView.act(on:)` or `FleetStore.refusal(for:)`, reached here
+    /// too. See `AgentStream.refusal`'s own doc comment for why chat
+    /// mutations needed this separately: they route correctly by
+    /// `hostArguments` already, but never asked FIRST.
+    let refusal: () -> String?
     let isFocused: Bool
     let searchFiles: (String) async -> [String]
     /// Report this pane's grid, in cells. Empty or dishonest here and tmux
@@ -38,7 +45,8 @@ struct AgentSurface: View {
 
     init(
         terminal: Terminal, binary: String?, environment: [String: String],
-        hostArguments: [String], isFocused: Bool,
+        hostArguments: [String], refusal: @escaping () -> String?,
+        isFocused: Bool,
         searchFiles: @escaping (String) async -> [String],
         onResize: @escaping (Int, Int) async -> Void
     ) {
@@ -46,6 +54,7 @@ struct AgentSurface: View {
         self.binary = binary
         self.environment = environment
         self.hostArguments = hostArguments
+        self.refusal = refusal
         self.isFocused = isFocused
         self.searchFiles = searchFiles
         self.onResize = onResize
@@ -161,7 +170,9 @@ struct AgentSurface: View {
             }
         }
         .onAppear {
-            stream.start(binary: binary, environment: environment, hostArguments: hostArguments)
+            stream.start(
+                binary: binary, environment: environment, hostArguments: hostArguments,
+                refusal: refusal)
         }
         .onDisappear { stream.stop() }
         // The CLI path can arrive after this view does — the service is
@@ -169,7 +180,9 @@ struct AgentSurface: View {
         // `nil` has to be restarted once a real binary shows up rather than
         // staying inert for the life of the pane.
         .onChange(of: binary) { _, newBinary in
-            stream.start(binary: newBinary, environment: environment, hostArguments: hostArguments)
+            stream.start(
+                binary: newBinary, environment: environment, hostArguments: hostArguments,
+                refusal: refusal)
         }
     }
 

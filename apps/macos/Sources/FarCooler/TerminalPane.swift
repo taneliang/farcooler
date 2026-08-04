@@ -16,6 +16,10 @@ struct TerminalPane: View {
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
+    /// Why this pane's machine cannot be acted on, or nil if it can — passed
+    /// straight through to `AgentSurface`, which is the one branch below
+    /// that mutates outside `onAction`'s own `act(on:)` gate.
+    let refusal: () -> String?
     let onGeometry: (Int, Int) async -> Void
     let onSearchFiles: (String) async -> [String]
     let onAction: (TerminalAction) -> Void
@@ -37,6 +41,7 @@ struct TerminalPane: View {
                     binary: binary,
                     environment: environment,
                     hostArguments: hostArguments,
+                    refusal: refusal,
                     // One pane, so it always owns the keyboard.
                     isFocused: true,
                     searchFiles: onSearchFiles,

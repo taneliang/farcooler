@@ -31,6 +31,10 @@ struct TileView: View {
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
+    /// Why this workspace's machine cannot be acted on, or nil if it can —
+    /// passed down to each `TilePane`, which hands it to `AgentSurface` for
+    /// an agent pane. See `AgentStream.refusal`'s own doc comment.
+    let refusal: () -> String?
     let onFocus: (String) -> Void
     let onSelectGroup: (PaneGroup) -> Void
     /// A terminal dropped on an edge of a pane: put it there.
@@ -179,6 +183,7 @@ struct TileView: View {
             binary: binary,
             environment: environment,
             hostArguments: hostArguments,
+            refusal: refusal,
             isFocused: isFocused,
             isZoomed: rect.zoomed,
             index: (group.panes.firstIndex(of: rect) ?? 0) + 1,
@@ -274,6 +279,9 @@ private struct TilePane: View {
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
+    /// Why this pane's machine cannot be acted on, or nil if it can — see
+    /// `AgentStream.refusal`'s own doc comment.
+    let refusal: () -> String?
     let isFocused: Bool
     let isZoomed: Bool
     let index: Int
@@ -314,6 +322,7 @@ private struct TilePane: View {
                     binary: binary,
                     environment: environment,
                     hostArguments: hostArguments,
+                    refusal: refusal,
                     isFocused: isFocused,
                     searchFiles: onSearchFiles,
                     onResize: { _, _ in }

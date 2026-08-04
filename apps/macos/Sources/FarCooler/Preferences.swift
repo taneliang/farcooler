@@ -78,27 +78,12 @@ final class Preferences: ObservableObject {
     /// process launch.
     @AppStorage("tasks.defaultAgent") var defaultAgent = "claude"
 
-    /// The machine this window is driving, as `user@host` or an ssh config
-    /// alias. Empty means this one.
-    ///
-    /// The app drives the `farcooler` CLI, and the CLI already knows how to
-    /// operate another machine over ssh — including streaming a terminal,
-    /// which it proxies as the byte pipe it is. So making this window a remote
-    /// one is a matter of saying which machine, not of building a second
-    /// client: everything below this setting is the same code path either way,
-    /// which is the only version of remote support worth having. There is no
-    /// Far Cooler listener anywhere; a host reachable by ssh is reachable by
-    /// Far Cooler, and one that is not, is not.
     /// Which Settings tab to open on.
     ///
     /// Stored rather than passed because Settings is a scene, not a sheet —
     /// nothing that opens it can hand it a parameter. Anything that wants to
     /// send someone to a specific tab sets this first.
     @AppStorage("settings.tab") var settingsTab = "terminal"
-
-    @AppStorage("host.remote") var remoteHost = "" {
-        didSet { revision += 1 }
-    }
 
     /// The editor the "Open in…" control uses on a click, by `Editor.id`.
     ///

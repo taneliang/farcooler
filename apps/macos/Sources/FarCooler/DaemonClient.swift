@@ -1,5 +1,44 @@
 import Foundation
 
+/// Where a machine's connection stands.
+///
+/// `notInstalled` is separate from `unreachable` because it is not a failure
+/// worth retrying at full speed. It is a machine that needs `host install`,
+/// and retrying it every second forever produces noise instead of the one
+/// sentence that would fix it. It still gets checked again — every few
+/// minutes, see `DaemonClient.scheduleRetry()` — because "never" is the
+/// opposite failure: installing it later would otherwise go unnoticed until
+/// someone restarts the app.
+enum HostState: Equatable {
+    case connecting
+    case connected
+    case reconnecting(attempt: Int)
+    case unreachable(reason: String)
+    case notInstalled
+
+    var isUsable: Bool { self == .connected }
+
+    /// What to tell someone whose action was refused, or nil to let it proceed.
+    ///
+    /// Only `.unreachable` and `.notInstalled` refuse. Those are the two states
+    /// where a command was already tried against this machine and failed, so
+    /// trying another is asking the same question twice. `.connecting` and
+    /// `.reconnecting` mean "we do not know yet", not "no" — refusing on those
+    /// would turn an ordinary transient stream drop on an otherwise-reachable
+    /// machine into a read-only window for up to a 30s backoff, when the
+    /// command itself would simply have succeeded, or failed on its own and
+    /// bounded by `ConnectTimeout`, exactly as it would on a machine this
+    /// client had never seen go down at all. A false refusal here is worse
+    /// than the bounded wait a real attempt risks.
+    var refusal: String? {
+        switch self {
+        case .connected, .connecting, .reconnecting: return nil
+        case .unreachable(let why): return why
+        case .notInstalled: return "Far Cooler is not installed on this machine"
+        }
+    }
+}
+
 /// Talks to the daemon through the `farcooler` CLI.
 ///
 /// DEVIATION FROM THE DESIGN, recorded honestly: the accepted architecture has
@@ -14,6 +53,208 @@ final class DaemonClient: ObservableObject {
     @Published var lastError: String?
     @Published var busy = false
 
+    /// The machine this client drives. Empty means the Mac it runs on.
+    ///
+    /// An instance property, not a global preference. One client per machine is
+    /// what lets an unreachable one be a single object in a bad state rather
+    /// than a condition threaded through shared code — and it is what makes
+    /// holding several at once possible at all.
+    let target: String
+
+    init(target: String = "") {
+        self.target = target.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Cancels the retry loop rather than leaving it to run against a client
+    /// nobody holds anymore.
+    ///
+    /// Without this, a removed host's `retryTask` keeps itself alive:
+    /// `scheduleRetry`'s `Task` calls `startEvents`, whose `onEnd` arms the
+    /// next `scheduleRetry` — self → retryTask → self, with no owner left to
+    /// break the cycle. It would keep spawning `farcooler … events` and
+    /// `workspace list` subprocesses against a machine this app no longer
+    /// shows anywhere, invisible except in `ps`.
+    deinit { retryTask?.cancel() }
+
+    @Published private(set) var state: HostState = .connecting
+
+    /// Called the moment `refresh()` transitions `state` into `.connected`
+    /// from anything else — set by `FleetStore`, which uses it to re-seed
+    /// repositories, roots and layouts on every reconnection, not only at
+    /// bring-up. Not fired for a `refresh()` that merely confirms an
+    /// already-`.connected` client is still up.
+    var onReconnect: (() -> Void)?
+
+    /// How long to wait before the next attempt, in seconds.
+    ///
+    /// Doubling from 1 to a 30s ceiling, with jitter: several machines
+    /// recovering from one network event must not retry in lockstep, or the
+    /// first thing a just-returned network sees is a thundering herd.
+    private var attempt = 0
+    private var retryTask: Task<Void, Never>?
+
+    /// True from the moment `stopEvents()` runs until `startEvents()` or
+    /// `reconnectNow()` next runs — checked by `scheduleRetry()` in addition
+    /// to its `retryTask == nil` guard.
+    ///
+    /// `retryTask == nil` alone is not "not stopped"; it is "idempotent",
+    /// and `stopEvents()` nils that same slot as part of shutting down. A
+    /// `refresh()` already in flight when `stopEvents()` runs keeps running
+    /// to completion — `runRaw` is not cancellation-aware — and its failure
+    /// path calls `scheduleRetry()` directly, with no cancellation check of
+    /// its own between it and the `Task` that was told to stop. Reading
+    /// `retryTask == nil` at that moment, `scheduleRetry()` cannot tell "a
+    /// retry has never needed to arm" from "this client was just told to be
+    /// quiet", and arms a fresh one either way — resurrecting the exact loop
+    /// `stopEvents()` exists to end. This flag is the fact `retryTask` alone
+    /// cannot carry, checked wherever a retry would arm, so being stopped
+    /// wins regardless of which of the two racing paths gets there first.
+    private var isStopped = false
+
+    private var backoffSeconds: Double {
+        let base = min(30.0, pow(2.0, Double(attempt)))
+        let jitter = Double.random(in: 0.8...1.2)
+        return base * jitter
+    }
+
+    /// Whether a failure names a machine that needs installing rather than
+    /// one that is merely unreachable right now.
+    ///
+    /// `crates/cli/src/remote.rs`'s `explain` produces this exact phrase when
+    /// ssh connects fine but nothing answers `farcoolerd --stdio` on the far
+    /// side, which from here is indistinguishable from "not installed" — and
+    /// is the CLI's own signal for it, not a guess. Local-only: the Mac
+    /// bundles and starts its own daemon, so a local failure is never "go
+    /// install this".
+    private func looksNotInstalled(_ message: String) -> Bool {
+        !target.isEmpty && message.localizedCaseInsensitiveContains("is far cooler installed")
+    }
+
+    /// Whether a failure names two sides speaking different protocol
+    /// versions.
+    ///
+    /// Same source as `looksNotInstalled`: `explain`'s other branch, for
+    /// `ClientError::VersionMismatch`. No amount of retrying updates the
+    /// older side, so this gets the same slow cadence as `notInstalled`
+    /// rather than the fast exponential one — see `scheduleRetry()`.
+    private func looksVersionMismatch(_ message: String) -> Bool {
+        !target.isEmpty && message.localizedCaseInsensitiveContains("update the older side")
+    }
+
+    /// How long a machine that needs installing, or that speaks a different
+    /// protocol version, waits between checks.
+    ///
+    /// Five minutes: no amount of retrying fixes either condition, so the
+    /// exponential schedule (which only exists to survive a burst of
+    /// transient failures quickly) is the wrong tool here and would just be
+    /// noise every 30 seconds forever. This is the opposite failure — never
+    /// checking again — which would mean installing it later, or updating
+    /// the older side, goes unnoticed until someone restarts the app.
+    private let slowRetrySeconds: Double = 300
+
+    /// The one place that arms a retry, so `onEnd` and `refresh()`'s own
+    /// failure paths cannot each schedule their own and race.
+    ///
+    /// Idempotent: if a retry is already armed and ticking down, this leaves
+    /// it alone rather than cancelling and replacing it. Without that, an
+    /// ordinary UI-driven `refresh()` call made while a host happens to be
+    /// down — and `refresh()` has some thirty call sites — would push an
+    /// already-scheduled retry further out every time someone clicked
+    /// anything, and two near-simultaneous failures (`refresh()`'s own and
+    /// `onEnd`'s, moments apart for the same underlying drop) would each
+    /// bump `attempt` and skip a rung instead of counting as one failure.
+    /// `reconnectNow()` is the deliberate exception to all of this: it
+    /// forcibly cancels and replaces, because "now" means now.
+    ///
+    /// `refresh()` needs this as much as `onEnd` does: a `farcooler events`
+    /// subprocess that hangs against a dead host rather than exiting —
+    /// plausible now that ssh's keepalives (see `crates/cli/src/remote.rs`)
+    /// hold the connection open for up to 45s — reports no `onEnd` at all,
+    /// and without this a client in that state sits at `.unreachable`
+    /// forever with nothing counting down.
+    private func scheduleRetry() {
+        guard !isStopped, retryTask == nil else { return }
+
+        let wait: Double
+        switch state {
+        case .notInstalled:
+            // `attempt` resets rather than climbs here: it drives the fast
+            // exponential schedule only, means nothing at this cadence, and
+            // letting it grow would leave a later, genuinely transient
+            // failure starting at the 30s ceiling instead of a fresh 1s.
+            attempt = 0
+            wait = slowRetrySeconds
+        case .unreachable(let reason) where looksVersionMismatch(reason):
+            attempt = 0
+            wait = slowRetrySeconds
+        default:
+            attempt += 1
+            wait = backoffSeconds
+        }
+
+        // `[weak self]` alone is not enough here: binding `guard let self`
+        // before the sleep would hold a strong reference for the entire
+        // wait, for nothing — the whole point of the wait is to do nothing.
+        // Deleting a client mid-backoff must let it deallocate, not keep it
+        // alive until the timer happens to fire.
+        retryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled, let self else { return }
+            // A daemon going away is also the moment another build could
+            // take the socket, so the app claims it back before reading
+            // anything through it.
+            if self.target.isEmpty { await LocalDaemon.shared.ensure() }
+            guard !Task.isCancelled else { return }
+            // Anything that changed while we were deaf is only visible in a
+            // full read. This may itself call `scheduleRetry()` again on
+            // failure — a no-op, since this task is still the recorded
+            // `retryTask` at that point, which is exactly the idempotency
+            // above. That is not a dead end: `startEvents()` below still
+            // runs, and the subprocess it starts either survives (this
+            // machine is back) or dies and fires `onEnd`, which finds
+            // `retryTask` nil by then and arms the next wait correctly.
+            await self.refresh()
+            guard !Task.isCancelled else { return }
+            self.retryTask = nil
+            self.startEvents()
+        }
+    }
+
+    /// Retry this machine at once, whatever the backoff had planned.
+    ///
+    /// The escape hatch for the case the timer cannot know about: you fixed the
+    /// VPN, and waiting out a thirty second ceiling to find out is the wrong
+    /// experience.
+    ///
+    /// Shares `retryTask`'s slot with `scheduleRetry()`: a second call, or one
+    /// landing while a scheduled retry is already in flight, must cancel the
+    /// other rather than run alongside it — one slot is what makes "cancel
+    /// the previous one" the whole rule.
+    func reconnectNow() {
+        attempt = 0
+        // Cancels and nils `retryTask` as a side effect — see `stopEvents()`
+        // — which is what leaves the slot correctly empty for the
+        // reassignment below rather than merely cancelled.
+        stopEvents()
+        // `stopEvents()` just set `isStopped`, which is right for a caller
+        // that meant "be quiet" but wrong here — "now" means resume at once,
+        // not stay stopped. Without this, the Task below's own `refresh()`
+        // failing would call `scheduleRetry()` while `isStopped` is still
+        // true and silently no-op, leaving `state` reading `.connecting`
+        // forever with nothing counting down.
+        isStopped = false
+        state = .connecting
+        retryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            if self.target.isEmpty { await LocalDaemon.shared.ensure() }
+            guard !Task.isCancelled else { return }
+            await self.refresh()
+            guard !Task.isCancelled else { return }
+            self.retryTask = nil
+            self.startEvents()
+        }
+    }
+
     /// Where the CLI lives.
     ///
     /// The bundled copy comes first, because an app launched from the Dock
@@ -24,14 +265,13 @@ final class DaemonClient: ObservableObject {
 
     var cliEnvironment: [String: String] { environment }
 
-    /// What to put in front of every CLI invocation to aim it at another
-    /// machine. Empty when this window is driving the machine it is running on.
+    /// What to put in front of every CLI invocation to aim it at this client's
+    /// machine. Empty when it is the machine the app runs on.
     ///
     /// Before the subcommand, not after: `--host` is a top-level option, and
     /// clap will not see it once a subcommand has been named.
     var cliHostArguments: [String] {
-        let target = Preferences.shared.remoteHost.trimmingCharacters(in: .whitespaces)
-        return target.isEmpty ? [] : ["--host", target]
+        target.isEmpty ? [] : ["--host", target]
     }
 
     private var binary: String? { CLI.binary }
@@ -41,6 +281,20 @@ final class DaemonClient: ObservableObject {
     // MARK: - Live updates
 
     private var eventStream: EventStream?
+    /// Which stream is current, so a terminated one's `onEnd` can tell
+    /// whether it still is.
+    ///
+    /// `EventStream.stop()` nils its caller's reference but cannot stop the
+    /// child process's termination handler from still running — Process
+    /// fires it for a killed child same as a crashed one. Without this, a
+    /// deliberate `stopEvents()` (from `reconnectNow()`, or the window's
+    /// `.onDisappear`) is followed milliseconds later by that same stream's
+    /// `onEnd`, which would arm a whole new retry loop for a client nothing
+    /// asked to keep running. Comparing generations rather than the
+    /// `EventStream` instance itself sidesteps the same problem the other
+    /// way: it also covers the stream that already replaced it, so `onEnd`
+    /// landing late can never null out a healthy successor by mistake.
+    private var streamGeneration = 0
     /// Terminals whose clean exit we have already acted on, so a burst of
     /// events for the same one does not queue several removals.
     private var reaped: Set<String> = []
@@ -51,57 +305,140 @@ final class DaemonClient: ObservableObject {
     /// question late and burning cycles on a fleet where nothing is happening;
     /// pushed changes have neither problem, and a quiet host sends nothing.
     func startEvents() {
-        guard eventStream == nil, let binary else { return }
+        // Whatever called this wants the client live — the initial bring-up,
+        // a scheduled retry that just succeeded, `reconnectNow()`'s own
+        // task, or `FleetStore.resume()` bringing a closed window's fleet
+        // back. Reset here, not just in `reconnectNow()`, so `scheduleRetry()`
+        // is armed correctly regardless of which of those paths is calling.
+        isStopped = false
+        guard eventStream == nil else { return }
+        guard let binary else {
+            // No CLI to run means no stream can ever start on its own, so
+            // without arming a retry here this state never has a way out.
+            state = .unreachable(reason: "The farcooler CLI was not found.")
+            scheduleRetry()
+            return
+        }
+
+        streamGeneration += 1
+        let generation = streamGeneration
         let stream = EventStream(
             onEvent: { [weak self] event in
-                Task { @MainActor in self?.apply(event) }
+                Task { @MainActor in
+                    // Stale, same test `onEnd` uses and for the same reason:
+                    // a line already in flight through the subprocess's pipe
+                    // when `stopEvents()` runs is read and decoded regardless
+                    // — `EventStream.stop()` tears down the process but
+                    // cannot un-read bytes already sitting in the pipe — so
+                    // without this a buffered event for a removed machine
+                    // still mutates `fleet` and fires a notification for it.
+                    guard let self, self.streamGeneration == generation else { return }
+                    self.apply(event)
+                }
             },
             onLayout: { [weak self] event in
                 Task { @MainActor in
-                    self?.layouts[event.workspace] = event.groups
+                    guard let self, self.streamGeneration == generation else { return }
+                    self.layouts[event.workspace] = event.groups
                 }
             },
             onFleet: { [weak self] in
-                Task { @MainActor in await self?.refresh() }
+                Task { @MainActor in
+                    // Stale-guarded for the same reason as `onEvent` above,
+                    // and doubly so here: an unguarded `refresh()` can itself
+                    // call `scheduleRetry()` on failure, which is exactly the
+                    // resurrection `isStopped` exists to prevent — this way
+                    // that call is never reached at all for a stopped stream.
+                    guard let self, self.streamGeneration == generation else { return }
+                    await self.refresh()
+                }
             },
             onEnd: { [weak self] in
                 Task { @MainActor in
-                    self?.eventStream = nil
-                    // The daemon restarted, or the CLI died. Reconnect after a
-                    // pause rather than spinning, and re-read once connected:
-                    // anything that changed while we were deaf is only visible
-                    // in a full read.
-                    try? await Task.sleep(for: .seconds(2))
-                    // A daemon going away is also the moment another build
-                    // could take the socket, so the app claims it back before
-                    // reading anything through it. See `LocalDaemon`.
-                    await LocalDaemon.shared.ensure()
-                    await self?.refresh()
-                    self?.startEvents()
+                    // Stale: either this stream was deliberately stopped, or
+                    // it already lost a race to a newer one. Either way,
+                    // touching `eventStream` or arming a retry here would be
+                    // acting on behalf of a stream nobody holds anymore.
+                    guard let self, self.streamGeneration == generation else { return }
+                    self.eventStream = nil
+                    self.scheduleRetry()
+                    // Only overwrite with the generic "reconnecting" state
+                    // for an ordinary drop. `.notInstalled` and a
+                    // version-mismatch `.unreachable` are more specific than
+                    // "reconnecting" would be, and both just got a wait
+                    // measured in minutes, not moments — showing
+                    // "reconnecting" over that whole span would say less
+                    // than what `refresh()` already determined.
+                    if case .notInstalled = self.state { return }
+                    if case .unreachable(let reason) = self.state, self.looksVersionMismatch(reason) {
+                        return
+                    }
+                    self.state = .reconnecting(attempt: self.attempt)
                 }
             })
         stream.start(binary: binary, environment: environment, host: cliHostArguments)
         eventStream = stream
+
+        // Only a stream that survives is proof the daemon is genuinely back.
+        // Resetting `attempt` on every successful `refresh()` instead (the
+        // first cut of this) reset it even when the stream that `refresh()`
+        // preceded died again immediately after — which turned a flapping
+        // daemon into a retry every ~1s forever, spawning two subprocesses a
+        // second, rather than a backoff that actually grows.
+        //
+        // `eventStream != nil` matters as much as the generation match:
+        // `onEnd` does not bump `streamGeneration` (only `startEvents` and
+        // `stopEvents` do), so between this stream dying and the next
+        // `startEvents()` call, the generation alone still matches. Without
+        // also checking that the stream is still actually there, this timer
+        // would fire mid-backoff and zero `attempt` out from under it — which
+        // is exactly finding 5 again, just needing a flappier daemon (three
+        // failures instead of one) to reach it, since the armed wait only
+        // has to exceed 5s once `attempt` reaches 3.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self, self.streamGeneration == generation, self.eventStream != nil else {
+                return
+            }
+            self.attempt = 0
+        }
     }
 
     func stopEvents() {
+        // Invalidates this stream's `onEnd` before it can even fire: `stop()`
+        // below terminates the process asynchronously, and its termination
+        // handler runs regardless of whether the stop was deliberate.
+        streamGeneration += 1
+        // A backoff already armed at the moment of a stop must not be left
+        // ticking: it would fire later regardless, calling `refresh()` and
+        // `startEvents()` against a client that was just told to be quiet —
+        // resurrecting the very thing this call exists to stop. `.onDisappear`
+        // relies on this: a window closing mid-backoff must leave nothing
+        // running behind it.
+        //
+        // Nilled out, not just cancelled: a cancelled task skips both places
+        // that null this slot on completion (each gated on `!Task.isCancelled`,
+        // precisely so a superseded cycle cannot clobber whatever replaced
+        // it) — so without this, `retryTask` is left permanently non-nil,
+        // pointing at a task that will never run again. `scheduleRetry()`'s
+        // idempotency guard reads non-nil as "a live retry is armed" and
+        // every later call from `onEnd` or `refresh()` would silently no-op
+        // forever: `state` keeps reading `.reconnecting`/`.unreachable`, but
+        // nothing is actually counting down. The invariant this relies on —
+        // a cancelled retry always leaves the slot nil — has to hold at
+        // every site that cancels, not just the ones that go on to replace
+        // it in the same breath.
+        //
+        // Set before either of those, and load-bearing beyond them: a
+        // `refresh()` already in flight has no cancellation check between
+        // it and its own `scheduleRetry()` call, so nilling `retryTask`
+        // alone leaves that guard reading "idempotent" instead of "stopped".
+        // See `isStopped`'s own doc comment.
+        isStopped = true
+        retryTask?.cancel()
+        retryTask = nil
         eventStream?.stop()
         eventStream = nil
-    }
-
-    /// Point every live connection at whichever machine `remoteHost` now names.
-    ///
-    /// The subprocess-per-command calls already read the preference fresh on
-    /// every call, but the event stream is a long-lived process started once —
-    /// changing the preference under it would leave it listening to the machine
-    /// it was pointed at when it started. Only the stream needs restarting, but
-    /// the fleet it was populating belongs to the old machine too, so that goes
-    /// back to empty rather than showing stale rows until the next event lands.
-    func hostChanged() async {
-        stopEvents()
-        fleet = .empty
-        await refresh()
-        startEvents()
     }
 
     /// Fold one pushed change into the fleet.
@@ -208,11 +545,39 @@ final class DaemonClient: ObservableObject {
     @Published private(set) var hasLoaded = false
 
     func refresh() async {
-        guard let data = await run(["workspace", "list", "--json"], background: true) else { return }
+        // `runRaw`, not `run`: the failure message comes back from THIS
+        // call directly rather than being read out of `lastError` after the
+        // fact, where a concurrent command's own failure could have
+        // overwritten it between that call resuming and this line running.
+        let (maybeData, failureMessage) = await runRaw(
+            ["workspace", "list", "--json"], background: true)
+        guard let data = maybeData else {
+            let reason = failureMessage ?? "Could not reach this machine."
+            lastError = reason
+            if looksNotInstalled(reason) {
+                state = .notInstalled
+            } else {
+                state = .unreachable(reason: reason)
+            }
+            // Not a failure to retry forever at full speed (`.notInstalled`
+            // and a version mismatch are not fixed by retrying at all), but
+            // not one to never check again either — `scheduleRetry()` reads
+            // `state` itself and picks the slow cadence for those two cases.
+            scheduleRetry()
+            return
+        }
         do {
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
             hasLoaded = true
             lastError = nil
+            // Read before overwriting: `onReconnect` fires for a genuine
+            // transition into `.connected`, not for a read that merely
+            // confirms a connection that was already up — the common case,
+            // since `refresh()` has some thirty call sites and most of them
+            // run while everything is fine.
+            let justReconnected = state != .connected
+            state = .connected
+            if justReconnected { onReconnect?() }
             // Reap on every read, not only on events. A terminal that exited
             // while the app was closed produces no event to react to, so
             // without this the first thing you see on launch is exactly the
@@ -232,6 +597,8 @@ final class DaemonClient: ObservableObject {
             lastError = sample.isEmpty
                 ? "Could not read the fleet: \(error.localizedDescription)"
                 : "Could not read the fleet. The CLI said: \(sample)"
+            state = .unreachable(reason: lastError ?? "Could not read the fleet.")
+            scheduleRetry()
         }
     }
 
@@ -492,6 +859,13 @@ final class DaemonClient: ObservableObject {
         // Up to a minute: a cold agent on a slow machine is not a failure.
         for _ in 0..<120 {
             try? await Task.sleep(for: .milliseconds(500))
+            // `try?` swallows `Task.sleep`'s `CancellationError`, so a
+            // cancelled `startTask` — the machine it targets was just
+            // removed — would otherwise fall straight through into another
+            // `refresh()` and, once the agent went idle, `send()` the task
+            // description into a machine nothing holds a client for anymore.
+            // Checked explicitly rather than relying on the sleep to throw.
+            guard !Task.isCancelled else { return workspace.id }
             await refresh()
             let current = fleet.workspaces
                 .first(where: { $0.id == workspace.id })?
@@ -517,9 +891,15 @@ final class DaemonClient: ObservableObject {
         _ = await run(["terminal", "send-hex", terminal, "0d"], background: true)
     }
 
-    func createWorkspace(repo: String, task: String, branch: String, base: String) async {
-        _ = await run(["workspace", "create", repo, task, "--branch", branch, "--base", base])
+    /// Creates the worktree and branch. Returns the daemon's own message on
+    /// failure, or nil on success — `NewWorkspaceSheet` stays open and shows
+    /// it rather than dismissing as if nothing went wrong.
+    func createWorkspace(repo: String, task: String, branch: String, base: String) async -> String? {
+        let failure = await runReportingError([
+            "workspace", "create", repo, task, "--branch", branch, "--base", base,
+        ])
         await refresh()
+        return failure
     }
 
     func hideWorkspace(_ workspace: String) async {
@@ -688,6 +1068,11 @@ final class DaemonClient: ObservableObject {
                 return found
             }
             try? await Task.sleep(for: .milliseconds(150))
+            // Same reasoning as `startTask`'s own loop just above: `try?`
+            // alone lets a cancelled caller keep polling — up to 20 more
+            // `workspace list` subprocesses against a machine that may have
+            // just been removed — instead of stopping the moment it is told to.
+            guard !Task.isCancelled else { return nil }
             await refresh()
         }
         return nil
@@ -747,8 +1132,36 @@ final class DaemonClient: ObservableObject {
 
     // MARK: - Subprocess
 
+    /// Run a command; on failure, set `lastError` and hand back `nil`.
+    ///
+    /// A thin wrapper over `runRaw`, kept for the roughly thirty call sites
+    /// in this file that only ever wanted the data-or-banner behavior. The
+    /// one caller that needs its OWN failure's exact words — `refresh()`,
+    /// which decides `.unreachable`'s reason and whether this is a machine
+    /// that needs installing — calls `runRaw` directly instead. See there.
     @discardableResult
     private func run(_ args: [String], background: Bool = false) async -> Data? {
+        let (data, message) = await runRaw(args, background: background)
+        if let message { lastError = message }
+        return data
+    }
+
+    /// Run a command and hand back its data or its failure message directly,
+    /// rather than through `lastError`.
+    ///
+    /// `refresh()` used to read `lastError` back out after `run()` returned,
+    /// to build `.unreachable(reason:)`. That is a race: `run()`'s failure
+    /// used to write `lastError` and resume its continuation from the same
+    /// hop, which closed the ordering between those two — but a SECOND,
+    /// concurrent command's own `run()` call can still land its own write in
+    /// between that resume and `refresh()`'s subsequent read, handing
+    /// `.unreachable` a message about an unrelated command instead of its
+    /// own. Returning the message removes the shared state from the middle
+    /// of that read entirely: whatever this call's own result says is what
+    /// `refresh()` acts on, unconditionally.
+    private func runRaw(
+        _ args: [String], background: Bool = false
+    ) async -> (data: Data?, message: String?) {
         // A background poll must not toggle `busy`. That is a @Published change,
         // and every one of them re-evaluates the whole view tree including the
         // terminal surface, which is wasted work several times a second.
@@ -756,10 +1169,10 @@ final class DaemonClient: ObservableObject {
         defer { if !background { busy = false } }
 
         guard let bin = binary else {
-            lastError =
+            let message =
                 "The farcooler CLI was not found. Rebuild the app with "
                 + "apps/macos/build-app.sh so it bundles one, or set FARCOOLER_BIN."
-            return nil
+            return (nil, message)
         }
 
         let env = environment
@@ -779,8 +1192,7 @@ final class DaemonClient: ObservableObject {
                 do {
                     try process.run()
                 } catch {
-                    Task { @MainActor in self.lastError = error.localizedDescription }
-                    continuation.resume(returning: nil)
+                    continuation.resume(returning: (nil, error.localizedDescription))
                     return
                 }
 
@@ -792,12 +1204,11 @@ final class DaemonClient: ObservableObject {
                     let message =
                         String(data: stderr, encoding: .utf8)?
                         .trimmingCharacters(in: .whitespacesAndNewlines) ?? "command failed"
-                    Task { @MainActor in self.lastError = message }
-                    continuation.resume(returning: nil)
+                    continuation.resume(returning: (nil, message))
                     return
                 }
 
-                continuation.resume(returning: stdout)
+                continuation.resume(returning: (stdout, nil))
             }
         }
     }

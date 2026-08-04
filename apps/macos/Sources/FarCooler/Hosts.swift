@@ -1,7 +1,7 @@
 import AgentKit
 import SwiftUI
 
-/// The machines this Mac can drive, and which one it is driving.
+/// The machines this Mac can reach, and what the app knows about each.
 ///
 /// This replaced a single free-text field. That field was honest about the
 /// architecture — a host is just an ssh target, and there is no Far Cooler
@@ -11,24 +11,14 @@ import SwiftUI
 /// it. Every one of those questions has an answer the app can get.
 ///
 /// Stored as a list rather than one string because the whole point of a fleet
-/// is that it spans machines; switching between them should not mean retyping
-/// one.
+/// is that it spans machines at once — there is no longer a single one being
+/// "driven," so this class holds no selection, only the configured set.
 @MainActor
 final class Hosts: ObservableObject {
     static let shared = Hosts()
 
     /// Every configured machine, in the order they were added.
     @Published private(set) var all: [RemoteHost] = []
-
-    /// Which one the app is driving, or nil for this Mac.
-    ///
-    /// Kept in `Preferences.remoteHost` rather than here: `DaemonClient` reads
-    /// it on every call, and one place must own it. This class is the list; the
-    /// preference is the selection.
-    var active: String {
-        get { Preferences.shared.remoteHost }
-        set { Preferences.shared.remoteHost = newValue }
-    }
 
     private let storageKey = "hosts.configured"
 
@@ -47,9 +37,6 @@ final class Hosts: ObservableObject {
 
     func remove(_ target: String) {
         all.removeAll { $0.target == trimmed(target) }
-        // Driving a machine that is no longer in the list would leave the app
-        // pointed at something with no way to inspect or repair it.
-        if active == trimmed(target) { active = "" }
         save()
     }
 

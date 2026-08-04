@@ -42,6 +42,18 @@ final class AgentStream: ObservableObject {
     private var environment: [String: String] = [:]
     private var hostArguments: [String] = []
     private var pollTask: Task<Void, Never>?
+    /// Why this session's machine cannot be acted on, or nil if it can —
+    /// the same check `ContentView.act(on:)` runs for every terminal-pane
+    /// mutation, reached here too.
+    ///
+    /// Without this, `send`, `answer`, `cancel`, `setConfig` and the rest
+    /// below routed correctly BY `hostArguments` — the CLI subprocess really
+    /// does run against the right machine — but never asked FIRST whether
+    /// that machine was already known to be gone. Messaging an agent on a
+    /// machine already `.unreachable` burned a full `ConnectTimeout` finding
+    /// that out the hard way, with no banner, for a refusal `FleetStore`
+    /// already had the answer to.
+    private var refusal: () -> String? = { nil }
 
     init(terminal: String) {
         self.terminal = terminal
@@ -51,11 +63,15 @@ final class AgentStream: ObservableObject {
     /// poll loop rather than running two, the same rule `TerminalStream.start`
     /// follows for the same reason — a pane can be reconfigured without first
     /// being told to stop.
-    func start(binary: String?, environment: [String: String], hostArguments: [String] = []) {
+    func start(
+        binary: String?, environment: [String: String], hostArguments: [String] = [],
+        refusal: @escaping () -> String? = { nil }
+    ) {
         stop()
         self.binary = binary
         self.environment = environment
         self.hostArguments = hostArguments
+        self.refusal = refusal
 
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -143,7 +159,20 @@ final class AgentStream: ObservableObject {
         return try JSONDecoder().decode(Batch.self, from: data)
     }
 
+    /// True, and `connectionError` set, when this session's machine already
+    /// refuses. Every mutating call below starts with this — before any
+    /// local, optimistic transcript edit as well as before the CLI call —
+    /// so a message typed to a machine already known to be gone gets an
+    /// immediate, honest banner instead of either a silent hang or a local
+    /// echo of something that was never sent.
+    private func refuseIfNeeded() -> Bool {
+        guard let why = refusal() else { return false }
+        connectionError = why
+        return true
+    }
+
     func send(_ text: String, images: [ComposerImage] = [], whileWorking: Bool) async {
+        guard !refuseIfNeeded() else { return }
         // Echoed locally only when it is going out NOW.
         //
         // A message written mid-turn does not become part of the conversation
@@ -176,24 +205,29 @@ final class AgentStream: ObservableObject {
 
     /// Rewrite a message that has not gone out yet.
     func editQueued(_ id: String, _ text: String) async {
+        guard !refuseIfNeeded() else { return }
         _ = try? await runCLI(["terminal", "agent-edit-queued", terminal, id, text])
     }
 
     /// Send a queued message into the turn already running.
     func steerQueued(_ id: String) async {
+        guard !refuseIfNeeded() else { return }
         _ = try? await runCLI(["terminal", "agent-steer-queued", terminal, id])
     }
 
     /// Take back a message that has not gone out yet.
     func cancelQueued(_ id: String) async {
+        guard !refuseIfNeeded() else { return }
         _ = try? await runCLI(["terminal", "agent-cancel-queued", terminal, id])
     }
 
     func setModel(_ model: String) async {
+        guard !refuseIfNeeded() else { return }
         _ = try? await runCLI(["terminal", "agent-set-model", terminal, model])
     }
 
     func setConfig(_ id: String, _ value: String) async {
+        guard !refuseIfNeeded() else { return }
         // Shown before it is confirmed. The adapter applies the change without
         // announcing it, so waiting for an echo left the picker snapping back
         // to its old value — which reads as the control doing nothing at all.
@@ -202,6 +236,7 @@ final class AgentStream: ObservableObject {
     }
 
     func answer(_ requestID: String, _ optionID: String) async {
+        guard !refuseIfNeeded() else { return }
         // Taken down on click, not on an echo. The agent resumes without
         // acknowledging the request it was blocked on, so a card that waited
         // for confirmation sat there after the work it gated had happened.
@@ -210,10 +245,12 @@ final class AgentStream: ObservableObject {
     }
 
     func setMode(_ mode: String) async {
+        guard !refuseIfNeeded() else { return }
         _ = try? await runCLI(["terminal", "agent-set-mode", terminal, mode])
     }
 
     func cancel() async {
+        guard !refuseIfNeeded() else { return }
         _ = try? await runCLI(["terminal", "agent-cancel", terminal])
     }
 

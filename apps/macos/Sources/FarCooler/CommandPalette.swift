@@ -87,14 +87,14 @@ struct CommandPalette: View {
 
     private var currentWorkspace: String? {
         switch current {
-        case .workspace(let id): return id
-        case .terminal(let id, _): return id
+        case .workspace(_, let id): return id
+        case .terminal(_, let workspace, _): return workspace
         case nil: return nil
         }
     }
 
     private var currentTerminal: String? {
-        if case .terminal(_, let id) = current { return id }
+        if case .terminal(_, _, let id) = current { return id }
         return nil
     }
 

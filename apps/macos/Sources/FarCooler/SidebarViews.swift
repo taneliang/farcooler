@@ -112,16 +112,27 @@ struct WorkspaceSection: View {
     /// and is not in the environment, and the banner that shows this belongs to
     /// the window, not to one sidebar row.
     var onEditorError: (String) -> Void = { _ in }
+    /// Whether this workspace's machine can be acted on right now.
+    ///
+    /// Reads stay live even when this is `false` — the row is still
+    /// selectable and its terminals still show whatever was last read from
+    /// it — but the affordances that would MUTATE something on a machine
+    /// already known to be unreachable are dimmed and inert rather than
+    /// left to fail silently or hang on a dead connection.
+    var usable: Bool = true
 
     @State private var hovering = false
 
-    private var isSelected: Bool { selection == .workspace(workspace.id) }
+    private var isSelected: Bool {
+        selection == .workspace(host: workspace.host ?? "", id: workspace.id)
+    }
 
     /// Open whether or not the user opened it.
     private var showsTerminals: Bool { isExpanded || !workspace.attention.isEmpty }
 
     private func row(_ terminal: Terminal, ordinal: Int?) -> some View {
-        let id = ContentView.Selection.terminal(workspace: workspace.id, terminal: terminal.id)
+        let id = ContentView.Selection.terminal(
+            host: workspace.host ?? "", workspace: workspace.id, terminal: terminal.id)
         return TerminalRow(
             terminal: terminal,
             isSelected: selection == id,
@@ -131,7 +142,8 @@ struct WorkspaceSection: View {
             onMoveToLayout: { onMoveToLayout(terminal, $0) },
             onDropTogether: { onDropTogether($0, terminal) },
             onAction: { onTerminalAction(terminal, $0) },
-            ordinal: ordinal
+            ordinal: ordinal,
+            usable: usable
         )
     }
 
@@ -184,6 +196,12 @@ struct WorkspaceSection: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.bottom, 4)
+                // Making a terminal is a mutation same as any other, and one
+                // that would simply hang against a machine already known to
+                // be gone rather than fail fast the way `act(on:)` fails
+                // everything else.
+                .opacity(usable ? 1 : 0.55)
+                .allowsHitTesting(usable)
             }
         }
     }
@@ -280,7 +298,14 @@ struct WorkspaceSection: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .opacity(hovering ? 1 : 0)
+            // Hover already gates visibility; an unusable machine's menu
+            // stays reachable by hover but reads as dimmed and does nothing
+            // — every item in it is a mutation (hide, remove, a new
+            // terminal, opening an editor on the worktree), and every one
+            // of those is exactly what `usable` says this machine cannot
+            // take right now.
+            .opacity(hovering ? (usable ? 1 : 0.55) : 0)
+            .allowsHitTesting(usable)
             .padding(.leading, 2)
         }
         .padding(.vertical, 4)
@@ -291,7 +316,7 @@ struct WorkspaceSection: View {
         )
         .padding(.horizontal, SidebarGrid.highlightInset)
         .contentShape(Rectangle())
-        .onTapGesture { selection = .workspace(workspace.id) }
+        .onTapGesture { selection = .workspace(host: workspace.host ?? "", id: workspace.id) }
         .onHover { hovering = $0 }
     }
 }
@@ -313,6 +338,12 @@ struct ProjectHeader: View {
     var onNewWorktree: (() -> Void)?
     /// A terminal in the repository's own checkout, not in a worktree.
     var onNewTerminal: (() -> Void)?
+    /// Which machine this project's worktrees are on.
+    var host: String = ""
+    var hostState: HostState = .connected
+    /// Whether to name the machine at all — noise on a fleet of one.
+    var showHost: Bool = false
+    var onReconnect: () -> Void = {}
 
     @State private var hovering = false
 
@@ -331,6 +362,13 @@ struct ProjectHeader: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.quaternary)
                     .monospacedDigit()
+                if showHost {
+                    Text(host.isEmpty ? "this Mac" : host)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                HostDot(state: hostState, onReconnect: onReconnect)
                 Spacer()
 
                 if onNewWorktree != nil || onNewTerminal != nil {
@@ -362,6 +400,41 @@ struct ProjectHeader: View {
         .padding(.bottom, 3)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+    }
+}
+
+/// A machine's connection, said as quietly as possible.
+///
+/// Absent when healthy: a dot that is always there is a dot nobody reads, and
+/// the whole point is that you notice it only when something is wrong.
+/// Reconnection is amber and silent; only a machine that has given up is red,
+/// and clicking it retries at once rather than waiting out the backoff.
+struct HostDot: View {
+    let state: HostState
+    let onReconnect: () -> Void
+
+    var body: some View {
+        switch state {
+        case .connected:
+            EmptyView()
+        case .connecting, .reconnecting:
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 5, height: 5)
+                .help("Reconnecting to this machine")
+        case .unreachable(let why):
+            Button(action: onReconnect) {
+                Circle().fill(Color.red).frame(width: 5, height: 5)
+            }
+            .buttonStyle(.plain)
+            .help("\(why) — click to retry now")
+        case .notInstalled:
+            Button(action: onReconnect) {
+                Circle().fill(Color.secondary).frame(width: 5, height: 5)
+            }
+            .buttonStyle(.plain)
+            .help("Far Cooler is not installed on this machine — open Settings ▸ Machines")
+        }
     }
 }
 
@@ -401,6 +474,9 @@ struct TerminalRow: View {
     /// the old behaviour and it labelled a lone `claude` as "Terminal 7", which
     /// answers a question nobody asked.
     var ordinal: Int?
+    /// Whether this terminal's machine can be acted on right now. See
+    /// `WorkspaceSection.usable`, which this mirrors row by row.
+    var usable: Bool = true
 
     /// The status, and only when it is not the boring case.
     private var meta: String? {
@@ -449,6 +525,8 @@ struct TerminalRow: View {
                 Button("Dismiss") { onAction(.dismissLost) }
                     .buttonStyle(.borderless)
                     .font(.system(size: 11))
+                    .opacity(usable ? 1 : 0.55)
+                    .allowsHitTesting(usable)
             }
         }
         .padding(.vertical, 4)
@@ -475,11 +553,16 @@ struct TerminalRow: View {
         // can show which half it would land in, and reading that back out of an
         // item provider is asynchronous. See `PaneDrag`.
         .onDrag {
+            // Dragging arranges panes, which is a mutation like any other —
+            // guarded here rather than by hiding the gesture, because the row
+            // still has to stay a normal drop TARGET for other terminals'
+            // drags even when this machine cannot itself be rearranged.
+            guard usable else { return NSItemProvider() }
             MainActor.assumeIsolated { PaneDrag.shared.begin(terminal.id) }
             return NSItemProvider(object: terminal.id as NSString)
         }
         .onDrop(of: [.text], isTargeted: $targeted) { _ in
-            guard let dragged = PaneDrag.shared.terminal, dragged != terminal.id else {
+            guard usable, let dragged = PaneDrag.shared.terminal, dragged != terminal.id else {
                 return false
             }
             PaneDrag.shared.end()
@@ -488,13 +571,14 @@ struct TerminalRow: View {
         }
         .contextMenu {
             Button("Move to its own layout") { onMoveToLayout(nil) }
+                .disabled(!usable)
             if !layouts.isEmpty {
                 Divider()
                 ForEach(Array(layouts.enumerated()), id: \.element.id) { index, group in
                     Button(layoutLabel(group, position: index + 1)) {
                         onMoveToLayout(group)
                     }
-                    .disabled(group.terminals.contains(terminal.id))
+                    .disabled(!usable || group.terminals.contains(terminal.id))
                 }
             }
         }

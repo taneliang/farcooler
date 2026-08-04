@@ -3,19 +3,61 @@ import SwiftUI
 
 /// Create a workspace: one worktree plus branch for one task.
 struct NewWorkspaceSheet: View {
-    let repositories: [Repository]
+    /// Every machine's repositories, tagged the same way `FleetStore.repositories`
+    /// tags them — carried together rather than flattened to a bare
+    /// `[Repository]`. A repository's `short` is eight hex characters minted
+    /// per daemon (see `FleetStore.repositories`'s own doc comment), so two
+    /// machines can hand back the same one for two different repositories; the
+    /// picker below has to choose host and repository together; a repository
+    /// chosen without its host, submitted through whatever host happened to be
+    /// "active" elsewhere, is exactly how a workspace gets created on the wrong
+    /// machine with no error at all.
+    let repositories: [(host: String, repository: Repository)]
     /// The repository to open on, when this was reached from a project header.
     /// Empty means "ask", which is what the sidebar's own `+` wants.
     var preselected: String = ""
-    let onCreate: (String, String, String, String) async -> Void
+    /// The machine `preselected` lives on. Only consulted alongside
+    /// `preselected`, to disambiguate a display name that exists on more than
+    /// one machine — once the picker below has been touched, its own
+    /// selection carries its own host and this is never read again.
+    var preselectedHost: String = ""
+    /// Receives host and repository together with the rest of the form, and
+    /// answers with the daemon's own failure message, or nil on success. A
+    /// `String` return rather than swallowing the result is what lets this
+    /// sheet stay open and say why, the same way `RemoveWorkspaceSheet` and
+    /// `AddRepositorySheet` already do — `createWorkspace` failing used to
+    /// dismiss the sheet exactly as if it had succeeded.
+    let onCreate: (_ host: String, _ repo: String, _ task: String, _ branch: String, _ base: String)
+        async -> String?
     @Environment(\.dismiss) private var dismiss
 
-    @State private var repo: String = ""
+    /// Host and repository chosen together, so the picker can never leave
+    /// them disagreeing — selecting a row changes both fields at once, unlike
+    /// two independent pickers that could each point somewhere else.
+    private struct Choice: Hashable {
+        var host: String
+        var short: String
+    }
+
+    @State private var choice: Choice?
     @State private var task = ""
     @State private var branch = ""
     @State private var base = "HEAD"
     @State private var working = false
     @State private var error: String?
+
+    /// Whether more than one machine has a repository on offer — the picker
+    /// names the machine alongside the repository only when that distinction
+    /// is real, same rule the sidebar's own host labels follow.
+    private var multipleHosts: Bool {
+        Set(repositories.map(\.host)).count > 1
+    }
+
+    private func label(for entry: (host: String, repository: Repository)) -> String {
+        guard multipleHosts else { return entry.repository.displayName }
+        let host = entry.host.isEmpty ? "This Mac" : entry.host
+        return "\(entry.repository.displayName) — \(host)"
+    }
 
     /// Suggest a branch from the task name, the way a person would write it.
     private var suggestedBranch: String {
@@ -30,7 +72,7 @@ struct NewWorkspaceSheet: View {
     }
 
     private var canCreate: Bool {
-        !repo.isEmpty && !task.trimmingCharacters(in: .whitespaces).isEmpty
+        choice != nil && !task.trimmingCharacters(in: .whitespaces).isEmpty
             && !effectiveBranch.isEmpty && !working
     }
 
@@ -48,17 +90,25 @@ struct NewWorkspaceSheet: View {
             error: error,
             onCancel: { dismiss() },
             onConfirm: {
+                guard let choice else { return }
                 working = true
                 error = nil
-                await onCreate(repo, task, effectiveBranch, base)
+                if let failure = await onCreate(
+                    choice.host, choice.short, task, effectiveBranch, base)
+                {
+                    working = false
+                    error = failure
+                    return
+                }
                 working = false
                 dismiss()
             }
         ) {
             Form {
-                Picker("Repository", selection: $repo) {
-                    ForEach(repositories) { r in
-                        Text(r.displayName).tag(r.short)
+                Picker("Repository", selection: $choice) {
+                    ForEach(repositories, id: \.repository.id) { entry in
+                        Text(label(for: entry))
+                            .tag(Optional(Choice(host: entry.host, short: entry.repository.short)))
                     }
                 }
 
@@ -73,11 +123,18 @@ struct NewWorkspaceSheet: View {
             .formStyle(.grouped)
         }
         .onAppear {
-            guard repo.isEmpty else { return }
+            guard choice == nil else { return }
             // The project whose header was clicked, if there was one. Matching
-            // on display name because that is what the sidebar groups by.
-            repo = repositories.first { $0.displayName == preselected }?.short
-                ?? repositories.first?.short ?? ""
+            // on display name because that is what the sidebar groups by, and
+            // on host too, because two machines can share a display name and
+            // only one of them is the project that header actually named.
+            let preferred = repositories.first {
+                $0.repository.displayName == preselected
+                    && (preselectedHost.isEmpty || $0.host == preselectedHost)
+            }
+            if let entry = preferred ?? repositories.first {
+                choice = Choice(host: entry.host, short: entry.repository.short)
+            }
         }
     }
 }
@@ -312,29 +369,61 @@ struct Callout: View {
 /// understand that: it works out whether an allowlist entry is needed, names
 /// the exact folder it would add, and asks once. What it never does is
 /// silently grant access to a directory the user did not see.
+///
+/// This Mac is browsed with an `NSOpenPanel`, because it is the one machine
+/// whose disk this process can actually see. Any other machine is typed as a
+/// path instead — the app has no filesystem to browse there, only the
+/// daemon on that machine does, and it is the one that decides whether the
+/// path exists and looks like a repository.
 struct AddRepositorySheet: View {
-    let roots: [RepositoryRoot]
-    /// Allowlist a folder. Returns a message on failure.
-    let onAddRoot: (String) async -> String?
-    /// Register a repository. Returns a message on failure.
-    let onRegister: (String) async -> String?
-    /// Called after a successful registration, so the worktrees that repository
-    /// already has can be offered immediately. That is the moment they matter:
-    /// the person has just pointed at a project and it very likely has three or
-    /// four checked out already.
-    var onRegistered: () -> Void = {}
+    /// Every machine that could take a new repository.
+    let hosts: [String]
+    /// Allowlisted roots across every machine, tagged the same way
+    /// `FleetStore.roots` tags them — filtered here to whichever machine is
+    /// currently chosen, so a root on one machine can never look like it
+    /// covers a path on another that merely happens to share the string.
+    let roots: [(host: String, root: RepositoryRoot)]
+    /// Allowlist a folder on `host`. Returns a message on failure.
+    let onAddRoot: (_ host: String, _ path: String) async -> String?
+    /// Register a repository on `host`. Returns a message on failure.
+    let onRegister: (_ host: String, _ path: String) async -> String?
+    /// Called with the host just registered on, after a successful
+    /// registration, so the worktrees that repository already has can be
+    /// offered immediately. That is the moment they matter: the person has
+    /// just pointed at a project and it very likely has three or four checked
+    /// out already. The host is handed back rather than assumed, because it
+    /// is this sheet's own `host` state that decided which machine registered
+    /// — nothing upstream chose it.
+    var onRegistered: (_ host: String) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
+    /// Empty means this Mac, same convention as everywhere else host-tagged.
+    @State private var host: String = ""
     @State private var chosen: URL?
+    @State private var remotePath: String = ""
     @State private var working = false
     @State private var error: String?
 
-    /// The allowlisted root that already covers the chosen folder, if any.
+    /// The path being proposed, however it was chosen. Building this from a
+    /// `URL` even for a typed remote path is pure string manipulation — the
+    /// path segment work below never touches a filesystem, remote or
+    /// otherwise, so it is safe to share between both cases.
+    private var path: URL? {
+        host.isEmpty ? chosen : (remotePath.isEmpty ? nil : URL(fileURLWithPath: remotePath))
+    }
+
+    /// This machine's own allowlisted roots. A root string-identical to one
+    /// on a different machine still must not answer for this one.
+    private var rootsOnHost: [RepositoryRoot] {
+        roots.filter { $0.host == host }.map(\.root)
+    }
+
+    /// The allowlisted root that already covers the chosen path, if any.
     private var coveringRoot: RepositoryRoot? {
-        guard let chosen else { return nil }
-        return roots.first { root in
-            guard let path = root.path else { return false }
-            return chosen.path == path || chosen.path.hasPrefix(path + "/")
+        guard let path else { return nil }
+        return rootsOnHost.first { root in
+            guard let rootPath = root.path else { return false }
+            return path.path == rootPath || path.path.hasPrefix(rootPath + "/")
         }
     }
 
@@ -342,13 +431,21 @@ struct AddRepositorySheet: View {
     /// entry covers its siblings too and the next repository needs no
     /// permission at all.
     private var rootToAdd: URL? {
-        guard let chosen, coveringRoot == nil else { return nil }
-        return chosen.deletingLastPathComponent()
+        guard let path, coveringRoot == nil else { return nil }
+        return path.deletingLastPathComponent()
     }
 
+    /// Only meaningful on this Mac — the one machine whose disk this process
+    /// can read. A remote path is taken on faith here; the daemon that owns
+    /// that disk is what actually confirms it, when `onRegister` reaches it.
     private var looksLikeRepository: Bool {
         guard let chosen else { return false }
         return FileManager.default.fileExists(atPath: chosen.appendingPathComponent(".git").path)
+    }
+
+    private var canConfirm: Bool {
+        guard path != nil, !working else { return false }
+        return host.isEmpty ? looksLikeRepository : true
     }
 
     var body: some View {
@@ -356,26 +453,47 @@ struct AddRepositorySheet: View {
             title: "Add repository",
             subtitle: "Far Cooler creates a worktree per task, so it needs an existing repository.",
             confirmTitle: "Add repository",
-            canConfirm: chosen != nil && looksLikeRepository && !working,
+            canConfirm: canConfirm,
             working: working,
             error: error,
             onCancel: { dismiss() },
             onConfirm: { await confirm() }
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Button("Choose folder…") { choose() }
-                    if let chosen {
-                        Text(chosen.lastPathComponent)
-                            .font(.callout.weight(.medium))
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    } else {
-                        Text("No folder chosen").font(.callout).foregroundStyle(.secondary)
+                if hosts.count > 1 {
+                    Picker("Machine", selection: $host) {
+                        ForEach(hosts, id: \.self) { h in
+                            Text(h.isEmpty ? "This Mac" : h).tag(h)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                if host.isEmpty {
+                    HStack(spacing: 10) {
+                        Button("Choose folder…") { choose() }
+                        if let chosen {
+                            Text(chosen.lastPathComponent)
+                                .font(.callout.weight(.medium))
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                        } else {
+                            Text("No folder chosen").font(.callout).foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Path on \(host)")
+                            .font(.callout)
+                        TextField("/home/you/src/project", text: $remotePath)
+                            .textFieldStyle(.roundedBorder)
+                        Text("Checked on that machine when you add it — this Mac cannot see its disk.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
-                if chosen != nil && !looksLikeRepository {
+                if host.isEmpty && chosen != nil && !looksLikeRepository {
                     Callout(
                         icon: "exclamationmark.triangle.fill",
                         tone: .warning,
@@ -391,15 +509,16 @@ struct AddRepositorySheet: View {
                             "This also grants access to \(rootToAdd.lastPathComponent), "
                             + "the enclosing folder."
                     )
-                } else if let coveringRoot, let path = coveringRoot.path {
+                } else if let coveringRoot, let rootPath = coveringRoot.path {
                     Callout(
                         icon: "checkmark.circle.fill",
                         tone: .neutral,
-                        text: "Already inside the allowlisted folder \(URL(fileURLWithPath: path).lastPathComponent)."
+                        text: "Already inside the allowlisted folder \(URL(fileURLWithPath: rootPath).lastPathComponent)."
                     )
                 }
             }
         }
+        .onChange(of: host) { _, _ in error = nil }
     }
 
     private func choose() {
@@ -416,19 +535,19 @@ struct AddRepositorySheet: View {
     }
 
     private func confirm() async {
-        guard let chosen else { return }
+        guard let path else { return }
         working = true
         defer { working = false }
 
-        if let rootToAdd, let failure = await onAddRoot(rootToAdd.path) {
+        if let rootToAdd, let failure = await onAddRoot(host, rootToAdd.path) {
             error = failure
             return
         }
-        if let failure = await onRegister(chosen.path) {
+        if let failure = await onRegister(host, path.path) {
             error = failure
             return
         }
         dismiss()
-        onRegistered()
+        onRegistered(host)
     }
 }

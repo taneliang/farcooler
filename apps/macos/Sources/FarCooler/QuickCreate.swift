@@ -17,10 +17,22 @@ import SwiftUI
 /// quick succession and a panel that closes on every one turns a burst into a
 /// sequence of separate decisions.
 struct QuickCreate: View {
-    let projects: [Repository]
+    /// Every machine's repositories, tagged the same way `FleetStore.repositories`
+    /// tags them. Carried together rather than flattened to a bare `[Repository]`
+    /// so the picker below can name the machine, not just the project — see
+    /// `NewWorkspaceSheet`, which tags the same way for the same reason.
+    let projects: [(host: String, repository: Repository)]
     @Binding var project: String
-    /// Description, project, preset. Returns once queued, not finished.
-    let onSubmit: (String, String, String) -> Void
+    /// Description, host, project, preset. Returns once queued, not
+    /// finished.
+    ///
+    /// `host` comes from `chosen` below, the same picker selection that
+    /// resolved `project` — not re-derived by the caller from `project`
+    /// alone. `NewWorkspaceSheet.Choice` carries host and repository
+    /// together for exactly this reason: a repository chosen without its
+    /// host, handed to whatever machine happens to be "current" downstream,
+    /// is how a task starts on the wrong one with no error at all.
+    let onSubmit: (String, String, String, String) -> Void
     let onResume: () -> Void
     let onClose: () -> Void
 
@@ -35,8 +47,31 @@ struct QuickCreate: View {
 
     @State private var justCreated: String?
 
-    private var chosen: Repository? {
-        projects.first { $0.id == project } ?? projects.first
+    /// The project `project` names, or nil if it names nothing any machine
+    /// currently has.
+    ///
+    /// No fallback to `projects.first`. `project` is `tasks.lastProject`,
+    /// persisted across launches — if the repository it names was removed
+    /// (or the whole machine it lived on was), the picker below renders with
+    /// no row selected, and this being nil is what keeps `⏎` from starting a
+    /// task on whatever happened to be first in the list instead: a fallback
+    /// here would be a machine picked with nothing on screen saying so, which
+    /// is the exact failure this project exists to remove.
+    private var chosen: (host: String, repository: Repository)? {
+        projects.first { $0.repository.id == project }
+    }
+
+    /// Whether more than one machine has a repository on offer — the picker
+    /// names the machine alongside the repository only when that distinction
+    /// is real, same rule `NewWorkspaceSheet` follows.
+    private var multipleHosts: Bool {
+        Set(projects.map(\.host)).count > 1
+    }
+
+    private func label(for entry: (host: String, repository: Repository)) -> String {
+        guard multipleHosts else { return entry.repository.displayName }
+        let host = entry.host.isEmpty ? "This Mac" : entry.host
+        return "\(entry.repository.displayName) — \(host)"
     }
 
     private var branch: String { Branch.slug(from: text) }
@@ -99,9 +134,15 @@ struct QuickCreate: View {
 
             Spacer(minLength: 10)
 
-            if projects.count > 1 {
+            // Shown whenever there is more than one project to confuse, or
+            // whenever the persisted selection matches none of them — the
+            // latter is what makes a stale `tasks.lastProject` a visible
+            // "pick one" instead of a silent wrong machine (see `chosen`).
+            if projects.count > 1 || chosen == nil {
                 Picker("", selection: $project) {
-                    ForEach(projects) { Text($0.displayName).tag($0.id) }
+                    ForEach(projects, id: \.repository.id) { entry in
+                        Text(label(for: entry)).tag(entry.repository.id)
+                    }
                 }
                 .labelsHidden().fixedSize().controlSize(.small)
             }
@@ -129,7 +170,9 @@ struct QuickCreate: View {
     private func submit() {
         let description = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty, let chosen else { return }
-        onSubmit(description, chosen.id, Agents.preset(agent: agent, model: model))
+        onSubmit(
+            description, chosen.host, chosen.repository.id,
+            Agents.preset(agent: agent, model: model))
 
         justCreated = Branch.title(from: description)
         // Cleared only on success, which is also what clears the draft.

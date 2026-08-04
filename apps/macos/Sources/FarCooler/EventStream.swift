@@ -57,6 +57,18 @@ private struct EventKind: Decodable {
 
 final class EventStream {
     private var process: Process?
+    /// The pipe end `start()` attached `readabilityHandler` to, so `stop()`
+    /// can clear it immediately rather than waiting for `terminationHandler`
+    /// to get around to it.
+    ///
+    /// `stop()` used to only `terminate()` the process; Foundation keeps
+    /// delivering whatever is already buffered in the pipe to the handler
+    /// regardless of that, right up until the termination handler itself
+    /// clears it — which runs asynchronously, after `stop()` has already
+    /// returned. A line that arrived in that window was decoded and handed
+    /// to `onEvent`/`onLayout`/`onFleet` for a stream its own caller just
+    /// told to stop.
+    private var outputHandle: FileHandle?
     private let onEvent: @Sendable (TerminalEvent) -> Void
     private let onLayout: @Sendable (LayoutEvent) -> Void
     /// The set of workspaces changed — a worktree appeared, vanished, or moved
@@ -99,6 +111,7 @@ final class EventStream {
         // state across threads, which the compiler is right to refuse.
         let buffer = LineBuffer()
         let handle = out.fileHandleForReading
+        outputHandle = handle
         handle.readabilityHandler = { [onEvent, onLayout, onFleet] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
@@ -136,11 +149,17 @@ final class EventStream {
             process = p
         } catch {
             process = nil
+            outputHandle = nil
             onEnd()
         }
     }
 
     func stop() {
+        // Cleared here, synchronously, rather than left for
+        // `terminationHandler` to get to — see `outputHandle`'s own doc
+        // comment for why waiting is the bug.
+        outputHandle?.readabilityHandler = nil
+        outputHandle = nil
         guard let p = process else { return }
         process = nil
         if p.isRunning { p.terminate() }

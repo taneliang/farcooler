@@ -114,7 +114,16 @@ A fleet sidebar, per-terminal output, and an input box. It renders the state the
 daemon derived and never computes state itself, so two clients cannot disagree
 about the same terminal.
 
-The app owns this Mac's daemon. It ships one inside its own bundle and runs
+Every machine added under Settings ▸ Machines is connected at once, over SSH,
+alongside this Mac — there is no picker and no "current machine" to switch
+between first. Projects from every machine appear in one sidebar, each naming
+the machine it is on. A machine that stops answering keeps its rows, dimmed,
+rather than dropping them: reads keep showing the last good fetch, and an
+action against that machine is refused at once with its own error instead of
+hanging or being queued for later.
+
+The app owns this Mac's own daemon specifically — the one machine it can start
+and stop directly, because it ships one inside its own bundle. It runs
 `farcooler daemon ensure` at launch, which replaces any daemon built from
 different source than the app:
 
@@ -170,11 +179,14 @@ workspaces with real git worktrees, terminals in a private tmux server, derived
 fleet state, input and output, restart, loss dismissal, hide/unhide, and the
 SwiftUI app.
 
+Also working: every configured machine connects over SSH at once, alongside
+this Mac, with its own reconnection and backoff — see `docs/farcooler-design.md`
+for the connection states this is built on.
+
 Not built yet: the daemon's socket server is not wired to the CLI (the CLI links
 the service directly), the terminal channel streams via `capture-pane` rather
-than control-mode streaming, and there is no SSH transport, iOS client, or
-libghostty terminal core. See the final section of the design doc for the full
-picture.
+than control-mode streaming, and there is no iOS client. See the final section
+of the design doc for the full picture.
 
 ## License
 

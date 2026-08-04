@@ -1,16 +1,22 @@
 import AgentKit
 import SwiftUI
 
-/// About Far Cooler — which build this is, and which one it is driving.
+/// About Far Cooler — which build this is, and which one this Mac is running.
 ///
 /// Replaces the standard panel rather than decorating it. That panel shows
 /// `CFBundleShortVersionString` and `CFBundleVersion`, which for a beta and the
 /// release it names are identical — so the window whose entire job is answering
-/// "what am I running" could not. This one names the channel, and the daemon on
-/// the machine currently being driven, because those two are what have to match.
+/// "what am I running" could not. This one names the channel, and the daemon
+/// version, because those two are what have to match.
+///
+/// This Mac only, deliberately, now that the app can be looking at several
+/// machines at once: a fleet-wide roundup here would either duplicate
+/// Settings ▸ Machines (which already shows each machine's installed version
+/// next to its name) or race it, and "what am I running" — the question this
+/// window answers — is a question about the app in your hand, which runs on
+/// exactly one machine regardless of how many others it is talking to.
 struct AboutSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var hosts = Hosts.shared
 
     @State private var daemon: DaemonBuild?
 
@@ -32,7 +38,12 @@ struct AboutSheet: View {
             .padding(.bottom, 18)
 
             Form {
-                VersionSection(daemon: daemon, host: hosts.active) { text in
+                // Named explicitly rather than left at `VersionSection`'s
+                // default empty host: the default reads as "no machine to
+                // say," which was right when a blank host meant "whichever
+                // one is being driven" and is wrong now that this window only
+                // ever shows this Mac's own daemon.
+                VersionSection(daemon: daemon, host: "This Mac") { text in
                     // The moment this window matters is when someone is filling
                     // in a bug report, and a commit hash transcribed by hand is
                     // a commit hash typed wrong.
@@ -54,14 +65,9 @@ struct AboutSheet: View {
         .task { await load() }
     }
 
-    /// Ask the machine being driven what it is running.
-    ///
-    /// Through the CLI's `status --json`, which is the same call the Machines
-    /// screen uses, so the two cannot come to disagree about the same host.
+    /// Ask this Mac's own daemon what it is running.
     private func load() async {
-        var arguments = hosts.active.isEmpty ? [] : ["--host", hosts.active]
-        arguments += ["--json", "status"]
-        let result = await CLI.run(arguments)
+        let result = await CLI.run(["--json", "status"])
         guard result.ok, let data = result.output.data(using: .utf8),
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }

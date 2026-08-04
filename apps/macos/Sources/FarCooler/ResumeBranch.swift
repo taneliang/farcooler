@@ -48,10 +48,26 @@ struct BranchList: Decodable {
 /// labelled as one: it has no local ref here yet, so adopting it has to create a
 /// tracking branch, which is what makes pushing back go where it came from.
 struct ResumeBranch: View {
-    let projects: [Repository]
+    /// Every machine's repositories, tagged the same way `FleetStore.repositories`
+    /// tags them — see `QuickCreate.projects` and `NewWorkspaceSheet.repositories`
+    /// for the same shape and the same reason: this picker is the machine
+    /// selector for `resume` now, and a bare `[Repository]` cannot name one.
+    let projects: [(host: String, repository: Repository)]
     @Binding var project: String
-    let load: (String) async -> [BranchInfo]
-    let onAdopt: (BranchInfo, String, String) -> Void
+    /// Branches for a project on a given machine. `host` is handed in
+    /// alongside `project` rather than re-derived from it downstream — see
+    /// `chosen` below and `onAdopt`'s own doc comment.
+    let load: (_ host: String, _ project: String) async -> [BranchInfo]
+    /// The branch adopted, the machine and project it came from, and the
+    /// chosen preset.
+    ///
+    /// `host` comes from `chosen`, the same picker selection that resolved
+    /// `project` — not re-derived by the caller from `project` alone once
+    /// it is stale. `NewWorkspaceSheet.Choice` carries host and repository
+    /// together for the identical reason: a lookup repeated downstream, from
+    /// a bare id, is exactly the shape that goes silently wrong when the
+    /// picker's own list has since moved on.
+    let onAdopt: (BranchInfo, String, String, String) -> Void
 
     @AppStorage("tasks.agent") private var agent = "claude"
     @AppStorage("tasks.model") private var model = ""
@@ -61,6 +77,28 @@ struct ResumeBranch: View {
     @State private var query = ""
     @State private var loading = true
     @State private var selection: String?
+
+    /// The project `project` names, together with the machine it is on —
+    /// same rule `QuickCreate.chosen` follows, and for the same reason: no
+    /// fallback to `projects.first`, so a stale `project` (a repository
+    /// that was removed, or one on a machine not yet re-read after a
+    /// reconnect) resolves to nothing rather than to whichever project
+    /// happened to be first.
+    private var chosen: (host: String, repository: Repository)? {
+        projects.first { $0.repository.id == project }
+    }
+
+    /// Whether more than one machine has a repository on offer — same rule
+    /// `QuickCreate` and `NewWorkspaceSheet` follow.
+    private var multipleHosts: Bool {
+        Set(projects.map(\.host)).count > 1
+    }
+
+    private func label(for entry: (host: String, repository: Repository)) -> String {
+        guard multipleHosts else { return entry.repository.displayName }
+        let host = entry.host.isEmpty ? "This Mac" : entry.host
+        return "\(entry.repository.displayName) — \(host)"
+    }
 
     private var visible: [BranchInfo] {
         guard !query.isEmpty else { return branches }
@@ -126,7 +164,9 @@ struct ResumeBranch: View {
                 Spacer()
                 if projects.count > 1 {
                     Picker("", selection: $project) {
-                        ForEach(projects) { Text($0.displayName).tag($0.id) }
+                        ForEach(projects, id: \.repository.id) { entry in
+                            Text(label(for: entry)).tag(entry.repository.id)
+                        }
                     }
                     .labelsHidden().fixedSize().controlSize(.small)
                 }
@@ -198,13 +238,20 @@ struct ResumeBranch: View {
 
     private func reload() async {
         loading = true
-        branches = await load(project)
+        // No fallback host, matching `chosen`'s own doc comment: a `project`
+        // that names nothing any machine currently has loads no branches
+        // rather than guessing which machine to ask.
+        if let chosen {
+            branches = await load(chosen.host, project)
+        } else {
+            branches = []
+        }
         loading = false
     }
 
     private func adopt(_ branch: BranchInfo) {
-        guard !branch.isCheckedOut else { return }
-        onAdopt(branch, project, Agents.preset(agent: agent, model: model))
+        guard !branch.isCheckedOut, let chosen else { return }
+        onAdopt(branch, chosen.host, project, Agents.preset(agent: agent, model: model))
         dismiss()
     }
 }

@@ -1,7 +1,7 @@
 import AgentKit
 import SwiftUI
 
-/// Add a machine, see what it is, install onto it, drive it.
+/// Add a machine, see what it is, install onto it.
 ///
 /// The old settings pane was one text field and a paragraph explaining that
 /// Far Cooler reaches other machines over ssh. That explanation is still true and
@@ -28,7 +28,18 @@ struct HostsSettings: View {
                     hostRow(host)
                 }
             } header: {
-                Text("Machines")
+                HStack {
+                    Text("Machines")
+                    Spacer()
+                    // Per-host dots already retry one machine with a click;
+                    // this is the same `reconnectNow()` for every one of
+                    // them at once — the escape hatch for "I fixed the VPN"
+                    // without waiting out however many backoffs are
+                    // currently ticking down, or clicking each dot in turn.
+                    Button("Reconnect all") { Reachability.shared.retryNow() }
+                        .font(.caption)
+                        .buttonStyle(.link)
+                }
             } footer: {
                 Text("Connect to any machine you can reach over SSH.")
                 .font(.caption)
@@ -106,14 +117,6 @@ struct HostsSettings: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-
-            if hosts.active.isEmpty {
-                Label("Driving", systemImage: "checkmark.circle.fill")
-                    .labelStyle(.iconOnly)
-                    .foregroundStyle(.green)
-            } else {
-                Button("Drive") { hosts.active = "" }
-            }
         }
     }
 
@@ -167,14 +170,6 @@ struct HostsSettings: View {
     @ViewBuilder
     private func actions(for host: RemoteHost) -> some View {
         HStack(spacing: 8) {
-            if hosts.active == host.target {
-                Label("Driving", systemImage: "checkmark.circle.fill")
-                    .labelStyle(.iconOnly)
-                    .foregroundStyle(.green)
-            } else if host.probe?.isInstalled == true {
-                Button("Drive") { hosts.active = host.target }
-            }
-
             if host.probe?.installable == true {
                 Button(host.probe?.isInstalled == true ? "Reinstall" : "Install") {
                     Task { await install(host.target) }
