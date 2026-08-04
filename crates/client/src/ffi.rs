@@ -416,6 +416,42 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             Ok(json!({}))
         }
 
+        "workspace.remove_worktree" => {
+            use crate::actions::RemoveWorktreeOutcome;
+            match session
+                .remove_worktree(id("workspace")?, &text("confirm"))
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                RemoveWorktreeOutcome::Removed => Ok(json!({ "ok": true })),
+                RemoveWorktreeOutcome::ConfirmationRequired => {
+                    Ok(json!({ "confirmationRequired": true }))
+                }
+            }
+        }
+
+        "repository_root.add" => {
+            let root = session
+                .add_repository_root(&text("path"))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({
+                "id": uuid_of(&root.id).to_string(),
+                "displayPath": root.display_path,
+            }))
+        }
+
+        "repository.register" => {
+            let repo = session
+                .register_repository(&text("path"))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({
+                "id": uuid_of(&repo.id).to_string(),
+                "displayName": repo.display_name,
+            }))
+        }
+
         "terminal.create" => {
             let terminal = session
                 .create_terminal(
