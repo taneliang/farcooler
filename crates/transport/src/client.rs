@@ -37,6 +37,8 @@ pub enum ClientError {
     Daemon { code: i32, retryable: bool, message: String },
     #[error("the daemon returned an empty result")]
     EmptyResult,
+    #[error("the daemon returned {got} where {expected} was expected")]
+    WrongResult { expected: &'static str, got: &'static str },
 }
 
 pub struct Client<R, W> {

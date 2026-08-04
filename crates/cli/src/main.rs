@@ -750,20 +750,11 @@ async fn root(host: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
             // Canonicalised here so the daemon is handed an absolute path
             // regardless of which directory the user ran this from.
             let absolute = path.canonicalize().unwrap_or(path);
-            let r = link
-                .call(with(
-                    req("repository_root.add"),
-                    request::Payload::RepositoryRootAdd(
-                        farcooler_protocol::v1::RepositoryRootAdd {
-                            absolute_path: absolute.to_string_lossy().into_owned(),
-                            typed_confirmation: String::new(),
-                        },
-                    ),
-                ))
-                .await?;
-            let result::Value::RepositoryRoot(root) = expect_value(r.value, "root")? else {
-                return Err("the daemon returned the wrong resource".into());
-            };
+            let root = farcooler_client::actions::add_repository_root(
+                link.client_mut(),
+                &absolute.to_string_lossy(),
+            )
+            .await?;
             println!(
                 "added root {}  {}",
                 short_bytes(&root.id),
@@ -816,19 +807,11 @@ async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
     match cmd {
         RepoCmd::Register { path } => {
             let absolute = path.canonicalize().unwrap_or(path);
-            let r = link
-                .call(with(
-                    req("repository.register"),
-                    request::Payload::RepositoryRegister(
-                        farcooler_protocol::v1::RepositoryRegister {
-                            relative_path: absolute.to_string_lossy().into_owned(),
-                        },
-                    ),
-                ))
-                .await?;
-            let result::Value::Repository(repo) = expect_value(r.value, "repository")? else {
-                return Err("the daemon returned the wrong resource".into());
-            };
+            let repo = farcooler_client::actions::register_repository(
+                link.client_mut(),
+                &absolute.to_string_lossy(),
+            )
+            .await?;
             println!(
                 "registered {}  {}  ({})",
                 short_bytes(&repo.id),
@@ -1057,14 +1040,14 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
         WorkspaceCmd::Hide { workspace } => {
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
-            link.call(req_for("workspace.hide", uuid_of(&ws.id))).await?;
+            farcooler_client::actions::hide_workspace(link.client_mut(), uuid_of(&ws.id)).await?;
             println!("hidden {}  (git data untouched)", short_bytes(&ws.id));
         }
 
         WorkspaceCmd::Unhide { workspace } => {
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
-            link.call(req_for("workspace.unhide", uuid_of(&ws.id))).await?;
+            farcooler_client::actions::unhide_workspace(link.client_mut(), uuid_of(&ws.id)).await?;
             println!("unhidden {}", short_bytes(&ws.id));
         }
 
@@ -1073,14 +1056,24 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
             // The daemon checks this too, and its check is the one that counts:
             // a client that skips the prompt must still be refused.
-            link.call(with(
-                req_for("workspace.remove_worktree", uuid_of(&ws.id)),
-                request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
-                    typed_confirmation: confirm.unwrap_or_default(),
-                }),
-            ))
-            .await?;
-            println!("removed worktree for {} (branch kept)", short_bytes(&ws.id));
+            use farcooler_client::actions::RemoveWorktreeOutcome;
+            match farcooler_client::actions::remove_worktree(
+                link.client_mut(),
+                uuid_of(&ws.id),
+                &confirm.unwrap_or_default(),
+            )
+            .await?
+            {
+                RemoveWorktreeOutcome::Removed => {
+                    println!("removed worktree for {} (branch kept)", short_bytes(&ws.id));
+                }
+                // Same substring the CLI's own prior direct call produced in
+                // its error text — DaemonClient.swift on macOS still sniffs
+                // for "confirmation" in whatever this prints to stderr.
+                RemoveWorktreeOutcome::ConfirmationRequired => {
+                    return Err("exact typed confirmation required".into());
+                }
+            }
         }
     }
     Ok(())

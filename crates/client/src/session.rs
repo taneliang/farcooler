@@ -284,11 +284,35 @@ impl Session {
     }
 
     pub async fn hide_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
-        self.value("workspace.hide", Some(workspace), None).await.map(|_| ())
+        Ok(crate::actions::hide_workspace(&mut self.client, workspace).await?)
     }
 
     pub async fn unhide_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
-        self.value("workspace.unhide", Some(workspace), None).await.map(|_| ())
+        Ok(crate::actions::unhide_workspace(&mut self.client, workspace).await?)
+    }
+
+    /// Remove a worktree, or find out it needs the task name typed first —
+    /// see `actions::remove_worktree` for what `confirm` means.
+    pub async fn remove_worktree(
+        &mut self,
+        workspace: Uuid,
+        confirm: &str,
+    ) -> Result<crate::actions::RemoveWorktreeOutcome, SessionError> {
+        Ok(crate::actions::remove_worktree(&mut self.client, workspace, confirm).await?)
+    }
+
+    pub async fn add_repository_root(
+        &mut self,
+        absolute_path: &str,
+    ) -> Result<RepositoryRoot, SessionError> {
+        Ok(crate::actions::add_repository_root(&mut self.client, absolute_path).await?)
+    }
+
+    pub async fn register_repository(
+        &mut self,
+        relative_path: &str,
+    ) -> Result<Repository, SessionError> {
+        Ok(crate::actions::register_repository(&mut self.client, relative_path).await?)
     }
 
     pub async fn stop_terminal(&mut self, terminal: Uuid) -> Result<(), SessionError> {

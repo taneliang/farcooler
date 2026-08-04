@@ -232,6 +232,118 @@ async fn a_failed_call_arrives_as_an_error_not_a_dropped_session() {
     assert!(session.fleet().await.is_ok());
 }
 
+#[tokio::test]
+async fn removing_a_clean_worktree_needs_no_typed_name() {
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = farcooler_client::session::uuid_of(&repositories[0].id);
+    let workspace = session
+        .create_workspace(repository, "clean removal", "feat/clean-removal", "HEAD")
+        .await
+        .expect("create");
+    let id = farcooler_client::session::uuid_of(&workspace.id);
+
+    use farcooler_client::actions::RemoveWorktreeOutcome;
+    let outcome = session.remove_worktree(id, "").await.expect("remove");
+    assert_eq!(outcome, RemoveWorktreeOutcome::Removed);
+}
+
+#[tokio::test]
+async fn removing_a_dirty_worktree_needs_the_task_name_typed() {
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = farcooler_client::session::uuid_of(&repositories[0].id);
+    let workspace = session
+        .create_workspace(repository, "dirty removal", "feat/dirty-removal", "HEAD")
+        .await
+        .expect("create");
+    let id = farcooler_client::session::uuid_of(&workspace.id);
+
+    // Find the worktree on disk and dirty it. The daemon derives "dirty" from
+    // git status, so this has to be a real uncommitted change, not a flag.
+    let fleet = session.fleet().await.expect("fleet");
+    let workspaces = fleet["workspaces"].as_array().unwrap();
+    let created =
+        workspaces.iter().find(|w| w["task"] == "dirty removal").expect("workspace present");
+    let worktree_path = created["worktree"].as_str().expect("worktree path");
+    std::fs::write(std::path::Path::new(worktree_path).join("untracked.txt"), "uncommitted")
+        .unwrap();
+
+    use farcooler_client::actions::RemoveWorktreeOutcome;
+    let outcome = session.remove_worktree(id, "").await.expect("first attempt");
+    assert_eq!(outcome, RemoveWorktreeOutcome::ConfirmationRequired);
+
+    let outcome =
+        session.remove_worktree(id, "dirty removal").await.expect("confirmed attempt");
+    assert_eq!(outcome, RemoveWorktreeOutcome::Removed);
+}
+
+#[tokio::test]
+async fn adding_a_root_and_registering_a_repository_round_trips() {
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+
+    let root = session
+        .add_repository_root(&dir.path().to_string_lossy())
+        .await
+        .expect("add_repository_root");
+    assert_eq!(root.repository_count, 0);
+
+    let registered = session
+        .register_repository(&repo.to_string_lossy())
+        .await
+        .expect("register_repository");
+    assert!(!registered.display_name.is_empty());
+
+    let repositories = session.repositories().await.expect("repositories");
+    assert_eq!(repositories.len(), 1);
+}
+
 /// Add a root and register a repository, over a throwaway session.
 async fn register_root_and_repository(
     socket: &std::path::Path,

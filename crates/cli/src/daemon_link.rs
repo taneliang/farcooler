@@ -55,6 +55,13 @@ impl Link {
     pub fn daemon_build(&self) -> &str {
         &self.client.server_hello().daemon_version
     }
+
+    /// The transport underneath, for callers reusing shared request-building
+    /// code from `farcooler_client::actions` instead of building requests
+    /// inline.
+    pub fn client_mut(&mut self) -> &mut Client<Reader, Writer> {
+        &mut self.client
+    }
 }
 
 /// Connect to a daemon: the local one, or `target`'s over ssh.
