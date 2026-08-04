@@ -439,7 +439,7 @@ struct WorkspaceListView: View {
             }
         }
         .sheet(isPresented: $showNewWorkspace) {
-            NewWorkspaceView(repositories: connection.repositories) { repository, task, branch in
+            NewWorkspaceView(repositories: connection.repositories, connection: connection) { repository, task, branch in
                 await connection.createWorkspace(repository: repository, task: task, branch: branch)
             }
         }
@@ -870,8 +870,72 @@ struct RemoveWorktreeConfirmSheet: View {
     }
 }
 
+/// Registers a repository on a remote host. Always remote: this app has no
+/// filesystem of its own worth pointing at, unlike macOS's version of this
+/// sheet, which also offers a local file picker.
+struct AddRepositorySheet: View {
+    let connection: Connection
+    /// Called with the new repository's id after a successful registration,
+    /// so the caller can select it immediately.
+    let onRegistered: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var path = ""
+    @State private var working = false
+    @State private var errorMessage: String?
+
+    private var canConfirm: Bool { !path.trimmingCharacters(in: .whitespaces).isEmpty && !working }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Path on the host", text: $path)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Section {
+                    Text("Far Cooler creates a worktree per task, so it needs an existing repository already on this host.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage).foregroundStyle(.red).font(.footnote)
+                    }
+                }
+            }
+            .navigationTitle("Add repository")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        working = true
+                        errorMessage = nil
+                        Task {
+                            do {
+                                try await connection.addRepositoryRoot(path: path)
+                                let id = try await connection.registerRepository(path: path)
+                                working = false
+                                onRegistered(id)
+                                dismiss()
+                            } catch {
+                                working = false
+                                errorMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                    .disabled(!canConfirm)
+                }
+            }
+        }
+    }
+}
+
 struct NewWorkspaceView: View {
     let repositories: [Repository]
+    let connection: Connection
     let onCreate: (String, String, String) async -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -879,6 +943,7 @@ struct NewWorkspaceView: View {
     @State private var task = ""
     @State private var branch = ""
     @State private var working = false
+    @State private var showAddRepository = false
 
     private var isValid: Bool {
         !repository.isEmpty && !task.trimmingCharacters(in: .whitespaces).isEmpty
@@ -892,6 +957,7 @@ struct NewWorkspaceView: View {
                     Text("Choose").tag("")
                     ForEach(repositories) { Text($0.displayName).tag($0.id) }
                 }
+                Button("Add a repository…") { showAddRepository = true }
                 TextField("Task", text: $task)
                 TextField("Branch", text: $branch)
                     .textInputAutocapitalization(.never)
@@ -918,6 +984,11 @@ struct NewWorkspaceView: View {
                         }
                     }
                     .disabled(!isValid || working)
+                }
+            }
+            .sheet(isPresented: $showAddRepository) {
+                AddRepositorySheet(connection: connection) { newId in
+                    repository = newId
                 }
             }
         }
