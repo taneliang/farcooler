@@ -46,6 +46,9 @@ enum Entry {
         if let action = ProcessInfo.processInfo.environment["FARCOOLER_SERVICE_PROBE"] {
             MainActor.assumeIsolated { ServiceProbe.run(action) }
         }
+        if let action = ProcessInfo.processInfo.environment["FARCOOLER_CLI_TOOLS_PROBE"] {
+            MainActor.assumeIsolated { CLIToolsProbe.run(action) }
+        }
         FarCoolerApp.main()
     }
 }
