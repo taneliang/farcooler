@@ -121,15 +121,23 @@ Settings row to explain itself when found.
 
 ## Testing
 
-- Unit tests for `CommandLineTools` against a temp `HOME` (existing tests in
-  this app already redirect `HOME` for filesystem-touching code — follow the
-  same pattern rather than touching the real `~/.local/bin` in CI):
-  not-installed → install → installed; already-installed is idempotent;
-  a real file in the slot produces `.conflict` and `install()` leaves it
-  untouched; a foreign symlink produces `.conflict`; `uninstall()` removes
-  only what it owns and leaves a `.conflict` slot alone.
-- No UI test for the one-time alert beyond a manual check — it is one
-  `UserDefaults` flag and a stock SwiftUI `.alert`.
+The macOS app's `Package.swift` has no test target at all — `apps/macos` is
+verified today through the render-probe / service-probe pattern already in
+`FarCoolerApp.swift` and `ServiceRegistration.swift`: run the built app binary
+with an env var (`FARCOOLER_SERVICE_PROBE=register`), it performs the action
+headlessly against `Bundle.main`, prints the resulting state, and exits.
+`CommandLineTools` follows the same pattern rather than introducing a new
+XCTest target for one class: a `CLIToolsProbe` enum, driven by
+`FARCOOLER_CLI_TOOLS_PROBE={install,uninstall,refresh}`, checked in
+`Entry.main()` next to the existing `FARCOOLER_SERVICE_PROBE` check. Manual
+verification against a real (or scratch) `~/.local/bin` covers: not-installed
+→ install → installed; already-installed is idempotent; a real file in the
+slot produces `.conflict` and `install()` leaves it untouched; a foreign
+symlink produces `.conflict`; `uninstall()` removes only what it owns and
+leaves a `.conflict` slot alone.
+
+No UI test for the one-time alert beyond a manual check — it is one
+`UserDefaults` flag and a stock SwiftUI `.alert`.
 
 ## Out of scope
 
