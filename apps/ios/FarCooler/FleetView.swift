@@ -403,9 +403,15 @@ struct WorkspaceListView: View {
 
     @State private var showNewWorkspace = false
     @State private var showQuickTask = false
+    @State private var removeCandidate: Workspace?
+    @State private var confirmingRemove = false
+    @State private var needsTypedConfirmation: Workspace?
 
     var body: some View {
-        FleetList(fleet: connection.fleet, connection: connection, onSelect: onSelect) { action, terminal in
+        FleetList(fleet: connection.fleet, connection: connection, onSelect: onSelect, onRemove: { ws in
+            removeCandidate = ws
+            confirmingRemove = true
+        }) { action, terminal in
             Task { await connection.act(action, on: terminal) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -439,6 +445,32 @@ struct WorkspaceListView: View {
         }
         .sheet(isPresented: $showQuickTask) {
             TaskComposerView(connection: connection)
+        }
+        .confirmationDialog(
+            "Remove worktree for \(removeCandidate?.task ?? "")?",
+            isPresented: $confirmingRemove,
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                guard let ws = removeCandidate else { return }
+                Task {
+                    switch await connection.removeWorktree(ws, confirm: "") {
+                    case .ok:
+                        break
+                    case .confirmationRequired, .failed:
+                        // The typed-name sheet also handles and displays a
+                        // `.failed` result — route every non-.ok outcome
+                        // there so there is one place this is shown, not two.
+                        needsTypedConfirmation = ws
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(item: $needsTypedConfirmation) { ws in
+            RemoveWorktreeConfirmSheet(workspace: ws) { typed in
+                await connection.removeWorktree(ws, confirm: typed)
+            }
         }
     }
 }
@@ -553,8 +585,8 @@ struct FleetList: View {
     let fleet: Fleet
     @ObservedObject var connection: Connection
     let onSelect: (Terminal) -> Void
-    let onAction: (Connection.Action, Terminal) -> Void
     var onRemove: (Workspace) -> Void = { _ in }
+    let onAction: (Connection.Action, Terminal) -> Void
 
     @State private var hiddenExpanded = false
 
@@ -774,6 +806,67 @@ func attentionColor(_ agent: AgentActivity) -> Color {
     case .blocked: return .orange
     case .done: return .green
     default: return .secondary
+    }
+}
+
+/// The second phase: the worktree has uncommitted work, so removal needs the
+/// task name typed exactly. Also where any other refusal surfaces, since
+/// there is no room for an error message inside a confirmationDialog.
+struct RemoveWorktreeConfirmSheet: View {
+    let workspace: Workspace
+    let onRemove: (String) async -> Connection.RemoveWorktreeResult
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var typed = ""
+    @State private var working = false
+    @State private var errorMessage: String?
+
+    private var matches: Bool { typed == workspace.task }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("This worktree has uncommitted work. Type its name to remove it anyway.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                TextField("Type \(workspace.task) to confirm", text: $typed)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage).foregroundStyle(.red).font(.footnote)
+                    }
+                }
+            }
+            .navigationTitle("Remove worktree")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Remove", role: .destructive) {
+                        working = true
+                        Task {
+                            switch await onRemove(typed) {
+                            case .ok:
+                                working = false
+                                dismiss()
+                            case .confirmationRequired:
+                                working = false
+                                errorMessage = "That name didn't match — try again."
+                            case .failed(let message):
+                                working = false
+                                errorMessage = message
+                            }
+                        }
+                    }
+                    .disabled(!matches || working)
+                }
+            }
+        }
     }
 }
 
