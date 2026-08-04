@@ -346,6 +346,72 @@ final class Connection: ObservableObject {
         return try JSONDecoder().decode(IdentifiedReply.self, from: data).id
     }
 
+    /// A second (or third) terminal in a worktree you already have open.
+    /// Always a shell — matching macOS's own "New terminal", which has never
+    /// offered a preset picker either.
+    func createTerminal(workspace: Workspace) async {
+        _ = try? await createTerminal(
+            workspace: workspace.id,
+            title: "Terminal \(workspace.terminals.count + 1)",
+            preset: "shell")
+        await refresh()
+    }
+
+    func hideWorkspace(_ workspace: Workspace) async {
+        _ = try? await core.call("workspace.hide", ["workspace": workspace.id])
+        await refresh()
+    }
+
+    func unhideWorkspace(_ workspace: Workspace) async {
+        _ = try? await core.call("workspace.unhide", ["workspace": workspace.id])
+        await refresh()
+    }
+
+    /// What asking to remove a worktree came back with — mirrors macOS's
+    /// `DaemonClient.RemoveWorktreeResult` so both apps' UIs make the same
+    /// three-way distinction.
+    enum RemoveWorktreeResult {
+        case ok
+        case confirmationRequired
+        case failed(String)
+    }
+
+    /// `confirm` must be the workspace's exact task name, unless the
+    /// worktree is clean, in which case it may be empty.
+    func removeWorktree(_ workspace: Workspace, confirm: String) async -> RemoveWorktreeResult {
+        let data: Data
+        do {
+            data = try await core.call(
+                "workspace.remove_worktree", ["workspace": workspace.id, "confirm": confirm])
+        } catch {
+            await refresh()
+            return .failed(error.localizedDescription)
+        }
+        struct Reply: Decodable {
+            var ok: Bool?
+            var confirmationRequired: Bool?
+        }
+        let reply = (try? JSONDecoder().decode(Reply.self, from: data)) ?? Reply()
+        await refresh()
+        if reply.confirmationRequired == true { return .confirmationRequired }
+        return .ok
+    }
+
+    /// Allowlist the folder a repository lives in. Always a remote host's
+    /// path from this app — a phone has no filesystem of its own worth
+    /// pointing at.
+    func addRepositoryRoot(path: String) async throws {
+        _ = try await core.call("repository_root.add", ["path": path])
+    }
+
+    /// Register the repository itself, once its parent folder is
+    /// allowlisted. Hands back the new repository's id, so the caller can
+    /// select it immediately.
+    func registerRepository(path: String) async throws -> String {
+        let data = try await core.call("repository.register", ["path": path])
+        return try JSONDecoder().decode(IdentifiedReply.self, from: data).id
+    }
+
     /// Send exact bytes to a terminal. `hex` must already be lowercase hex —
     /// this does no encoding of its own, because the one caller that exists
     /// (QuickTaskView) needs the sentence and the carriage return sent as two
