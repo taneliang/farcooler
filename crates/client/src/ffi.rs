@@ -170,7 +170,21 @@ pub unsafe extern "C" fn farcooler_client_call(
         // connected. It is also what makes the next call fail in microseconds
         // with "not connected" rather than spending another TCP timeout
         // learning the same thing.
-        let lost = matches!(&outcome, Err(Lost::Call(e)) if e.is_disconnect());
+        let lost = match &outcome {
+            Err(Lost::Call(e)) => e.is_disconnect(),
+            // An empty slot is reported as a drop too, and it has to be.
+            //
+            // The first call to notice a dead link is whichever one the user
+            // happened to make — a keystroke, a resize — and it empties the
+            // slot on its way out. If this answered `false`, the poll that
+            // arrives a moment later would be told "not connected" with
+            // nothing to mark it as a disconnection, and a client whose only
+            // detector is that poll would sit at `connected` forever with
+            // every call failing. Saying so twice costs nothing: both clients
+            // ignore a drop reported while they are already reconnecting.
+            Err(Lost::Already) => true,
+            Ok(_) => false,
+        };
         if lost {
             *guard = None;
         }
@@ -187,9 +201,8 @@ pub unsafe extern "C" fn farcooler_client_call(
 /// Why a call produced no answer, kept apart from its message just long enough
 /// to decide whether the session is still worth keeping.
 enum Lost {
-    /// There was no session to call on. Deliberately not reported as a drop:
-    /// whichever call emptied the slot already said so, and repeating it would
-    /// restart a reconnection that is already under way.
+    /// There was no session to call on — either nothing ever connected, or a
+    /// call before this one found the link dead and emptied the slot.
     Already,
     Call(SessionError),
 }
@@ -778,6 +791,34 @@ unsafe fn read_str(pointer: *const c_char) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_call_on_a_handle_that_never_connected_reports_a_dropped_link() {
+        // The hole this closes: the first call to notice a dead link is
+        // whichever one the user happened to make, and it empties the session
+        // slot on its way out. Every call after it lands here — so if this
+        // said nothing, the poll that follows would be told "not connected"
+        // with no way to tell it apart from a request being refused, and a
+        // client whose only detector is that poll would sit at "connected"
+        // forever with everything failing.
+        let handle = farcooler_client_new();
+        let ticket = unsafe { farcooler_client_call(handle, c"fleet".as_ptr(), c"{}".as_ptr()) };
+        assert_ne!(ticket, 0);
+
+        // The call is answered on the runtime's thread, so wait for it rather
+        // than assuming it has landed by now.
+        let answer = loop {
+            if let Some(line) = unsafe { farcooler_client_poll(handle).as_ref() } {
+                break unsafe { CStr::from_ptr(line) }.to_str().unwrap().to_string();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+
+        assert!(answer.contains("\"ok\":false"));
+        assert!(answer.contains("\"disconnected\":true"), "got {answer}");
+        assert!(!unsafe { farcooler_client_connected(handle) });
+        unsafe { farcooler_client_free(handle) };
+    }
 
     #[test]
     fn a_missing_fingerprint_means_ask_rather_than_trust() {

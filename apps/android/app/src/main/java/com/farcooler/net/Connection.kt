@@ -318,6 +318,11 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
         poller?.cancel()
         poller = null
         reconnector?.cancel()
+        // A start may still be waiting on the network — this is reachable from
+        // Connecting, and a routable address with nothing listening takes over
+        // a minute to say so. Bumping the counter is what stops its answer
+        // landing on top of this one; see [attempt].
+        attempt += 1
         _phase.value = Phase.Reconnecting(0)
         reconnector = scope.launch { reconnect(0) }
     }

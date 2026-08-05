@@ -251,6 +251,11 @@ final class Connection: ObservableObject {
         poller?.cancel()
         poller = nil
         reconnectTask?.cancel()
+        // A `start` may still be waiting on the network — this is reachable
+        // from `.connecting`, and a routable address with nothing listening
+        // takes over a minute to say so. Bumping the counter is what stops its
+        // answer landing on top of this one; see `attempt`.
+        attempt += 1
         phase = .reconnecting(attempt: 0)
         reconnectTask = Task { [weak self] in await self?.reconnect(attempt: 0) }
     }
