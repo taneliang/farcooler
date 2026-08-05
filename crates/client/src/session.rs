@@ -16,7 +16,7 @@ use farcooler_protocol::v1::{
     AgentEventBatch, PaneMode, Repository, RepositoryRoot, Terminal, TerminalState, Workspace,
     WorkspaceState, request, result,
 };
-use farcooler_transport::{Client, ClientError};
+use farcooler_transport::{Client, ClientError, CodecError};
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
@@ -37,6 +37,36 @@ pub enum SessionError {
     DaemonMissing,
     #[error("the host runs protocol {daemon}; this client speaks {client}")]
     VersionMismatch { daemon: u32, client: u32 },
+    /// The link underneath this session is gone.
+    ///
+    /// Deliberately distinct from `Protocol`, which is the far side saying
+    /// something we could not make sense of — that is a session still worth
+    /// talking on, and a client that reconnected over it would be reconnecting
+    /// over a bug.
+    #[error("the connection to the host was lost: {0}")]
+    Disconnected(String),
+}
+
+impl SessionError {
+    /// Whether this means the link is gone, rather than that the request was
+    /// refused.
+    ///
+    /// Only meaningful for a call on an ESTABLISHED session. At connect time
+    /// these same variants answer a different question — what could not be
+    /// reached in the first place — and `DaemonMissing` in particular means
+    /// something specific and actionable there ("go install it"), which is why
+    /// `connect_ssh` keeps that reading and this does not. Once a session
+    /// exists, a closed pipe is a closed pipe.
+    pub fn is_disconnect(&self) -> bool {
+        match self {
+            SessionError::Ssh(_) | SessionError::Disconnected(_) | SessionError::DaemonMissing => {
+                true
+            }
+            SessionError::Protocol(_)
+            | SessionError::WrongResult { .. }
+            | SessionError::VersionMismatch { .. } => false,
+        }
+    }
 }
 
 impl From<ClientError> for SessionError {
@@ -47,6 +77,15 @@ impl From<ClientError> for SessionError {
             ClientError::Closed | ClientError::NoHello => SessionError::DaemonMissing,
             ClientError::VersionMismatch { daemon, client } => {
                 SessionError::VersionMismatch { daemon, client }
+            }
+            // The socket, not the conversation on it. `Framing` is deliberately
+            // not here: bytes that do not decode are a bug on one side or the
+            // other, and calling that a dropped link would send a client into a
+            // reconnect loop that reproduces it on every attempt.
+            ClientError::Connect(e) => SessionError::Disconnected(e.to_string()),
+            ClientError::Codec(CodecError::Io(e)) => SessionError::Disconnected(e.to_string()),
+            ClientError::Codec(e @ CodecError::Truncated) => {
+                SessionError::Disconnected(e.to_string())
             }
             other => SessionError::Protocol(other.to_string()),
         }
@@ -742,6 +781,47 @@ mod tests {
         let error: SessionError = ClientError::Closed.into();
         assert!(matches!(error, SessionError::DaemonMissing));
         assert!(error.to_string().contains("installed"));
+    }
+
+    #[test]
+    fn a_dead_socket_is_told_apart_from_a_confused_one() {
+        // The distinction the whole reconnect story rests on. An io error
+        // reading a frame means the link is gone and reconnecting is the fix;
+        // bytes that do not decode mean one side has a bug, and reconnecting
+        // over it would just reproduce it on every attempt.
+        let broken: SessionError =
+            ClientError::Codec(std::io::Error::from(std::io::ErrorKind::BrokenPipe).into()).into();
+        assert!(matches!(broken, SessionError::Disconnected(_)));
+        assert!(broken.is_disconnect());
+
+        let truncated: SessionError = ClientError::Codec(CodecError::Truncated).into();
+        assert!(truncated.is_disconnect());
+
+        let garbage: SessionError = ClientError::Codec(CodecError::Framing(
+            farcooler_protocol::framing::FramingError::Malformed,
+        ))
+        .into();
+        assert!(matches!(garbage, SessionError::Protocol(_)));
+        assert!(!garbage.is_disconnect());
+    }
+
+    #[test]
+    fn a_refused_request_leaves_the_session_alone() {
+        // Everything the daemon answers — badly, or with the wrong shape — is
+        // a session still worth talking on. Treating these as drops would
+        // reconnect on every typo'd method a client ever sends.
+        assert!(!SessionError::Protocol("nope".into()).is_disconnect());
+        assert!(!SessionError::WrongResult { expected: "host", got: "workspace" }.is_disconnect());
+        assert!(!SessionError::VersionMismatch { daemon: 2, client: 1 }.is_disconnect());
+    }
+
+    #[test]
+    fn a_missing_daemon_means_two_things_depending_on_when_it_is_asked() {
+        // At connect time it is a diagnosis: go install Far Cooler over there.
+        // Mid-session it can only mean the pipe closed under us, so it counts
+        // as a drop — and the message stays the useful one either way.
+        assert!(SessionError::DaemonMissing.is_disconnect());
+        assert!(SessionError::DaemonMissing.to_string().contains("installed"));
     }
 
     #[test]

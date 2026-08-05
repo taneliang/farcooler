@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-use crate::session::{Session, uuid_of};
+use crate::session::{Session, SessionError, uuid_of};
 use crate::ssh::{Destination, HostKeyPolicy};
 
 /// A client handle: a runtime, a session, and a queue of finished work.
@@ -156,13 +156,51 @@ pub unsafe extern "C" fn farcooler_client_call(
         let parsed: Value = serde_json::from_str(&args).unwrap_or(json!({}));
         let mut guard = session.lock().await;
         let outcome = match guard.as_mut() {
-            None => Err("not connected".to_string()),
-            Some(session) => dispatch(session, &method, &parsed).await,
+            None => Err(Lost::Already),
+            Some(session) => dispatch(session, &method, &parsed).await.map_err(Lost::Call),
         };
-        push(&finished, ticket, outcome);
+
+        // A transport failure is not this request's problem; it is every
+        // future request's problem.
+        //
+        // Emptying the slot is what makes `farcooler_client_connected` an
+        // answer about now rather than about history: it reported whether a
+        // session had ever been put here, and nothing ever took one out, so a
+        // session whose ssh transport died an hour ago still read as
+        // connected. It is also what makes the next call fail in microseconds
+        // with "not connected" rather than spending another TCP timeout
+        // learning the same thing.
+        let lost = matches!(&outcome, Err(Lost::Call(e)) if e.is_disconnect());
+        if lost {
+            *guard = None;
+        }
+        // Released before pushing, so a client that reconnects the instant it
+        // reads this answer is not queued behind this call's own lock.
+        drop(guard);
+
+        push_call(&finished, ticket, outcome, lost);
     });
 
     ticket
+}
+
+/// Why a call produced no answer, kept apart from its message just long enough
+/// to decide whether the session is still worth keeping.
+enum Lost {
+    /// There was no session to call on. Deliberately not reported as a drop:
+    /// whichever call emptied the slot already said so, and repeating it would
+    /// restart a reconnection that is already under way.
+    Already,
+    Call(SessionError),
+}
+
+impl Lost {
+    fn message(&self) -> String {
+        match self {
+            Lost::Already => "not connected".to_string(),
+            Lost::Call(e) => e.to_string(),
+        }
+    }
 }
 
 /// Generate a new ed25519 key pair for this device.
@@ -338,7 +376,11 @@ pub unsafe extern "C" fn farcooler_client_poll(handle: *mut c_void) -> *const c_
     }
 }
 
-/// True once a session is established.
+/// Whether there is a live session right now.
+///
+/// Now, not ever: `farcooler_client_call` empties the slot the moment a call
+/// fails for a transport reason, so this goes false when the link dies rather
+/// than staying true until the handle is freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_connected(handle: *mut c_void) -> bool {
     let Some(h) = (unsafe { as_handle(handle) }) else { return false };
@@ -347,19 +389,23 @@ pub unsafe extern "C" fn farcooler_client_connected(handle: *mut c_void) -> bool
     h.session.try_lock().map(|guard| guard.is_some()).unwrap_or(true)
 }
 
-async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<Value, String> {
-    let id = |key: &str| -> Result<uuid::Uuid, String> {
+async fn dispatch(
+    session: &mut Session,
+    method: &str,
+    args: &Value,
+) -> Result<Value, SessionError> {
+    let id = |key: &str| -> Result<uuid::Uuid, SessionError> {
         args.get(key)
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<uuid::Uuid>().ok())
-            .ok_or_else(|| format!("{method} needs a {key}"))
+            .ok_or_else(|| SessionError::Protocol(format!("{method} needs a {key}")))
     };
     let text = |key: &str| -> String {
         args.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
     };
 
     match method {
-        "fleet" => session.fleet().await.map_err(|e| e.to_string()),
+        "fleet" => session.fleet().await,
 
         // What this machine is, and whether it was built from the same source
         // as the client asking.
@@ -369,7 +415,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         // that makes a fix you already shipped go on reproducing — so a client
         // that cannot see it is a client that cannot explain itself.
         "host" => {
-            let facts = session.host().await.map_err(|e| e.to_string())?;
+            let facts = session.host().await?;
             Ok(json!({
                 "daemonVersion": facts.daemon_version,
                 "clientVersion": farcooler_protocol::BUILD,
@@ -382,7 +428,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         }
 
         "repositories" => {
-            let items = session.repositories().await.map_err(|e| e.to_string())?;
+            let items = session.repositories().await?;
             Ok(json!({
                 "repositories": items.iter().map(|r| json!({
                     "id": uuid_of(&r.id).to_string(),
@@ -402,17 +448,16 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             };
             let workspace = session
                 .create_workspace(id("repository")?, &text("task"), &text("branch"), &base)
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({ "id": uuid_of(&workspace.id).to_string() }))
         }
 
         "workspace.hide" => {
-            session.hide_workspace(id("workspace")?).await.map_err(|e| e.to_string())?;
+            session.hide_workspace(id("workspace")?).await?;
             Ok(json!({}))
         }
         "workspace.unhide" => {
-            session.unhide_workspace(id("workspace")?).await.map_err(|e| e.to_string())?;
+            session.unhide_workspace(id("workspace")?).await?;
             Ok(json!({}))
         }
 
@@ -420,8 +465,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             use crate::actions::RemoveWorktreeOutcome;
             match session
                 .remove_worktree(id("workspace")?, &text("confirm"))
-                .await
-                .map_err(|e| e.to_string())?
+                .await?
             {
                 RemoveWorktreeOutcome::Removed => Ok(json!({ "ok": true })),
                 RemoveWorktreeOutcome::ConfirmationRequired => {
@@ -433,8 +477,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         "repository_root.add" => {
             let root = session
                 .add_repository_root(&text("path"))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({
                 "id": uuid_of(&root.id).to_string(),
                 "displayPath": root.display_path,
@@ -444,8 +487,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         "repository.register" => {
             let repo = session
                 .register_repository(&text("path"))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({
                 "id": uuid_of(&repo.id).to_string(),
                 "displayName": repo.display_name,
@@ -460,27 +502,26 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
                     &text("preset"),
                     args.get("tile").and_then(|v| v.as_bool()).unwrap_or(false),
                 )
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({ "id": uuid_of(&terminal.id).to_string() }))
         }
         "terminal.stop" => {
-            session.stop_terminal(id("terminal")?).await.map_err(|e| e.to_string())?;
+            session.stop_terminal(id("terminal")?).await?;
             Ok(json!({}))
         }
         "terminal.restart" => {
-            session.restart_terminal(id("terminal")?).await.map_err(|e| e.to_string())?;
+            session.restart_terminal(id("terminal")?).await?;
             Ok(json!({}))
         }
         "terminal.dismiss_lost" => {
-            session.dismiss_lost(id("terminal")?).await.map_err(|e| e.to_string())?;
+            session.dismiss_lost(id("terminal")?).await?;
             Ok(json!({}))
         }
         // Answers `{}` for the reason the agent calls below do: what a client
         // redraws from is the fleet it polls, or the pushed change, not an echo
         // of the row taken at the instant of the write.
         "terminal.seen" => {
-            session.mark_seen(id("terminal")?).await.map_err(|e| e.to_string())?;
+            session.mark_seen(id("terminal")?).await?;
             Ok(json!({}))
         }
         // The screen, base64 so it survives JSON.
@@ -492,7 +533,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         "terminal.screen" => {
             let known = args.get("knownRevision").and_then(|v| v.as_u64()).unwrap_or(0);
             let screen =
-                session.screen(id("terminal")?, known).await.map_err(|e| e.to_string())?;
+                session.screen(id("terminal")?, known).await?;
             Ok(json!({
                 // Absent when unchanged, so an idle pane costs a few bytes on
                 // the wire instead of a whole capture several times a second.
@@ -511,8 +552,9 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
         // bracketed paste are byte sequences — so nothing here re-encodes.
         "terminal.write" => {
             let hex = text("hex");
-            let bytes = decode_hex(&hex).ok_or("input must be hex")?;
-            session.write(id("terminal")?, bytes).await.map_err(|e| e.to_string())?;
+            let bytes = decode_hex(&hex)
+                .ok_or_else(|| SessionError::Protocol("input must be hex".into()))?;
+            session.write(id("terminal")?, bytes).await?;
             Ok(json!({}))
         }
 
@@ -521,8 +563,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             let rows = args.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u32;
             session
                 .resize_terminal(id("terminal")?, columns, rows)
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({}))
         }
 
@@ -539,13 +580,14 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
                 // Refused rather than guessed at: a client asking to switch to
                 // a mode that does not exist has a bug worth surfacing, not a
                 // default worth picking for it.
-                other => return Err(format!("unknown pane mode: {other}")),
+                other => {
+                    return Err(SessionError::Protocol(format!("unknown pane mode: {other}")));
+                }
             };
             let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
             session
                 .set_pane_mode(id("terminal")?, mode, force)
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({}))
         }
 
@@ -556,8 +598,7 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             let from_seq = args.get("fromSeq").and_then(|v| v.as_u64()).unwrap_or(0);
             let batch = session
                 .agent_subscribe(id("terminal")?, from_seq, args.get("epoch").and_then(|v| v.as_u64()).unwrap_or(0))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({
                 // The epoch goes back with the batch, not just in with the
                 // request. A client that cannot see it change cannot know its
@@ -592,53 +633,47 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
                 .unwrap_or_default();
             session
                 .agent_prompt(id("terminal")?, &text("text"), &images)
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({}))
         }
 
         "terminal.agent_answer" => {
             session
                 .agent_answer(id("terminal")?, &text("requestId"), &text("optionId"))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({}))
         }
 
         "terminal.agent_set_mode" => {
             session
                 .agent_set_mode(id("terminal")?, &text("mode"))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({}))
         }
 
         "terminal.agent_edit_queued" => {
             session
                 .agent_edit_queued(id("terminal")?, &text("queuedId"), &text("text"))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({}))
         }
 
         "terminal.agent_cancel_queued" => {
             session
                 .agent_cancel_queued(id("terminal")?, &text("queuedId"))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({}))
         }
 
         "terminal.agent_steer_queued" => {
             session
                 .agent_steer_queued(id("terminal")?, &text("queuedId"))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({}))
         }
 
         "terminal.agent_cancel" => {
-            session.agent_cancel(id("terminal")?).await.map_err(|e| e.to_string())?;
+            session.agent_cancel(id("terminal")?).await?;
             Ok(json!({}))
         }
 
@@ -646,14 +681,13 @@ async fn dispatch(session: &mut Session, method: &str, args: &Value) -> Result<V
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
             let paths = session
                 .search_worktree_files(id("workspace")?, &text("query"), limit)
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             Ok(json!({ "paths": paths }))
         }
 
         // Refused rather than defaulted, so a typo in a client is a visible
         // error instead of a call that silently does nothing.
-        other => Err(format!("unknown method: {other}")),
+        other => Err(SessionError::Protocol(format!("unknown method: {other}"))),
     }
 }
 
@@ -688,6 +722,32 @@ fn push(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value
     let payload = match outcome {
         Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
         Err(message) => json!({ "ticket": ticket, "ok": false, "error": message }),
+    };
+    queue.lock().expect("queue").push_back(payload.to_string());
+}
+
+/// The same envelope, plus the one thing a client cannot work out from the
+/// message: whether the link is gone.
+///
+/// Both phone apps recover meaning from error strings by matching substrings.
+/// That is the right call on the connect path, where the message genuinely is
+/// all there is, and the wrong thing to extend to every call on a live
+/// session. Rust still has the type at the moment the error is produced, so it
+/// is answered once here instead of guessed separately in Swift and Kotlin.
+fn push_call(
+    queue: &Arc<Mutex<VecDeque<String>>>,
+    ticket: u64,
+    outcome: Result<Value, Lost>,
+    lost: bool,
+) {
+    let payload = match outcome {
+        Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
+        Err(reason) => json!({
+            "ticket": ticket,
+            "ok": false,
+            "error": reason.message(),
+            "disconnected": lost,
+        }),
     };
     queue.lock().expect("queue").push_back(payload.to_string());
 }

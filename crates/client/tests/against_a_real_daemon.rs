@@ -93,6 +93,26 @@ async fn the_fleet_shape_is_the_one_a_phone_decodes() {
 }
 
 #[tokio::test]
+async fn a_daemon_that_goes_away_mid_session_reads_as_a_dropped_link() {
+    // The case both phones had no answer for: a session that connected fine
+    // and then stopped being a session. It has to be distinguishable from the
+    // daemon refusing a request, because one of those is fixed by
+    // reconnecting and the other is fixed by not sending it again.
+    let mut daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    session.fleet().await.expect("the session works before the daemon goes away");
+
+    daemon.process.kill().expect("kill");
+    daemon.process.wait().expect("reap");
+
+    let error = session.fleet().await.expect_err("a dead daemon cannot answer");
+    assert!(
+        error.is_disconnect(),
+        "a closed socket has to read as a dropped link, not as a protocol error: {error}"
+    );
+}
+
+#[tokio::test]
 async fn a_workspace_created_through_the_client_comes_back_in_the_fleet() {
     let daemon = start().await;
     let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
