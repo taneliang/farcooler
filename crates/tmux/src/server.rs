@@ -38,11 +38,25 @@ pub struct TmuxServer {
 /// `remain-on-exit` is the load-bearing one. Applied post-hoc it would race a
 /// command that exits immediately, and that terminal would derive `lost` when it
 /// actually exited cleanly.
-const MANAGED_CONFIG: &str = "\
+///
+/// `default-shell` is here rather than left to tmux because tmux's own default
+/// is `$SHELL` — and the process starting this server is a daemon launched by
+/// launchd or sshd, so its `$SHELL` is whatever that inherited rather than
+/// anything the user chose. Left alone it produced a server whose
+/// `default-shell` was `/bin/zsh` for a user whose login shell is fish, which
+/// showed up twice: every pane command ran through a zsh wrapper it had no
+/// reason to, and `$SHELL` inside a pane named a shell nobody was typing into.
+fn managed_config() -> String {
+    format!(
+        "\
 set -g remain-on-exit on
 set -g window-size latest
 set -g status off
-";
+set -g default-shell {}
+",
+        farcooler_core::shell::login_shell()
+    )
+}
 
 /// Raw result of one tmux invocation.
 #[derive(Debug)]
@@ -71,12 +85,20 @@ impl TmuxServer {
         Self { socket: format!("farcooler-{install_id}"), daemon_id, config_path }
     }
 
-    /// Write the managed config if it is not already in place.
+    /// Write the managed config if what is on disk is not what we want.
+    ///
+    /// Compared rather than merely checked for existence. The file is keyed on
+    /// the install id and lives in the temp directory, so it long outlives any
+    /// one daemon — and "it exists, leave it" meant an upgrade that changed
+    /// these options never reached a machine that had already run the previous
+    /// build. `default-shell` is the option that made that visible: the fix
+    /// for it shipped and did nothing, because the stale file was still there.
     fn ensure_config(&self) -> Result<()> {
-        if self.config_path.exists() {
+        let wanted = managed_config();
+        if std::fs::read_to_string(&self.config_path).is_ok_and(|on_disk| on_disk == wanted) {
             return Ok(());
         }
-        std::fs::write(&self.config_path, MANAGED_CONFIG).map_err(|e| {
+        std::fs::write(&self.config_path, &wanted).map_err(|e| {
             tracing::warn!(error = %e, "could not write managed tmux config");
             DomainError::TmuxUnavailable
         })
@@ -167,8 +189,9 @@ impl TmuxServer {
         self.set_session_option(tags::DAEMON_ID, &self.daemon_id.to_string()).await?;
         self.set_session_option(tags::SCHEMA_VERSION, &SCHEMA_VERSION.to_string()).await?;
 
-        // `remain-on-exit` and `window-size latest` come from MANAGED_CONFIG so
-        // they are in force from the first window, not applied afterwards.
+        // `remain-on-exit`, `window-size latest` and `default-shell` come from
+        // `managed_config()` so they are in force from the first window, not
+        // applied afterwards.
         Ok(())
     }
 

@@ -76,7 +76,7 @@ pub fn shell_quote(value: &str) -> String {
 }
 
 pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let shell = farcooler_core::shell::login_shell();
     let (agent, model) = match preset.split_once(':') {
         Some((a, m)) if is_safe_model(m) => (a, Some(m)),
         // A model that is not a plain identifier is dropped, not escaped and
@@ -142,7 +142,7 @@ pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
 /// support resuming, unverified rather than unsupported.
 fn terminal_mode_command(preset: &str, session_id: &str, resumable: bool) -> String {
     let preset = if preset.is_empty() { "shell" } else { preset };
-    let shell = || std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let shell = farcooler_core::shell::login_shell;
     if preset.starts_with("claude") {
         if resumable {
             format!("{} -ilc 'claude --resume {session_id}'", shell())

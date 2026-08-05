@@ -12,6 +12,7 @@ pub mod error;
 pub mod inventory;
 pub mod preconditions;
 pub mod replay;
+pub mod shell;
 pub mod validate;
 
 pub use error::{DomainError, Result};
