@@ -52,7 +52,7 @@ fn main() {
         .rows
         .iter()
         .flat_map(|r| r.cells.iter())
-        .filter(|c| c.fg != farcooler_vt::grid::DEFAULT_FG)
+        .filter(|c| c.fg != farcooler_vt::grid::Palette::default().foreground)
         .count();
     let styled = snap.rows.iter().flat_map(|r| r.cells.iter()).filter(|c| c.bold).count();
     println!("{colored} cells carry a non-default color, {styled} are bold");

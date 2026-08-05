@@ -55,6 +55,10 @@ pub struct Terminal {
     term: Term<Collector>,
     parser: Processor<StdSyncHandler>,
     collector: Collector,
+    /// What indexed and named colours resolve to. Runtime state rather than
+    /// the constants this used to be, because a theme is a thing the person
+    /// looking at the screen chooses. See `grid::Palette`.
+    palette: grid::Palette,
 }
 
 impl Terminal {
@@ -67,7 +71,23 @@ impl Terminal {
             term: Term::new(config, &size, collector.clone()),
             parser: Processor::new(),
             collector,
+            palette: grid::Palette::default(),
         }
+    }
+
+    pub fn palette(&self) -> &grid::Palette {
+        &self.palette
+    }
+
+    /// Recolour every cell the next snapshot reads.
+    ///
+    /// Nothing is repainted here and nothing needs to be: colours are resolved
+    /// when a snapshot is taken, not when bytes arrive, so the scrollback a
+    /// program wrote an hour ago comes back in the new theme too. That is the
+    /// property that makes switching themes instant rather than a redraw of
+    /// history the terminal no longer has.
+    pub fn set_palette(&mut self, palette: grid::Palette) {
+        self.palette = palette;
     }
 
     /// Feed output bytes from the program.

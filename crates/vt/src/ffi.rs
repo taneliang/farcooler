@@ -210,6 +210,41 @@ pub unsafe extern "C" fn farcooler_vt_scroll_to_bottom(handle: *mut c_void) {
     h.revision = h.revision.wrapping_add(1);
 }
 
+/// Recolour the terminal.
+///
+/// `colors` is nineteen packed `0x00RRGGBB` values: sixteen ANSI, then
+/// foreground, background, cursor. Positional rather than a struct, because
+/// this boundary is POD-only and a struct would need a declaration maintained
+/// by hand in Swift and again in Kotlin. `farcooler_core::theme::Theme::packed`
+/// produces exactly this array.
+///
+/// Any other length is refused rather than padded: a caller that sent eighteen
+/// has a bug, and a nineteenth colour invented here would show up on screen
+/// with nothing in any theme file to explain it.
+///
+/// Bumps the revision, so the next frame redraws — including scrollback, since
+/// colours are resolved when a snapshot is taken rather than when bytes
+/// arrive. That is what makes switching themes instant instead of a repaint of
+/// history the terminal no longer has.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_vt_set_palette(
+    handle: *mut c_void,
+    colors: *const u32,
+    len: usize,
+) -> bool {
+    let Some(h) = (unsafe { as_handle(handle) }) else { return false };
+    if colors.is_null() {
+        return false;
+    }
+    let values = unsafe { std::slice::from_raw_parts(colors, len) };
+    let Some(palette) = crate::grid::Palette::from_packed(values) else {
+        return false;
+    };
+    h.terminal.set_palette(palette);
+    h.revision = h.revision.wrapping_add(1);
+    true
+}
+
 /// Take bytes the program wants written back to the pty.
 ///
 /// Cursor-position reports and mouse replies must reach the program or a

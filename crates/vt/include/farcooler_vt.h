@@ -123,6 +123,10 @@ void farcooler_vt_scroll(void *handle, int32_t lines);
  */
 void farcooler_vt_scroll_to_bottom(void *handle);
 
+/// Recolour the terminal. `colors` is 19 packed 0x00RRGGBB values: 16 ANSI,
+/// then foreground, background, cursor. False if the length is not 19.
+bool farcooler_vt_set_palette(void *handle, const uint32_t *colors, size_t len);
+
 /*
  * Take bytes the program wants written back to the pty and send them on.
  *
