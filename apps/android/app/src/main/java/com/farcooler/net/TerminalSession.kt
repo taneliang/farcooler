@@ -241,6 +241,40 @@ class TerminalSession(
     }
 
     /**
+     * The link under this session was replaced by a new one.
+     *
+     * Everything the old link set up — the stream, the emulator's idea of
+     * where the cursor is, the last screen a poll compared against — belonged
+     * to an SSH session that no longer exists, so it is dropped rather than
+     * reused. Without this the screen still recovers, because [streamEnded]
+     * falls back to polling, but it stays on the slower path until the screen
+     * is rebuilt: streaming is one round trip and polling is an interval.
+     *
+     * [switchTo] minus the two things that only make sense when the terminal
+     * itself changes. The id is the same, and the outgoing pane is not handed
+     * its old size back — that pane is on the far side of a link that is gone,
+     * so asking it anything is a request into the void.
+     */
+    fun relink() {
+        scope.launch {
+            if (!started) return@launch
+            teardown()
+            vt?.free()
+            vt = null
+            _grid.value = null
+            lastScreen = null
+            revision = 0uL
+            paneSize = null
+            _phase.value = Phase.Connecting
+            failedAttaches = 0
+            hasResized = false
+            lastResizeSent = null
+            open()
+            scheduleResize()
+        }
+    }
+
+    /**
      * Stop watching. A screen nobody is looking at has no business holding an
      * SSH channel open, or spending this phone's battery.
      */

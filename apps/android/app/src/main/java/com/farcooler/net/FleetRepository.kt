@@ -203,8 +203,23 @@ class FleetRepository(
      * The push path is what covers a phone in a pocket.
      */
     fun setForeground(foreground: Boolean) {
-        connections.values.forEach { it.isForeground = foreground }
-        if (foreground) scope.launch { refreshAll() }
+        // Each connection decides what coming back means for it — a healthy
+        // one polls at once, a dropped one reconnects at once, one waiting on
+        // a fingerprint does neither. That judgement needs the phase, which
+        // lives there and not here.
+        connections.values.forEach { it.setForeground(foreground) }
+    }
+
+    /**
+     * Retry every machine at once, whatever each one's backoff had planned.
+     *
+     * What the network coming back means. Only the transition into reachable
+     * reaches this — see [Reachability] — because a path that was already
+     * satisfied and stayed that way is not news, and a phone hands out plenty
+     * of those.
+     */
+    fun reconnectAll() {
+        connections.values.forEach { it.reconnectNow() }
     }
 
     /**

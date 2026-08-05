@@ -20,7 +20,18 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
 
 /** What the core refused, in a sentence written for a human. */
-class CoreException(message: String) : Exception(message)
+open class CoreException(message: String) : Exception(message)
+
+/**
+ * The link is gone, as opposed to the request being refused.
+ *
+ * Answered by the core rather than worked out from the message here: Rust
+ * still has the error's type at the moment it is produced, and
+ * [com.farcooler.net.Connection.Failure] matching substrings is a compromise
+ * the connect path makes because a connect failure genuinely arrives as prose.
+ * A call on a live session need not make it.
+ */
+class DisconnectedException(message: String) : CoreException(message)
 
 /**
  * Kotlin's view of the Rust client core.
@@ -223,7 +234,10 @@ class ClientCore {
             } else {
                 val message =
                     line["error"]?.jsonPrimitive?.contentOrNull ?: "the host refused the request"
-                waiter.completeExceptionally(CoreException(message))
+                val lost = line["disconnected"]?.jsonPrimitive?.booleanOrNull == true
+                waiter.completeExceptionally(
+                    if (lost) DisconnectedException(message) else CoreException(message)
+                )
             }
         }
     }

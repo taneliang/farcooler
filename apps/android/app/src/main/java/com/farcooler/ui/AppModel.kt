@@ -11,6 +11,7 @@ import com.farcooler.data.Identity
 import com.farcooler.data.Settings
 import com.farcooler.net.Connection
 import com.farcooler.net.FleetRepository
+import com.farcooler.net.Reachability
 import com.farcooler.net.TerminalRef
 import com.farcooler.notify.Notifier
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +54,16 @@ class AppModel(application: Application) : AndroidViewModel(application) {
 
     val fleet = FleetRepository(hosts, settings, viewModelScope)
 
+    /**
+     * The network coming back, which no backoff timer can predict.
+     *
+     * Held here rather than inside [FleetRepository] because it needs a
+     * `Context`, and the repository deliberately has none — it is given the
+     * stores it talks to, not the framework. Declared before `init`, because
+     * that is where it is started and Kotlin initialises in source order.
+     */
+    private val reachability = Reachability(application) { fleet.reconnectAll() }
+
     private val _route = MutableStateFlow<Route>(Route.Fleet)
     val route: StateFlow<Route> = _route.asStateFlow()
 
@@ -90,6 +101,8 @@ class AppModel(application: Application) : AndroidViewModel(application) {
 
         account.afterSignIn = { viewModelScope.launch { push.sendIfPossible() } }
         push.attach(viewModelScope)
+
+        reachability.start()
     }
 
     /**
@@ -199,6 +212,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        reachability.stop()
         // The scope is cancelled either way, but a native handle and an SSH
         // session are not the garbage collector's to reclaim.
         kotlinx.coroutines.runBlocking { fleet.close() }

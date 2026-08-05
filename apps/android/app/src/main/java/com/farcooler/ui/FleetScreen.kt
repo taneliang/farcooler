@@ -199,6 +199,10 @@ private fun FleetBody(
                 connection = connection,
                 showLabel = namesMachines,
                 onRetry = { model.fleet.retry(connection.host.id) },
+                // Not `retry`: this machine already has a session object with a
+                // backoff armed, and starting over would discard the schedule
+                // rather than skip the wait it is counting down.
+                onReconnectNow = { connection.reconnectNow() },
                 onTrust = { fingerprint ->
                     model.hosts.trust(connection.host, fingerprint)
                     model.fleet.retry(
@@ -359,6 +363,7 @@ private fun MachineStatusRow(
     connection: Connection,
     showLabel: Boolean,
     onRetry: () -> Unit,
+    onReconnectNow: () -> Unit,
     onTrust: (String) -> Unit,
     onReviewKey: () -> Unit,
     onEdit: () -> Unit,
@@ -378,6 +383,25 @@ private fun MachineStatusRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            // Not an error, and deliberately not worded as one: the rows above
+            // are this machine's last good answer and are still worth reading.
+            //
+            // The attempt number is left out. "Reconnecting (4)" prices a wait
+            // nobody asked for and reads as an error count; what someone wants
+            // to know here is whether to keep waiting or tap, and the button
+            // beside it answers that.
+            is Connection.Phase.Reconnecting -> {
+                Text(
+                    "Reconnecting…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row {
+                    TextButton(onClick = onReconnectNow) { Text("Reconnect now") }
+                    TextButton(onClick = onEdit) { Text("Edit") }
+                }
             }
 
             is Connection.Phase.NeedsApproval -> {

@@ -105,6 +105,21 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
     LaunchedEffect(session) { session.start() }
     LaunchedEffect(ref.terminalId) { session.switchTo(ref.terminalId) }
     LaunchedEffect(reshape) { session.reshapeAllowed = reshape }
+    // The link under this pane was replaced.
+    //
+    // A stream is a second SSH channel on the session that just died, so
+    // everything this screen had open went with it. [TerminalSession] survives
+    // that on its own by falling back to polling, which is the right behaviour
+    // and the slower path; this puts it back on the stream now that there is
+    // one to be on. Skipped on the first composition, where the count is
+    // whatever it already was and nothing has been replaced.
+    val reconnects by connection.reconnects.collectAsStateWithLifecycle()
+    var seenReconnects by remember(ref.hostId) { mutableIntStateOf(reconnects) }
+    LaunchedEffect(reconnects) {
+        if (reconnects == seenReconnects) return@LaunchedEffect
+        seenReconnects = reconnects
+        session.relink()
+    }
     DisposableEffect(session) {
         onDispose { session.dispose() }
     }

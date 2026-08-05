@@ -51,6 +51,21 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
         data class Failed(val message: String) : Phase
 
         data object Connected : Phase
+
+        /**
+         * There WAS a connection, it went away, and one is being made again.
+         *
+         * A fourth phase rather than a flag on [Connected], because the two
+         * existing candidates are each wrong in a way that shows on screen.
+         * [Connecting] means "there has never been a fleet"; [Failed] means
+         * "stopped, waiting for you", and this is not stopped.
+         *
+         * Rows keep their place through this. A machine that stops answering
+         * keeps its rows, dimmed, rather than dropping them — the rule this
+         * app already follows, and the reason it can afford a phase that means
+         * "stale, on purpose, for the moment".
+         */
+        data class Reconnecting(val attempt: Int) : Phase
     }
 
     /**
@@ -143,8 +158,30 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      */
     val core = ClientCore()
 
+    /**
+     * Bumped every time a session is replaced by a new one.
+     *
+     * What a live terminal stream watches. A stream is a second SSH channel on
+     * the session that just died, and [TerminalSession] recovers from losing
+     * one by falling back to polling — correct, and slower than it needs to be
+     * once there is a link to stream over again. This is how it finds out
+     * there is.
+     */
+    private val _reconnects = MutableStateFlow(0)
+    val reconnects: StateFlow<Int> = _reconnects.asStateFlow()
+
     private val json = Json { ignoreUnknownKeys = true }
     private var poller: Job? = null
+
+    /**
+     * The armed retry, or the attempt in flight. One slot, so a second request
+     * to reconnect replaces the first rather than running alongside it — the
+     * same rule the Mac's `DaemonClient.retryTask` follows.
+     */
+    private var reconnector: Job? = null
+
+    /** The machine details the last [start] used, which a retry reconnects to. */
+    private var current: Host = host
 
     /**
      * Which connection attempt is current.
@@ -172,12 +209,46 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      */
     var visibleTerminal: String? = null
 
-    /** Whether this connection is allowed to poll. False while backgrounded. */
+    /**
+     * Whether this connection is allowed to poll. False while backgrounded.
+     *
+     * Set through [setForeground] rather than assigned, because coming back is
+     * the moment a backoff timer cannot predict and something has to act on
+     * it. Still readable directly: [markVisibleSeen] and the poll loop only
+     * ask the question.
+     */
     @Volatile
     var isForeground: Boolean = true
+        private set
+
+    /**
+     * The app came to the foreground, or left it.
+     *
+     * The single most common way this will be experienced: a phone in a pocket
+     * for two hours, the process frozen, the sockets dying, and the first
+     * thing anyone sees on unlock being a stale screen.
+     */
+    fun setForeground(foreground: Boolean) {
+        val was = isForeground
+        isForeground = foreground
+        if (!foreground || was) return
+
+        when (_phase.value) {
+            // After two hours away, "connected" is a claim rather than a fact.
+            // Testing it now beats waiting out a poll interval to find out, and
+            // if it holds this is one round trip nobody notices.
+            is Phase.Connected -> scope.launch { refresh() }
+            is Phase.Reconnecting, is Phase.Failed -> reconnectNow()
+            // Already in flight, or waiting on a person. Neither is helped by
+            // starting over.
+            is Phase.Connecting, is Phase.NeedsApproval -> Unit
+        }
+    }
 
     suspend fun start(withHost: Host = host) {
         poller?.cancel()
+        reconnector?.cancel()
+        current = withHost
         attempt += 1
         val mine = attempt
         _phase.value = Phase.Connecting
@@ -206,6 +277,121 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
         refresh()
         loadRepositories()
         startPolling()
+    }
+
+    // ---- staying connected ----
+
+    /**
+     * A call came back saying the link is gone.
+     *
+     * Detected in [refresh] alone. Every other call site swallows its errors,
+     * and chasing all of them would buy nothing: the poller runs every three
+     * seconds, so the drop is noticed within one poll of whichever call first
+     * hit it, from one place instead of twenty.
+     */
+    private fun linkDropped() {
+        if (_phase.value !is Phase.Connected) return
+        poller?.cancel()
+        poller = null
+        scheduleReconnect(attempt = 1, afterMs = backoffMs(1))
+    }
+
+    private fun scheduleReconnect(attempt: Int, afterMs: Long) {
+        _phase.value = Phase.Reconnecting(attempt)
+        reconnector?.cancel()
+        reconnector = scope.launch {
+            delay(afterMs)
+            reconnect(attempt)
+        }
+    }
+
+    /**
+     * Retry at once, whatever the backoff had planned.
+     *
+     * The escape hatch for everything a timer cannot know: you walked back
+     * into Wi-Fi range, you woke the machine, or you can simply see that this
+     * is stuck. Deliberately available while [Phase.Connected] too — that is
+     * the case where the app believes it is fine and the person holding it
+     * knows better.
+     */
+    fun reconnectNow() {
+        poller?.cancel()
+        poller = null
+        reconnector?.cancel()
+        _phase.value = Phase.Reconnecting(0)
+        reconnector = scope.launch { reconnect(0) }
+    }
+
+    private suspend fun reconnect(attempt: Int) {
+        if (_phase.value !is Phase.Reconnecting) return
+        val key = Identity.privateKey()
+        if (key == null) {
+            _phase.value = Phase.Failed(
+                Identity.lastError
+                    ?: "This device has no SSH key and one could not be generated."
+            )
+            return
+        }
+
+        try {
+            core.connect(current.config(key))
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            // A start, or a second reconnectNow, landed while this attempt was
+            // crossing the network. Its answer is the current one; this one
+            // must not reach up and overwrite it.
+            if (_phase.value !is Phase.Reconnecting) return
+            retryOrGiveUp(e.message.orEmpty(), attempt)
+            return
+        }
+
+        if (_phase.value !is Phase.Reconnecting) return
+        _phase.value = Phase.Connected
+        // Before the reads below, so anything watching for a new link learns
+        // about it in the same turn the link exists.
+        _reconnects.value += 1
+        refresh()
+        // Re-read rather than trust what a previous session reported: a
+        // machine that dropped and came back may have gained a repository, and
+        // staying invisible to the pickers until relaunch is the failure the
+        // Mac's `onReconnect` seeding exists to prevent.
+        loadRepositories()
+        startPolling()
+    }
+
+    /**
+     * What to do about an attempt that failed: wait longer, wait much longer,
+     * or stop and say why.
+     *
+     * Stopping is not a dead end — the row's button, the app coming back to
+     * the foreground and the network returning all still reach [reconnectNow].
+     * It is the difference between a screen that explains what to fix and one
+     * that spins forever over something retrying will never fix.
+     */
+    private fun retryOrGiveUp(message: String, attempt: Int) {
+        val next = classify(message)
+        if (next !is Phase.Failed) {
+            // The host key is unknown again, which is a question for a human
+            // and not something to retry past.
+            _phase.value = next
+            return
+        }
+
+        when (Failure.of(next.message)) {
+            Failure.KEY_REJECTED,
+            Failure.HOST_KEY_CHANGED,
+            Failure.NO_IDENTITY,
+            Failure.KEY_NOT_TRUSTED,
+            -> _phase.value = next
+
+            // Kept at the same rung: `attempt` drives the fast schedule, means
+            // nothing at this cadence, and letting it climb would leave a
+            // later, genuinely transient failure starting at the ceiling.
+            Failure.DAEMON_MISSING -> scheduleReconnect(attempt, SLOW_RETRY_MS)
+
+            Failure.UNREACHABLE, Failure.STOPPED, Failure.OTHER ->
+                scheduleReconnect(attempt + 1, backoffMs(attempt + 1))
+        }
     }
 
     /**
@@ -237,6 +423,10 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
     private fun abandon(message: String) {
         attempt += 1
         poller?.cancel()
+        // The armed retry too. "Stop waiting" that leaves a backoff ticking
+        // underneath would put the spinner back thirty seconds later, which is
+        // the opposite of what was asked for.
+        reconnector?.cancel()
         _phase.value = Phase.Failed(message)
     }
 
@@ -290,8 +480,13 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
             markVisibleSeen()
         } catch (e: Exception) {
             e.rethrowIfCancellation()
-            // A failed poll is not a disconnection. Keep showing the last known
-            // fleet rather than blanking the screen someone is reading.
+            // A failed poll is not a disconnection — unless the core says it
+            // is. That distinction did not exist before: this swallowed every
+            // error, which is right about one poll and wrong about the
+            // hundredth, and left the app with no path out of Connected at
+            // all. Either way the last known fleet stays on screen rather than
+            // blanking the screen someone is reading.
+            if (e is com.farcooler.core.DisconnectedException) linkDropped()
             return
         }
     }
@@ -439,6 +634,33 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
 
     companion object {
         private const val POLL_INTERVAL_MS = 3_000L
+
+        /**
+         * How long a machine that answered SSH but not Far Cooler waits.
+         *
+         * Five minutes, matching the Mac. No amount of retrying installs a
+         * daemon, so the exponential schedule — which exists to survive a
+         * burst of transient failures quickly — is the wrong tool and would
+         * just be noise every thirty seconds forever. Not giving up either:
+         * installing it later should be noticed without relaunching the app.
+         */
+        private const val SLOW_RETRY_MS = 300_000L
+
+        /**
+         * How long to wait before the next attempt.
+         *
+         * The same schedule as the Mac's `DaemonClient.backoffSeconds` and the
+         * iPhone's `Connection.backoff`, deliberately: "how long until it comes
+         * back" should have one answer across the three apps. Doubling from two
+         * seconds to a thirty second ceiling, with jitter, because several
+         * machines recovering from one network event must not retry in
+         * lockstep — and this app connects to every machine at once, so that is
+         * the ordinary case here rather than the unlucky one.
+         */
+        fun backoffMs(attempt: Int): Long {
+            val ceiling = minOf(30.0, Math.pow(2.0, attempt.toDouble()))
+            return (ceiling * (0.8 + Math.random() * 0.4) * 1000).toLong()
+        }
 
         /**
          * A JSON object from string pairs, which is every call this makes.
