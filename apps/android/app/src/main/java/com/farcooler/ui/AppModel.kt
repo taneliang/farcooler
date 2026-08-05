@@ -82,6 +82,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
 
     init {
         Identity.initialize(application)
+        com.farcooler.data.Themes.initialize(application)
         notifier.createChannels()
 
         // Generate the device key at launch rather than the first time

@@ -438,6 +438,10 @@ class TerminalSession(
         // to receive it is simply lost.
         vt?.free()
         val emulator = VtCore(response.columns, response.rows)
+        // A fresh core starts on the VT crate's own default palette, not the
+        // theme in force. Without this the chrome would be themed and every
+        // character would not.
+        emulator.setPalette(com.farcooler.data.Themes.current.packed())
         applyModes(response.modes, emulator)
         vt = emulator
         response
@@ -676,6 +680,10 @@ class TerminalSession(
         }
         vt?.free()
         val emulator = VtCore(response.columns, response.rows)
+        // A fresh core starts on the VT crate's own default palette, not the
+        // theme in force. Without this the chrome would be themed and every
+        // character would not.
+        emulator.setPalette(com.farcooler.data.Themes.current.packed())
         applyModes(response.modes, emulator)
         // A capture separates its lines with a bare line feed, which to a
         // terminal means "down one row" and nothing about which column. Fed

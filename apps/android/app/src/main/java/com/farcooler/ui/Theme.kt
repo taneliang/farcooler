@@ -3,44 +3,67 @@ package com.farcooler.ui
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import com.farcooler.R
-import com.farcooler.core.TerminalPalette
+import com.farcooler.data.Themes
 import com.farcooler.data.TerminalFontChoice
 
 /**
- * Dark, always — and Material You inside that.
+ * Whichever way the chosen theme goes — and Material You inside that.
  *
- * The Apple apps force dark app-wide, and the reasoning transfers exactly: half
- * the app is a terminal, a terminal is dark whatever the device is set to, and
- * a light list handing off to a black screen and back looked like two
- * applications. Choosing one is better than reconciling two.
+ * This was dark unconditionally, and the reasoning was sound as far as it went:
+ * half the app is a terminal, a terminal is dark whatever the device is set to,
+ * and a light list handing off to a black screen looked like two applications.
+ * Choosing one beat reconciling two.
  *
- * What does not transfer is ignoring the platform's own colour. Android hands
- * every app a palette derived from the wallpaper, and an app that declines it
- * reads as ported rather than native. So the scheme is the system's DARK
- * dynamic palette where the device offers one — accents, containers and
- * surfaces all from the user's wallpaper — with only the terminal's own
- * background pinned, because that colour is shared with the Mac and iOS apps so
- * the same terminal looks like the same terminal on all three.
+ * What it could not survive is a light TERMINAL. Now that the palette is a
+ * choice, the same argument points at following it: the chrome and the grid go
+ * the same way because they are one theme, which is exactly the join that had
+ * to be protected. Still one decision, just no longer a constant.
  *
- * [isSystemInDarkTheme] is deliberately not consulted. It is the one place this
- * app overrules the system, and it does so for a reason that does not depend on
- * a preference.
+ * Material You survives for the dark case. Android hands every app a palette
+ * derived from the wallpaper, and an app that declines it reads as ported
+ * rather than native — accents around a dark terminal do not fight it. A light
+ * theme takes its own colours instead: picking Solarized Light and getting
+ * wallpaper-derived dark surfaces would be the app ignoring what it was just
+ * told.
+ *
+ * [isSystemInDarkTheme] is still deliberately not consulted. The theme decides,
+ * and that is a preference this app owns rather than one it inherits.
  */
 @Composable
 fun FarCoolerTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val scheme = remember(context) {
-        dynamicDarkColorScheme(context).copy(
-            // The one colour that is not the platform's to choose.
-            surfaceContainerLowest = Color(TerminalPalette.BACKGROUND),
+    // Recomposed when the theme changes, which is what carries a pick in
+    // settings out to every surface in the app rather than just the terminal.
+    val revision by Themes.revision.collectAsStateWithLifecycle()
+    val scheme = remember(context, revision) {
+        val theme = Themes.current
+        // Material You survives, for the DARK case only.
+        //
+        // Wallpaper-derived colour is the platform-native behaviour this file
+        // argues for at length, and it is still right when the chosen theme is
+        // dark — the accents sit around a terminal, they do not fight it. It
+        // yields entirely once a LIGHT theme is chosen: picking Solarized
+        // Light and getting wallpaper-derived dark surfaces would be the app
+        // ignoring what it was just told.
+        val base =
+            if (theme.dark) dynamicDarkColorScheme(context)
+            else dynamicLightColorScheme(context)
+        base.copy(
+            // The one colour that is not the platform's to choose: it is
+            // shared with the Mac and iOS so the same terminal looks like the
+            // same terminal on all three.
+            surfaceContainerLowest = Color(Themes.opaque(theme.background)),
         )
     }
 

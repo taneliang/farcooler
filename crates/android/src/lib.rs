@@ -34,7 +34,7 @@
 use std::ffi::{CStr, CString, c_void};
 
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JString};
+use jni::objects::{JByteArray, JClass, JIntArray, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jintArray, jlong, jstring};
 
 use farcooler_client::ffi as client;
@@ -237,6 +237,35 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePublicKey(
     }
 }
 
+/// The themes compiled into this build, as JSON.
+///
+/// Session-free, like the key helpers above: a phone that has never reached a
+/// host still needs a theme to render with, and every other client call needs
+/// a live ssh connection.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeBuiltinThemes(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    // Asked for the size first rather than guessing a buffer: eleven themes of
+    // nineteen colours is a few kilobytes today and is exactly the sort of
+    // number that grows without anyone revisiting a constant.
+    let needed = unsafe { client::farcooler_client_builtin_themes(std::ptr::null_mut(), 0) };
+    if needed == 0 {
+        return std::ptr::null_mut();
+    }
+    let mut buffer = vec![0u8; needed];
+    let written =
+        unsafe { client::farcooler_client_builtin_themes(buffer.as_mut_ptr(), buffer.len()) };
+    if written == 0 || written > buffer.len() {
+        return std::ptr::null_mut();
+    }
+    match std::str::from_utf8(&buffer[..written]) {
+        Ok(text) => jstring_of(&mut env, text),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 // MARK: - Terminal core
 
 #[unsafe(no_mangle)]
@@ -281,6 +310,31 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeResize(
     rows: jint,
 ) {
     unsafe { vt::farcooler_vt_resize(handle_of(handle), clamp_u16(columns), clamp_u16(rows)) }
+}
+
+/// Recolour the terminal. Nineteen packed values: sixteen ANSI, then
+/// foreground, background, cursor. False if the array is any other length.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeSetPalette(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    colors: JIntArray,
+) -> jboolean {
+    let Ok(len) = env.get_array_length(&colors) else {
+        return 0;
+    };
+    let mut values = vec![0i32; len as usize];
+    if env.get_int_array_region(&colors, 0, &mut values).is_err() {
+        return 0;
+    }
+    // Kotlin has no unsigned int, so the colours arrive as a signed bit
+    // pattern. The bits are the same; only the interpretation differs.
+    let packed: Vec<u32> = values.into_iter().map(|v| v as u32).collect();
+    let ok = unsafe {
+        vt::farcooler_vt_set_palette(handle_of(handle), packed.as_ptr(), packed.len())
+    };
+    u8::from(ok)
 }
 
 #[unsafe(no_mangle)]

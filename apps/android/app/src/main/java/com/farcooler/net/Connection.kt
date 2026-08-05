@@ -276,6 +276,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
         _phase.value = Phase.Connected
         refresh()
         loadRepositories()
+        loadThemes()
         startPolling()
     }
 
@@ -361,6 +362,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
         // staying invisible to the pickers until relaunch is the failure the
         // Mac's `onReconnect` seeding exists to prevent.
         loadRepositories()
+        loadThemes()
         startPolling()
     }
 
@@ -532,6 +534,24 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
             synchronized(markingSeen) { markingSeen.remove(id) }
         }
     }
+
+    /**
+     * Merge whatever this machine defines into the picker.
+     *
+     * Read on every connection and reconnection, alongside repositories, so a
+     * `[themes.*]` table added to the host's config.toml does not stay
+     * invisible until the app is relaunched.
+     */
+    private suspend fun loadThemes() {
+        val data = attempt { core.call("themes") }.getOrNull() ?: return
+        val parsed = runCatching {
+            json.decodeFromJsonElement(HostThemes.serializer(), data)
+        }.getOrNull() ?: return
+        com.farcooler.data.Themes.merge(parsed.themes)
+    }
+
+    @kotlinx.serialization.Serializable
+    private data class HostThemes(val themes: List<com.farcooler.data.Theme> = emptyList())
 
     private suspend fun loadRepositories() {
         val data = attempt { core.call("repositories") }.getOrNull() ?: return

@@ -57,6 +57,9 @@ internal object NativeClient {
     external fun nativeGenerateKey(comment: String): String?
 
     external fun nativePublicKey(privateKey: String): String?
+
+    /** The themes compiled in, as JSON. No session needed. */
+    external fun nativeBuiltinThemes(): String?
 }
 
 internal object NativeVt {
@@ -76,6 +79,12 @@ internal object NativeVt {
     external fun nativeScroll(handle: Long, lines: Int)
 
     external fun nativeScrollToBottom(handle: Long)
+
+    /**
+     * Recolour the terminal. Nineteen packed 0xRRGGBB values: sixteen ANSI,
+     * then foreground, background, cursor.
+     */
+    external fun nativeSetPalette(handle: Long, colors: IntArray): Boolean
 
     external fun nativeTakeWrites(handle: Long): ByteArray?
 

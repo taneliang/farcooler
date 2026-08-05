@@ -44,6 +44,19 @@ class VtCore(columns: Int, rows: Int) {
      * Jump back to the live screen. Call this on input: typing into a
      * scrolled-back view would show the user nothing of what they typed.
      */
+    /**
+     * Recolour every cell the next snapshot produces.
+     *
+     * Colours resolve when a snapshot is taken rather than when bytes arrive,
+     * so this recolours scrollback too — switching themes is instant, not a
+     * repaint of history the terminal no longer holds.
+     */
+    fun setPalette(colors: IntArray): Boolean {
+        val h = handle
+        if (h == 0L) return false
+        return NativeVt.nativeSetPalette(h, colors)
+    }
+
     fun scrollToBottom() {
         if (handle == 0L) return
         NativeVt.nativeScrollToBottom(handle)
@@ -228,7 +241,16 @@ class TerminalGrid(
  * the cursor block. Values mirror the Mac and iOS apps' so the same terminal
  * looks like the same terminal on all three.
  */
+/**
+ * The colours the renderer owns, read from the theme in force.
+ *
+ * These were constants, which is what made the palette unchangeable without
+ * reinstalling. Cell colours still come from the core already resolved; this is
+ * the chrome around them.
+ */
 object TerminalPalette {
-    const val BACKGROUND = 0xFF121419.toInt()
-    const val CURSOR = 0xE6709FFF.toInt()
+    val BACKGROUND: Int get() =
+        com.farcooler.data.Themes.opaque(com.farcooler.data.Themes.current.background)
+    val CURSOR: Int get() =
+        com.farcooler.data.Themes.opaque(com.farcooler.data.Themes.current.cursor)
 }

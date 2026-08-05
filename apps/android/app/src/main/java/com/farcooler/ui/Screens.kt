@@ -2,6 +2,7 @@ package com.farcooler.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -55,6 +56,7 @@ import com.farcooler.account.Registrations
 import com.farcooler.data.Identity
 import com.farcooler.data.Settings
 import com.farcooler.data.TerminalFontChoice
+import com.farcooler.data.Themes
 import com.farcooler.net.Connection
 import kotlinx.coroutines.launch
 
@@ -217,6 +219,8 @@ fun SettingsScreen(model: AppModel, onBack: () -> Unit) {
     val clipboard = LocalClipboard.current
 
     val font by model.settings.font.collectAsStateWithLifecycle()
+    val themes by Themes.available.collectAsStateWithLifecycle()
+    val selectedTheme by Themes.selected.collectAsStateWithLifecycle()
     val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
     val onAttention by model.settings.notifyOnAttention.collectAsStateWithLifecycle()
     val onDone by model.settings.notifyOnDone.collectAsStateWithLifecycle()
@@ -314,6 +318,27 @@ fun SettingsScreen(model: AppModel, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            HorizontalDivider()
+            SectionTitle("Theme")
+            Text(
+                "Sets the terminal's colors and the app's. Add your own under " +
+                    "[themes.name] in ~/.config/farcooler/config.toml on a machine.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (theme in themes) {
+                    TextButton(onClick = { Themes.select(theme.name) }) {
+                        Text(
+                            theme.name,
+                            color =
+                                if (theme.name == selectedTheme) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
 
             HorizontalDivider()
             SectionTitle("Terminal font")
