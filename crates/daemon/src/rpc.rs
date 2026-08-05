@@ -61,7 +61,10 @@ impl Rpc {
 /// method unreachable instead of silently unguarded.
 fn required_scope(method: &str) -> Option<Scope> {
     Some(match method {
-        "host.get" | "host.health" | "daemon.version" => Scope::Read,
+        // Themes are what a client paints with. Read, not Control: naming a
+        // colour changes nothing on the host, and a phone connected in a
+        // read-only capacity should still be able to render itself properly.
+        "host.get" | "host.health" | "daemon.version" | "theme.list" => Scope::Read,
         // Stopping the daemon stops nothing a user is watching — terminals are
         // tmux's — but it is the one method that ends the process, so it sits
         // at the highest scope. A local caller already holds it; a remote one
@@ -256,6 +259,29 @@ impl Rpc {
                 Ok(result::Value::RepositoryRootList(
                     farcooler_protocol::v1::RepositoryRootList { items },
                 ))
+            }
+
+            // What this host defines in `[themes.<name>]`, read fresh.
+            //
+            // Read on each call rather than cached at startup, so editing the
+            // file and reconnecting is enough to see the change — which is the
+            // whole reason themes live in a hand-edited file. It is a few
+            // hundred bytes of TOML parsed a handful of times per session, and
+            // a file watcher on every host would be a lot of machinery for
+            // something that changes twice a year.
+            "theme.list" => {
+                let items = farcooler_core::config::load_themes()
+                    .into_iter()
+                    .map(|t| farcooler_protocol::v1::Theme {
+                        name: t.name,
+                        dark: t.dark,
+                        background: t.background,
+                        foreground: t.foreground,
+                        cursor: t.cursor,
+                        ansi: t.ansi.to_vec(),
+                    })
+                    .collect();
+                Ok(result::Value::ThemeList(farcooler_protocol::v1::ThemeList { items }))
             }
 
             "repository.list" => {

@@ -121,6 +121,7 @@ message Result {
     // whole result is that the daemon is going away. Echoing any resource back
     // would be describing a process that is about to stop existing.
     Empty empty = 19;
+    ThemeList theme_list = 20;
   }
 }
 
@@ -429,6 +430,28 @@ message Repository {
 }
 
 message RepositoryList { repeated Repository items = 1; }
+
+// A colour scheme this host defines, from `[themes.<name>]` in config.toml.
+//
+// Sent as packed 0x00RRGGBB integers rather than as the "#rrggbb" strings the
+// file is written in: the client hands these straight to the VT core, and
+// re-parsing hex on three platforms is three chances to disagree about a
+// colour the daemon has already read correctly.
+message Theme {
+  string name = 1;
+  // Whether the app's own surfaces go dark. Carried rather than derived from
+  // the background, so a theme author picking a mid-grey ground decides which
+  // way the chrome goes instead of a luminance threshold deciding for them.
+  bool dark = 2;
+  uint32 background = 3;
+  uint32 foreground = 4;
+  uint32 cursor = 5;
+  // Exactly 16: ANSI 0-7 then 8-15. Anything else is dropped by the daemon
+  // before it reaches here.
+  repeated uint32 ansi = 6;
+}
+
+message ThemeList { repeated Theme items = 1; }
 
 message Workspace {
   bytes id = 1;

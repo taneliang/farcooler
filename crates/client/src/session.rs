@@ -290,6 +290,18 @@ impl Session {
         }
     }
 
+    /// The colour schemes this host defines.
+    ///
+    /// Only the host's own — the built-ins are compiled into every client, so
+    /// sending eleven fixed palettes down an ssh link on every connection
+    /// would be a round trip spent to be told what the client already knows.
+    pub async fn themes(&mut self) -> Result<Vec<farcooler_protocol::v1::Theme>, SessionError> {
+        match self.value("theme.list", None, None).await? {
+            result::Value::ThemeList(l) => Ok(l.items),
+            other => Err(wrong("themes", &other)),
+        }
+    }
+
     // ---- mutations ----
 
     pub async fn create_workspace(
@@ -676,6 +688,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::TerminalScreen(_) => "terminal_screen",
         result::Value::AgentEventBatch(_) => "agent_event_batch",
         result::Value::WorktreeFileList(_) => "worktree_file_list",
+        result::Value::ThemeList(_) => "theme_list",
         result::Value::Empty(_) => "empty",
     }
 }

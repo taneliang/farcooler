@@ -440,6 +440,22 @@ async fn dispatch(
             }))
         }
 
+        // The host's own themes. The built-ins are compiled into each client,
+        // so only what this machine adds crosses the wire.
+        "themes" => {
+            let items = session.themes().await?;
+            Ok(json!({
+                "themes": items.iter().map(|t| json!({
+                    "name": t.name,
+                    "dark": t.dark,
+                    "background": t.background,
+                    "foreground": t.foreground,
+                    "cursor": t.cursor,
+                    "ansi": t.ansi,
+                })).collect::<Vec<_>>()
+            }))
+        }
+
         "repositories" => {
             let items = session.repositories().await?;
             Ok(json!({

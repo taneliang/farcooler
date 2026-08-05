@@ -80,6 +80,9 @@ enum Command {
     /// Manage registered repositories.
     #[command(subcommand)]
     Repo(RepoCmd),
+    /// List the colour schemes available on this machine.
+    #[command(subcommand)]
+    Theme(ThemeCmd),
     /// Manage task workspaces (one worktree plus branch per task).
     #[command(subcommand)]
     Workspace(WorkspaceCmd),
@@ -298,6 +301,13 @@ enum RootCmd {
         #[arg(long)]
         confirm: String,
     },
+}
+
+#[derive(Subcommand)]
+enum ThemeCmd {
+    /// Every theme this machine offers: the built-ins, plus whatever
+    /// `[themes.<name>]` in config.toml adds.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -598,6 +608,7 @@ async fn run() -> Fallible {
         Command::Daemon(c) => daemon(host, c, cli.json).await,
         Command::Root(c) => root(host, c, cli.json).await,
         Command::Repo(c) => repo(host, c, cli.json).await,
+        Command::Theme(c) => theme(host, c, cli.json).await,
         Command::Workspace(c) => workspace(host, c, cli.json).await,
         Command::Terminal(c) => terminal(host, c, cli.json).await,
         Command::Worktree(c) => worktree(host, c, cli.json).await,
@@ -798,6 +809,72 @@ async fn root(host: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
                 );
             }
         }
+    }
+    Ok(())
+}
+
+/// The themes a machine offers.
+///
+/// Built-ins merged with the host's own, resolved HERE rather than in the app,
+/// so the Mac and the two phones cannot come to disagree about what "Nord"
+/// means or about which of two definitions wins.
+async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
+    let ThemeCmd::List = cmd;
+
+    // The host's own, over whichever transport reaches it. A machine that
+    // cannot be reached still has the built-ins — the picker should not empty
+    // itself because a laptop is asleep.
+    let custom = match connect_to(host).await {
+        Ok(mut link) => list_themes(&mut link).await.unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+
+    let mut themes = farcooler_core::theme::built_in();
+    for one in custom {
+        let resolved = farcooler_core::theme::Theme {
+            name: one.name,
+            dark: one.dark,
+            background: one.background,
+            foreground: one.foreground,
+            cursor: one.cursor,
+            ansi: match <[u32; 16]>::try_from(one.ansi.as_slice()) {
+                Ok(a) => a,
+                // The daemon drops these before sending, so reaching here means
+                // an older host. Skipping beats padding a colour nobody chose.
+                Err(_) => continue,
+            },
+        };
+        // The host wins a name collision: it is the more specific statement,
+        // and the one somebody edited a file on purpose to make.
+        match themes.iter().position(|t| t.name == resolved.name) {
+            Some(i) => themes[i] = resolved,
+            None => themes.push(resolved),
+        }
+    }
+
+    if json {
+        let items: Vec<_> = themes
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "dark": t.dark,
+                    "background": t.background,
+                    "foreground": t.foreground,
+                    "cursor": t.cursor,
+                    "ansi": t.ansi,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({ "themes": items, "default": farcooler_core::theme::DEFAULT_THEME })
+        );
+        return Ok(());
+    }
+
+    for t in &themes {
+        println!("{:<20} {}", t.name, if t.dark { "dark" } else { "light" });
     }
     Ok(())
 }
@@ -1852,6 +1929,16 @@ async fn list_repositories(link: &mut Link) -> Result<Vec<Repository>, Box<dyn s
     let r = link.call(req("repository.list")).await?;
     match expect_value(r.value, "repositories")? {
         result::Value::RepositoryList(l) => Ok(l.items),
+        _ => Err("the daemon returned the wrong list".into()),
+    }
+}
+
+async fn list_themes(
+    link: &mut Link,
+) -> Result<Vec<farcooler_protocol::v1::Theme>, Box<dyn std::error::Error>> {
+    let r = link.call(req("theme.list")).await?;
+    match expect_value(r.value, "themes")? {
+        result::Value::ThemeList(l) => Ok(l.items),
         _ => Err("the daemon returned the wrong list".into()),
     }
 }
