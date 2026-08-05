@@ -76,6 +76,11 @@ Two sources, resolved in one list.
 **Built in**, compiled into `crates/core`, so every client has them with no
 round trip and a phone that has never reached a host still has a light mode:
 
+Solarized Light takes `base01` rather than the canonical `base00` as its
+foreground: the readability test below caught the canonical pairing at 4.13:1,
+under AA. Recorded here and at the definition — this is Solarized Light one
+step darker on the text.
+
 | Light | Dark | Contrast |
 |---|---|---|
 | Solarized Light | Solarized Dark | High Contrast Light |
@@ -85,11 +90,19 @@ round trip and a phone that has never reached a host still has a light mode:
 | | Catppuccin Mocha | |
 | | Far Cooler *(today's palette)* | |
 
-Today's palette stays, named, and stays the default. It was not among the
-built-ins the user picked, and keeping it is a deliberate call rather than an
-oversight: it is what every existing terminal is currently rendered in, and
-changing what people are already looking at is not this feature's job. This
-feature's job is to make it one tap to leave.
+**Nord is the default**, asked for directly mid-implementation: "the UI should
+default to a dark theme instead of system, and also choose a standard popular
+dark theme as the default". Of the popular darks it is the one that best
+answers the complaint that started this — a soft `#2E3440` ground rather than
+the near-black `#121419` that hurt to look at, at 9.25:1 on its body text.
+
+Today's palette stays as a built-in named "Far Cooler", at its exact values, so
+anyone who liked it has it back in one tap. Existing terminals DO change colour
+on upgrade; that is what was asked for rather than a side effect of it.
+
+macOS's `app.appearance` also moves from `system` to `dark` for the same
+reason: following the system produced a light sidebar against a dark grid for
+half of every day.
 
 **Host-defined**, from `~/.config/farcooler/config.toml`, alongside the
 `[adapters.*]` tables that already live there:
