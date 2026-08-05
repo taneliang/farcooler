@@ -199,6 +199,35 @@ final class TerminalSession: ObservableObject {
         scheduleResize()
     }
 
+    /// The link under this session was replaced by a new one.
+    ///
+    /// Everything the old link set up — the stream, the emulator's idea of
+    /// where the cursor is, the last screen a poll compared against — belonged
+    /// to an SSH session that no longer exists, so it is dropped rather than
+    /// reused. Without this the screen still recovers, because `streamEnded`
+    /// falls back to polling, but it stays on the slower path until the view
+    /// is rebuilt: streaming is one round trip and polling is an interval.
+    ///
+    /// `switchTo` minus the two things that only make sense when the terminal
+    /// itself changes. The id is the same, and the outgoing pane is not handed
+    /// its old size back — that pane is on the far side of a link that is
+    /// gone, so asking it anything is a request into the void.
+    func relink() {
+        guard started else { return }
+        teardown()
+        vt = nil
+        grid = nil
+        lastScreen = nil
+        revision = 0
+        paneSize = nil
+        phase = .connecting
+        failedAttaches = 0
+        hasResized = false
+        lastResizeSent = nil
+        Task { await open() }
+        scheduleResize()
+    }
+
     /// Debounce and dedupe a request to reflow the pane to `lastRequestedSize`.
     ///
     /// Every trigger that thinks the pane might need refitting — the screen

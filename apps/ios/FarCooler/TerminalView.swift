@@ -186,6 +186,19 @@ struct TerminalView: View {
         .navigationTitle(currentWorkspace?.task ?? currentName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // Only when there is something wrong, and then unmissably.
+            //
+            // The machine bar carries this permanently, but the bar lives on
+            // the worktree list and this screen is the one people actually sit
+            // on — a terminal that has quietly stopped updating is exactly
+            // where a frozen link is noticed and, before this, the only place
+            // it could not be acted on without first opening the switcher.
+            if connection.phase != .connected {
+                ToolbarItem(placement: .topBarLeading) {
+                    LinkStatusChip(connection: connection)
+                }
+            }
+
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 0) {
                     Text(currentWorkspace?.task ?? currentName)
@@ -276,6 +289,16 @@ struct TerminalView: View {
             // notification did its job while the phone was away; leaving the
             // pane flagged afterwards makes you dismiss the same news twice.
             Task { await connection.markVisibleSeen() }
+        }
+        // The link under this pane was replaced.
+        //
+        // A stream is a second SSH channel on the session that just died, so
+        // everything this screen had open went with it. `TerminalSession`
+        // survives that on its own by falling back to polling, which is the
+        // right behavior and the slower path; this puts it back on the stream
+        // now that there is one to be on.
+        .onChange(of: connection.reconnectGeneration) { _, _ in
+            session.relink()
         }
     }
 

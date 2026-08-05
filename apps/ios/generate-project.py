@@ -21,6 +21,7 @@ SOURCES = [
     "FleetView.swift",
     "Model.swift",
     "Notifications.swift",
+    "Reachability.swift",
     "Settings.swift",
     "Store.swift",
     "QuickTask.swift",

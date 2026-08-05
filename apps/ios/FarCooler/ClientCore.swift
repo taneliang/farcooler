@@ -31,12 +31,21 @@ actor ClientCore {
     enum CoreError: LocalizedError {
         case notStarted
         case rejected(String)
+        /// The link is gone, as opposed to the request being refused.
+        ///
+        /// Answered by the core rather than worked out from the message here:
+        /// Rust still has the error's type at the moment it is produced, and
+        /// `Connection.Failure` matching substrings is a compromise the
+        /// connect path makes because a connect failure genuinely arrives as
+        /// prose. A call on a live session need not make it.
+        case disconnected(String)
         case malformed
 
         var errorDescription: String? {
             switch self {
             case .notStarted: return "The client core could not be started."
             case .rejected(let message): return message
+            case .disconnected(let message): return message
             case .malformed: return "The client core returned something unreadable."
             }
         }
@@ -179,7 +188,11 @@ actor ClientCore {
                 }
             } else {
                 let message = object["error"] as? String ?? "the host refused the request"
-                continuation.resume(throwing: CoreError.rejected(message))
+                if object["disconnected"] as? Bool == true {
+                    continuation.resume(throwing: CoreError.disconnected(message))
+                } else {
+                    continuation.resume(throwing: CoreError.rejected(message))
+                }
             }
         }
     }

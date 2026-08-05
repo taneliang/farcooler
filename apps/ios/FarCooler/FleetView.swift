@@ -38,6 +38,8 @@ struct FleetView: View {
     /// Whether to offer a way off the spinner yet. See `waitedLongEnough`.
     @State private var stalled = false
 
+    @Environment(\.scenePhase) private var scenePhase
+
     /// Open when correcting this machine's details, from any phase that has a
     /// reason to doubt them.
     @State private var editing = false
@@ -54,7 +56,12 @@ struct FleetView: View {
             case .failed(let message):
                 escapable { failure(message) }
 
-            case .connected:
+            // Reconnecting renders exactly what connected renders. The fleet on
+            // screen is the last one this machine sent, and it is a better
+            // answer than a spinner while the link comes back — see
+            // `Connection.Phase.reconnecting`. The status chip in the bar is
+            // where the difference shows.
+            case .connected, .reconnecting:
                 connected
             }
         }
@@ -68,6 +75,16 @@ struct FleetView: View {
                 onRemove: { store.remove($0) })
         }
         .task { await connect(host) }
+        // The app coming back is the moment a backoff timer cannot predict.
+        //
+        // Here rather than in `RootView`, because this is where the connection
+        // is: the same reason the host switcher moved down out of the
+        // connected screen. `.background` is passed on too, so a phone in a
+        // pocket stops polling — which is both a battery question and one
+        // plausible way the session died in the first place.
+        .onChange(of: scenePhase) { _, phase in
+            connection.setActive(phase == .active)
+        }
     }
 
     /// Every screen shown BEFORE a connection exists, wrapped in the ways out of
@@ -489,9 +506,10 @@ struct WorkspaceListView: View {
 /// screens leaveable at all.
 struct HostSwitcherBar: View {
     @ObservedObject var hosts: HostStore
-    /// Only so the settings screen can name the daemon it is talking to. Absent
+    /// The connection whose state the chip shows, and which its tap retries.
+    /// Also how the settings screen names the daemon it is talking to. Absent
     /// before a connection exists, which is most of the time this bar matters.
-    var connection: Connection?
+    @ObservedObject var connection: Connection
     /// Called after picking a different machine, for the caller that is a sheet
     /// and needs to close itself. Nil where the bar is part of the screen.
     var onSwitch: (() -> Void)?
@@ -549,6 +567,8 @@ struct HostSwitcherBar: View {
             }
 
             Spacer(minLength: 0)
+
+            LinkStatusChip(connection: connection)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -571,6 +591,74 @@ struct HostSwitcherBar: View {
                         }
                     }
             }
+        }
+    }
+}
+
+/// Whether this machine is answering, and a way to ask it again.
+///
+/// The Mac's sidebar dot, on a phone. It sits in the machine bar because that
+/// strip is already what says which machine you are looking at, and because it
+/// is under every phase including the ones you cannot otherwise escape — the
+/// same property that made the bar the app's escape hatch in the first place.
+///
+/// Connected is a dot and no words. A permanent "Connected" on a phone screen
+/// is noise, and the absence of amber says the same thing in no space at all.
+///
+/// The tap works from every state, green included. That is the "it's actually
+/// cooked" case: the app believes it is fine and the person holding it can see
+/// that it is not, and a button that refuses to try because the app disagrees
+/// is a button that fails exactly when it is needed.
+struct LinkStatusChip: View {
+    @ObservedObject var connection: Connection
+
+    var body: some View {
+        Button {
+            connection.reconnectNow()
+        } label: {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 7, height: 7)
+                if let label {
+                    Text(label)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            // A 7-point dot is not a tap target. The padding is, and it stays
+            // there when the label does not so the target does not move.
+            .padding(.vertical, 6)
+            .padding(.leading, 8)
+            .padding(.trailing, label == nil ? 8 : 10)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label ?? "Connected")
+        .accessibilityHint("Reconnects to this machine")
+    }
+
+    private var color: Color {
+        switch connection.phase {
+        case .connected: return .green
+        case .connecting, .reconnecting: return .orange
+        case .needsApproval, .failed: return .red
+        }
+    }
+
+    /// Nothing to say when it is working.
+    ///
+    /// The attempt number is deliberately not shown. "Reconnecting (4)" prices
+    /// a wait nobody asked for and reads as an error count; what someone wants
+    /// to know here is whether to keep waiting or tap, and the word alone
+    /// answers that.
+    private var label: String? {
+        switch connection.phase {
+        case .connected: return nil
+        case .connecting: return "Connecting"
+        case .reconnecting: return "Reconnecting"
+        case .needsApproval: return "Not Trusted"
+        case .failed: return "Disconnected"
         }
     }
 }

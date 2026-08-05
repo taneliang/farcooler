@@ -15,6 +15,22 @@ final class Connection: ObservableObject {
         case needsApproval(String)
         case failed(String)
         case connected
+        /// There WAS a connection, it went away, and one is being made again.
+        ///
+        /// A fourth phase rather than a flag on `connected`, because the two
+        /// existing candidates are each wrong in a way that shows on screen.
+        /// `connecting` means "there has never been a fleet" and renders a
+        /// spinner in place of the whole screen — showing that to someone
+        /// reading a terminal because their Wi-Fi blinked throws away the
+        /// thing they were looking at. `failed` means "stopped, waiting for
+        /// you", and this is not stopped.
+        ///
+        /// Views keep rendering the last known fleet through this. The Mac
+        /// settled that rule already — an unreachable machine still
+        /// contributes its last good rows, because that is what keeps your
+        /// mental map of the fleet stable while a laptop sleeps — and the
+        /// phone should not disagree with it about the same machine.
+        case reconnecting(attempt: Int)
     }
 
     /// What a failure MEANS, as opposed to what it says.
@@ -88,11 +104,39 @@ final class Connection: ObservableObject {
     @Published private(set) var fleet: Fleet = .empty
     @Published private(set) var repositories: [Repository] = []
 
+    /// Bumped every time a session is replaced by a new one.
+    ///
+    /// What a live terminal stream watches. A stream is a second SSH channel
+    /// on the session that just died, and `TerminalSession` recovers from
+    /// losing one by falling back to polling — correct, and slower than it
+    /// needs to be once there is a link to stream over again. This is how it
+    /// finds out there is.
+    @Published private(set) var reconnectGeneration = 0
+
     // Not private: a pushed `TerminalView` talks to the same host through this
     // same core, rather than opening a second SSH session just to poll one
     // terminal's screen.
     let core = ClientCore()
     private var poller: Task<Void, Never>?
+
+    /// The machine this connection is for, remembered so a reconnection has
+    /// something to reconnect TO. Before this, the host appeared only as an
+    /// argument to `start` and was gone the moment it returned.
+    private var host: Host?
+
+    /// The armed retry, or the attempt in flight. One slot, so a second
+    /// request to reconnect replaces the first rather than running alongside
+    /// it — the same rule the Mac's `DaemonClient.retryTask` follows.
+    private var reconnectTask: Task<Void, Never>?
+
+    /// Whether anyone is looking.
+    ///
+    /// A poll is an SSH round trip and a radio wake-up, and while the app is
+    /// backgrounded nothing reads the answer. Worse: iOS suspends the process
+    /// mid-flight, which is one plausible way the session dies in the first
+    /// place. Android's client has had this gate since it was written; this
+    /// one polled a phone in a pocket every three seconds.
+    private var isActive = true
 
     /// Which connection attempt is current.
     ///
@@ -107,13 +151,23 @@ final class Connection: ObservableObject {
     /// change what they are looking at now.
     private var attempt = 0
 
-    deinit { poller?.cancel() }
+    deinit {
+        poller?.cancel()
+        reconnectTask?.cancel()
+    }
 
     func start(host: Host) async {
         poller?.cancel()
+        reconnectTask?.cancel()
+        self.host = host
         attempt += 1
         let mine = attempt
         phase = .connecting
+
+        // Claimed here rather than in `init`, so switching machines hands the
+        // slot to the connection that is now on screen. The old one's closure
+        // captures `self` weakly and no-ops once it is gone.
+        Reachability.shared.onShouldRetry = { [weak self] in self?.reconnectNow() }
 
         guard let key = Identity.privateKey() else {
             if mine == attempt {
@@ -134,6 +188,157 @@ final class Connection: ObservableObject {
         await refresh()
         await loadRepositories()
         startPolling()
+    }
+
+    // MARK: - Staying connected
+
+    /// How long to wait before the next attempt, in seconds.
+    ///
+    /// The same schedule as the Mac's `DaemonClient.backoffSeconds`,
+    /// deliberately: "how long until it comes back" should have one answer
+    /// across the three apps. Doubling from two seconds to a thirty second
+    /// ceiling, with jitter, because several machines recovering from one
+    /// network event must not retry in lockstep.
+    static func backoff(attempt: Int) -> Double {
+        min(30, pow(2, Double(attempt))) * Double.random(in: 0.8...1.2)
+    }
+
+    /// How long a machine that answered SSH but not Far Cooler waits.
+    ///
+    /// Five minutes, matching the Mac. No amount of retrying installs a
+    /// daemon, so the exponential schedule — which exists to survive a burst
+    /// of transient failures quickly — is the wrong tool and would just be
+    /// noise every thirty seconds forever. Not giving up either: installing it
+    /// later should be noticed without relaunching the app.
+    private static let slowRetrySeconds: Double = 300
+
+    /// A call came back saying the link is gone.
+    ///
+    /// Detected in `refresh()` alone. Every other call site swallows its
+    /// errors, and chasing all twenty of them would buy nothing: the poller
+    /// runs every three seconds, so the drop is noticed within one poll of
+    /// whichever call first hit it, from one place instead of twenty.
+    private func linkDropped() {
+        guard phase == .connected else { return }
+        poller?.cancel()
+        poller = nil
+        scheduleReconnect(attempt: 1, after: Self.backoff(attempt: 1))
+    }
+
+    private func scheduleReconnect(attempt: Int, after seconds: Double) {
+        phase = .reconnecting(attempt: attempt)
+        reconnectTask?.cancel()
+        // `[weak self]` rather than binding before the sleep: the whole point
+        // of the wait is to do nothing, and a screen that goes away mid-wait
+        // must be able to deallocate rather than be held until the timer
+        // happens to fire.
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            await self?.reconnect(attempt: attempt)
+        }
+    }
+
+    /// Retry at once, whatever the backoff had planned.
+    ///
+    /// The escape hatch for everything a timer cannot know: you walked back
+    /// into Wi-Fi range, you woke the machine, or you can simply see that this
+    /// is stuck. Deliberately available from `connected` too — that is the
+    /// case where the app believes it is fine and the person holding it knows
+    /// better.
+    func reconnectNow() {
+        guard host != nil else { return }
+        poller?.cancel()
+        poller = nil
+        reconnectTask?.cancel()
+        phase = .reconnecting(attempt: 0)
+        reconnectTask = Task { [weak self] in await self?.reconnect(attempt: 0) }
+    }
+
+    private func reconnect(attempt: Int) async {
+        guard case .reconnecting = phase, let host else { return }
+        guard let key = Identity.privateKey() else {
+            phase = .failed("This device has no SSH key and one could not be generated.")
+            return
+        }
+
+        do {
+            _ = try await core.connect(config: host.config(privateKey: key))
+        } catch {
+            // A `start` or a second `reconnectNow` landed while this attempt
+            // was crossing the network. Its answer is the current one; this
+            // one must not reach up and overwrite it.
+            guard case .reconnecting = phase else { return }
+            retryOrGiveUp(on: error, attempt: attempt)
+            return
+        }
+
+        guard case .reconnecting = phase else { return }
+        phase = .connected
+        // Before the reads below, so anything watching for a new link learns
+        // about it in the same turn the link exists.
+        reconnectGeneration += 1
+        await refresh()
+        // Re-read rather than trust what a previous session reported: a
+        // machine that dropped and came back may have gained a repository, and
+        // staying invisible to the pickers until relaunch is the failure the
+        // Mac's `onReconnect` seeding exists to prevent.
+        await loadRepositories()
+        startPolling()
+    }
+
+    /// What to do about an attempt that failed: wait longer, wait much longer,
+    /// or stop and say why.
+    ///
+    /// Stopping is not a dead end — the chip, the app becoming active and the
+    /// network coming back all still reach `reconnectNow()`. It is the
+    /// difference between a screen that explains what to fix and one that
+    /// spins forever over something retrying will never fix.
+    private func retryOrGiveUp(on error: Error, attempt: Int) {
+        let next = classify(error)
+        guard case .failed(let message) = next else {
+            // The host key is unknown again, which is a question for a human
+            // and not something to retry past.
+            phase = next
+            return
+        }
+
+        switch Failure(message: message) {
+        case .keyRejected, .hostKeyChanged, .noIdentity, .keyNotTrusted:
+            phase = next
+        case .daemonMissing:
+            // Kept at the same rung: `attempt` drives the fast schedule, means
+            // nothing at this cadence, and letting it climb would leave a
+            // later, genuinely transient failure starting at the ceiling.
+            scheduleReconnect(attempt: attempt, after: Self.slowRetrySeconds)
+        case .unreachable, .stopped, .other:
+            scheduleReconnect(attempt: attempt + 1, after: Self.backoff(attempt: attempt + 1))
+        }
+    }
+
+    /// The app came to the foreground, or left it.
+    ///
+    /// The single most common way this feature will be experienced: a phone in
+    /// a pocket for two hours, iOS suspending the process, the sockets dying,
+    /// and the first thing anyone sees on unlock being a stale screen.
+    func setActive(_ active: Bool) {
+        let wasActive = isActive
+        isActive = active
+        guard active, !wasActive else { return }
+
+        switch phase {
+        case .connected:
+            // After two hours suspended, "connected" is a claim rather than a
+            // fact. Testing it now beats waiting out a poll interval to find
+            // out, and if it holds this is one round trip nobody notices.
+            Task { await refresh() }
+        case .reconnecting, .failed:
+            reconnectNow()
+        case .connecting, .needsApproval:
+            // Already in flight, or waiting on a person. Neither is helped by
+            // starting over.
+            break
+        }
     }
 
     /// Stop waiting, and say so.
@@ -161,6 +366,10 @@ final class Connection: ObservableObject {
     private func abandon(_ message: String) {
         attempt += 1
         poller?.cancel()
+        // The armed retry too. "Stop waiting" that leaves a backoff ticking
+        // underneath would put the spinner back thirty seconds later, which is
+        // the opposite of what was asked for.
+        reconnectTask?.cancel()
         phase = .failed(message)
     }
 
@@ -228,8 +437,15 @@ final class Connection: ObservableObject {
             // interaction at all is the one case that never clears.
             await markVisibleSeen()
         } catch {
-            // A failed poll is not a disconnection. Keep showing the last known
-            // fleet rather than blanking the screen someone is reading.
+            // A failed poll is not a disconnection — unless the core says it
+            // is. That distinction did not exist before: this swallowed every
+            // error, which is right about one poll and wrong about the
+            // hundredth, and left the app with no path out of `connected` at
+            // all. Either way the last known fleet stays on screen rather than
+            // blanking the screen someone is reading.
+            if let core = error as? ClientCore.CoreError, case .disconnected = core {
+                linkDropped()
+            }
             return
         }
     }
@@ -286,12 +502,19 @@ final class Connection: ObservableObject {
     /// is a phone with a battery. The states that matter here change on the
     /// scale of an agent finishing a task, not a keystroke.
     private func startPolling() {
+        poller?.cancel()
         poller = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
-                await self?.refresh()
+                await self?.refreshIfWatched()
             }
         }
+    }
+
+    /// A poll that a backgrounded app does not make. See `isActive`.
+    private func refreshIfWatched() async {
+        guard isActive else { return }
+        await refresh()
     }
 
     func act(_ action: Action, on terminal: Terminal) async {
