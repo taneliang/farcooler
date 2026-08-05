@@ -372,6 +372,43 @@ pub unsafe extern "C" fn farcooler_client_public_key(
     bytes.len()
 }
 
+/// The themes compiled into this build, as JSON, with no session required.
+///
+/// Session-free on purpose. A phone that has never reached a host still needs
+/// a theme to render with — the whole point of the built-ins being built in —
+/// and every other call here needs a live ssh connection. Whatever a host adds
+/// arrives separately, through the `themes` method, and is merged by the
+/// client on top of these.
+///
+/// Writes into `out` and returns the number of bytes. If `out` is null or too
+/// small, nothing is written and the needed size is returned — the same
+/// contract `farcooler_client_generate_key` uses.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_builtin_themes(out: *mut u8, capacity: usize) -> usize {
+    let items: Vec<Value> = farcooler_core::theme::built_in()
+        .iter()
+        .map(|t| {
+            json!({
+                "name": t.name,
+                "dark": t.dark,
+                "background": t.background,
+                "foreground": t.foreground,
+                "cursor": t.cursor,
+                "ansi": t.ansi,
+            })
+        })
+        .collect();
+    let payload =
+        json!({ "themes": items, "default": farcooler_core::theme::DEFAULT_THEME }).to_string();
+
+    let bytes = payload.as_bytes();
+    if out.is_null() || bytes.len() > capacity {
+        return bytes.len();
+    }
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+    bytes.len()
+}
+
 /// Take the oldest finished result, or NULL if none is ready.
 ///
 /// The returned pointer is owned by the handle and stays valid until the next

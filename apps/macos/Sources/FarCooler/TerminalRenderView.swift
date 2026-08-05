@@ -1,5 +1,6 @@
 import AppKit
 import CFarCoolerVT
+import Combine
 import CoreText
 
 /// The cell grid a font produces, and the insets a pane draws inside.
@@ -43,6 +44,13 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
     private(set) var core: VTCore
     private var displayLink: CADisplayLink?
+    /// Watches the theme, so a pick in Settings reaches a live terminal.
+    ///
+    /// Subscribed here rather than threaded down as a `themeRevision` property
+    /// beside `fontRevision`: that would mean a new argument on four view
+    /// layers to deliver one integer to the one object that acts on it, and
+    /// every one of those layers would be passing it through untouched.
+    private var themeObserver: AnyCancellable?
     private var lastDrawnRevision: UInt64 = .max
     private var lastReportedGeometry = (columns: 0, rows: 0)
 
@@ -85,7 +93,17 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         super.init(frame: .zero)
         measure()
         wantsLayer = true
-        layer?.backgroundColor = Palette.background.cgColor
+        // Applied once up front as well as on every later change: the observer
+        // below fires on CHANGES, and a view built while a theme is already
+        // chosen has had no change to hear about.
+        applyTheme()
+        themeObserver = Themes.shared.$revision
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.applyTheme()
+                self.needsDisplay = true
+            }
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -204,15 +222,32 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         font = Preferences.shared.terminalFont()
         boldFont = Preferences.shared.terminalFont(weight: .bold)
         italicFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        applyTheme()
         measure()
         lastReportedGeometry = (0, 0)
         reportGeometry()
         needsDisplay = true
     }
 
+    /// Hand the palette to the core.
+    ///
+    /// Chrome alone is not enough: every CELL's colour is resolved inside the
+    /// emulator — deliberately, so three renderers cannot drift — so a theme
+    /// the core has not been told about would repaint the background and leave
+    /// every character in the old colours.
+    func applyTheme() {
+        core.setPalette(Themes.shared.current.packed)
+        layer?.backgroundColor = Palette.background.cgColor
+    }
+
     /// Replace the core, for when the view is pointed at a different terminal.
     func reset(columns: Int, rows: Int) {
         core = VTCore(columns: columns, rows: rows)
+        // A fresh core starts on the VT crate's own default palette, which is
+        // not the theme in force. Without this, pointing a view at a different
+        // terminal repainted its chrome correctly and left every character in
+        // the wrong colours.
+        core.setPalette(Themes.shared.current.packed)
         selection = nil
         lastDrawnRevision = .max
         needsDisplay = true
@@ -768,11 +803,19 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
 /// Colors the renderer owns. Cell colors come from the core already resolved;
 /// these are the chrome around them.
+///
+/// Read from the theme in force rather than fixed, and read on each access
+/// rather than captured: these were `static let`s, which is what made the
+/// palette unchangeable without relaunching. The cost is a dictionary lookup
+/// per draw call against a value that is already in memory.
+@MainActor
 enum Palette {
-    static let backgroundPacked: UInt32 = 0x12_14_19
-    static let background = NSColor(srgbRed: 0x12 / 255, green: 0x14 / 255, blue: 0x19 / 255, alpha: 1)
-    static let cursor = NSColor(srgbRed: 0.44, green: 0.66, blue: 1.0, alpha: 0.9)
-    static let selection = NSColor(srgbRed: 0.30, green: 0.42, blue: 0.62, alpha: 0.45)
+    private static var theme: Theme { Themes.shared.current }
+
+    static var backgroundPacked: UInt32 { theme.background }
+    static var background: NSColor { theme.backgroundColor }
+    static var cursor: NSColor { theme.cursorColor }
+    static var selection: NSColor { theme.selectionColor }
 
     static func cgColor(_ packed: UInt32) -> CGColor {
         CGColor(

@@ -155,6 +155,18 @@ final class FleetStore: ObservableObject {
         await client.refreshRoots()
         guard clients[target] === client else { return }
         await client.refreshLayouts()
+        guard clients[target] === client else { return }
+        // Themes, for the same reason as the three above: a machine that
+        // dropped and came back may have gained one, and a `[themes.*]` table
+        // added to config.toml should not stay invisible until the app is
+        // relaunched. Only the local machine's, because a theme is what THIS
+        // app paints with — asking three remote hosts and merging their
+        // answers would make the picker's contents depend on which machines
+        // happen to be awake.
+        if target.isEmpty {
+            await Themes.shared.reload(
+                binary: client.cliPath, environment: client.cliEnvironment, host: [])
+        }
     }
 
     /// One list from N.

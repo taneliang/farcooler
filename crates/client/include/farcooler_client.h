@@ -148,6 +148,12 @@ size_t farcooler_client_generate_key(const char *comment, uint8_t *out, size_t c
  */
 size_t farcooler_client_public_key(const char *private_key, uint8_t *out, size_t capacity);
 
+/// The themes compiled into this build, as JSON. No session needed — a phone
+/// that has never connected still has to render something. Writes into `out`
+/// and returns the byte count; if `out` is NULL or too small, writes nothing
+/// and returns the size needed.
+size_t farcooler_client_builtin_themes(uint8_t *out, size_t capacity);
+
 /**
  * Start streaming a terminal's live output.
  *

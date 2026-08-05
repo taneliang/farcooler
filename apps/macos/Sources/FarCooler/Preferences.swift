@@ -42,15 +42,20 @@ final class Preferences: ObservableObject {
 
     /// System, light, or dark.
     ///
-    /// Defaults to system, because that is what the rest of the machine does. It
-    /// is offered at all because a great many people who run four agents farcooler
-    /// keep every window dark regardless of what the OS is doing at noon.
+    /// Defaults to dark rather than to the system.
     ///
-    /// It never touches the terminal. Terminal colors come from `Palette`, which
-    /// is a fixed dark palette — the emulator's background is the program's
-    /// business, not the app chrome's, and a terminal that went white under a
-    /// light theme would be a different terminal.
-    @AppStorage("app.appearance") var appearance = Appearance.system {
+    /// It followed the system for a long time, on the reasoning that this is
+    /// what the rest of the machine does. What that missed is that most of
+    /// this window is a terminal, and a terminal is dark at noon: following
+    /// the system produced a light sidebar against a dark grid for half of
+    /// every day. Asked for directly, and it is what the phones already did.
+    ///
+    /// `.theme` is the fourth option and the one that makes theming one
+    /// feature rather than two: it takes whichever way the chosen theme says
+    /// its chrome should go, so picking Solarized Light lightens the app
+    /// around it. The explicit light and dark stay, because someone who has
+    /// said "always dark" has said something this must not overrule.
+    @AppStorage("app.appearance") var appearance = Appearance.dark {
         didSet { Appearance.apply(appearance) }
     }
 
@@ -180,6 +185,7 @@ private struct Setting<Control: View>: View {
 
 struct SettingsView: View {
     @ObservedObject private var preferences = Preferences.shared
+    @ObservedObject private var themes = Themes.shared
     @StateObject private var service = ServiceRegistration()
     @StateObject private var cliTools = CommandLineTools()
 
@@ -306,7 +312,15 @@ struct SettingsView: View {
             }
 
             Section {
-                Setting("Terminal colors are set separately.") {
+                Setting("Sets the terminal's colors and, on \"Theme\", the app's too.") {
+                    Picker("Theme", selection: themes.selectedNameBinding) {
+                        ForEach(themes.available) { theme in
+                            Text(theme.name).tag(theme.name)
+                        }
+                    }
+                }
+
+                Setting("Add your own under [themes.name] in ~/.config/farcooler/config.toml.") {
                     Picker("Appearance", selection: $preferences.appearance) {
                         ForEach(Appearance.allCases) { Text($0.label).tag($0) }
                     }
@@ -358,18 +372,20 @@ struct SettingsView: View {
 
 /// The app's appearance, independent of the system's.
 enum Appearance: String, CaseIterable, Identifiable {
-    case system, light, dark
+    case theme, system, light, dark
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
+        case .theme: return "Theme"
         case .system: return "System"
         case .light: return "Light"
         case .dark: return "Dark"
         }
     }
 
+    @MainActor
     private var named: NSAppearance? {
         switch self {
         // nil hands the decision back to the system, which is what "System"
@@ -377,10 +393,16 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .system: return nil
         case .light: return NSAppearance(named: .aqua)
         case .dark: return NSAppearance(named: .darkAqua)
+        // Whichever way the theme says. Read at apply time rather than stored,
+        // so switching to a light theme lightens the chrome without also
+        // having to change this setting.
+        case .theme:
+            return NSAppearance(named: Themes.shared.current.dark ? .darkAqua : .aqua)
         }
     }
 
     /// Applied application-wide, so settings and sheets follow too.
+    @MainActor
     static func apply(_ appearance: Appearance) {
         NSApp?.appearance = appearance.named
     }
