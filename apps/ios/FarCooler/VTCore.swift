@@ -33,6 +33,19 @@ final class VTCore {
         bytes.withUnsafeBufferPointer { farcooler_vt_feed(handle, $0.baseAddress, $0.count) }
     }
 
+    /// Recolour every cell the next snapshot produces.
+    ///
+    /// Nineteen packed values: sixteen ANSI, then foreground, background,
+    /// cursor. Colours resolve when a snapshot is taken rather than when bytes
+    /// arrive, so this recolours scrollback too.
+    @discardableResult
+    func setPalette(_ colors: [UInt32]) -> Bool {
+        guard let handle else { return false }
+        return colors.withUnsafeBufferPointer {
+            farcooler_vt_set_palette(handle, $0.baseAddress, $0.count)
+        }
+    }
+
     func resize(columns: Int, rows: Int) {
         guard let handle else { return }
         farcooler_vt_resize(handle, UInt16(clamping: columns), UInt16(clamping: rows))

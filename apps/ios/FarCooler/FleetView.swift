@@ -437,6 +437,9 @@ struct WorkspaceListView: View {
             }
         }
         .refreshable { await connection.refresh() }
+        // Let the theme's ground show through; a List paints an opaque
+        // background of its own that would sit on top of it.
+        .scrollContentBackground(.hidden)
         .toolbar {
             // Sparkles for "describe it" (QuickTaskView), plain plus for
             // "fill in the form" (NewWorkspaceView) — same two flows the

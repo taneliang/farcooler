@@ -132,6 +132,15 @@ struct SettingsView: View {
     var connection: Connection?
 
     @AppStorage(TerminalSettings.fontKey) private var fontChoice: TerminalFontChoice = .iosevka
+    @ObservedObject private var themes = Themes.shared
+
+    /// `Themes.selectedName` is backed by `@AppStorage` on the model rather
+    /// than being `@Published`, because what is stored is deliberately a name
+    /// and not a value — a host theme that gets edited must not keep showing
+    /// its old colours. This adapts it for the picker.
+    private var themeBinding: Binding<String> {
+        Binding(get: { themes.selectedName }, set: { themes.selectedName = $0 })
+    }
     @AppStorage(TerminalSettings.fontSizeKey) private var fontSize: Double = TerminalSettings.defaultFontSize
     @AppStorage(NotificationSettings.onAttentionKey) private var notifyOnAttention = true
     @AppStorage(NotificationSettings.onDoneKey) private var notifyOnDone = true
@@ -154,6 +163,20 @@ struct SettingsView: View {
                 Text("Notifications")
             } footer: {
                 Text("A working agent never notifies you.")
+            }
+
+            Section {
+                Picker("Theme", selection: themeBinding) {
+                    ForEach(themes.available) { theme in
+                        Text(theme.name).tag(theme.name)
+                    }
+                }
+            } header: {
+                Text("Theme")
+            } footer: {
+                Text(
+                    "Sets the terminal's colors and the app's. Add your own under "
+                        + "[themes.name] in ~/.config/farcooler/config.toml on a machine.")
             }
 
             Section("Terminal font") {
@@ -223,6 +246,6 @@ struct SettingsView: View {
         // terminal screen: it exists to preview one. See FarCoolerApp's
         // reasoning for forcing dark everywhere rather than just over the
         // grid itself.
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Themes.shared.current.colorScheme)
     }
 }

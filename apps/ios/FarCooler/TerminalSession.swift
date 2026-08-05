@@ -459,6 +459,10 @@ final class TerminalSession: ObservableObject {
             // emulator to receive it is simply lost. It stays empty because the
             // stream's first act is to clear the screen and replay it.
             let emulator = VTCore(columns: response.columns, rows: response.rows)
+            // A fresh core starts on the VT crate's own default palette, not
+            // the theme in force. Without this the chrome would be themed and
+            // every character would not.
+            emulator.setPalette(Themes.shared.current.packed)
             applyModes(response.modes, to: emulator)
             vt = emulator
             return response
@@ -680,6 +684,10 @@ final class TerminalSession: ObservableObject {
             return
         }
         let emulator = VTCore(columns: response.columns, rows: response.rows)
+        // A fresh core starts on the VT crate's own default palette, not the
+        // theme in force. Without this the chrome would be themed and every
+        // character would not.
+        emulator.setPalette(Themes.shared.current.packed)
         applyModes(response.modes, to: emulator)
         // A capture separates its lines with a bare line feed, which to a
         // terminal means "down one row" and nothing about which column. Fed
@@ -945,8 +953,13 @@ extension Color {
 /// screen, not to any program running on the host: the fill behind a short
 /// last row and the cursor block. Values mirror the Mac app's so the same
 /// terminal looks like the same terminal on both.
+///
+/// Read from the theme in force rather than fixed, and read on each access
+/// rather than captured: these were `static let`s, which is what made the
+/// palette unchangeable without relaunching.
+@MainActor
 enum TerminalPalette {
-    static let backgroundPacked: UInt32 = 0x12_14_19
-    static let background = Color(packed: backgroundPacked)
-    static let cursor = Color(red: 0.44, green: 0.66, blue: 1.0, opacity: 0.9)
+    static var backgroundPacked: UInt32 { Themes.shared.current.background }
+    static var background: Color { Themes.shared.current.backgroundColor }
+    static var cursor: Color { Themes.shared.current.cursorColor }
 }

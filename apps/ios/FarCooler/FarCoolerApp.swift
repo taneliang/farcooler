@@ -5,19 +5,32 @@ import UIKit
 struct FarCoolerApp: App {
     /// Present only to catch the APNs device token, which arrives nowhere else.
     @UIApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
+    @ObservedObject private var themes = Themes.shared
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                // Dark everywhere, not just over the terminal.
+                // Whichever way the theme goes, everywhere.
                 //
-                // Half the app was already forced dark because a terminal is
-                // dark whatever the phone is set to, and the light chrome around
-                // it did not survive the join: a white list handing off to a
-                // black screen, and back, looked like two applications. Choosing
-                // one is better than reconciling two, and for a tool whose
-                // content is terminals the choice makes itself.
-                .preferredColorScheme(.dark)
+                // This was an unconditional `.dark`, and the reasoning was
+                // sound as far as it went: half the app is a terminal, a
+                // terminal is dark whatever the phone is set to, and a white
+                // list handing off to a black screen looked like two
+                // applications. Choosing one beat reconciling two.
+                //
+                // What it could not survive is a light TERMINAL. Now that the
+                // palette is a choice, the same argument points at following
+                // it: the chrome and the grid go the same way because they are
+                // one theme, which is exactly the join that had to be
+                // protected. Still one decision, just no longer a constant.
+                .preferredColorScheme(themes.current.colorScheme)
+                // The theme's own ground, not just its light/dark leaning.
+                //
+                // The scheme alone gives the SYSTEM's black, which is the
+                // colour the complaint that started this was about — picking
+                // Nord and still getting `#000000` chrome around a `#2E3440`
+                // terminal is the theme applying to half the screen.
+                .background(themes.current.backgroundColor)
         }
     }
 }

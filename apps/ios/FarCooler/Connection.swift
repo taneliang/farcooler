@@ -187,6 +187,7 @@ final class Connection: ObservableObject {
         phase = .connected
         await refresh()
         await loadRepositories()
+        await loadThemes()
         startPolling()
     }
 
@@ -289,6 +290,7 @@ final class Connection: ObservableObject {
         // staying invisible to the pickers until relaunch is the failure the
         // Mac's `onReconnect` seeding exists to prevent.
         await loadRepositories()
+        await loadThemes()
         startPolling()
     }
 
@@ -499,6 +501,20 @@ final class Connection: ObservableObject {
     private func loadRepositories() async {
         guard let data = try? await core.call("repositories") else { return }
         repositories = (try? JSONDecoder().decode(RepositoryList.self, from: data))?.repositories ?? []
+    }
+
+    /// Merge whatever this machine defines into the picker.
+    ///
+    /// Read on every connection and every reconnection, alongside
+    /// repositories, so a `[themes.*]` table added to the host's config.toml
+    /// does not stay invisible until the app is relaunched.
+    private func loadThemes() async {
+        guard let data = try? await core.call("themes") else { return }
+        struct Reply: Decodable {
+            var themes: [Theme]
+        }
+        guard let reply = try? JSONDecoder().decode(Reply.self, from: data) else { return }
+        Themes.shared.merge(hostThemes: reply.themes)
     }
 
     /// Poll while the view is up.

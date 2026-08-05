@@ -15,6 +15,7 @@
 		0477432E534753A0B759DC6F /* Reachability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C039D3E60E15306853FA113; };
 		6D4A0EFB0B5D560DAFE9179A /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B544A71636558E0931C038F; };
 		14CC0B48DA7A59509BAB17BF /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44EFA7B6FE3153B686B0EA92; };
+		2C1C521DFD6D5FB2B064E27F /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC6A81BC63335368B5774AC7; };
 		381629282DA45A10B0D4C8B5 /* QuickTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = B131EF9D6FCF56858D53BD95; };
 		9EEE0D41BCAB52609113FE9A /* TaskComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E69A0E803A4537AB291D373; };
 		2158FBCD5E6052FEA8C368C9 /* VTCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24008172D7157DE94556AF4; };
@@ -52,6 +53,7 @@
 		2C039D3E60E15306853FA113 /* Reachability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reachability.swift; sourceTree = "<group>"; };
 		2B544A71636558E0931C038F /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		44EFA7B6FE3153B686B0EA92 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		DC6A81BC63335368B5774AC7 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		B131EF9D6FCF56858D53BD95 /* QuickTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTask.swift; sourceTree = "<group>"; };
 		2E69A0E803A4537AB291D373 /* TaskComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskComposer.swift; sourceTree = "<group>"; };
 		A24008172D7157DE94556AF4 /* VTCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VTCore.swift; sourceTree = "<group>"; };
@@ -116,6 +118,7 @@
 				2C039D3E60E15306853FA113 /* Reachability.swift */,
 				2B544A71636558E0931C038F /* Settings.swift */,
 				44EFA7B6FE3153B686B0EA92 /* Store.swift */,
+				DC6A81BC63335368B5774AC7 /* Theme.swift */,
 				B131EF9D6FCF56858D53BD95 /* QuickTask.swift */,
 				2E69A0E803A4537AB291D373 /* TaskComposer.swift */,
 				A24008172D7157DE94556AF4 /* VTCore.swift */,
@@ -245,6 +248,7 @@
 				0477432E534753A0B759DC6F /* Reachability.swift in Sources */,
 				6D4A0EFB0B5D560DAFE9179A /* Settings.swift in Sources */,
 				14CC0B48DA7A59509BAB17BF /* Store.swift in Sources */,
+				2C1C521DFD6D5FB2B064E27F /* Theme.swift in Sources */,
 				381629282DA45A10B0D4C8B5 /* QuickTask.swift in Sources */,
 				9EEE0D41BCAB52609113FE9A /* TaskComposer.swift in Sources */,
 				2158FBCD5E6052FEA8C368C9 /* VTCore.swift in Sources */,
@@ -305,9 +309,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 78f9b5f)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 891453c)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 252;
+				CURRENT_PROJECT_VERSION = 261;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -329,9 +333,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 78f9b5f)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 891453c)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 252;
+				CURRENT_PROJECT_VERSION = 261;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
 				INFOPLIST_FILE = FarCooler/Info.plist;

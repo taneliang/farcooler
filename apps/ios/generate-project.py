@@ -24,6 +24,7 @@ SOURCES = [
     "Reachability.swift",
     "Settings.swift",
     "Store.swift",
+    "Theme.swift",
     "QuickTask.swift",
     "TaskComposer.swift",
     "VTCore.swift",

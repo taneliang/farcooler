@@ -171,7 +171,7 @@ struct TerminalView: View {
         // A terminal is dark regardless of the phone's own appearance — the
         // host doesn't know or care whether this device is in Light Mode, and
         // neither should the screen showing its output.
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Themes.shared.current.colorScheme)
         // The task and its branch, not `currentName` — the terminal already
         // names itself in its tab strip chip, and repeating it here would
         // waste the one line of title bar a phone has on something already on
