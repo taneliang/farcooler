@@ -78,6 +78,16 @@ final class DaemonClient: ObservableObject {
 
     @Published private(set) var state: HostState = .connecting
 
+    /// Bumped every time this machine's link is replaced by a new one.
+    ///
+    /// What the per-pane streams watch. `state` alone cannot serve: it settles
+    /// back to `.connected` and a view comparing it against its last value sees
+    /// nothing to do, while a counter says "the link you started on is not the
+    /// link that exists now" — which is the only question a stream needs
+    /// answered. Same shape as the phones' `Connection.reconnectGeneration`,
+    /// for the same reason and with the same name.
+    @Published private(set) var linkGeneration = 0
+
     /// Called the moment `refresh()` transitions `state` into `.connected`
     /// from anything else — set by `FleetStore`, which uses it to re-seed
     /// repositories, roots and layouts on every reconnection, not only at
@@ -577,7 +587,20 @@ final class DaemonClient: ObservableObject {
             // run while everything is fine.
             let justReconnected = state != .connected
             state = .connected
-            if justReconnected { onReconnect?() }
+            if justReconnected {
+                // Every stream this machine was carrying died with the link.
+                //
+                // `onReconnect` re-reads repositories, roots and layouts, and
+                // for a long time that was mistaken for "the machine is back".
+                // It is not: a terminal pane and an agent chat each own a
+                // `farcooler … ` subprocess of their own, and those exited when
+                // ssh did. Nothing restarted them, so a remote machine coming
+                // back left every pane on screen frozen at the last byte it
+                // received before the drop — the panes were dead and the app
+                // said nothing, because as far as it knew it was connected.
+                linkGeneration += 1
+                onReconnect?()
+            }
             // Reap on every read, not only on events. A terminal that exited
             // while the app was closed produces no event to react to, so
             // without this the first thing you see on launch is exactly the

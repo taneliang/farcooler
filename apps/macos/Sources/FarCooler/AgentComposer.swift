@@ -14,6 +14,11 @@ struct AgentComposer: View {
     @ObservedObject var stream: AgentStream
     let terminal: Terminal
     let isFocused: Bool
+    /// Why this pane's machine cannot be reached, or nil when it can.
+    ///
+    /// Only `activity` reads it, and only to stop claiming an agent is
+    /// starting on a machine that is not answering — see there.
+    let unreachable: String?
     /// The worktree file search, injected rather than reached for directly —
     /// the same reason `CommandPalette` is handed a `screen:` closure instead
     /// of a `DaemonClient`: this view can look things up and send a prompt,
@@ -561,6 +566,13 @@ struct AgentComposer: View {
     /// What survives is the two states the transcript cannot show — waiting for
     /// an answer, and not started yet, where an empty pane with no selectors is
     /// genuinely indistinguishable from a broken one.
+    ///
+    /// An empty transcript has two causes, not one, and they had been conflated.
+    /// It means "starting" only when there is a machine to start on; on one
+    /// that has stopped answering it means the subscription died with the link
+    /// and nothing is coming. Reporting a launch in progress there is the app
+    /// stating as fact the one thing it knows is not happening — and it did so
+    /// with a spinner, which reads as progress being made.
     @ViewBuilder
     private var activity: some View {
         if terminal.agent == .blocked {
@@ -569,6 +581,16 @@ struct AgentComposer: View {
                 Text("Waiting for you")
             }
             .font(.caption)
+        } else if let unreachable {
+            HStack(spacing: 5) {
+                StatusGlyph(status: .lost, size: 6)
+                // The machine's own reason, not a paraphrase: it distinguishes
+                // "asleep" from "Far Cooler is not installed there", and those
+                // have different fixes.
+                Text(unreachable)
+            }
+            .font(.caption)
+            .help("This chat reconnects on its own once the machine answers")
         } else if stream.transcript.configOptions.isEmpty && stream.transcript.rows.isEmpty {
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini)

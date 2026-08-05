@@ -16,6 +16,10 @@ struct TerminalPane: View {
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
+    /// Which link the panes below were opened on, so a machine that dropped
+    /// and came back gets fresh streams instead of frozen ones. See
+    /// `DaemonClient.linkGeneration`.
+    let linkGeneration: Int
     /// Why this pane's machine cannot be acted on, or nil if it can — passed
     /// straight through to `AgentSurface`, which is the one branch below
     /// that mutates outside `onAction`'s own `act(on:)` gate.
@@ -41,6 +45,7 @@ struct TerminalPane: View {
                     binary: binary,
                     environment: environment,
                     hostArguments: hostArguments,
+                    linkGeneration: linkGeneration,
                     refusal: refusal,
                     // One pane, so it always owns the keyboard.
                     isFocused: true,
@@ -62,6 +67,7 @@ struct TerminalPane: View {
                     binary: binary,
                     environment: environment,
                     hostArguments: hostArguments,
+                    linkGeneration: linkGeneration,
                     onResize: onGeometry,
                     fontRevision: preferences.revision,
                     // One pane, so it always owns the keyboard.

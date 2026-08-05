@@ -1030,6 +1030,7 @@ struct ContentView: View {
                     binary: store.client(for: ws)?.cliPath,
                     environment: store.client(for: ws)?.cliEnvironment ?? [:],
                     hostArguments: store.client(for: ws)?.cliHostArguments ?? [],
+                    linkGeneration: store.client(for: ws)?.linkGeneration ?? 0,
                     refusal: { store.refusal(for: ws) },
                     onGeometry: { cols, rows in
                         // Not routed through `act(on:_:)`, deliberately: this
@@ -1095,6 +1096,7 @@ struct ContentView: View {
             binary: store.client(for: ws)?.cliPath,
             environment: store.client(for: ws)?.cliEnvironment ?? [:],
             hostArguments: store.client(for: ws)?.cliHostArguments ?? [],
+            linkGeneration: store.client(for: ws)?.linkGeneration ?? 0,
             refusal: { store.refusal(for: ws) },
             onFocus: { id in
                 selection = .terminal(host: ws.host ?? "", workspace: ws.id, terminal: id)

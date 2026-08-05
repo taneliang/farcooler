@@ -12,6 +12,15 @@ struct TerminalSurface: NSViewRepresentable {
     /// Put in front of every launch, to aim it at another machine. See
     /// `DaemonClient.cliHostArguments`.
     let hostArguments: [String]
+    /// Bumped by `DaemonClient` when this machine's link is replaced, so a
+    /// pane whose stream died with the old one opens a new one.
+    ///
+    /// Without it a remote machine dropping killed the `farcooler terminal
+    /// stream` subprocess behind every pane, and nothing ever started another:
+    /// `attach` runs when the pane changes terminals, and this pane is still
+    /// showing the same terminal it always was. The machine came back, the
+    /// sidebar went green, and every pane stayed frozen on its last byte.
+    let linkGeneration: Int
     /// Resize the pane. Must complete before the stream replays history.
     let onResize: (Int, Int) async -> Void
 
@@ -26,6 +35,8 @@ struct TerminalSurface: NSViewRepresentable {
         var fontRevision = 0
         var focused: Bool?
         var pendingGeometry: Task<Void, Never>?
+        /// Which link the live stream was opened on. `nil` until one has been.
+        var linkGeneration: Int?
 
         func stop() {
             pendingGeometry?.cancel()
@@ -54,9 +65,17 @@ struct TerminalSurface: NSViewRepresentable {
     }
 
     func updateNSView(_ view: TerminalRenderView, context: Context) {
-        // Only re-attach when the selected terminal actually changes. Restarting
-        // on every SwiftUI update would wipe the screen constantly.
-        if context.coordinator.attached != terminal {
+        // Only re-attach when the selected terminal actually changes, or when
+        // the link underneath it has been replaced. Restarting on every
+        // SwiftUI update would wipe the screen constantly.
+        //
+        // The generation is compared rather than merely checked against zero
+        // so a pane that mounts onto an already-reconnected machine records
+        // where it started and re-attaches only on the NEXT drop, instead of
+        // re-attaching once for a reconnection that happened before it existed.
+        if context.coordinator.attached != terminal
+            || context.coordinator.linkGeneration != linkGeneration
+        {
             attach(view, context: context)
         }
         if context.coordinator.fontRevision != fontRevision {
@@ -90,6 +109,7 @@ struct TerminalSurface: NSViewRepresentable {
         let coord = context.coordinator
         coord.stop()
         coord.attached = terminal
+        coord.linkGeneration = linkGeneration
 
         let terminal = self.terminal
         let binary = self.binary
@@ -137,6 +157,15 @@ struct TerminalSurface: NSViewRepresentable {
                 coord.stream = stream
             }
         }
+
+        // Ask for the report rather than waiting for one.
+        //
+        // At mount this does nothing — the view has no bounds yet, so
+        // `reportGeometry` returns early and the real report arrives from
+        // `layout()`. On a re-attach it is the whole mechanism: the grid is
+        // unchanged, so no layout pass is coming, and without a report the
+        // closure above never runs and no stream is ever opened.
+        view.reannounceGeometry()
     }
 }
 

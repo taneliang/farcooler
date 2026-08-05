@@ -149,6 +149,21 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         reportGeometry()
     }
 
+    /// Report the grid again even though nothing about it has changed.
+    ///
+    /// `reportGeometry` deduplicates, which is right for a layout pass that
+    /// runs continuously and wrong for the one caller that needs the report as
+    /// a TRIGGER rather than as news. `TerminalSurface.attach` starts the byte
+    /// stream from inside `onGeometry`, so that the pane is resized before its
+    /// history replays; a pane re-attaching because its machine reconnected has
+    /// exactly the grid it always had, so the deduplication swallowed the
+    /// report and the stream was never started. The reconnection looked fixed
+    /// and the pane stayed as frozen as before.
+    func reannounceGeometry() {
+        lastReportedGeometry = (0, 0)
+        reportGeometry()
+    }
+
     /// Tell the core and the pane what grid actually fits.
     private func reportGeometry() {
         let usableWidth = bounds.width - padding.left - padding.right

@@ -20,6 +20,9 @@ struct AgentSurface: View {
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
+    /// Which link this chat's subscription was opened on. See
+    /// `DaemonClient.linkGeneration`.
+    let linkGeneration: Int
     /// Why this pane's machine cannot be acted on, or nil if it can — the
     /// same check every other mutation in the app runs through
     /// `ContentView.act(on:)` or `FleetStore.refusal(for:)`, reached here
@@ -45,7 +48,7 @@ struct AgentSurface: View {
 
     init(
         terminal: Terminal, binary: String?, environment: [String: String],
-        hostArguments: [String], refusal: @escaping () -> String?,
+        hostArguments: [String], linkGeneration: Int, refusal: @escaping () -> String?,
         isFocused: Bool,
         searchFiles: @escaping (String) async -> [String],
         onResize: @escaping (Int, Int) async -> Void
@@ -54,6 +57,7 @@ struct AgentSurface: View {
         self.binary = binary
         self.environment = environment
         self.hostArguments = hostArguments
+        self.linkGeneration = linkGeneration
         self.refusal = refusal
         self.isFocused = isFocused
         self.searchFiles = searchFiles
@@ -133,6 +137,11 @@ struct AgentSurface: View {
 
                         AgentComposer(
                             stream: stream, terminal: terminal, isFocused: isFocused,
+                            // Why this machine cannot be reached, if it cannot.
+                            // The composer used to read an empty transcript as
+                            // "starting"; on an unreachable machine that is the
+                            // one thing it certainly is not.
+                            unreachable: refusal(),
                             searchFiles: searchFiles,
                             // The pane's own width, passed down as a plain number.
                             //
@@ -182,6 +191,19 @@ struct AgentSurface: View {
         .onChange(of: binary) { _, newBinary in
             stream.start(
                 binary: newBinary, environment: environment, hostArguments: hostArguments,
+                refusal: refusal)
+        }
+        // The machine dropped and came back, so this chat's `farcooler agent
+        // subscribe` subprocess died with the old link.
+        //
+        // Nothing used to restart it. The transcript simply stopped growing,
+        // and because an empty transcript is how the composer recognizes a
+        // pane that has not started yet, a chat on a machine that went away
+        // sat reading "Starting the agent…" indefinitely — describing a launch
+        // that was not happening on a machine that was not there.
+        .onChange(of: linkGeneration) { _, _ in
+            stream.start(
+                binary: binary, environment: environment, hostArguments: hostArguments,
                 refusal: refusal)
         }
     }
