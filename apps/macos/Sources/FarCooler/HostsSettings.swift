@@ -19,6 +19,12 @@ struct HostsSettings: View {
     @State private var newTarget = ""
     @State private var busy: Set<String> = []
     @State private var log: [String: String] = [:]
+    /// The machine whose settings sheet is open, by ssh target — `""` for this
+    /// Mac, which is a real value here and not "nothing".
+    ///
+    /// Optional-of-target rather than a bool plus a target, so the sheet cannot
+    /// be presented without knowing which machine it is about.
+    @State private var editingMachine: MachineChoice?
 
     var body: some View {
         Form {
@@ -57,6 +63,9 @@ struct HostsSettings: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(item: $editingMachine) { choice in
+            MachineSettingsSheet(name: choice.name, target: choice.target)
+        }
         .task {
             // Everything at once. These are independent ssh round trips and a
             // fleet of five machines should not take five times as long to
@@ -67,6 +76,23 @@ struct HostsSettings: View {
                 }
             }
         }
+    }
+
+    // MARK: - Machine settings
+
+    /// Opens one machine's own `config.toml` as a screen.
+    ///
+    /// A sheet rather than a disclosure in this row: the theme editor inside it
+    /// is nineteen colour wells over a live terminal preview, and this window is
+    /// 520 points wide.
+    private func settingsButton(name: String, target: String) -> some View {
+        Button {
+            editingMachine = MachineChoice(name: name, target: target)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+        }
+        .buttonStyle(.borderless)
+        .help("Settings on \(name)")
     }
 
     // MARK: - Rows
@@ -109,6 +135,7 @@ struct HostsSettings: View {
             // This Mac gets the same pairing control as anything else. Its
             // daemon is the same daemon and reaches a sleeping phone by the same
             // route — being local buys it no special path.
+            settingsButton(name: "This Mac", target: "")
             Menu {
                 Button("Notify me from this machine") { Task { await pair("") } }
                 Button("Stop notifications from this machine") { Task { await unpair("") } }
@@ -143,6 +170,7 @@ struct HostsSettings: View {
                 if busy.contains(host.target) {
                     ProgressView().controlSize(.small)
                 } else {
+                    settingsButton(name: host.target, target: host.target)
                     actions(for: host)
                 }
             }
@@ -260,4 +288,14 @@ struct HostsSettings: View {
         // all" makes.
         Reachability.shared.retryNow()
     }
+}
+
+/// Which machine a settings sheet is about.
+///
+/// A type rather than a bare `String?`, because `""` is a real target — this Mac
+/// — and an optional string could not tell it apart from "no machine chosen".
+struct MachineChoice: Identifiable, Hashable {
+    let name: String
+    let target: String
+    var id: String { target }
 }

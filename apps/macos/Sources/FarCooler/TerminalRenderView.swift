@@ -94,6 +94,21 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// only ever restores a cursor it changed itself.
     private var showingLinkCursor = false
 
+    /// A background to paint instead of the theme in force.
+    ///
+    /// For the theme editor's preview, which renders a theme that is being
+    /// EDITED and has not been chosen — so the chrome has to follow the draft
+    /// rather than `Themes.shared.current`, which is what every real pane
+    /// correctly follows. Nil everywhere else.
+    private var previewBackground: UInt32?
+
+    /// Paint this background rather than the theme's. See `previewBackground`.
+    func overrideBackground(_ packed: UInt32) {
+        previewBackground = packed
+        layer?.backgroundColor = Palette.cgColor(packed)
+        needsDisplay = true
+    }
+
     struct GridPoint: Equatable, Comparable {
         var row: Int
         var column: Int
@@ -326,7 +341,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        context.setFillColor(Palette.background.cgColor)
+        context.setFillColor(previewBackground.map(Palette.cgColor) ?? Palette.background.cgColor)
         context.fill(bounds)
 
         core.withSnapshot { snapshot in
