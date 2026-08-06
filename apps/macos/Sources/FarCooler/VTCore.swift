@@ -128,6 +128,49 @@ final class VTCore {
         return farcooler_vt_take_bell(handle)
     }
 
+    /// Text the program asked to put on the clipboard (OSC 52), or nil.
+    ///
+    /// Two calls, like `encode(paste:)` and for the mirror of its reason: the
+    /// core writes nothing when the buffer is short rather than truncating,
+    /// because half a copied command is worse than no copy at all.
+    ///
+    /// There is no counterpart that READS the clipboard. A program asking for
+    /// its contents is refused inside the core — see `farcooler_vt_take_clipboard`.
+    func takeClipboard() -> String? {
+        guard let handle else { return nil }
+        let needed = farcooler_vt_take_clipboard(handle, nil, 0)
+        guard needed > 0 else { return nil }
+
+        var buffer = [UInt8](repeating: 0, count: needed)
+        let written = buffer.withUnsafeMutableBufferPointer {
+            farcooler_vt_take_clipboard(handle, $0.baseAddress, $0.count)
+        }
+        guard written == needed else { return nil }
+        return String(decoding: buffer, as: UTF8.self)
+    }
+
+    /// The URL under a cell, with where it sits so it can be underlined.
+    ///
+    /// The core decides what counts as a URL and which schemes may be opened —
+    /// terminal output is not trusted input, and putting that list here would
+    /// make it three lists across three platforms.
+    func url(atRow row: Int, column: Int) -> (url: String, span: FarCoolerVtUrlSpan)? {
+        guard let handle, row >= 0, column >= 0 else { return nil }
+        var span = FarCoolerVtUrlSpan()
+        let needed = farcooler_vt_url_at(
+            handle, UInt16(clamping: row), UInt16(clamping: column), &span, nil, 0)
+        guard needed > 0 else { return nil }
+
+        var buffer = [UInt8](repeating: 0, count: needed)
+        let written = buffer.withUnsafeMutableBufferPointer {
+            farcooler_vt_url_at(
+                handle, UInt16(clamping: row), UInt16(clamping: column), &span,
+                $0.baseAddress, $0.count)
+        }
+        guard written == needed else { return nil }
+        return (String(decoding: buffer, as: UTF8.self), span)
+    }
+
     var title: String? {
         guard let handle, let ptr = farcooler_vt_title(handle) else { return nil }
         return String(cString: ptr)

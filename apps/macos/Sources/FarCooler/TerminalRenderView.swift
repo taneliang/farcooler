@@ -74,6 +74,23 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// A button the program is tracking, so its release goes to the program too.
     private var reportingButton: UInt32?
 
+    // MARK: - Links
+    //
+    // ⌘-click, not shift-click as the review asked for. Shift is already the
+    // selection override in `mouseDown` — the only way to copy text out of a
+    // full-screen program that has grabbed the mouse — so overloading it would
+    // make one gesture mean two different things depending on what happened to
+    // be under the pointer, and would cost the ability to begin a selection on a
+    // line containing a URL. In agent output that is most lines.
+    //
+    // ⌘-click is what Terminal.app and iTerm2 use, so it is a gesture people
+    // already have, and it was free.
+
+    /// The link under the pointer while ⌘ is held, and where it sits.
+    private var hoveredLink: (url: String, span: FarCoolerVtUrlSpan)?
+    /// Recreated on every layout, so the area always covers the current bounds.
+    private var linkTracking: NSTrackingArea?
+
     struct GridPoint: Equatable, Comparable {
         var row: Int
         var column: Int
@@ -158,6 +175,14 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         needsDisplay = true
 
         if core.takeBell() { NSSound.beep() }
+        // OSC 52: the program handing you something. Drained on the tick beside
+        // the bell and the pty replies because it arrives the same way they do —
+        // as a side effect of feeding bytes — and the tick is already the one
+        // place that notices the core has news.
+        if let copied = core.takeClipboard() {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(copied, forType: .string)
+        }
         let replies = core.takePendingWrites()
         if !replies.isEmpty { onInput?(replies) }
     }
@@ -165,6 +190,21 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     override func layout() {
         super.layout()
         reportGeometry()
+    }
+
+    /// The view had no tracking area at all before links existed, which is why
+    /// it could not previously know where the pointer was.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = linkTracking { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            // `inVisibleRect` keeps the area sized to the view without this
+            // having to run again on every divider drag.
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self)
+        addTrackingArea(area)
+        linkTracking = area
     }
 
     /// Report the grid again even though nothing about it has changed.
@@ -290,7 +330,40 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
             drawBackgrounds(snapshot, in: context)
             drawSelection(snapshot, in: context)
             drawGlyphs(snapshot, in: context)
+            drawLinkUnderline(snapshot, in: context)
             drawCursor(snapshot, in: context)
+        }
+    }
+
+    /// Underline the ⌘-hovered link, on every row it covers.
+    ///
+    /// Drawn here rather than inside `drawGlyphs`, which flips into text space:
+    /// this measures in the same top-down space `origin` reports, like the
+    /// background fills do.
+    private func drawLinkUnderline(_ snapshot: VTSnapshot, in context: CGContext) {
+        guard let link = hoveredLink, snapshot.columns > 0 else { return }
+        // Clamped to the grid that exists right now. The span was measured
+        // against a snapshot taken a moment ago, and a pane can be resized
+        // between the two — the same reflow hazard `selectionSpan` documents.
+        let first = max(0, Int(link.span.start_row))
+        let last = min(snapshot.rows - 1, Int(link.span.end_row))
+        guard first <= last else { return }
+
+        context.setLineWidth(1)
+        for row in first...last {
+            let from = row == first ? min(Int(link.span.start_column), snapshot.columns - 1) : 0
+            let to = row == last
+                ? min(Int(link.span.end_column), snapshot.columns - 1) : snapshot.columns - 1
+            guard to >= from else { continue }
+
+            // The link's own color, so it underlines in whatever the program
+            // painted it rather than in a color no theme chose.
+            context.setStrokeColor(Palette.cgColor(effectiveForeground(snapshot[row, from])))
+            let start = origin(row: row, column: from)
+            let y = start.y + cellHeight - 1.5
+            context.move(to: CGPoint(x: start.x, y: y))
+            context.addLine(to: CGPoint(x: origin(row: row, column: to).x + cellWidth, y: y))
+            context.strokePath()
         }
     }
 
@@ -628,7 +701,62 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         return m
     }
 
+    override func mouseMoved(with event: NSEvent) {
+        updateHoveredLink(for: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHoveredLink(nil)
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        // ⌘ pressed or released without the pointer moving still has to
+        // underline or un-underline whatever is under it, so the modifier is a
+        // trigger in its own right rather than only a condition on a move.
+        super.flagsChanged(with: event)
+        updateHoveredLink(for: event)
+    }
+
+    /// The link under the pointer, or nil when ⌘ is not held.
+    private func updateHoveredLink(for event: NSEvent) {
+        guard event.modifierFlags.contains(.command) else {
+            setHoveredLink(nil)
+            return
+        }
+        let point = cell(for: event)
+        setHoveredLink(core.url(atRow: point.row, column: point.column))
+    }
+
+    private func setHoveredLink(_ link: (url: String, span: FarCoolerVtUrlSpan)?) {
+        let changed = link?.url != hoveredLink?.url
+        hoveredLink = link
+        if link != nil {
+            NSCursor.pointingHand.set()
+        } else if window?.firstResponder === self || hoveredLink == nil {
+            NSCursor.iBeam.set()
+        }
+        // Only when the underline would actually move. This runs on every mouse
+        // move, and a redraw per pixel of pointer travel would cost a frame for
+        // nothing on a grid that has not changed.
+        if changed { needsDisplay = true }
+    }
+
     override func mouseDown(with event: NSEvent) {
+        // Before anything else, so a program tracking the mouse never sees this
+        // click and `claimKeyboard` does not steal focus for what is really a
+        // click on a link. The core decides what a URL is and which schemes may
+        // be opened — terminal output is not trusted input, and an agent prints
+        // whatever it read.
+        if event.modifierFlags.contains(.command) {
+            let target = cell(for: event)
+            if let link = core.url(atRow: target.row, column: target.column),
+                let url = URL(string: link.url)
+            {
+                NSWorkspace.shared.open(url)
+                return
+            }
+        }
+
         claimKeyboard()
         let point = cell(for: event)
 

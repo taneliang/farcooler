@@ -27,6 +27,9 @@ struct NewWorkspaceSheet: View {
     /// sheet stay open and say why, the same way `RemoveWorkspaceSheet` and
     /// `AddRepositorySheet` already do — `createWorkspace` failing used to
     /// dismiss the sheet exactly as if it had succeeded.
+    /// What a given machine says branch names start with. Per machine, because
+    /// the branch is created on the one holding the repository.
+    var branchPrefix: (String) -> String = { _ in "" }
     let onCreate: (_ host: String, _ repo: String, _ task: String, _ branch: String, _ base: String)
         async -> String?
     @Environment(\.dismiss) private var dismiss
@@ -60,6 +63,11 @@ struct NewWorkspaceSheet: View {
     }
 
     /// Suggest a branch from the task name, the way a person would write it.
+    ///
+    /// The prefix used to be `feat/` written out here, which is where this and
+    /// the task composer disagreed: the composer used none. It is now whatever
+    /// the chosen machine says, defaulting to `feat/` — so the two agree and the
+    /// answer is configurable in one place.
     private var suggestedBranch: String {
         let slug = task.lowercased()
             .map { $0.isLetter || $0.isNumber ? $0 : "-" }
@@ -68,7 +76,7 @@ struct NewWorkspaceSheet: View {
                 acc.append(c)
             }
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return slug.isEmpty ? "" : "feat/\(slug)"
+        return slug.isEmpty ? "" : branchPrefix(choice?.host ?? "") + slug
     }
 
     private var canCreate: Bool {
@@ -116,7 +124,9 @@ struct NewWorkspaceSheet: View {
 
                 TextField(
                     "Branch", text: $branch,
-                    prompt: Text(suggestedBranch.isEmpty ? "feat/my-task" : suggestedBranch))
+                    prompt: Text(
+                        suggestedBranch.isEmpty
+                            ? branchPrefix(choice?.host ?? "") + "my-task" : suggestedBranch))
 
                 TextField("Base revision", text: $base, prompt: Text("HEAD"))
             }
@@ -151,12 +161,18 @@ struct NewWorkspaceSheet: View {
 /// mistake.
 struct RemoveWorkspaceSheet: View {
     let workspace: Workspace
-    let hasRunningTerminals: Bool
+    /// How many terminals removal is about to close.
+    ///
+    /// A count rather than the flag this used to be. Running terminals no longer
+    /// BLOCK removal — the daemon closes them — so what the sheet needs is not
+    /// "may I proceed" but "how many am I about to close", which is the one thing
+    /// the user cannot see from here and would want to know before clicking.
+    let runningCount: Int
     /// Receives the exact text the user typed, which the daemon re-checks.
     ///
     /// Answers `.ok`, `.confirmationRequired` (the worktree is dirty and the
     /// name is needed), or `.failed` with the daemon's own message for every
-    /// other refusal — `RunningProcesses`, `TmuxUnavailable`, a failed `git
+    /// other refusal — `TmuxUnavailable`, the main checkout, a failed `git
     /// worktree remove`. Only the middle case means "there is uncommitted
     /// work here"; the others are refused for reasons that typing the name
     /// again does nothing about.
@@ -176,7 +192,10 @@ struct RemoveWorkspaceSheet: View {
             subtitle: workspace.task,
             confirmTitle: "Remove worktree",
             confirmRole: .destructive,
-            canConfirm: !hasRunningTerminals && !working && (!needsName || matches),
+            // No longer gated on running terminals: removal closes them, so
+            // disabling the button over one meant refusing to do the thing the
+            // sheet exists to do.
+            canConfirm: !working && (!needsName || matches),
             working: working,
             error: errorMessage,
             onCancel: { dismiss() },
@@ -199,21 +218,22 @@ struct RemoveWorkspaceSheet: View {
             }
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                if hasRunningTerminals {
-                    Callout(
-                        icon: "exclamationmark.triangle.fill",
-                        tone: .warning,
-                        text: "Stop the terminals in this workspace before removing it."
-                    )
-                } else {
-                    Callout(
-                        icon: "info.circle.fill",
-                        tone: .neutral,
-                        text:
-                            "This deletes the working directory. The branch is kept, and nothing "
+                // One callout, stating what the button will do. It used to be two,
+                // and the first was an instruction — "Stop the terminals in this
+                // workspace before removing it" — which told you to go and do by
+                // hand the thing you had just asked for. The daemon closes them
+                // now, so the only thing worth saying is how many.
+                Callout(
+                    icon: "info.circle.fill",
+                    tone: .neutral,
+                    text: runningCount == 0
+                        ? "This deletes the working directory. The branch is kept, and nothing "
                             + "already committed or pushed is touched."
-                    )
-                }
+                        : "This closes \(runningCount) "
+                            + (runningCount == 1 ? "terminal" : "terminals")
+                            + " and deletes the working directory. The branch is kept, and "
+                            + "nothing already committed or pushed is touched."
+                )
 
                 if needsName {
                     Callout(
@@ -225,9 +245,12 @@ struct RemoveWorkspaceSheet: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Type the workspace name to confirm")
                             .font(.callout)
+                        // Not disabled any more. It was gated on running
+                        // terminals, which meant the one field standing between
+                        // the user and a dirty worktree could not be typed into
+                        // for a reason that no longer stops removal at all.
                         TextField("", text: $typed, prompt: Text(workspace.task))
                             .textFieldStyle(.roundedBorder)
-                            .disabled(hasRunningTerminals)
                     }
                 }
             }
