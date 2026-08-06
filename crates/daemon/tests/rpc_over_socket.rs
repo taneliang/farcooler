@@ -127,6 +127,155 @@ async fn connect(h: &Harness) -> Client<
     Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect")
 }
 
+/// A registered repository with one empty commit, ready to branch from.
+///
+/// The `TempDir` comes back with it and must be held: dropping it deletes the
+/// repository out from under the daemon, which turns a later assertion into a
+/// confusing `worktree_missing` rather than the thing being tested.
+async fn registered_repository(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+) -> (tempfile::TempDir, bytes::Bytes) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("demo");
+    std::fs::create_dir(&repo_path).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo_path)
+            .status()
+            .unwrap();
+    }
+
+    let mut add = request("repository_root.add");
+    add.payload = Some(request::Payload::RepositoryRootAdd(
+        farcooler_protocol::v1::RepositoryRootAdd {
+            absolute_path: dir.path().to_string_lossy().into_owned(),
+            typed_confirmation: String::new(),
+        },
+    ));
+    client.call(add).await.expect("repository_root.add");
+
+    let mut register = request("repository.register");
+    register.payload = Some(request::Payload::RepositoryRegister(
+        farcooler_protocol::v1::RepositoryRegister {
+            relative_path: repo_path.to_string_lossy().into_owned(),
+        },
+    ));
+    let result = client.call(register).await.expect("repository.register");
+    let Some(result::Value::Repository(repository)) = result.value else {
+        panic!("wrong result")
+    };
+    (dir, repository.id)
+}
+
+/// Every terminal the daemon knows about, whichever workspace it belongs to.
+///
+/// `Workspace` carries no terminals of its own — they are a separate list — so
+/// asserting that a worktree opened with one means asking for them.
+async fn terminals(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+) -> Vec<farcooler_protocol::v1::Terminal> {
+    let result = client.call(request("terminal.list")).await.expect("terminal.list");
+    let Some(result::Value::TerminalList(list)) = result.value else { panic!("wrong result") };
+    list.items
+}
+
+/// Create a workspace, asking for `preset` in its opening terminal.
+async fn create_workspace(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+    repository: bytes::Bytes,
+    task: &str,
+    branch: &str,
+    preset: &str,
+) -> farcooler_protocol::v1::Workspace {
+    let mut create = request("workspace.create");
+    create.target_resource_id = Some(repository);
+    create.payload = Some(request::Payload::WorkspaceCreate(
+        farcooler_protocol::v1::WorkspaceCreate {
+            task_name: task.into(),
+            branch: branch.into(),
+            base_revision: "HEAD".into(),
+            terminal_preset: preset.into(),
+            adopt_existing: false,
+        },
+    ));
+    let result = client.call(create).await.expect("workspace.create");
+    let Some(result::Value::Workspace(ws)) = result.value else { panic!("wrong result") };
+    ws
+}
+
+#[tokio::test]
+async fn creating_a_workspace_with_a_preset_opens_a_terminal_in_it() {
+    // The review: "When a new worktree is created, it should just open a
+    // terminal as well." Done here rather than in each client, because a
+    // worktree with nothing running in it is a directory, and a rule
+    // implemented three times is a rule three clients can disagree about.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository) = registered_repository(&mut client).await;
+
+    let ws = create_workspace(&mut client, repository, "add auth", "feat/add-auth", "shell").await;
+
+    let opened: Vec<_> =
+        terminals(&mut client).await.into_iter().filter(|t| t.workspace_id == ws.id).collect();
+    assert_eq!(opened.len(), 1, "the worktree came with a terminal");
+    assert_eq!(opened[0].title, "shell", "titled after the preset, as the CLI does");
+}
+
+#[tokio::test]
+async fn creating_a_workspace_with_no_preset_opens_nothing() {
+    // Empty means none, which is what keeps every existing caller's behavior
+    // unchanged and gives `--no-terminal` something to mean: the task flow
+    // creates its own agent terminal a moment later and must not also get a
+    // shell it never asked for.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository) = registered_repository(&mut client).await;
+
+    let ws = create_workspace(&mut client, repository, "add auth", "feat/add-auth", "").await;
+    assert!(
+        terminals(&mut client).await.iter().all(|t| t.workspace_id != ws.id),
+        "nothing was asked for, so nothing was opened"
+    );
+}
+
+#[tokio::test]
+async fn removing_a_worktree_closes_the_terminals_in_it() {
+    // The review: "Deleting a worktree should just automatically close existing
+    // terminals." It used to refuse with RunningProcesses, and the Mac app
+    // rendered that as "Stop the terminals in this workspace before removing
+    // it" — telling the user to go and do by hand the thing they had asked for.
+    //
+    // The worktree here is clean, so no typed confirmation is needed. That a
+    // DIRTY one still demands its name is covered by
+    // `service::remove_worktree_tests::a_dirty_worktree_demands_the_name`.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository) = registered_repository(&mut client).await;
+
+    let ws = create_workspace(&mut client, repository, "doomed", "feat/doomed", "shell").await;
+    assert_eq!(
+        terminals(&mut client).await.iter().filter(|t| t.workspace_id == ws.id).count(),
+        1,
+        "there has to be something to close for this to prove anything"
+    );
+
+    let mut remove = request("workspace.remove_worktree");
+    remove.target_resource_id = Some(ws.id.clone());
+    client.call(remove).await.expect("removal closes the terminals rather than refusing");
+
+    assert!(
+        terminals(&mut client).await.iter().all(|t| t.workspace_id != ws.id),
+        "the terminal records went with the worktree"
+    );
+}
+
 #[tokio::test]
 async fn a_client_can_ask_the_daemon_what_it_is() {
     let h = start(Scope::HostAdmin).await;
@@ -446,7 +595,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
             task_name: "a task".into(),
             branch: "feat/x".into(),
             base_revision: "HEAD".into(),
-            cli_preset: String::new(),
+            terminal_preset: String::new(),
             adopt_existing: false,
         },
     ));
@@ -679,7 +828,7 @@ async fn a_workspace(
             task_name: "tiling".into(),
             branch: "feat/tiling".into(),
             base_revision: "HEAD".into(),
-            cli_preset: String::new(),
+            terminal_preset: String::new(),
             adopt_existing: false,
         },
     ));
