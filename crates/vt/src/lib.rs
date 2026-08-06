@@ -19,7 +19,7 @@ pub mod url;
 
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::term::test::TermSize;
-use alacritty_terminal::term::{Config, Term};
+use alacritty_terminal::term::{ClipboardType, Config, Term};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
 /// Events the emulator raises that a client may care about.
@@ -32,6 +32,18 @@ pub struct Signals {
     /// The program wrote to the host (a device-status reply, a mouse report).
     /// These bytes must be delivered back to the pty in order.
     pub pty_writes: Vec<u8>,
+    /// Text the program asked to put on the clipboard (OSC 52).
+    ///
+    /// The WRITE half only, and deliberately. `Config::osc52` defaults to
+    /// `Osc52::OnlyCopy`, so a program asking to READ the clipboard is refused
+    /// by the parser and never reaches here — there is a test that asserts it.
+    ///
+    /// That default stands because of what this product is: agents running
+    /// unattended on machines nobody is sitting at. One of them being able to
+    /// read the clipboard of the Mac watching it is a data path in the wrong
+    /// direction, over a link that exists to carry terminal output. Copy is a
+    /// program handing you something; paste is a program taking something.
+    pub clipboard: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -46,6 +58,15 @@ impl EventListener for Collector {
             Event::Bell => s.bell = true,
             Event::Title(t) => s.title = Some(t),
             Event::PtyWrite(text) => s.pty_writes.extend_from_slice(text.as_bytes()),
+            // Last writer wins within one drain: a program that copies twice
+            // before the client looks meant the second one.
+            //
+            // `ClipboardType::Selection` falls through to the arm below rather
+            // than being treated as a copy. It is X11's PRIMARY selection,
+            // which has no analogue on any of the three platforms, and quietly
+            // mapping it onto the clipboard would let a program overwrite the
+            // clipboard through a channel nobody expects one on.
+            Event::ClipboardStore(ClipboardType::Clipboard, text) => s.clipboard = Some(text),
             _ => {}
         }
     }
@@ -464,6 +485,50 @@ mod tests {
             .encode_mouse(input::MouseButton::WheelUp, input::MouseAction::Press, 3, 4, input::Modifiers::default())
             .expect("the program asked for the mouse, so it gets the event");
         assert!(report.starts_with(b"\x1b[<"), "SGR encoding was requested: {report:?}");
+    }
+
+    /// Base64 of "hello", as a program sending OSC 52 would encode it.
+    const HELLO_B64: &str = "aGVsbG8=";
+
+    #[test]
+    fn an_osc52_copy_reaches_the_signals_once() {
+        let mut t = Terminal::new(40, 6);
+        t.feed(format!("\x1b]52;c;{HELLO_B64}\x07").as_bytes());
+        assert_eq!(t.take_signals().clipboard.as_deref(), Some("hello"));
+        assert_eq!(t.take_signals().clipboard, None, "signals are drained when taken");
+    }
+
+    #[test]
+    fn an_osc52_copy_terminated_by_st_works_too() {
+        // BEL and ESC-backslash are both legal terminators and real programs
+        // use both — tmux sends ST. Supporting only one would make this work
+        // from a shell and not from inside tmux, which is where the agents run.
+        let mut t = Terminal::new(40, 6);
+        t.feed(format!("\x1b]52;c;{HELLO_B64}\x1b\\").as_bytes());
+        assert_eq!(t.take_signals().clipboard.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn a_program_asking_to_read_the_clipboard_gets_no_reply() {
+        // The security property, so it is a test rather than a comment. This
+        // app exists to run agents on machines nobody is sitting at; one of
+        // them being able to read the watching Mac's clipboard is a data path
+        // in the wrong direction over a link that carries terminal output.
+        let mut t = Terminal::new(40, 6);
+        t.feed(b"\x1b]52;c;?\x07");
+        let s = t.take_signals();
+        assert!(s.pty_writes.is_empty(), "nothing may go back to the program");
+        assert_eq!(s.clipboard, None);
+    }
+
+    #[test]
+    fn a_selection_clipboard_write_is_ignored() {
+        // X11's PRIMARY has no analogue on any of the three platforms, and
+        // treating it as a copy would let a program overwrite the clipboard
+        // through a channel nobody expects one on.
+        let mut t = Terminal::new(40, 6);
+        t.feed(format!("\x1b]52;p;{HELLO_B64}\x07").as_bytes());
+        assert_eq!(t.take_signals().clipboard, None);
     }
 
     #[test]
