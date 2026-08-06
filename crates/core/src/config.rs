@@ -239,6 +239,34 @@ pub fn branch_prefix_from(path: &Path) -> String {
     }
 }
 
+/// Which adapters this host's config file names, whatever it says about them.
+///
+/// Names only, and that is the point: it answers "is there a table for this?",
+/// which is what tells an override apart from a built-in. The merged registry
+/// cannot answer it — by the time an adapter is in there, the two have already
+/// been combined and which was which is gone.
+pub fn adapter_names_from(path: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let parsed: ConfigFile = match toml::from_str(&text) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "ignoring a malformed config file");
+            return Vec::new();
+        }
+    };
+    parsed.adapters.into_keys().collect()
+}
+
+/// The adapters this host's config file names, found the way the registry is.
+pub fn load_adapter_names() -> Vec<String> {
+    match config_path() {
+        Some(path) => adapter_names_from(&path),
+        None => Vec::new(),
+    }
+}
+
 /// The host's branch prefix, found the same way the registry is.
 pub fn load_branch_prefix() -> String {
     match config_path() {

@@ -240,7 +240,15 @@ pub struct Service {
     /// config file and the environment that locates it are process-global, and
     /// a service that consulted them on every call could be moved out from
     /// under itself — which is what happens when two tests run in parallel.
-    registry: farcooler_core::activity::Registry,
+    ///
+    /// Swappable, but still not per-call. `adapter.upsert` and `adapter.delete`
+    /// call `reload_registry` so an edit made from a settings screen takes
+    /// effect without `daemon ensure`; everything else reads a snapshot. The
+    /// `Arc` is what preserves the property the paragraph above is about: a
+    /// caller holds one consistent registry for the whole of its operation, so
+    /// a concurrent reload cannot change the rules underneath it halfway
+    /// through. Editing the file BY HAND still needs a restart, unchanged.
+    registry: std::sync::RwLock<Arc<farcooler_core::activity::Registry>>,
     /// Every terminal's agent session: activity, cursor, and the fast-attach
     /// event window. See `agent_supervisor` for why the transcript itself is
     /// not here.
@@ -305,7 +313,7 @@ impl Service {
         let inventory = LiveInventory::new(tmux.clone());
         inventory.refresh().await;
 
-        let registry = farcooler_core::config::load_registry();
+        let registry = std::sync::RwLock::new(Arc::new(farcooler_core::config::load_registry()));
 
         Ok(Self {
             store,
@@ -334,8 +342,23 @@ impl Service {
     }
 
     /// Which agents are recognized, and which can be hosted as a chat.
-    pub fn registry(&self) -> &farcooler_core::activity::Registry {
-        &self.registry
+    ///
+    /// An `Arc` snapshot rather than a borrow, so an operation reads one
+    /// consistent registry from start to finish even if a settings write
+    /// replaces it midway.
+    pub fn registry(&self) -> Arc<farcooler_core::activity::Registry> {
+        Arc::clone(&self.registry.read().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// Re-read `config.toml`'s adapters and swap them in.
+    ///
+    /// Called only after a write through `adapter.upsert` or `adapter.delete`,
+    /// which is the whole difference between this and reading per call: an
+    /// explicit edit takes effect, and nothing else can move the rules out from
+    /// under an operation in flight.
+    pub fn reload_registry(&self) {
+        let fresh = Arc::new(farcooler_core::config::load_registry());
+        *self.registry.write().unwrap_or_else(|e| e.into_inner()) = fresh;
     }
 
 
@@ -981,7 +1004,7 @@ impl Service {
             return false;
         };
         let screen = self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default();
-        identifies_claude(&self.registry, &pane.command, &screen)
+        identifies_claude(&self.registry(), &pane.command, &screen)
     }
 
     /// Re-open a socket for every terminal already in agent pane mode.
@@ -1313,7 +1336,7 @@ impl Service {
         // has to be this same value or the daemon's chat-capability check below
         // and the shim's own resolution could disagree.
         let harness = self
-            .registry
+            .registry()
             .identify(
                 &pane.command,
                 &self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default(),
@@ -1404,7 +1427,7 @@ impl Service {
         // toggle that goes nowhere.
         if pane_mode == models::PaneMode::Agent {
             match harness.as_deref() {
-                Some(h) if self.registry.chat_capable(h) => {}
+                Some(h) if self.registry().chat_capable(h) => {}
                 Some(_) => {
                     return Err(DomainError::InvalidArgument {
                         what: "this agent has no chat adapter; it stays in terminal mode",

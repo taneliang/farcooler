@@ -32,7 +32,7 @@ use farcooler_protocol::v1::AgentActivity;
 /// representation — a bare program with no arguments — could express none of
 /// them, so a user-supplied adapter silently lost everything after the program
 /// name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AdapterSpec {
     pub program: String,
     pub args: Vec<String>,

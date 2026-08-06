@@ -80,6 +80,12 @@ message Request {
     AgentEditQueued agent_edit_queued = 42;
     AgentCancelQueued agent_cancel_queued = 43;
     AgentSteerQueued agent_steer_queued = 44;
+    Adapter adapter = 45;
+    // Machine settings. `HostSettings` doubles as the write payload for the one
+    // scalar it carries, and `Theme` is the same message the read returns —
+    // there is nothing an upsert needs that a read does not already describe.
+    HostSettings host_settings = 46;
+    Theme theme = 47;
   }
 }
 
@@ -122,6 +128,8 @@ message Result {
     // would be describing a process that is about to stop existing.
     Empty empty = 19;
     ThemeList theme_list = 20;
+    AdapterList adapter_list = 21;
+    AdapterTestResult adapter_test_result = 22;
   }
 }
 
@@ -476,6 +484,52 @@ message Theme {
 }
 
 message ThemeList { repeated Theme items = 1; }
+
+// One `[adapters.<name>]` table, plus where this one came from.
+//
+// Carried whole rather than as a diff against the built-in, because the editor
+// has to be able to show what an override actually says — including a
+// deliberately emptied array, which a diff could not distinguish from "unset".
+message Adapter {
+  string preset = 1;
+  string program = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;
+  // Detection, as opposed to launch. Wrong values here do not fail loudly: they
+  // stop an agent being recognized, which surfaces as "chat mode broke" from
+  // somewhere else entirely. `adapter.test` cannot check these — it proves the
+  // adapter starts and speaks ACP — so a client must not imply that it does.
+  repeated string commands = 5;
+  repeated string identity = 6;
+  repeated string blocked = 7;
+  repeated string working = 8;
+  AdapterOrigin origin = 9;
+}
+
+enum AdapterOrigin {
+  ADAPTER_ORIGIN_UNSPECIFIED = 0;
+  // Compiled into the daemon, with no table in config.toml.
+  ADAPTER_ORIGIN_BUILT_IN = 1;
+  // A table shadowing a built-in of the same name. Deleting it restores the
+  // shipped one, which is what "revert to default" means.
+  ADAPTER_ORIGIN_OVERRIDE = 2;
+  // A table naming an agent Far Cooler does not ship.
+  ADAPTER_ORIGIN_USER = 3;
+}
+
+message AdapterList { repeated Adapter items = 1; }
+
+// What an adapter said when asked to identify itself.
+message AdapterTestResult {
+  bool ok = 1;
+  // The agent and version it reported, when it answered. Some adapters answer
+  // correctly without naming themselves, so this may describe the protocol
+  // version instead — an answer either way.
+  string reported = 2;
+  // Why it did not answer, when it did not. Phrased for a form field: never a
+  // raw Rust error, never a stack.
+  string failure = 3;
+}
 
 message Workspace {
   bytes id = 1;
