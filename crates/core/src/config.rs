@@ -70,12 +70,40 @@ fn yes() -> bool {
     true
 }
 
+/// The `[branches]` table.
+///
+/// A table rather than a top-level key, and that is not a style preference:
+/// TOML puts a bare top-level scalar written below `[themes.paper]` inside THAT
+/// table, so a `prefix = "elt/"` appended to the end of an existing config file
+/// would silently become a theme's property and do nothing at all. In a file
+/// whose entire purpose is being hand-edited, that is a trap worth one extra
+/// line to avoid.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct ConfigBranches {
+    /// Absent and empty are different answers. `None` means "say nothing, use
+    /// the default"; `Some("")` means "no prefix at all", which is what makes
+    /// opting out possible rather than indistinguishable from silence.
+    #[serde(default)]
+    pub prefix: Option<String>,
+}
+
+/// What a derived branch name gets in front of it when nothing says otherwise.
+///
+/// `feat/` because `NewWorkspaceSheet` on macOS already suggested exactly this,
+/// so it is the default users can already see rather than a new one invented
+/// here. The two creation paths disagreed — the sheet hardcoded this and the
+/// task composer used nothing — and there cannot be a customizable default
+/// until there is one default to customize.
+pub const DEFAULT_BRANCH_PREFIX: &str = "feat/";
+
 #[derive(Debug, Default, serde::Deserialize)]
 struct ConfigFile {
     #[serde(default)]
     adapters: std::collections::BTreeMap<String, ConfigAdapter>,
     #[serde(default)]
     themes: std::collections::BTreeMap<String, ConfigTheme>,
+    #[serde(default)]
+    branches: ConfigBranches,
 }
 
 /// Where the config file is, if the environment can say.
@@ -173,6 +201,49 @@ pub fn load_themes() -> Vec<crate::theme::Theme> {
     match config_path() {
         Some(path) => themes_from(&path),
         None => Vec::new(),
+    }
+}
+
+/// The prefix this host puts in front of a branch name derived from a task.
+///
+/// Read per call, like `themes_from` and for the same reason stated there: a few
+/// hundred bytes of TOML parsed a handful of times per session, in exchange for
+/// an edit taking effect without restarting the daemon. It matters more here
+/// than it does for themes, because the machine settings editor writes this
+/// file — a value cached at startup would not reflect its own writes.
+///
+/// Applied by the CLIENT, not by the daemon, because the task composer shows
+/// you the branch it is about to create. A prefix added on this side would make
+/// that preview a lie. The daemon still validates the finished name, which is
+/// the check that actually protects git.
+pub fn branch_prefix_from(path: &Path) -> String {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return DEFAULT_BRANCH_PREFIX.to_string();
+    };
+    let parsed: ConfigFile = match toml::from_str(&text) {
+        Ok(c) => c,
+        Err(e) => {
+            // Reported, then ignored — the rule adapters and themes already
+            // follow. A typo in one table must not cost the user every other
+            // table in the file.
+            tracing::warn!(path = %path.display(), error = %e, "ignoring a malformed config file");
+            return DEFAULT_BRANCH_PREFIX.to_string();
+        }
+    };
+    match parsed.branches.prefix {
+        // Trimmed, but otherwise literal: `elt-` is as valid a convention as
+        // `elt/`, so no slash is added or removed. Only surrounding whitespace
+        // goes, which is never intentional in a branch name.
+        Some(p) => p.trim().to_string(),
+        None => DEFAULT_BRANCH_PREFIX.to_string(),
+    }
+}
+
+/// The host's branch prefix, found the same way the registry is.
+pub fn load_branch_prefix() -> String {
+    match config_path() {
+        Some(path) => branch_prefix_from(&path),
+        None => DEFAULT_BRANCH_PREFIX.to_string(),
     }
 }
 
@@ -352,6 +423,80 @@ mod tests {
         assert_eq!(parse_hex("rebeccapurple"), None);
         assert_eq!(parse_hex("rgb(1,2,3)"), None);
         assert_eq!(parse_hex("#gggggg"), None);
+    }
+
+    // ---- the branch prefix ----
+
+    #[test]
+    fn a_branch_prefix_is_read_from_its_own_table() {
+        let dir = scratch("branch-prefix");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[branches]\nprefix = \"elt/\"\n").unwrap();
+        assert_eq!(branch_prefix_from(&path), "elt/");
+    }
+
+    #[test]
+    fn a_prefix_written_below_another_table_still_belongs_to_branches() {
+        // Why this is a table and not a top-level key, as a test. A bare
+        // top-level scalar written here would have been swallowed by
+        // `[themes.paper]` and done nothing, with nothing to say why.
+        let dir = scratch("branch-after-theme");
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            concat!(
+                "[themes.paper]\nbackground = \"#fffdf7\"\nforeground = \"#2b2b2b\"\n",
+                "[branches]\nprefix = \"elt/\"\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(branch_prefix_from(&path), "elt/");
+        // And the theme in the same file still parses.
+        assert_eq!(themes_from(&path).len(), 1);
+    }
+
+    #[test]
+    fn no_config_file_yields_the_default_prefix() {
+        assert_eq!(
+            branch_prefix_from(std::path::Path::new("/nonexistent/config.toml")),
+            DEFAULT_BRANCH_PREFIX
+        );
+    }
+
+    #[test]
+    fn a_file_with_no_branches_table_yields_the_default() {
+        let dir = scratch("branch-none");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[adapters.codex]\nprogram = \"npx\"\n").unwrap();
+        assert_eq!(branch_prefix_from(&path), DEFAULT_BRANCH_PREFIX);
+    }
+
+    #[test]
+    fn an_empty_prefix_opts_out_rather_than_falling_back() {
+        // The distinction that makes this customizable at all: "" is a choice,
+        // and treating it as "unset" would make opting out impossible.
+        let dir = scratch("branch-empty");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[branches]\nprefix = \"\"\n").unwrap();
+        assert_eq!(branch_prefix_from(&path), "");
+    }
+
+    #[test]
+    fn a_prefix_is_trimmed_but_otherwise_taken_literally() {
+        // `elt-` is as valid a convention as `elt/`, so no slash is added or
+        // removed. Only surrounding whitespace goes.
+        let dir = scratch("branch-literal");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[branches]\nprefix = \"  elt-  \"\n").unwrap();
+        assert_eq!(branch_prefix_from(&path), "elt-");
+    }
+
+    #[test]
+    fn a_malformed_file_does_not_take_the_prefix_down_with_it() {
+        let dir = scratch("branch-broken");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[branches\nprefix = ").unwrap();
+        assert_eq!(branch_prefix_from(&path), DEFAULT_BRANCH_PREFIX);
     }
 
     #[test]
