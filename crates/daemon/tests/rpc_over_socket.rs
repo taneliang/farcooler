@@ -143,6 +143,29 @@ async fn a_client_can_ask_the_daemon_what_it_is() {
 }
 
 #[tokio::test]
+async fn host_get_carries_this_machines_settings() {
+    // The client applies the branch prefix — the composer shows you the branch
+    // it is about to create, so a daemon-side prefix would make that preview a
+    // lie — which means the client has to be told what it is. It rides
+    // `host.get` rather than a call of its own because every client already
+    // makes this one.
+    //
+    // Asserts the field is POPULATED, not what it contains. `load_branch_prefix`
+    // reads the real `$HOME`, and this harness deliberately avoids
+    // process-global environment (see `start`) because these tests run in
+    // parallel. What the value should be for a given file is covered
+    // hermetically by `config::branch_prefix_from`'s own tests.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let result = client.call(request("host.get")).await.expect("host.get");
+    let Some(result::Value::Host(host)) = result.value else {
+        panic!("expected a Host, got {:?}", result.value);
+    };
+    assert!(host.settings.is_some(), "a client cannot apply a prefix it was never sent");
+}
+
+#[tokio::test]
 async fn listing_an_empty_host_returns_empty_lists_rather_than_an_error() {
     // A fresh install is not a failure, and a client that has to distinguish
     // "no workspaces" from "the call broke" will get it wrong.

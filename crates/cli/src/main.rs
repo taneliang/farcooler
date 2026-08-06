@@ -713,6 +713,10 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
                 // compiled and tested goes on reproducing in the app.
                 "buildsMatch": host_facts.daemon_version == farcooler_protocol::BUILD,
                 "platform": host_facts.platform,
+                "branchPrefix": host_facts.settings
+                    .as_ref()
+                    .map(|s| s.branch_prefix.clone())
+                    .unwrap_or_default(),
                 "runtimeHealthy": healthy,
                 "livePanes": host_facts.live_terminal_count,
                 "roots": roots.len(),
@@ -1023,6 +1027,13 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                     serde_json::json!({
                         "runtime_healthy": healthy,
                         "live_panes": host_facts.live_terminal_count,
+                        // The Mac app reads this on every refresh, which is why
+                        // it rides the envelope that call already parses rather
+                        // than costing a second subprocess per branch it names.
+                        "branch_prefix": host_facts.settings
+                            .as_ref()
+                            .map(|s| s.branch_prefix.clone())
+                            .unwrap_or_default(),
                         "workspaces": items,
                     })
                 );
