@@ -11,9 +11,9 @@ thiserror.workspace = true
 uuid.workspace = true
 tracing.workspace = true
 serde.workspace = true
+# Runtime, not just tests: `activity::handshake` speaks JSON-RPC to an ACP
+# adapter, which is the same wire the tests used to build by hand.
+serde_json.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
 libc.workspace = true
-
-[dev-dependencies]
-serde_json.workspace = true
