@@ -316,7 +316,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeResize(
 /// foreground, background, cursor. False if the array is any other length.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeSetPalette(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _class: JClass,
     handle: jlong,
     colors: JIntArray,
