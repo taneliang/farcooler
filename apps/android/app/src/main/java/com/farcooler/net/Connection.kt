@@ -3,12 +3,16 @@ package com.farcooler.net
 import com.farcooler.core.ClientCore
 import com.farcooler.data.Host
 import com.farcooler.data.Identity
+import com.farcooler.data.Theme
+import com.farcooler.model.AdapterInfo
+import com.farcooler.model.AdapterTestOutcome
 import com.farcooler.model.DaemonBuild
 import com.farcooler.model.Fleet
 import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryList
 import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
+import com.farcooler.model.toJson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -613,6 +617,104 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      * Hiding never touches git and is never refused for a running terminal — it
      * is a view preference, not a lifecycle step.
      */
+    // ---- machine settings ----
+    //
+    // Editing what the connected machine's config.toml holds. Every write
+    // answers with the file's new state, read back by the daemon rather than
+    // echoed from the request, so a value the writer normalized is what this
+    // phone ends up holding.
+    //
+    // Built with `buildJsonObject` rather than the `args` helper below: these
+    // carry arrays and a map, and that helper handles scalars only.
+
+    /**
+     * Only the themes this machine's file defines.
+     *
+     * Not the merged list [com.farcooler.data.Themes.available], which includes
+     * this phone's built-ins — a built-in shown in an editor as though the file
+     * defined it would offer a delete that does nothing.
+     */
+    suspend fun hostThemes(): List<Theme> {
+        val data = attempt { core.call("themes") }.getOrNull() ?: return emptyList()
+        return runCatching {
+            json.decodeFromJsonElement(HostThemes.serializer(), data).themes
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun setBranchPrefix(prefix: String): String? {
+        val data = attempt {
+            core.call("settings.set_branch_prefix", args("prefix" to prefix))
+        }.getOrNull() ?: return null
+        val stored = data["branchPrefix"]?.jsonPrimitive?.contentOrNull ?: prefix
+        _branchPrefix.value = stored
+        return stored
+    }
+
+    suspend fun upsertTheme(theme: Theme): List<Theme>? {
+        val data = attempt { core.call("theme.upsert", theme.toJson()) }.getOrNull() ?: return null
+        return themesFrom(data)
+    }
+
+    suspend fun deleteTheme(name: String): List<Theme>? {
+        val data = attempt {
+            core.call("theme.delete", args("name" to name))
+        }.getOrNull() ?: return null
+        return themesFrom(data)
+    }
+
+    /**
+     * Put the machine's themes back into the picker every screen reads.
+     *
+     * Without this, a theme you just made is missing from the one place you
+     * would go to choose it.
+     */
+    suspend fun reloadThemes() {
+        com.farcooler.data.Themes.merge(hostThemes())
+    }
+
+    suspend fun adapters(): List<AdapterInfo> {
+        val data = attempt { core.call("adapters") }.getOrNull() ?: return emptyList()
+        return adaptersFrom(data)
+    }
+
+    suspend fun upsertAdapter(adapter: AdapterInfo): List<AdapterInfo>? {
+        val data = attempt {
+            core.call("adapter.upsert", adapter.toJson())
+        }.getOrNull() ?: return null
+        return adaptersFrom(data)
+    }
+
+    suspend fun deleteAdapter(preset: String): List<AdapterInfo>? {
+        val data = attempt {
+            core.call("adapter.delete", args("preset" to preset))
+        }.getOrNull() ?: return null
+        return adaptersFrom(data)
+    }
+
+    /** Prove an adapter works, without saving it first. */
+    suspend fun testAdapter(adapter: AdapterInfo): AdapterTestOutcome {
+        val data = attempt { core.call("adapter.test", adapter.toJson()) }.getOrNull()
+            ?: return AdapterTestOutcome.Failed("That machine could not be reached.")
+        return if (data["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+            AdapterTestOutcome.Worked(
+                data["reported"]?.jsonPrimitive?.contentOrNull ?: "answered")
+        } else {
+            AdapterTestOutcome.Failed(
+                data["failure"]?.jsonPrimitive?.contentOrNull ?: "The adapter did not answer.")
+        }
+    }
+
+    private fun themesFrom(data: JsonObject): List<Theme> = runCatching {
+        json.decodeFromJsonElement(HostThemes.serializer(), data).themes
+    }.getOrDefault(emptyList())
+
+    private fun adaptersFrom(data: JsonObject): List<AdapterInfo> = runCatching {
+        json.decodeFromJsonElement(AdapterList.serializer(), data).adapters
+    }.getOrDefault(emptyList())
+
+    @kotlinx.serialization.Serializable
+    private data class AdapterList(val adapters: List<AdapterInfo> = emptyList())
+
     suspend fun setHidden(workspace: Workspace, hidden: Boolean) {
         val method = if (hidden) "workspace.hide" else "workspace.unhide"
         attempt { core.call(method, args("workspace" to workspace.id)) }

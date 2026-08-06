@@ -35,6 +35,15 @@ sealed interface Route {
 
     /** Everything this account has registered, and how to revoke it. */
     data object Devices : Route
+
+    /**
+     * One machine's own config.toml.
+     *
+     * Carries the host id rather than the connection, so a route survives the
+     * connection being replaced underneath it — a reconnect builds a new
+     * `Connection` and a route holding the old one would edit a dead session.
+     */
+    data class MachineSettings(val hostId: String) : Route
 }
 
 /**

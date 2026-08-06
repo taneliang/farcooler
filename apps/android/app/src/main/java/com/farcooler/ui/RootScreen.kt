@@ -74,7 +74,25 @@ fun RootScreen(model: AppModel) {
     when (val current = route) {
         is Route.Settings -> {
             BackHandler { model.back() }
-            SettingsScreen(model, onBack = { model.back() })
+            SettingsScreen(
+                model,
+                onOpenMachineSettings = { model.navigate(Route.MachineSettings(it.host.id)) },
+                onBack = { model.back() },
+            )
+            return
+        }
+
+        is Route.MachineSettings -> {
+            BackHandler { model.back() }
+            // Looked up fresh rather than carried: a reconnect replaces the
+            // Connection, and a screen holding the old one would be editing a
+            // session that no longer exists.
+            val live = connections.firstOrNull { it.host.id == current.hostId }
+            if (live == null) {
+                model.back()
+            } else {
+                MachineSettingsScreen(live, onBack = { model.back() })
+            }
             return
         }
 

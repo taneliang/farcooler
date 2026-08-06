@@ -26,6 +26,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -213,7 +214,11 @@ private fun Mono(text: String) {
 /** What the terminal looks like, what may interrupt you, and who you are. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(model: AppModel, onBack: () -> Unit) {
+fun SettingsScreen(
+    model: AppModel,
+    onOpenMachineSettings: (Connection) -> Unit,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
@@ -322,11 +327,19 @@ fun SettingsScreen(model: AppModel, onBack: () -> Unit) {
             HorizontalDivider()
             SectionTitle("Theme")
             Text(
-                "Sets the terminal's colors and the app's. Add your own under " +
-                    "[themes.name] in ~/.config/farcooler/config.toml on a machine.",
+                "Sets the terminal's colors and the app's.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // Editing the machine's own file, rather than telling someone to go
+            // and edit it. That instruction used to be this section's help text —
+            // reasonable advice, and not something anybody does from a phone.
+            val live = connections.firstOrNull { it.phase.value is Connection.Phase.Connected }
+            if (live != null) {
+                OutlinedButton(onClick = { onOpenMachineSettings(live) }) {
+                    Text("Settings on ${live.host.displayLabel}")
+                }
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (theme in themes) {
                     TextButton(onClick = { Themes.select(theme.name) }) {
@@ -432,8 +445,15 @@ private fun diagnostics(model: AppModel, connections: List<Connection>): String 
     }
 }
 
+/**
+ * A section heading, shared by every settings screen in this app.
+ *
+ * Was private to this file until the machine-settings screens needed the same
+ * heading. Two definitions of one heading is how two screens come to look
+ * slightly different for no reason anybody can find later.
+ */
 @Composable
-private fun SectionTitle(text: String) {
+fun SectionTitle(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.titleSmall,
