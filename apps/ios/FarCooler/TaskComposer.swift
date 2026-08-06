@@ -66,7 +66,7 @@ struct TaskComposerView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.triangle.branch")
                                 .foregroundStyle(.tertiary)
-                            Text(TaskSlug.slug(from: text))
+                            Text(TaskSlug.slug(from: text, prefix: connection.branchPrefix))
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -188,7 +188,7 @@ struct TaskComposerView: View {
         let description = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty, let repository = chosenRepository else { return }
 
-        let branch = TaskSlug.slug(from: description)
+        let branch = TaskSlug.slug(from: description, prefix: connection.branchPrefix)
         let title = TaskSlug.title(from: description)
         let agentName = QuickAgents.agent(agentID).name
         let preset = QuickAgents.preset(agent: agentID, model: model)

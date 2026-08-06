@@ -87,6 +87,51 @@ final class VTCore {
         )
     }
 
+    /// Text the program asked to put on the clipboard (OSC 52), or nil.
+    ///
+    /// This matters more here than it does on the Mac: there is no text
+    /// selection in this renderer, so OSC 52 is the only way for anything on
+    /// screen to reach the clipboard at all.
+    ///
+    /// Two calls, because the core reports the size it needs and writes nothing
+    /// when the buffer is short rather than truncating — half a copied command
+    /// is worse than no copy. There is no counterpart that READS the clipboard;
+    /// a program asking for its contents is refused inside the core.
+    func takeClipboard() -> String? {
+        guard let handle else { return nil }
+        let needed = farcooler_vt_take_clipboard(handle, nil, 0)
+        guard needed > 0 else { return nil }
+
+        var buffer = [UInt8](repeating: 0, count: needed)
+        let written = buffer.withUnsafeMutableBufferPointer {
+            farcooler_vt_take_clipboard(handle, $0.baseAddress, $0.count)
+        }
+        guard written == needed else { return nil }
+        return String(decoding: buffer, as: UTF8.self)
+    }
+
+    /// The URL under a cell, or nil.
+    ///
+    /// The core decides what counts as a URL and which schemes may be opened.
+    /// Terminal output is not trusted input — an agent prints whatever it read —
+    /// and keeping the allowlist there means it is one list rather than three.
+    func url(atRow row: Int, column: Int) -> String? {
+        guard let handle, row >= 0, column >= 0 else { return nil }
+        var span = FarCoolerVtUrlSpan()
+        let needed = farcooler_vt_url_at(
+            handle, UInt16(clamping: row), UInt16(clamping: column), &span, nil, 0)
+        guard needed > 0 else { return nil }
+
+        var buffer = [UInt8](repeating: 0, count: needed)
+        let written = buffer.withUnsafeMutableBufferPointer {
+            farcooler_vt_url_at(
+                handle, UInt16(clamping: row), UInt16(clamping: column), &span,
+                $0.baseAddress, $0.count)
+        }
+        guard written == needed else { return nil }
+        return String(decoding: buffer, as: UTF8.self)
+    }
+
     /// Encode a keystroke for the program currently running.
     ///
     /// The core answers because the answer depends on modes it holds: an arrow

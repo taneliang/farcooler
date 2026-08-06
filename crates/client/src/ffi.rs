@@ -474,6 +474,14 @@ async fn dispatch(
                 "livePanes": facts.live_terminal_count,
                 "healthy": facts.self_health
                     != farcooler_protocol::v1::SelfHealth::Degraded as i32,
+                // What this machine says a derived branch name starts with. The
+                // client applies it, because the composer shows you the branch
+                // it is about to create and a prefix added on the far side would
+                // make that preview a lie.
+                "branchPrefix": facts.settings
+                    .as_ref()
+                    .map(|s| s.branch_prefix.as_str())
+                    .unwrap_or_default(),
             }))
         }
 
@@ -512,8 +520,18 @@ async fn dispatch(
                 b if b.is_empty() => "HEAD".to_string(),
                 b => b,
             };
+            // A worktree with nothing running in it is a directory, so the
+            // manual form asks for a shell. A caller creating its own agent
+            // terminal — the quick-task flow — passes an empty string, which is
+            // also what an older client that never sends the key gets.
             let workspace = session
-                .create_workspace(id("repository")?, &text("task"), &text("branch"), &base)
+                .create_workspace(
+                    id("repository")?,
+                    &text("task"),
+                    &text("branch"),
+                    &base,
+                    &text("terminal"),
+                )
                 .await?;
             Ok(json!({ "id": uuid_of(&workspace.id).to_string() }))
         }

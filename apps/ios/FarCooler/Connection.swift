@@ -417,7 +417,20 @@ final class Connection: ObservableObject {
             version: body["daemonVersion"] as? String ?? "unknown",
             matches: body["buildsMatch"] as? Bool ?? true,
             platform: body["platform"] as? String ?? "")
+        // Read from the same call, which is already made once per connection.
+        //
+        // Defaulted to the daemon's own default rather than to no prefix: an
+        // older daemon that does not send the key still prefixes its branches
+        // that way, so assuming nothing here would have this phone create
+        // differently-named branches than the Mac beside it.
+        branchPrefix = body["branchPrefix"] as? String ?? "feat/"
     }
+
+    /// What this machine says a derived branch name starts with.
+    ///
+    /// Applied on this side rather than by the daemon, because the composer
+    /// shows you the branch it is about to create.
+    @Published private(set) var branchPrefix = "feat/"
 
     func refresh() async {
         guard phase == .connected else { return }
@@ -552,7 +565,10 @@ final class Connection: ObservableObject {
     func createWorkspace(repository: String, task: String, branch: String) async {
         _ = try? await core.call(
             "workspace.create",
-            ["repository": repository, "task": task, "branch": branch])
+            // A shell, because a worktree with nothing running in it is a
+            // directory. This is the manual form; the quick-task flow below
+            // creates its own agent terminal and asks for none.
+            ["repository": repository, "task": task, "branch": branch, "terminal": "shell"])
         await refresh()
     }
 

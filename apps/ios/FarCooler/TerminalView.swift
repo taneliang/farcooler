@@ -49,6 +49,12 @@ struct TerminalView: View {
     @State private var focusRequest = 0
     @State private var dismissRequest = 0
     @State private var showWorkspaceList = false
+    /// The URL a long press landed on, which is also what presents the dialog.
+    ///
+    /// One value rather than a flag plus a string: a dialog that can be shown
+    /// with nothing to show is a dialog that will eventually be shown with
+    /// nothing to show.
+    @State private var heldLink: String?
 
     // User-configurable, unlike the Mac's fixed terminal font: see
     // Settings.swift. Read directly from the same `UserDefaults` key
@@ -168,6 +174,20 @@ struct TerminalView: View {
             .padding(.bottom, 10)
         }
         .background(TerminalPalette.background)
+        // The link a long press landed on. Titled with the URL itself, because
+        // "Open Link" without saying which link is a button that asks you to
+        // trust output an agent produced.
+        .confirmationDialog(
+            heldLink ?? "",
+            isPresented: Binding(get: { heldLink != nil }, set: { if !$0 { heldLink = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let link = heldLink, let url = URL(string: link) {
+                Button("Open Link") { UIApplication.shared.open(url) }
+            }
+            Button("Copy Link") { UIPasteboard.general.string = heldLink }
+            Button("Cancel", role: .cancel) {}
+        }
         // A terminal is dark regardless of the phone's own appearance — the
         // host doesn't know or care whether this device is in Light Mode, and
         // neither should the screen showing its output.
@@ -376,6 +396,14 @@ struct TerminalView: View {
                 onScroll: { lines, point in
                     let target = cell(at: point, grid: grid, size: size)
                     Task { await session.scroll(lines: lines, column: target.column, row: target.row) }
+                },
+                onHold: { point in
+                    // Nothing happens away from a link. There is no terminal
+                    // paste on this platform for a long press to displace, so
+                    // inventing a second meaning here would be a gesture nobody
+                    // asked for on a screen where every touch matters.
+                    let target = cell(at: point, grid: grid, size: size)
+                    heldLink = session.url(atRow: target.row, column: target.column)
                 },
                 accessory: AnyView(
                     TerminalKeyRow(
@@ -758,6 +786,8 @@ private struct KeystrokeField: UIViewRepresentable {
     var onInsertText: (String) -> Void
     var onDeleteBackward: () -> Void
     var onScroll: (Int, CGPoint) -> Void
+    /// Where a long press landed, for the link actions.
+    var onHold: (CGPoint) -> Void
     /// The key row, handed to the system as the keyboard's accessory so it is
     /// drawn as part of the keyboard rather than as a strip above one.
     var accessory: AnyView
@@ -775,6 +805,7 @@ private struct KeystrokeField: UIViewRepresentable {
         view.onInsertText = onInsertText
         view.onDeleteBackward = onDeleteBackward
         view.onScroll = onScroll
+        view.onHold = onHold
         view.cellHeight = cellHeight
         view.backgroundColor = .clear
 
@@ -808,6 +839,7 @@ private struct KeystrokeField: UIViewRepresentable {
         uiView.onInsertText = onInsertText
         uiView.onDeleteBackward = onDeleteBackward
         uiView.onScroll = onScroll
+        uiView.onHold = onHold
         uiView.cellHeight = cellHeight
         context.coordinator.accessoryHost?.rootView = accessory
 
@@ -840,6 +872,8 @@ private final class KeystrokeSink: UIView, UIKeyInput {
     var onInsertText: ((String) -> Void)?
     var onDeleteBackward: (() -> Void)?
     var onScroll: ((Int, CGPoint) -> Void)?
+    /// Where a long press landed, for the link actions.
+    var onHold: ((CGPoint) -> Void)?
     var cellHeight: CGFloat = 16
     /// The key row, shown by the system as part of the keyboard.
     var accessory: UIView?
@@ -871,6 +905,16 @@ private final class KeystrokeSink: UIView, UIKeyInput {
         tap.require(toFail: pan)
         addGestureRecognizer(tap)
         addGestureRecognizer(pan)
+
+        // A long press offers the link under it, if there is one.
+        //
+        // Tap already means "give me the keyboard" and cannot be made ambiguous,
+        // so the link actions go on the one gesture this view had nothing on.
+        // Android long-presses to paste and keeps doing so; there is no terminal
+        // paste on this platform to preserve, so a press away from a link simply
+        // does nothing rather than being given a new meaning nobody asked for.
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
+        addGestureRecognizer(hold)
     }
 
     override var canBecomeFirstResponder: Bool { true }
@@ -893,6 +937,15 @@ private final class KeystrokeSink: UIView, UIKeyInput {
         recognizer.setTranslation(
             CGPoint(x: translation.x, y: translation.y - CGFloat(lines) * cellHeight), in: self)
         onScroll?(lines, recognizer.location(in: self))
+    }
+
+    /// Report where a long press landed, once, when it begins.
+    ///
+    /// `.began` only: a press that is held reports repeatedly otherwise, and a
+    /// dialog presented several times over is a dialog you cannot dismiss.
+    @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began else { return }
+        onHold?(recognizer.location(in: self))
     }
 
     func insertText(_ text: String) { onInsertText?(text) }
