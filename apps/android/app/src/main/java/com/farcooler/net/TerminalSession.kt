@@ -10,9 +10,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -84,6 +88,23 @@ class TerminalSession(
 
     private val _grid = MutableStateFlow<TerminalGrid?>(null)
     val grid: StateFlow<TerminalGrid?> = _grid.asStateFlow()
+
+    /**
+     * Text a program asked to put on the clipboard (OSC 52).
+     *
+     * A flow of events rather than a state, because a copy is something that
+     * HAPPENED: two identical copies in a row are two copies, and a StateFlow
+     * would collapse them into one. The screen owns the clipboard — this layer
+     * has no Context — so it collects these and writes them.
+     *
+     * `extraBufferCapacity` so an emit from the emulator thread never suspends
+     * waiting for the UI to collect; `DROP_OLDEST` because if several copies
+     * queue up behind a stalled collector, the newest is the one the user meant.
+     */
+    private val _copied =
+        MutableSharedFlow<String>(
+            extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val copied: SharedFlow<String> = _copied.asSharedFlow()
 
     private var terminalId: String = terminalId
     private var vt: VtCore? = null
@@ -739,9 +760,22 @@ class TerminalSession(
     /** Show what the emulator currently holds, cursor included. */
     private fun publish() {
         val emulator = vt ?: return
+        // OSC 52, drained here because this is the one place every path that
+        // feeds bytes ends up — the live stream, the poll, and a jump to the
+        // bottom all call it, so a program's copy does not depend on which
+        // route its output took to get here.
+        emulator.takeClipboard()?.let { _copied.tryEmit(it) }
         _grid.value = emulator.snapshot()
         _phase.value = Phase.Live
     }
+
+    /**
+     * The URL under a cell of the screen as currently shown, or null.
+     *
+     * Asked of the emulator rather than of the host: it holds the same bytes,
+     * and a round trip to answer a long press would arrive after the gesture.
+     */
+    fun urlAt(row: Int, column: Int): String? = vt?.urlAt(row, column)
 
     /**
      * "resource not found" is the host's answer for a terminal that is not

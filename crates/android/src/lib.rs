@@ -487,6 +487,76 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTitle(
     }
 }
 
+/// Text the program asked to put on the clipboard (OSC 52), or null.
+///
+/// Sized then taken, because the core writes nothing when the buffer is short
+/// rather than truncating — half a copied command is worse than no copy.
+///
+/// There is no read counterpart, deliberately: a program asking for the
+/// clipboard's CONTENTS is refused inside the core.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTakeClipboard(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let h = handle_of(handle);
+    let needed = unsafe { vt::farcooler_vt_take_clipboard(h, std::ptr::null_mut(), 0) };
+    if needed == 0 {
+        return std::ptr::null_mut();
+    }
+    let mut buffer = vec![0u8; needed];
+    let written =
+        unsafe { vt::farcooler_vt_take_clipboard(h, buffer.as_mut_ptr(), buffer.len()) };
+    if written != needed {
+        return std::ptr::null_mut();
+    }
+    match std::str::from_utf8(&buffer) {
+        Ok(text) => jstring_of(&mut env, text),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// The URL under a cell, or null.
+///
+/// The core decides what counts as a URL and which schemes may be opened.
+/// Terminal output is not trusted input — an agent prints whatever it read — so
+/// keeping the allowlist there makes it one list rather than three.
+///
+/// Only the text crosses, not the span: this renderer has no ⌘-hover to
+/// underline, so the rectangle would be carried for nobody.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeUrlAt(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    row: jint,
+    column: jint,
+) -> jstring {
+    if row < 0 || column < 0 {
+        return std::ptr::null_mut();
+    }
+    let h = handle_of(handle);
+    let (row, column) = (clamp_u16(row), clamp_u16(column));
+    let mut span = vt::VtUrlSpan { start_row: 0, start_column: 0, end_row: 0, end_column: 0 };
+    let needed =
+        unsafe { vt::farcooler_vt_url_at(h, row, column, &mut span, std::ptr::null_mut(), 0) };
+    if needed == 0 {
+        return std::ptr::null_mut();
+    }
+    let mut buffer = vec![0u8; needed];
+    let written = unsafe {
+        vt::farcooler_vt_url_at(h, row, column, &mut span, buffer.as_mut_ptr(), buffer.len())
+    };
+    if written != needed {
+        return std::ptr::null_mut();
+    }
+    match std::str::from_utf8(&buffer) {
+        Ok(text) => jstring_of(&mut env, text),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeAltScreen(
     _env: JNIEnv,

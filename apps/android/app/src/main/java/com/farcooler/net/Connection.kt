@@ -469,7 +469,25 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
             matches = body["buildsMatch"]?.jsonPrimitive?.booleanOrNull ?: true,
             platform = body["platform"]?.jsonPrimitive?.contentOrNull.orEmpty(),
         )
+        // Read from the same call, which is already made once per connection.
+        //
+        // Defaulted to the daemon's own default rather than to no prefix: an
+        // older daemon that does not send the key still prefixes its branches
+        // that way, so assuming nothing here would have this phone create
+        // differently-named branches than the Mac beside it.
+        _branchPrefix.value =
+            body["branchPrefix"]?.jsonPrimitive?.contentOrNull ?: DEFAULT_BRANCH_PREFIX
     }
+
+    /**
+     * What this machine says a derived branch name starts with.
+     *
+     * Applied on this side rather than by the daemon, because the composer shows
+     * you the branch it is about to create — a prefix added on the far side
+     * would make that preview a lie.
+     */
+    private val _branchPrefix = MutableStateFlow(DEFAULT_BRANCH_PREFIX)
+    val branchPrefix: StateFlow<String> = _branchPrefix.asStateFlow()
 
     /** What a fleet refresh produced, so the app can announce it exactly once. */
     var onFleet: ((Fleet) -> Unit)? = null
@@ -601,10 +619,28 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
         refresh()
     }
 
-    suspend fun createWorkspace(repository: String, task: String, branch: String): String {
+    /**
+     * Create a worktree and branch, with a terminal already in it.
+     *
+     * `terminal` names what runs there; empty means none, which is what a caller
+     * about to create its own agent terminal wants. A shell here, because a
+     * worktree with nothing running in it is a directory.
+     */
+    suspend fun createWorkspace(
+        repository: String,
+        task: String,
+        branch: String,
+        terminal: String = "shell",
+    ): String {
         val data = core.call(
             "workspace.create",
-            args("repository" to repository, "task" to task, "branch" to branch, "base" to ""),
+            args(
+                "repository" to repository,
+                "task" to task,
+                "branch" to branch,
+                "base" to "",
+                "terminal" to terminal,
+            ),
         )
         return data["id"]?.jsonPrimitive?.contentOrNull
             ?: throw com.farcooler.core.CoreException("The host created a worktree but did not name it.")
@@ -658,6 +694,16 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
     }
 
     companion object {
+        /**
+         * What a derived branch name starts with when the machine says nothing.
+         *
+         * Matches `farcooler_core::config::DEFAULT_BRANCH_PREFIX`. Stated here
+         * as well because an older daemon does not send the key, and defaulting
+         * to no prefix would have this phone name branches differently from
+         * every other client talking to the same machine.
+         */
+        const val DEFAULT_BRANCH_PREFIX = "feat/"
+
         private const val POLL_INTERVAL_MS = 3_000L
 
         /**

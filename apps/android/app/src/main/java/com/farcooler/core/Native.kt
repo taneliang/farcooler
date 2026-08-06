@@ -92,6 +92,20 @@ internal object NativeVt {
 
     external fun nativeTitle(handle: Long): String?
 
+    /**
+     * Text the program asked to put on the clipboard (OSC 52), or null.
+     *
+     * There is no read counterpart: a program asking for the clipboard's
+     * contents is refused inside the core.
+     */
+    external fun nativeTakeClipboard(handle: Long): String?
+
+    /**
+     * The URL under a cell, or null. The core decides what counts as one and
+     * which schemes may be opened — terminal output is not trusted input.
+     */
+    external fun nativeUrlAt(handle: Long, row: Int, column: Int): String?
+
     external fun nativeAltScreen(handle: Long): Boolean
 
     external fun nativeEncodeKey(handle: Long, key: Int, modifiers: Int): ByteArray?

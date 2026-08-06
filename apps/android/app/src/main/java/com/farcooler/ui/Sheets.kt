@@ -205,6 +205,11 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
     val connection = connected.getOrNull(machineIndex.coerceIn(0, (connected.size - 1).coerceAtLeast(0)))
     val repositories by (connection?.repositories
         ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
+    // Per machine, because the branch is created on the one holding the project
+    // and that machine's convention is the one that matters.
+    val branchPrefix by (connection?.branchPrefix
+        ?: kotlinx.coroutines.flow.MutableStateFlow(Connection.DEFAULT_BRANCH_PREFIX))
+        .collectAsStateWithLifecycle()
 
     LaunchedEffect(repositories) {
         if (repositories.none { it.id == repositoryId }) {
@@ -234,7 +239,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
 
             if (text.isNotBlank()) {
                 Text(
-                    TaskSlug.slug(text),
+                    TaskSlug.slug(text, branchPrefix),
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -307,7 +312,11 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                             target.createWorkspace(
                                 repository,
                                 TaskSlug.title(description),
-                                TaskSlug.slug(description),
+                                TaskSlug.slug(description, branchPrefix),
+                                // Its own agent terminal is created a few lines
+                                // below, so the worktree must not also come up
+                                // with an unused shell beside it.
+                                terminal = "",
                             )
                         }.getOrElse {
                             failure = "Could not create the worktree: ${it.message}"
@@ -419,6 +428,19 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
     var working by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
 
+    // Per machine, because the branch is created on the one holding the project.
+    val branchPrefix by (connection?.branchPrefix
+        ?: kotlinx.coroutines.flow.MutableStateFlow(Connection.DEFAULT_BRANCH_PREFIX))
+        .collectAsStateWithLifecycle()
+
+    // This form used to make you type a branch by hand, which meant the
+    // machine's branch prefix — the whole point of the setting — could not reach
+    // the one place on this screen that names a branch. Now it matches the Mac's
+    // sheet: type nothing and get the suggestion.
+    val suggestedBranch =
+        if (task.isBlank()) "" else TaskSlug.slug(task.trim(), branchPrefix)
+    val effectiveBranch = branch.trim().ifEmpty { suggestedBranch }
+
     LaunchedEffect(repositories) {
         if (repositories.none { it.id == repositoryId }) {
             repositoryId = repositories.firstOrNull()?.id.orEmpty()
@@ -462,6 +484,9 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                 value = branch,
                 onValueChange = { branch = it },
                 label = { Text("Branch") },
+                placeholder = {
+                    Text(suggestedBranch.ifEmpty { branchPrefix + "my-task" })
+                },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -481,7 +506,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                     working = true
                     scope.launch {
                         runCatching {
-                            target.createWorkspace(repositoryId, task.trim(), branch.trim())
+                            target.createWorkspace(repositoryId, task.trim(), effectiveBranch)
                         }.onFailure {
                             failure = it.message
                             working = false
@@ -493,7 +518,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                     }
                 },
                 enabled = !working && repositoryId.isNotEmpty() &&
-                    task.isNotBlank() && branch.isNotBlank(),
+                    task.isNotBlank() && effectiveBranch.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Create")

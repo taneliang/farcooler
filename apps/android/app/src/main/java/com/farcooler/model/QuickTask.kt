@@ -16,13 +16,21 @@ package com.farcooler.model
  */
 object TaskSlug {
     /**
-     * A git-safe slug.
+     * A git-safe slug, behind whatever the machine says branches start with.
      *
      * Conservative on purpose: git accepts far more than this, but a branch name
      * is something people type, paste into a PR title and see in a CI log, and
      * one carrying punctuation from a sentence is a small tax paid repeatedly.
+     *
+     * The prefix is applied HERE rather than by the daemon, because the composer
+     * shows you the branch it is about to create — a prefix added on the far
+     * side would make that preview a lie. The daemon still validates the
+     * finished name.
+     *
+     * The 48-character budget is spent on the slug, not on the result: a long
+     * prefix must not eat the part that says what the task was.
      */
-    fun slug(text: String): String {
+    fun slug(text: String, prefix: String = ""): String {
         val out = StringBuilder()
         var lastWasDash = true // leading dashes are dropped
 
@@ -38,7 +46,7 @@ object TaskSlug {
             if (out.length >= 48) break
         }
         while (out.isNotEmpty() && out.last() == '-') out.deleteCharAt(out.lastIndex)
-        return if (out.isEmpty()) "task" else out.toString()
+        return prefix + (if (out.isEmpty()) "task" else out.toString())
     }
 
     /** A short human title, for the workspace's task name. */
