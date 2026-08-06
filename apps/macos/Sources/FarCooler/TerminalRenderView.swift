@@ -90,6 +90,9 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     private var hoveredLink: (url: String, span: FarCoolerVtUrlSpan)?
     /// Recreated on every layout, so the area always covers the current bounds.
     private var linkTracking: NSTrackingArea?
+    /// Whether this view is the one currently showing the pointing hand, so it
+    /// only ever restores a cursor it changed itself.
+    private var showingLinkCursor = false
 
     struct GridPoint: Equatable, Comparable {
         var row: Int
@@ -730,14 +733,22 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     private func setHoveredLink(_ link: (url: String, span: FarCoolerVtUrlSpan)?) {
         let changed = link?.url != hoveredLink?.url
         hoveredLink = link
+
+        // Only the pointing hand is this view's to set, and it is only restored
+        // if this view was the one that changed it. The alternative — picking a
+        // cursor for the no-link case — would mean inventing a base cursor for a
+        // view that never had one, and overriding it everywhere else.
         if link != nil {
             NSCursor.pointingHand.set()
-        } else if window?.firstResponder === self || hoveredLink == nil {
-            NSCursor.iBeam.set()
+            showingLinkCursor = true
+        } else if showingLinkCursor {
+            NSCursor.arrow.set()
+            showingLinkCursor = false
         }
-        // Only when the underline would actually move. This runs on every mouse
-        // move, and a redraw per pixel of pointer travel would cost a frame for
-        // nothing on a grid that has not changed.
+
+        // Redraw only when the underline would actually move. This runs on every
+        // mouse move, and a frame per pixel of pointer travel would be spent on
+        // a grid that has not changed.
         if changed { needsDisplay = true }
     }
 
