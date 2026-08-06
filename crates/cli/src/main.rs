@@ -327,6 +327,20 @@ enum WorkspaceCmd {
         branch: String,
         #[arg(long, default_value = "HEAD")]
         base: String,
+        /// What to run in the terminal the new worktree opens with.
+        ///
+        /// A worktree with nothing in it is a directory, so this defaults to a
+        /// shell — the same default `terminal create` uses, and for the same
+        /// reason: you open a terminal and type into it.
+        #[arg(long, default_value = "shell")]
+        terminal: String,
+        /// Create the worktree with no terminal at all.
+        ///
+        /// For a caller about to create its own. The Mac app's task flow does
+        /// exactly this, and would otherwise leave every task with an unused
+        /// shell sitting beside its agent.
+        #[arg(long, conflicts_with = "terminal")]
+        no_terminal: bool,
     },
     /// Show the fleet with freshly derived state.
     List,
@@ -939,7 +953,7 @@ async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
 async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
     let mut link = connect_to(host).await?;
     match cmd {
-        WorkspaceCmd::Create { repo, task, branch, base } => {
+        WorkspaceCmd::Create { repo, task, branch, base, terminal, no_terminal } => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;
             let r = link
@@ -949,7 +963,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                         task_name: task,
                         branch,
                         base_revision: base,
-                        cli_preset: String::new(),
+                        terminal_preset: if no_terminal { String::new() } else { terminal },
                         adopt_existing: false,
                     }),
                 ))
@@ -1115,7 +1129,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                         task_name: task,
                         branch,
                         base_revision: String::new(),
-                        cli_preset: String::new(),
+                        terminal_preset: String::new(),
                         adopt_existing: true,
                     }),
                 ))

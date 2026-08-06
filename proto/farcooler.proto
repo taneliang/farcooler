@@ -748,7 +748,20 @@ message WorkspaceCreate {
   string task_name = 1;
   string branch = 2;
   string base_revision = 3;
-  string cli_preset = 4;
+  // What to run in the terminal this workspace opens with, or empty for no
+  // terminal at all.
+  //
+  // A worktree with nothing running in it is a directory, so a client that just
+  // made one almost always wants a shell in it — which is what the review that
+  // prompted this asked for. Done here rather than as a second call from each
+  // client because it is a product rule, and a rule implemented three times is
+  // a rule three clients can disagree about.
+  //
+  // Tag 4, previously `cli_preset`, which nothing ever read — so the wire is
+  // unchanged and the name now says what it does. Empty is the compatible
+  // default: every caller that passed `String::new()` keeps its behavior, and
+  // it is what a caller about to create its own agent terminal passes.
+  string terminal_preset = 4;
   // Adopt `branch` instead of creating it.
   //
   // Work arrives on a branch as often as it starts on one — pushed from
