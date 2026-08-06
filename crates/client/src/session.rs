@@ -305,18 +305,24 @@ impl Session {
 
     // ---- mutations ----
 
+    /// Create a worktree and branch, optionally with a terminal already in it.
+    ///
+    /// `terminal_preset` empty means no terminal — which is what a caller about
+    /// to create its own agent terminal wants, and what keeps this compatible
+    /// with every caller that predates the parameter.
     pub async fn create_workspace(
         &mut self,
         repository: Uuid,
         task: &str,
         branch: &str,
         base: &str,
+        terminal_preset: &str,
     ) -> Result<Workspace, SessionError> {
         let payload = request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
             task_name: task.into(),
             branch: branch.into(),
             base_revision: base.into(),
-            cli_preset: String::new(),
+            terminal_preset: terminal_preset.into(),
             adopt_existing: false,
         });
         match self.value("workspace.create", Some(repository), Some(payload)).await? {

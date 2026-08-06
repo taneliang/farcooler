@@ -1036,9 +1036,25 @@ struct NewWorkspaceView: View {
     @State private var working = false
     @State private var showAddRepository = false
 
+    /// The branch this form suggests, from the task and the machine's prefix.
+    ///
+    /// This form had no suggestion at all and made you type a branch by hand,
+    /// which meant the machine's branch prefix — the whole point of the setting
+    /// — could not reach the one place on this screen that names a branch. Now
+    /// it matches the Mac's sheet: type nothing and get the suggestion.
+    private var suggestedBranch: String {
+        let trimmed = task.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? "" : TaskSlug.slug(from: trimmed, prefix: connection.branchPrefix)
+    }
+
+    private var effectiveBranch: String {
+        let typed = branch.trimmingCharacters(in: .whitespaces)
+        return typed.isEmpty ? suggestedBranch : typed
+    }
+
     private var isValid: Bool {
         !repository.isEmpty && !task.trimmingCharacters(in: .whitespaces).isEmpty
-            && !branch.trimmingCharacters(in: .whitespaces).isEmpty
+            && !effectiveBranch.isEmpty
     }
 
     var body: some View {
@@ -1050,9 +1066,14 @@ struct NewWorkspaceView: View {
                 }
                 Button("Add a repository…") { showAddRepository = true }
                 TextField("Task", text: $task)
-                TextField("Branch", text: $branch)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                TextField(
+                    "Branch", text: $branch,
+                    prompt: Text(
+                        suggestedBranch.isEmpty
+                            ? connection.branchPrefix + "my-task" : suggestedBranch)
+                )
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
                 Section {
                     Text("A workspace is one git worktree and branch, for one task.")
                         .font(.footnote)
@@ -1069,7 +1090,7 @@ struct NewWorkspaceView: View {
                     Button("Create") {
                         working = true
                         Task {
-                            await onCreate(repository, task, branch)
+                            await onCreate(repository, task, effectiveBranch)
                             working = false
                             dismiss()
                         }

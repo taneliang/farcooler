@@ -14,13 +14,21 @@ import Foundation
 /// Mac does) is what keeps them from drifting apart the next time either one
 /// is tuned.
 enum TaskSlug {
-    /// A git-safe slug.
+    /// A git-safe slug, behind whatever the machine says branches start with.
     ///
     /// Conservative on purpose: git accepts far more than this, but a branch
     /// name is something people type, paste into a PR title and see in a CI
     /// log, and one carrying punctuation from a sentence is a small tax paid
     /// repeatedly.
-    static func slug(from text: String) -> String {
+    ///
+    /// The prefix is applied HERE rather than by the daemon, because the
+    /// composer shows you the branch it is about to create — a prefix added on
+    /// the far side would make that preview a lie. The daemon still validates
+    /// the finished name.
+    ///
+    /// The 48-character budget is spent on the slug, not on the result: a long
+    /// prefix must not eat the part that says what the task was.
+    static func slug(from text: String, prefix: String = "") -> String {
         let lowered = text.lowercased()
         var out = ""
         var lastWasDash = true  // leading dashes are dropped
@@ -37,7 +45,7 @@ enum TaskSlug {
             if out.count >= 48 { break }
         }
         while out.hasSuffix("-") { out.removeLast() }
-        return out.isEmpty ? "task" : out
+        return prefix + (out.isEmpty ? "task" : out)
     }
 
     /// A short human title, for the workspace's task name.

@@ -748,8 +748,26 @@ final class TerminalSession: ObservableObject {
     /// Show what the emulator currently holds, cursor included.
     private func publish() {
         guard let vt else { return }
+        // OSC 52, drained here because this is the one place every path that
+        // feeds bytes ends up — the live stream, the poll, and a jump to the
+        // bottom all call it, and a program's copy must not depend on which
+        // route its output took.
+        //
+        // On this platform it is the ONLY way anything on screen reaches the
+        // clipboard: there is no text selection in the renderer.
+        if let copied = vt.takeClipboard() {
+            UIPasteboard.general.string = copied
+        }
         grid = vt.withSnapshot { TerminalGrid(snapshot: $0) }
         phase = .live
+    }
+
+    /// The URL under a cell of the screen as currently shown, or nil.
+    ///
+    /// Asked of the emulator rather than of the host: it holds the same bytes,
+    /// and a round trip to answer a long press would arrive after the gesture.
+    func url(atRow row: Int, column: Int) -> String? {
+        vt?.url(atRow: row, column: column)
     }
 
     /// "resource not found" is the host's answer for a terminal that is not
