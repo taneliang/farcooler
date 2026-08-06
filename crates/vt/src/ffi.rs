@@ -71,6 +71,20 @@ pub struct VtSnapshot {
     pub history_size: u32,
 }
 
+/// Where a URL sits on screen, in display coordinates.
+///
+/// A struct rather than four out-parameters, because the renderers underline
+/// the span and four `*mut u16` at a call site is four chances to pass them in
+/// the wrong order.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VtUrlSpan {
+    pub start_row: u16,
+    pub start_column: u16,
+    pub end_row: u16,
+    pub end_column: u16,
+}
+
 /// Opaque to callers.
 pub struct VtHandle {
     terminal: Terminal,
@@ -418,6 +432,50 @@ pub unsafe extern "C" fn farcooler_vt_alt_screen(handle: *mut c_void) -> bool {
     }
 }
 
+/// The URL under a cell, or 0 if there is none.
+///
+/// Returns the byte length the URL needs and writes nothing when that exceeds
+/// `capacity` — the same contract `farcooler_vt_encode_paste` uses, and for a
+/// sharper reason: a truncated URL is a DIFFERENT URL, and opening one would be
+/// worse than opening nothing at all.
+///
+/// `span` is filled whenever a URL is found, including on a sizing call, so a
+/// renderer can underline the match before it has anywhere to put the text.
+///
+/// Only schemes `crate::url::SCHEMES` names are ever returned. Terminal output
+/// is not trusted input — an agent prints whatever it read — so the allowlist
+/// lives on this side of the boundary, once, rather than in three renderers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_vt_url_at(
+    handle: *mut c_void,
+    row: u16,
+    column: u16,
+    span: *mut VtUrlSpan,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
+    let Some(found) = crate::url::url_at(&h.terminal, row, column) else { return 0 };
+
+    if !span.is_null() {
+        unsafe {
+            *span = VtUrlSpan {
+                start_row: found.start_row,
+                start_column: found.start_column,
+                end_row: found.end_row,
+                end_column: found.end_column,
+            };
+        }
+    }
+
+    let bytes = found.url.as_bytes();
+    if bytes.len() > capacity || out.is_null() {
+        return bytes.len();
+    }
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+    bytes.len()
+}
+
 fn decode_key(key: u32) -> Option<crate::input::Key> {
     use crate::input::Key;
     Some(match key {
@@ -629,6 +687,12 @@ mod tests {
             assert_eq!(farcooler_vt_take_writes(null, std::ptr::null_mut(), 0), 0);
             assert!(!farcooler_vt_take_bell(null));
             assert!(farcooler_vt_title(null).is_null());
+            let mut span =
+                VtUrlSpan { start_row: 0, start_column: 0, end_row: 0, end_column: 0 };
+            assert_eq!(
+                farcooler_vt_url_at(null, 0, 0, &mut span, std::ptr::null_mut(), 0),
+                0
+            );
             farcooler_vt_free(null);
         }
 
@@ -746,6 +810,62 @@ mod tests {
         assert_eq!(n, 0);
         assert_eq!(one[0], 0);
         unsafe { farcooler_vt_free(h) };
+    }
+
+    fn url(h: *mut c_void, row: u16, column: u16) -> Option<(String, VtUrlSpan)> {
+        let mut span =
+            VtUrlSpan { start_row: 0, start_column: 0, end_row: 0, end_column: 0 };
+        let needed = unsafe {
+            farcooler_vt_url_at(h, row, column, &mut span, std::ptr::null_mut(), 0)
+        };
+        if needed == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; needed];
+        let n =
+            unsafe { farcooler_vt_url_at(h, row, column, &mut span, buf.as_mut_ptr(), needed) };
+        assert_eq!(n, needed);
+        Some((String::from_utf8(buf).unwrap(), span))
+    }
+
+    #[test]
+    fn a_url_crosses_the_boundary_with_its_span() {
+        let h = farcooler_vt_new(60, 4);
+        feed(h, b"see https://example.com/x now");
+
+        let (text, span) = url(h, 0, 10).expect("a URL is under this cell");
+        assert_eq!(text, "https://example.com/x");
+        assert_eq!((span.start_row, span.start_column), (0, 4));
+        assert_eq!((span.end_row, span.end_column), (0, 24));
+
+        assert!(url(h, 0, 0).is_none(), "no URL under \"see\"");
+        unsafe { farcooler_vt_free(h) };
+    }
+
+    #[test]
+    fn asking_for_a_url_with_a_short_buffer_writes_nothing() {
+        // Same contract as encode_paste, for a sharper reason: a truncated URL
+        // is a different URL, and opening one is worse than opening none.
+        let h = farcooler_vt_new(60, 4);
+        feed(h, b"https://example.com/x");
+        let mut span =
+            VtUrlSpan { start_row: 0, start_column: 0, end_row: 0, end_column: 0 };
+        let mut one = [0u8; 1];
+        let needed =
+            unsafe { farcooler_vt_url_at(h, 0, 2, &mut span, one.as_mut_ptr(), 1) };
+        assert_eq!(needed, "https://example.com/x".len());
+        assert_eq!(one[0], 0, "nothing written");
+        // The span is filled even on a call that could not carry the text, so a
+        // renderer can underline before it allocates.
+        assert_eq!(span.end_column, 20);
+        unsafe { farcooler_vt_free(h) };
+    }
+
+    #[test]
+    fn the_url_span_layout_is_what_the_renderer_expects() {
+        // Renderers read these fields by raw offset, same as VtCell.
+        assert_eq!(std::mem::size_of::<VtUrlSpan>(), 8);
+        assert_eq!(std::mem::align_of::<VtUrlSpan>(), 2);
     }
 
     #[test]
