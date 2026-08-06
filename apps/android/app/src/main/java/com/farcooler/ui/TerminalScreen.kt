@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -28,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -43,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,6 +83,12 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
 
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
+
+    // The URL a long press landed on, which is also what shows the sheet: a
+    // dialog that can be presented with nothing to present is one that
+    // eventually will be.
+    var heldLink by remember { mutableStateOf<String?>(null) }
+
     val fontChoice by model.settings.font.collectAsStateWithLifecycle()
     val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
     val reshape by model.settings.reshapePanes.collectAsStateWithLifecycle()
@@ -105,6 +114,13 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
     LaunchedEffect(session) { session.start() }
     LaunchedEffect(ref.terminalId) { session.switchTo(ref.terminalId) }
     LaunchedEffect(reshape) { session.reshapeAllowed = reshape }
+    // A program putting text on the clipboard (OSC 52). Collected here because
+    // this is where a Context — and therefore the clipboard — exists at all.
+    // On a phone this is the only way anything on screen reaches the clipboard:
+    // there is no text selection in the renderer.
+    LaunchedEffect(session) {
+        session.copied.collect { clipboard.writeText("Far Cooler", it) }
+    }
     // The link under this pane was replaced.
     //
     // A stream is a second SSH channel on the session that just died, so
@@ -277,12 +293,22 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
                         fontFamily = TerminalFonts.family(fontChoice),
                         fontSize = fontSize,
                         onTap = { focusRequest += 1 },
-                        onLongPress = {
-                            // A long press pastes. A phone has no other way to
-                            // get a command it did not type into a terminal, and
-                            // the menu is two taps away at the top of a screen
-                            // whose whole point is being usable one-handed.
-                            scope.launch { clipboard.readText()?.let { session.paste(it) } }
+                        onLongPress = { column, row ->
+                            // Over a link, the link actions. Anywhere else, the
+                            // paste this gesture has always meant: a phone has no
+                            // other way to get a command it did not type into a
+                            // terminal, and the menu is two taps away at the top
+                            // of a screen whose whole point is one-handed use.
+                            //
+                            // So the new behavior only appears where there is
+                            // something to act on, and the old one is untouched
+                            // everywhere else.
+                            val link = session.urlAt(row, column)
+                            if (link != null) {
+                                heldLink = link
+                            } else {
+                                scope.launch { clipboard.readText()?.let { session.paste(it) } }
+                            }
                         },
                     )
                     TerminalKeyboardAnchor(
@@ -320,6 +346,30 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
             )
         }
     }
+
+    // The link a long press landed on. Titled with the URL itself, because
+    // "Open Link" without saying which link asks you to trust output an agent
+    // produced without showing you what you are trusting.
+    heldLink?.let { link ->
+        val uri = LocalUriHandler.current
+        AlertDialog(
+            onDismissRequest = { heldLink = null },
+            title = { Text("Link") },
+            text = { Text(link) },
+            confirmButton = {
+                TextButton(onClick = {
+                    heldLink = null
+                    runCatching { uri.openUri(link) }
+                }) { Text("Open") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    heldLink = null
+                    scope.launch { clipboard.writeText("Far Cooler link", link) }
+                }) { Text("Copy") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -329,7 +379,7 @@ private fun TerminalSurface(
     fontFamily: FontFamily,
     fontSize: Float,
     onTap: () -> Unit,
-    onLongPress: () -> Unit,
+    onLongPress: (column: Int, row: Int) -> Unit,
 ) {
     val phase by session.phase.collectAsStateWithLifecycle()
     val grid by session.grid.collectAsStateWithLifecycle()

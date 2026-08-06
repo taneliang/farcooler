@@ -78,7 +78,8 @@ fun TerminalCanvas(
     fontSize: Float,
     onSize: (columns: Int, rows: Int) -> Unit,
     onTap: () -> Unit,
-    onLongPress: () -> Unit,
+    // Where the press landed, in cells, so the caller can ask what is there.
+    onLongPress: (column: Int, row: Int) -> Unit,
     onScroll: (lines: Int, column: Int, row: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -146,7 +147,16 @@ fun TerminalCanvas(
             // scheduling a redraw.
             .onSizeChanged { viewport = it }
             .pointerInput(Unit) {
-                detectTapGestures(onTap = { onTap() }, onLongPress = { onLongPress() })
+                detectTapGestures(
+                    onTap = { onTap() },
+                    // The cell, not just the fact of the press: a long press
+                    // over a link means something different from one over
+                    // ordinary output, and only the caller can tell which.
+                    onLongPress = { offset ->
+                        val (column, row) = cellAt(offset)
+                        onLongPress(column, row)
+                    },
+                )
             }
             .pointerInput(scaledCellHeight) {
                 // Converted to whole lines, with the fractional remainder kept,

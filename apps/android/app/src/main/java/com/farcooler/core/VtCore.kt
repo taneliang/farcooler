@@ -83,6 +83,32 @@ class VtCore(columns: Int, rows: Int) {
     fun title(): String? = if (handle == 0L) null else NativeVt.nativeTitle(handle)
 
     /**
+     * Text the program asked to put on the clipboard (OSC 52), or null.
+     *
+     * This matters more here than on the Mac: there is no text selection in
+     * this renderer, so OSC 52 is the only way anything on screen reaches the
+     * clipboard at all.
+     *
+     * There is no counterpart that reads the clipboard. A program asking for
+     * its contents is refused inside the core — copy is a program handing you
+     * something, paste is a program taking something, and Far Cooler runs
+     * agents on machines nobody is watching.
+     */
+    fun takeClipboard(): String? =
+        if (handle == 0L) null else NativeVt.nativeTakeClipboard(handle)
+
+    /**
+     * The URL under a cell of the screen as currently shown, or null.
+     *
+     * The core decides what counts as a URL and which schemes may be opened;
+     * terminal output is not trusted input, and keeping the allowlist there
+     * makes it one list rather than three.
+     */
+    fun urlAt(row: Int, column: Int): String? =
+        if (handle == 0L || row < 0 || column < 0) null
+        else NativeVt.nativeUrlAt(handle, row, column)
+
+    /**
      * Encode a keystroke for the program currently running.
      *
      * The core answers because the answer depends on modes it holds: an arrow
