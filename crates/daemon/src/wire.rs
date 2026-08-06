@@ -79,6 +79,13 @@ pub fn host(
         },
         replay_bytes_retained: replay_bytes,
         live_terminal_count: runtime.panes.len() as u32,
+        // Read on every call rather than cached on the service, so editing
+        // config.toml — or a settings editor writing it — takes effect without
+        // a daemon restart. Same reasoning as `theme.list`, and a few hundred
+        // bytes of TOML is not a cost worth a staleness bug.
+        settings: Some(wire::HostSettings {
+            branch_prefix: farcooler_core::config::load_branch_prefix(),
+        }),
     }
 }
 

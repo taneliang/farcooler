@@ -386,6 +386,25 @@ enum Scope {
   SCOPE_HOST_ADMIN = 3;
 }
 
+// Settings this machine's config.toml decides, as opposed to facts about it.
+//
+// Its own message rather than scalars hung off `Host`, so it can grow by a
+// field: a machine settings editor adds to this, and a bare scalar would need a
+// migration where a nested message needs a tag. Kept distinguishable from the
+// live facts beside it — `self_health`, `live_terminal_count` — for the same
+// reason the two are worth separating at all: one is what the machine IS, the
+// other is what somebody chose.
+message HostSettings {
+  // Prepended to a branch name derived from a task description. Empty opts out
+  // entirely; the daemon's own default when config.toml says nothing is
+  // `feat/`, so an absent message and an empty string mean different things.
+  //
+  // Applied by the CLIENT, not by the daemon, because the task composer shows
+  // you the branch it is about to create — a prefix added daemon-side would
+  // make that preview a lie. The daemon still validates the finished name.
+  string branch_prefix = 1;
+}
+
 message Host {
   bytes id = 1;
   uint64 resource_version = 2;
@@ -399,6 +418,11 @@ message Host {
   // these itself: a remote one has no tmux to look at, and a local one that
   // looked would be a second authority on the same question.
   uint32 live_terminal_count = 9;
+  // Rides on this message rather than a call of its own, because every client
+  // already makes this one and the prefix is needed on the path that creates a
+  // workspace — a second round trip there would be a round trip spent asking
+  // for a string.
+  HostSettings settings = 10;
 }
 
 enum SelfHealth {
