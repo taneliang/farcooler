@@ -126,8 +126,47 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "repository_root.add"
         | "repository_root.remove"
         | "workspace.remove_worktree" => Scope::HostAdmin,
+        // Machine settings, reads included.
+        //
+        // These write a file in the user's home directory on a machine that may
+        // not be the one asking, which is `host_admin` by the same rule paths
+        // are. `adapter.list` is a READ and still belongs here: it reports
+        // `program`, `args` and `env`, which is local paths and, for an agent
+        // that needs one, an API key. `Scope::Read` is for the shape of the
+        // fleet, not for its secrets.
+        "settings.set_branch_prefix"
+        | "theme.upsert"
+        | "theme.delete"
+        | "adapter.list"
+        | "adapter.upsert"
+        | "adapter.delete"
+        | "adapter.test" => Scope::HostAdmin,
         _ => return None,
     })
+}
+
+/// Where an adapter in force came from.
+///
+/// A pure function of two name sets rather than a branch inside the list
+/// builder, so it can be tested without a config file — which matters because
+/// `config_path()` reads process-global environment and the test harness runs
+/// in parallel, so a test that pointed it at a scratch file would move it out
+/// from under every other test in the binary.
+fn adapter_origin(
+    preset: &str,
+    configured: &std::collections::BTreeSet<String>,
+    built_in: &std::collections::BTreeSet<String>,
+) -> farcooler_protocol::v1::AdapterOrigin {
+    use farcooler_protocol::v1::AdapterOrigin;
+    match (configured.contains(preset), built_in.contains(preset)) {
+        // A table shadowing something Far Cooler ships. Deleting it restores
+        // the shipped one, which is what "revert to default" means.
+        (true, true) => AdapterOrigin::Override,
+        // A table for an agent Far Cooler does not ship.
+        (true, false) => AdapterOrigin::User,
+        // No table, so whatever is in force is what shipped.
+        (false, _) => AdapterOrigin::BuiltIn,
+    }
 }
 
 fn scope_name(scope: Scope) -> &'static str {
@@ -190,6 +229,123 @@ impl Rpc {
             .as_deref()
             .and_then(wire::parse_id)
             .ok_or(DomainError::NotFound)
+    }
+
+    // MARK: - Machine settings helpers
+
+    /// This host as it is right now, for a settings write to answer with.
+    async fn host_now(&self, svc: &Service) -> Result<farcooler_protocol::v1::Host> {
+        svc.inventory.refresh().await;
+        Ok(wire::host(&self.daemon_version, svc.host_id, &svc.inventory_snapshot(), 0))
+    }
+
+    /// A config write that failed, as something a form can show.
+    ///
+    /// Never the raw `io::Error`. A settings screen showing "Permission denied
+    /// (os error 13)" has told the user nothing about which file or what to do,
+    /// and the one thing they need to know is that nothing was changed.
+    fn config_write_failed(what: &str, error: std::io::Error) -> DomainError {
+        tracing::warn!(%what, error = %error, "could not write config.toml");
+        DomainError::OperationFailed
+    }
+
+    /// The host's themes, in the shape every settings write answers with.
+    ///
+    /// Read back from the file rather than assembled from what was sent, so a
+    /// client's list is what the file now says — including a colour the writer
+    /// normalized on the way in.
+    fn host_themes() -> farcooler_protocol::v1::ThemeList {
+        let items = farcooler_core::config::load_themes()
+            .into_iter()
+            .map(|t| farcooler_protocol::v1::Theme {
+                name: t.name,
+                dark: t.dark,
+                background: t.background,
+                foreground: t.foreground,
+                cursor: t.cursor,
+                ansi: t.ansi.to_vec(),
+            })
+            .collect();
+        farcooler_protocol::v1::ThemeList { items }
+    }
+
+    /// A wire theme, validated.
+    ///
+    /// Exactly sixteen ANSI colours, and a name. The reader refuses a short list
+    /// rather than padding it — "a colour on screen that nobody chose and nobody
+    /// can find in the file" — so the writer refuses one too, before it can
+    /// produce a table the reader will then silently drop.
+    fn theme_from_wire(
+        wire_theme: &farcooler_protocol::v1::Theme,
+    ) -> Result<farcooler_core::theme::Theme> {
+        let name = wire_theme.name.trim();
+        farcooler_core::validate::display_name(name)?;
+        if wire_theme.ansi.len() != 16 {
+            return Err(DomainError::InvalidArgument { what: "ansi" });
+        }
+        let mut ansi = [0u32; 16];
+        ansi.copy_from_slice(&wire_theme.ansi);
+        Ok(farcooler_core::theme::Theme {
+            name: name.to_string(),
+            dark: wire_theme.dark,
+            background: wire_theme.background,
+            foreground: wire_theme.foreground,
+            cursor: wire_theme.cursor,
+            ansi,
+        })
+    }
+
+    /// Every adapter the daemon would use, marked with where it came from.
+    ///
+    /// Built by asking the live registry what it holds and the config file what
+    /// it says, then comparing — rather than by reading the file alone, which
+    /// could not report a built-in, or the registry alone, which has already
+    /// merged the two and forgotten which was which.
+    fn adapters(svc: &Service) -> farcooler_protocol::v1::AdapterList {
+        let configured: std::collections::BTreeSet<String> =
+            farcooler_core::config::load_adapter_names().into_iter().collect();
+        let built_in: std::collections::BTreeSet<String> = farcooler_core::activity::Registry::built_in()
+            .all()
+            .iter()
+            .map(|r| r.preset.clone())
+            .collect();
+
+        let registry = svc.registry();
+        let items = registry
+            .all()
+            .iter()
+            .map(|rules| {
+                let origin = adapter_origin(&rules.preset, &configured, &built_in);
+                let spec = rules.adapter.clone().unwrap_or_default();
+                farcooler_protocol::v1::Adapter {
+                    preset: rules.preset.clone(),
+                    program: spec.program,
+                    args: spec.args,
+                    env: spec.env.into_iter().collect(),
+                    commands: rules.commands.clone(),
+                    identity: rules.identity.clone(),
+                    blocked: rules.blocked.clone(),
+                    working: rules.working.clone(),
+                    origin: origin as i32,
+                }
+            })
+            .collect();
+        farcooler_protocol::v1::AdapterList { items }
+    }
+
+    /// A wire adapter as the config writer wants it.
+    fn adapter_table(
+        wire_adapter: &farcooler_protocol::v1::Adapter,
+    ) -> farcooler_core::config::AdapterTable {
+        farcooler_core::config::AdapterTable {
+            program: wire_adapter.program.trim().to_string(),
+            args: wire_adapter.args.clone(),
+            env: wire_adapter.env.clone().into_iter().collect(),
+            commands: wire_adapter.commands.clone(),
+            identity: wire_adapter.identity.clone(),
+            blocked: wire_adapter.blocked.clone(),
+            working: wire_adapter.working.clone(),
+        }
     }
 
     async fn dispatch(&self, req: Request) -> Result<result::Value> {
@@ -282,6 +438,137 @@ impl Rpc {
                     })
                     .collect();
                 Ok(result::Value::ThemeList(farcooler_protocol::v1::ThemeList { items }))
+            }
+
+            // MARK: - Machine settings
+            //
+            // Editing what `config.toml` holds, from a settings screen instead
+            // of an ssh session and a text editor.
+            //
+            // Every write goes through `farcooler_core::config`, which is
+            // format-preserving and atomic and refuses a malformed file — see
+            // the module's own comment on why that matters for a file a
+            // dotfiles repository tracks. Nothing here rewrites the whole
+            // document, so a hand edit to another table survives a write here.
+            //
+            // `config_path()` rather than a path from the request: a client
+            // naming the file it wanted written would be a client that could
+            // name any file.
+            "settings.set_branch_prefix" => {
+                let Some(request::Payload::HostSettings(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let path =
+                    farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
+                farcooler_core::config::write_branch_prefix(&path, &p.branch_prefix)
+                    .map_err(|e| Self::config_write_failed("the branch prefix", e))?;
+                // Read back rather than echoing what was sent: the writer trims,
+                // so what the file now says is not always what arrived.
+                Ok(result::Value::Host(self.host_now(svc).await?))
+            }
+
+            "theme.upsert" => {
+                let Some(request::Payload::Theme(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let theme = Self::theme_from_wire(&p)?;
+                let path =
+                    farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
+                farcooler_core::config::write_theme(&path, &theme)
+                    .map_err(|e| Self::config_write_failed("the theme", e))?;
+                Ok(result::Value::ThemeList(Self::host_themes()))
+            }
+
+            "theme.delete" => {
+                // `TypedConfirmation` carries the NAME, not a confirmation of
+                // intent: deleting a theme touches no files and is undone by
+                // saving it again, so it needs no typed gate.
+                let Some(request::Payload::TypedConfirmation(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let path =
+                    farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
+                farcooler_core::config::delete_theme(&path, p.typed_confirmation.trim())
+                    .map_err(|e| Self::config_write_failed("the theme", e))?;
+                Ok(result::Value::ThemeList(Self::host_themes()))
+            }
+
+            "adapter.list" => Ok(result::Value::AdapterList(Self::adapters(svc))),
+
+            "adapter.upsert" => {
+                let Some(request::Payload::Adapter(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let preset = p.preset.trim().to_string();
+                farcooler_core::validate::command_preset(&preset)?;
+                // The same guard `Registry::merge` applies when reading, applied
+                // before writing: an adapter with no program cannot start, and a
+                // table for one would offer a chat toggle that silently fails.
+                if p.program.trim().is_empty() {
+                    return Err(DomainError::InvalidArgument { what: "program" });
+                }
+                let path =
+                    farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
+                farcooler_core::config::write_adapter(&path, &preset, &Self::adapter_table(&p))
+                    .map_err(|e| Self::config_write_failed("the adapter", e))?;
+                // The one place the registry is not read per call, so the one
+                // place it has to be told.
+                svc.reload_registry();
+                Ok(result::Value::AdapterList(Self::adapters(svc)))
+            }
+
+            "adapter.delete" => {
+                let Some(request::Payload::TypedConfirmation(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let path =
+                    farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
+                farcooler_core::config::delete_adapter(&path, p.typed_confirmation.trim())
+                    .map_err(|e| Self::config_write_failed("the adapter", e))?;
+                svc.reload_registry();
+                Ok(result::Value::AdapterList(Self::adapters(svc)))
+            }
+
+            "adapter.test" => {
+                let Some(request::Payload::Adapter(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                // Tests what the CLIENT is holding, not what is saved. The point
+                // is to answer "will this work" before committing it to the
+                // file, so an unsaved form is exactly the input this wants.
+                //
+                // Blocking, on a blocking pool: a cold `npx` fetches a package
+                // on first use and the bound is 90 seconds, which is far too
+                // long to hold a runtime worker.
+                let spec = farcooler_core::activity::AdapterSpec {
+                    program: p.program.trim().to_string(),
+                    args: p.args.clone(),
+                    env: p.env.clone().into_iter().collect(),
+                };
+                let outcome = tokio::task::spawn_blocking(move || {
+                    farcooler_core::activity::handshake(
+                        &spec,
+                        farcooler_core::activity::HANDSHAKE_TIMEOUT,
+                    )
+                })
+                .await
+                .map_err(|_| DomainError::OperationFailed)?;
+
+                Ok(result::Value::AdapterTestResult(match outcome {
+                    Ok(shake) => farcooler_protocol::v1::AdapterTestResult {
+                        ok: true,
+                        reported: shake.reported,
+                        failure: String::new(),
+                    },
+                    // The adapter's own words, not "the test failed": the
+                    // message is the only clue about which field is wrong, and
+                    // it is going straight into a form.
+                    Err(failure) => farcooler_protocol::v1::AdapterTestResult {
+                        ok: false,
+                        reported: String::new(),
+                        failure,
+                    },
+                }))
             }
 
             "repository.list" => {
@@ -1097,6 +1384,54 @@ mod tests {
         assert_eq!(required_scope("repository_root.remove"), Some(Scope::HostAdmin));
         // Paths live behind the same gate, so listing roots is admin too.
         assert_eq!(required_scope("repository_root.list"), Some(Scope::HostAdmin));
+    }
+
+    #[test]
+    fn every_machine_setting_method_requires_host_admin() {
+        // Writes, because they touch a file in the user's home directory on a
+        // machine that may not be the one asking.
+        for method in [
+            "settings.set_branch_prefix",
+            "theme.upsert",
+            "theme.delete",
+            "adapter.upsert",
+            "adapter.delete",
+            "adapter.test",
+        ] {
+            assert_eq!(required_scope(method), Some(Scope::HostAdmin), "{method}");
+        }
+        // And the READ, which is the one worth stating on its own: it reports
+        // `program`, `args` and `env` — local paths, and an API key for any
+        // agent that needs one. `theme.list` next to it is `read` because a
+        // colour is not a secret; an adapter's environment is.
+        assert_eq!(required_scope("adapter.list"), Some(Scope::HostAdmin));
+        assert_eq!(required_scope("theme.list"), Some(Scope::Read));
+    }
+
+    #[test]
+    fn an_adapter_reports_where_it_came_from() {
+        use farcooler_protocol::v1::AdapterOrigin;
+        let set = |names: &[&str]| -> std::collections::BTreeSet<String> {
+            names.iter().map(|s| s.to_string()).collect()
+        };
+        let built_in = set(&["claude", "codex"]);
+
+        // No table for it: whatever is in force is what shipped.
+        assert_eq!(
+            adapter_origin("claude", &set(&[]), &built_in),
+            AdapterOrigin::BuiltIn
+        );
+        // A table shadowing a shipped name. The editor offers "Revert to
+        // Default" on exactly this, and reverting deletes the table.
+        assert_eq!(
+            adapter_origin("claude", &set(&["claude"]), &built_in),
+            AdapterOrigin::Override
+        );
+        // A table for an agent Far Cooler does not ship — nothing to revert to.
+        assert_eq!(
+            adapter_origin("my-agent", &set(&["my-agent"]), &built_in),
+            AdapterOrigin::User
+        );
     }
 
     #[test]
