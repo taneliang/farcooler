@@ -152,6 +152,19 @@ size_t farcooler_vt_take_writes(void *handle, uint8_t *out, size_t capacity);
 bool farcooler_vt_take_bell(void *handle);
 
 /*
+ * Take text the program asked to put on the clipboard (OSC 52).
+ *
+ * Returns the byte length needed and drains only when it fits, so a short
+ * buffer cannot truncate a copy. Put the result on the platform clipboard.
+ *
+ * There is deliberately no read counterpart: a program asking for the
+ * clipboard's CONTENTS is refused by the parser and never reaches the handle.
+ * Copy is a program handing you something; paste is a program taking
+ * something, and Far Cooler runs agents on machines nobody is watching.
+ */
+size_t farcooler_vt_take_clipboard(void *handle, uint8_t *out, size_t capacity);
+
+/*
  * The title the program last set, or NULL if it never set one. Borrowed;
  * valid until the next feed.
  */

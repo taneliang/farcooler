@@ -91,6 +91,11 @@ pub struct VtHandle {
     cells: Vec<VtCell>,
     /// Bytes the program wants written back to the pty, drained by the caller.
     pending_writes: Vec<u8>,
+    /// Text the program asked to put on the clipboard (OSC 52), drained by the
+    /// caller. Not a `CString`, because clipboard text may legitimately be
+    /// almost anything and an interior NUL would turn the whole copy into
+    /// `None` rather than a truncated one.
+    pending_clipboard: Option<String>,
     title: Option<std::ffi::CString>,
     /// Bumped on every feed, so a renderer can skip a redraw that would paint
     /// exactly what is already on screen. This is what keeps an idle terminal
@@ -106,6 +111,7 @@ pub extern "C" fn farcooler_vt_new(columns: u16, rows: u16) -> *mut c_void {
         terminal: Terminal::new(columns, rows),
         cells: Vec::new(),
         pending_writes: Vec::new(),
+        pending_clipboard: None,
         title: None,
         revision: 0,
         bell: false,
@@ -141,6 +147,9 @@ pub unsafe extern "C" fn farcooler_vt_feed(handle: *mut c_void, bytes: *const u8
     h.pending_writes.extend_from_slice(&signals.pty_writes);
     if let Some(t) = signals.title {
         h.title = std::ffi::CString::new(t).ok();
+    }
+    if let Some(text) = signals.clipboard {
+        h.pending_clipboard = Some(text);
     }
 }
 
@@ -287,6 +296,35 @@ pub unsafe extern "C" fn farcooler_vt_take_bell(handle: *mut c_void) -> bool {
         Some(h) => std::mem::take(&mut h.bell),
         None => false,
     }
+}
+
+/// Take text the program asked to put on the clipboard (OSC 52).
+///
+/// Returns the byte length it needs and drains only when it fits, so a short
+/// buffer cannot truncate a copy — half a copied command is worse than no copy.
+/// Length is bounded by the parser's own OSC limit; a second cap invented here
+/// would be a number with nothing behind it.
+///
+/// There is deliberately no read counterpart. A program asking for the
+/// clipboard's contents is refused by the parser and never reaches this handle:
+/// copy is a program handing you something, paste is a program taking
+/// something, and this app exists to run agents on machines nobody is watching.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_vt_take_clipboard(
+    handle: *mut c_void,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
+    let Some(text) = h.pending_clipboard.as_ref() else { return 0 };
+    let bytes = text.as_bytes();
+    if bytes.len() > capacity || out.is_null() {
+        return bytes.len();
+    }
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+    let n = bytes.len();
+    h.pending_clipboard = None;
+    n
 }
 
 /// The current window title, or null if the program never set one.
@@ -686,6 +724,7 @@ mod tests {
             assert!(!farcooler_vt_snapshot(null, std::ptr::null_mut()));
             assert_eq!(farcooler_vt_take_writes(null, std::ptr::null_mut(), 0), 0);
             assert!(!farcooler_vt_take_bell(null));
+            assert_eq!(farcooler_vt_take_clipboard(null, std::ptr::null_mut(), 0), 0);
             assert!(farcooler_vt_title(null).is_null());
             let mut span =
                 VtUrlSpan { start_row: 0, start_column: 0, end_row: 0, end_column: 0 };
@@ -809,6 +848,35 @@ mod tests {
         let n = unsafe { farcooler_vt_encode_key(h, KEY_UP, 0, one.as_mut_ptr(), 1) };
         assert_eq!(n, 0);
         assert_eq!(one[0], 0);
+        unsafe { farcooler_vt_free(h) };
+    }
+
+    #[test]
+    fn the_clipboard_crosses_the_boundary_and_drains_once() {
+        let h = farcooler_vt_new(40, 6);
+        feed(h, b"\x1b]52;c;aGVsbG8=\x07");
+
+        let needed = unsafe { farcooler_vt_take_clipboard(h, std::ptr::null_mut(), 0) };
+        assert_eq!(needed, 5);
+
+        // A short buffer must not truncate: half a copied command is worse
+        // than no copy at all.
+        let mut one = [0u8; 1];
+        assert_eq!(unsafe { farcooler_vt_take_clipboard(h, one.as_mut_ptr(), 1) }, 5);
+        assert_eq!(one[0], 0);
+
+        let mut buf = vec![0u8; needed];
+        assert_eq!(
+            unsafe { farcooler_vt_take_clipboard(h, buf.as_mut_ptr(), needed) },
+            5
+        );
+        assert_eq!(&buf, b"hello");
+        assert_eq!(
+            unsafe { farcooler_vt_take_clipboard(h, buf.as_mut_ptr(), needed) },
+            0,
+            "taking drains"
+        );
+
         unsafe { farcooler_vt_free(h) };
     }
 
