@@ -35,6 +35,14 @@ struct QuickCreate: View {
     let onSubmit: (String, String, String, String) -> Void
     let onResume: () -> Void
     let onClose: () -> Void
+    /// What the CHOSEN machine says branch names start with.
+    ///
+    /// Per machine rather than one setting for the app: the branch is created on
+    /// the machine holding the project, and that machine's convention is the one
+    /// that matters. Looked up by the caller from `chosen`'s host for the same
+    /// reason `onSubmit` carries the host — a repository resolved without it is
+    /// how work starts on the wrong machine with no error at all.
+    var branchPrefix: (String) -> String = { _ in "" }
 
     /// The draft survives closing the panel.
     ///
@@ -74,7 +82,9 @@ struct QuickCreate: View {
         return "\(entry.repository.displayName) — \(host)"
     }
 
-    private var branch: String { Branch.slug(from: text) }
+    private var branch: String {
+        Branch.slug(from: text, prefix: branchPrefix(chosen?.host ?? ""))
+    }
     private var canSubmit: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chosen != nil
     }
@@ -182,13 +192,21 @@ struct QuickCreate: View {
 
 /// Turning a sentence into a branch name.
 enum Branch {
-    /// A git-safe slug.
+    /// A git-safe slug, behind whatever the machine says branches start with.
     ///
     /// Conservative on purpose: git accepts far more than this, but a branch
     /// name is something people type, paste into a PR title and see in a CI
     /// log, and one carrying punctuation from a sentence is a small tax paid
     /// repeatedly.
-    static func slug(from text: String) -> String {
+    ///
+    /// The prefix is applied HERE, on the client, rather than by the daemon —
+    /// because the composer shows you the branch it is about to create, and a
+    /// prefix added on the far side would make that preview a lie. The daemon
+    /// still validates the finished name, which is the check that protects git.
+    ///
+    /// The 48-character budget is spent on the slug, not on the result: a long
+    /// prefix must not be able to eat the part that says what the task was.
+    static func slug(from text: String, prefix: String = "") -> String {
         let lowered = text.lowercased()
         var out = ""
         var lastWasDash = true  // leading dashes are dropped
@@ -205,7 +223,7 @@ enum Branch {
             if out.count >= 48 { break }
         }
         while out.hasSuffix("-") { out.removeLast() }
-        return out.isEmpty ? "task" : out
+        return prefix + (out.isEmpty ? "task" : out)
     }
 
     /// A short human title, for a sidebar row.

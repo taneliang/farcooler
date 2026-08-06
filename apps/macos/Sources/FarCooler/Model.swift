@@ -11,14 +11,24 @@ struct Fleet: Decodable, Equatable {
     var runtimeHealthy: Bool
     var livePanes: Int
     var workspaces: [Workspace]
+    /// What this machine says a derived branch name starts with.
+    ///
+    /// Optional, by the rule stated on `Workspace` below: a client meeting an
+    /// older daemon must not fail to decode the entire fleet over one absent
+    /// key. `nil` and `""` are both "no prefix from this machine" here — the
+    /// distinction between unset and deliberately empty is the daemon's to draw,
+    /// and it has already drawn it by the time this arrives.
+    var branchPrefix: String?
 
     enum CodingKeys: String, CodingKey {
         case runtimeHealthy = "runtime_healthy"
         case livePanes = "live_panes"
         case workspaces
+        case branchPrefix = "branch_prefix"
     }
 
-    static let empty = Fleet(runtimeHealthy: false, livePanes: 0, workspaces: [])
+    static let empty =
+        Fleet(runtimeHealthy: false, livePanes: 0, workspaces: [], branchPrefix: nil)
 }
 
 /// A worktree.
