@@ -24,6 +24,43 @@ final class Preferences: ObservableObject {
         didSet { revision += 1 }
     }
 
+    /// Bumped when the sidebar's own shape changes.
+    ///
+    /// Separate from `revision`, which is documented as what a TERMINAL renders
+    /// from: collapsing a project in the sidebar is not one of those, and
+    /// sharing the counter would repaint every terminal on screen to hide a
+    /// couple of rows in a list.
+    @Published private(set) var sidebarRevision = 0
+
+    /// Which projects are collapsed in the sidebar, keyed by `groupKey`.
+    ///
+    /// Persisted, unlike the sidebar's `hiddenExpanded`, and deliberately:
+    /// collapsing a repository is a statement about how you want the sidebar to
+    /// look, and one that reset on every launch would have to be re-made on
+    /// every launch.
+    ///
+    /// Stored as one newline-joined string because `@AppStorage` cannot hold a
+    /// `Set`. Newline rather than anything else because `groupKey` already uses
+    /// `\u{1}` as its own host/project separator, and neither a machine name nor
+    /// a project display name can contain a newline.
+    @AppStorage("sidebar.collapsedProjects") private var collapsedProjects = ""
+
+    func isProjectCollapsed(_ key: String) -> Bool {
+        !key.isEmpty && collapsedProjects.split(separator: "\n").contains(Substring(key))
+    }
+
+    func toggleProject(_ key: String) {
+        guard !key.isEmpty else { return }
+        var keys = collapsedProjects.split(separator: "\n").map(String.init)
+        if let at = keys.firstIndex(of: key) {
+            keys.remove(at: at)
+        } else {
+            keys.append(key)
+        }
+        collapsedProjects = keys.joined(separator: "\n")
+        sidebarRevision += 1
+    }
+
     /// Remove a terminal's record once its process is gone.
     ///
     /// On by default, because a terminal is its process: when that exits there
