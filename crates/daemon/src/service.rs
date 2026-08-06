@@ -776,16 +776,19 @@ impl Service {
 
     /// Remove a workspace's worktree.
     ///
-    /// The most destructive action in the product. Refused while any managed
-    /// terminal is running OR starting, matching `remove_terminal` exactly —
-    /// a terminal mid-launch is exactly as alive as one already confirmed.
-    /// Also refused outright when the tmux inventory cannot be trusted at
-    /// all: `derive_terminal` reports EVERY terminal as `Lost` when the
-    /// inventory is unhealthy (`crates/core/src/derive.rs`), which would
-    /// otherwise let a momentarily unreachable tmux server sail straight past
-    /// the running check and delete the directory out from under a process
-    /// that may still be alive — exactly what `remove_root`'s identical guard
-    /// exists to prevent.
+    /// The most destructive action in the product. It CLOSES every terminal in
+    /// the workspace rather than refusing while one is running: the user asked
+    /// for the worktree gone, and telling them to go and stop four terminals
+    /// first is telling them to do the thing they just asked for. What the old
+    /// refusal protected — a directory deleted out from under a live process —
+    /// is protected by killing the process first instead.
+    ///
+    /// Still refused outright when the tmux inventory cannot be trusted at all:
+    /// `derive_terminal` reports EVERY terminal as `Lost` when the inventory is
+    /// unhealthy (`crates/core/src/derive.rs`), so a momentarily unreachable
+    /// tmux server is exactly the condition under which "nothing is running
+    /// here" is a lie. That check is what makes closing the terminals safe, and
+    /// it comes first for that reason.
     ///
     /// It never deletes the branch: git history and anything pushed survive
     /// untouched. A dirty worktree still requires the caller to have
@@ -825,13 +828,33 @@ impl Service {
             return Err(DomainError::TmuxUnavailable);
         }
 
-        let view = self.workspace_view(&ws).await?;
-        if view
-            .terminals
-            .iter()
-            .any(|t| matches!(t.state(), TerminalState::Running | TerminalState::Starting))
-        {
-            return Err(DomainError::RunningProcesses);
+        // Closing what is running here is part of removing it, not a reason to
+        // refuse. This used to return `RunningProcesses`, which meant a client
+        // told the user to go and stop four terminals by hand — the thing they
+        // had just asked for by pressing Remove.
+        //
+        // The guard that replaced existed to keep a directory from being deleted
+        // out from under a live process, and that property is KEPT: the process
+        // is killed first, which is a different thing from skipping the check.
+        // The unhealthy-inventory refusal above is what makes this safe to do at
+        // all — without it, "nothing is running here" is a lie precisely when
+        // tmux is unreachable, which is why it must stay above this.
+        //
+        // Two steps per terminal rather than one, because that is the sequence
+        // that already works: `stop_terminal` kills the pane and sets intent
+        // Stopped, which is what makes the `remove_terminal` that follows pass
+        // its own running check. `remove_root` deletes its workspaces' terminals
+        // through the same pair, for the stated reason that a hand-rolled
+        // deletion beside it would orphan the pane `remain-on-exit` retains.
+        //
+        // `stop_terminal`'s result is discarded and `remove_terminal`'s is not,
+        // and the asymmetry is deliberate. A terminal whose pane is already gone
+        // has nothing to stop, and that is no reason to keep the worktree; a
+        // record that will not delete is, because `terminals.workspace_id` is a
+        // foreign key with no cascade and the workspace row is about to go.
+        for term in self.store.list_terminals_for_workspace(ws.id)? {
+            let _ = self.stop_terminal(term.id).await;
+            self.remove_terminal(term.id).await?;
         }
 
         let lock = self.repo_lock(repo.id);
@@ -2228,14 +2251,26 @@ mod remove_worktree_tests {
         assert!(!svc.removal_needs_confirmation(ws.id).await.unwrap());
     }
 
-    /// `remove_worktree` must refuse a `Starting` terminal exactly as it
-    /// refuses a `Running` one, matching `remove_terminal`'s own guard. Built
-    /// the same way `remove_root_tests::a_starting_terminal_blocks_removal_same_as_a_running_one`
+    /// `remove_worktree` CLOSES a live terminal rather than refusing over it.
+    ///
+    /// This test asserted the opposite until a user review pointed out that
+    /// being told to stop four terminals by hand, after pressing Remove, is
+    /// being told to do the thing you just asked for. The rule changed; the
+    /// safety did not — see `remove_worktree`'s own comment on why killing the
+    /// process first is different from skipping the check.
+    ///
+    /// `remove_root` still refuses, and deliberately: removing a root revokes
+    /// permission over a whole directory tree that may hold work in several
+    /// worktrees, so there the refusal is the user's cue to look at what is
+    /// running before they take all of it away.
+    ///
+    /// Built the same way `remove_root_tests::a_starting_terminal_blocks_removal_same_as_a_running_one`
     /// is: a terminal created through the store directly, with no live pane
     /// behind it, derives `Starting` rather than `Running` as long as the
-    /// inventory itself is healthy.
+    /// inventory itself is healthy. `Starting` is the harder case — a terminal
+    /// mid-launch is exactly as alive as one already confirmed.
     #[tokio::test]
-    async fn a_starting_terminal_blocks_worktree_removal_same_as_a_running_one() {
+    async fn a_starting_terminal_is_closed_by_worktree_removal_rather_than_blocking_it() {
         let (dir, svc, repo) = crate::test_support::fixture().await;
         let side = dir.path().join("side");
         git::git(
@@ -2271,10 +2306,19 @@ mod remove_worktree_tests {
              this test to prove what it claims to: {derived:?}"
         );
 
-        match svc.remove_worktree(ws.id).await {
-            Err(DomainError::RunningProcesses) => {}
-            other => panic!("expected RunningProcesses for a starting terminal, got {other:?}"),
-        }
+        svc.remove_worktree(ws.id).await.expect("a live terminal is closed, not a refusal");
+
+        // The terminal's record goes with it. Left behind it would point at a
+        // workspace row that no longer exists, and `terminals.workspace_id` has
+        // no cascade to clean that up.
+        assert!(
+            svc.store.get_terminal(term.id).is_err(),
+            "the terminal record must go with the worktree"
+        );
+        assert!(
+            svc.store.list_workspaces_for_repository(repo).unwrap().iter().all(|w| w.id != ws.id),
+            "the workspace row is gone"
+        );
     }
 
     /// The main checkout is refused by `ws.is_main_checkout`, a fact read
