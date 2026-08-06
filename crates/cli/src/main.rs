@@ -317,7 +317,25 @@ enum RootCmd {
 enum ThemeCmd {
     /// Every theme this machine offers: the built-ins, plus whatever
     /// `[themes.<name>]` in config.toml adds.
-    List,
+    List {
+        /// Only the themes this machine's config.toml defines.
+        ///
+        /// What a settings editor wants: the merged list cannot say which
+        /// entries the file actually owns, and a built-in shown as if it did
+        /// would offer a Delete that does nothing.
+        #[arg(long)]
+        only_host: bool,
+    },
+    /// Write one `[themes.<name>]` table, from JSON on stdin.
+    ///
+    /// stdin rather than nineteen positional colours: nineteen of anything on a
+    /// command line is a contract nobody can read and one transposition away
+    /// from a colour nobody chose. This is the apps' channel, not a hand-typed
+    /// one — `$EDITOR ~/.config/farcooler/config.toml` is better at that.
+    Set {
+        #[arg(long, required = true)]
+        json_stdin: bool,
+    },
     /// Remove one `[themes.<name>]` table.
     ///
     /// A name that is not there is success, because this is also how a client
@@ -338,13 +356,29 @@ enum SettingsCmd {
 enum AdapterCmd {
     /// Every adapter in force, and whether it is shipped, overridden or yours.
     List,
+    /// Write one `[adapters.<name>]` table, from JSON on stdin.
+    ///
+    /// The apps' channel, for the reason `theme set` is: an adapter is seven
+    /// fields including four string arrays, and flags for all of them would be a
+    /// worse editor than the file it replaces.
+    Set {
+        #[arg(long, required = true)]
+        json_stdin: bool,
+    },
     /// Prove one works: start it and complete an ACP handshake.
     ///
     /// Checks LAUNCH, not detection. A pass means the adapter starts and speaks
     /// ACP; whether the agent gets recognized in a pane depends on the
     /// `identity`, `blocked` and `working` strings, which nothing here can
     /// exercise.
-    Test { preset: String },
+    ///
+    /// Naming a preset tests what is IN FORCE. `--json-stdin` tests whatever is
+    /// piped in, which is what a form that has not been saved yet needs.
+    Test {
+        preset: Option<String>,
+        #[arg(long, conflicts_with = "preset")]
+        json_stdin: bool,
+    },
     /// Remove one `[adapters.<name>]` table, restoring the shipped one if this
     /// was overriding it.
     Delete { preset: String },
@@ -965,22 +999,43 @@ async fn adapter(host: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible {
             }
         }
 
-        AdapterCmd::Test { preset } => {
-            // Tests what is IN FORCE for that preset, which is what a terminal
-            // caller means by naming one. The apps test an unsaved form instead,
-            // over the same method.
-            let r = link.call(req("adapter.list")).await?;
+        AdapterCmd::Set { .. } => {
+            let adapter = adapter_from_json(&read_json_stdin()?);
+            let preset = adapter.preset.clone();
+            let r = link.call(with(req("adapter.upsert"), request::Payload::Adapter(adapter))).await?;
             let result::Value::AdapterList(list) = expect_value(r.value, "adapters")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
-            let found = list
-                .items
-                .into_iter()
-                .find(|a| a.preset == preset)
-                .ok_or_else(|| format!("no adapter named {preset}"))?;
-            if found.program.is_empty() {
-                return Err(format!("{preset} has no adapter, so it stays a terminal").into());
+            if json {
+                println!("{}", serde_json::json!({ "adapters": list.items.len() }));
+            } else {
+                println!("saved adapter {preset}");
             }
+        }
+
+        AdapterCmd::Test { preset, json_stdin } => {
+            // Two callers, two inputs. A terminal names a preset and means
+            // "test what is in force"; an app pipes a form and means "will this
+            // work if I save it". Same method underneath.
+            let found = if json_stdin {
+                adapter_from_json(&read_json_stdin()?)
+            } else {
+                let preset = preset.ok_or("name an adapter, or pass --json-stdin")?;
+                let r = link.call(req("adapter.list")).await?;
+                let result::Value::AdapterList(list) = expect_value(r.value, "adapters")? else {
+                    return Err("the daemon returned the wrong resource".into());
+                };
+                let found = list
+                    .items
+                    .into_iter()
+                    .find(|a| a.preset == preset)
+                    .ok_or_else(|| format!("no adapter named {preset}"))?;
+                if found.program.is_empty() {
+                    return Err(format!("{preset} has no adapter, so it stays a terminal").into());
+                }
+                found
+            };
+            let preset = found.preset.clone();
 
             let r = link.call(with(req("adapter.test"), request::Payload::Adapter(found))).await?;
             let result::Value::AdapterTestResult(outcome) = expect_value(r.value, "test result")?
@@ -1036,6 +1091,48 @@ async fn adapter(host: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible {
     Ok(())
 }
 
+/// Read one JSON value from stdin.
+///
+/// The apps' channel into the two commands that would otherwise need a flag per
+/// field. Whatever they send is a value they already hold, so there is nothing
+/// to spell out on a command line and nothing to transpose.
+fn read_json_stdin() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    use std::io::Read;
+    let mut body = String::new();
+    std::io::stdin().read_to_string(&mut body)?;
+    Ok(serde_json::from_str(&body)?)
+}
+
+/// An adapter out of the JSON an app sends.
+fn adapter_from_json(payload: &serde_json::Value) -> farcooler_protocol::v1::Adapter {
+    let strings = |key: &str| -> Vec<String> {
+        payload[key]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default()
+    };
+    farcooler_protocol::v1::Adapter {
+        preset: payload["preset"].as_str().unwrap_or_default().to_string(),
+        program: payload["program"].as_str().unwrap_or_default().to_string(),
+        args: strings("args"),
+        env: payload["env"]
+            .as_object()
+            .map(|o| {
+                o.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        commands: strings("commands"),
+        identity: strings("identity"),
+        blocked: strings("blocked"),
+        working: strings("working"),
+        // The daemon decides this on the way back out. A caller claiming an
+        // origin would be claiming something only the daemon can know.
+        origin: 0,
+    }
+}
+
 /// Where an adapter came from, for a terminal to read.
 fn origin_label(origin: i32) -> &'static str {
     match farcooler_protocol::v1::AdapterOrigin::try_from(origin) {
@@ -1071,7 +1168,39 @@ async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
         }
         return Ok(());
     }
-    let ThemeCmd::List = cmd else { unreachable!("Delete returned above") };
+    if let ThemeCmd::Set { .. } = &cmd {
+        let payload: serde_json::Value = read_json_stdin()?;
+        let ansi: Vec<u32> = payload["ansi"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect())
+            .unwrap_or_default();
+        if ansi.len() != 16 {
+            return Err("a theme needs exactly sixteen ANSI colours".into());
+        }
+        let wire_theme = farcooler_protocol::v1::Theme {
+            name: payload["name"].as_str().unwrap_or_default().to_string(),
+            dark: payload["dark"].as_bool().unwrap_or(true),
+            background: payload["background"].as_u64().unwrap_or(0) as u32,
+            foreground: payload["foreground"].as_u64().unwrap_or(0) as u32,
+            cursor: payload["cursor"].as_u64().unwrap_or(0) as u32,
+            ansi,
+        };
+        let name = wire_theme.name.clone();
+
+        let mut link = connect_to(host).await?;
+        let r = link.call(with(req("theme.upsert"), request::Payload::Theme(wire_theme))).await?;
+        let result::Value::ThemeList(list) = expect_value(r.value, "themes")? else {
+            return Err("the daemon returned the wrong resource".into());
+        };
+        if json {
+            println!("{}", serde_json::json!({ "themes": list.items.len() }));
+        } else {
+            println!("saved theme {name}");
+        }
+        return Ok(());
+    }
+
+    let ThemeCmd::List { only_host } = cmd else { unreachable!("handled above") };
 
     // The host's own, over whichever transport reaches it. A machine that
     // cannot be reached still has the built-ins — the picker should not empty
@@ -1080,6 +1209,39 @@ async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
         Ok(mut link) => list_themes(&mut link).await.unwrap_or_default(),
         Err(_) => Vec::new(),
     };
+
+    if only_host {
+        // What the FILE defines, nothing else. A settings editor needs to know
+        // which entries it can delete, and the merged list below cannot say.
+        // Whether each one shadows something Far Cooler ships, computed here
+        // because this is the one place both halves are already in hand: the
+        // built-in table is compiled in and the host's list just arrived. A
+        // client would otherwise need a third call to work it out.
+        let shipped: std::collections::BTreeSet<String> =
+            farcooler_core::theme::built_in().into_iter().map(|t| t.name).collect();
+        if json {
+            let items: Vec<_> = custom
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "name": t.name,
+                        "dark": t.dark,
+                        "background": t.background,
+                        "foreground": t.foreground,
+                        "cursor": t.cursor,
+                        "ansi": t.ansi,
+                        "shadowsBuiltIn": shipped.contains(&t.name),
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::json!({ "themes": items }));
+        } else {
+            for t in &custom {
+                println!("{}", t.name);
+            }
+        }
+        return Ok(());
+    }
 
     let mut themes = farcooler_core::theme::built_in();
     for one in custom {
