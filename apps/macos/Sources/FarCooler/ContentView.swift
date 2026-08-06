@@ -272,7 +272,8 @@ struct ContentView: View {
                         showQuickCreate = false
                         showResumeBranch = true
                     },
-                    onClose: { showQuickCreate = false }
+                    onClose: { showQuickCreate = false },
+                    branchPrefix: { host in store.clients[host]?.fleet.branchPrefix ?? "" }
                 )
                 .padding(.top, 14)
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -364,7 +365,8 @@ struct ContentView: View {
                 // clicked on; nil is the sidebar's own `+` and the
                 // empty-state button, neither of which named a machine, so
                 // the sheet's own picker is left to choose one.
-                preselectedHost: newWorkspaceHost ?? ""
+                preselectedHost: newWorkspaceHost ?? "",
+                branchPrefix: { host in store.clients[host]?.fleet.branchPrefix ?? "" }
             ) { host, repo, task, branch, base in
                 if let why = store.refusal(for: host) {
                     return "Cannot do that: \(why)"
@@ -378,13 +380,15 @@ struct ContentView: View {
         .sheet(item: $removeWorkspace) { ws in
             RemoveWorkspaceSheet(
                 workspace: ws,
-                // Matches the daemon's own gate (`Running | Starting`): a
-                // terminal that has not finished starting yet is still one
-                // the daemon will refuse to remove out from under.
-                hasRunningTerminals: ws.terminals.contains {
+                // `Running | Starting`, matching what the daemon actually
+                // closes: a terminal mid-launch is as alive as one already
+                // confirmed. A count now rather than a flag — removal closes
+                // them, so the sheet reports the consequence instead of
+                // refusing over it.
+                runningCount: ws.terminals.filter {
                     let kind = StateKind.parse($0.state)
                     return kind == .running || kind == .starting
-                }
+                }.count
             ) { typed in
                 let result = await act(
                     on: ws, default: .failed("This machine cannot be reached right now.")
@@ -591,6 +595,62 @@ struct ContentView: View {
         Task { await newMainTerminal(host: host, project: project) }
     }
 
+    /// One project's worktrees, plus its hidden section.
+    ///
+    /// Lifted out of `sidebar` when projects became collapsible: the rows had to
+    /// go behind an `if`, and wrapping fifty lines of view builder in one would
+    /// have re-indented the whole block to say one thing. A builder method is
+    /// what this file already does for the detail side — see `tiled(_:group:)`.
+    @ViewBuilder
+    private func projectRows(_ group: ProjectGroup, key: String, usable: Bool) -> some View {
+        ForEach(group.shown) { ws in
+            WorkspaceSection(
+                workspace: ws,
+                isExpanded: expanded.contains(ws.id),
+                selection: $selection,
+                onToggle: { toggle(ws.id) },
+                onNewTerminal: { newTerminal(in: ws) },
+                onHide: {
+                    Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } }
+                },
+                onUnhide: {
+                    Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
+                },
+                onRemove: { removeWorkspace = ws },
+                onTerminalAction: { term, action in
+                    Task { await run(action, on: term, in: ws) }
+                },
+                layouts: store.client(for: ws)?.layouts[ws.id] ?? [],
+                onMoveToLayout: { term, group in
+                    moveToLayout(term, in: ws, group: group)
+                },
+                onDropTogether: { dragged, onto in
+                    placePane(dragged, onto: onto.id, side: .right, in: ws)
+                },
+                tiled: Set(store.client(for: ws)?.activeGroup(ws.id)?.terminals ?? []),
+                onEditorError: { editorError = $0 },
+                usable: usable
+            )
+        }
+        if !group.hidden.isEmpty {
+            HiddenWorktrees(
+                project: key,
+                worktrees: group.hidden,
+                isExpanded: hiddenExpanded.contains(key),
+                onToggle: {
+                    if hiddenExpanded.contains(key) {
+                        hiddenExpanded.remove(key)
+                    } else {
+                        hiddenExpanded.insert(key)
+                    }
+                },
+                onUnhide: { ws in
+                    Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
+                }
+            )
+        }
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
             sidebarHeader
@@ -652,53 +712,17 @@ struct ContentView: View {
                                 host: group.host,
                                 hostState: store.state(of: group.host),
                                 showHost: isSilentHost ? false : showHosts,
-                                onReconnect: { store.reconnect(group.host) }
+                                onReconnect: { store.reconnect(group.host) },
+                                isCollapsed: preferences.isProjectCollapsed(key),
+                                // A silent host's header has no worktrees under
+                                // it, so there is nothing for a chevron to do.
+                                onToggleCollapse: isSilentHost
+                                    ? nil : { preferences.toggleProject(key) }
                             )
-                            ForEach(group.shown) { ws in
-                                WorkspaceSection(
-                                    workspace: ws,
-                                    isExpanded: expanded.contains(ws.id),
-                                    selection: $selection,
-                                    onToggle: { toggle(ws.id) },
-                                    onNewTerminal: { newTerminal(in: ws) },
-                                    onHide: {
-                                        Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } }
-                                    },
-                                    onUnhide: {
-                                        Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
-                                    },
-                                    onRemove: { removeWorkspace = ws },
-                                    onTerminalAction: { term, action in
-                                        Task { await run(action, on: term, in: ws) }
-                                    },
-                                    layouts: store.client(for: ws)?.layouts[ws.id] ?? [],
-                                    onMoveToLayout: { term, group in
-                                        moveToLayout(term, in: ws, group: group)
-                                    },
-                                    onDropTogether: { dragged, onto in
-                                        placePane(dragged, onto: onto.id, side: .right, in: ws)
-                                    },
-                                    tiled: Set(store.client(for: ws)?.activeGroup(ws.id)?.terminals ?? []),
-                                    onEditorError: { editorError = $0 },
-                                    usable: usable
-                                )
-                            }
-                            if !group.hidden.isEmpty {
-                                HiddenWorktrees(
-                                    project: key,
-                                    worktrees: group.hidden,
-                                    isExpanded: hiddenExpanded.contains(key),
-                                    onToggle: {
-                                        if hiddenExpanded.contains(key) {
-                                            hiddenExpanded.remove(key)
-                                        } else {
-                                            hiddenExpanded.insert(key)
-                                        }
-                                    },
-                                    onUnhide: { ws in
-                                        Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
-                                    }
-                                )
+                            // Everything under the header, which is everything a
+                            // collapsed project hides.
+                            if !preferences.isProjectCollapsed(key) {
+                                projectRows(group, key: key, usable: usable)
                             }
                         }
                     }

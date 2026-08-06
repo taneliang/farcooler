@@ -348,6 +348,11 @@ struct ProjectHeader: View {
     /// Whether to name the machine at all — noise on a fleet of one.
     var showHost: Bool = false
     var onReconnect: () -> Void = {}
+    /// Whether this project's worktrees are hidden right now.
+    var isCollapsed: Bool = false
+    /// `nil` for a silent host's placeholder header, which names a machine and
+    /// has no worktrees under it to collapse.
+    var onToggleCollapse: (() -> Void)?
 
     @State private var hovering = false
 
@@ -358,6 +363,23 @@ struct ProjectHeader: View {
         // achieve.
         SidebarRow {
             HStack(spacing: 6) {
+                // The chevron goes in `SidebarGrid.gutter` — the column this
+                // header already padded by and left empty — so collapsing costs
+                // no horizontal space and lands in the same column as every
+                // other disclosure in the sidebar. A `Spacer` of the same width
+                // holds the column when there is nothing to collapse, so a
+                // silent host's header does not sit one indent to the left of
+                // every real one.
+                if onToggleCollapse != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: SidebarGrid.gutter, alignment: .leading)
+                } else {
+                    Spacer().frame(width: SidebarGrid.gutter)
+                }
+
                 Text(name.uppercased())
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.tertiary)
@@ -410,11 +432,14 @@ struct ProjectHeader: View {
                     .opacity(hovering ? 1 : 0)
                 }
             }
-            .padding(.leading, SidebarGrid.gutter)
         }
         .padding(.top, 14)
         .padding(.bottom, 3)
         .contentShape(Rectangle())
+        // The whole row toggles, not just the chevron: a section label is a big
+        // easy target and a 9-point glyph is not. The `+` and `…` are real
+        // Buttons, which take their own clicks ahead of this.
+        .onTapGesture { onToggleCollapse?() }
         .onHover { hovering = $0 }
     }
 }
