@@ -800,9 +800,7 @@ final class DaemonClient: ObservableObject {
     @discardableResult
     func focusPane(_ terminal: String, in workspace: Workspace) async -> [PaneGroup] {
         assumeFocus(terminal, in: workspace.id)
-        let groups = await layout(workspace, ["focus"], [terminal], background: true)
-        await confirmFocus(terminal, in: workspace, from: groups)
-        return layouts[workspace.id] ?? groups
+        return await confirmed(workspace, ["focus"], [terminal])
     }
 
     @discardableResult
@@ -810,47 +808,44 @@ final class DaemonClient: ObservableObject {
         // `--next`/`--prev` step through a pane order the app already holds, so
         // the target is knowable here and the assumption is as safe as it is for
         // a pane named outright.
-        var assumed: String?
         if let group = activeGroup(workspace.id), !group.panes.isEmpty,
             let current = group.panes.firstIndex(where: \.focused)
         {
             let delta = step == "--prev" ? -1 : 1
             let next = (current + delta + group.panes.count) % group.panes.count
-            assumed = group.panes[next].id
             assumeFocus(group.panes[next].id, in: workspace.id)
         }
-        let groups = await layout(workspace, ["focus"], [step], background: true)
-        if let assumed { await confirmFocus(assumed, in: workspace, from: groups) }
-        return layouts[workspace.id] ?? groups
+        return await confirmed(workspace, ["focus"], [step])
     }
 
     @discardableResult
     func focusPane(number: Int, in workspace: Workspace) async -> [PaneGroup] {
-        var assumed: String?
         if let group = activeGroup(workspace.id), number >= 1, number <= group.panes.count {
-            assumed = group.panes[number - 1].id
             assumeFocus(group.panes[number - 1].id, in: workspace.id)
         }
-        let groups = await layout(workspace, ["focus"], ["--pane", "\(number)"], background: true)
-        if let assumed { await confirmFocus(assumed, in: workspace, from: groups) }
-        return layouts[workspace.id] ?? groups
+        return await confirmed(workspace, ["focus"], ["--pane", "\(number)"])
     }
 
-    /// Undo an assumption the daemon did not agree with.
+    /// Run a focus command and make sure the local copy ends up telling the
+    /// truth either way.
     ///
-    /// The one new failure mode optimistic focus introduces, and the one thing
-    /// here that must not be left implicit: `layout` returns the LOCAL copy when
-    /// its command fails, and that copy now carries the assumption — so without
-    /// this, a focus against an unreachable machine would leave the ring sitting
-    /// on a pane that never got it, indefinitely and with nothing to say so.
+    /// This is the one new failure mode optimistic focus introduces, so it is
+    /// handled in one place rather than at each of the three call sites. The
+    /// caller has already written an assumption into `layouts`; if the daemon
+    /// never answers, that assumption is a ring drawn on a pane which never got
+    /// focus, and nothing would ever correct it. So a failure re-reads.
     ///
-    /// Checked against what came back rather than against a thrown error,
-    /// because `layout` reports failure by handing back the unchanged list.
-    private func confirmFocus(
-        _ terminal: String, in workspace: Workspace, from groups: [PaneGroup]
-    ) async {
-        guard groups.first(where: { $0.focused == terminal }) == nil else { return }
+    /// `layoutOrNil` rather than `layout` because only the former can tell the
+    /// difference: `layout` answers a failure with the local copy, which is now
+    /// the copy carrying the assumption.
+    private func confirmed(
+        _ workspace: Workspace, _ path: [String], _ rest: [String]
+    ) async -> [PaneGroup] {
+        if let groups = await layoutOrNil(workspace, path, rest, background: true) {
+            return groups
+        }
         await refreshLayout(workspace)
+        return layouts[workspace.id] ?? []
     }
 
     @discardableResult
@@ -939,13 +934,29 @@ final class DaemonClient: ObservableObject {
         _ workspace: Workspace, _ path: [String], _ rest: [String] = [],
         background: Bool = false
     ) async -> [PaneGroup] {
+        await layoutOrNil(workspace, path, rest, background: background)
+            ?? layouts[workspace.id] ?? []
+    }
+
+    /// The same call, reporting failure instead of hiding it.
+    ///
+    /// `layout` answers a failure with the local copy, which is right for its
+    /// callers — a split that did not happen should leave the arrangement on
+    /// screen alone — and useless to the focus paths, which have just written an
+    /// ASSUMPTION into that copy. Handed it back, they cannot tell a daemon that
+    /// agreed from a daemon that never answered, so a focus against an
+    /// unreachable machine would leave the ring on a pane that never got it.
+    ///
+    /// `nil` means the command did not produce a layout, whether it failed to
+    /// run or answered with something undecodable.
+    private func layoutOrNil(
+        _ workspace: Workspace, _ path: [String], _ rest: [String] = [],
+        background: Bool = false
+    ) async -> [PaneGroup]? {
         let command = ["layout"] + path + [workspace.short] + rest
-        guard let data = await run(command + ["--json"], background: background) else {
-            return layouts[workspace.id] ?? []
-        }
-        guard let list = try? JSONDecoder().decode(PaneGroupList.self, from: data) else {
-            return layouts[workspace.id] ?? []
-        }
+        guard let data = await run(command + ["--json"], background: background),
+            let list = try? JSONDecoder().decode(PaneGroupList.self, from: data)
+        else { return nil }
         layouts[workspace.id] = list.groups
         return list.groups
     }
