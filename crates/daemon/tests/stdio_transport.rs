@@ -158,7 +158,7 @@ async fn a_workspace(
         task_name: "stdio".into(),
         branch: "feat/stdio".into(),
         base_revision: "HEAD".into(),
-        cli_preset: String::new(),
+        terminal_preset: String::new(),
         adopt_existing: false,
     }));
     let result = client.call(create).await.expect("workspace.create");

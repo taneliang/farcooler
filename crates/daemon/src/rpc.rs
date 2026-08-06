@@ -388,6 +388,35 @@ impl Rpc {
                     svc.create_workspace(repository, &p.task_name, &p.branch, &p.base_revision)
                         .await?
                 };
+                // A worktree with nothing running in it is a directory.
+                //
+                // Done here rather than as a second call from each client
+                // because it is a product rule, not a client preference — and
+                // a rule implemented three times is a rule three clients can
+                // disagree about. The apps ask for `shell`; a caller about to
+                // start its own agent terminal asks for nothing.
+                //
+                // A terminal that fails to start is LOGGED, not fatal. The
+                // worktree exists and is useful, and failing the call would
+                // report an error for a workspace that was in fact created —
+                // which sends someone looking for a worktree that is already
+                // there. The view returned below shows no terminals, so the
+                // failure is visible without being reported as the wrong one.
+                //
+                // The title is the preset, which is the convention the CLI's
+                // own `terminal create` already follows. An empty title would
+                // be refused by `validate::display_name`.
+                let preset = p.terminal_preset.trim();
+                if !preset.is_empty() {
+                    if let Err(e) = svc.create_terminal(ws.id, preset, preset).await {
+                        tracing::warn!(
+                            workspace = %ws.id,
+                            preset = %preset,
+                            error = ?e,
+                            "the worktree was created but its terminal was not"
+                        );
+                    }
+                }
                 // The mutation writes the workspace row itself, so the
                 // reconcile pass that follows finds nothing to adopt — the
                 // fleet already matches git by the time it runs, which makes
