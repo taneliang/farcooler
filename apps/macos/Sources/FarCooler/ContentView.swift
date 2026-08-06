@@ -24,6 +24,13 @@ struct ContentView: View {
     /// already says which machine, and preselecting anything else would put
     /// the worktree on a machine other than the one the row named.
     @State private var newWorkspaceHost: String?
+    /// Whether the review split is open, and the stores behind it.
+    ///
+    /// Per workspace, and kept across selection changes: a review is a session,
+    /// not a mode. Closing the split and reopening it must not discard comments
+    /// you have not sent, and coming back to a worktree should still be showing
+    /// the file you were reading.
+    @State private var reviewOpen = false
     @State private var showAddRepository = false
     @State private var showShortcuts = false
     @State private var showAbout = false
@@ -113,13 +120,29 @@ struct ContentView: View {
             // `fleetPlaceholder` already owns the sidebar's pre-load state, and
             // this banner only appears once something has actually been acted
             // on, so the two never draw at once.
-            detail
+            detailWithReview
                 // Attached here rather than beside each of the four
                 // `navigationTitle` calls, which sit in three different views
                 // that would each need the failure channel threaded down to
                 // them. This is the one place that decides which worktree the
                 // window is showing, which is exactly what the control acts on.
                 .openInEditorToolbar(workspace: detailWorkspace) { editorError = $0 }
+                .toolbar {
+                    if detailWorkspace != nil {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button {
+                                reviewOpen.toggle()
+                            } label: {
+                                Label(
+                                    "Review",
+                                    systemImage: reviewOpen
+                                        ? "sidebar.right" : "plus.forwardslash.minus")
+                            }
+                            .help("Show what this worktree changed")
+                            .keyboardShortcut("r", modifiers: [.command, .shift])
+                        }
+                    }
+                }
                 .overlay(alignment: .top) {
                     ErrorBanner(message: errorBanner) { errorBanner = nil }
                 }
@@ -1023,6 +1046,42 @@ struct ContentView: View {
     }
 
     // MARK: - Detail
+
+    @ViewBuilder
+    /// The detail pane, with review in a trailing inspector when it is open.
+    ///
+    /// An `inspector`, NOT a member of the tmux-derived pane tree: `PaneGroup` is
+    /// a projection of tmux's own windows keyed by terminal id, and a view that
+    /// is not a process has no pane identity to take.
+    ///
+    /// And an inspector rather than an `HSplitView`, which was the first attempt
+    /// and was wrong: an HSplitView with minimum widths inside a
+    /// `NavigationSplitView` competes with the sidebar for the same points, so
+    /// opening review squeezed the worktree list off the left edge. On a window
+    /// whose size something else owns, that is not a resize away — it is the
+    /// layout being broken. `inspector` is the container AppKit already has for
+    /// a trailing panel that coexists with a navigation split, and it comes with
+    /// its own drag handle and remembered width.
+    private var detailWithReview: some View {
+        detail
+            .inspector(isPresented: $reviewOpen) {
+                if let ws = detailWorkspace, let client = store.client(for: ws) {
+                    ReviewPane(client: client, workspace: ws, terminals: ws.terminals)
+                        // One store per worktree: switching worktrees is a
+                        // different review, not the same one showing new data.
+                        .id(ws.id)
+                        .inspectorColumnWidth(min: 200, ideal: 300, max: 620)
+                } else {
+                    // The inspector is open and there is nothing to review. Say
+                    // so rather than showing an empty panel that looks broken.
+                    Text("Pick a worktree to review")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .inspectorColumnWidth(min: 200, ideal: 300, max: 620)
+                }
+            }
+    }
 
     @ViewBuilder
     private var detail: some View {

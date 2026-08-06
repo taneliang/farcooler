@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 
 /// Where a machine's connection stands.
@@ -1307,6 +1308,90 @@ final class DaemonClient: ObservableObject {
     /// which decides `.unreachable`'s reason and whether this is a machine
     /// that needs installing — calls `runRaw` directly instead. See there.
     @discardableResult
+    // ---- review ----
+    //
+    // Every one of these is the same CLI the terminal rows already go through.
+    // A review surface the app could reach but an agent could not would make the
+    // one workflow this product is about the one thing nobody can automate.
+
+    func reviewJSON(_ args: [String]) async -> Data? {
+        await run(args, background: true)
+    }
+
+    /// One file's diff, as lines the review pane draws directly.
+    ///
+    /// Parsed from the CLI's unified output rather than recomputed here: the
+    /// daemon already refused what it could not read, and a second parser in the
+    /// app would be free to disagree with it about what a hunk is.
+    func reviewDiff(workspace: String, path: String) async -> [DiffComputation.Line] {
+        guard let data = await run(["review", "diff", workspace, path], background: true),
+            let text = String(data: data, encoding: .utf8)
+        else { return [] }
+
+        var lines: [DiffComputation.Line] = []
+        var next = 0
+        var oldNo = 0
+        var newNo = 0
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.hasPrefix("@@") {
+                // `@@ -a,b +c,d @@`
+                let parts = line.split(separator: " ")
+                if parts.count >= 3 {
+                    oldNo = Int(parts[1].dropFirst().split(separator: ",").first ?? "0") ?? 0
+                    newNo = Int(parts[2].dropFirst().split(separator: ",").first ?? "0") ?? 0
+                }
+                continue
+            }
+            guard let first = line.first else { continue }
+            let body = String(line.dropFirst())
+            switch first {
+            case "+":
+                lines.append(
+                    .init(id: next, kind: .added, oldNumber: nil, newNumber: newNo, text: body))
+                next += 1
+                newNo += 1
+            case "-":
+                lines.append(
+                    .init(id: next, kind: .removed, oldNumber: oldNo, newNumber: nil, text: body))
+                next += 1
+                oldNo += 1
+            case " ":
+                lines.append(
+                    .init(
+                        id: next, kind: .context, oldNumber: oldNo, newNumber: newNo, text: body))
+                next += 1
+                oldNo += 1
+                newNo += 1
+            default:
+                continue
+            }
+        }
+        return lines
+    }
+
+    func reviewNote(workspace: String, body: String, file: String?, ask: Bool) async {
+        var args = ["review", "note", workspace, body]
+        if let file { args += ["--file", file] }
+        if ask { args.append("--ask") }
+        _ = await run(args)
+    }
+
+    func reviewDrop(workspace: String, entry: String) async {
+        _ = await run(["review", "drop", workspace, entry])
+    }
+
+    func reviewSend(workspace: String, terminal: String, entries: [String], ask: Bool) async {
+        var args = ["review", "send", workspace, terminal]
+        for e in entries { args += ["--entry", e] }
+        if ask { args.append("--ask") }
+        _ = await run(args)
+    }
+
+    func reviewSeen(workspace: String) async {
+        _ = await run(["review", "seen", workspace])
+    }
+
     private func run(_ args: [String], background: Bool = false) async -> Data? {
         let (data, message) = await runRaw(args, background: background)
         if let message { lastError = message }
