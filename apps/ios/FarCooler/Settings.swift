@@ -171,12 +171,20 @@ struct SettingsView: View {
                         Text(theme.name).tag(theme.name)
                     }
                 }
+                // Editing the machine's own file, rather than telling someone to
+                // go and edit it. That instruction used to be this section's
+                // footer — reasonable advice, and not something anybody does from
+                // a phone over ssh.
+                if let connection {
+                    NavigationLink("Settings on this machine") {
+                        MachineSettingsView(
+                            name: connection.hostLabel, connection: connection)
+                    }
+                }
             } header: {
                 Text("Theme")
             } footer: {
-                Text(
-                    "Sets the terminal's colors and the app's. Add your own under "
-                        + "[themes.name] in ~/.config/farcooler/config.toml on a machine.")
+                Text("Sets the terminal's colors and the app's.")
             }
 
             Section("Terminal font") {
