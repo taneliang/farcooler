@@ -267,6 +267,8 @@ pub struct Service {
     /// lifecycle at least as strongly as to our own. After a restart every PR
     /// reads Unknown until a refresh succeeds.
     pr_cache: std::sync::Mutex<std::collections::HashMap<Uuid, Option<Vec<crate::stack::PrInfo>>>>,
+    /// How many `gh` processes may run at once, across every repository.
+    gh_limit: Arc<tokio::sync::Semaphore>,
     /// One mutex per repository, created on first use and never removed.
     ///
     /// Held across any sequence that mutates git and then writes a workspace
@@ -339,8 +341,18 @@ impl Service {
             agents: agent_supervisor::AgentSupervisor::new(),
             review_cache: crate::review::ReviewCache::new(),
             pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+            gh_limit: Arc::new(tokio::sync::Semaphore::new(crate::stack::GH_MAX_CONCURRENT)),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    /// Wait for permission to run `gh`. Held for the length of the call.
+    pub async fn gh_permit(&self) -> tokio::sync::OwnedSemaphorePermit {
+        self.gh_limit
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("the gh semaphore is never closed")
     }
 
     /// PR state as last read, or `None` when it has never been read since this

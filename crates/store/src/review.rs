@@ -905,3 +905,65 @@ fn row_to_attachment(row: &rusqlite::Row) -> rusqlite::Result<Attachment> {
         height: row.get(5)?,
     })
 }
+
+impl Store {
+    /// Every entry that is carrying a capture snapshot, oldest first.
+    ///
+    /// Snapshots live inside `manifest_json` rather than a column of their own,
+    /// so the size is read back out rather than indexed. That is affordable
+    /// because a buffer is tens of entries, not thousands — and it keeps the
+    /// manifest one immutable blob rather than a shape the schema has opinions
+    /// about.
+    pub fn entries_with_snapshots(&self, workspace_id: Uuid) -> Result<Vec<(Uuid, usize)>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, manifest_json FROM review_entries
+                 WHERE workspace_id = ?1 ORDER BY created_at ASC",
+            )
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(params![uuid_blob(workspace_id)], |r| {
+                Ok((get_uuid(r, 0)?, r.get::<_, String>(1)?))
+            })
+            .map_err(map_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_err)?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, json)| {
+                let v: serde_json::Value = serde_json::from_str(&json).ok()?;
+                let snap = v.get("file_snapshot")?.as_str()?;
+                Some((id, snap.len()))
+            })
+            .collect())
+    }
+
+    /// Drop one entry's snapshot, keeping the rest of its manifest.
+    ///
+    /// The entry stays; it loses range precision and says so. Deleting the
+    /// comment to reclaim bytes would be the wrong trade by a mile.
+    pub fn clear_snapshot(&self, entry_id: Uuid) -> Result<()> {
+        let conn = self.conn();
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT manifest_json FROM review_entries WHERE id = ?1",
+                params![uuid_blob(entry_id)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_err)?;
+        let Some(json) = json else { return Ok(()) };
+        let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&json) else { return Ok(()) };
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("file_snapshot".into(), serde_json::Value::Null);
+        }
+        conn.execute(
+            "UPDATE review_entries SET manifest_json = ?2 WHERE id = ?1",
+            params![uuid_blob(entry_id), v.to_string()],
+        )
+        .map_err(map_err)?;
+        Ok(())
+    }
+}

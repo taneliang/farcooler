@@ -121,6 +121,12 @@ struct WorkspaceSection: View {
     /// left to fail silently or hang on a dead connection.
     var usable: Bool = true
 
+    /// Diff status for this worktree, when the fleet inbox has been read.
+    ///
+    /// Absent is a real state and shows nothing at all, rather than a confident
+    /// `+0 −0` for a worktree nobody has looked at yet.
+    var review: InboxRow?
+
     @State private var hovering = false
 
     private var isSelected: Bool {
@@ -243,6 +249,35 @@ struct WorkspaceSection: View {
             }
 
             Spacer(minLength: 6)
+
+            // What changed in here, at a glance, without opening anything.
+            //
+            // The cluster is the lightest thing that can carry it: two numbers
+            // and at most one dot. This row is the one there can be hundreds of,
+            // and it must not grow a second line.
+            if let review, review.hasDiff {
+                HStack(spacing: 3) {
+                    Text("+\(review.insertions)").foregroundStyle(.green)
+                    Text("−\(review.deletions)").foregroundStyle(.red)
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .lineLimit(1)
+                .layoutPriority(1)
+                .padding(.trailing, review.needsYou > 0 ? 4 : 6)
+            }
+            if let review, review.needsYou > 0 {
+                // Amber only when something is genuinely unresolved. A count
+                // that is always on stops being a signal.
+                Text("\(review.needsYou)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(.orange.opacity(0.16), in: Capsule())
+                    .layoutPriority(1)
+                    .padding(.trailing, 6)
+                    .help("Comments waiting on you")
+            }
 
             if !showsTerminals {
                 // What a closed worktree still has to answer: is anything

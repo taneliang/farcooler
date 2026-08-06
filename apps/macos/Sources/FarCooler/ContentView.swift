@@ -627,33 +627,7 @@ struct ContentView: View {
     @ViewBuilder
     private func projectRows(_ group: ProjectGroup, key: String, usable: Bool) -> some View {
         ForEach(group.shown) { ws in
-            WorkspaceSection(
-                workspace: ws,
-                isExpanded: expanded.contains(ws.id),
-                selection: $selection,
-                onToggle: { toggle(ws.id) },
-                onNewTerminal: { newTerminal(in: ws) },
-                onHide: {
-                    Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } }
-                },
-                onUnhide: {
-                    Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
-                },
-                onRemove: { removeWorkspace = ws },
-                onTerminalAction: { term, action in
-                    Task { await run(action, on: term, in: ws) }
-                },
-                layouts: store.client(for: ws)?.layouts[ws.id] ?? [],
-                onMoveToLayout: { term, group in
-                    moveToLayout(term, in: ws, group: group)
-                },
-                onDropTogether: { dragged, onto in
-                    placePane(dragged, onto: onto.id, side: .right, in: ws)
-                },
-                tiled: Set(store.client(for: ws)?.activeGroup(ws.id)?.terminals ?? []),
-                onEditorError: { editorError = $0 },
-                usable: usable
-            )
+            workspaceRow(ws, usable: usable)
         }
         if !group.hidden.isEmpty {
             HiddenWorktrees(
@@ -1062,6 +1036,54 @@ struct ContentView: View {
     /// layout being broken. `inspector` is the container AppKit already has for
     /// a trailing panel that coexists with a navigation split, and it comes with
     /// its own drag handle and remembered width.
+    /// One worktree's sidebar row.
+    ///
+    /// Extracted from the sidebar builder rather than written inline. With
+    /// eighteen arguments, most of them closures, this call sits right at the
+    /// type checker's budget — adding one more parameter to it pushed the whole
+    /// enclosing expression past "unable to type-check in reasonable time",
+    /// which is a compile error with no line number worth reading.
+    private func workspaceRow(_ ws: Workspace, usable: Bool) -> some View {
+        let client = store.client(for: ws)
+        let tiled = Set(client?.activeGroup(ws.id)?.terminals ?? [])
+        return WorkspaceSection(
+            workspace: ws,
+            isExpanded: expanded.contains(ws.id),
+            selection: $selection,
+            onToggle: { toggle(ws.id) },
+            onNewTerminal: { newTerminal(in: ws) },
+            onHide: {
+                Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } }
+            },
+            onUnhide: {
+                Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
+            },
+            onRemove: { removeWorkspace = ws },
+            onTerminalAction: { term, action in
+                Task { await run(action, on: term, in: ws) }
+            },
+            layouts: client?.layouts[ws.id] ?? [],
+            onMoveToLayout: { term, group in
+                moveToLayout(term, in: ws, group: group)
+            },
+            onDropTogether: { dragged, onto in
+                placePane(dragged, onto: onto.id, side: .right, in: ws)
+            },
+            tiled: tiled,
+            onEditorError: { editorError = $0 },
+            usable: usable,
+            review: reviewStatus(ws)
+        )
+    }
+
+    /// Diff status for one worktree, or nil when the fleet inbox has not been
+    /// read yet. Hoisted out of the sidebar builder: inline, the chained
+    /// optional subscript pushed that expression past the type checker's budget.
+    private func reviewStatus(_ ws: Workspace) -> InboxRow? {
+        guard let client = store.client(for: ws) else { return nil }
+        return client.reviewInbox[ws.short]
+    }
+
     private var detailWithReview: some View {
         detail
             .inspector(isPresented: $reviewOpen) {
@@ -1070,7 +1092,7 @@ struct ContentView: View {
                         // One store per worktree: switching worktrees is a
                         // different review, not the same one showing new data.
                         .id(ws.id)
-                        .inspectorColumnWidth(min: 200, ideal: 300, max: 620)
+                        .inspectorColumnWidth(min: 160, ideal: 300, max: 620)
                 } else {
                     // The inspector is open and there is nothing to review. Say
                     // so rather than showing an empty panel that looks broken.
@@ -1078,7 +1100,7 @@ struct ContentView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .inspectorColumnWidth(min: 200, ideal: 300, max: 620)
+                        .inspectorColumnWidth(min: 160, ideal: 300, max: 620)
                 }
             }
     }

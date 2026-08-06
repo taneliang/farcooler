@@ -373,6 +373,39 @@ pub async fn worktree_digest(repo: &Path, head_commit: &str) -> Result<String> {
     Ok(format!("{:x}", h.finalize()))
 }
 
+/// Just the three numbers, for a sidebar row.
+///
+/// `--shortstat` rather than the full change set: a fleet-wide glance needs
+/// files-changed and +/- for every worktree, and computing a whole change set
+/// per row would put a `git log` and a `git status` on a timer across the fleet.
+/// One `git diff --shortstat` is a fraction of that, and behind the cheap gate it
+/// only runs when something actually moved.
+pub async fn shortstat(repo: &Path, base_ref: &str) -> Result<(u32, u32, u32)> {
+    let base = merge_base(repo, base_ref).await?;
+    let r = git(repo, &["diff", "--shortstat", &base, "HEAD"]).await?;
+    if !r.ok {
+        return Err(DomainError::OperationFailed);
+    }
+    // " 3 files changed, 12 insertions(+), 4 deletions(-)"
+    let mut files = 0;
+    let mut ins = 0;
+    let mut del = 0;
+    let words: Vec<&str> = r.stdout.split_whitespace().collect();
+    for (i, w) in words.iter().enumerate() {
+        let n: u32 = match w.parse() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        match words.get(i + 1) {
+            Some(next) if next.starts_with("file") => files = n,
+            Some(next) if next.starts_with("insertion") => ins = n,
+            Some(next) if next.starts_with("deletion") => del = n,
+            _ => {}
+        }
+    }
+    Ok((files, ins, del))
+}
+
 /// The whole summary for one branch.
 pub async fn change_set(
     repo: &Path,

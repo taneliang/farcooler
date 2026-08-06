@@ -455,6 +455,28 @@ pub async fn review(host: Option<&str>, cmd: ReviewCmd, json: bool) -> Fallible 
             let result::Value::ReviewInbox(inbox) = expect_value(r.value, "review_inbox")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
+            if json {
+                let items: Vec<_> = inbox
+                    .items
+                    .iter()
+                    .map(|w| {
+                        serde_json::json!({
+                            "workspace_id": short_bytes(&w.workspace_id),
+                            "task_name": w.task_name,
+                            "branch": w.branch,
+                            "open": w.open,
+                            "dispatched": w.dispatched,
+                            "answered": w.answered,
+                            "dispatch_unknown": w.dispatch_unknown,
+                            "changed_since_reviewed": w.changed_since_reviewed,
+                            "insertions": w.insertions,
+                            "deletions": w.deletions,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string(&items)?);
+                return Ok(());
+            }
             if inbox.items.is_empty() {
                 println!("nothing needs you");
                 return Ok(());

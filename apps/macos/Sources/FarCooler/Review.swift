@@ -111,6 +111,33 @@ struct ReviewEntry: Decodable, Equatable, Identifiable {
     var isUnknown: Bool { status == "UNKNOWN" }
 }
 
+/// One workspace's line in the fleet inbox.
+///
+/// Deliberately counts and numbers only. Resolving every anchor to say how many
+/// want re-reading would need each workspace's change set, which is a `git
+/// status` per worktree per glance — the fan-out `watch.rs` exists to avoid.
+struct InboxRow: Decodable, Equatable, Identifiable {
+    var workspaceId: String
+    var open: Int
+    var answered: Int
+    var dispatchUnknown: Int
+    var changedSinceReviewed: Bool
+    var insertions: Int
+    var deletions: Int
+
+    var id: String { workspaceId }
+    /// Anything at all worth a badge.
+    var needsYou: Int { open + answered + dispatchUnknown }
+    var hasDiff: Bool { insertions > 0 || deletions > 0 }
+
+    enum CodingKeys: String, CodingKey {
+        case workspaceId = "workspace_id"
+        case open, answered, insertions, deletions
+        case dispatchUnknown = "dispatch_unknown"
+        case changedSinceReviewed = "changed_since_reviewed"
+    }
+}
+
 /// Everything the review surface needs for one workspace.
 @MainActor
 final class ReviewStore: ObservableObject {
@@ -228,10 +255,16 @@ struct ReviewPane: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // Otherwise the scroll view paints its own opaque background over
+            // the material this panel is supposed to be showing through.
+            .scrollContentBackground(.hidden)
             Divider()
             composer
         }
-        .background(.background)
+        // No background of its own, deliberately. An inspector already carries
+        // the same material the sidebar does; painting `.background` over it
+        // produced a flat opaque slab next to a translucent sidebar, which is
+        // why the panel read as bolted on rather than part of the window.
         .task { await review.load() }
     }
 
@@ -470,7 +503,7 @@ struct ReviewPane: View {
                 }
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
             }
         }
     }

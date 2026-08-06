@@ -50,6 +50,9 @@ enum HostState: Equatable {
 /// file for a socket client is the whole migration.
 @MainActor
 final class DaemonClient: ObservableObject {
+    /// Diff status per worktree short id, for the sidebar. Empty until read.
+    @Published var reviewInbox: [String: InboxRow] = [:]
+
     @Published var fleet: Fleet = .empty
     @Published var lastError: String?
     @Published var busy = false
@@ -580,6 +583,11 @@ final class DaemonClient: ObservableObject {
         do {
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
             hasLoaded = true
+            // Diff status for the whole sidebar, in one more call. Cheap by
+            // construction: the daemon answers it from counts it already holds
+            // plus a two-syscall gate per worktree, so a fleet where nothing is
+            // happening costs nothing to keep on screen.
+            Task { await self.refreshReviewInbox() }
             lastError = nil
             // Read before overwriting: `onReconnect` fires for a genuine
             // transition into `.connected`, not for a read that merely
@@ -1316,6 +1324,22 @@ final class DaemonClient: ObservableObject {
 
     func reviewJSON(_ args: [String]) async -> Data? {
         await run(args, background: true)
+    }
+
+    /// Diff status for every worktree on this machine, in one call.
+    ///
+    /// One call rather than one per row: the daemon answers it from counts it
+    /// already has plus a two-syscall gate, so a quiet fleet costs almost
+    /// nothing — and a per-row call would have put a `git` on a timer for every
+    /// worktree in the sidebar, which is exactly what makes a fleet view
+    /// expensive to leave open.
+    func refreshReviewInbox() async {
+        guard let data = await run(["review", "inbox", "--json"], background: true),
+            let rows = try? JSONDecoder().decode([InboxRow].self, from: data)
+        else { return }
+        var byWorkspace: [String: InboxRow] = [:]
+        for r in rows { byWorkspace[r.workspaceId] = r }
+        reviewInbox = byWorkspace
     }
 
     /// One file's diff, as lines the review pane draws directly.

@@ -424,6 +424,14 @@ pub async fn capture(svc: &Service, req: &pb::ReviewCapture) -> Result<pb::Revie
         now_millis(),
     )?;
 
+    // Keep the workspace's snapshots inside their budget, oldest first.
+    //
+    // The evicted entries stay — they lose range precision and their state says
+    // so. Dropping a comment to reclaim bytes would be the wrong trade by a mile,
+    // and dropping the NEWEST snapshot instead would punish the comment you just
+    // wrote for the sins of the ones before it.
+    enforce_snapshot_budget(svc, workspace_id)?;
+
     for id in &req.attachment_ids {
         if let Ok(aid) = Uuid::from_slice(id) {
             svc.store.attach_to_entry(aid, e.id)?;
@@ -664,6 +672,19 @@ pub async fn inbox(svc: &Service) -> Result<pb::ReviewInbox> {
             // Never marked read. Anything in the buffer wants attention.
             None => c.open + c.dispatched + c.answered + c.dispatch_unknown > 0,
         };
+        let base = svc
+            .store
+            .review_base(c.workspace_id)?
+            .unwrap_or_else(default_base);
+        // Behind the cheap gate: a worktree nobody has touched costs two stats
+        // and no git at all, which is what makes leaving a fleet view open
+        // affordable.
+        let (_, ins, del) = svc
+            .review_cache
+            .shortstat(c.workspace_id, Path::new(&ws.worktree_path), &base)
+            .await
+            .unwrap_or((0, 0, 0));
+
         items.push(pb::InboxWorkspace {
             workspace_id: id_bytes(c.workspace_id),
             task_name: ws.task_name,
@@ -673,12 +694,30 @@ pub async fn inbox(svc: &Service) -> Result<pb::ReviewInbox> {
             answered: c.answered,
             dispatch_unknown: c.dispatch_unknown,
             changed_since_reviewed: changed,
-            insertions: 0,
-            deletions: 0,
+            insertions: ins,
+            deletions: del,
         });
     }
 
     Ok(pb::ReviewInbox { items, elsewhere: 0 })
+}
+
+/// Evict oldest-first until the workspace is under its snapshot budget.
+fn enforce_snapshot_budget(svc: &Service, workspace_id: Uuid) -> Result<()> {
+    let mut held = svc.store.entries_with_snapshots(workspace_id)?;
+    let mut total: usize = held.iter().map(|(_, n)| *n).sum();
+    if total <= review::MAX_SNAPSHOT_BYTES_PER_WORKSPACE {
+        return Ok(());
+    }
+    // Oldest first, which is the order the query already returns.
+    for (id, size) in held.drain(..) {
+        if total <= review::MAX_SNAPSHOT_BYTES_PER_WORKSPACE {
+            break;
+        }
+        svc.store.clear_snapshot(id)?;
+        total = total.saturating_sub(size);
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +812,10 @@ async fn build_stack(
     // was recorded and no upstream is set, which is the common case for branches
     // created by an agent.
     let prs = if refresh_prs {
+        // At most `GH_MAX_CONCURRENT` of these run at once across the daemon.
+        // A fleet refresh over twenty repositories would otherwise fork twenty
+        // network-bound processes at the same instant.
+        let _permit = svc.gh_permit().await;
         crate::stack::fetch_prs(worktree).await?
     } else {
         svc.pr_cache_get(repository_id)

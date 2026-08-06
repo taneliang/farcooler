@@ -59,6 +59,12 @@ pub struct ReviewCache {
     /// through its own filesystem service. Precise, free, and it covers the case
     /// that matters: the agents doing the work are ACP clients of this daemon.
     touched: Mutex<HashMap<Uuid, i64>>,
+    /// Per-workspace `(gate, files, insertions, deletions)` for the sidebar.
+    ///
+    /// Keyed by the cheap gate, so a quiet worktree costs two stats and no git
+    /// at all. This is what makes "diff status across every worktree at a glance"
+    /// affordable rather than a fleet-wide `git` loop on a timer.
+    shortstats: Mutex<HashMap<Uuid, ((u128, u128), (u32, u32, u32))>>,
 }
 
 /// mtimes of the two files that move whenever git does something structural.
@@ -122,6 +128,37 @@ impl ReviewCache {
         self.touched.lock().unwrap_or_else(|x| x.into_inner()).get(&workspace_id).copied()
     }
 
+    /// Files changed and +/- for one workspace, recomputed only when the cheap
+    /// gate says something moved.
+    pub async fn shortstat(
+        &self,
+        workspace_id: Uuid,
+        worktree: &Path,
+        base_ref: &str,
+    ) -> Option<(u32, u32, u32)> {
+        let gate = cheap_gate(worktree);
+        {
+            let m = self.shortstats.lock().unwrap_or_else(|x| x.into_inner());
+            if let Some((cached_gate, stats)) = m.get(&workspace_id) {
+                if *cached_gate == gate {
+                    return Some(*stats);
+                }
+            }
+        }
+        let stats = match crate::change_set::shortstat(worktree, base_ref).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(?e, ?worktree, base_ref, "shortstat failed");
+                return None;
+            }
+        };
+        self.shortstats
+            .lock()
+            .unwrap_or_else(|x| x.into_inner())
+            .insert(workspace_id, (gate, stats));
+        Some(stats)
+    }
+
     /// The digest of an already-cached change set, if there is one.
     ///
     /// Free: no git runs. Lets the inbox notice an in-place edit for any
@@ -179,6 +216,14 @@ impl ReviewCache {
         Ok(cached)
     }
 }
+
+/// How much of one workspace's snapshots the daemon will hold.
+///
+/// A per-entry cap alone is not a budget: sixty anchored comments in a heavy
+/// review is fifteen megabytes of file copies, on top of the attachments and on
+/// top of the replay buffers `TODOS.md` already names as the dominant term in
+/// daemon memory.
+pub const MAX_SNAPSHOT_BYTES_PER_WORKSPACE: usize = 8 * 1024 * 1024;
 
 /// Build the manifest an entry carries, so re-read detection survives a restart.
 pub async fn capture_manifest(

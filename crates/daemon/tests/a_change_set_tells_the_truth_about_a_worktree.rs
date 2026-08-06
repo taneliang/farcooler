@@ -232,3 +232,42 @@ async fn a_new_untracked_file_moves_the_digest() {
     let after = worktree_digest(p, "head").await.expect("digest");
     assert_ne!(before, after, "an agent creating a file is a change worth re-reading");
 }
+
+#[tokio::test]
+async fn shortstat_gives_the_three_numbers_a_sidebar_row_needs() {
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    write(p, "a.txt", "one\ntwo\nthree\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "add a"]);
+    write(p, "README.md", "changed\n");
+    run(p, &["commit", "-qam", "change readme"]);
+
+    let (files, ins, del) =
+        farcooler_daemon::change_set::shortstat(p, "main").await.expect("shortstat");
+    assert_eq!(files, 2);
+    assert_eq!(ins, 4, "three new lines plus the readme rewrite");
+    assert_eq!(del, 1, "and git says `1 deletion(-)`, singular");
+}
+
+#[tokio::test]
+async fn shortstat_works_in_a_linked_worktree_which_is_the_only_kind_this_product_makes() {
+    // Every workspace is a `git worktree add`, never the main checkout, so the
+    // main-worktree case above is the one that never happens in production.
+    let dir = repo();
+    let p = dir.path();
+    let linked = dir.path().parent().unwrap().join("linked-wt");
+
+    run(p, &["worktree", "add", "-b", "feature", linked.to_str().unwrap()]);
+    write(&linked, "a.txt", "one\ntwo\nthree\n");
+    run(&linked, &["add", "."]);
+    run(&linked, &["commit", "-q", "-m", "add a"]);
+
+    let (files, ins, del) = farcooler_daemon::change_set::shortstat(&linked, "main")
+        .await
+        .expect("shortstat in a linked worktree");
+    assert_eq!((files, ins, del), (1, 3, 0));
+
+    let _ = std::fs::remove_dir_all(&linked);
+}
