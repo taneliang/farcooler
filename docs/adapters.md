@@ -94,6 +94,43 @@ adapter, useless once there were four. `Status::AdapterMissing` and
 Either way, terminal mode for that pane keeps working exactly as it did
 before you tried the toggle.
 
+## Editing it from an app
+
+Everything below can be edited from a settings screen instead of an ssh session
+and a text editor: **Machines → a machine → Settings** on the Mac, and
+**Settings → Settings on this machine** on iOS and Android. Per machine, because
+each one has its own file and "the branch prefix" is a different answer on each.
+
+Three things about those writes are worth knowing, because they are what make it
+safe to point a UI at a file people hand-edit:
+
+- **Comments and layout survive.** A write goes through `toml_edit` and touches
+  one table, so everything else in the file — including the comment you left
+  explaining why an adapter is pinned — comes back byte for byte.
+  `config::a_write_leaves_every_byte_outside_its_own_table_alone` asserts it on
+  the whole file rather than on a parse of it.
+- **A malformed file is refused, not overwritten.** The reader tolerates a broken
+  file by ignoring it; a writer that overwrote one would turn a typo into lost
+  work. Fix it by hand first.
+- **Deleting is how you revert.** Removing a table restores whatever Far Cooler
+  ships under that name, including a later improvement to it. The editors call
+  that **Revert to Default** and it writes nothing back.
+
+`Test`, in the agent editor, starts the adapter and completes an ACP handshake.
+It proves the **launch** half — `program`, `args`, `env` — and cannot prove
+detection: `commands`, `identity`, `blocked` and `working` are matched against
+output only that agent produces, and a wrong one there does not fail, it stops
+the agent being recognized. The form says so rather than showing one checkmark
+over seven fields.
+
+The CLI reaches the same methods: `farcooler settings show`,
+`settings set-branch-prefix`, `adapter list`, `adapter test <preset>`,
+`adapter delete`, `theme delete`. There is deliberately no hand-typed `adapter
+set` — seven fields including four string arrays is a worse editor than the file
+itself, and `$EDITOR ~/.config/farcooler/config.toml` is the right tool for that.
+The apps write over `--json-stdin`, which is a machine channel rather than a
+flag surface.
+
 ## The config file
 
 `~/.config/farcooler/config.toml`, on macOS and Linux alike — deliberately
