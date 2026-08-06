@@ -83,6 +83,16 @@ enum Command {
     /// List the colour schemes available on this machine.
     #[command(subcommand)]
     Theme(ThemeCmd),
+    /// Read and change what this machine's config.toml holds.
+    ///
+    /// The same writes the apps' machine-settings screens make, for scripting
+    /// and for looking at what a screen actually did. Every write is
+    /// format-preserving: comments and layout elsewhere in the file survive.
+    #[command(subcommand)]
+    Settings(SettingsCmd),
+    /// Inspect and edit the ACP adapters that make chat mode possible.
+    #[command(subcommand)]
+    Adapter(AdapterCmd),
     /// Manage task workspaces (one worktree plus branch per task).
     #[command(subcommand)]
     Workspace(WorkspaceCmd),
@@ -308,6 +318,36 @@ enum ThemeCmd {
     /// Every theme this machine offers: the built-ins, plus whatever
     /// `[themes.<name>]` in config.toml adds.
     List,
+    /// Remove one `[themes.<name>]` table.
+    ///
+    /// A name that is not there is success, because this is also how a client
+    /// reverts a theme that shadows a built-in: the table goes and the shipped
+    /// one takes over again.
+    Delete { name: String },
+}
+
+#[derive(Subcommand)]
+enum SettingsCmd {
+    /// Show what this machine's config.toml decides.
+    Show,
+    /// Set what a derived branch name starts with. Empty opts out entirely.
+    SetBranchPrefix { prefix: String },
+}
+
+#[derive(Subcommand)]
+enum AdapterCmd {
+    /// Every adapter in force, and whether it is shipped, overridden or yours.
+    List,
+    /// Prove one works: start it and complete an ACP handshake.
+    ///
+    /// Checks LAUNCH, not detection. A pass means the adapter starts and speaks
+    /// ACP; whether the agent gets recognized in a pane depends on the
+    /// `identity`, `blocked` and `working` strings, which nothing here can
+    /// exercise.
+    Test { preset: String },
+    /// Remove one `[adapters.<name>]` table, restoring the shipped one if this
+    /// was overriding it.
+    Delete { preset: String },
 }
 
 #[derive(Subcommand)]
@@ -627,6 +667,8 @@ async fn run() -> Fallible {
         Command::Root(c) => root(host, c, cli.json).await,
         Command::Repo(c) => repo(host, c, cli.json).await,
         Command::Theme(c) => theme(host, c, cli.json).await,
+        Command::Settings(c) => settings(host, c, cli.json).await,
+        Command::Adapter(c) => adapter(host, c, cli.json).await,
         Command::Workspace(c) => workspace(host, c, cli.json).await,
         Command::Terminal(c) => terminal(host, c, cli.json).await,
         Command::Worktree(c) => worktree(host, c, cli.json).await,
@@ -835,13 +877,201 @@ async fn root(host: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
     Ok(())
 }
 
+/// What this machine's config.toml decides, and how to change it.
+async fn settings(host: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallible {
+    let mut link = connect_to(host).await?;
+    match cmd {
+        SettingsCmd::Show => {
+            let facts = host_get(&mut link).await?;
+            let prefix = facts
+                .settings
+                .as_ref()
+                .map(|s| s.branch_prefix.clone())
+                .unwrap_or_default();
+            if json {
+                println!("{}", serde_json::json!({ "branchPrefix": prefix }));
+            } else {
+                // Quoted, because the empty string is a real and deliberate
+                // value here and an unquoted blank line would read as a bug.
+                println!("branch prefix  \"{prefix}\"");
+            }
+        }
+        SettingsCmd::SetBranchPrefix { prefix } => {
+            let req = with(
+                req("settings.set_branch_prefix"),
+                request::Payload::HostSettings(farcooler_protocol::v1::HostSettings {
+                    branch_prefix: prefix,
+                }),
+            );
+            let r = link.call(req).await?;
+            let result::Value::Host(h) = expect_value(r.value, "host")? else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            // Read back from the reply rather than echoing what was sent: the
+            // writer trims, so the file may not say quite what arrived.
+            let stored = h.settings.map(|s| s.branch_prefix).unwrap_or_default();
+            if json {
+                println!("{}", serde_json::json!({ "branchPrefix": stored }));
+            } else {
+                println!("branch prefix is now \"{stored}\"");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The ACP adapters in force, and the two things worth doing to one.
+///
+/// No `upsert` here on purpose. An adapter is seven fields including four string
+/// arrays, and a command line for it would be a worse editor than the file it is
+/// meant to replace — `$EDITOR ~/.config/farcooler/config.toml` is the right
+/// tool for that, and the apps have a form. What a terminal is good for is
+/// seeing what is in force and proving one works, which is what these do.
+async fn adapter(host: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible {
+    let mut link = connect_to(host).await?;
+    match cmd {
+        AdapterCmd::List => {
+            let r = link.call(req("adapter.list")).await?;
+            let result::Value::AdapterList(list) = expect_value(r.value, "adapters")? else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            if json {
+                let items: Vec<_> = list
+                    .items
+                    .iter()
+                    .map(|a| {
+                        serde_json::json!({
+                            "preset": a.preset,
+                            "program": a.program,
+                            "args": a.args,
+                            "origin": origin_label(a.origin),
+                            "chatCapable": !a.program.is_empty(),
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::json!({ "adapters": items }));
+                return Ok(());
+            }
+            for a in &list.items {
+                // An adapter with no program is a recognized agent that Far
+                // Cooler cannot host as a chat, which is a real state and not a
+                // gap — so it is named rather than left blank.
+                let launch = if a.program.is_empty() {
+                    "(terminal only)".to_string()
+                } else {
+                    format!("{} {}", a.program, a.args.join(" "))
+                };
+                println!("{:12}  {:10}  {}", a.preset, origin_label(a.origin), launch);
+            }
+        }
+
+        AdapterCmd::Test { preset } => {
+            // Tests what is IN FORCE for that preset, which is what a terminal
+            // caller means by naming one. The apps test an unsaved form instead,
+            // over the same method.
+            let r = link.call(req("adapter.list")).await?;
+            let result::Value::AdapterList(list) = expect_value(r.value, "adapters")? else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            let found = list
+                .items
+                .into_iter()
+                .find(|a| a.preset == preset)
+                .ok_or_else(|| format!("no adapter named {preset}"))?;
+            if found.program.is_empty() {
+                return Err(format!("{preset} has no adapter, so it stays a terminal").into());
+            }
+
+            let r = link.call(with(req("adapter.test"), request::Payload::Adapter(found))).await?;
+            let result::Value::AdapterTestResult(outcome) = expect_value(r.value, "test result")?
+            else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": outcome.ok,
+                        "reported": outcome.reported,
+                        "failure": outcome.failure,
+                    })
+                );
+            } else if outcome.ok {
+                println!("{preset}  OK  {}", outcome.reported);
+                println!();
+                println!("This proves it starts and speaks ACP. Whether the agent is");
+                println!("RECOGNIZED in a pane depends on its detection strings, which");
+                println!("nothing here can check.");
+            } else {
+                println!("{preset}  FAILED  {}", outcome.failure);
+            }
+            if !outcome.ok {
+                std::process::exit(1);
+            }
+        }
+
+        AdapterCmd::Delete { preset } => {
+            let req = with(
+                req("adapter.delete"),
+                request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
+                    typed_confirmation: preset.clone(),
+                }),
+            );
+            let r = link.call(req).await?;
+            let result::Value::AdapterList(list) = expect_value(r.value, "adapters")? else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            let restored = list.items.iter().find(|a| a.preset == preset);
+            match restored {
+                // The table went and a shipped adapter took over, which is what
+                // reverting an override means.
+                Some(a) => println!(
+                    "removed the table for {preset}; the built-in is back ({})",
+                    a.program
+                ),
+                None => println!("removed {preset}"),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Where an adapter came from, for a terminal to read.
+fn origin_label(origin: i32) -> &'static str {
+    match farcooler_protocol::v1::AdapterOrigin::try_from(origin) {
+        Ok(farcooler_protocol::v1::AdapterOrigin::BuiltIn) => "built-in",
+        Ok(farcooler_protocol::v1::AdapterOrigin::Override) => "override",
+        Ok(farcooler_protocol::v1::AdapterOrigin::User) => "yours",
+        _ => "unknown",
+    }
+}
+
 /// The themes a machine offers.
 ///
 /// Built-ins merged with the host's own, resolved HERE rather than in the app,
 /// so the Mac and the two phones cannot come to disagree about what "Nord"
 /// means or about which of two definitions wins.
 async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
-    let ThemeCmd::List = cmd;
+    if let ThemeCmd::Delete { name } = &cmd {
+        let mut link = connect_to(host).await?;
+        let req = with(
+            req("theme.delete"),
+            request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
+                typed_confirmation: name.clone(),
+            }),
+        );
+        let r = link.call(req).await?;
+        let result::Value::ThemeList(list) = expect_value(r.value, "themes")? else {
+            return Err("the daemon returned the wrong resource".into());
+        };
+        if json {
+            println!("{}", serde_json::json!({ "themes": list.items.len() }));
+        } else {
+            println!("removed theme {name}  ({} host themes left)", list.items.len());
+        }
+        return Ok(());
+    }
+    let ThemeCmd::List = cmd else { unreachable!("Delete returned above") };
 
     // The host's own, over whichever transport reaches it. A machine that
     // cannot be reached still has the built-ins — the picker should not empty
