@@ -71,6 +71,18 @@ typedef struct {
     uint32_t history_size;
 } FarCoolerVtSnapshot;
 
+/*
+ * Where a URL sits on screen, in display coordinates — the same space
+ * FarCoolerVtSnapshot reports in, so a renderer can underline the span without
+ * converting anything. A span can cover two rows: long URLs wrap.
+ */
+typedef struct {
+    uint16_t start_row;
+    uint16_t start_column;
+    uint16_t end_row;
+    uint16_t end_column;
+} FarCoolerVtUrlSpan;
+
 /* MARK: - Lifecycle */
 
 /* Create a terminal. Dimensions are clamped to the protocol's range. */
@@ -150,6 +162,25 @@ const char *farcooler_vt_title(void *handle);
  * whether the wheel scrolls your own scrollback or belongs to the program.
  */
 bool farcooler_vt_alt_screen(void *handle);
+
+/*
+ * The URL under a cell, or 0 if there is none.
+ *
+ * Returns the byte length the URL needs and writes NOTHING when that exceeds
+ * `capacity` — call again with a buffer at least that large. Same contract as
+ * farcooler_vt_encode_paste, for a sharper reason: a truncated URL is a
+ * different URL, and opening one is worse than opening none.
+ *
+ * `span` is filled whenever a URL is found, sizing calls included, so a
+ * renderer can underline the match before it has anywhere to put the text.
+ *
+ * An OSC 8 hyperlink wins over the text under it. Only a fixed allowlist of
+ * schemes is ever returned — terminal output is not trusted input, and the list
+ * lives in the core so three renderers cannot widen it independently.
+ */
+size_t farcooler_vt_url_at(void *handle, uint16_t row, uint16_t column,
+                           FarCoolerVtUrlSpan *span, uint8_t *out,
+                           size_t capacity);
 
 /* MARK: - Input */
 
