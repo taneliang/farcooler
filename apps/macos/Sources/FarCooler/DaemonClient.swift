@@ -721,6 +721,37 @@ final class DaemonClient: ObservableObject {
         (layouts[workspace] ?? []).first { $0.terminals.contains(terminal) }
     }
 
+    /// Mark a pane focused locally, before the daemon has been asked.
+    ///
+    /// Every daemon action here spawns a `farcooler` subprocess, which connects
+    /// over a socket and runs `tmux select-pane`. The focus ring, the header
+    /// tint and the keyboard claim are all driven by `PaneRect.focused` — a fact
+    /// the DAEMON reports — so none of them moved until that whole round trip
+    /// finished: locally a fork, an exec and a socket connect, and over ssh all
+    /// of that plus the link. That lag is what the review noticed.
+    ///
+    /// So the answer is assumed and then confirmed. tmux remains the only
+    /// authority — the reply replaces this wholesale a moment later, and a
+    /// FAILED call re-reads rather than leaving the assumption standing, which
+    /// is the one new way this can be wrong. See `focusPane`.
+    ///
+    /// The pane's group comes forward with it, because `layout focus` brings a
+    /// layout to the front on the daemon side too; assuming the focus without
+    /// the group would show a ring on a pane in a layout that is not on screen.
+    func assumeFocus(_ terminal: String, in workspace: String) {
+        guard var groups = layouts[workspace],
+            let index = groups.firstIndex(where: { $0.terminals.contains(terminal) })
+        else { return }
+
+        for g in groups.indices {
+            groups[g].active = g == index
+            for p in groups[g].panes.indices {
+                groups[g].panes[p].focused = g == index && groups[g].panes[p].id == terminal
+            }
+        }
+        layouts[workspace] = groups
+    }
+
     // MARK: - Layout commands
     //
     // One method per CLI subcommand, and nothing more. Each is a single line over
@@ -763,19 +794,63 @@ final class DaemonClient: ObservableObject {
     }
 
     /// Focus a pane, which also brings its layout to the front.
+    ///
+    /// Assumed locally first — see `assumeFocus` for why that is the whole fix
+    /// for a focus ring that used to arrive a round trip late.
     @discardableResult
     func focusPane(_ terminal: String, in workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["focus"], [terminal])
+        assumeFocus(terminal, in: workspace.id)
+        let groups = await layout(workspace, ["focus"], [terminal], background: true)
+        await confirmFocus(terminal, in: workspace, from: groups)
+        return layouts[workspace.id] ?? groups
     }
 
     @discardableResult
     func focusPane(step: String, in workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["focus"], [step])
+        // `--next`/`--prev` step through a pane order the app already holds, so
+        // the target is knowable here and the assumption is as safe as it is for
+        // a pane named outright.
+        var assumed: String?
+        if let group = activeGroup(workspace.id), !group.panes.isEmpty,
+            let current = group.panes.firstIndex(where: \.focused)
+        {
+            let delta = step == "--prev" ? -1 : 1
+            let next = (current + delta + group.panes.count) % group.panes.count
+            assumed = group.panes[next].id
+            assumeFocus(group.panes[next].id, in: workspace.id)
+        }
+        let groups = await layout(workspace, ["focus"], [step], background: true)
+        if let assumed { await confirmFocus(assumed, in: workspace, from: groups) }
+        return layouts[workspace.id] ?? groups
     }
 
     @discardableResult
     func focusPane(number: Int, in workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["focus"], ["--pane", "\(number)"])
+        var assumed: String?
+        if let group = activeGroup(workspace.id), number >= 1, number <= group.panes.count {
+            assumed = group.panes[number - 1].id
+            assumeFocus(group.panes[number - 1].id, in: workspace.id)
+        }
+        let groups = await layout(workspace, ["focus"], ["--pane", "\(number)"], background: true)
+        if let assumed { await confirmFocus(assumed, in: workspace, from: groups) }
+        return layouts[workspace.id] ?? groups
+    }
+
+    /// Undo an assumption the daemon did not agree with.
+    ///
+    /// The one new failure mode optimistic focus introduces, and the one thing
+    /// here that must not be left implicit: `layout` returns the LOCAL copy when
+    /// its command fails, and that copy now carries the assumption — so without
+    /// this, a focus against an unreachable machine would leave the ring sitting
+    /// on a pane that never got it, indefinitely and with nothing to say so.
+    ///
+    /// Checked against what came back rather than against a thrown error,
+    /// because `layout` reports failure by handing back the unchanged list.
+    private func confirmFocus(
+        _ terminal: String, in workspace: Workspace, from groups: [PaneGroup]
+    ) async {
+        guard groups.first(where: { $0.focused == terminal }) == nil else { return }
+        await refreshLayout(workspace)
     }
 
     @discardableResult
@@ -853,12 +928,21 @@ final class DaemonClient: ObservableObject {
     /// The reply is the workspace's whole layout, so the local copy is replaced
     /// rather than patched — and the event that follows says the same thing,
     /// which is what keeps a second client in step.
+    ///
+    /// `background` skips the `busy` toggle, which is a `@Published` change that
+    /// re-evaluates the whole view tree — terminal surface included — on every
+    /// call. Only the focus paths pass true: a split or a preset change
+    /// genuinely is the app doing something the user should see it doing, and
+    /// `busy` is how it says so.
     @discardableResult
     func layout(
-        _ workspace: Workspace, _ path: [String], _ rest: [String] = []
+        _ workspace: Workspace, _ path: [String], _ rest: [String] = [],
+        background: Bool = false
     ) async -> [PaneGroup] {
         let command = ["layout"] + path + [workspace.short] + rest
-        guard let data = await run(command + ["--json"]) else { return layouts[workspace.id] ?? [] }
+        guard let data = await run(command + ["--json"], background: background) else {
+            return layouts[workspace.id] ?? []
+        }
         guard let list = try? JSONDecoder().decode(PaneGroupList.self, from: data) else {
             return layouts[workspace.id] ?? []
         }
@@ -893,11 +977,20 @@ final class DaemonClient: ObservableObject {
     }
 
     func startTask(project: String, description: String, agent: String) async -> String? {
-        let branch = await MainActor.run { Branch.slug(from: description) }
+        // This machine's own prefix, read from the fleet it last refreshed — the
+        // same value the composer previewed, so the branch that gets made is the
+        // branch the user was shown.
+        let prefix = fleet.branchPrefix ?? ""
+        let branch = await MainActor.run { Branch.slug(from: description, prefix: prefix) }
         let title = await MainActor.run { Branch.title(from: description) }
 
         let before = Set(fleet.workspaces.map(\.id))
-        _ = await run(["workspace", "create", project, title, "--branch", branch])
+        // `--no-terminal`, because this creates its own agent terminal a few
+        // lines below. Without it a task would come up with an unused shell
+        // sitting beside the agent that is doing the work.
+        _ = await run([
+            "workspace", "create", project, title, "--branch", branch, "--no-terminal",
+        ])
         await refresh()
 
         guard let workspace = fleet.workspaces.first(where: { !before.contains($0.id) }) else {
@@ -955,6 +1048,11 @@ final class DaemonClient: ObservableObject {
     func createWorkspace(repo: String, task: String, branch: String, base: String) async -> String? {
         let failure = await runReportingError([
             "workspace", "create", repo, task, "--branch", branch, "--base", base,
+            // A worktree with nothing running in it is a directory. `shell`
+            // rather than an agent, because this is the manual path — `startTask`
+            // is the one that starts an agent — and it matches what
+            // "New terminal in <project>" already opens in the main checkout.
+            "--terminal", "shell",
         ])
         await refresh()
         return failure
