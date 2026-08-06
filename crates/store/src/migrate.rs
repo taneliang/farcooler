@@ -18,6 +18,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0004_pane_mode,
     migration_0005_drop_loss_dismissed,
     migration_0006_worktrees_are_managed,
+    migration_0007_review,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -240,6 +241,89 @@ fn migration_0005_drop_loss_dismissed(tx: &Transaction) -> rusqlite::Result<()> 
 /// repository so the race cannot normally happen. It exists so that if that
 /// lock is ever lost in a refactor, the symptom is an error rather than two
 /// sidebar rows for one directory.
+/// Review entries and the dispatch outbox.
+///
+/// Two things here are deliberately absent, and both are the point.
+///
+/// **No line numbers.** An anchor stores the TEXT it was written about and a
+/// fingerprint of what surrounded it. A line number is stale the moment an agent
+/// edits the file, and this schema must not be able to hold a stale fact — the
+/// same rule that keeps `running` out of the terminals table.
+///
+/// **No derived anchor state.** `status` is where the USER put the entry: open,
+/// dispatched, answered, resolved. Whether it is now outdated, ambiguous or in
+/// need of a re-read is computed against the worktree on every read. An entry
+/// can be dispatched and in need of a re-read at once, which is the normal state
+/// right after an agent lands a fix, and one column could not say both.
+///
+/// Attachment BYTES are not here either. They live beside the database, keyed by
+/// hash, for the reason `push.rs` keeps the relay token out of it: a database
+/// copied for support should not carry a screenshot of whatever was on screen.
+fn migration_0007_review(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE TABLE review_entries (
+            id BLOB PRIMARY KEY,
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            body TEXT NOT NULL,
+            disposition TEXT NOT NULL,
+            status TEXT NOT NULL,
+            anchor_json TEXT NOT NULL,
+            manifest_json TEXT NOT NULL,
+            dispatch_id BLOB,
+            answer_text TEXT,
+            answer_terminal_id BLOB,
+            answer_correlation TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            resource_version INTEGER NOT NULL
+        );
+        CREATE INDEX review_entries_by_workspace
+            ON review_entries (workspace_id, status);
+
+        CREATE TABLE review_attachments (
+            id BLOB PRIMARY KEY,
+            entry_id BLOB NOT NULL REFERENCES review_entries(id) ON DELETE CASCADE,
+            sha256 TEXT NOT NULL,
+            mime TEXT NOT NULL,
+            byte_size INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX review_attachments_by_entry ON review_attachments (entry_id);
+
+        -- The outbox exists because a daemon can die between marking an entry
+        -- dispatched and the agent seeing the prompt, and ACP gives no receipt
+        -- to distinguish those. A row here is the only evidence that a send was
+        -- attempted at all.
+        CREATE TABLE review_dispatches (
+            id BLOB PRIMARY KEY,
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            terminal_id BLOB NOT NULL,
+            disposition TEXT NOT NULL,
+            entry_ids_json TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            state TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            observed_at INTEGER
+        );
+        CREATE INDEX review_dispatches_pending
+            ON review_dispatches (state, created_at);
+
+        -- Viewed marks are keyed by CONTENT, so a file's mark clears itself the
+        -- moment an agent changes it, and by branch, so the same path can be
+        -- read on the tip and unread on a stack link.
+        CREATE TABLE review_viewed (
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            branch TEXT NOT NULL,
+            path TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            viewed_at INTEGER NOT NULL,
+            PRIMARY KEY (workspace_id, branch, path)
+        );
+        "#,
+    )
+}
+
 fn migration_0006_worktrees_are_managed(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"
