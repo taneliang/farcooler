@@ -112,16 +112,57 @@ reported and then ignored** — a typo in one `[adapters.*]` table must not
 cost every other agent its chat mode, so `tracing::warn!` names the file and
 the parse error, and the built-in table is used unchanged.
 
-**The config file is read once, at daemon startup, not on every toggle.**
-`Service::open_in` (`crates/daemon/src/service.rs`) loads it into a `Registry`
-held for the life of the process — deliberately, per the comment on
-`Service`'s `registry` field: the file and the environment that locates it are
-process-global, and a service that consulted them on every call could be moved
-out from under itself by another thread, exactly as `root` could. Editing
-`~/.config/farcooler/config.toml` therefore does nothing until the daemon
-restarts. Run `farcooler daemon ensure` to pick it up — it replaces a running
-daemon with one built from the same source, which for a config-only edit is
-just a restart.
+**When the file is read depends on which table you edited**, and the split is
+deliberate rather than an oversight:
+
+| Table | Read | Why |
+|---|---|---|
+| `[adapters.*]` | Once, at daemon startup | It becomes a `Registry` held for the life of the process |
+| `[themes.*]` | On every `theme.list` | A few hundred bytes of TOML, in exchange for no restart |
+| `[branches]` | On every `host.get` | Same, and a settings editor will write this table |
+
+For `[adapters.*]`, `Service::open_in` (`crates/daemon/src/service.rs`) loads the
+table into a `Registry` held for the life of the process — deliberately, per the
+comment on `Service`'s `registry` field: the file and the environment that
+locates it are process-global, and a service that consulted them on every call
+could be moved out from under itself by another thread, exactly as `root` could.
+Editing an adapter therefore does nothing until the daemon restarts. Run
+`farcooler daemon ensure` to pick it up — it replaces a running daemon with one
+built from the same source, which for a config-only edit is just a restart.
+
+The other two tables are read per call, so editing them takes effect on the next
+one. Themes are read that way because a colour is something you tune by looking
+at it; branches because the machine-settings editor writes that table, and a
+value cached at startup would not reflect its own writes.
+
+## Branch names
+
+```toml
+[branches]
+prefix = "elt/"
+```
+
+Prepended to a branch name derived from a task description, so a task called
+"add authentication" becomes `elt/add-authentication`. The default is `feat/`.
+
+`prefix = ""` opts out and produces a bare slug. An **absent** key and an
+**empty** one are different answers: absent means "use the default", empty means
+"no prefix", and collapsing the two would make opting out impossible.
+
+Taken literally beyond trimming surrounding whitespace, so `elt-` works as well
+as `elt/` — no slash is added or removed.
+
+**A table, not a top-level key**, and that matters when you edit by hand: TOML
+puts a bare top-level scalar written *below* `[themes.paper]` inside that table,
+so a `prefix = "elt/"` appended to the end of an existing file would silently
+become a theme's property and do nothing at all.
+
+The prefix is applied by the **client**, not the daemon, because the task
+composer shows you the branch it is about to create — a prefix added on the far
+side would make that preview a lie. The daemon still validates the finished name
+through `validate::branch_name`, which is the check that actually protects git.
+It is carried to clients on `Host.settings.branch_prefix`, so all three apps and
+the CLI agree with the machine the worktree is created on rather than each other.
 
 A configured entry is a `[adapters.<name>]` table:
 

@@ -323,6 +323,36 @@ If `libghostty-vt` later ships a stable, packaged C API, only `crates/vt` change
 - The shared React Native terminal contract is byte-oriented: write ordered output, reset after a declared gap, emit exact input bytes, resize, select, copy/paste, search, and publish renderer metrics. No platform renderer invents transport or reconnection behavior.
 - A terminal `Gap` discards the affected client-side emulator instance before applying the retained tail. The UI shows a persistent output-gap marker because a byte tail cannot reconstruct terminal state that was evicted.
 
+#### Two postures the core holds, and why they are not conveniences
+
+Both of these live in `crates/vt` rather than in the three renderers, because a
+rule enforced in one place is a rule and a rule enforced in three places is a
+coincidence. Both look like missing features until you know what they are for,
+so they are stated here as well as in the code.
+
+**OSC 52 copies. It does not paste.** A program can put text on the clipboard —
+`Signals::clipboard`, drained by each renderer — and this is the only way to get
+text out of a terminal on iOS or Android, neither of which has selection. A
+program asking to *read* the clipboard is refused by the parser
+(`Config::osc52` stays at its `OnlyCopy` default) and never reaches a handle.
+The asymmetry is the whole point: this product exists to run agents unattended
+on machines nobody is sitting at, and one of them being able to read the
+clipboard of the Mac watching it is a data path in the wrong direction over a
+link that exists to carry terminal output. Copy is a program handing you
+something; paste is a program taking something.
+`crates/vt/src/lib.rs` asserts the refusal as a test rather than claiming it in
+a comment.
+
+**A URL is opened only from an allowlist of schemes, and only on an explicit
+gesture.** `url::SCHEMES` names them. Terminal output is not trusted input: an
+agent working overnight prints whatever it read, and some of what it read came
+off the internet, so a URL opener that honors whatever the platform will
+dispatch is a local application-launch primitive driven by text an attacker may
+have chosen. There is no auto-linkification a stray click could fire — ⌘-click
+on the Mac, a long press on the phones. The allowlist is re-checked against the
+produced text rather than trusted from the regex that produced it, so a future
+edit widening the pattern cannot widen what gets opened without a test failing.
+
 The initial terminal spike is not complete until it:
 
 1. Renders a tmux control-mode session in the Swift Mac app through the shared core.
