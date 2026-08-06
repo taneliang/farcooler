@@ -25,7 +25,9 @@ mod remote;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
+
+mod review;
+pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use farcooler_daemon::runtime::Runtime;
 use farcooler_protocol::v1::{
     Repository, RepositoryRoot, Terminal, TerminalState, Workspace, WorkspaceState, request, result,
@@ -99,6 +101,9 @@ enum Command {
     /// Manage terminals inside a workspace.
     #[command(subcommand)]
     Terminal(TerminalCmd),
+    /// Review a workspace: what changed, what you said, and sending it on.
+    #[command(subcommand)]
+    Review(review::ReviewCmd),
     /// Search a workspace's worktree files, for an agent chat's @-mention.
     #[command(subcommand)]
     Worktree(WorktreeCmd),
@@ -618,7 +623,7 @@ async fn main() {
     }
 }
 
-type Fallible = Result<(), Box<dyn std::error::Error>>;
+pub(crate) type Fallible = Result<(), Box<dyn std::error::Error>>;
 
 /// Pair, unpair, or report — on this machine or, with `--host`, on another.
 ///
@@ -714,6 +719,7 @@ async fn run() -> Fallible {
         Command::Adapter(c) => adapter(host, c, cli.json).await,
         Command::Workspace(c) => workspace(host, c, cli.json).await,
         Command::Terminal(c) => terminal(host, c, cli.json).await,
+        Command::Review(c) => review::review(host, c, cli.json).await,
         Command::Worktree(c) => worktree(host, c, cli.json).await,
         Command::Layout(c) => layout(host, c, cli.json).await,
         Command::Attach { workspace } => attach(host, &workspace).await,
@@ -2380,7 +2386,7 @@ async fn list_roots(link: &mut Link) -> Result<Vec<RepositoryRoot>, Box<dyn std:
     }
 }
 
-async fn list_repositories(link: &mut Link) -> Result<Vec<Repository>, Box<dyn std::error::Error>> {
+pub(crate) async fn list_repositories(link: &mut Link) -> Result<Vec<Repository>, Box<dyn std::error::Error>> {
     let r = link.call(req("repository.list")).await?;
     match expect_value(r.value, "repositories")? {
         result::Value::RepositoryList(l) => Ok(l.items),
@@ -2433,18 +2439,18 @@ fn short(id: Uuid) -> String {
     s[s.len() - 8..].to_string()
 }
 
-fn uuid_of(bytes: &[u8]) -> Uuid {
+pub(crate) fn uuid_of(bytes: &[u8]) -> Uuid {
     Uuid::from_slice(bytes).unwrap_or(Uuid::nil())
 }
 
 /// The inverse of `uuid_of`: an id going INTO a payload rather than out of
 /// one, for the agent-channel and worktree-search messages that carry their
 /// own id fields instead of using the envelope's `target_resource_id`.
-fn id_bytes(id: Uuid) -> bytes::Bytes {
+pub(crate) fn id_bytes(id: Uuid) -> bytes::Bytes {
     bytes::Bytes::copy_from_slice(id.as_bytes())
 }
 
-fn short_bytes(bytes: &[u8]) -> String {
+pub(crate) fn short_bytes(bytes: &[u8]) -> String {
     short(uuid_of(bytes))
 }
 
@@ -2593,7 +2599,7 @@ fn normalize_id(text: &str) -> String {
 /// `farcooler workspace discover myrepo` is what anyone would write. Ids still
 /// work, and an ambiguous name is refused rather than guessed at — two projects
 /// called `api` on one host is a thing that happens.
-fn resolve_repository<'a>(
+pub(crate) fn resolve_repository<'a>(
     repositories: &'a [Repository],
     given: &str,
 ) -> Result<&'a Repository, String> {
@@ -2615,6 +2621,38 @@ fn resolve_repository<'a>(
 }
 
 /// Resolve a short id suffix, refusing an ambiguous match rather than guessing.
+/// A workspace by id prefix or by task name.
+pub(crate) async fn resolve_workspace_id(
+    link: &mut Link,
+    needle: &str,
+) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let workspaces = list_workspaces(link).await?;
+    // Name first: people type the task they gave it, and an id prefix is the
+    // fallback rather than the other way round.
+    let by_name: Vec<&Workspace> =
+        workspaces.iter().filter(|w| w.task_name == needle).collect();
+    if by_name.len() == 1 {
+        return Ok(uuid_of(&by_name[0].id));
+    }
+    let w = resolve(&workspaces, needle, |w| &w.id, "workspace")?;
+    Ok(uuid_of(&w.id))
+}
+
+/// A terminal by id prefix or by title.
+pub(crate) async fn resolve_terminal_id(
+    link: &mut Link,
+    needle: &str,
+) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let terminals = list_terminals(link, None).await?;
+    let by_title: Vec<&farcooler_protocol::v1::Terminal> =
+        terminals.iter().filter(|t| t.title == needle).collect();
+    if by_title.len() == 1 {
+        return Ok(uuid_of(&by_title[0].id));
+    }
+    let t = resolve(&terminals, needle, |t| &t.id, "terminal")?;
+    Ok(uuid_of(&t.id))
+}
+
 fn resolve<'a, T>(
     items: &'a [T],
     prefix: &str,

@@ -50,6 +50,15 @@ pub struct CachedChangeSet {
 pub struct ReviewCache {
     entries: Mutex<HashMap<(Uuid, String), CachedChangeSet>>,
     next_version: Mutex<u64>,
+    /// When an agent last wrote into each workspace.
+    ///
+    /// The two-syscall gate cannot see a file edited in place — HEAD and the
+    /// index both sit still — and that is the MOST common change there is. The
+    /// inbox needs to know about it without running `git status` per workspace
+    /// per tick, so the daemon records the moment it serves an agent's write
+    /// through its own filesystem service. Precise, free, and it covers the case
+    /// that matters: the agents doing the work are ACP clients of this daemon.
+    touched: Mutex<HashMap<Uuid, i64>>,
 }
 
 /// mtimes of the two files that move whenever git does something structural.
@@ -101,6 +110,29 @@ impl ReviewCache {
     pub fn invalidate(&self, workspace_id: Uuid) {
         let mut e = self.entries.lock().unwrap_or_else(|x| x.into_inner());
         e.retain(|(ws, _), _| *ws != workspace_id);
+        drop(e);
+        self.touched
+            .lock()
+            .unwrap_or_else(|x| x.into_inner())
+            .insert(workspace_id, now_millis());
+    }
+
+    /// When this workspace was last written to through the daemon.
+    pub fn touched_at(&self, workspace_id: Uuid) -> Option<i64> {
+        self.touched.lock().unwrap_or_else(|x| x.into_inner()).get(&workspace_id).copied()
+    }
+
+    /// The digest of an already-cached change set, if there is one.
+    ///
+    /// Free: no git runs. Lets the inbox notice an in-place edit for any
+    /// workspace someone has actually been looking at, without paying for the
+    /// ones nobody has opened.
+    pub fn cached_digest(&self, workspace_id: Uuid, branch: &str) -> Option<String> {
+        self.entries
+            .lock()
+            .unwrap_or_else(|x| x.into_inner())
+            .get(&(workspace_id, branch.to_string()))
+            .map(|c| c.set.worktree_digest.clone())
     }
 
     /// The change set, computed only if something moved.

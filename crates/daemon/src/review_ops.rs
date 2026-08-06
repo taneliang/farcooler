@@ -194,6 +194,49 @@ fn read_manifest(json: &str) -> CaptureManifest {
     })
 }
 
+/// Fill in an anchor's context fingerprint from the file as it stands.
+///
+/// Only when the client left it empty. A client that DID compute one is
+/// describing a specific occurrence — the second `DUP` rather than the first —
+/// and overwriting that would lose the very thing it was for.
+async fn fingerprint_now(worktree: &Path, anchor: Anchor) -> Anchor {
+    let Anchor::Lines { path, side, text, context_fingerprint } = anchor else {
+        return anchor;
+    };
+    if !context_fingerprint.is_empty() {
+        return Anchor::Lines { path, side, text, context_fingerprint };
+    }
+
+    let fp = match tokio::fs::read_to_string(worktree.join(&path)).await {
+        Ok(content) => {
+            let hay: Vec<&str> = content.lines().collect();
+            let needle: Vec<&str> = text.lines().collect();
+            // Only when the text occurs exactly once. Two occurrences means the
+            // caller has not said WHICH, and picking the first here would bake a
+            // guess into the entry forever — the one thing anchoring refuses to
+            // do. Left empty, resolution reports Ambiguous, which is true.
+            let hits: Vec<usize> = if needle.is_empty() || needle.len() > hay.len() {
+                Vec::new()
+            } else {
+                (0..=hay.len() - needle.len())
+                    .filter(|&i| hay[i..i + needle.len()] == needle[..])
+                    .collect()
+            };
+            match hits.as_slice() {
+                [at] => farcooler_review::anchor::context_fingerprint(
+                    &hay,
+                    *at,
+                    at + needle.len(),
+                ),
+                _ => String::new(),
+            }
+        }
+        Err(_) => String::new(),
+    };
+
+    Anchor::Lines { path, side, text, context_fingerprint: fp }
+}
+
 /// An entry, with its anchor resolved against the worktree as it is now.
 async fn hydrate(
     svc: &Service,
@@ -359,6 +402,14 @@ pub async fn capture(svc: &Service, req: &pb::ReviewCapture) -> Result<pb::Revie
         .await?;
 
     let anchor = read_anchor(&req.anchor_json);
+    // Fingerprint the surroundings HERE rather than trusting the client to.
+    //
+    // A client knows the text it selected; it does not necessarily know what sits
+    // three lines either side of it, and the CLI genuinely cannot. Left empty,
+    // every freshly written comment resolves as `moved` the instant you look at
+    // it — technically honest, and a lie in effect, because nothing moved. The
+    // daemon has the file open anyway.
+    let anchor = fingerprint_now(Path::new(&worktree), anchor).await;
     let manifest = review::capture_manifest(Path::new(&worktree), &c.set, &anchor).await;
 
     let anchor_json = serde_json::to_string(&anchor).unwrap_or_else(|_| r#"{"kind":"none"}"#.into());
@@ -516,11 +567,18 @@ pub async fn mark_reviewed(svc: &Service, req: &pb::ReviewMarkReviewed) -> Resul
         .get(workspace_id, Path::new(&worktree), &branch, &base, source, false)
         .await?;
     let _ = &req.branch;
-    svc.store.mark_reviewed(
+    // The gate is stored ALONGSIDE the digest, and the inbox compares gates.
+    // Storing a zero here left "changed since you looked" permanently on, because
+    // the real gate never equals zero — the badge could be earned but never
+    // cleared, which is worse than no badge.
+    let gate = review::cheap_gate(Path::new(&worktree));
+    svc.store.mark_reviewed_with_gate(
         workspace_id,
         &branch,
         &c.set.head_commit,
         &c.set.worktree_digest,
+        gate.0 as i64,
+        gate.1 as i64,
         now_millis(),
     )
 }
@@ -583,8 +641,27 @@ pub async fn inbox(svc: &Service) -> Result<pb::ReviewInbox> {
         let Ok(ws) = svc.store.get_workspace(c.workspace_id) else { continue };
         let gate = review::cheap_gate(Path::new(&ws.worktree_path));
         let mark = svc.store.reviewed_mark(c.workspace_id, &ws.branch)?;
+        // Three cheap signals, none of which runs git:
+        //
+        //   1. the gate, which catches commits, rebases and checkouts;
+        //   2. an agent write served by this daemon, which catches the ordinary
+        //      case the gate cannot see — a file edited in place;
+        //   3. the digest of an already-cached change set, free when someone has
+        //      been looking at this workspace anyway.
         let changed = match mark {
-            Some(m) => m.gate_head != gate.0 as i64 || m.gate_index != gate.1 as i64,
+            Some(m) => {
+                let structural = m.gate_head != gate.0 as i64 || m.gate_index != gate.1 as i64;
+                let written = svc
+                    .review_cache
+                    .touched_at(c.workspace_id)
+                    .is_some_and(|t| t > m.marked_at);
+                let digest_moved = svc
+                    .review_cache
+                    .cached_digest(c.workspace_id, &ws.branch)
+                    .is_some_and(|d| d != m.worktree_digest);
+                structural || written || digest_moved
+            }
+            // Never marked read. Anything in the buffer wants attention.
             None => c.open + c.dispatched + c.answered + c.dispatch_unknown > 0,
         };
         items.push(pb::InboxWorkspace {
@@ -773,4 +850,116 @@ pub async fn pr_refresh(svc: &Service, req: &pb::PrRefresh) -> Result<pb::StackL
         .unwrap_or_else(|| "HEAD".into());
     let _ = worktree_path;
     build_stack(svc, repository_id, &branch, true).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use farcooler_review::anchor::{Current, Side, content_hash, resolve};
+
+    fn manifest_for(content: &str) -> CaptureManifest {
+        CaptureManifest {
+            base_commit: "base".into(),
+            head_commit: "head".into(),
+            worktree_digest: "digest".into(),
+            file_content_hash: Some(content_hash(content)),
+            file_snapshot: None,
+        }
+    }
+
+    fn current_for(content: &str) -> Current {
+        Current {
+            head_commit: "head".into(),
+            worktree_digest: "digest".into(),
+            file_content: Some(content.into()),
+            file_content_hash: Some(content_hash(content)),
+            hunks: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_freshly_captured_anchor_resolves_exact_rather_than_moved() {
+        // The bug this exists for: a client cannot always know what sits three
+        // lines either side of the text it selected, and the CLI genuinely
+        // cannot. Left empty, every comment read as `moved` the instant it was
+        // written — technically true, and a lie in effect.
+        let dir = tempfile::tempdir().unwrap();
+        let content = "one\ntwo\nTARGET\nthree\n";
+        std::fs::write(dir.path().join("x.rs"), content).unwrap();
+
+        let bare = Anchor::Lines {
+            path: "x.rs".into(),
+            side: Side::New,
+            text: "TARGET".into(),
+            context_fingerprint: String::new(),
+        };
+        let filled = fingerprint_now(dir.path(), bare).await;
+
+        let r = resolve(&filled, &manifest_for(content), &current_for(content));
+        assert_eq!(r.state, AnchorState::Exact, "nothing moved, so nothing should say it did");
+        assert_eq!(r.line, Some(3));
+    }
+
+    #[tokio::test]
+    async fn a_fingerprint_the_client_supplied_is_left_alone() {
+        // A client that DID compute one is naming a specific occurrence — the
+        // second copy rather than the first — and overwriting it would throw away
+        // exactly the information it was carrying.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("x.rs"), "a\nDUP\nb\nDUP\nc\n").unwrap();
+
+        let theirs = Anchor::Lines {
+            path: "x.rs".into(),
+            side: Side::New,
+            text: "DUP".into(),
+            context_fingerprint: "the client picked the second one".into(),
+        };
+        let after = fingerprint_now(dir.path(), theirs.clone()).await;
+        assert_eq!(after, theirs);
+    }
+
+    #[tokio::test]
+    async fn text_that_appears_twice_is_left_unfingerprinted_so_it_reads_as_ambiguous() {
+        // Picking the first match here would bake a guess into the entry
+        // permanently. Empty is correct: resolution then reports Ambiguous.
+        let dir = tempfile::tempdir().unwrap();
+        let content = "a\nDUP\nb\nDUP\nc\n";
+        std::fs::write(dir.path().join("x.rs"), content).unwrap();
+
+        let bare = Anchor::Lines {
+            path: "x.rs".into(),
+            side: Side::New,
+            text: "DUP".into(),
+            context_fingerprint: String::new(),
+        };
+        let filled = fingerprint_now(dir.path(), bare).await;
+        let Anchor::Lines { context_fingerprint, .. } = &filled else {
+            panic!("still a Lines anchor");
+        };
+        assert!(context_fingerprint.is_empty(), "two matches means the caller has not said which");
+
+        let r = resolve(&filled, &manifest_for(content), &current_for(content));
+        assert_eq!(r.state, AnchorState::Ambiguous);
+        assert_eq!(r.line, None);
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_leaves_the_anchor_alone_rather_than_failing_the_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = Anchor::Lines {
+            path: "not-here.rs".into(),
+            side: Side::New,
+            text: "x".into(),
+            context_fingerprint: String::new(),
+        };
+        let after = fingerprint_now(dir.path(), bare).await;
+        assert!(matches!(after, Anchor::Lines { .. }), "capturing still succeeds");
+    }
+
+    #[tokio::test]
+    async fn an_unanchored_capture_is_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(fingerprint_now(dir.path(), Anchor::None).await, Anchor::None);
+        assert_eq!(fingerprint_now(dir.path(), Anchor::Workspace).await, Anchor::Workspace);
+    }
 }

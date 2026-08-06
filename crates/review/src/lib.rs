@@ -27,6 +27,7 @@
 //! ```
 
 pub mod anchor;
+pub mod ffi;
 pub mod diff;
 
 pub use anchor::{Anchor, AnchorState, CaptureManifest, Resolution};
