@@ -1,6 +1,8 @@
 //! Daemon composition: git worktree transactions, domain services, lifecycle.
 pub mod agent_supervisor;
+pub mod change_set;
 pub mod fanout;
+pub mod file_diff;
 pub mod foreground;
 pub mod git;
 pub mod layout;
