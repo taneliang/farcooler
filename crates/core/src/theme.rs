@@ -165,6 +165,16 @@ pub fn built_in() -> Vec<Theme> {
 
 /// Solarized's sixteen, shared by its light and dark variants — which is the
 /// whole idea of that palette: one set of accent colours over two grounds.
+///
+/// `mistyped_literal_suffixes` is silenced for one entry's sake: clippy reads
+/// the `_16` ending `0xCB_4B_16` — Solarized's orange — as a mistyped `u16`
+/// suffix and offers to "fix" it into a different colour. Every literal in this
+/// file is grouped `RR_GG_BB`, which is what makes a table of sixteen colours
+/// readable at a glance, and regrouping one of them to dodge a false positive
+/// would cost that for nothing. Newer clippy releases fire this where the
+/// toolchain CI pins does not, so the allow is what keeps the lint gate usable
+/// on both.
+#[allow(clippy::mistyped_literal_suffixes)]
 const SOLARIZED: [Rgb; 16] = [
     0x07_36_42, 0xDC_32_2F, 0x85_99_00, 0xB5_89_00, 0x26_8B_D2, 0xD3_36_82, 0x2A_A1_98, 0xEE_E8_D5,
     0x00_2B_36, 0xCB_4B_16, 0x58_6E_75, 0x65_7B_83, 0x83_94_96, 0x6C_71_C4, 0x93_A1_A1, 0xFD_F6_E3,
