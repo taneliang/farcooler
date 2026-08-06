@@ -281,15 +281,51 @@ fn migration_0007_review(tx: &Transaction) -> rusqlite::Result<()> {
         CREATE INDEX review_entries_by_workspace
             ON review_entries (workspace_id, status);
 
+        -- entry_id is nullable: bytes are uploaded BEFORE the comment they
+        -- belong to exists, so the client can show a thumbnail while the user is
+        -- still typing. An attachment nobody claims is swept later.
         CREATE TABLE review_attachments (
             id BLOB PRIMARY KEY,
-            entry_id BLOB NOT NULL REFERENCES review_entries(id) ON DELETE CASCADE,
+            entry_id BLOB REFERENCES review_entries(id) ON DELETE CASCADE,
+            workspace_id BLOB,
             sha256 TEXT NOT NULL,
             mime TEXT NOT NULL,
             byte_size INTEGER NOT NULL,
+            width INTEGER NOT NULL DEFAULT 0,
+            height INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
         );
         CREATE INDEX review_attachments_by_entry ON review_attachments (entry_id);
+        CREATE INDEX review_attachments_by_workspace ON review_attachments (workspace_id);
+
+        -- What a workspace is compared against, when the user pinned it.
+        CREATE TABLE review_bases (
+            workspace_id BLOB PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+            base_ref TEXT NOT NULL
+        );
+
+        -- "I have looked at this workspace." Stores the CHEAP gate as well as
+        -- the digest, so the inbox can answer "changed since you looked" with two
+        -- stats instead of a `git status` per worktree.
+        CREATE TABLE review_reviewed (
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            branch TEXT NOT NULL,
+            head_commit TEXT NOT NULL,
+            worktree_digest TEXT NOT NULL,
+            gate_head INTEGER NOT NULL DEFAULT 0,
+            gate_index INTEGER NOT NULL DEFAULT 0,
+            marked_at INTEGER NOT NULL,
+            PRIMARY KEY (workspace_id, branch)
+        );
+
+        -- One branch's parent in a stack, when inference got it wrong and the
+        -- user said so.
+        CREATE TABLE review_stack_parents (
+            repository_id BLOB NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+            branch TEXT NOT NULL,
+            parent_branch TEXT NOT NULL,
+            PRIMARY KEY (repository_id, branch)
+        );
 
         -- The outbox exists because a daemon can die between marking an entry
         -- dispatched and the agent seeing the prompt, and ACP gives no receipt

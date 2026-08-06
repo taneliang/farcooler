@@ -57,6 +57,28 @@ pub enum DomainError {
     #[error("tmux is unavailable")]
     TmuxUnavailable,
 
+    // ---- review ----
+    //
+    // Six failures the review surface can produce. Each maps to a sentence a
+    // person reads; none of them ever puts a Rust error in front of a user.
+    #[error("the base this branch is compared against could not be resolved")]
+    BaseUnresolvable,
+
+    #[error("the diff is larger than a client may be sent at once")]
+    DiffTooLarge,
+
+    #[error("this file has no unified diff to show")]
+    DiffUnsupported,
+
+    #[error("pull request state could not be read")]
+    PrStateUnavailable,
+
+    #[error("attachment exceeds a size or count limit")]
+    AttachmentLimit,
+
+    #[error("the agent may or may not have received this dispatch")]
+    DispatchUnknown,
+
     #[error("path is outside every allowlisted repository root")]
     PathNotAllowed,
 
@@ -105,6 +127,15 @@ impl DomainError {
             DomainError::SensitiveRoot => (ErrorCode::SensitiveRoot, false),
             DomainError::ConfirmationRequired => (ErrorCode::ConfirmationRequired, false),
             DomainError::WorkspacesExist => (ErrorCode::WorkspacesExist, false),
+            DomainError::BaseUnresolvable => (ErrorCode::BaseUnresolvable, false),
+            DomainError::DiffTooLarge => (ErrorCode::DiffTooLarge, false),
+            DomainError::DiffUnsupported => (ErrorCode::DiffUnsupported, false),
+            // Retryable: a captive portal clears, a rate limit expires.
+            DomainError::PrStateUnavailable => (ErrorCode::PrStateUnavailable, true),
+            DomainError::AttachmentLimit => (ErrorCode::AttachmentLimit, false),
+            // Retryable in the sense that Send Again is the answer, though only
+            // a person may decide to press it.
+            DomainError::DispatchUnknown => (ErrorCode::DispatchUnknown, true),
         }
     }
 
@@ -155,6 +186,12 @@ mod tests {
             DomainError::SensitiveRoot,
             DomainError::ConfirmationRequired,
             DomainError::WorkspacesExist,
+            DomainError::BaseUnresolvable,
+            DomainError::DiffTooLarge,
+            DomainError::DiffUnsupported,
+            DomainError::PrStateUnavailable,
+            DomainError::AttachmentLimit,
+            DomainError::DispatchUnknown,
         ]
     }
 

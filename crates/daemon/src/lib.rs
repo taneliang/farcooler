@@ -11,8 +11,11 @@ pub mod paths;
 pub mod push;
 pub mod reconcile;
 pub mod rpc;
+pub mod review;
+pub mod review_ops;
 pub mod runtime;
 pub mod service;
+pub mod stack;
 pub mod session_discovery;
 #[cfg(test)]
 pub(crate) mod test_support;

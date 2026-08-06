@@ -605,3 +605,303 @@ fn row_to_dispatch(row: &rusqlite::Row) -> rusqlite::Result<Dispatch> {
         observed_at: row.get(8)?,
     })
 }
+
+// ---------------------------------------------------------------------------
+// Bases, viewed marks, attachments, and the inbox's counts
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attachment {
+    pub id: Uuid,
+    pub sha256: String,
+    pub mime: String,
+    pub byte_size: u64,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewedMark {
+    pub head_commit: String,
+    pub worktree_digest: String,
+    pub gate_head: i64,
+    pub gate_index: i64,
+    pub marked_at: i64,
+}
+
+/// Per-workspace counts for the fleet inbox.
+///
+/// Durable columns only. Deriving `needs_reread` here would mean resolving every
+/// anchor, which needs that workspace's change set, which is a `git status` per
+/// worktree per inbox call — the exact fan-out `watch.rs` exists to avoid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceCounts {
+    pub workspace_id: Uuid,
+    pub open: u32,
+    pub dispatched: u32,
+    pub answered: u32,
+    pub dispatch_unknown: u32,
+}
+
+impl Store {
+    pub fn review_base(&self, workspace_id: Uuid) -> Result<Option<String>> {
+        self.conn()
+            .query_row(
+                "SELECT base_ref FROM review_bases WHERE workspace_id = ?1",
+                params![uuid_blob(workspace_id)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_err)
+    }
+
+    pub fn set_review_base(&self, workspace_id: Uuid, base_ref: &str) -> Result<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO review_bases (workspace_id, base_ref) VALUES (?1, ?2)
+                 ON CONFLICT(workspace_id) DO UPDATE SET base_ref = excluded.base_ref",
+                params![uuid_blob(workspace_id), base_ref],
+            )
+            .map_err(map_err)?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_attachment(
+        &self,
+        sha256: &str,
+        mime: &str,
+        byte_size: u64,
+        width: u32,
+        height: u32,
+        now_millis: i64,
+    ) -> Result<Attachment> {
+        let id = Uuid::now_v7();
+        self.conn()
+            .execute(
+                "INSERT INTO review_attachments
+                 (id, sha256, mime, byte_size, width, height, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    uuid_blob(id),
+                    sha256,
+                    mime,
+                    byte_size as i64,
+                    width,
+                    height,
+                    now_millis
+                ],
+            )
+            .map_err(map_err)?;
+        Ok(Attachment {
+            id,
+            sha256: sha256.to_string(),
+            mime: mime.to_string(),
+            byte_size,
+            width,
+            height,
+        })
+    }
+
+    pub fn attach_to_entry(&self, attachment_id: Uuid, entry_id: Uuid) -> Result<()> {
+        self.conn()
+            .execute(
+                "UPDATE review_attachments SET entry_id = ?2,
+                   workspace_id = (SELECT workspace_id FROM review_entries WHERE id = ?2)
+                 WHERE id = ?1",
+                params![uuid_blob(attachment_id), uuid_blob(entry_id)],
+            )
+            .map_err(map_err)?;
+        Ok(())
+    }
+
+    pub fn attachment(&self, id: Uuid) -> Result<Option<Attachment>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, sha256, mime, byte_size, width, height
+                 FROM review_attachments WHERE id = ?1",
+            )
+            .map_err(map_err)?;
+        stmt.query_row(params![uuid_blob(id)], row_to_attachment).optional().map_err(map_err)
+    }
+
+    pub fn entry_attachments(&self, entry_id: Uuid) -> Result<Vec<Attachment>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, sha256, mime, byte_size, width, height
+                 FROM review_attachments WHERE entry_id = ?1 ORDER BY created_at",
+            )
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(params![uuid_blob(entry_id)], row_to_attachment)
+            .map_err(map_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_err)?;
+        Ok(rows)
+    }
+
+    /// Total attachment bytes charged to one workspace.
+    ///
+    /// Counts DISTINCT hashes: the same screenshot attached to four comments is
+    /// one file on disk, so charging it four times would refuse an upload the
+    /// user has room for.
+    pub fn workspace_attachment_bytes(&self, workspace_id: Uuid) -> Result<u64> {
+        let total: i64 = self
+            .conn()
+            .query_row(
+                "SELECT COALESCE(SUM(byte_size), 0) FROM
+                   (SELECT DISTINCT sha256, byte_size FROM review_attachments
+                    WHERE workspace_id = ?1)",
+                params![uuid_blob(workspace_id)],
+                |r| r.get(0),
+            )
+            .map_err(map_err)?;
+        Ok(total as u64)
+    }
+
+    pub fn mark_reviewed(
+        &self,
+        workspace_id: Uuid,
+        branch: &str,
+        head_commit: &str,
+        worktree_digest: &str,
+        now_millis: i64,
+    ) -> Result<()> {
+        self.mark_reviewed_with_gate(workspace_id, branch, head_commit, worktree_digest, 0, 0, now_millis)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn mark_reviewed_with_gate(
+        &self,
+        workspace_id: Uuid,
+        branch: &str,
+        head_commit: &str,
+        worktree_digest: &str,
+        gate_head: i64,
+        gate_index: i64,
+        now_millis: i64,
+    ) -> Result<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO review_reviewed
+                 (workspace_id, branch, head_commit, worktree_digest, gate_head, gate_index, marked_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(workspace_id, branch) DO UPDATE SET
+                   head_commit = excluded.head_commit,
+                   worktree_digest = excluded.worktree_digest,
+                   gate_head = excluded.gate_head,
+                   gate_index = excluded.gate_index,
+                   marked_at = excluded.marked_at",
+                params![
+                    uuid_blob(workspace_id),
+                    branch,
+                    head_commit,
+                    worktree_digest,
+                    gate_head,
+                    gate_index,
+                    now_millis
+                ],
+            )
+            .map_err(map_err)?;
+        Ok(())
+    }
+
+    pub fn reviewed_mark(&self, workspace_id: Uuid, branch: &str) -> Result<Option<ReviewedMark>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT head_commit, worktree_digest, gate_head, gate_index, marked_at
+                 FROM review_reviewed WHERE workspace_id = ?1 AND branch = ?2",
+            )
+            .map_err(map_err)?;
+        stmt.query_row(params![uuid_blob(workspace_id), branch], |r| {
+            Ok(ReviewedMark {
+                head_commit: r.get(0)?,
+                worktree_digest: r.get(1)?,
+                gate_head: r.get(2)?,
+                gate_index: r.get(3)?,
+                marked_at: r.get(4)?,
+            })
+        })
+        .optional()
+        .map_err(map_err)
+    }
+
+    /// One row per workspace that has any entries at all. Workspaces with an
+    /// empty buffer are absent rather than reported as zeroes, so an inbox over a
+    /// hundred worktrees returns the handful that want attention.
+    pub fn review_counts_by_workspace(&self) -> Result<Vec<WorkspaceCounts>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT workspace_id,
+                        SUM(status = 'open'),
+                        SUM(status = 'dispatched'),
+                        SUM(status = 'answered'),
+                        SUM(status = 'dispatch_unknown')
+                 FROM review_entries
+                 WHERE status != 'resolved'
+                 GROUP BY workspace_id",
+            )
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(WorkspaceCounts {
+                    workspace_id: get_uuid(r, 0)?,
+                    open: r.get::<_, i64>(1)? as u32,
+                    dispatched: r.get::<_, i64>(2)? as u32,
+                    answered: r.get::<_, i64>(3)? as u32,
+                    dispatch_unknown: r.get::<_, i64>(4)? as u32,
+                })
+            })
+            .map_err(map_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_err)?;
+        Ok(rows)
+    }
+
+    // ---- stack parents ----
+
+    pub fn stack_parent(&self, repository_id: Uuid, branch: &str) -> Result<Option<String>> {
+        self.conn()
+            .query_row(
+                "SELECT parent_branch FROM review_stack_parents
+                 WHERE repository_id = ?1 AND branch = ?2",
+                params![uuid_blob(repository_id), branch],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_err)
+    }
+
+    pub fn set_stack_parent(
+        &self,
+        repository_id: Uuid,
+        branch: &str,
+        parent_branch: &str,
+    ) -> Result<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO review_stack_parents (repository_id, branch, parent_branch)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(repository_id, branch)
+                 DO UPDATE SET parent_branch = excluded.parent_branch",
+                params![uuid_blob(repository_id), branch, parent_branch],
+            )
+            .map_err(map_err)?;
+        Ok(())
+    }
+}
+
+fn row_to_attachment(row: &rusqlite::Row) -> rusqlite::Result<Attachment> {
+    Ok(Attachment {
+        id: get_uuid(row, 0)?,
+        sha256: row.get(1)?,
+        mime: row.get(2)?,
+        byte_size: row.get::<_, i64>(3)? as u64,
+        width: row.get(4)?,
+        height: row.get(5)?,
+    })
+}

@@ -253,6 +253,20 @@ pub struct Service {
     /// event window. See `agent_supervisor` for why the transcript itself is
     /// not here.
     agents: agent_supervisor::AgentSupervisor,
+    /// Change sets, cached behind a two-syscall gate.
+    ///
+    /// Not in the store: nothing here is durable. It is a derivation of git, and
+    /// the only reason it is held at all is that recomputing it per keystroke of
+    /// scrolling would put a `git status` on the critical path of a phone.
+    pub review_cache: crate::review::ReviewCache,
+    /// PR state, in memory and nowhere else.
+    ///
+    /// Deliberately not durable. Writing it would mean a restarted daemon
+    /// confidently showing yesterday's "merged" for a PR that was reopened, and
+    /// "runtime state is derived, never stored" applies to a third party's
+    /// lifecycle at least as strongly as to our own. After a restart every PR
+    /// reads Unknown until a refresh succeeds.
+    pr_cache: std::sync::Mutex<std::collections::HashMap<Uuid, Option<Vec<crate::stack::PrInfo>>>>,
     /// One mutex per repository, created on first use and never removed.
     ///
     /// Held across any sequence that mutates git and then writes a workspace
@@ -323,13 +337,57 @@ impl Service {
             root,
             registry,
             agents: agent_supervisor::AgentSupervisor::new(),
+            review_cache: crate::review::ReviewCache::new(),
+            pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    /// PR state as last read, or `None` when it has never been read since this
+    /// process started. `None` means Unknown to a client, never "not merged".
+    pub fn pr_cache_get(&self, repository_id: Uuid) -> Option<Vec<crate::stack::PrInfo>> {
+        self.pr_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&repository_id)
+            .cloned()
+            .flatten()
+    }
+
+    pub fn pr_cache_put(&self, repository_id: Uuid, prs: Option<Vec<crate::stack::PrInfo>>) {
+        self.pr_cache.lock().unwrap_or_else(|e| e.into_inner()).insert(repository_id, prs);
     }
 
     /// The supervisor for every terminal's agent session.
     pub fn agents(&self) -> &agent_supervisor::AgentSupervisor {
         &self.agents
+    }
+
+    /// Where this service's runtime data lives. Attachment blobs sit under it,
+    /// beside the database rather than inside it.
+    pub fn root_dir(&self) -> &std::path::Path {
+        &self.root
+    }
+
+    /// Hand a composed review prompt to a terminal's agent.
+    ///
+    /// The same path `terminal.agent_prompt` uses, deliberately: a review
+    /// dispatch is an ordinary prompt to an ordinary terminal, and giving it a
+    /// private channel would be a second way for text to reach an agent, free to
+    /// behave differently from the one people already use.
+    pub async fn send_review_prompt(&self, terminal_id: Uuid, prompt: &str) -> Result<()> {
+        // Refuses early if the terminal is not something that can be prompted,
+        // so a dispatch cannot be recorded against a pane that could never have
+        // received it.
+        let _ = self.store.get_terminal(terminal_id)?;
+        self.agents().send(
+            terminal_id,
+            farcooler_agent::link::DaemonMessage::Prompt {
+                text: prompt.to_string(),
+                images: Vec::new(),
+            },
+        );
+        Ok(())
     }
 
     /// The lock guarding one repository's git-plus-metadata sequences.
