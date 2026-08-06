@@ -381,6 +381,101 @@ impl Session {
         Ok(crate::actions::register_repository(&mut self.client, relative_path).await?)
     }
 
+    // ---- machine settings ----
+    //
+    // Every write answers with what the file now says, read back by the daemon
+    // rather than echoed from the request, so a value the writer normalized is
+    // what the caller ends up holding.
+
+    pub async fn set_branch_prefix(
+        &mut self,
+        prefix: &str,
+    ) -> Result<farcooler_protocol::v1::Host, SessionError> {
+        let payload =
+            request::Payload::HostSettings(farcooler_protocol::v1::HostSettings {
+                branch_prefix: prefix.to_string(),
+            });
+        match self.value("settings.set_branch_prefix", None, Some(payload)).await? {
+            result::Value::Host(h) => Ok(h),
+            other => Err(wrong("host", &other)),
+        }
+    }
+
+    pub async fn upsert_theme(
+        &mut self,
+        theme: farcooler_protocol::v1::Theme,
+    ) -> Result<Vec<farcooler_protocol::v1::Theme>, SessionError> {
+        let payload = request::Payload::Theme(theme);
+        match self.value("theme.upsert", None, Some(payload)).await? {
+            result::Value::ThemeList(l) => Ok(l.items),
+            other => Err(wrong("themes", &other)),
+        }
+    }
+
+    pub async fn delete_theme(
+        &mut self,
+        name: &str,
+    ) -> Result<Vec<farcooler_protocol::v1::Theme>, SessionError> {
+        // The name travels in `TypedConfirmation`, which carries exactly one
+        // string. Not a confirmation of intent: deleting a theme touches no
+        // files and is undone by saving it again.
+        let payload = request::Payload::TypedConfirmation(
+            farcooler_protocol::v1::TypedConfirmation { typed_confirmation: name.to_string() },
+        );
+        match self.value("theme.delete", None, Some(payload)).await? {
+            result::Value::ThemeList(l) => Ok(l.items),
+            other => Err(wrong("themes", &other)),
+        }
+    }
+
+    pub async fn adapters(
+        &mut self,
+    ) -> Result<Vec<farcooler_protocol::v1::Adapter>, SessionError> {
+        match self.value("adapter.list", None, None).await? {
+            result::Value::AdapterList(l) => Ok(l.items),
+            other => Err(wrong("adapters", &other)),
+        }
+    }
+
+    pub async fn upsert_adapter(
+        &mut self,
+        adapter: farcooler_protocol::v1::Adapter,
+    ) -> Result<Vec<farcooler_protocol::v1::Adapter>, SessionError> {
+        let payload = request::Payload::Adapter(adapter);
+        match self.value("adapter.upsert", None, Some(payload)).await? {
+            result::Value::AdapterList(l) => Ok(l.items),
+            other => Err(wrong("adapters", &other)),
+        }
+    }
+
+    pub async fn delete_adapter(
+        &mut self,
+        preset: &str,
+    ) -> Result<Vec<farcooler_protocol::v1::Adapter>, SessionError> {
+        let payload = request::Payload::TypedConfirmation(
+            farcooler_protocol::v1::TypedConfirmation { typed_confirmation: preset.to_string() },
+        );
+        match self.value("adapter.delete", None, Some(payload)).await? {
+            result::Value::AdapterList(l) => Ok(l.items),
+            other => Err(wrong("adapters", &other)),
+        }
+    }
+
+    /// Prove an adapter works, without saving it first.
+    ///
+    /// Takes the adapter rather than a name on purpose: the point is to answer
+    /// "will this work" about a form the user has not committed yet.
+    pub async fn test_adapter(
+        &mut self,
+        adapter: farcooler_protocol::v1::Adapter,
+    ) -> Result<farcooler_protocol::v1::AdapterTestResult, SessionError> {
+        let payload = request::Payload::Adapter(adapter);
+        match self.value("adapter.test", None, Some(payload)).await? {
+            result::Value::AdapterTestResult(r) => Ok(r),
+            other => Err(wrong("adapter test result", &other)),
+        }
+    }
+
     pub async fn stop_terminal(&mut self, terminal: Uuid) -> Result<(), SessionError> {
         self.value("terminal.stop", Some(terminal), None).await.map(|_| ())
     }

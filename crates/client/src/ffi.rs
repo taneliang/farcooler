@@ -453,6 +453,22 @@ async fn dispatch(
     let text = |key: &str| -> String {
         args.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
     };
+    // An absent array and an empty one are the same thing here, and that is
+    // right: the adapter writer always writes all four detection arrays, so a
+    // client clearing one sends `[]` and a client that never had one sends
+    // nothing — both mean "no strings".
+    let strings = |key: &str| -> Vec<String> {
+        args.get(key)
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default()
+    };
+    let numbers = |key: &str| -> Vec<u32> {
+        args.get(key)
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect())
+            .unwrap_or_default()
+    };
 
     match method {
         "fleet" => session.fleet().await,
@@ -498,6 +514,65 @@ async fn dispatch(
                     "cursor": t.cursor,
                     "ansi": t.ansi,
                 })).collect::<Vec<_>>()
+            }))
+        }
+
+        // MARK: - Machine settings
+        //
+        // Editing what this machine's config.toml holds. Every write answers
+        // with the file's new state read back, not with what was sent, so a
+        // value the writer normalized is what the caller ends up holding.
+
+        "settings.set_branch_prefix" => {
+            let host = session.set_branch_prefix(&text("prefix")).await?;
+            Ok(json!({
+                "branchPrefix": host.settings
+                    .as_ref()
+                    .map(|s| s.branch_prefix.as_str())
+                    .unwrap_or_default(),
+            }))
+        }
+
+        "theme.upsert" => {
+            let ansi = numbers("ansi");
+            if ansi.len() != 16 {
+                return Err(SessionError::Protocol(
+                    "a theme needs exactly sixteen ANSI colours".into(),
+                ));
+            }
+            let themes = session
+                .upsert_theme(farcooler_protocol::v1::Theme {
+                    name: text("name"),
+                    dark: args.get("dark").and_then(|v| v.as_bool()).unwrap_or(true),
+                    background: args.get("background").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    foreground: args.get("foreground").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    cursor: args.get("cursor").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    ansi,
+                })
+                .await?;
+            Ok(theme_json(&themes))
+        }
+
+        "theme.delete" => Ok(theme_json(&session.delete_theme(&text("name")).await?)),
+
+        "adapters" => Ok(adapter_json(&session.adapters().await?)),
+
+        "adapter.upsert" => {
+            let adapter = wire_adapter(&text("preset"), &text("program"), &strings, args);
+            Ok(adapter_json(&session.upsert_adapter(adapter).await?))
+        }
+
+        "adapter.delete" => {
+            Ok(adapter_json(&session.delete_adapter(&text("preset")).await?))
+        }
+
+        "adapter.test" => {
+            let adapter = wire_adapter(&text("preset"), &text("program"), &strings, args);
+            let outcome = session.test_adapter(adapter).await?;
+            Ok(json!({
+                "ok": outcome.ok,
+                "reported": outcome.reported,
+                "failure": outcome.failure,
             }))
         }
 
@@ -772,6 +847,81 @@ async fn dispatch(
         // Refused rather than defaulted, so a typo in a client is a visible
         // error instead of a call that silently does nothing.
         other => Err(SessionError::Protocol(format!("unknown method: {other}"))),
+    }
+}
+
+/// Themes as every client already decodes them, so a write's answer and
+/// `themes`'s answer are the same shape.
+fn theme_json(items: &[farcooler_protocol::v1::Theme]) -> Value {
+    json!({
+        "themes": items.iter().map(|t| json!({
+            "name": t.name,
+            "dark": t.dark,
+            "background": t.background,
+            "foreground": t.foreground,
+            "cursor": t.cursor,
+            "ansi": t.ansi,
+        })).collect::<Vec<_>>()
+    })
+}
+
+/// Adapters, with the origin as a word rather than an enum number.
+///
+/// A word because the clients are Swift and Kotlin and neither has the
+/// generated enum: a number here would be three copies of a mapping table, and
+/// the third one would be wrong.
+fn adapter_json(items: &[farcooler_protocol::v1::Adapter]) -> Value {
+    json!({
+        "adapters": items.iter().map(|a| json!({
+            "preset": a.preset,
+            "program": a.program,
+            "args": a.args,
+            "env": a.env,
+            "commands": a.commands,
+            "identity": a.identity,
+            "blocked": a.blocked,
+            "working": a.working,
+            "origin": match farcooler_protocol::v1::AdapterOrigin::try_from(a.origin) {
+                Ok(farcooler_protocol::v1::AdapterOrigin::BuiltIn) => "builtIn",
+                Ok(farcooler_protocol::v1::AdapterOrigin::Override) => "override",
+                Ok(farcooler_protocol::v1::AdapterOrigin::User) => "user",
+                _ => "unknown",
+            },
+            // Derived here rather than left to each client: an adapter with no
+            // program is a recognized agent Far Cooler cannot host as a chat,
+            // which is a real state and the one thing a picker has to know.
+            "chatCapable": !a.program.is_empty(),
+        })).collect::<Vec<_>>()
+    })
+}
+
+/// One adapter out of a client's JSON.
+fn wire_adapter(
+    preset: &str,
+    program: &str,
+    strings: &dyn Fn(&str) -> Vec<String>,
+    args: &Value,
+) -> farcooler_protocol::v1::Adapter {
+    farcooler_protocol::v1::Adapter {
+        preset: preset.to_string(),
+        program: program.to_string(),
+        args: strings("args"),
+        env: args
+            .get("env")
+            .and_then(|v| v.as_object())
+            .map(|o| {
+                o.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        commands: strings("commands"),
+        identity: strings("identity"),
+        blocked: strings("blocked"),
+        working: strings("working"),
+        // Set by the daemon on the way back out; a client claiming one would be
+        // claiming something only the daemon can know.
+        origin: 0,
     }
 }
 
