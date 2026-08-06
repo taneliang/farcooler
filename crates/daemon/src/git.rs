@@ -12,9 +12,23 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use farcooler_core::{DomainError, Result};
 use tokio::process::Command;
+
+/// How long any single git invocation may take before it is killed.
+///
+/// Worktree operations are local and finish in milliseconds; a call that has not
+/// returned in ten seconds is not slow, it is stuck — a repository on a network
+/// filesystem that stopped answering, a `.git` on a stalled mount, an index lock
+/// held by something that died. Without this the daemon waits forever on a
+/// process it can see, and the client waits forever on the daemon.
+///
+/// Ten seconds rather than one: `git status` on a genuinely large repository with
+/// a cold cache can take seconds, and killing honest work is worse than waiting
+/// for it.
+pub const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub struct GitOutput {
@@ -23,24 +37,72 @@ pub struct GitOutput {
     pub stderr: String,
 }
 
-/// Run a git command inside `cwd`.
+/// Raw bytes, for the `-z` plumbing whose output is NOT text.
+///
+/// `git status -z` and friends separate records with NUL and emit path bytes
+/// exactly as they are on disk, which on Linux is any byte sequence that is not
+/// NUL or `/`. Running that through `from_utf8_lossy` replaces the undecodable
+/// bytes with U+FFFD, and a path that has been through that substitution can no
+/// longer be opened. Anything that parses paths uses this; anything that parses
+/// git's own English uses `git`.
+#[derive(Debug)]
+pub struct GitBytes {
+    pub ok: bool,
+    pub stdout: Vec<u8>,
+    pub stderr: String,
+}
+
+/// Run a git command inside `cwd`, bounded by [`GIT_TIMEOUT`].
 pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
-    let out = Command::new("git")
+    let raw = git_bytes(cwd, args).await?;
+    Ok(GitOutput {
+        ok: raw.ok,
+        stdout: String::from_utf8_lossy(&raw.stdout).into_owned(),
+        stderr: raw.stderr,
+    })
+}
+
+/// Run a git command inside `cwd` and keep its stdout as bytes.
+///
+/// Two properties beyond spawning the process, and both are the reason this
+/// function exists rather than a bare `Command`:
+///
+/// **It cannot hang.** The call is wrapped in [`GIT_TIMEOUT`]; on expiry the
+/// child is killed rather than left to run headless, and the caller gets
+/// `OperationFailed` instead of never being answered.
+///
+/// **It cannot outlive its caller.** `kill_on_drop` means a request whose
+/// connection went away takes its git with it. Review recomputes a change set
+/// whenever a client asks; without this, a phone that drops off a train tunnel
+/// mid-scroll leaves a `git diff` running on the host for as long as it likes,
+/// once per abandoned request.
+pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
+    let child = Command::new("git")
         .current_dir(cwd)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| {
-            tracing::warn!(error = %e, "failed to spawn git");
-            DomainError::OperationFailed
-        })?;
+        .kill_on_drop(true)
+        .output();
 
-    Ok(GitOutput {
+    let out = match tokio::time::timeout(GIT_TIMEOUT, child).await {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "failed to spawn git");
+            return Err(DomainError::OperationFailed);
+        }
+        Err(_) => {
+            // The timeout dropped the future, and `kill_on_drop` reaped the
+            // child with it. Nothing to clean up here; say what happened.
+            tracing::warn!(?args, "git timed out and was killed");
+            return Err(DomainError::OperationFailed);
+        }
+    };
+
+    Ok(GitBytes {
         ok: out.status.success(),
-        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stdout: out.stdout,
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
     })
 }
