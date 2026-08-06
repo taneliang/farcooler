@@ -124,6 +124,13 @@ final class Connection: ObservableObject {
     /// argument to `start` and was gone the moment it returned.
     private var host: Host?
 
+    /// The machine this connection is for, as it reads on screen.
+    ///
+    /// `host` itself stays private — nothing outside should be able to change
+    /// which machine a live connection points at — but a settings screen has to
+    /// be able to title itself with the machine it is editing.
+    var hostLabel: String { host?.label ?? "This machine" }
+
     /// The armed retry, or the attempt in flight. One slot, so a second
     /// request to reconnect replaces the first rather than running alongside
     /// it — the same rule the Mac's `DaemonClient.retryTask` follows.
@@ -560,6 +567,97 @@ final class Connection: ObservableObject {
         }
         _ = try? await core.call(method, ["terminal": terminal.id])
         await refresh()
+    }
+
+    // MARK: - Machine settings
+    //
+    // Editing what the connected machine's config.toml holds. Every write
+    // answers with the file's new state, read back by the daemon rather than
+    // echoed from the request, so a value the writer normalized is what this
+    // phone ends up holding.
+
+    /// Only the themes this machine's file defines.
+    ///
+    /// Not the merged list `Themes.shared.available` holds: that one includes
+    /// this phone's built-ins, and a built-in shown in an editor as if the file
+    /// defined it would offer a delete that does nothing.
+    func hostThemes() async -> [Theme] {
+        guard let data = try? await core.call("themes"),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+        return Self.themes(from: body)
+    }
+
+    func setBranchPrefix(_ prefix: String) async -> String? {
+        guard let data = try? await core.call(
+            "settings.set_branch_prefix", ["prefix": prefix]),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let stored = body["branchPrefix"] as? String ?? prefix
+        branchPrefix = stored
+        return stored
+    }
+
+    func upsertTheme(_ theme: Theme) async -> [Theme]? {
+        guard let data = try? await core.call("theme.upsert", theme.arguments),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return Self.themes(from: body)
+    }
+
+    func deleteTheme(_ name: String) async -> [Theme]? {
+        guard let data = try? await core.call("theme.delete", ["name": name]),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return Self.themes(from: body)
+    }
+
+    /// Put the machine's themes back into the picker every screen reads.
+    ///
+    /// Without this, a theme you just made is missing from the one place you
+    /// would go to choose it.
+    func reloadThemes() async {
+        Themes.shared.merge(hostThemes: await hostThemes())
+    }
+
+    func adapters() async -> [AdapterInfo] {
+        guard let data = try? await core.call("adapters"),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+        return Self.adapters(from: body)
+    }
+
+    func upsertAdapter(_ adapter: AdapterInfo) async -> [AdapterInfo]? {
+        guard let data = try? await core.call("adapter.upsert", adapter.arguments),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return Self.adapters(from: body)
+    }
+
+    func deleteAdapter(_ preset: String) async -> [AdapterInfo]? {
+        guard let data = try? await core.call("adapter.delete", ["preset": preset]),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return Self.adapters(from: body)
+    }
+
+    /// Prove an adapter works, without saving it first.
+    func testAdapter(_ adapter: AdapterInfo) async -> AdapterTestOutcome {
+        guard let data = try? await core.call("adapter.test", adapter.arguments),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return .failed("That machine could not be reached.") }
+        if body["ok"] as? Bool == true {
+            return .worked(body["reported"] as? String ?? "answered")
+        }
+        return .failed(body["failure"] as? String ?? "The adapter did not answer.")
+    }
+
+    private static func themes(from body: [String: Any]) -> [Theme] {
+        (body["themes"] as? [[String: Any]] ?? []).compactMap(Theme.init(bridge:))
+    }
+
+    private static func adapters(from body: [String: Any]) -> [AdapterInfo] {
+        (body["adapters"] as? [[String: Any]] ?? []).compactMap(AdapterInfo.init(json:))
     }
 
     func createWorkspace(repository: String, task: String, branch: String) async {

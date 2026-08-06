@@ -33,6 +33,9 @@ SOURCES = [
     "TerminalView.swift",
     "AgentStream.swift",
     "AgentView.swift",
+    "MachineSettings.swift",
+    "ThemeEditorView.swift",
+    "AdapterEditorView.swift",
 ]
 
 # `AgentKit`'s own sources, compiled directly into this target rather than
