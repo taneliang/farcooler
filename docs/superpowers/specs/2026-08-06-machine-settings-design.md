@@ -262,15 +262,25 @@ picker reading host themes, so this extends a screen rather than inventing one.
 
 `crates/daemon`:
 
-- `adapter.list` reports a built-in as `BUILT_IN`, the same name after an upsert
-  as `OVERRIDE`, and an unshipped name as `USER`.
-- An upsert takes effect on the next `adapter.list` **without a restart**, which
-  is the registry reload asserted through behavior.
-- `adapter.delete` on an override restores the built-in.
 - Every new method is `HostAdmin` in the scope table, asserted the way the
-  existing scope tests do.
-- An adapter with a blank `program` is refused, matching `Registry::merge`'s
-  existing guard rather than writing a table that can never start.
+  existing scope tests do — including `adapter.list`, with `theme.list` beside it
+  as `Read` to make the distinction explicit.
+- `adapter_origin` reports `BUILT_IN` for a name with no table, `OVERRIDE` for one
+  shadowing a shipped adapter, and `USER` for one Far Cooler does not ship.
+
+**Not socket tests, and this is a real limitation rather than an omission.**
+`config_path()` reads process-global environment, and the socket harness runs its
+tests in parallel — a test that pointed it at a scratch file would move it out
+from under every other test in the same binary, which is the exact failure that
+harness's own doc comment says it was built to avoid. So the origin decision is a
+**pure function of two name sets**, tested hermetically, and the parts that
+genuinely need a file — the write, the reload, and the round trip — are verified
+against a scratch daemon by hand, the way the previous spec's items 5 to 7 were.
+What that leaves uncovered by CI is the wiring between them.
+
+Closing that properly means threading a config path through `Service` instead of
+reading the global, which is a larger change than this feature justifies and is
+recorded here rather than pretended away.
 
 The three apps are checked by building and driving them; none of this is
 unit-testable.
