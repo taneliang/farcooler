@@ -114,10 +114,24 @@ pub fn snapshot(term: &Terminal) -> Snapshot {
         for col in 0..cols {
             let c = &grid[Line(line as i32 - offset)][Column(col)];
             let flags = c.flags;
+            let background = resolve(c.bg, false, palette);
+            // Intensity is resolved here, with colour, and for the same stated
+            // reason: three renderers that each decided how dim a dim is would
+            // be three different answers to one question.
+            //
+            // `HIDDEN` first, because it outranks everything — a program that
+            // asked to conceal text gets that, not a dimmed version of it.
+            let foreground = if flags.contains(Flags::HIDDEN) {
+                background
+            } else if flags.contains(Flags::DIM) {
+                dim(resolve(c.fg, true, palette))
+            } else {
+                resolve(c.fg, true, palette)
+            };
             cells.push(Cell {
                 ch: c.c,
-                fg: resolve(c.fg, true, palette),
-                bg: resolve(c.bg, false, palette),
+                fg: foreground,
+                bg: background,
                 bold: flags.contains(Flags::BOLD),
                 italic: flags.contains(Flags::ITALIC),
                 underline: flags.contains(Flags::UNDERLINE),
@@ -195,6 +209,25 @@ fn resolve(
 
 fn pack(r: u8, g: u8, b: u8) -> u32 {
     ((r as u32) << 16) | ((g as u32) << 8) | b as u32
+}
+
+/// `\e[2m`: the same colour, at two thirds intensity.
+///
+/// Scaled per channel rather than blended toward the background, which keeps the
+/// hue — a dim red stays red instead of drifting grey — and works the same on a
+/// light theme as on a dark one. Blending toward the ground would be prettier on
+/// one and wrong on the other.
+///
+/// Two thirds is Alacritty's own factor, and it is the right kind of number to
+/// borrow: it has been looked at by a lot of people on a lot of screens. Dim is
+/// the most common attribute in a coding agent's output, so getting the amount
+/// wrong would be visible on every pane.
+///
+/// Applied to the FOREGROUND only. SGR 2 reduces the intensity of text; a dimmed
+/// background would wash out every filled bar and selection an agent draws.
+fn dim(rgb: u32) -> u32 {
+    let scale = |shift: u32| (((rgb >> shift) & 0xFF) * 2 / 3) as u8;
+    pack(scale(16), scale(8), scale(0))
 }
 
 /// The xterm 256-color cube. Only the first sixteen are the theme's; the rest
@@ -285,5 +318,86 @@ mod tests {
         let mut t = Terminal::new(20, 4);
         t.feed(b"\x1b[7mX");
         assert!(snapshot(&t).rows[0].cells[0].inverse);
+    }
+
+    #[test]
+    fn dim_text_is_dimmer_than_the_same_colour_at_full_strength() {
+        // `\e[2m` is the most common attribute in a coding agent's output —
+        // "? for shortcuts", hints, spinners, every piece of secondary text —
+        // and dropping it made every screen uniformly bright. That reads as
+        // "the colours are wrong" rather than as a missing attribute, which is
+        // how it was reported.
+        let mut plain = Terminal::new(10, 2);
+        plain.feed(b"\x1b[31mX");
+        let mut dim = Terminal::new(10, 2);
+        dim.feed(b"\x1b[2;31mX");
+
+        let bright = snapshot(&plain).rows[0].cells[0].fg;
+        let dimmed = snapshot(&dim).rows[0].cells[0].fg;
+        assert_ne!(bright, dimmed, "dim red must not render as plain red");
+
+        // Still recognisably red: dimming reduces intensity, it does not discard
+        // the hue. A dim red that came out grey would be a different bug.
+        let channel = |c: u32, shift: u32| (c >> shift) & 0xFF;
+        assert!(channel(dimmed, 16) > channel(dimmed, 8), "still more red than green");
+        assert!(channel(dimmed, 16) < channel(bright, 16), "and darker than full red");
+    }
+
+    #[test]
+    fn dim_applies_to_the_default_foreground_too() {
+        // The commonest case of all: `\e[2m` with no colour at all.
+        let mut plain = Terminal::new(10, 2);
+        plain.feed(b"X");
+        let mut dim = Terminal::new(10, 2);
+        dim.feed(b"\x1b[2mX");
+        assert_ne!(
+            snapshot(&plain).rows[0].cells[0].fg,
+            snapshot(&dim).rows[0].cells[0].fg,
+            "dim default text must be distinguishable from normal text"
+        );
+    }
+
+    #[test]
+    fn dim_never_touches_the_background() {
+        // SGR 2 reduces foreground intensity. A dimmed background would wash out
+        // every filled bar and selection an agent draws.
+        let mut t = Terminal::new(10, 2);
+        t.feed(b"\x1b[2;41mX");
+        let mut plain = Terminal::new(10, 2);
+        plain.feed(b"\x1b[41mX");
+        assert_eq!(
+            snapshot(&t).rows[0].cells[0].bg,
+            snapshot(&plain).rows[0].cells[0].bg
+        );
+    }
+
+    #[test]
+    fn hidden_text_is_actually_hidden() {
+        // `\e[8m` is how some tools conceal what they are about to echo. Rendered
+        // at full contrast it is not concealed at all, which is worse than
+        // unsupported — the program believes it hid something.
+        let mut t = Terminal::new(10, 2);
+        t.feed(b"\x1b[8msecret");
+        let snap = snapshot(&t);
+        let cell = &snap.rows[0].cells[0];
+        assert_eq!(cell.fg, cell.bg, "hidden text must be the colour of the ground it sits on");
+    }
+
+    #[test]
+    fn dimming_is_resolved_here_rather_than_left_to_a_renderer() {
+        // The property this whole module exists for, applied to one more
+        // attribute: three renderers cannot disagree about how dim a dim is if
+        // none of them decides. A theme change recolours it too, because this
+        // runs when a snapshot is taken.
+        let mut t = Terminal::new(10, 2);
+        t.feed(b"\x1b[2;32mX");
+        let first = snapshot(&t).rows[0].cells[0].fg;
+
+        let mut recoloured = Palette::default();
+        recoloured.ansi[2] = 0x00_FF_00;
+        t.set_palette(recoloured);
+        let after = snapshot(&t).rows[0].cells[0].fg;
+        assert_ne!(first, after, "a dim cell follows the palette like any other");
+        assert!(after < 0x00_FF_00, "and is dimmer than the palette's own green");
     }
 }
