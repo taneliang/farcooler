@@ -83,13 +83,24 @@ message TerminalImagePutResult {
 }
 ```
 
-`TerminalImagePut` takes `Request.payload` tag 65, `TerminalImagePutResult`
-takes `Result.value` tag 31.
+`TerminalImagePut` takes `Request.payload` tag 48, `TerminalImagePutResult`
+takes `Result.value` tag 23 — the next free tags in each.
 
-Chunks are 128 KiB. This shares a connection with live terminal output, and
-`attachment_get` already caps its reads at 256 KiB with a comment saying why:
-one huge frame stalls panes mid-render. A ten-megabyte screenshot in a single
-frame would do it for seconds.
+Chunks are 128 KiB, and chunking is not a courtesy: `MAX_CONTROL_ENVELOPE_BYTES`
+caps every control envelope at 1 MiB, so a ten-megabyte screenshot **cannot** be
+sent as one frame. It would be wrong even if it fit — this shares a connection
+with live terminal output, whose own frames are capped at 64 KiB
+(`MAX_TERMINAL_PAYLOAD_BYTES`), and a single huge envelope stalls every pane on
+the connection while it is written.
+
+128 KiB is twice a terminal frame and an eighth of the envelope ceiling: large
+enough that a 16 MB image is 128 round trips rather than a thousand, small
+enough that output interleaves between chunks.
+
+The client keeps at most **eight chunks in flight**. `MAX_QUEUED_CONTROL_BYTES`
+caps queued unwritten control envelopes at 4 MiB per client, and a client that
+blasts a whole image at a slow link would hit that ceiling — which is a
+connection-level failure, not a transfer-level one.
 
 Progress needs no server events. The client is the sender, so bytes acked over
 bytes total is a number it already has.
@@ -100,7 +111,12 @@ for a file size this feature caps below 16 MB.
 
 ## 2. The file
 
-Bytes land in `$FARCOOLER_HOME/pastes/.incoming/<transfer_id hex>` and are
+The directory is `paths::pastes_dir()`, a new function beside `worktrees_dir()`
+and built the same way: under `runtime_dir()`, which is
+`~/Library/Application Support/Far Cooler` unless `FARCOOLER_HOME` overrides it,
+created 0700 by `ensure_runtime_dir`.
+
+Bytes land in `<pastes_dir>/.incoming/<transfer_id hex>` and are
 renamed into place only when the last chunk arrives. Nothing that reads the
 directory — an agent, the sweep, a person with a Finder window — can ever see a
 half-written PNG, because a half-written PNG never exists under a name that
@@ -109,14 +125,15 @@ looks finished.
 The final name is `YYYY-MM-DD-HHMMSS.png`, with `-2`, `-3` appended on collision
 within the same second. Legible was the point: this path gets echoed back by the
 agent, read on a phone screen, and scrolled past in someone's history. A content
-hash would deduplicate repeated pastes and would reuse `review::put_attachment`
-nearly unchanged, but it produces a sixty-four character path that means nothing
-to the person reading it.
+hash would deduplicate repeated pastes, but it produces a sixty-four character
+path that means nothing to the person reading it.
 
-The paste directory is deliberately **not** the review attachment store, despite
-the resemblance. Different directory, different naming, different lifetime, and
-review attachments are referenced by database rows that a seven-day sweep would
-break. `pastes.rs` sits beside `review.rs` and shares nothing but a shape.
+Nothing here is shared with the review attachment store being built on
+`feat/review`, which is content-addressed, capped per workspace, and referenced
+by database rows that a seven-day sweep would break. When that branch merges,
+the resemblance will be close enough to tempt someone into unifying them; the
+lifetimes are what make them different, and a paste is the one that is meant to
+expire.
 
 ### What is allowed in
 
@@ -126,9 +143,9 @@ else is refused. A client should not be able to name arbitrary content `.png` on
 someone's machine, and the mime string is a claim by the sender. `transfer_id`
 is formatted as hex before it becomes a filename, so it cannot be a path.
 
-`review::image_dimensions` already sniffs PNG and JPEG headers for its own
-reasons; the sniffing here is a separate, stricter function in `pastes.rs`
-because refusing a file is a different job from measuring one.
+The sniffing is new code in `pastes.rs`. There is nothing on this branch to
+reuse, and it should stay separate from anything that arrives later: refusing a
+file is a different job from measuring one, and this one is a gate.
 
 ### The sweep
 
@@ -141,11 +158,37 @@ where its own transcript says it is.
 
 ## 3. Typing the path
 
-The daemon writes `<absolute path>` followed by a single space, through
+The daemon writes the absolute path followed by a single space, through
 `vt::encode_paste`, via `Service::send_bytes`.
 
 A trailing space so the next word does not glue to `.png`. **Never a newline** —
 nothing is submitted on anyone's behalf, on any surface, ever.
+
+### The path is quoted, because it contains spaces
+
+`runtime_dir()` is `~/Library/Application Support/Far Cooler`. Two of its
+components have spaces in them, so the default path is:
+
+```
+"/Users/e/Library/Application Support/Far Cooler/pastes/2026-08-07-141233.png"
+```
+
+Typed bare, a shell sees four arguments and an agent parsing a prompt for file
+references sees a path that stops at `Application`. So the daemon wraps the path
+in double quotes whenever it contains a space, and emits it bare when it does
+not — which is what macOS Terminal already does when you drag a file into it, so
+it is the form people have seen before. The trailing space goes after the
+closing quote.
+
+Double quotes rather than backslash escaping: an agent reading a prompt strips
+quotes readily and handles `\ ` inconsistently, and quotes survive being echoed
+back into a transcript legibly.
+
+The paste directory is daemon-owned, so its filenames never contain a quote, a
+newline or a backslash — the name is a timestamp and a counter. Quoting is
+therefore complete rather than a partial escape that some other filename could
+defeat. A test asserts this: a path with a space comes back quoted, one without
+comes back bare.
 
 `encode_paste` brackets only when the program asked, and its existing test
 (`paste_is_bracketed_only_when_the_program_asked`) is the reason to reuse it
