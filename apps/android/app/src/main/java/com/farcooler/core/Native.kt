@@ -46,6 +46,13 @@ internal object NativeClient {
 
     external fun nativeCall(handle: Long, method: String, args: String): Long
 
+    external fun nativePasteImage(
+        handle: Long,
+        terminal: String,
+        mime: String,
+        data: ByteArray,
+    ): Long
+
     external fun nativePoll(handle: Long): String?
 
     external fun nativeConnected(handle: Long): Boolean

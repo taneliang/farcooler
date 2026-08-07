@@ -126,6 +126,41 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCall(
     }
 }
 
+/// Paste an image into a terminal.
+///
+/// Takes the bytes as a `byte[]` rather than through `nativeCall`'s JSON,
+/// because the payload is megabytes of binary and base64 in both directions
+/// would be a third more bytes and two more copies to describe something no
+/// Kotlin here ever looks at.
+///
+/// The core copies the bytes before returning, so the JNI borrow ends with this
+/// call and the array is the JVM's again immediately.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePasteImage(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    terminal: JString,
+    mime: JString,
+    data: JByteArray,
+) -> jlong {
+    let Some(terminal) = c_string(&mut env, &terminal) else { return 0 };
+    let Some(mime) = c_string(&mut env, &mime) else { return 0 };
+    let Ok(bytes) = env.convert_byte_array(&data) else { return 0 };
+    if bytes.is_empty() {
+        return 0;
+    }
+    unsafe {
+        client::farcooler_client_paste_image(
+            handle_of(handle),
+            terminal.as_ptr(),
+            mime.as_ptr(),
+            bytes.as_ptr(),
+            bytes.len(),
+        ) as jlong
+    }
+}
+
 /// The oldest finished result, or null when nothing is ready.
 ///
 /// Copied into a Java string immediately, before anything else can touch the

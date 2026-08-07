@@ -73,6 +73,15 @@ class ClientCore {
     private val waiting = ConcurrentHashMap<Long, CompletableDeferred<JsonObject>>()
 
     /**
+     * Progress reporters for in-flight image pastes, by ticket.
+     *
+     * Separate from [waiting] because a paste produces MANY lines under the
+     * same ticket and only the last one is the answer. Completing on the first
+     * would leave the transfer running with nobody listening to it.
+     */
+    private val reporting = ConcurrentHashMap<Long, (Long, Long) -> Unit>()
+
+    /**
      * What a live terminal stream reports back.
      *
      * Not a continuation, because a stream is not an answer to anything: it
@@ -108,6 +117,24 @@ class ClientCore {
     /** Invoke a method. */
     suspend fun call(method: String, args: JsonObject = JsonObject(emptyMap())): JsonObject =
         submit { NativeClient.nativeCall(it, method, args.toString()) }
+
+    /**
+     * Paste an image into a terminal, and hand back the path it landed at.
+     *
+     * Its own entry point rather than a [call] method because the payload is
+     * binary: the JSON boundary every other method uses would mean base64 in
+     * both directions to carry bytes nothing in Kotlin looks at.
+     */
+    suspend fun pasteImage(
+        terminal: String,
+        mime: String,
+        data: ByteArray,
+        onProgress: (Long, Long) -> Unit,
+    ): String {
+        val result = submit(onProgress) { NativeClient.nativePasteImage(it, terminal, mime, data) }
+        return result["path"]?.jsonPrimitive?.contentOrNull
+            ?: throw CoreException("The client core returned something unreadable.")
+    }
 
     suspend fun isConnected(): Boolean = withContext(dispatcher) {
         handle != 0L && NativeClient.nativeConnected(handle)
@@ -171,7 +198,10 @@ class ClientCore {
         dispatcher.close()
     }
 
-    private suspend fun submit(start: (Long) -> Long): JsonObject {
+    private suspend fun submit(
+        onProgress: ((Long, Long) -> Unit)? = null,
+        start: (Long) -> Long,
+    ): JsonObject {
         val h = ensureHandle()
         if (h == 0L) {
             throw CoreException(
@@ -186,13 +216,22 @@ class ClientCore {
         // ticket is taken and the waiter is filed on the same dispatcher the
         // pump drains on. That ordering is what stops a result arriving before
         // anything is waiting for it, which on a fast local host is not rare.
+        // The reporter is filed in the same hop, for the same reason: a paste
+        // can report progress before this coroutine would otherwise resume.
         val ticket = withContext(dispatcher) {
             val ticket = start(h)
-            if (ticket != 0L) waiting[ticket] = result
+            if (ticket != 0L) {
+                waiting[ticket] = result
+                if (onProgress != null) reporting[ticket] = onProgress
+            }
             ticket
         }
         if (ticket == 0L) throw CoreException("The client core returned something unreadable.")
-        return result.await()
+        try {
+            return result.await()
+        } finally {
+            reporting.remove(ticket)
+        }
     }
 
     /**
@@ -226,6 +265,17 @@ class ClientCore {
             }
 
             val ticket = line["ticket"]?.jsonPrimitive?.long ?: continue
+
+            // A progress line is not the answer. Reporting it must not take
+            // the waiter, or the transfer would run on with nobody awaiting it.
+            val progress = line["progress"] as? JsonObject
+            if (progress != null) {
+                val sent = progress["sent"]?.jsonPrimitive?.long ?: 0L
+                val total = progress["total"]?.jsonPrimitive?.long ?: 0L
+                reporting[ticket]?.invoke(sent, total)
+                continue
+            }
+
             val waiter = waiting.remove(ticket) ?: continue
 
             if (line["ok"]?.jsonPrimitive?.booleanOrNull == true) {

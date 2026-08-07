@@ -12,9 +12,13 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Menu
@@ -45,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -55,7 +60,9 @@ import com.farcooler.core.TerminalPalette
 import com.farcooler.core.Vt
 import com.farcooler.net.TerminalRef
 import com.farcooler.net.TerminalSession
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * One terminal, live — or the chat behind the same pane.
@@ -154,6 +161,32 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
     }
 
     var showMenu by remember { mutableStateOf(false) }
+
+    // Images on their way into this pane, and the picker that starts one.
+    // Keyed to nothing, so switching terminals in place does not lose a
+    // transfer that is still running.
+    val pastes = remember { ImagePasteQueue() }
+    val resolver = LocalContext.current.contentResolver
+    val pickImage = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val picked = withContext(Dispatchers.IO) { readPickedImage(resolver, uri) }
+            if (picked == null) {
+                pastes.reject("Far Cooler couldn't read that image.")
+                return@launch
+            }
+            pastes.send(
+                picked.data,
+                picked.mime,
+                picked.thumbnail,
+                ref.terminalId,
+                connection.core,
+                scope,
+            )
+        }
+    }
     var focusRequest by remember { mutableIntStateOf(0) }
     var dismissRequest by remember { mutableIntStateOf(0) }
     var ctrlArmed by remember { mutableStateOf(false) }
@@ -259,6 +292,18 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
                                     },
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("Send Image") },
+                                    leadingIcon = { Icon(Icons.Filled.Image, null) },
+                                    onClick = {
+                                        showMenu = false
+                                        pickImage.launch(
+                                            PickVisualMediaRequest(
+                                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                                            )
+                                        )
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Show keyboard") },
                                     leadingIcon = { Icon(Icons.Filled.Keyboard, null) },
                                     onClick = {
@@ -280,6 +325,10 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
                 .imePadding()
         ) {
             Box(Modifier.weight(1f)) {
+                // Over the terminal, and gone the moment the path is typed.
+                // Nothing about a transfer is ever written into the pane
+                // itself: the path is the only thing that reaches the program.
+                ImagePasteChips(pastes, Modifier.align(Alignment.BottomCenter))
                 if (live?.isAgentPane == true) {
                     AgentScreen(
                         model = model,
