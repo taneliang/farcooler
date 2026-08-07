@@ -1,11 +1,47 @@
 import AppKit
 import SwiftUI
 
+/// A terminal pane: the emulator, and whatever is floating over it.
+///
+/// A thin wrapper over `TerminalCanvas`, which is the part that has always been
+/// here. It exists so an image being pasted has somewhere to be drawn: the
+/// canvas is an `NSViewRepresentable` and cannot overlay SwiftUI on itself, and
+/// putting the chip at both call sites instead would be the same view written
+/// twice.
+struct TerminalSurface: View {
+    let terminal: String
+    let binary: String?
+    let environment: [String: String]
+    let hostArguments: [String]
+    let linkGeneration: Int
+    let onResize: (Int, Int) async -> Void
+    var fontRevision: Int = 0
+    var isFocused: Bool = true
+
+    /// One queue per pane, so two panes uploading at once each show their own.
+    @StateObject private var pastes = ImagePasteQueue()
+
+    var body: some View {
+        TerminalCanvas(
+            terminal: terminal,
+            binary: binary,
+            environment: environment,
+            hostArguments: hostArguments,
+            linkGeneration: linkGeneration,
+            onResize: onResize,
+            pastes: pastes,
+            fontRevision: fontRevision,
+            isFocused: isFocused
+        )
+        .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
+    }
+}
+
 /// SwiftUI wrapper around the terminal. Owns the stream lifecycle.
 ///
 /// The split is: this file decides *when* bytes flow, TerminalRenderView draws
 /// them, and the Rust core decides what they mean.
-struct TerminalSurface: NSViewRepresentable {
+struct TerminalCanvas: NSViewRepresentable {
     let terminal: String
     let binary: String?
     let environment: [String: String]
@@ -48,6 +84,10 @@ struct TerminalSurface: NSViewRepresentable {
             started = false
         }
     }
+
+    /// Where a pasted image goes. Held rather than passed through a closure so
+    /// the canvas can give it the one thing only the view can do: type.
+    let pastes: ImagePasteQueue
 
     /// Bumped by preferences, so a font change reaches a live terminal.
     var fontRevision: Int = 0
@@ -125,6 +165,18 @@ struct TerminalSurface: NSViewRepresentable {
         coord.input = input
         view.onInput = { bytes in input.send(bytes) }
         coord.focused = nil
+
+        // Typing is the view's, because only it holds the emulator that knows
+        // whether the program asked for bracketing. Everything else about a
+        // paste — copying the bytes, naming the file, expiring it — belongs to
+        // the daemon, and the queue is what asks it.
+        let pastes = self.pastes
+        pastes.type = { [weak view] text in view?.typePaste(text) }
+        view.onPasteImage = { pasted in
+            pastes.start(
+                pasted, terminal: terminal, binary: binary,
+                environment: environment, hostArguments: hostArguments)
+        }
 
         let box = MainActorBox(view)
 

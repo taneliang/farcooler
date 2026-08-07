@@ -39,6 +39,9 @@ enum TerminalMetrics {
 final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// Encoded bytes leaving the terminal, ready for the pane.
     var onInput: (([UInt8]) -> Void)?
+    /// An image was pasted or dropped. Handled above this view, because getting
+    /// it onto the machine the pane is on is a daemon conversation, not drawing.
+    var onPasteImage: ((PastedImage) -> Void)?
     /// The grid this view can show, which is what the pane must be resized to.
     var onGeometry: ((Int, Int) -> Void)?
 
@@ -128,6 +131,9 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         super.init(frame: .zero)
         measure()
         wantsLayer = true
+        // Dragging a screenshot onto a pane is the same intent as pasting one,
+        // and on a Mac it is the more natural of the two.
+        registerForDraggedTypes([.fileURL, .png, .tiff])
         // Applied once up front as well as on every later change: the observer
         // below fires on CHANGES, and a view built while a theme is already
         // chosen has had no change to hear about.
@@ -679,9 +685,62 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     }
 
     @objc func paste(_ sender: Any?) {
-        guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        // Text wins whenever there is any, so this changes nothing about
+        // pasting a command, a path, or anything else people already do. Only a
+        // pasteboard with no text at all — a screenshot, a copy out of Preview,
+        // a file dragged from the Finder — becomes an image paste.
+        if let text = NSPasteboard.general.string(forType: .string) {
+            typePaste(text)
+            return
+        }
+        if let pasted = Self.image(on: NSPasteboard.general) {
+            onPasteImage?(pasted)
+        }
+    }
+
+    /// Type text into the pane as a paste, bracketed if the program asked.
+    func typePaste(_ text: String) {
         core.scrollToBottomIfScrolled()
         send(core.encode(paste: text))
+    }
+
+    /// An image on a pasteboard, as a file when it has one.
+    ///
+    /// The file is preferred over the data: it is the same bytes without a
+    /// re-encode, and against a local daemon it means nothing has to be copied
+    /// anywhere at all.
+    static func image(on pasteboard: NSPasteboard) -> PastedImage? {
+        let images: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tiff"]
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
+            let url = urls.first(where: { images.contains($0.pathExtension.lowercased()) })
+        {
+            return .file(url)
+        }
+        // `png` before `tiff`: AppKit offers TIFF for everything, and a
+        // screenshot re-encoded as TIFF is several times the bytes for a
+        // picture of text that was already lossless.
+        if let png = pasteboard.data(forType: .png) {
+            return .data(png, mime: "image/png")
+        }
+        if let tiff = pasteboard.data(forType: .tiff), let image = NSImage(data: tiff),
+            let rep = image.tiffRepresentation.flatMap({ NSBitmapImageRep(data: $0) }),
+            let png = rep.representation(using: .png, properties: [:])
+        {
+            return .data(png, mime: "image/png")
+        }
+        return nil
+    }
+
+    // MARK: - Drag and drop
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        Self.image(on: sender.draggingPasteboard) != nil ? .copy : []
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let pasted = Self.image(on: sender.draggingPasteboard) else { return false }
+        onPasteImage?(pasted)
+        return true
     }
 
     @objc override func selectAll(_ sender: Any?) {
