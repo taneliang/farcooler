@@ -88,7 +88,17 @@ impl Terminal {
         let (columns, rows) = clamp(columns, rows);
         let collector = Collector::default();
         let size = TermSize::new(columns as usize, rows as usize);
-        let config = Config { scrolling_history: SCROLLBACK_LINES, ..Config::default() };
+        // `kitty_keyboard` is what lets a program negotiate the keyboard
+        // protocol at all: without it the parser drops `CSI > flags u` on the
+        // floor and every modified Enter stays indistinguishable from Enter.
+        // The emulator owns the mode stack, including the separate one the
+        // alternate screen gets, so a full-screen program that dies without
+        // popping cannot strand the shell underneath it. See `input::kitty_key`.
+        let config = Config {
+            scrolling_history: SCROLLBACK_LINES,
+            kitty_keyboard: true,
+            ..Config::default()
+        };
         Self {
             term: Term::new(config, &size, collector.clone()),
             parser: Processor::new(),
@@ -529,6 +539,66 @@ mod tests {
         let mut t = Terminal::new(40, 6);
         t.feed(format!("\x1b]52;p;{HELLO_B64}\x07").as_bytes());
         assert_eq!(t.take_signals().clipboard, None);
+    }
+
+    /// Shift-Enter, the chord the kitty protocol exists to make expressible.
+    fn shift_enter(t: &Terminal) -> Vec<u8> {
+        t.encode_key(input::Key::Enter, input::Modifiers { shift: true, ..Default::default() })
+    }
+
+    #[test]
+    fn the_kitty_keyboard_protocol_is_off_until_a_program_asks_for_it() {
+        // A terminal that volunteered CSI u would break every program that never
+        // heard of it, so the mode is opt-in and starts empty.
+        let t = Terminal::new(40, 6);
+        assert_eq!(shift_enter(&t), vec![0x0d]);
+    }
+
+    #[test]
+    fn a_program_can_push_and_pop_the_kitty_keyboard_protocol() {
+        // This is the handshake Claude Code, neovim and helix perform at startup
+        // and undo on exit. Without the pop, the shell that outlives the program
+        // would keep receiving CSI u for chords it cannot read.
+        let mut t = Terminal::new(40, 6);
+        t.feed(b"\x1b[>1u");
+        assert_eq!(shift_enter(&t), b"\x1b[13;2u".to_vec(), "the program asked to disambiguate");
+
+        t.feed(b"\x1b[<u");
+        assert_eq!(shift_enter(&t), vec![0x0d], "popping must restore the legacy encoding");
+    }
+
+    #[test]
+    fn a_program_can_set_the_flags_without_pushing_them() {
+        // `CSI = flags ; mode u` is the other way in, used by programs that
+        // manage the mode themselves rather than nesting it.
+        let mut t = Terminal::new(40, 6);
+        t.feed(b"\x1b[=1;1u");
+        assert_eq!(shift_enter(&t), b"\x1b[13;2u".to_vec());
+    }
+
+    #[test]
+    fn a_program_can_ask_what_the_terminal_supports() {
+        // The detection handshake: push, ask, and read the reply to find out
+        // whether anything is listening. A terminal that stayed silent here
+        // would leave the program assuming the legacy encoding forever.
+        let mut t = Terminal::new(40, 6);
+        t.feed(b"\x1b[>1u\x1b[?u");
+        assert_eq!(t.take_signals().pty_writes, b"\x1b[?1u".to_vec());
+    }
+
+    #[test]
+    fn a_full_screen_program_cannot_strand_the_protocol_on_the_shell() {
+        // The alternate screen keeps its own keyboard stack, so an agent that
+        // turns the protocol on and then dies without popping it leaves the
+        // shell underneath encoding keys the way it always did. This is the
+        // same safety property as Enter staying a carriage return: after a
+        // crash, the user has to be able to type.
+        let mut t = Terminal::new(40, 6);
+        t.feed(b"\x1b[?1049h\x1b[>1u");
+        assert_eq!(shift_enter(&t), b"\x1b[13;2u".to_vec());
+
+        t.feed(b"\x1b[?1049l");
+        assert_eq!(shift_enter(&t), vec![0x0d], "the primary screen never asked for it");
     }
 
     #[test]

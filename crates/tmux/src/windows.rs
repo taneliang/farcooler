@@ -442,6 +442,12 @@ impl PaneModes {
         }
         // Application keypad has no private-mode form; it is its own pair.
         out.push_str(if self.application_keypad { "\x1b=" } else { "\x1b>" });
+        // The kitty keyboard protocol, cleared unconditionally: `pane_modes`
+        // has no field for it, so a replay can never learn that a pane wants
+        // it, and the only honest state to restore is off. Left set, a reused
+        // emulator would keep reporting modified keys as CSI u to a program
+        // that never negotiated it and has no parser for it.
+        out.push_str("\x1b[=0;1u");
         out
     }
 }
@@ -515,6 +521,17 @@ mod tests {
         assert!(s.contains("\x1b[?1049l"));
         assert!(s.contains("\x1b[?1003l"));
         assert!(s.contains("\x1b>"));
+    }
+
+    #[test]
+    fn a_restore_clears_the_keyboard_protocol_it_cannot_know_about() {
+        // tmux does not report the kitty keyboard mode in `pane_modes`, so a
+        // replay can never turn it on — which makes it all the more important to
+        // turn it off. An emulator reused from a pane whose program had pushed
+        // the protocol would otherwise keep encoding Shift-Enter as CSI u to a
+        // program that never asked and cannot read it.
+        let s = PaneModes::default().restore_sequence();
+        assert!(s.contains("\x1b[=0;1u"), "the keyboard protocol must be reset: {s:?}");
     }
 
     #[test]

@@ -58,6 +58,9 @@ pub enum Key {
 
 /// Encode a keystroke for the program currently running.
 pub fn encode_key(mode: TermMode, key: Key, mods: Modifiers) -> Vec<u8> {
+    if let Some(bytes) = kitty_key(mode, key, mods) {
+        return bytes;
+    }
     match key {
         Key::Char(c) => encode_char(c, mods),
 
@@ -113,6 +116,83 @@ pub fn encode_key(mode: TermMode, key: Key, mods: Modifiers) -> Vec<u8> {
             _ => Vec::new(),
         },
     }
+}
+
+/// Only Shift is held.
+const SHIFT_ONLY: Modifiers = Modifiers { shift: true, alt: false, ctrl: false };
+
+/// The kitty keyboard protocol's `CSI number ; modifiers u` form, for the keys
+/// and chords it applies to. `None` means the legacy encoding still stands.
+///
+/// A terminal transmits bytes, not key events, and the classic encoding folds
+/// modifiers into the character: Shift picks the shifted glyph, Ctrl masks bits,
+/// Alt prefixes ESC. Keys with no shifted glyph therefore lose Shift entirely —
+/// Shift-Enter and Enter arrive as the same `0x0d`, which is why no program can
+/// bind them apart. This protocol is the way out, and a program opts in by
+/// pushing flags with `CSI > flags u`; `alacritty_terminal` keeps that stack and
+/// surfaces the result in `TermMode`.
+///
+/// What is implemented is *disambiguation* — flag 1, the one Claude Code, neovim
+/// and helix actually request, and the only one needed to make a modified Enter
+/// readable. The others are deliberately not claimed:
+///
+/// - Reporting every key as an escape code (flag 8) needs the *unshifted* key
+///   behind each character, and this crate is not in the business of knowing
+///   keyboard layouts — the platform resolved the character before it reached
+///   us. Guessing would report `!` where a US layout means `1`.
+/// - Key release and repeat (flag 2) would need an event kind this API does not
+///   carry; only presses exist above us. Nothing emitted here is wrong as a
+///   result, because a press is the protocol's default event type and is
+///   encoded identically either way — the information is absent, not false.
+/// - Alternate keys (flag 4) and associated text (flag 16) are additive fields
+///   on the same sequence. Omitting them costs a program nothing here, because
+///   the keys we report this way are chords that produce no text; anything that
+///   types stays on the legacy path and arrives as text.
+fn kitty_key(mode: TermMode, key: Key, mods: Modifiers) -> Option<Vec<u8>> {
+    if !mode.intersects(
+        TermMode::DISAMBIGUATE_ESC_CODES
+            | TermMode::REPORT_ALL_KEYS_AS_ESC
+            | TermMode::REPORT_EVENT_TYPES,
+    ) {
+        return None;
+    }
+
+    // The key's number, from the spec's functional key table. Everything absent
+    // here — arrows, navigation, function keys — already had an unambiguous
+    // encoding with room for a modifier parameter, so the protocol leaves it be
+    // and so do we.
+    let code = match key {
+        Key::Escape => 27,
+        Key::Enter => 13,
+        Key::Tab => 9,
+        Key::Backspace => 127,
+        // A chord is named after the key, not after the character the key
+        // produced, so Ctrl-Shift-C reports `c` with two modifiers rather than
+        // `C` with one. The platform applied Shift on the way in; undo it.
+        Key::Char(c) if mods.shift => u32::from(c.to_lowercase().next().unwrap_or(c)),
+        Key::Char(c) => u32::from(c),
+        _ => return None,
+    };
+
+    // Esc is reported bare, because the ambiguity it suffers from is being the
+    // first byte of an escape sequence rather than anything to do with
+    // modifiers. Every other key waits until a modifier makes the legacy
+    // encoding ambiguous — and Shift on its own only does that for the three
+    // keys with no shifted character to tell them apart. A shifted letter is
+    // already a different letter, so it stays text; reporting it as CSI u is
+    // how an implementation breaks typing on non-US keyboards.
+    let ambiguous = key == Key::Escape
+        || (mods.any()
+            && (mods != SHIFT_ONLY || matches!(key, Key::Enter | Key::Tab | Key::Backspace)));
+    if !ambiguous {
+        return None;
+    }
+
+    Some(if mods.any() {
+        format!("\x1b[{};{}u", code, mods.param()).into_bytes()
+    } else {
+        format!("\x1b[{code}u").into_bytes()
+    })
 }
 
 fn encode_char(c: char, mods: Modifiers) -> Vec<u8> {
@@ -292,6 +372,9 @@ mod tests {
     use super::*;
 
     const PLAIN: TermMode = TermMode::empty();
+    /// A program that asked to disambiguate escape codes — the flag that makes
+    /// Shift-Enter expressible at all.
+    const KITTY: TermMode = TermMode::DISAMBIGUATE_ESC_CODES;
 
     fn ctrl() -> Modifiers {
         Modifiers { ctrl: true, ..Default::default() }
@@ -301,6 +384,9 @@ mod tests {
     }
     fn shift() -> Modifiers {
         Modifiers { shift: true, ..Default::default() }
+    }
+    fn ctrl_shift() -> Modifiers {
+        Modifiers { ctrl: true, shift: true, alt: false }
     }
 
     #[test]
@@ -532,6 +618,125 @@ mod tests {
                 Modifiers::default()
             ),
             None
+        );
+    }
+
+    #[test]
+    fn shift_enter_is_its_own_key_under_the_kitty_protocol() {
+        // The reason this protocol exists, and the reason a program can offer
+        // "Shift-Enter for a newline" at all: legacy encoding has nowhere to put
+        // the modifier, so both chords arrive as one byte and the program cannot
+        // tell which one the user pressed.
+        assert_eq!(encode_key(KITTY, Key::Enter, shift()), b"\x1b[13;2u".to_vec());
+        assert_eq!(encode_key(KITTY, Key::Enter, ctrl()), b"\x1b[13;5u".to_vec());
+        assert_eq!(encode_key(KITTY, Key::Enter, ctrl_shift()), b"\x1b[13;6u".to_vec());
+    }
+
+    #[test]
+    fn an_unmodified_enter_stays_a_carriage_return_even_under_the_protocol() {
+        // The spec carves Enter, Tab and Backspace out by name so that someone
+        // can still type `reset` after a program crashes without popping the
+        // mode. A terminal that reported plain Enter as CSI u would leave the
+        // shell unusable until the window was closed.
+        assert_eq!(encode_key(KITTY, Key::Enter, Modifiers::default()), vec![0x0d]);
+        assert_eq!(encode_key(KITTY, Key::Tab, Modifiers::default()), vec![0x09]);
+        assert_eq!(encode_key(KITTY, Key::Backspace, Modifiers::default()), vec![0x7f]);
+    }
+
+    #[test]
+    fn escape_is_disambiguated_even_unmodified() {
+        // Esc is the one key the protocol reports bare, because the ambiguity
+        // being removed is Esc versus the first byte of an escape sequence —
+        // which is what every "press Esc twice" workaround is about.
+        assert_eq!(encode_key(KITTY, Key::Escape, Modifiers::default()), b"\x1b[27u".to_vec());
+        assert_eq!(encode_key(PLAIN, Key::Escape, Modifiers::default()), vec![0x1b]);
+    }
+
+    #[test]
+    fn a_modified_tab_or_backspace_is_reported_as_csi_u() {
+        // Shift-Tab stops being the legacy CSI Z here. That is the protocol's
+        // call, not ours: a program that asked for disambiguation is asking to
+        // read one shape for every modified key.
+        assert_eq!(encode_key(KITTY, Key::Tab, shift()), b"\x1b[9;2u".to_vec());
+        assert_eq!(encode_key(KITTY, Key::Backspace, ctrl()), b"\x1b[127;5u".to_vec());
+    }
+
+    #[test]
+    fn a_ctrl_chord_reports_the_key_rather_than_a_control_byte() {
+        assert_eq!(encode_key(KITTY, Key::Char('c'), ctrl()), b"\x1b[99;5u".to_vec());
+        // The pair legacy folds into one byte is now two distinct sequences.
+        assert_ne!(
+            encode_key(KITTY, Key::Char('C'), ctrl_shift()),
+            encode_key(KITTY, Key::Char('c'), ctrl())
+        );
+        assert_eq!(encode_key(KITTY, Key::Char('C'), ctrl_shift()), b"\x1b[99;6u".to_vec());
+    }
+
+    #[test]
+    fn an_alt_chord_is_csi_u_rather_than_an_escape_prefix() {
+        assert_eq!(encode_key(KITTY, Key::Char('b'), alt()), b"\x1b[98;3u".to_vec());
+    }
+
+    #[test]
+    fn typing_is_untouched_by_the_protocol() {
+        // Shift alone is not ambiguous — the layout already resolved it into a
+        // different character — so a shifted key must stay text. Reporting it as
+        // CSI u would require knowing the unshifted key, which is exactly the
+        // layout knowledge this crate refuses to guess at, and would break
+        // typing on every non-US keyboard.
+        assert_eq!(encode_key(KITTY, Key::Char('a'), Modifiers::default()), b"a".to_vec());
+        assert_eq!(encode_key(KITTY, Key::Char('A'), shift()), b"A".to_vec());
+        assert_eq!(encode_key(KITTY, Key::Char('é'), Modifiers::default()), "é".as_bytes().to_vec());
+        assert_eq!(encode_key(KITTY, Key::Char('日'), shift()), "日".as_bytes().to_vec());
+    }
+
+    #[test]
+    fn a_shifted_symbol_reports_the_character_the_layout_produced() {
+        // A deliberate divergence, recorded so it is not mistaken for a bug and
+        // "fixed" by guessing: kitty reports Ctrl-Shift-1 as the key `1`,
+        // because it knows the layout. We are handed `!` and there is no way
+        // back to `1` without a layout table this crate refuses to keep — and on
+        // a French keyboard that key is not `1` at all. Letters, which is what
+        // chords are bound to in practice, round-trip exactly.
+        assert_eq!(encode_key(KITTY, Key::Char('!'), ctrl_shift()), b"\x1b[33;6u".to_vec());
+    }
+
+    #[test]
+    fn keys_that_were_already_unambiguous_are_left_alone() {
+        // Arrows, navigation and function keys keep their legacy sequences under
+        // the protocol. They already carried a modifier parameter, so there is
+        // nothing to disambiguate, and changing them would break every program
+        // that reads these from terminfo.
+        for mods in [Modifiers::default(), shift(), ctrl(), alt(), ctrl_shift()] {
+            for key in [
+                Key::Up,
+                Key::Down,
+                Key::Left,
+                Key::Right,
+                Key::Home,
+                Key::End,
+                Key::Insert,
+                Key::Delete,
+                Key::PageUp,
+                Key::PageDown,
+                Key::Function(1),
+                Key::Function(5),
+                Key::Function(12),
+            ] {
+                assert_eq!(
+                    encode_key(KITTY, key, mods),
+                    encode_key(PLAIN, key, mods),
+                    "{key:?} with {mods:?} must not change under the protocol"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_protocol_does_not_disturb_application_cursor_mode() {
+        assert_eq!(
+            encode_key(KITTY | TermMode::APP_CURSOR, Key::Up, Modifiers::default()),
+            b"\x1bOA".to_vec()
         );
     }
 

@@ -705,6 +705,7 @@ Terminal acceptance requires:
 
 - UTF-8; ANSI cursor, erase, style, 16/256/true-color, alternate-screen, and bracketed-paste behavior used by the supported CLIs.
 - Correct input for escape, control chords, arrows, tab, return, backspace, hardware keyboards, iOS text composition, copy/paste, and selection.
+- The kitty keyboard protocol's disambiguation flag, negotiated by the program. Legacy encoding has nowhere to put a modifier on a key with no shifted character, so Shift-Enter and Enter arrive as the same byte and an agent cannot offer "Shift-Enter for a newline" at all. Claude Code, neovim and helix all request this. Unmodified Enter, Tab and Backspace stay on their legacy bytes so a crashed program that never popped the mode still leaves a shell someone can type `reset` into.
 - A 10,000-line scrollback fixture and a sustained 1 MiB/s output fixture without crashes, reordered frames, or unbounded memory growth.
 - Input-to-local-render p95 below 50 ms and input-to-host-ack p95 below `network RTT + 100 ms` over a test profile with RTT ≤100 ms and 1% packet loss.
 - Reconnect after 30 seconds offline with either complete ordered replay or a visible output-gap marker.
