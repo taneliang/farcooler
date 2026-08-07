@@ -367,3 +367,50 @@ Buttons are Retry and Cancel.
   photo. It is a client-side check, so raising it costs nothing on the host.
 - **Seven days.** If people resume week-old conversations and find broken paths,
   this is the number that was wrong.
+
+## As built
+
+Seven things came out differently once the code met the tree. Each is a
+decision, not a compromise, and the reasoning belongs with the design rather
+than only in a commit message.
+
+**The bracketing encoder is the daemon's own, not `farcooler_vt`'s.** The
+daemon does not depend on `farcooler-vt`, and reusing `encode_paste` would put
+`alacritty_terminal` — a terminal emulator — in the host daemon's dependency
+graph to wrap six bytes around a path. `pastes::encode_paste` keeps vt's rule
+about stripping the terminator, and its test proves the case that rule exists
+for. If a third caller ever needs it, that is the moment to lift it into
+`farcooler-core`.
+
+**Chunks are sequential, and there is no in-flight window.**
+`Client::call` takes `&mut self` and awaits its own response, so a transfer
+cannot pipeline without changing the transport. `MAX_QUEUED_CONTROL_BYTES` is
+therefore unreachable by a paste — one request is outstanding at a time — and
+the constant the design proposed for bounding it would have been a lie.
+
+**The paste directory comes from the service, not the environment.**
+`Service.root` is held rather than re-derived precisely because
+`FARCOOLER_HOME` is process-global, and `paths::pastes_dir_in(root)` follows
+that rule. Reading the variable would have had the integration tests, which run
+in parallel against private directories, writing into the real app's.
+
+**Filenames are stamped in UTC, with a `Z`.** There is no date library in this
+workspace, and adding one to name a file is a poor trade. A local time needs a
+timezone database; this needs arithmetic, and `date(1)` agrees with it.
+
+**On the phones the entry point is the toolbar, not the key row.** iOS's
+`TerminalKeyRow` is already nine keys wide and carries a comment about what a
+tenth did: it widened the stack it was in, and the terminal above it lost
+characters off both edges. Android's goes in the overflow menu beside the text
+paste, which is the same question asked about a different kind of content.
+
+**Both phone clients' poll loops had to learn that a ticket is not an answer.**
+`drain` matched on ticket alone and resolved the waiter on the first line it
+saw. A paste reports progress many times under one ticket, so this would have
+resolved the call at 128 KiB and left the transfer running with nobody
+listening. Android registers the reporter in the same dispatcher hop as the
+waiter, for the reason that hop already existed.
+
+**`TerminalSurface` on macOS is now a wrapper over `TerminalCanvas`.** An
+`NSViewRepresentable` cannot overlay SwiftUI on itself, and the alternative was
+the chip written at both call sites.
