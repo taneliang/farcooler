@@ -269,6 +269,13 @@ pub struct Service {
     pr_cache: std::sync::Mutex<std::collections::HashMap<Uuid, Option<Vec<crate::stack::PrInfo>>>>,
     /// How many `gh` processes may run at once, across every repository.
     gh_limit: Arc<tokio::sync::Semaphore>,
+    /// Each repository's default branch, once discovered.
+    ///
+    /// In memory like PR state, and for a weaker version of the same reason: it
+    /// changes about once in a repository's life, but writing it would mean a
+    /// restarted daemon confidently diffing against a default that has since
+    /// been renamed. Cheap to rediscover, so it is.
+    default_branches: std::sync::Mutex<std::collections::HashMap<Uuid, Option<String>>>,
     /// One mutex per repository, created on first use and never removed.
     ///
     /// Held across any sequence that mutates git and then writes a workspace
@@ -342,6 +349,7 @@ impl Service {
             review_cache: crate::review::ReviewCache::new(),
             pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             gh_limit: Arc::new(tokio::sync::Semaphore::new(crate::stack::GH_MAX_CONCURRENT)),
+            default_branches: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
@@ -353,6 +361,37 @@ impl Service {
             .acquire_owned()
             .await
             .expect("the gh semaphore is never closed")
+    }
+
+    /// A repository's default branch: GitHub's answer when `gh` can give one,
+    /// `origin/HEAD` when it cannot.
+    ///
+    /// Asked at most once per repository per daemon lifetime, including the
+    /// misses — a machine without `gh` must not pay for a process launch every
+    /// time somebody scrolls a diff.
+    pub async fn default_branch(&self, repository_id: Uuid, worktree: &Path) -> Option<String> {
+        if let Some(cached) =
+            self.default_branches.lock().unwrap_or_else(|e| e.into_inner()).get(&repository_id)
+        {
+            return cached.clone();
+        }
+
+        let found = {
+            let _permit = self.gh_permit().await;
+            crate::stack::fetch_default_branch(worktree).await
+        };
+        // `origin/HEAD` records the same fact without a network, and is right
+        // whenever the clone has ever been told.
+        let found = match found {
+            Some(name) => Some(name),
+            None => crate::change_set::default_branch_local(worktree).await,
+        };
+
+        self.default_branches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(repository_id, found.clone());
+        found
     }
 
     /// PR state as last read, or `None` when it has never been read since this

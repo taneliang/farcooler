@@ -148,7 +148,7 @@ final class ReviewStore: ObservableObject {
     @Published var loading = false
     @Published var error: String?
 
-    private let client: DaemonClient
+    let client: DaemonClient
     private let workspace: Workspace
 
     init(client: DaemonClient, workspace: Workspace) {
@@ -164,6 +164,13 @@ final class ReviewStore: ObservableObject {
         if fresh { args.append("--fresh") }
         if let data = await client.reviewJSON(args) {
             changeSet = (try? JSONDecoder().decode(ChangeSet.self, from: data)) ?? .empty
+            error = nil
+        } else {
+            // A failure is NOT an empty diff. Saying so was the whole bug: a
+            // machine whose daemon predates review answered NOT_FOUND to every
+            // call, and this pane drew a worktree with no changes.
+            changeSet = .empty
+            error = client.reviewError
         }
         if let data = await client.reviewJSON(["review", "list", workspace.short, "--json"]) {
             entries = (try? JSONDecoder().decode([ReviewEntry].self, from: data)) ?? []
@@ -242,6 +249,11 @@ struct ReviewPane: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if review.client.reviewSupported == false {
+                outOfDate
+            } else if let problem = review.error {
+                failure(problem)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if showingFiles {
@@ -314,6 +326,40 @@ struct ReviewPane: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// This machine's Far Cooler is older than review.
+    ///
+    /// Worth its own state rather than a generic error, because it is the one
+    /// failure with a specific remedy and it is the one a person cannot diagnose
+    /// from an empty panel: an older daemon does not know these methods exist, so
+    /// it refuses them exactly the way it refuses a workspace that is not there.
+    private var outOfDate: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("This machine can't show changes yet")
+                .font(.system(size: 11.5, weight: .medium))
+            Text("Its copy of Far Cooler is older than review. Update it in Settings › Machines.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.orange.opacity(0.12))
+    }
+
+    private func failure(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Couldn't read this worktree")
+                .font(.system(size: 11.5, weight: .medium))
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.orange.opacity(0.12))
     }
 
     private var changed: some View {

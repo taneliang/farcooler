@@ -52,6 +52,15 @@ enum HostState: Equatable {
 final class DaemonClient: ObservableObject {
     /// Diff status per worktree short id, for the sidebar. Empty until read.
     @Published var reviewInbox: [String: InboxRow] = [:]
+    /// Whether this machine's daemon knows about review at all.
+    ///
+    /// `nil` until asked. `false` means the daemon ANSWERED and refused — which
+    /// on a machine installed before review is every review call, because an
+    /// unknown method is a `NOT_FOUND` there. Distinguished from "unreachable",
+    /// which is not the daemon's answer and must not be remembered as one.
+    @Published var reviewSupported: Bool?
+    /// The last thing review failed with, verbatim from the daemon.
+    @Published var reviewError: String?
 
     @Published var fleet: Fleet = .empty
     @Published var lastError: String?
@@ -1323,7 +1332,13 @@ final class DaemonClient: ObservableObject {
     // one workflow this product is about the one thing nobody can automate.
 
     func reviewJSON(_ args: [String]) async -> Data? {
-        await run(args, background: true)
+        let (data, message) = await runRaw(args, background: true)
+        // Kept rather than dropped. Swallowing this is what made a machine
+        // running an older daemon look like a worktree with no changes: the call
+        // failed, the pane rendered an empty diff, and nothing anywhere said why.
+        reviewError = data == nil ? message : nil
+        if data != nil { reviewSupported = true }
+        return data
     }
 
     /// Diff status for every worktree on this machine, in one call.
@@ -1334,9 +1349,21 @@ final class DaemonClient: ObservableObject {
     /// worktree in the sidebar, which is exactly what makes a fleet view
     /// expensive to leave open.
     func refreshReviewInbox() async {
-        guard let data = await run(["review", "inbox", "--json"], background: true),
-            let rows = try? JSONDecoder().decode([InboxRow].self, from: data)
-        else { return }
+        let (maybe, message) = await runRaw(["review", "inbox", "--json"], background: true)
+        guard let data = maybe else {
+            // Only a CONNECTED machine refusing the call proves it cannot do it.
+            // A machine that is merely unreachable will answer differently once
+            // it is back, and remembering "unsupported" for it would be a lie
+            // that outlives the network.
+            if state == .connected {
+                reviewSupported = false
+                reviewError = message
+            }
+            return
+        }
+        reviewSupported = true
+        reviewError = nil
+        guard let rows = try? JSONDecoder().decode([InboxRow].self, from: data) else { return }
         var byWorkspace: [String: InboxRow] = [:]
         for r in rows { byWorkspace[r.workspaceId] = r }
         reviewInbox = byWorkspace

@@ -271,3 +271,86 @@ async fn shortstat_works_in_a_linked_worktree_which_is_the_only_kind_this_produc
 
     let _ = std::fs::remove_dir_all(&linked);
 }
+
+#[tokio::test]
+async fn a_repository_on_master_resolves_a_base_instead_of_showing_nothing() {
+    // The bug this exists for: `main` was hardcoded, so a repository on `master`
+    // resolved no merge base and review showed an empty diff with no reason —
+    // "nothing changed" and "I could not work out what to compare against"
+    // looked identical.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let p = dir.path();
+    run(p, &["init", "--initial-branch=master", "-q"]);
+    run(p, &["config", "user.email", "test@example.com"]);
+    run(p, &["config", "user.name", "Test"]);
+    run(p, &["config", "commit.gpgsign", "false"]);
+    write(p, "README.md", "start\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "initial"]);
+
+    let base = farcooler_daemon::change_set::guess_base(p).await;
+    assert_eq!(base.as_deref(), Some("master"));
+}
+
+#[tokio::test]
+async fn a_repository_on_main_still_resolves_main() {
+    let dir = repo();
+    let base = farcooler_daemon::change_set::guess_base(dir.path()).await;
+    assert_eq!(base.as_deref(), Some("main"));
+}
+
+#[tokio::test]
+async fn origin_head_wins_over_a_local_main_because_it_is_what_the_remote_calls_default() {
+    let dir = repo();
+    let p = dir.path();
+    // A repository whose remote default is `trunk`, with a local `main` that is
+    // not it. Guessing `main` here would diff against the wrong branch and look
+    // entirely plausible.
+    run(p, &["branch", "trunk"]);
+    run(p, &["update-ref", "refs/remotes/origin/trunk", "refs/heads/trunk"]);
+    run(p, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"]);
+
+    let base = farcooler_daemon::change_set::guess_base(p).await;
+    assert_eq!(base.as_deref(), Some("origin/trunk"));
+}
+
+#[tokio::test]
+async fn a_repository_with_no_main_no_master_and_no_remote_resolves_nothing() {
+    // Nothing is the honest answer, and it is what lets the caller say "pick a
+    // base" rather than silently diffing against a ref that is not there.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let p = dir.path();
+    run(p, &["init", "--initial-branch=develop", "-q"]);
+    run(p, &["config", "user.email", "test@example.com"]);
+    run(p, &["config", "user.name", "Test"]);
+    run(p, &["config", "commit.gpgsign", "false"]);
+    write(p, "README.md", "start\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "initial"]);
+
+    assert!(farcooler_daemon::change_set::guess_base(p).await.is_none());
+}
+
+#[tokio::test]
+async fn a_change_set_against_master_counts_what_the_branch_changed() {
+    // End to end on the shape that used to show nothing at all.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let p = dir.path();
+    run(p, &["init", "--initial-branch=master", "-q"]);
+    run(p, &["config", "user.email", "test@example.com"]);
+    run(p, &["config", "user.name", "Test"]);
+    run(p, &["config", "commit.gpgsign", "false"]);
+    write(p, "README.md", "start\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "initial"]);
+
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    write(p, "a.txt", "one\ntwo\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "add a"]);
+
+    let base = farcooler_daemon::change_set::guess_base(p).await.expect("a base");
+    let cs = change_set(p, "feature", &base, BaseSource::Guessed).await.expect("change set");
+    assert_eq!(cs.insertions, 2);
+    assert_eq!(cs.commits.len(), 1);
+}

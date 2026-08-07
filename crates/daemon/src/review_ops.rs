@@ -48,6 +48,16 @@ fn pb_file(f: &change_set::FileChange) -> pb::FileChange {
     }
 }
 
+fn pb_base_source(s: BaseSource) -> i32 {
+    (match s {
+        BaseSource::Recorded => pb::BaseSource::Recorded,
+        BaseSource::Upstream => pb::BaseSource::Upstream,
+        BaseSource::PrBase => pb::BaseSource::PrBase,
+        BaseSource::DefaultBranch => pb::BaseSource::DefaultBranch,
+        BaseSource::Guessed => pb::BaseSource::Guessed,
+    }) as i32
+}
+
 fn pb_change_set(workspace_id: Uuid, c: &review::CachedChangeSet) -> pb::ChangeSet {
     let s = &c.set;
     pb::ChangeSet {
@@ -55,11 +65,7 @@ fn pb_change_set(workspace_id: Uuid, c: &review::CachedChangeSet) -> pb::ChangeS
         version: c.version,
         branch: s.branch.clone(),
         base_ref: s.base_ref.clone(),
-        base_source: (match s.base_source {
-            BaseSource::Recorded => pb::BaseSource::Recorded,
-            BaseSource::Upstream => pb::BaseSource::Upstream,
-            BaseSource::Guessed => pb::BaseSource::Guessed,
-        }) as i32,
+        base_source: pb_base_source(s.base_source),
         base_commit: s.base_commit.clone(),
         head_commit: s.head_commit.clone(),
         commits: s
@@ -162,20 +168,63 @@ fn pb_anchor_state(s: AnchorState) -> i32 {
 /// The worktree, branch and base for a workspace.
 async fn locate(svc: &Service, workspace_id: Uuid) -> Result<(String, String, String, BaseSource)> {
     let ws = svc.store.get_workspace(workspace_id)?;
-    let base = svc
-        .store
-        .review_base(workspace_id)?
-        .map(|b| (b, BaseSource::Recorded))
-        .unwrap_or_else(|| (default_base(), BaseSource::Guessed));
-    Ok((ws.worktree_path, ws.branch, base.0, base.1))
+    let (base, source) = resolve_base(svc, &ws).await?;
+    Ok((ws.worktree_path, ws.branch, base, source))
 }
 
-/// The base to compare against when nothing was recorded.
+/// What this branch is compared against, asked in order of what actually knows.
 ///
-/// `main` then `master`, resolved at use. Displayed and correctable, because a
-/// guess that silently produces the wrong diff is the failure mode here.
-fn default_base() -> String {
-    "main".to_string()
+/// `main` was hardcoded here once, and it failed in the worst possible way: a
+/// repository on `master` resolved no merge base, so review showed an empty diff
+/// and said nothing about why. Nothing about "no changes" and "I could not work
+/// out what to compare against" looked different.
+///
+/// The order is by how much each source really knows about THIS branch:
+///
+/// 1. **What the user pinned.** Nothing overrules a person who said so.
+/// 2. **The branch's pull request.** GitHub records exactly what it is based on,
+///    and for a stacked branch that is its parent slice — where the repository
+///    default would be flatly wrong and would show the whole stack's diff.
+/// 3. **The repository's default branch**, from `gh` when it is there.
+/// 4. **`origin/HEAD`**, the same fact recorded locally, no network.
+/// 5. **A local `main` or `master`** — the only one labeled a guess, because it
+///    is the only one that can quietly be the wrong answer.
+///
+/// Every step degrades to the next, so a machine with no `gh`, no network and no
+/// remote still reviews.
+async fn resolve_base(
+    svc: &Service,
+    ws: &farcooler_store::models::Workspace,
+) -> Result<(String, BaseSource)> {
+    if let Some(recorded) = svc.store.review_base(ws.id)? {
+        return Ok((recorded, BaseSource::Recorded));
+    }
+
+    let worktree = Path::new(&ws.worktree_path);
+
+    // Whatever PR state was last read. Never fetched here: resolving a base must
+    // not put a network call on the path of drawing a diff.
+    if let Some(prs) = svc.pr_cache_get(ws.repository_id) {
+        if let Some(pr) = prs.iter().find(|p| p.head_ref == ws.branch) {
+            if !pr.base_ref.is_empty() && pr.base_ref != ws.branch {
+                return Ok((pr.base_ref.clone(), BaseSource::PrBase));
+            }
+        }
+    }
+
+    if let Some(d) = svc.default_branch(ws.repository_id, worktree).await {
+        return Ok((d, BaseSource::DefaultBranch));
+    }
+
+    change_set::guess_base(worktree)
+        .await
+        .map(|b| (b, BaseSource::Guessed))
+        .ok_or(DomainError::BaseUnresolvable)
+}
+
+/// The base for a repository-level call, where there is no workspace to ask.
+async fn default_base_for(worktree: &Path) -> String {
+    change_set::guess_base(worktree).await.unwrap_or_else(|| "main".to_string())
 }
 
 /// Read a stored anchor, tolerating an unparseable one rather than failing the
@@ -672,10 +721,10 @@ pub async fn inbox(svc: &Service) -> Result<pb::ReviewInbox> {
             // Never marked read. Anything in the buffer wants attention.
             None => c.open + c.dispatched + c.answered + c.dispatch_unknown > 0,
         };
-        let base = svc
-            .store
-            .review_base(c.workspace_id)?
-            .unwrap_or_else(default_base);
+        let base = match svc.store.review_base(c.workspace_id)? {
+            Some(recorded) => recorded,
+            None => default_base_for(Path::new(&ws.worktree_path)).await,
+        };
         // Behind the cheap gate: a worktree nobody has touched costs two stats
         // and no git at all, which is what makes leaving a fleet view open
         // affordable.

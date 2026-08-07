@@ -111,7 +111,13 @@ pub enum BaseSource {
     Recorded,
     /// `branch.<name>.merge`.
     Upstream,
-    /// The repository's default branch, because nothing better was known.
+    /// The branch's pull request says what it is based on. Exact, and the only
+    /// source that is right for a stacked branch.
+    PrBase,
+    /// The repository's own default branch.
+    DefaultBranch,
+    /// Nothing knew. A local `main` or `master`, and labeled as a guess because
+    /// it is the only one of these that can quietly be wrong.
     Guessed,
 }
 
@@ -371,6 +377,62 @@ pub async fn worktree_digest(repo: &Path, head_commit: &str) -> Result<String> {
         h.update([0]);
     }
     Ok(format!("{:x}", h.finalize()))
+}
+
+/// What this branch is compared against, when nobody has said.
+///
+/// A hardcoded `main` was the first version and it was wrong in a way that
+/// produced SILENCE rather than an error: a repository on `master`, or one whose
+/// default branch is anything else, resolved no merge base, so every review of
+/// it showed an empty diff and said nothing about why.
+///
+/// The repository's default branch, WITHOUT a network call.
+///
+/// `origin/HEAD` is the local record of what the remote calls its default, so it
+/// is right whenever the clone has ever been told — and costs nothing.
+pub async fn default_branch_local(repo: &Path) -> Option<String> {
+    if let Ok(r) = git(repo, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).await {
+        if r.ok {
+            let full = r.stdout.trim();
+            if !full.is_empty() {
+                // `origin/main` names a ref that resolves; keep it whole rather
+                // than stripping the remote, so a repository with a local branch
+                // of the same name but different tip still diffs against what the
+                // remote actually has.
+                return Some(full.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// The last resort: a local `main` or `master`.
+///
+/// Returns `None` when neither exists, so the caller can ask the user to pick a
+/// base rather than diffing against a ref that is not there — which produced an
+/// empty diff and no explanation.
+pub async fn guess_base(repo: &Path) -> Option<String> {
+    if let Some(d) = default_branch_local(repo).await {
+        return Some(d);
+    }
+    for candidate in ["main", "master"] {
+        if let Ok(r) = git(repo, &["rev-parse", "--verify", "--quiet", candidate]).await {
+            if r.ok {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// The branch currently checked out, or `None` on a detached HEAD.
+pub async fn current_branch(repo: &Path) -> Option<String> {
+    let r = git(repo, &["symbolic-ref", "--short", "--quiet", "HEAD"]).await.ok()?;
+    if !r.ok {
+        return None;
+    }
+    let b = r.stdout.trim().to_string();
+    if b.is_empty() { None } else { Some(b) }
 }
 
 /// Just the three numbers, for a sidebar row.

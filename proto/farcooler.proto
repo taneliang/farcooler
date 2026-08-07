@@ -1170,9 +1170,18 @@ message ChangeSetChanged {
 // and the user is the only one who can spot it.
 enum BaseSource {
   BASE_SOURCE_UNSPECIFIED = 0;
+  // The user pinned it.
   BASE_SOURCE_RECORDED = 1;
   BASE_SOURCE_UPSTREAM = 2;
+  // Nothing knew, so a local `main` or `master` was used. The only one the UI
+  // labels as a guess, because it is the only one that can silently be wrong.
   BASE_SOURCE_GUESSED = 3;
+  // The branch has a pull request, and GitHub says what it is based on. Exact,
+  // and the only source that is right for a STACKED branch, whose base is its
+  // parent slice rather than the repository default.
+  BASE_SOURCE_PR_BASE = 4;
+  // The repository's own default branch, from `gh` or from `origin/HEAD`.
+  BASE_SOURCE_DEFAULT_BRANCH = 5;
 }
 
 enum FileStatus {

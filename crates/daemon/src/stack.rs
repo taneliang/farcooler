@@ -397,6 +397,34 @@ pub fn discard_verdict(i: &DiscardInputs<'_>) -> DiscardVerdict {
     DiscardVerdict::Safe
 }
 
+/// The repository's default branch, according to GitHub.
+///
+/// One short call, and it degrades to `None` for every reason `fetch_prs` does —
+/// `gh` absent, logged out, offline, rate limited. The caller falls back to
+/// `origin/HEAD`, so a machine without `gh` is not a machine without review.
+pub async fn fetch_default_branch(worktree: &Path) -> Option<String> {
+    let out = tokio::time::timeout(
+        GH_TIMEOUT,
+        tokio::process::Command::new("gh")
+            .current_dir(worktree)
+            .args(["repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+
+    match out {
+        Ok(Ok(o)) if o.status.success() => {
+            let name = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if name.is_empty() { None } else { Some(name) }
+        }
+        _ => None,
+    }
+}
+
 /// Which repository a worktree belongs to, for cache keying.
 pub type RepoId = Uuid;
 
