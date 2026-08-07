@@ -127,7 +127,37 @@ impl TmuxServer {
     pub async fn run(&self, args: &[&str]) -> Result<Output> {
         self.ensure_config()?;
 
-        let mut cmd = Command::new("tmux");
+        // Resolved rather than spawned by name.
+        //
+        // A Dock-launched Mac app inherits launchd's default `PATH` —
+        // `/usr/bin:/bin:/usr/sbin:/sbin` — which has no Homebrew prefix in it,
+        // so `Command::new("tmux")` failed with `ENOENT`. That is not a degraded
+        // app: the inventory becomes unusable, `derive_terminal` reports every
+        // terminal as `Lost`, and the whole product looks broken because of a
+        // missing directory. See `farcooler_core::programs`.
+        let tmux = farcooler_core::programs::find("tmux").ok_or_else(|| {
+            tracing::warn!("tmux is not installed anywhere this daemon can find");
+            DomainError::TmuxUnavailable
+        })?;
+
+        let mut cmd = Command::new(&tmux);
+        // Give tmux a UTF-8 locale when the daemon inherited none.
+        //
+        // The other half of the same launchd problem `programs::find` solves
+        // above: a Dock-launched app inherits no `LANG` either, and a tmux
+        // running in the C locale SANITIZES control characters out of format
+        // output — every `-F` and `display-message` string here delimits fields
+        // with a TAB, and tmux turns each one into `_`.
+        //
+        // Every parser then splits on `\t`, gets one field, and returns `None`.
+        // The inventory comes back empty, `derive_terminal` reports every
+        // terminal `Lost`, pane modes and cursor position stop parsing too, and
+        // nothing anywhere says why. Verified against tmux 3.7b: the same
+        // binary on the same socket emits `\t` with `LANG=en_US.UTF-8` and `_`
+        // without it.
+        if let Some((key, value)) = utf8_locale() {
+            cmd.env(key, value);
+        }
         cmd.arg("-L").arg(&self.socket).arg("-f").arg(&self.config_path);
         cmd.args(args);
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -209,5 +239,107 @@ impl TmuxServer {
     pub async fn kill_server(&self) -> Result<()> {
         let _ = self.run(&["kill-server"]).await;
         Ok(())
+    }
+}
+
+/// The locale variable to set for tmux, or `None` when the inherited one is
+/// already fine.
+///
+/// Only `LC_CTYPE`, and deliberately: it is the category that decides character
+/// classification, which is the only thing tmux's sanitizing depends on. Setting
+/// `LC_ALL` would also override collation and number formatting the user may
+/// have chosen on purpose, to fix a problem that has nothing to do with either.
+fn utf8_locale() -> Option<(&'static str, &'static str)> {
+    let read = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
+    ctype_override(
+        read("LC_ALL").as_deref(),
+        read("LC_CTYPE").as_deref(),
+        read("LANG").as_deref(),
+    )
+    .map(|value| ("LC_CTYPE", value))
+}
+
+/// Which locale to impose, given what was inherited.
+///
+/// Pure so it can be tested: the real thing reads process-global environment,
+/// and these tests run in parallel with everything else in the crate.
+///
+/// The precedence is libc's own — `LC_ALL` beats `LC_CTYPE` beats `LANG` — so if
+/// the winning one already names UTF-8 there is nothing to do, and a user who
+/// deliberately runs a non-UTF-8 locale is left alone rather than overridden.
+fn ctype_override(
+    lc_all: Option<&str>,
+    lc_ctype: Option<&str>,
+    lang: Option<&str>,
+) -> Option<&'static str> {
+    let effective = lc_all.or(lc_ctype).or(lang);
+    match effective {
+        // Something is set, and it is the user's business what.
+        Some(_) => None,
+        // Nothing at all, which is what launchd hands a Dock-launched app.
+        None => Some(DEFAULT_UTF8_LOCALE),
+    }
+}
+
+/// A UTF-8 locale that exists on the platform the daemon runs on.
+///
+/// macOS ships `en_US.UTF-8` always. Linux gets `C.UTF-8`, which glibc has had
+/// since 2.35 and musl always has, and which does not impose an American
+/// English anything on a machine that never asked for one.
+///
+/// Naming one that does not exist costs nothing: libc falls back to `C`, which
+/// is exactly where this started, so the change either helps or is inert.
+#[cfg(target_os = "macos")]
+const DEFAULT_UTF8_LOCALE: &str = "en_US.UTF-8";
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_UTF8_LOCALE: &str = "C.UTF-8";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nothing_inherited_means_impose_a_utf8_locale() {
+        // What launchd hands a Dock-launched app. Without this, tmux runs in the
+        // C locale and sanitizes the tab delimiter out of every format string.
+        assert_eq!(ctype_override(None, None, None), Some(DEFAULT_UTF8_LOCALE));
+    }
+
+    #[test]
+    fn an_inherited_locale_is_left_alone_whichever_variable_carries_it() {
+        // Including a non-UTF-8 one. A user who deliberately runs a C locale in
+        // their shell is not someone to override — and if they do, tmux behaves
+        // for Far Cooler exactly as it does for them in a terminal, which is the
+        // property worth preserving.
+        assert_eq!(ctype_override(Some("en_US.UTF-8"), None, None), None);
+        assert_eq!(ctype_override(None, Some("en_GB.UTF-8"), None), None);
+        assert_eq!(ctype_override(None, None, Some("ja_JP.UTF-8")), None);
+        assert_eq!(ctype_override(Some("C"), None, None), None, "their choice");
+    }
+
+    #[test]
+    fn precedence_follows_libcs_own() {
+        // LC_ALL beats LC_CTYPE beats LANG, so a set LC_ALL means there is
+        // nothing to decide however empty the others are.
+        assert_eq!(ctype_override(Some("C"), Some("en_US.UTF-8"), Some("en_US.UTF-8")), None);
+    }
+
+    #[test]
+    fn the_imposed_locale_actually_says_utf8() {
+        // The whole point of the value. A default that was not UTF-8 would set a
+        // variable and change nothing.
+        assert!(
+            DEFAULT_UTF8_LOCALE.to_ascii_uppercase().contains("UTF-8"),
+            "{DEFAULT_UTF8_LOCALE}"
+        );
+    }
+
+    #[test]
+    fn only_lc_ctype_is_imposed() {
+        // Never LC_ALL: that would also override collation and number formatting
+        // somebody may have chosen on purpose, to fix a character-classification
+        // problem that has nothing to do with either.
+        let (key, _) = utf8_locale().unwrap_or(("LC_CTYPE", DEFAULT_UTF8_LOCALE));
+        assert_eq!(key, "LC_CTYPE");
     }
 }

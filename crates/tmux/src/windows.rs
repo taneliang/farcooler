@@ -166,7 +166,24 @@ impl TmuxServer {
             return Err(DomainError::TmuxUnavailable);
         }
 
-        Ok(out.stdout.lines().filter_map(parse_pane_line).collect())
+        let parsed: Vec<TaggedPane> = out.stdout.lines().filter_map(parse_pane_line).collect();
+
+        // Lines arrived and none of them parsed.
+        //
+        // Worth saying out loud because it is indistinguishable from "nothing is
+        // running" everywhere downstream: the snapshot is empty either way,
+        // `derive_terminal` reports every terminal `Lost`, and the app looks
+        // broken with nothing anywhere saying why. That is exactly how the
+        // missing-locale bug hid — tmux sanitized the tab delimiter to `_`, every
+        // line was dropped here in silence, and the symptom surfaced three layers
+        // away as panes that never leave `starting`.
+        if parsed.is_empty() && out.stdout.lines().any(|l| !l.trim().is_empty()) {
+            tracing::warn!(
+                lines = out.stdout.lines().count(),
+                "tmux listed panes but none could be parsed; the delimiter or the tags have changed"
+            );
+        }
+        Ok(parsed)
     }
 
     /// Kill exactly the window whose fresh tags match this terminal.

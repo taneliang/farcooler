@@ -11,6 +11,7 @@ pub mod derive;
 pub mod error;
 pub mod inventory;
 pub mod preconditions;
+pub mod programs;
 pub mod replay;
 pub mod shell;
 pub mod theme;

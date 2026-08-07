@@ -627,7 +627,19 @@ pub fn handshake(
         return Err("no program to run".to_string());
     }
 
-    let mut child = Command::new(&spec.program)
+    // Resolved rather than spawned by name, for the reason `crate::programs`
+    // exists: a Dock-launched daemon inherits launchd's `PATH` and finds no
+    // `npx`, no `opencode`, nothing a package manager installed.
+    //
+    // This one reported a FALSE failure rather than breaking anything — a pane
+    // launches its adapter through the user's login shell, so chat mode worked
+    // fine while the Test button said the adapter could not start. A settings
+    // form confidently contradicting the product is its own kind of bad.
+    let program = crate::programs::find(spec.program.trim()).ok_or_else(|| {
+        format!("could not find `{}` on this machine", spec.program.trim())
+    })?;
+
+    let mut child = Command::new(&program)
         .args(&spec.args)
         .envs(spec.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .current_dir(std::env::temp_dir())
@@ -1223,14 +1235,20 @@ Do you want to allow this command?
     }
 
     #[test]
-    fn a_program_that_does_not_exist_says_so() {
+    fn a_program_that_does_not_exist_says_it_cannot_be_found() {
+        // "could not FIND" rather than "could not start", because resolution now
+        // happens before the spawn — see `crate::programs`. The distinction is
+        // the useful half: a program that is not installed and a program that is
+        // installed and crashes on launch need different things done about them,
+        // and this used to report both as the same failure.
         let spec = AdapterSpec {
             program: "farcooler-no-such-program".into(),
             args: vec![],
             env: Default::default(),
         };
         let failure = handshake(&spec, std::time::Duration::from_secs(5)).expect_err("no program");
-        assert!(failure.contains("could not start"), "{failure}");
+        assert!(failure.contains("could not find"), "{failure}");
+        assert!(failure.contains("farcooler-no-such-program"), "names it: {failure}");
     }
 
     #[test]
