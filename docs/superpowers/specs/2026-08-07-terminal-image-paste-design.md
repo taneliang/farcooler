@@ -232,10 +232,27 @@ The third case is the one worth stating. A path on the local Mac means nothing o
 a remote machine, so pasting it as text would produce a file reference the agent
 cannot open. Dragging an image onto the pane goes through the same door.
 
-Even against a local daemon the bytes make the round trip and land in the paste
-directory. Handing over the original path would be faster and would mean two
-behaviors — one file the sweep owns and one that lives forever — differing by
-something the user cannot see.
+### A local daemon does not need a transfer
+
+`DaemonClient` already knows: `target.isEmpty` means the daemon is on this
+machine. That splits the behavior three ways.
+
+| Connection | Pasteboard holds | What happens |
+|---|---|---|
+| Local | An image **file** | Its existing path is typed. No copy, no RPC, no chip. |
+| Local | Raw image **data** | `terminal.paste_image`, no chip — it is a unix socket. |
+| Remote | Either | `terminal.paste_image`, with the chip. |
+
+A file already on the machine the agent runs on needs nothing done to it, and
+copying it would mean the same image sitting in two places with two lifetimes.
+Raw data — a screenshot, a copy out of Preview — has no path yet, so something
+must write one; the daemon does it over the socket rather than the app doing it
+in Swift, because that keeps the naming, the collision counter, the sniffing and
+the sweep in one implementation instead of two.
+
+The chip is suppressed on a local connection because there is nothing to report:
+sixteen megabytes over a unix socket is not a wait, and a progress ring that
+flashes for one frame is noise.
 
 ### iOS and Android
 

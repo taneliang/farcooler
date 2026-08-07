@@ -276,6 +276,23 @@ impl TmuxServer {
         parse_modes(&out.stdout).ok_or(DomainError::TmuxUnavailable)
     }
 
+    /// Whether the pane's program has asked for bracketed paste.
+    ///
+    /// Deliberately not a tenth field on `pane_modes`. That returns the
+    /// sequences that RESTORE a pane's modes in a fresh emulator, and every
+    /// replaying client applies the whole string; adding bracketing to it would
+    /// change what they all do, to serve one caller that asks this once, at the
+    /// moment it pastes.
+    pub async fn pane_bracketed_paste(&self, pane_id: &str) -> Result<bool> {
+        let out = self
+            .run(&["display-message", "-p", "-t", pane_id, "#{bracket_paste_flag}"])
+            .await?;
+        if !out.ok() {
+            return Err(DomainError::TmuxUnavailable);
+        }
+        parse_flag(&out.stdout).ok_or(DomainError::TmuxUnavailable)
+    }
+
     /// Where the cursor is in the pane, zero-based as (column, row).
     ///
     /// A captured screen is text: it carries no cursor. Without asking tmux
@@ -475,6 +492,20 @@ fn parse_modes(text: &str) -> Option<PaneModes> {
 }
 
 /// Parse `display-message -p "#{cursor_x}\t#{cursor_y}"`.
+/// A single tmux flag format, as a bool.
+///
+/// `None` rather than `false` for anything else, for the reason `parse_modes`
+/// rejects a short reply: guessing "not bracketed" against a program that asked
+/// for bracketing pastes the terminator as literal text, and the program runs
+/// whatever followed it.
+fn parse_flag(text: &str) -> Option<bool> {
+    match text.lines().next()?.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
 fn parse_cursor(text: &str) -> Option<(u32, u32)> {
     let line = text.lines().next()?;
     let (x, y) = line.split_once('\t')?;
@@ -532,6 +563,16 @@ mod tests {
         // program that never asked and cannot read it.
         let s = PaneModes::default().restore_sequence();
         assert!(s.contains("\x1b[=0;1u"), "the keyboard protocol must be reset: {s:?}");
+    }
+
+    #[test]
+    fn a_bracketed_paste_flag_is_parsed_and_a_bad_one_is_refused() {
+        assert_eq!(parse_flag("1\n"), Some(true));
+        assert_eq!(parse_flag("0\n"), Some(false));
+        // Not `Some(false)`: pasting unbracketed into a program that asked for
+        // bracketing leaves `ESC[201~` in its input as text to be run.
+        assert_eq!(parse_flag(""), None);
+        assert_eq!(parse_flag("_\n"), None, "a C-locale tmux sanitizes output to underscores");
     }
 
     #[test]

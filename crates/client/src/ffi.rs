@@ -198,6 +198,82 @@ pub unsafe extern "C" fn farcooler_client_call(
     ticket
 }
 
+/// Paste an image into a terminal.
+///
+/// Its own function rather than a `farcooler_client_call` method because the
+/// payload is megabytes of binary: routing it through the JSON boundary would
+/// mean base64 in and base64 out, a third more bytes and two more copies, to
+/// describe something neither Swift nor Kotlin needs to look at.
+///
+/// Returns a ticket. Progress arrives on `farcooler_client_poll` as
+///
+/// ```text
+/// {"ticket": 7, "progress": {"sent": 262144, "total": 1048576}}
+/// ```
+///
+/// and the answer, once, as the usual `{"ticket": 7, "ok": true, "result":
+/// {"path": "..."}}`. The bytes are copied before this returns, so the caller
+/// may free them immediately.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_paste_image(
+    handle: *mut c_void,
+    terminal: *const c_char,
+    mime: *const c_char,
+    data: *const u8,
+    len: usize,
+) -> u64 {
+    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
+    let Some(terminal) = (unsafe { read_str(terminal) }) else { return 0 };
+    let mime = unsafe { read_str(mime) }.unwrap_or_else(|| "image/png".into());
+    if data.is_null() || len == 0 {
+        return 0;
+    }
+    let image = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
+
+    let ticket = h.take_ticket();
+    let session = Arc::clone(&h.session);
+    let finished = Arc::clone(&h.finished);
+
+    h.runtime.spawn(async move {
+        let mut guard = session.lock().await;
+        let outcome = match (guard.as_mut(), terminal.parse::<uuid::Uuid>().ok()) {
+            (None, _) => Err(Lost::Already),
+            (Some(_), None) => {
+                Err(Lost::Call(SessionError::Protocol("that is not a terminal id".into())))
+            }
+            (Some(session), Some(id)) => {
+                let queue = Arc::clone(&finished);
+                session
+                    .paste_image(id, &mime, &image, |sent, total| {
+                        queue.lock().expect("queue").push_back(
+                            json!({"ticket": ticket, "progress": {"sent": sent, "total": total}})
+                                .to_string(),
+                        );
+                    })
+                    .await
+                    .map(|path| json!({ "path": path }))
+                    .map_err(Lost::Call)
+            }
+        };
+
+        // Same rule as `farcooler_client_call`: a dead link is every future
+        // call's problem, not just this one's.
+        let lost = match &outcome {
+            Err(Lost::Call(e)) => e.is_disconnect(),
+            Err(Lost::Already) => true,
+            Ok(_) => false,
+        };
+        if lost {
+            *guard = None;
+        }
+        drop(guard);
+
+        push_call(&finished, ticket, outcome, lost);
+    });
+
+    ticket
+}
+
 /// Why a call produced no answer, kept apart from its message just long enough
 /// to decide whether the session is still worth keeping.
 enum Lost {

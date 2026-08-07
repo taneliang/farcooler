@@ -59,6 +59,32 @@ pub fn worktrees_dir() -> Result<PathBuf> {
     Ok(d)
 }
 
+/// Where images pasted into a terminal are written, one file per paste.
+///
+/// Under the runtime directory rather than the worktree, so a paste never
+/// appears in anyone's `git status`, and so one sweep owns every one of them.
+///
+/// Takes the root rather than reading `FARCOOLER_HOME`, for the reason
+/// `Service.root` is held rather than re-derived: the environment is
+/// process-global, and two tests running in parallel would otherwise write into
+/// whichever directory was set last — or, in production, into the real one.
+pub fn pastes_dir_in(root: &std::path::Path) -> Result<PathBuf> {
+    let d = root.join("pastes");
+    std::fs::create_dir_all(&d).map_err(|_| DomainError::OperationFailed)?;
+    Ok(d)
+}
+
+/// Where a paste's bytes accumulate before it is complete.
+///
+/// A dotted subdirectory of `pastes_dir_in`, so the sweep can find partials
+/// without walking anywhere else, and so nothing reading the paste directory
+/// for finished images ever sees one that is still arriving.
+pub fn pastes_incoming_dir_in(root: &std::path::Path) -> Result<PathBuf> {
+    let d = pastes_dir_in(root)?.join(".incoming");
+    std::fs::create_dir_all(&d).map_err(|_| DomainError::OperationFailed)?;
+    Ok(d)
+}
+
 /// Stable per-install id, generated once.
 pub fn load_or_create_install_id() -> Result<String> {
     load_or_create_install_id_in(&ensure_runtime_dir()?)

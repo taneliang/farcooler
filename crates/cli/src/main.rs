@@ -488,6 +488,15 @@ enum TerminalCmd {
     Send { terminal: String, data: String },
     /// Send exact input bytes as hex. This is the terminal client input path.
     SendHex { terminal: String, hex: String },
+    /// Paste an image into a terminal.
+    ///
+    /// The file is copied to the machine the terminal is on and its path is
+    /// typed into the pane, which is how an agent in that pane gets to look at
+    /// it. Prints the path on stdout.
+    ///
+    /// An agent can use this to hand a chart or a screenshot to a SIBLING
+    /// pane. Pasting into its own pane would feed it its own stdin.
+    PasteImage { terminal: String, file: PathBuf },
     /// Print the rendered visible screen with color escapes intact.
     Screen { terminal: String },
     /// Stream live output bytes to stdout until killed. The terminal data plane.
@@ -2015,6 +2024,29 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
                     println!("{:>6}  {}", e.seq, e.payload_json);
                 }
             }
+        }
+
+        // No `proxy()` arm: this is an RPC, not a byte stream, so `connect_to`
+        // already reaches a remote daemon over ssh — the same reason `seen` and
+        // `stop` have none.
+        TerminalCmd::PasteImage { terminal, file } => {
+            let data = std::fs::read(&file)?;
+            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let path = farcooler_client::actions::paste_image(
+                link.client_mut(),
+                id,
+                mime_for(&file),
+                &data,
+                // Progress goes to stderr: stdout is the data channel, and the
+                // one thing a caller wants from it is the path.
+                |sent, total| {
+                    if sent < total {
+                        eprintln!("sent {sent}/{total} bytes");
+                    }
+                },
+            )
+            .await?;
+            println!("{path}");
         }
 
         TerminalCmd::AgentPrompt { terminal, text, images } => {

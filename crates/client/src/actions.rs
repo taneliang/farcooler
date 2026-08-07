@@ -94,6 +94,76 @@ where
     }
 }
 
+/// Send an image into a terminal, and return the path it landed at on the host.
+///
+/// Here rather than in `Session` for the reason this module exists: the CLI and
+/// the mobile core reach the daemon through different connections but must
+/// paste identically. The chunking, the ceiling and the refusal to resume are
+/// the parts that must not differ.
+///
+/// `progress` is called after each chunk with (sent, total) — enough to draw a
+/// ring, and nothing here depends on what it does with it.
+pub async fn paste_image<R, W>(
+    client: &mut Client<R, W>,
+    terminal: Uuid,
+    mime: &str,
+    image: &[u8],
+    mut progress: impl FnMut(u64, u64),
+) -> Result<String, ClientError>
+where
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    let total = image.len() as u64;
+    if total == 0 || total > farcooler_protocol::MAX_IMAGE_PASTE_BYTES {
+        return Err(ClientError::WrongResult {
+            expected: "an image within the size limit",
+            got: "one that is empty or too large",
+        });
+    }
+
+    // One id for the whole transfer, so a second paste into the same pane
+    // cannot append to this one's bytes. v7 like every other id here: the
+    // daemon only hexes it into a filename, so the timestamp prefix costs
+    // nothing and keeps partials sorted by when they started.
+    let transfer_id = farcooler_protocol::ids::new_id();
+    let mut offset: u64 = 0;
+
+    for chunk in image.chunks(farcooler_protocol::IMAGE_PASTE_CHUNK_BYTES) {
+        let payload =
+            request::Payload::TerminalImagePut(farcooler_protocol::v1::TerminalImagePut {
+                terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+                transfer_id: transfer_id.clone(),
+                mime: mime.to_string(),
+                total_size: total,
+                offset,
+                chunk: bytes::Bytes::copy_from_slice(chunk),
+            });
+        match call(client, "terminal.paste_image", terminal, Some(payload)).await? {
+            Some(result::Value::TerminalImagePut(r)) => {
+                offset = r.stored;
+                progress(r.stored, total);
+                if let Some(path) = r.path {
+                    return Ok(path);
+                }
+            }
+            _ => {
+                return Err(ClientError::WrongResult {
+                    expected: "terminal_image_put",
+                    got: "something else",
+                });
+            }
+        }
+    }
+
+    // Every chunk was accepted and the daemon never said it was finished, so
+    // the two sides disagree about how big the image is.
+    Err(ClientError::WrongResult {
+        expected: "a finished image",
+        got: "a transfer that never completed",
+    })
+}
+
 /// Allowlist a folder Far Cooler may operate under. Returns the new root.
 pub async fn add_repository_root<R, W>(
     client: &mut Client<R, W>,

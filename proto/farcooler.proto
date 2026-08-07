@@ -86,6 +86,7 @@ message Request {
     // there is nothing an upsert needs that a read does not already describe.
     HostSettings host_settings = 46;
     Theme theme = 47;
+    TerminalImagePut terminal_image_put = 48;
   }
 }
 
@@ -130,6 +131,7 @@ message Result {
     ThemeList theme_list = 20;
     AdapterList adapter_list = 21;
     AdapterTestResult adapter_test_result = 22;
+    TerminalImagePutResult terminal_image_put = 23;
   }
 }
 
@@ -939,6 +941,36 @@ message TerminalScreen {
 // the way would have to know the terminal's mode to get them right.
 message TerminalWrite {
   bytes payload = 1;
+}
+
+// One chunk of an image on its way to a terminal.
+//
+// Chunked because it has to be: `MAX_CONTROL_ENVELOPE_BYTES` caps a control
+// envelope at 1 MiB, so an image is never one frame. It would be wrong even if
+// it fit — this shares a connection with live terminal output, and a single
+// huge envelope stalls every pane on it while it is written.
+message TerminalImagePut {
+  bytes terminal_id = 1;
+  // Client-generated, and what names the partial file. Two pastes into the same
+  // pane must not be able to append to each other's bytes.
+  bytes transfer_id = 2;
+  // What the sender believes it is sending. The daemon sniffs the bytes and
+  // trusts those instead — this only picks the error message.
+  string mime = 3;
+  // Known before the first chunk, so an oversize send is refused immediately
+  // rather than after the upload the sender already waited through.
+  uint64 total_size = 4;
+  // Must equal the bytes already stored. A retry that matches is a no-op; a
+  // mismatch fails the transfer rather than writing at a guessed position.
+  uint64 offset = 5;
+  bytes chunk = 6;
+}
+
+message TerminalImagePutResult {
+  uint64 stored = 1;
+  // Final chunk only: the absolute path on the host, already typed into the
+  // terminal. Quoted in the terminal when it contains a space; bare here.
+  optional string path = 2;
 }
 
 // Ask for a screen, saying which one you already have.

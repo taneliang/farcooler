@@ -1554,6 +1554,31 @@ impl Service {
         self.runtime().cursor(id).await
     }
 
+    /// Where this service's runtime data lives.
+    pub fn root_dir(&self) -> &Path {
+        &self.root
+    }
+
+    /// Whether the pane's program has asked for bracketed paste.
+    pub async fn pane_bracketed_paste(&self, id: Uuid) -> Result<bool> {
+        self.runtime().pane_bracketed_paste(id).await
+    }
+
+    /// Type a path into a terminal, as a paste.
+    ///
+    /// The daemon does this rather than handing the path back for the client to
+    /// send, because the bracketing depends on a mode only the machine holding
+    /// the pane can answer for, and because the CLI form of this has no
+    /// terminal emulator to encode with.
+    ///
+    /// A trailing space so the next word does not glue to `.png`, and never a
+    /// newline: nothing is submitted on anyone's behalf.
+    pub async fn paste_path(&self, id: Uuid, path: &str) -> Result<()> {
+        let bracketed = self.pane_bracketed_paste(id).await?;
+        let text = format!("{} ", crate::pastes::quote_for_paste(path));
+        self.send_bytes(id, &crate::pastes::encode_paste(bracketed, &text)).await
+    }
+
     /// Send exact bytes to a terminal.
     ///
     /// Bytes rather than text, because a key is not always a character: arrows,

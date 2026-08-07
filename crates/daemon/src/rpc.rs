@@ -93,6 +93,11 @@ fn required_scope(method: &str) -> Option<Scope> {
         // and tokens — and `read` is the scope handed to something that should
         // only see the shape of the fleet.
         | "terminal.screen"
+        // Pasting an image writes bytes to a pane and a file to the machine.
+        // The bytes are the same privilege as `terminal.write`; the file is
+        // written to a daemon-owned directory with a daemon-chosen name, so it
+        // grants no reach a write did not already have.
+        | "terminal.paste_image"
         | "terminal.write" => Scope::Control,
         // A pane's agent channel is exactly as sensitive as its screen — it is
         // the same conversation, just structured — so it sits at the same
@@ -905,6 +910,38 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
+            // One chunk of an image on its way into a pane. The last one names
+            // the file and types its path; every other one only says how much
+            // has landed, which is what the sender's next `offset` must be.
+            "terminal.paste_image" => {
+                let id = Self::target(&req)?;
+                let Some(request::Payload::TerminalImagePut(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let stored = crate::pastes::put_chunk(
+                    svc.root_dir(),
+                    &p.transfer_id,
+                    p.total_size,
+                    p.offset,
+                    &p.chunk,
+                )
+                .await?;
+                let out = match stored {
+                    crate::pastes::Stored::Partial { stored } => {
+                        farcooler_protocol::v1::TerminalImagePutResult { stored, path: None }
+                    }
+                    crate::pastes::Stored::Complete { path, stored } => {
+                        let shown = path.to_string_lossy().to_string();
+                        svc.paste_path(id, &shown).await?;
+                        farcooler_protocol::v1::TerminalImagePutResult {
+                            stored,
+                            path: Some(shown),
+                        }
+                    }
+                };
+                Ok(result::Value::TerminalImagePut(out))
+            }
+
             "terminal.resize" => {
                 let id = Self::target(&req)?;
                 let Some(request::Payload::TerminalResize(p)) = req.payload else {
@@ -1344,6 +1381,7 @@ mod tests {
             "terminal.restart",
             "terminal.screen",
             "terminal.write",
+            "terminal.paste_image",
             "layout.list",
             "layout.split",
             "layout.move",

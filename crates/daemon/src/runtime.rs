@@ -116,6 +116,16 @@ impl Runtime {
         Ok(self.tmux.pane_modes(&pane.pane_id).await?.restore_sequence())
     }
 
+    /// Whether the pane's program has asked for bracketed paste.
+    ///
+    /// Asked at paste time rather than carried in `pane_modes`, which is the
+    /// replay string every client applies wholesale.
+    pub async fn pane_bracketed_paste(&self, id: Uuid) -> Result<bool> {
+        let snapshot = self.inventory.snapshot();
+        let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
+        self.tmux.pane_bracketed_paste(&pane.pane_id).await
+    }
+
     /// Where the cursor sits, so a remote client can draw it in the right cell.
     ///
     /// Asked for separately from the screen because `capture-pane` does not carry

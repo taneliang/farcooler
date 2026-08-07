@@ -525,6 +525,39 @@ impl Session {
         Ok(())
     }
 
+    /// Send an image into a terminal, and return the path it landed at.
+    ///
+    /// The whole transfer lives here rather than in each app for the reason
+    /// this crate exists: the chunking, the retry-free failure behavior and the
+    /// size ceiling must not differ between a Mac, a phone and the CLI, and
+    /// three implementations of a loop is three chances for them to.
+    ///
+    /// `progress` is called after each chunk with (sent, total). It is how a
+    /// client draws a ring; nothing here depends on what it does.
+    pub async fn paste_image(
+        &mut self,
+        terminal: Uuid,
+        mime: &str,
+        image: &[u8],
+        progress: impl FnMut(u64, u64),
+    ) -> Result<String, SessionError> {
+        // The size check is here rather than in `actions` so a phone can say
+        // something a person can act on. `actions` refuses too, because the CLI
+        // reaches it without passing through this.
+        let total = image.len() as u64;
+        if total == 0 {
+            return Err(SessionError::Protocol("that image is empty".into()));
+        }
+        if total > farcooler_protocol::MAX_IMAGE_PASTE_BYTES {
+            return Err(SessionError::Protocol(format!(
+                "that image is {} MB, and the limit is {} MB",
+                total / (1024 * 1024),
+                farcooler_protocol::MAX_IMAGE_PASTE_BYTES / (1024 * 1024)
+            )));
+        }
+        Ok(crate::actions::paste_image(&mut self.client, terminal, mime, image, progress).await?)
+    }
+
     pub async fn resize_terminal(
         &mut self,
         terminal: Uuid,
@@ -794,6 +827,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::AdapterList(_) => "adapter_list",
         result::Value::AdapterTestResult(_) => "adapter_test_result",
         result::Value::Empty(_) => "empty",
+        result::Value::TerminalImagePut(_) => "terminal_image_put",
     }
 }
 

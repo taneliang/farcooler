@@ -1416,3 +1416,142 @@ async fn switching_a_panes_mode_tells_every_client_and_not_just_the_caller() {
         "a pane-mode change reached only the caller; every other client stayed wrong"
     );
 }
+
+/// A minimal but real PNG: an 8-byte signature and enough filler to be worth
+/// chunking. Nothing decodes it — the daemon sniffs its header and the test
+/// compares its bytes.
+fn png(len: usize) -> Vec<u8> {
+    let mut b = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    b.resize(len, 0x5a);
+    b
+}
+
+#[tokio::test]
+async fn an_image_pasted_in_chunks_lands_as_one_file_and_is_typed_into_the_pane() {
+    // The whole feature end to end: bytes cross a real socket in several
+    // chunks, become one file on the host, and the pane is told where it is.
+    // A unit test can prove the assembly; only this can prove that a client
+    // pasting an image ends up with an agent able to open it.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_repo_dir, repository) = registered_repository(&mut client).await;
+    let ws = create_workspace(&mut client, repository, "look at this", "feat/look", "shell").await;
+    let terminal = terminals(&mut client)
+        .await
+        .into_iter()
+        .find(|t| t.workspace_id == ws.id)
+        .expect("the workspace opened a terminal");
+
+    // Three chunks, so the offset bookkeeping is exercised rather than assumed.
+    let image = png(300);
+    let transfer = farcooler_protocol::ids::new_id();
+    let mut stored = 0u64;
+    let mut landed = None;
+    for chunk in image.chunks(128) {
+        let mut req = request("terminal.paste_image");
+        req.target_resource_id = Some(terminal.id.clone());
+        req.payload = Some(request::Payload::TerminalImagePut(
+            farcooler_protocol::v1::TerminalImagePut {
+                terminal_id: terminal.id.clone(),
+                transfer_id: transfer.clone(),
+                mime: "image/png".into(),
+                total_size: image.len() as u64,
+                offset: stored,
+                chunk: bytes::Bytes::copy_from_slice(chunk),
+            },
+        ));
+        let result = client.call(req).await.expect("terminal.paste_image");
+        let Some(result::Value::TerminalImagePut(r)) = result.value else { panic!("wrong result") };
+        stored = r.stored;
+        landed = r.path.or(landed);
+    }
+
+    let path = landed.expect("the last chunk named the file");
+    assert_eq!(stored, image.len() as u64);
+    assert_eq!(std::fs::read(&path).expect("the file exists"), image, "the bytes survived chunking");
+    assert!(
+        path.starts_with(h._dir.path().to_str().expect("utf-8")),
+        "a paste belongs to the daemon's own directory, not the user's real one: {path}"
+    );
+
+    // And the pane was told. The shell echoes what was typed into it, so the
+    // path appears on the screen without anything being run.
+    let quoted = farcooler_daemon::pastes::quote_for_paste(&path);
+    let seen = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let mut req = request("terminal.screen");
+            req.target_resource_id = Some(terminal.id.clone());
+            req.payload = Some(request::Payload::TerminalScreenRequest(
+                farcooler_protocol::v1::TerminalScreenRequest { known_revision: 0 },
+            ));
+            if let Ok(result) = client.call(req).await {
+                if let Some(result::Value::TerminalScreen(s)) = result.value {
+                    let text = String::from_utf8_lossy(&s.contents).to_string();
+                    // The shell may wrap the line, so compare on the filename
+                    // rather than the whole path.
+                    let name = std::path::Path::new(&path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .expect("a name");
+                    if text.contains(name) {
+                        return true;
+                    }
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert_eq!(seen, Ok(true), "the path was never typed into the pane (quoted: {quoted})");
+}
+
+#[tokio::test]
+async fn a_paste_whose_offset_does_not_match_is_refused_over_the_wire() {
+    // The unit test proves the rule; this proves it survives the dispatch
+    // layer as a refusal rather than a dropped connection.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_repo_dir, repository) = registered_repository(&mut client).await;
+    let ws = create_workspace(&mut client, repository, "look", "feat/look2", "shell").await;
+    let terminal = terminals(&mut client)
+        .await
+        .into_iter()
+        .find(|t| t.workspace_id == ws.id)
+        .expect("terminal");
+
+    let image = png(300);
+    let transfer = farcooler_protocol::ids::new_id();
+    let mut first = request("terminal.paste_image");
+    first.target_resource_id = Some(terminal.id.clone());
+    first.payload = Some(request::Payload::TerminalImagePut(
+        farcooler_protocol::v1::TerminalImagePut {
+            terminal_id: terminal.id.clone(),
+            transfer_id: transfer.clone(),
+            mime: "image/png".into(),
+            total_size: image.len() as u64,
+            offset: 0,
+            chunk: bytes::Bytes::copy_from_slice(&image[..128]),
+        },
+    ));
+    client.call(first).await.expect("the first chunk is accepted");
+
+    // A gap. Accepting it would produce a file that sniffs as a PNG and
+    // decodes to garbage.
+    let mut gap = request("terminal.paste_image");
+    gap.target_resource_id = Some(terminal.id.clone());
+    gap.payload = Some(request::Payload::TerminalImagePut(
+        farcooler_protocol::v1::TerminalImagePut {
+            terminal_id: terminal.id.clone(),
+            transfer_id: transfer.clone(),
+            mime: "image/png".into(),
+            total_size: image.len() as u64,
+            offset: 256,
+            chunk: bytes::Bytes::copy_from_slice(&image[256..]),
+        },
+    ));
+    let err = client.call(gap).await.expect_err("refused");
+    assert!(
+        matches!(err, ClientError::Daemon { code, .. } if code == ErrorCode::InvalidArgument as i32),
+        "expected a specific refusal, got {err:?}"
+    );
+}

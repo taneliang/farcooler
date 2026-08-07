@@ -4,6 +4,7 @@ pub mod fanout;
 pub mod foreground;
 pub mod git;
 pub mod layout;
+pub mod pastes;
 pub mod paths;
 pub mod push;
 pub mod reconcile;

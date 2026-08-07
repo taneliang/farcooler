@@ -173,6 +173,30 @@ bool farcooler_client_stream_start(void *handle, const char *terminal);
 /** Stop streaming. Safe when nothing is running for that terminal. */
 void farcooler_client_stream_stop(void *handle, const char *terminal);
 
+/*
+ * Paste an image into a terminal.
+ *
+ * The image is copied to the machine the terminal is on, written to a file the
+ * daemon owns and expires, and its path is typed into the pane — which is how
+ * an agent running there gets to look at it. Nothing about the transfer is ever
+ * written into the terminal; the path is the only thing that reaches the pane.
+ *
+ * Its own function rather than a `farcooler_client_call` method because the
+ * payload is megabytes of binary, and the JSON boundary would mean base64 both
+ * ways to describe something no client needs to look at.
+ *
+ * `data` is copied before this returns, so the caller may free it immediately.
+ *
+ * Progress arrives through `farcooler_client_poll` as
+ * `{"ticket": 7, "progress": {"sent": 262144, "total": 1048576}}`, and the
+ * answer once, as `{"ticket": 7, "ok": true, "result": {"path": "..."}}`.
+ *
+ * Returns a ticket, or 0 if the arguments could not be read.
+ */
+uint64_t farcooler_client_paste_image(void *handle, const char *terminal,
+                                      const char *mime, const uint8_t *data,
+                                      size_t len);
+
 #ifdef __cplusplus
 }
 #endif

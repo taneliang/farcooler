@@ -135,6 +135,18 @@ async fn run() -> Result<(), i32> {
     let watcher = Watcher::new(service.clone());
     tokio::spawn(watcher.clone().run());
 
+    // Expire pasted images. Once at startup and daily after that, because the
+    // machine this runs on is a laptop that is asleep more often than it is
+    // up — an interval alone would let a directory grow for weeks between two
+    // long-running sessions that never reached the next tick.
+    let sweeping = service.clone();
+    tokio::spawn(async move {
+        loop {
+            farcooler_daemon::pastes::sweep(sweeping.root_dir()).await;
+            tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+        }
+    });
+
     let server = UnixListenerServer::bind(&socket).map_err(|e| {
         eprintln!("cannot bind {}: {e}", socket.display());
         1
