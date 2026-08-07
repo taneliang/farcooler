@@ -1,4 +1,5 @@
 import FarCoolerVT
+import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -49,6 +50,10 @@ struct TerminalView: View {
     @State private var focusRequest = 0
     @State private var dismissRequest = 0
     @State private var showWorkspaceList = false
+    /// Images on their way into this pane. One queue per screen, so switching
+    /// terminals does not lose a transfer that is still running.
+    @StateObject private var pastes = ImagePasteQueue()
+    @State private var pickedImage: PhotosPickerItem?
     /// The URL a long press landed on, which is also what presents the dialog.
     ///
     /// One value rather than a flag plus a string: a dialog that can be shown
@@ -257,11 +262,60 @@ struct TerminalView: View {
                 }
             }
 
+            // Handing the agent something to look at.
+            //
+            // In the bar rather than the key row: that row is already nine keys
+            // wide and its own comment records what a tenth did to a phone. The
+            // clipboard item appears only when there is an image on it, so the
+            // menu is one item most of the time.
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    PhotosPicker(selection: $pickedImage, matching: .images) {
+                        Label("Choose Photo", systemImage: "photo")
+                    }
+                    if UIPasteboard.general.hasImages {
+                        Button {
+                            if let image = UIPasteboard.general.image {
+                                pastes.send(image, terminal: live.id, core: connection.core)
+                            }
+                        } label: {
+                            Label("Paste Image", systemImage: "doc.on.clipboard")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "photo.badge.plus")
+                }
+                .accessibilityLabel("Send an image")
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showWorkspaceList = true } label: {
                     Image(systemName: "square.stack")
                 }
                 .accessibilityLabel("Switch terminal")
+            }
+        }
+        // Over the terminal, above the key row, and gone the moment the path
+        // is typed. Nothing about a transfer is ever written into the pane
+        // itself: the path is the only thing that reaches the program.
+        .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
+        .onChange(of: pickedImage) { _, item in
+            guard let item else { return }
+            let terminal = live.id
+            let core = connection.core
+            Task {
+                // Loaded as data rather than as an `Image`: the picker hands
+                // back the original file, and re-encoding a screenshot through
+                // SwiftUI would smear the small text that is usually the whole
+                // reason someone is sending one.
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                    let image = UIImage(data: data)
+                else {
+                    pickedImage = nil
+                    return
+                }
+                pastes.send(image, terminal: terminal, core: core)
+                pickedImage = nil
             }
         }
         .sheet(isPresented: $showWorkspaceList) {

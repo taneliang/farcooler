@@ -31,6 +31,7 @@ SOURCES = [
     "TerminalSession.swift",
     "TerminalTabStrip.swift",
     "TerminalView.swift",
+    "ImagePaste.swift",
     "AgentStream.swift",
     "AgentView.swift",
     "MachineSettings.swift",

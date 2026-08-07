@@ -17,6 +17,12 @@ actor ClientCore {
     private var waiting: [UInt64: CheckedContinuation<Data, Error>] = [:]
     private var pump: Task<Void, Never>?
     private var streams: [String: Stream] = [:]
+    /// Progress reporters for in-flight image pastes, by ticket.
+    ///
+    /// Separate from `waiting` because a paste produces MANY lines carrying the
+    /// same ticket and only the last one is the answer. Resolving on the first
+    /// would leave the transfer running with nobody listening.
+    private var reporting: [UInt64: @Sendable (Int64, Int64) -> Void] = [:]
 
     /// What a live terminal stream reports back. Not a continuation, because a
     /// stream is not an answer to anything: it produces bytes until the pane
@@ -74,6 +80,42 @@ actor ClientCore {
                 method.withCString { farcooler_client_call(handle, $0, json) }
             }
         }
+    }
+
+    /// Paste an image into a terminal, and hand back the path it landed at.
+    ///
+    /// Its own entry point rather than a `call` method because the payload is
+    /// binary: the JSON boundary every other method uses would mean base64 in
+    /// both directions to describe bytes nothing in Swift needs to look at.
+    func pasteImage(
+        _ terminal: String,
+        mime: String,
+        data: Data,
+        onProgress: @escaping @Sendable (Int64, Int64) -> Void
+    ) async throws -> String {
+        guard let handle else { throw CoreError.notStarted }
+        startPumping()
+
+        let ticket = data.withUnsafeBytes { bytes -> UInt64 in
+            guard let base = bytes.bindMemory(to: UInt8.self).baseAddress else { return 0 }
+            return terminal.withCString { t in
+                mime.withCString { m in
+                    farcooler_client_paste_image(handle, t, m, base, bytes.count)
+                }
+            }
+        }
+        guard ticket != 0 else { throw CoreError.malformed }
+        reporting[ticket] = onProgress
+        defer { reporting[ticket] = nil }
+
+        let payload: Data = try await withCheckedThrowingContinuation { continuation in
+            waiting[ticket] = continuation
+        }
+        guard
+            let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+            let path = object["path"] as? String
+        else { throw CoreError.malformed }
+        return path
     }
 
     var isConnected: Bool {
@@ -174,10 +216,18 @@ actor ClientCore {
                 continue
             }
 
-            guard
-                let ticket = object["ticket"] as? UInt64,
-                let continuation = waiting.removeValue(forKey: ticket)
-            else { continue }
+            guard let ticket = object["ticket"] as? UInt64 else { continue }
+
+            // A progress line is not the answer. Reporting it must not take the
+            // continuation, or the transfer would run on with nobody waiting.
+            if let progress = object["progress"] as? [String: Any] {
+                let sent = (progress["sent"] as? NSNumber)?.int64Value ?? 0
+                let total = (progress["total"] as? NSNumber)?.int64Value ?? 0
+                reporting[ticket]?(sent, total)
+                continue
+            }
+
+            guard let continuation = waiting.removeValue(forKey: ticket) else { continue }
 
             if object["ok"] as? Bool == true {
                 let result = object["result"] ?? [:]

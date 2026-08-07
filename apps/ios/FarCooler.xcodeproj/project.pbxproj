@@ -22,6 +22,7 @@
 		277F3B04D4A35D27973EA0DD /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 851A6DCCD0835D92A1F84110; };
 		3FBD96AF8E9856509E8AA6AA /* TerminalTabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DD9107C112755A48A85E126; };
 		33ADF6CBA58D552A8FFC5F05 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D039AC3CA50A565AB5C9E2C9; };
+		B4BDBBB96BBB55309500381C /* ImagePaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = 913FA772187950F79075A3AA; };
 		090F5919118C5EE2A6F910CC /* AgentStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E65812E2025DDCA0AE929F; };
 		155CBF2767425E0385B106DD /* AgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F819FB63EB645686A9D99358; };
 		BA757BB1C6A656C484BF2D43 /* MachineSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE0452D9E935FE28127F6F4; };
@@ -63,6 +64,7 @@
 		851A6DCCD0835D92A1F84110 /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
 		7DD9107C112755A48A85E126 /* TerminalTabStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabStrip.swift; sourceTree = "<group>"; };
 		D039AC3CA50A565AB5C9E2C9 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		913FA772187950F79075A3AA /* ImagePaste.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePaste.swift; sourceTree = "<group>"; };
 		28E65812E2025DDCA0AE929F /* AgentStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStream.swift; sourceTree = "<group>"; };
 		F819FB63EB645686A9D99358 /* AgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentView.swift; sourceTree = "<group>"; };
 		7EE0452D9E935FE28127F6F4 /* MachineSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachineSettings.swift; sourceTree = "<group>"; };
@@ -131,6 +133,7 @@
 				851A6DCCD0835D92A1F84110 /* TerminalSession.swift */,
 				7DD9107C112755A48A85E126 /* TerminalTabStrip.swift */,
 				D039AC3CA50A565AB5C9E2C9 /* TerminalView.swift */,
+				913FA772187950F79075A3AA /* ImagePaste.swift */,
 				28E65812E2025DDCA0AE929F /* AgentStream.swift */,
 				F819FB63EB645686A9D99358 /* AgentView.swift */,
 				7EE0452D9E935FE28127F6F4 /* MachineSettings.swift */,
@@ -264,6 +267,7 @@
 				277F3B04D4A35D27973EA0DD /* TerminalSession.swift in Sources */,
 				3FBD96AF8E9856509E8AA6AA /* TerminalTabStrip.swift in Sources */,
 				33ADF6CBA58D552A8FFC5F05 /* TerminalView.swift in Sources */,
+				B4BDBBB96BBB55309500381C /* ImagePaste.swift in Sources */,
 				090F5919118C5EE2A6F910CC /* AgentStream.swift in Sources */,
 				155CBF2767425E0385B106DD /* AgentView.swift in Sources */,
 				BA757BB1C6A656C484BF2D43 /* MachineSettings.swift in Sources */,
@@ -321,9 +325,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 55f5040)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 0a8facb)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 291;
+				CURRENT_PROJECT_VERSION = 302;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -345,9 +349,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 55f5040)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 0a8facb)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 291;
+				CURRENT_PROJECT_VERSION = 302;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
 				INFOPLIST_FILE = FarCooler/Info.plist;
