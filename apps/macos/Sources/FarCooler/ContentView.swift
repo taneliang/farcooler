@@ -1106,6 +1106,12 @@ struct ContentView: View {
                 tmux: { AnyView(detail) }
             )
             .id(ws.id)
+            // Named here as well as inside the terminal views, because all four
+            // of those calls live in panes that a layout need not contain: turn
+            // the Agents tile off and the window would fall back to being called
+            // "Far Cooler" while a worktree is plainly open in it.
+            .navigationTitle(ws.windowTitle)
+            .navigationSubtitle(ws.windowSubtitle)
         } else {
             detail
         }

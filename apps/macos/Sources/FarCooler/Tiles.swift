@@ -83,6 +83,47 @@ indirect enum TileNode: Codable, Equatable {
     }
 }
 
+/// Turning a split's fractions into sizes, and a dragged divider back into
+/// fractions.
+///
+/// Here rather than in the view because it is arithmetic, and arithmetic that
+/// was wrong once: an `HSplitView` ignored the fractions entirely and sized
+/// children by what they asked for, which handed the tmux canvas nearly the
+/// whole row and left the diff tile a sliver.
+enum TileSizing {
+    /// Each child's size along the axis.
+    ///
+    /// Normalized rather than trusted to sum to one, so a layout written by a
+    /// build whose arithmetic differed still fills the space exactly instead of
+    /// leaving a gap or overflowing.
+    static func sizes(_ fractions: [Double], usable: Double) -> [Double] {
+        let sum = fractions.reduce(0, +)
+        guard sum > 0, fractions.allSatisfy({ $0.isFinite }) else {
+            return Array(repeating: usable / Double(fractions.count), count: fractions.count)
+        }
+        return fractions.map { usable * ($0 / sum) }
+    }
+
+    /// The fractions after dragging the divider that follows `index`.
+    ///
+    /// Only the two tiles either side of that divider move; the rest keep the
+    /// space they had, which is what makes dragging one divider in a three-tile
+    /// row feel local rather than like a reflow.
+    static func dragged(
+        _ base: [Double], index: Int, delta: Double, floorFraction: Double
+    ) -> [Double] {
+        guard index >= 0, index + 1 < base.count else { return base }
+        let room = base[index] + base[index + 1]
+        // Two tiles that cannot both clear the minimum are left alone rather
+        // than squeezed to something arbitrary.
+        guard room >= floorFraction * 2 else { return base }
+        var next = base
+        next[index] = max(floorFraction, min(room - floorFraction, base[index] + delta))
+        next[index + 1] = room - next[index]
+        return next
+    }
+}
+
 enum TileLayout {
     /// An agent on the left, the branch diff on the right.
     ///

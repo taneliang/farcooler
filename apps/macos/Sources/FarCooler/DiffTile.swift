@@ -201,10 +201,18 @@ struct DiffTile: View {
 
     @ViewBuilder
     private var diffBody: some View {
-        if changes.changeSet.files.isEmpty {
+        if changes.error != nil {
+            // Nothing here. The banner above already said what went wrong, and
+            // "Nothing changed here" underneath it would contradict it — that is
+            // the same mistake as drawing a failure as an empty diff, just one
+            // line further down.
+            Color.clear
+        } else if changes.changeSet.files.isEmpty {
             TilePlaceholder(
                 title: "Nothing changed here",
-                detail: "This branch matches \(changes.changeSet.baseRef).")
+                detail: changes.changeSet.baseRef.isEmpty
+                    ? "There's nothing to compare this branch against yet."
+                    : "This branch matches \(changes.changeSet.baseRef).")
         } else if changes.selectedFile == nil {
             TilePlaceholder(title: "Pick a file", detail: "Everything it changed, in one scroll.")
         } else {
