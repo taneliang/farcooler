@@ -51,16 +51,16 @@ enum HostState: Equatable {
 @MainActor
 final class DaemonClient: ObservableObject {
     /// Diff status per worktree short id, for the sidebar. Empty until read.
-    @Published var reviewInbox: [String: InboxRow] = [:]
+    @Published var changesInbox: [String: InboxRow] = [:]
     /// Whether this machine's daemon knows about review at all.
     ///
     /// `nil` until asked. `false` means the daemon ANSWERED and refused — which
     /// on a machine installed before review is every review call, because an
     /// unknown method is a `NOT_FOUND` there. Distinguished from "unreachable",
     /// which is not the daemon's answer and must not be remembered as one.
-    @Published var reviewSupported: Bool?
+    @Published var changesSupported: Bool?
     /// The last thing review failed with, verbatim from the daemon.
-    @Published var reviewError: String?
+    @Published var changesError: String?
 
     @Published var fleet: Fleet = .empty
     @Published var lastError: String?
@@ -596,7 +596,7 @@ final class DaemonClient: ObservableObject {
             // construction: the daemon answers it from counts it already holds
             // plus a two-syscall gate per worktree, so a fleet where nothing is
             // happening costs nothing to keep on screen.
-            Task { await self.refreshReviewInbox() }
+            Task { await self.refreshChangesInbox() }
             lastError = nil
             // Read before overwriting: `onReconnect` fires for a genuine
             // transition into `.connected`, not for a read that merely
@@ -1325,19 +1325,19 @@ final class DaemonClient: ObservableObject {
     /// which decides `.unreachable`'s reason and whether this is a machine
     /// that needs installing — calls `runRaw` directly instead. See there.
     @discardableResult
-    // ---- review ----
+    // ---- changes ----
     //
     // Every one of these is the same CLI the terminal rows already go through.
     // A review surface the app could reach but an agent could not would make the
     // one workflow this product is about the one thing nobody can automate.
 
-    func reviewJSON(_ args: [String]) async -> Data? {
+    func changesJSON(_ args: [String]) async -> Data? {
         let (data, message) = await runRaw(args, background: true)
         // Kept rather than dropped. Swallowing this is what made a machine
         // running an older daemon look like a worktree with no changes: the call
         // failed, the pane rendered an empty diff, and nothing anywhere said why.
-        reviewError = data == nil ? message : nil
-        if data != nil { reviewSupported = true }
+        changesError = data == nil ? message : nil
+        if data != nil { changesSupported = true }
         return data
     }
 
@@ -1348,37 +1348,44 @@ final class DaemonClient: ObservableObject {
     /// nothing — and a per-row call would have put a `git` on a timer for every
     /// worktree in the sidebar, which is exactly what makes a fleet view
     /// expensive to leave open.
-    func refreshReviewInbox() async {
-        let (maybe, message) = await runRaw(["review", "inbox", "--json"], background: true)
+    func refreshChangesInbox() async {
+        let (maybe, message) = await runRaw(["changes", "inbox", "--json"], background: true)
         guard let data = maybe else {
             // Only a CONNECTED machine refusing the call proves it cannot do it.
             // A machine that is merely unreachable will answer differently once
             // it is back, and remembering "unsupported" for it would be a lie
             // that outlives the network.
             if state == .connected {
-                reviewSupported = false
-                reviewError = message
+                changesSupported = false
+                changesError = message
             }
             return
         }
-        reviewSupported = true
-        reviewError = nil
+        changesSupported = true
+        changesError = nil
         guard let rows = try? JSONDecoder().decode([InboxRow].self, from: data) else { return }
         var byWorkspace: [String: InboxRow] = [:]
         for r in rows { byWorkspace[r.workspaceId] = r }
-        reviewInbox = byWorkspace
+        changesInbox = byWorkspace
     }
 
-    /// One file's diff, as lines the review pane draws directly.
+    /// One file's diff, as lines the diff tile draws directly.
     ///
     /// Parsed from the CLI's unified output rather than recomputed here: the
     /// daemon already refused what it could not read, and a second parser in the
     /// app would be free to disagree with it about what a hunk is.
-    func reviewDiff(workspace: String, path: String) async -> [DiffComputation.Line] {
-        guard let data = await run(["review", "diff", workspace, path], background: true),
+    func changesDiff(
+        workspace: String, path: String, scope: DiffScope
+    ) async -> [DiffComputation.Line] {
+        var args = ["changes", "diff", workspace, path]
+        if scope == .local { args.append("--unstaged") }
+        guard let data = await run(args, background: true),
             let text = String(data: data, encoding: .utf8)
         else { return [] }
+        return Self.parseUnified(text)
+    }
 
+    static func parseUnified(_ text: String) -> [DiffComputation.Line] {
         var lines: [DiffComputation.Line] = []
         var next = 0
         var oldNo = 0
@@ -1421,26 +1428,8 @@ final class DaemonClient: ObservableObject {
         return lines
     }
 
-    func reviewNote(workspace: String, body: String, file: String?, ask: Bool) async {
-        var args = ["review", "note", workspace, body]
-        if let file { args += ["--file", file] }
-        if ask { args.append("--ask") }
-        _ = await run(args)
-    }
-
-    func reviewDrop(workspace: String, entry: String) async {
-        _ = await run(["review", "drop", workspace, entry])
-    }
-
-    func reviewSend(workspace: String, terminal: String, entries: [String], ask: Bool) async {
-        var args = ["review", "send", workspace, terminal]
-        for e in entries { args += ["--entry", e] }
-        if ask { args.append("--ask") }
-        _ = await run(args)
-    }
-
-    func reviewSeen(workspace: String) async {
-        _ = await run(["review", "seen", workspace])
+    func changesMarkRead(workspace: String) async {
+        _ = await run(["changes", "read", workspace])
     }
 
     private func run(_ args: [String], background: Bool = false) async -> Data? {

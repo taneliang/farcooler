@@ -30,7 +30,10 @@ struct ContentView: View {
     /// not a mode. Closing the split and reopening it must not discard comments
     /// you have not sent, and coming back to a worktree should still be showing
     /// the file you were reading.
-    @State private var reviewOpen = false
+    /// Per-worktree tile arrangement and change state, kept across selection
+    /// changes: a review is a session, not a mode.
+    @State private var tileLayouts: [String: TileNode] = [:]
+    @State private var changesStores: [String: ChangesStore] = [:]
     @State private var showAddRepository = false
     @State private var showShortcuts = false
     @State private var showAbout = false
@@ -120,7 +123,7 @@ struct ContentView: View {
             // `fleetPlaceholder` already owns the sidebar's pre-load state, and
             // this banner only appears once something has actually been acted
             // on, so the two never draw at once.
-            detailWithReview
+            workbench
                 // Attached here rather than beside each of the four
                 // `navigationTitle` calls, which sit in three different views
                 // that would each need the failure channel threaded down to
@@ -128,18 +131,29 @@ struct ContentView: View {
                 // window is showing, which is exactly what the control acts on.
                 .openInEditorToolbar(workspace: detailWorkspace) { editorError = $0 }
                 .toolbar {
-                    if detailWorkspace != nil {
+                    if let ws = detailWorkspace {
                         ToolbarItem(placement: .primaryAction) {
-                            Button {
-                                reviewOpen.toggle()
+                            Menu {
+                                ForEach(TileKind.allCases, id: \.self) { kind in
+                                    Toggle(
+                                        kind.label,
+                                        isOn: Binding(
+                                            get: { tileBinding(ws).wrappedValue.contains(kind) },
+                                            set: { _ in
+                                                let b = tileBinding(ws)
+                                                b.wrappedValue = b.wrappedValue.toggling(kind)
+                                            }
+                                        ))
+                                }
+                                Divider()
+                                Button("Reset Layout") {
+                                    TileLayout.forget(workspace: ws.id)
+                                    tileLayouts[ws.id] = TileLayout.default
+                                }
                             } label: {
-                                Label(
-                                    "Review",
-                                    systemImage: reviewOpen
-                                        ? "sidebar.right" : "plus.forwardslash.minus")
+                                Label("Tiles", systemImage: "rectangle.split.2x1")
                             }
-                            .help("Show what this worktree changed")
-                            .keyboardShortcut("r", modifiers: [.command, .shift])
+                            .help("Choose what this worktree shows")
                         }
                     }
                 }
@@ -1021,21 +1035,6 @@ struct ContentView: View {
 
     // MARK: - Detail
 
-    @ViewBuilder
-    /// The detail pane, with review in a trailing inspector when it is open.
-    ///
-    /// An `inspector`, NOT a member of the tmux-derived pane tree: `PaneGroup` is
-    /// a projection of tmux's own windows keyed by terminal id, and a view that
-    /// is not a process has no pane identity to take.
-    ///
-    /// And an inspector rather than an `HSplitView`, which was the first attempt
-    /// and was wrong: an HSplitView with minimum widths inside a
-    /// `NavigationSplitView` competes with the sidebar for the same points, so
-    /// opening review squeezed the worktree list off the left edge. On a window
-    /// whose size something else owns, that is not a resize away — it is the
-    /// layout being broken. `inspector` is the container AppKit already has for
-    /// a trailing panel that coexists with a navigation split, and it comes with
-    /// its own drag handle and remembered width.
     /// One worktree's sidebar row.
     ///
     /// Extracted from the sidebar builder rather than written inline. With
@@ -1072,37 +1071,72 @@ struct ContentView: View {
             tiled: tiled,
             onEditorError: { editorError = $0 },
             usable: usable,
-            review: reviewStatus(ws)
+            changes: changesStatus(ws)
         )
     }
 
     /// Diff status for one worktree, or nil when the fleet inbox has not been
     /// read yet. Hoisted out of the sidebar builder: inline, the chained
     /// optional subscript pushed that expression past the type checker's budget.
-    private func reviewStatus(_ ws: Workspace) -> InboxRow? {
+    private func changesStatus(_ ws: Workspace) -> InboxRow? {
         guard let client = store.client(for: ws) else { return nil }
-        return client.reviewInbox[ws.short]
+        return client.changesInbox[ws.short]
     }
 
-    private var detailWithReview: some View {
-        detail
-            .inspector(isPresented: $reviewOpen) {
-                if let ws = detailWorkspace, let client = store.client(for: ws) {
-                    ReviewPane(client: client, workspace: ws, terminals: ws.terminals)
-                        // One store per worktree: switching worktrees is a
-                        // different review, not the same one showing new data.
-                        .id(ws.id)
-                        .inspectorColumnWidth(min: 160, ideal: 300, max: 620)
-                } else {
-                    // The inspector is open and there is nothing to review. Say
-                    // so rather than showing an empty panel that looks broken.
-                    Text("Pick a worktree to review")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .inspectorColumnWidth(min: 160, ideal: 300, max: 620)
-                }
+    /// The worktree's workbench: its tiles.
+    ///
+    /// Not an inspector, and not a pane. `PaneGroup` is a projection of tmux's
+    /// own window tree keyed by terminal id, so a view that is not a process has
+    /// no pane identity to take — the tmux canvas is one LEAF of this tree and
+    /// keeps its own tiling inside it.
+    ///
+    /// The splits deliberately carry no minimum widths. An earlier attempt put
+    /// review in an `HSplitView` with minimums, and inside a
+    /// `NavigationSplitView` those minimums compete with the sidebar for the same
+    /// points — opening it squeezed the worktree list off the left edge, which on
+    /// a window whose size something else owns is not a resize away. Tiles shrink
+    /// instead, and `DiffTile` changes shape rather than demanding room.
+    @ViewBuilder
+    private var workbench: some View {
+        if let ws = detailWorkspace, let client = store.client(for: ws) {
+            TileContainer(
+                node: tileBinding(ws),
+                workspace: ws,
+                changes: changesStore(for: ws, client: client),
+                tmux: { AnyView(detail) }
+            )
+            .id(ws.id)
+        } else {
+            detail
+        }
+    }
+
+    /// One layout per worktree, loaded on first sight and saved on every change.
+    private func tileBinding(_ ws: Workspace) -> Binding<TileNode> {
+        Binding(
+            get: { tileLayouts[ws.id] ?? TileLayout.load(workspace: ws.id) },
+            set: { newValue in
+                tileLayouts[ws.id] = newValue
+                TileLayout.save(newValue, workspace: ws.id)
             }
+        )
+    }
+
+    /// One changes store per worktree.
+    ///
+    /// Cached on the client too, not just the worktree. `FleetStore` drops a
+    /// `DaemonClient` when its machine leaves and builds a fresh one when it
+    /// comes back, and a store held over from the old one would go on talking to
+    /// a connection nobody is answering.
+    private func changesStore(for ws: Workspace, client: DaemonClient) -> ChangesStore {
+        if let existing = changesStores[ws.id], existing.client === client { return existing }
+        let made = ChangesStore(client: client, workspace: ws)
+        // Assigned outside the view update, because creating it IS a state
+        // change and SwiftUI is reading that state right now. An earlier version
+        // wrote it from a Task, which rebuilt the store on every render and threw
+        // away each load before it could finish — the panel sat permanently empty.
+        DispatchQueue.main.async { changesStores[ws.id] = made }
+        return made
     }
 
     @ViewBuilder
