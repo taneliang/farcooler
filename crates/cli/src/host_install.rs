@@ -44,6 +44,11 @@ const LAUNCH_AGENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
   <dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>10</integer>
   <key>ProcessType</key><string>Interactive</string>
+  <!-- Do not kill what the daemon started. launchd otherwise takes the whole
+       process group down with the job, which on this host means the tmux
+       server and every agent inside it. The systemd unit's KillMode=process
+       says the same thing for the same reason. -->
+  <key>AbandonProcessGroup</key><true/>
 </dict>
 </plist>
 "#;
@@ -61,6 +66,19 @@ ExecStart=%h/.local/bin/farcoolerd
 Restart=on-failure
 # systemd's default is 100ms, which turns a crash into a hot loop.
 RestartSec=5s
+# Stop only the daemon, never what it started.
+#
+# systemd's default, `control-group`, kills every process in the unit's cgroup
+# — which includes the tmux server the daemon spawned, and therefore every
+# agent running in it. That makes restarting the supervisor destroy the work it
+# supervises, and this whole product rests on the opposite: terminals belong to
+# tmux, the daemon is a supervisor that can come and go, and a reconnect finds
+# the panes where it left them.
+#
+# Without this, an upgrade could not restart the service, so an install
+# replaced the binary and left the old daemon running — reporting a version
+# that was not the one on disk.
+KillMode=process
 # The daemon supervises terminals a user is watching live, so it is not a
 # batch job to be throttled.
 Nice=-5
@@ -185,9 +203,18 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
                 println!("        ssh {target} 'sudo loginctl enable-linger $USER'");
             }
 
+            // `enable --now` STARTS an inactive service and does nothing to a
+            // running one, so on every host that already had Far Cooler the
+            // new binary sat on disk while the old daemon kept serving. The
+            // install said it succeeded, `status` reported the old version,
+            // and the two together read as a lie.
+            //
+            // Safe to restart because of `KillMode=process`: the tmux server
+            // and the agents in it are not in the daemon's kill scope.
             remote_run(
                 target,
-                "systemctl --user daemon-reload && systemctl --user enable --now farcooler.service",
+                "systemctl --user daemon-reload && systemctl --user enable farcooler.service \
+                 && systemctl --user restart farcooler.service",
             )
             .await?;
             Ok(Persistence::Systemd)
@@ -220,6 +247,21 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
                 println!("    session to load it into. It will start when someone logs in.");
                 return Ok(Persistence::OnDemand);
             }
+
+            // Bootstrapping an ALREADY-bootstrapped agent is a no-op, so on
+            // any host that already had Far Cooler the old daemon would keep
+            // running against a new binary — the same trap the systemd path
+            // fell into. `kickstart -k` restarts it whether or not the
+            // bootstrap above did anything.
+            //
+            // Safe because of `AbandonProcessGroup`: tmux and the agents in it
+            // are not launchd's to kill.
+            remote_run(
+                target,
+                "launchctl kickstart -k gui/$(id -u)/com.farcooler.daemon.remote \
+                 || true",
+            )
+            .await?;
             Ok(Persistence::Launchd)
         }
 
@@ -514,8 +556,11 @@ async fn upload_verified(target: &str, local: &Path, name: &str) -> Fallible {
         .into());
     }
 
-    // Rename only after the hash matches. A running daemon holding the old
-    // inode keeps running until it is restarted, which is what we want.
+    // Rename only after the hash matches. A running daemon holds the old
+    // inode and keeps serving until the service is restarted, which is what
+    // makes the swap atomic — and why the caller MUST restart it afterwards.
+    // Nothing did, once, and an install that reported success left the machine
+    // running the daemon it already had.
     remote_run(target, &format!("mv {destination}.new {destination}")).await?;
     println!("    {name}  {} bytes  sha256 {}…", bytes.len(), &expected[..12]);
     Ok(())
@@ -723,10 +768,29 @@ mod tests {
     }
 
     #[test]
+    fn the_launch_agent_leaves_what_the_daemon_started_alone() {
+        // The launchd half of `KillMode=process`. Without it, restarting the
+        // agent on a macOS host takes the tmux server and every agent in it
+        // down with the job.
+        assert!(
+            LAUNCH_AGENT.contains("<key>AbandonProcessGroup</key><true/>"),
+            "a restart would kill the tmux server and every agent in it"
+        );
+    }
+
+    #[test]
     fn the_unit_starts_the_daemon_from_the_users_own_bin() {
         // %h so the unit is not tied to one username, and no absolute /home.
         assert!(UNIT.contains("ExecStart=%h/.local/bin/farcoolerd"));
         assert!(UNIT.contains("WantedBy=default.target"));
+        // Restarting the supervisor must not take the supervised with it.
+        // systemd's default cgroup kill would end the tmux server and every
+        // agent in it, which is the one thing this design promises it will not
+        // do — and without it an upgrade cannot restart the daemon at all.
+        assert!(
+            UNIT.contains("KillMode=process"),
+            "a restart would kill the tmux server and every agent in it"
+        );
         // A crash loop with systemd's 100ms default would hammer the machine.
         assert!(UNIT.contains("RestartSec=5s"));
     }
