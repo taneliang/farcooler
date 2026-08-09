@@ -415,7 +415,7 @@ impl Service {
     }
 
     /// Where this service's runtime data lives. Attachment blobs sit under it,
-    /// beside the database rather than inside it.
+    /// beside the database rather than inside it, and pasted files land there too.
     pub fn root_dir(&self) -> &std::path::Path {
         &self.root
     }
@@ -1663,10 +1663,6 @@ impl Service {
         self.runtime().cursor(id).await
     }
 
-    /// Where this service's runtime data lives.
-    pub fn root_dir(&self) -> &Path {
-        &self.root
-    }
 
     /// Whether the pane's program has asked for bracketed paste.
     pub async fn pane_bracketed_paste(&self, id: Uuid) -> Result<bool> {
