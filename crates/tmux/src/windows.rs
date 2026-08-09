@@ -494,14 +494,24 @@ fn parse_modes(text: &str) -> Option<PaneModes> {
 /// Parse `display-message -p "#{cursor_x}\t#{cursor_y}"`.
 /// A single tmux flag format, as a bool.
 ///
-/// `None` rather than `false` for anything else, for the reason `parse_modes`
-/// rejects a short reply: guessing "not bracketed" against a program that asked
-/// for bracketing pastes the terminator as literal text, and the program runs
-/// whatever followed it.
+/// **Empty is false, and has to be.** tmux 3.4 renders an unset pane flag as
+/// an empty string rather than `0` — verified against a real 3.4 on a Linux
+/// host, where demanding `0` made every paste fail with "tmux is unavailable"
+/// on a machine whose tmux was working perfectly.
+///
+/// Erring towards false is also the safe direction, which is why this is not
+/// merely a compatibility patch. Pasting unbracketed into a program that wanted
+/// bracketing costs nothing here: the payload is one line with no newline, so
+/// there is nothing for a shell to run. Bracketing a program that never asked
+/// puts a literal `ESC[200~` into its input, where it is visible garbage.
+///
+/// Anything that is neither a flag nor empty is still refused, so a tmux
+/// sanitizing its output to underscores in the C locale — the failure
+/// `parse_modes` exists to catch — is an error rather than a guess.
 fn parse_flag(text: &str) -> Option<bool> {
-    match text.lines().next()?.trim() {
+    match text.lines().next().unwrap_or("").trim() {
         "1" => Some(true),
-        "0" => Some(false),
+        "0" | "" => Some(false),
         _ => None,
     }
 }
@@ -566,13 +576,18 @@ mod tests {
     }
 
     #[test]
-    fn a_bracketed_paste_flag_is_parsed_and_a_bad_one_is_refused() {
+    fn a_bracketed_paste_flag_is_parsed_including_the_empty_form() {
         assert_eq!(parse_flag("1\n"), Some(true));
         assert_eq!(parse_flag("0\n"), Some(false));
-        // Not `Some(false)`: pasting unbracketed into a program that asked for
-        // bracketing leaves `ESC[201~` in its input as text to be run.
-        assert_eq!(parse_flag(""), None);
-        assert_eq!(parse_flag("_\n"), None, "a C-locale tmux sanitizes output to underscores");
+        // tmux 3.4 renders an unset pane flag as nothing at all. Refusing this
+        // made every paste on such a host fail as "tmux is unavailable", which
+        // was a true statement about nothing that was actually wrong.
+        assert_eq!(parse_flag(""), Some(false));
+        assert_eq!(parse_flag("\n"), Some(false));
+        // Garbage is still refused: a C-locale tmux sanitizes its output to
+        // underscores, and that is a broken reply rather than a false one.
+        assert_eq!(parse_flag("_\n"), None);
+        assert_eq!(parse_flag("yes\n"), None);
     }
 
     #[test]
