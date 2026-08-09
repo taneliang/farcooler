@@ -420,27 +420,6 @@ impl Service {
         &self.root
     }
 
-    /// Hand a composed review prompt to a terminal's agent.
-    ///
-    /// The same path `terminal.agent_prompt` uses, deliberately: a review
-    /// dispatch is an ordinary prompt to an ordinary terminal, and giving it a
-    /// private channel would be a second way for text to reach an agent, free to
-    /// behave differently from the one people already use.
-    pub async fn send_review_prompt(&self, terminal_id: Uuid, prompt: &str) -> Result<()> {
-        // Refuses early if the terminal is not something that can be prompted,
-        // so a dispatch cannot be recorded against a pane that could never have
-        // received it.
-        let _ = self.store.get_terminal(terminal_id)?;
-        self.agents().send(
-            terminal_id,
-            farcooler_agent::link::DaemonMessage::Prompt {
-                text: prompt.to_string(),
-                images: Vec::new(),
-            },
-        );
-        Ok(())
-    }
-
     /// The lock guarding one repository's git-plus-metadata sequences.
     pub fn repo_lock(&self, repository_id: Uuid) -> Arc<tokio::sync::Mutex<()>> {
         // A std mutex, not a tokio one: this holds only long enough to clone an

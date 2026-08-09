@@ -90,20 +90,12 @@ message Request {
     ChangeSetRequest change_set_request = 49;
     CommitFilesRequest commit_files_request = 50;
     FileDiffRequest file_diff_request = 51;
-    ReviewSetBase review_set_base = 52;
-    ReviewCapture review_capture = 53;
-    ReviewUpdate review_update = 54;
-    ReviewDelete review_delete = 55;
-    ReviewList review_list = 56;
-    ReviewDispatchRequest review_dispatch = 57;
-    ReviewMarkViewed review_mark_viewed = 58;
-    ReviewMarkReviewed review_mark_reviewed = 59;
-    AttachmentPut attachment_put = 60;
-    AttachmentGet attachment_get = 61;
+    ChangesSetBase changes_set_base = 52;
+    ChangesMarkRead changes_mark_read = 59;
     StackGet stack_get = 62;
     StackSetParent stack_set_parent = 63;
     PrRefresh pr_refresh = 64;
-    ReviewInboxRequest review_inbox = 65;
+    ChangesInboxRequest changes_inbox = 65;
   }
 }
 
@@ -152,13 +144,8 @@ message Result {
     ChangeSet change_set = 24;
     FileChangeList file_change_list = 25;
     FileDiff file_diff = 26;
-    ReviewEntry review_entry = 27;
-    ReviewEntryList review_entry_list = 28;
-    ReviewDispatch review_dispatch_result = 29;
-    Attachment attachment = 30;
-    AttachmentBytes attachment_bytes = 31;
     StackLinkList stack_link_list = 32;
-    ReviewInbox review_inbox = 33;
+    ChangesInbox changes_inbox = 33;
   }
 }
 
@@ -338,7 +325,6 @@ message Event {
     // looking at it and a lockfile regeneration would otherwise fan out
     // thousands of file records to everyone.
     ChangeSetChanged change_set_changed = 19;
-    ReviewEntry review_entry_changed = 20;
     StackLinkList stack_changed = 21;
   }
 }
@@ -1212,7 +1198,7 @@ message FileChange {
 
 message FileChangeList { repeated FileChange items = 1; }
 
-message ReviewCommit {
+message ChangeCommit {
   string sha = 1;
   string subject = 2;
   string body = 3;
@@ -1241,7 +1227,7 @@ message ChangeSet {
   // The resolved merge base, shown because a wrong base is invisible otherwise.
   string base_commit = 6;
   string head_commit = 7;
-  repeated ReviewCommit commits = 8;
+  repeated ChangeCommit commits = 8;
   WorkingTree working_tree = 9;
   // Per-file COUNTS for the whole branch. Never patch text: a branch that
   // regenerated a lockfile touches thousands of files, and a phone must not
@@ -1351,153 +1337,12 @@ message FileDiff {
 // The buffer
 // ---------------------------------------------------------------------------
 
-enum Disposition {
-  DISPOSITION_UNSPECIFIED = 0;
-  DISPOSITION_FIX = 1;
-  DISPOSITION_ASK = 2;
-  DISPOSITION_NOTE = 3;
-}
-
-// Where the entry is in the USER's workflow.
-//
-// NOT where it sits relative to the code. That is `AnchorState`, derived on
-// every read, and the two are orthogonal: an entry is routinely DISPATCHED and
-// NEEDS_REREAD at once, which is the normal state right after an agent lands a
-// fix, and one enum could not say both.
-enum EntryStatus {
-  ENTRY_STATUS_UNSPECIFIED = 0;
-  ENTRY_STATUS_OPEN = 1;
-  ENTRY_STATUS_DISPATCHED = 2;
-  ENTRY_STATUS_ANSWERED = 3;
-  ENTRY_STATUS_RESOLVED = 4;
-  // Dispatched, and the daemon cannot prove the agent ever saw it.
-  ENTRY_STATUS_DISPATCH_UNKNOWN = 5;
-}
-
-enum AnchorState {
-  ANCHOR_STATE_UNSPECIFIED = 0;
-  ANCHOR_STATE_EXACT = 1;
-  ANCHOR_STATE_MOVED = 2;
-  // More than one place it could be. Degraded rather than guessed.
-  ANCHOR_STATE_AMBIGUOUS = 3;
-  ANCHOR_STATE_NEEDS_REREAD = 4;
-  ANCHOR_STATE_OUTDATED = 5;
-  ANCHOR_STATE_FILE_GONE = 6;
-}
-
-message ReviewEntry {
-  bytes id = 1;
-  bytes workspace_id = 2;
-  uint64 resource_version = 3;
-  string body = 4;
-  Disposition disposition = 5;
-  EntryStatus status = 6;
-  // `farcooler_review::Anchor`, as JSON.
-  //
-  // JSON rather than a generated message, and for the same reason
-  // `AgentEventFrame` carries JSON: the shape is one Rust definition that both
-  // apps already decode, and restating a tagged union whose arms carry
-  // different fields would create a second definition free to drift.
-  string anchor_json = 7;
-  // DERIVED on every read. Never stored, never sent back by a client.
-  AnchorState anchor_state = 8;
-  // 1-based, and present only when `anchor_state` is EXACT or MOVED. Any other
-  // state carrying a line would be a guess.
-  optional uint32 line = 9;
-  // The anchor as it should now be treated: the original when located, the
-  // degraded one otherwise. Clients render THIS, never `anchor_json`.
-  string effective_anchor_json = 10;
-  repeated Attachment attachments = 11;
-  optional bytes dispatch_id = 12;
-  optional string answer_text = 13;
-  optional bytes answer_terminal_id = 14;
-  // "exact" when the answer was matched by its number, "uncorrelated" when the
-  // daemon could not tell which question it belonged to and is saying so.
-  optional string answer_correlation = 15;
-  int64 created_at = 16;
-  int64 updated_at = 17;
-}
-
-message ReviewEntryList { repeated ReviewEntry items = 1; }
-
-message ReviewCapture {
-  bytes workspace_id = 1;
-  string body = 2;
-  Disposition disposition = 3;
-  string anchor_json = 4;
-  repeated bytes attachment_ids = 5;
-}
-
-message ReviewUpdate {
-  bytes id = 1;
-  string body = 2;
-  Disposition disposition = 3;
-}
-
-message ReviewDelete { bytes id = 1; }
-message ReviewList { bytes workspace_id = 1; }
-
-message ReviewSetBase {
+message ChangesSetBase {
   bytes workspace_id = 1;
   string base_ref = 2;
 }
 
-// One entry, and the version the client displayed.
-//
-// Explicit ids stop a NEWLY CAPTURED entry being swept into a prompt nobody
-// read. Versions stop one that was edited, resolved or already dispatched
-// between the client rendering it and the user pressing the button.
-message DispatchEntry {
-  bytes id = 1;
-  uint64 expected_resource_version = 2;
-}
-
-message ReviewDispatchRequest {
-  bytes workspace_id = 1;
-  // The terminal the USER picked. Never inferred, and never created implicitly:
-  // there is no such thing as an "ask terminal", because a terminal that just
-  // answered a question is very often the one you then tell to fix the thing.
-  bytes terminal_id = 2;
-  Disposition disposition = 3;
-  repeated DispatchEntry entries = 4;
-}
-
-enum DispatchState {
-  DISPATCH_STATE_UNSPECIFIED = 0;
-  // Sent, nothing observed yet.
-  DISPATCH_STATE_PENDING = 1;
-  // The prompt was seen in the target terminal's own event stream. Positive
-  // evidence — ACP has no acknowledgement, so this is the only honest signal.
-  DISPATCH_STATE_OBSERVED = 2;
-  // Cannot be established. The user decides whether to send again.
-  DISPATCH_STATE_UNKNOWN = 3;
-}
-
-message ReviewDispatch {
-  bytes id = 1;
-  bytes workspace_id = 2;
-  bytes terminal_id = 3;
-  Disposition disposition = 4;
-  repeated bytes entry_ids = 5;
-  string prompt = 6;
-  DispatchState state = 7;
-  int64 created_at = 8;
-  optional int64 observed_at = 9;
-  // Entries that were skipped because they were already dispatched. Reported
-  // rather than silently re-sent.
-  repeated bytes skipped_entry_ids = 10;
-}
-
-message ReviewMarkViewed {
-  bytes workspace_id = 1;
-  string branch = 2;
-  string path = 3;
-  // The hash of what was actually read. A mark is keyed by content, so an agent
-  // changing the file un-reads it without anything having to notice.
-  string content_hash = 4;
-}
-
-message ReviewMarkReviewed {
+message ChangesMarkRead {
   bytes workspace_id = 1;
   string branch = 2;
 }
@@ -1511,36 +1356,6 @@ message ReviewMarkReviewed {
 // comment. Content addressing also deduplicates the same screenshot attached to
 // several entries.
 // ---------------------------------------------------------------------------
-
-message Attachment {
-  bytes id = 1;
-  string sha256 = 2;
-  string mime = 3;
-  uint64 byte_size = 4;
-  uint32 width = 5;
-  uint32 height = 6;
-}
-
-message AttachmentPut {
-  bytes workspace_id = 1;
-  string mime = 2;
-  bytes content = 3;
-}
-
-message AttachmentGet {
-  bytes id = 1;
-  // Byte offset, so a large image does not arrive as one frame on the same
-  // connection that is carrying live terminal output.
-  uint64 offset = 2;
-  uint32 max_bytes = 3;
-}
-
-message AttachmentBytes {
-  bytes id = 1;
-  uint64 offset = 2;
-  bytes content = 3;
-  uint64 total_size = 4;
-}
 
 // ---------------------------------------------------------------------------
 // Stacks and PR state
@@ -1631,16 +1446,12 @@ message PrRefresh { bytes repository_id = 1; }
 // The fleet inbox
 // ---------------------------------------------------------------------------
 
-message ReviewInboxRequest {}
+message ChangesInboxRequest {}
 
 message InboxWorkspace {
   bytes workspace_id = 1;
   string task_name = 2;
   string branch = 3;
-  uint32 open = 4;
-  uint32 dispatched = 5;
-  uint32 answered = 6;
-  uint32 dispatch_unknown = 7;
   // The change set moved since this workspace was last marked reviewed. Derived
   // from the cheap two-syscall gate, never from a fleet-wide `git status`.
   bool changed_since_reviewed = 8;
@@ -1648,7 +1459,7 @@ message InboxWorkspace {
   uint32 deletions = 10;
 }
 
-message ReviewInbox {
+message ChangesInbox {
   repeated InboxWorkspace items = 1;
   // Entries in scopes this client cannot see, as an opaque count.
   //

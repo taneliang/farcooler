@@ -123,25 +123,17 @@ fn required_scope(method: &str) -> Option<Scope> {
         // adding a feature. `Scope` is host-wide (there is no per-repository
         // authorization to reach for), so the honest answer is the scope that
         // can already read a terminal screen, which already shows source.
-        "review.change_set"
-        | "review.commit_files"
-        | "review.file_diff"
-        | "review.set_base"
-        | "review.capture"
-        | "review.update"
-        | "review.delete"
-        | "review.list"
-        | "review.dispatch"
-        | "review.mark_viewed"
-        | "review.mark_reviewed"
-        | "review.attachment_put"
-        | "review.attachment_get"
+        "changes.change_set"
+        | "changes.commit_files"
+        | "changes.file_diff"
+        | "changes.set_base"
+        | "changes.mark_read"
         | "stack.set_parent"
         | "pr.refresh" => Scope::Control,
         // Metadata about work, not the work. Counts, +/-, PR state and the
         // needs-you badge let a read-scoped phone triage the fleet without being
         // able to read a line of the code.
-        "review.inbox" | "stack.get" => Scope::Read,
+        "changes.inbox" | "stack.get" => Scope::Read,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
         // no process — the worst a wrong one does is show you the wrong pane —
         // and it has to be reachable by an agent for any of this to be
@@ -1105,14 +1097,14 @@ impl Rpc {
             // Thin on purpose: every one of these is a call into `review_ops`,
             // so the dispatch table stays a table and the logic stays testable
             // without a wire frame around it.
-            "review.change_set" => {
+            "changes.change_set" => {
                 let Some(request::Payload::ChangeSetRequest(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 Ok(result::Value::ChangeSet(crate::review_ops::change_set(svc, &p).await?))
             }
 
-            "review.commit_files" => {
+            "changes.commit_files" => {
                 let Some(request::Payload::CommitFilesRequest(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
@@ -1121,104 +1113,30 @@ impl Rpc {
                 ))
             }
 
-            "review.file_diff" => {
+            "changes.file_diff" => {
                 let Some(request::Payload::FileDiffRequest(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 Ok(result::Value::FileDiff(crate::review_ops::file_diff(svc, &p).await?))
             }
 
-            "review.set_base" => {
-                let Some(request::Payload::ReviewSetBase(p)) = req.payload else {
+            "changes.set_base" => {
+                let Some(request::Payload::ChangesSetBase(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 Ok(result::Value::ChangeSet(crate::review_ops::set_base(svc, &p).await?))
             }
 
-            "review.capture" => {
-                let Some(request::Payload::ReviewCapture(p)) = req.payload else {
+            "changes.mark_read" => {
+                let Some(request::Payload::ChangesMarkRead(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                let e = crate::review_ops::capture(svc, &p).await?;
-                self.watcher.announce_review_entry(e.clone());
-                Ok(result::Value::ReviewEntry(e))
-            }
-
-            "review.update" => {
-                let Some(request::Payload::ReviewUpdate(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                // The precondition rides the envelope, like every other update
-                // in this protocol, rather than being invented inside the body.
-                let expected = req.expected_resource_version.ok_or(DomainError::ResourceConflict)?;
-                let e = crate::review_ops::update(svc, &p, expected).await?;
-                self.watcher.announce_review_entry(e.clone());
-                Ok(result::Value::ReviewEntry(e))
-            }
-
-            "review.delete" => {
-                let Some(request::Payload::ReviewDelete(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                crate::review_ops::delete(svc, &p).await?;
+                crate::review_ops::mark_read(svc, &p).await?;
                 Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
             }
 
-            "review.list" => {
-                let Some(request::Payload::ReviewList(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::ReviewEntryList(crate::review_ops::list(svc, &p).await?))
-            }
-
-            "review.dispatch" => {
-                let Some(request::Payload::ReviewDispatch(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let d = crate::review_ops::dispatch(svc, &p).await?;
-                // Sending is reading, the same way typing into a pane is.
-                if let Some(id) = wire::parse_id(&p.terminal_id) {
-                    self.watcher.mark_seen(id).await;
-                }
-                Ok(result::Value::ReviewDispatchResult(d))
-            }
-
-            "review.mark_viewed" => {
-                let Some(request::Payload::ReviewMarkViewed(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                crate::review_ops::mark_viewed(svc, &p).await?;
-                Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
-            }
-
-            "review.mark_reviewed" => {
-                let Some(request::Payload::ReviewMarkReviewed(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                crate::review_ops::mark_reviewed(svc, &p).await?;
-                Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
-            }
-
-            "review.attachment_put" => {
-                let Some(request::Payload::AttachmentPut(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::Attachment(
-                    crate::review_ops::attachment_put(svc, &p).await?,
-                ))
-            }
-
-            "review.attachment_get" => {
-                let Some(request::Payload::AttachmentGet(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::AttachmentBytes(
-                    crate::review_ops::attachment_get(svc, &p).await?,
-                ))
-            }
-
-            "review.inbox" => {
-                Ok(result::Value::ReviewInbox(crate::review_ops::inbox(svc).await?))
+            "changes.inbox" => {
+                Ok(result::Value::ChangesInbox(crate::review_ops::inbox(svc).await?))
             }
 
             "stack.get" => {
@@ -1571,20 +1489,12 @@ mod tests {
             "layout.zoom",
             "layout.swap",
             "layout.group.select",
-            "review.change_set",
-            "review.commit_files",
-            "review.file_diff",
-            "review.set_base",
-            "review.capture",
-            "review.update",
-            "review.delete",
-            "review.list",
-            "review.dispatch",
-            "review.mark_viewed",
-            "review.mark_reviewed",
-            "review.attachment_put",
-            "review.attachment_get",
-            "review.inbox",
+            "changes.change_set",
+            "changes.commit_files",
+            "changes.file_diff",
+            "changes.set_base",
+            "changes.mark_read",
+            "changes.inbox",
             "stack.get",
             "stack.set_parent",
             "pr.refresh",

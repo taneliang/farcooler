@@ -267,17 +267,6 @@ impl Watcher {
         });
     }
 
-    /// One review entry changed. Sent as the resource, like every other
-    /// resource event here, so a client that is looking at the buffer updates
-    /// without polling and one that is not pays a single small frame.
-    pub fn announce_review_entry(&self, entry: farcooler_protocol::v1::ReviewEntry) {
-        let _ = self.events.send(Event {
-            event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
-            sequence: 0,
-            payload: Some(farcooler_protocol::v1::event::Payload::ReviewEntryChanged(entry)),
-        });
-    }
-
     /// A workspace's change set moved.
     ///
     /// Carries the workspace and a version, never the set: most clients are not

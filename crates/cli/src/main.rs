@@ -26,7 +26,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-mod review;
+mod changes;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use farcooler_daemon::runtime::Runtime;
 use farcooler_protocol::v1::{
@@ -101,9 +101,9 @@ enum Command {
     /// Manage terminals inside a workspace.
     #[command(subcommand)]
     Terminal(TerminalCmd),
-    /// Review a workspace: what changed, what you said, and sending it on.
+    /// What a worktree changed.
     #[command(subcommand)]
-    Review(review::ReviewCmd),
+    Changes(changes::ChangesCmd),
     /// Search a workspace's worktree files, for an agent chat's @-mention.
     #[command(subcommand)]
     Worktree(WorktreeCmd),
@@ -719,7 +719,7 @@ async fn run() -> Fallible {
         Command::Adapter(c) => adapter(host, c, cli.json).await,
         Command::Workspace(c) => workspace(host, c, cli.json).await,
         Command::Terminal(c) => terminal(host, c, cli.json).await,
-        Command::Review(c) => review::review(host, c, cli.json).await,
+        Command::Changes(c) => changes::changes(host, c, cli.json).await,
         Command::Worktree(c) => worktree(host, c, cli.json).await,
         Command::Layout(c) => layout(host, c, cli.json).await,
         Command::Attach { workspace } => attach(host, &workspace).await,

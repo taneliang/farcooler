@@ -322,6 +322,24 @@ impl Store {
             .map_err(map_err)
     }
 
+    /// Every visible workspace on this machine, across repositories.
+    ///
+    /// For the fleet's own questions, which are not scoped to a project the way
+    /// the sidebar's are. Hidden worktrees are left out: the user said not to
+    /// see them, and that applies to a summary as much as to a list.
+    pub fn list_all_workspaces(&self) -> Result<Vec<Workspace>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, repository_id, task_name, branch, worktree_path, hidden,
+                        creation_failed, resource_version, is_main_checkout, worktree_missing
+                 FROM workspaces WHERE hidden = 0 ORDER BY task_name",
+            )
+            .map_err(map_err)?;
+        let rows = stmt.query_map([], row_to_workspace).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
     pub fn list_workspaces_for_repository(&self, repository_id: Uuid) -> Result<Vec<Workspace>> {
         let conn = self.conn();
         let mut stmt = conn

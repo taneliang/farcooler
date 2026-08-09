@@ -832,13 +832,8 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::ChangeSet(_) => "change_set",
         result::Value::FileChangeList(_) => "file_change_list",
         result::Value::FileDiff(_) => "file_diff",
-        result::Value::ReviewEntry(_) => "review_entry",
-        result::Value::ReviewEntryList(_) => "review_entry_list",
-        result::Value::ReviewDispatchResult(_) => "review_dispatch",
-        result::Value::Attachment(_) => "attachment",
-        result::Value::AttachmentBytes(_) => "attachment_bytes",
         result::Value::StackLinkList(_) => "stack_link_list",
-        result::Value::ReviewInbox(_) => "review_inbox",
+        result::Value::ChangesInbox(_) => "changes_inbox",
     }
 }
 
