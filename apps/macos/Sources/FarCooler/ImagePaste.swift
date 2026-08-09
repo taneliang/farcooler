@@ -2,12 +2,15 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Pasting an image into a terminal.
+/// Pasting or dropping a file into a terminal.
 ///
-/// A terminal takes bytes and an agent running in one opens a path, so an image
-/// has to become a file on the machine the pane is on before it can become
-/// anything the agent can see. The daemon does that and types the path; this
-/// decides what to hand it, and says so while it is happening.
+/// A terminal takes bytes and an agent running in one opens a path, so anything
+/// handed to a pane has to become a file on the machine that pane is on before
+/// it can become anything the agent can see. The daemon does that and types the
+/// path; this decides what to hand it, and says so while it is happening.
+///
+/// Any file type. What an agent does with a `.parquet` is its business, and
+/// refusing to carry one would be this app deciding on its behalf.
 
 /// A failure with something worth showing a person.
 ///
@@ -80,7 +83,7 @@ final class ImagePasteQueue: ObservableObject {
         // it. Copying would put the same image in two places with two
         // lifetimes, and the one the daemon owns would expire while the user's
         // own copy sat there forever.
-        if isLocal, case .file(let url) = pasted, !needsConverting(url) {
+        if isLocal, case .file(let url) = pasted {
             type?(quoteForPaste(url.path) + " ")
             return
         }
@@ -132,11 +135,11 @@ final class ImagePasteQueue: ObservableObject {
         // Refused here rather than after the upload: on a phone-speed link the
         // difference is a minute of waiting to be told no.
         if size > 16 * 1024 * 1024 {
-            job.failure = "That image is too large to send. Images up to 16 MB work."
+            job.failure = "That file is too large to send. Files up to 16 MB work."
             return
         }
 
-        let arguments = hostArguments + ["terminal", "paste-image", terminal, file.path]
+        let arguments = hostArguments + ["terminal", "paste-file", terminal, file.path]
         let outcome = await ImagePasteProcess.run(
             binary: binary, arguments: arguments, environment: environment,
             onProgress: { sent, total in
@@ -154,18 +157,16 @@ final class ImagePasteQueue: ObservableObject {
         }
     }
 
-    /// Give the CLI a file to send, converting when the agents could not read
-    /// what we were handed.
+    /// Give the CLI a file to send.
+    ///
+    /// A file already on disk is sent exactly as it is — no re-encode, because
+    /// the bytes ARE the thing being sent: a round trip through `NSImage` would
+    /// destroy a PDF outright and soften a screenshot's text for nothing. Only
+    /// raw pasteboard bytes, which have no file yet, get written to one.
     private func stage(_ pasted: PastedImage) -> Result<URL, PasteFailure> {
         switch pasted {
-        case .file(let url) where !needsConverting(url):
-            return .success(url)
         case .file(let url):
-            guard let image = NSImage(contentsOf: url), let png = pngData(of: image) else {
-                return .failure(
-                    PasteFailure(message: "Far Cooler can send PNG, JPEG, GIF, and WebP images."))
-            }
-            return write(png, extension: "png")
+            return .success(url)
         case .data(let data, let mime):
             let ext = mime == "image/jpeg" ? "jpg" : "png"
             return write(data, extension: ext)
@@ -179,7 +180,7 @@ final class ImagePasteQueue: ObservableObject {
             try data.write(to: url)
             return .success(url)
         } catch {
-            return .failure(PasteFailure(message: "Far Cooler couldn't prepare that image to send."))
+            return .failure(PasteFailure(message: "Far Cooler couldn't prepare that file to send."))
         }
     }
 
@@ -189,23 +190,6 @@ final class ImagePasteQueue: ObservableObject {
         case .data(let data, _): return NSImage(data: data)
         }
     }
-}
-
-/// Whether a file has to be re-encoded before an agent could open it.
-///
-/// HEIC is the case that matters: it is what an iPhone photo in iCloud Photos
-/// is, and both Claude Code and Codex refuse it. Sent untouched it would become
-/// a file that exists, has a path, and cannot be read.
-private func needsConverting(_ url: URL) -> Bool {
-    let known: Set<String> = ["png", "jpg", "jpeg", "gif", "webp"]
-    return !known.contains(url.pathExtension.lowercased())
-}
-
-private func pngData(of image: NSImage) -> Data? {
-    guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else {
-        return nil
-    }
-    return rep.representation(using: .png, properties: [:])
 }
 
 /// The path as it should be typed into a terminal.
@@ -305,11 +289,15 @@ enum ImagePasteProcess {
     /// method name — and none of them belong in a terminal pane.
     static func message(from stderr: String) -> String {
         let text = stderr.lowercased()
-        if text.contains("image format") {
-            return "Far Cooler can send PNG, JPEG, GIF, and WebP images."
+        // A machine whose daemon predates this feature refuses the method
+        // itself, and the refusal is indistinguishable from a missing
+        // resource. `actions` works out which it was; this only has to not
+        // throw that away by falling through to a network message.
+        if text.contains("predates this feature") {
+            return "This machine's Far Cooler is too old to accept files. Update it and try again."
         }
-        if text.contains("image size") {
-            return "That image is too large to send. Images up to 16 MB work."
+        if text.contains("file size") {
+            return "That file is too large to send. Files up to 16 MB work."
         }
         if text.contains("not found") {
             return "That terminal isn't running anymore."

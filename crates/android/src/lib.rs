@@ -126,7 +126,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCall(
     }
 }
 
-/// Paste an image into a terminal.
+/// Paste a file into a terminal.
 ///
 /// Takes the bytes as a `byte[]` rather than through `nativeCall`'s JSON,
 /// because the payload is megabytes of binary and base64 in both directions
@@ -136,24 +136,27 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCall(
 /// The core copies the bytes before returning, so the JNI borrow ends with this
 /// call and the array is the JVM's again immediately.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePasteImage(
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePasteFile(
     mut env: JNIEnv,
     _class: JClass,
     handle: jlong,
     terminal: JString,
+    name: JString,
     mime: JString,
     data: JByteArray,
 ) -> jlong {
     let Some(terminal) = c_string(&mut env, &terminal) else { return 0 };
+    let Some(name) = c_string(&mut env, &name) else { return 0 };
     let Some(mime) = c_string(&mut env, &mime) else { return 0 };
     let Ok(bytes) = env.convert_byte_array(&data) else { return 0 };
     if bytes.is_empty() {
         return 0;
     }
     unsafe {
-        client::farcooler_client_paste_image(
+        client::farcooler_client_paste_file(
             handle_of(handle),
             terminal.as_ptr(),
+            name.as_ptr(),
             mime.as_ptr(),
             bytes.as_ptr(),
             bytes.len(),

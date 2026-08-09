@@ -42,22 +42,27 @@ final class ImagePasteQueue: ObservableObject {
     /// on a slow link is told immediately rather than after the upload.
     static let limit: Int64 = 16 * 1024 * 1024
 
-    func send(_ image: UIImage, terminal: String, core: ClientCore) {
+    func send(_ image: UIImage, name: String = "", terminal: String, core: ClientCore) {
         guard let (data, mime) = encode(image) else {
             let job = ImagePasteJob(thumbnail: image, total: 0)
             job.failure = "Far Cooler couldn't prepare that image to send."
             jobs.append(job)
             return
         }
-        send(data: data, mime: mime, thumbnail: image, terminal: terminal, core: core)
+        // Named from the encoding when the picker gave us nothing: a phone's
+        // photo library has no filename worth carrying, and `photo.png` in a
+        // prompt still reads better than a bare timestamp.
+        let named = name.isEmpty ? (mime == "image/jpeg" ? "photo.jpg" : "photo.png") : name
+        send(data: data, name: named, mime: mime, thumbnail: image, terminal: terminal, core: core)
     }
 
     func send(
-        data: Data, mime: String, thumbnail: UIImage?, terminal: String, core: ClientCore
+        data: Data, name: String, mime: String, thumbnail: UIImage?, terminal: String,
+        core: ClientCore
     ) {
         let job = ImagePasteJob(thumbnail: thumbnail, total: Int64(data.count))
         guard Int64(data.count) <= Self.limit else {
-            job.failure = "That image is too large to send. Images up to 16 MB work."
+            job.failure = "That file is too large to send. Files up to 16 MB work."
             jobs.append(job)
             return
         }
@@ -68,8 +73,8 @@ final class ImagePasteQueue: ObservableObject {
             job.sent = 0
             Task {
                 do {
-                    _ = try await core.pasteImage(
-                        terminal, mime: mime, data: data,
+                    _ = try await core.pasteFile(
+                        terminal, name: name, mime: mime, data: data,
                         onProgress: { sent, total in
                             Task { @MainActor in
                                 job.sent = sent
@@ -97,11 +102,13 @@ final class ImagePasteQueue: ObservableObject {
     /// phone screen over a terminal.
     static func message(for error: Error) -> String {
         let text = error.localizedDescription.lowercased()
-        if text.contains("image format") {
-            return "Far Cooler can send PNG, JPEG, GIF, and WebP images."
+        // A machine whose daemon predates this feature refuses the method
+        // itself, and that refusal looks exactly like a missing resource.
+        if text.contains("predates this feature") {
+            return "This machine's Far Cooler is too old to accept files. Update it and try again."
         }
-        if text.contains("image size") {
-            return "That image is too large to send. Images up to 16 MB work."
+        if text.contains("file size") {
+            return "That file is too large to send. Files up to 16 MB work."
         }
         if text.contains("not found") {
             return "That terminal isn't running anymore."

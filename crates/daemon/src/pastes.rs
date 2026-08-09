@@ -1,8 +1,8 @@
-//! Images pasted into a terminal.
+//! Files pasted or dropped into a terminal.
 //!
-//! A terminal takes bytes, and an agent running in one reads an image by
-//! opening a path. So an image pasted from a phone — or from a Mac attached to
-//! a machine that is not this one — has to become a file here before it can
+//! A terminal takes bytes, and an agent running in one reads a file by opening
+//! a path. So anything handed to a pane from a phone — or from a Mac attached
+//! to a machine that is not this one — has to become a file here before it can
 //! become anything the agent can see.
 //!
 //! The bytes arrive in chunks, accumulate under `.incoming`, and are renamed
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use farcooler_core::{DomainError, Result};
-use farcooler_protocol::MAX_IMAGE_PASTE_BYTES;
+use farcooler_protocol::MAX_PASTE_FILE_BYTES;
 
 /// How long a finished paste survives.
 ///
@@ -28,12 +28,11 @@ const KEEP: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// anything still in `.incoming` an hour later is abandoned by definition.
 const KEEP_INCOMING: Duration = Duration::from_secs(60 * 60);
 
-/// An image format this daemon will write.
+/// An image this daemon can recognize from its first bytes.
 ///
-/// The list is what the agents can actually open. HEIC is deliberately absent:
-/// Claude Code and Codex both refuse it, so accepting one here would produce a
-/// file that exists, has a path, and cannot be read — the worst of the three
-/// outcomes.
+/// Only used to give a name an extension when the sender supplied neither. It
+/// is no longer a gate: any file may be pasted, because the scope that reaches
+/// this method is the same one that can type into a shell.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     Png,
@@ -53,12 +52,11 @@ impl Kind {
     }
 }
 
-/// What the bytes are, whatever the sender called them.
+/// What the bytes are, when they are an image this daemon knows.
 ///
-/// The `mime` on the wire is a claim by whoever is connected. This is the
-/// daemon deciding for itself, because the answer picks a filename extension on
-/// the user's own machine and "trust the sender" is not a policy that survives
-/// the question "and what if it lied".
+/// The `mime` on the wire is a claim by whoever is connected, so a recognizable
+/// image gets its real extension regardless of what it was called. Anything
+/// unrecognized keeps the sender's own extension, sanitized.
 pub fn sniff(b: &[u8]) -> Option<Kind> {
     if b.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
         return Some(Kind::Png);
@@ -99,6 +97,7 @@ pub enum Stored {
 pub async fn put_chunk(
     root: &Path,
     transfer_id: &[u8],
+    name: &str,
     total_size: u64,
     offset: u64,
     chunk: &[u8],
@@ -107,6 +106,7 @@ pub async fn put_chunk(
         &crate::paths::pastes_dir_in(root)?,
         &crate::paths::pastes_incoming_dir_in(root)?,
         transfer_id,
+        name,
         total_size,
         offset,
         chunk,
@@ -124,6 +124,7 @@ pub async fn put_chunk_in(
     dir: &Path,
     incoming: &Path,
     transfer_id: &[u8],
+    name: &str,
     total_size: u64,
     offset: u64,
     chunk: &[u8],
@@ -132,14 +133,16 @@ pub async fn put_chunk_in(
     if transfer_id.is_empty() {
         return Err(DomainError::InvalidArgument { what: "transfer id" });
     }
-    if total_size == 0 || total_size > MAX_IMAGE_PASTE_BYTES {
-        return Err(DomainError::InvalidArgument { what: "image size" });
+    if total_size == 0 || total_size > MAX_PASTE_FILE_BYTES {
+        return Err(DomainError::InvalidArgument { what: "file size" });
     }
 
     // Hex, so a transfer id can never contribute a separator, a dot-dot, or a
-    // NUL to the path it names.
-    let name: String = transfer_id.iter().map(|b| format!("{b:02x}")).collect();
-    let partial = incoming.join(&name);
+    // NUL to the path it names. Deliberately not called `name`: that is the
+    // sender's filename, and one shadowing the other is how a partial's hex
+    // would end up being what the finished file is called.
+    let partial_name: String = transfer_id.iter().map(|b| format!("{b:02x}")).collect();
+    let partial = incoming.join(&partial_name);
 
     let stored = match tokio::fs::metadata(&partial).await {
         Ok(m) => m.len(),
@@ -152,17 +155,10 @@ pub async fn put_chunk_in(
         return Ok(Stored::Partial { stored });
     }
     if offset != stored {
-        return Err(DomainError::InvalidArgument { what: "image offset" });
+        return Err(DomainError::InvalidArgument { what: "file offset" });
     }
     if stored + chunk.len() as u64 > total_size {
-        return Err(DomainError::InvalidArgument { what: "image size" });
-    }
-
-    // Refuse on the first chunk, before any of it is on disk. Every format here
-    // is identifiable from its first twelve bytes, so there is no case where
-    // waiting for the whole upload would learn something this cannot.
-    if offset == 0 && sniff(chunk).is_none() {
-        return Err(DomainError::InvalidArgument { what: "image format" });
+        return Err(DomainError::InvalidArgument { what: "file size" });
     }
 
     append(&partial, chunk).await?;
@@ -171,10 +167,7 @@ pub async fn put_chunk_in(
         return Ok(Stored::Partial { stored });
     }
 
-    let kind = sniff(&head(&partial).await?).ok_or(DomainError::InvalidArgument {
-        what: "image format",
-    })?;
-    let path = finalize(dir, &partial, kind, now).await?;
+    let path = finalize(dir, &partial, name, sniff(&head(&partial).await?), now).await?;
     Ok(Stored::Complete { path, stored })
 }
 
@@ -210,16 +203,22 @@ async fn head(path: &Path) -> Result<Vec<u8>> {
 ///
 /// The rename is what publishes it. Until this returns, the bytes are under
 /// `.incoming` with a name nothing looks for.
-async fn finalize(dir: &Path, partial: &Path, kind: Kind, now: SystemTime) -> Result<PathBuf> {
+async fn finalize(
+    dir: &Path,
+    partial: &Path,
+    given: &str,
+    kind: Option<Kind>,
+    now: SystemTime,
+) -> Result<PathBuf> {
     let stamp = stamp(now);
-    let ext = kind.extension();
+    let (base, ext) = name_parts(given, kind);
 
     // A counter rather than a longer timestamp: two pastes in the same second
     // is a person pasting twice, and `-2` says that more clearly than
     // milliseconds do.
     for n in 1..1000 {
-        let name =
-            if n == 1 { format!("{stamp}.{ext}") } else { format!("{stamp}-{n}.{ext}") };
+        let stem = if n == 1 { format!("{stamp}-{base}") } else { format!("{stamp}-{n}-{base}") };
+        let name = if ext.is_empty() { stem } else { format!("{stem}.{ext}") };
         let candidate = dir.join(&name);
         if tokio::fs::metadata(&candidate).await.is_ok() {
             continue;
@@ -231,6 +230,45 @@ async fn finalize(dir: &Path, partial: &Path, kind: Kind, now: SystemTime) -> Re
         return Ok(candidate);
     }
     Err(DomainError::OperationFailed)
+}
+
+/// A safe stem and extension for a file the far side named.
+///
+/// The sender's name is worth keeping — `quarterly-report.pdf` in a prompt says
+/// what it is and `2026-08-09-114812Z.bin` says nothing — but it is a string
+/// from another machine that becomes a filename on this one. So it is rebuilt
+/// rather than filtered: every character not explicitly allowed is dropped, and
+/// what comes out cannot contain a separator, a `..`, a NUL, a leading dot or a
+/// shell metacharacter, whatever went in.
+///
+/// A recognizable image overrides the extension it was given. That is the one
+/// case where the bytes are more trustworthy than the label, and it costs
+/// nothing to be right about a `.png` that arrived called `.txt`.
+fn name_parts(given: &str, kind: Option<Kind>) -> (String, String) {
+    // Only the last component, and only after `..` can no longer mean anything:
+    // both separators, because a Windows client naming `a\b` must not produce
+    // a directory here either.
+    let last = given.rsplit(['/', '\\']).next().unwrap_or("");
+    let (stem, given_ext) = match last.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s, e),
+        _ => (last, ""),
+    };
+
+    let keep = |s: &str, cap: usize| -> String {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .take(cap)
+            .collect()
+    };
+
+    let base = keep(stem, 64);
+    let ext = match kind {
+        Some(k) => k.extension().to_string(),
+        None => keep(given_ext, 16).to_lowercase(),
+    };
+    // `file` rather than nothing, so a name made entirely of characters this
+    // drops still produces something a person can read and select.
+    (if base.is_empty() { "file".to_string() } else { base }, ext)
 }
 
 /// `2026-08-07-141233Z`.
@@ -445,7 +483,8 @@ mod tests {
     }
 
     async fn put(d: &Dirs, id: &[u8], total: u64, offset: u64, chunk: &[u8]) -> Result<Stored> {
-        put_chunk_in(&d.dir, &d.incoming, id, total, offset, chunk, SystemTime::now()).await
+        put_chunk_in(&d.dir, &d.incoming, id, "shot.png", total, offset, chunk, SystemTime::now())
+            .await
     }
 
     #[tokio::test]
@@ -508,31 +547,68 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_format_no_agent_can_open_is_refused_on_the_first_chunk() {
+    async fn a_file_that_is_not_an_image_is_accepted_and_keeps_its_name() {
+        // The feature is "drop the thing you are talking about on the pane",
+        // and most of those things are not images. A PDF that arrived here and
+        // was refused would be the whole point missed.
         let d = dirs();
-        // HEIC: what an unconverted iPhone photo would arrive as.
-        let heic = b"\0\0\0\x18ftypheic____________";
-        let err = put(&d, &[5], 24, 0, heic).await.expect_err("refused");
-        assert!(matches!(err, DomainError::InvalidArgument { what: "image format" }), "{err:?}");
-        // Refused before anything was written, not after the whole upload.
-        assert!(std::fs::metadata(d.incoming.join("05")).is_err());
+        let pdf = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n".to_vec();
+        let out = put_chunk_in(
+            &d.dir,
+            &d.incoming,
+            &[5],
+            "Quarterly Report.pdf",
+            pdf.len() as u64,
+            0,
+            &pdf,
+            SystemTime::now(),
+        )
+        .await
+        .expect("accepted");
+        let Stored::Complete { path, .. } = out else { panic!("expected complete") };
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        assert!(name.ends_with("-QuarterlyReport.pdf"), "{name}");
+        assert_eq!(std::fs::read(&path).expect("read"), pdf);
     }
 
     #[tokio::test]
-    async fn an_oversize_image_is_refused_before_a_byte_is_written() {
+    async fn a_heic_photo_is_accepted_now_that_this_is_not_image_only() {
+        // It was refused when this was an image feature, because no agent can
+        // open one. It is accepted now for the same reason a PDF is: what the
+        // agent does with the file is the agent's business, and refusing a
+        // format is not this daemon's job once any file may be sent.
         let d = dirs();
-        let err = put(&d, &[6], MAX_IMAGE_PASTE_BYTES + 1, 0, &png(64))
+        let heic = b"\0\0\0\x18ftypheic____________".to_vec();
+        let out = put_chunk_in(
+            &d.dir,
+            &d.incoming,
+            &[6],
+            "IMG_0042.heic",
+            heic.len() as u64,
+            0,
+            &heic,
+            SystemTime::now(),
+        )
+        .await
+        .expect("accepted");
+        assert!(matches!(out, Stored::Complete { .. }));
+    }
+
+    #[tokio::test]
+    async fn an_oversize_file_is_refused_before_a_byte_is_written() {
+        let d = dirs();
+        let err = put(&d, &[8], MAX_PASTE_FILE_BYTES + 1, 0, &png(64))
             .await
             .expect_err("refused");
-        assert!(matches!(err, DomainError::InvalidArgument { what: "image size" }), "{err:?}");
-        assert!(std::fs::metadata(d.incoming.join("06")).is_err());
+        assert!(matches!(err, DomainError::InvalidArgument { what: "file size" }), "{err:?}");
+        assert!(std::fs::metadata(d.incoming.join("08")).is_err());
     }
 
     #[tokio::test]
     async fn a_chunk_past_the_declared_size_is_refused() {
         let d = dirs();
         let err = put(&d, &[7], 32, 0, &png(64)).await.expect_err("refused");
-        assert!(matches!(err, DomainError::InvalidArgument { what: "image size" }), "{err:?}");
+        assert!(matches!(err, DomainError::InvalidArgument { what: "file size" }), "{err:?}");
     }
 
     #[tokio::test]
@@ -541,16 +617,16 @@ mod tests {
         let now = UNIX_EPOCH + Duration::from_secs(1_770_474_753);
         let bytes = png(16);
         let first =
-            put_chunk_in(&d.dir, &d.incoming, &[10], 16, 0, &bytes, now).await.expect("first");
+            put_chunk_in(&d.dir, &d.incoming, &[10], "a.png", 16, 0, &bytes, now).await.expect("first");
         let second =
-            put_chunk_in(&d.dir, &d.incoming, &[11], 16, 0, &bytes, now).await.expect("second");
+            put_chunk_in(&d.dir, &d.incoming, &[11], "a.png", 16, 0, &bytes, now).await.expect("second");
         let (Stored::Complete { path: a, .. }, Stored::Complete { path: b, .. }) =
             (first, second)
         else {
             panic!("expected two complete pastes")
         };
-        assert_eq!(a.file_name().unwrap(), "2026-02-07-143233Z.png");
-        assert_eq!(b.file_name().unwrap(), "2026-02-07-143233Z-2.png");
+        assert_eq!(a.file_name().unwrap(), "2026-02-07-143233Z-a.png");
+        assert_eq!(b.file_name().unwrap(), "2026-02-07-143233Z-2-a.png");
     }
 
     #[tokio::test]
@@ -579,6 +655,45 @@ mod tests {
         sweep_dir(&d.dir, Duration::from_secs(0), SystemTime::now() + Duration::from_secs(1))
             .await;
         assert!(d.incoming.is_dir(), ".incoming must survive a sweep of its parent");
+    }
+
+    #[test]
+    fn a_senders_name_cannot_escape_the_paste_directory() {
+        // The name crosses a network and becomes a filename on someone else's
+        // machine. Rebuilt from allowed characters rather than filtered, so
+        // there is no clever encoding left to find.
+        assert_eq!(name_parts("../../etc/passwd", None), ("passwd".into(), String::new()));
+        assert_eq!(name_parts("/etc/shadow", None), ("shadow".into(), String::new()));
+        assert_eq!(name_parts(r"..\..\windows\system32\a.dll", None), ("a".into(), "dll".into()));
+        // Nothing survives that could be a separator, a traversal or a shell
+        // metacharacter — so the result is safe even before it is quoted.
+        let (base, ext) = name_parts("a b;rm -rf ~/$(x).sh", None);
+        assert!(!base.contains(['/', '\\', '.', ';', '$', '(', ')', ' ']), "{base}");
+        assert_eq!(ext, "sh");
+    }
+
+    #[test]
+    fn a_name_made_only_of_dropped_characters_still_produces_one() {
+        // Otherwise the file is called `2026-08-09-114812Z-.pdf`, or worse,
+        // nothing at all.
+        assert_eq!(name_parts("???", None), ("file".into(), String::new()));
+        assert_eq!(name_parts("", None), ("file".into(), String::new()));
+        assert_eq!(name_parts("...", None), ("file".into(), String::new()));
+    }
+
+    #[test]
+    fn recognized_image_bytes_override_the_extension_they_were_given() {
+        // The one case where the bytes are more trustworthy than the label.
+        assert_eq!(name_parts("screenshot.txt", Some(Kind::Png)), ("screenshot".into(), "png".into()));
+        // And an unrecognized file keeps its own, lowercased.
+        assert_eq!(name_parts("Report.PDF", None), ("Report".into(), "pdf".into()));
+    }
+
+    #[test]
+    fn a_very_long_name_is_bounded() {
+        let (base, ext) = name_parts(&format!("{}.txt", "a".repeat(500)), None);
+        assert_eq!(base.len(), 64);
+        assert_eq!(ext, "txt");
     }
 
     #[test]

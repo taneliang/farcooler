@@ -174,12 +174,17 @@ bool farcooler_client_stream_start(void *handle, const char *terminal);
 void farcooler_client_stream_stop(void *handle, const char *terminal);
 
 /*
- * Paste an image into a terminal.
+ * Paste a file into a terminal.
  *
- * The image is copied to the machine the terminal is on, written to a file the
+ * The file is copied to the machine the terminal is on, written to a file the
  * daemon owns and expires, and its path is typed into the pane — which is how
- * an agent running there gets to look at it. Nothing about the transfer is ever
- * written into the terminal; the path is the only thing that reaches the pane.
+ * an agent running there gets to look at it. Any type: an image, a PDF, a log.
+ * Nothing about the transfer is ever written into the terminal; the path is the
+ * only thing that reaches the pane.
+ *
+ * `name` is what the file was called where it came from, and may be empty. It
+ * is sanitized on the far side but worth sending: a path ending in
+ * `quarterly-report.pdf` tells the agent what it is looking at.
  *
  * Its own function rather than a `farcooler_client_call` method because the
  * payload is megabytes of binary, and the JSON boundary would mean base64 both
@@ -193,9 +198,9 @@ void farcooler_client_stream_stop(void *handle, const char *terminal);
  *
  * Returns a ticket, or 0 if the arguments could not be read.
  */
-uint64_t farcooler_client_paste_image(void *handle, const char *terminal,
-                                      const char *mime, const uint8_t *data,
-                                      size_t len);
+uint64_t farcooler_client_paste_file(void *handle, const char *terminal,
+                                     const char *name, const char *mime,
+                                     const uint8_t *data, size_t len);
 
 #ifdef __cplusplus
 }

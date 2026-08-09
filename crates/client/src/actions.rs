@@ -94,7 +94,7 @@ where
     }
 }
 
-/// Send an image into a terminal, and return the path it landed at on the host.
+/// Send a file into a terminal, and return the path it landed at on the host.
 ///
 /// Here rather than in `Session` for the reason this module exists: the CLI and
 /// the mobile core reach the daemon through different connections but must
@@ -103,21 +103,22 @@ where
 ///
 /// `progress` is called after each chunk with (sent, total) — enough to draw a
 /// ring, and nothing here depends on what it does with it.
-pub async fn paste_image<R, W>(
+pub async fn paste_file<R, W>(
     client: &mut Client<R, W>,
     terminal: Uuid,
+    name: &str,
     mime: &str,
-    image: &[u8],
+    file: &[u8],
     mut progress: impl FnMut(u64, u64),
 ) -> Result<String, ClientError>
 where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send,
 {
-    let total = image.len() as u64;
-    if total == 0 || total > farcooler_protocol::MAX_IMAGE_PASTE_BYTES {
+    let total = file.len() as u64;
+    if total == 0 || total > farcooler_protocol::MAX_PASTE_FILE_BYTES {
         return Err(ClientError::WrongResult {
-            expected: "an image within the size limit",
+            expected: "a file within the size limit",
             got: "one that is empty or too large",
         });
     }
@@ -129,18 +130,43 @@ where
     let transfer_id = farcooler_protocol::ids::new_id();
     let mut offset: u64 = 0;
 
-    for chunk in image.chunks(farcooler_protocol::IMAGE_PASTE_CHUNK_BYTES) {
+    for chunk in file.chunks(farcooler_protocol::PASTE_CHUNK_BYTES) {
         let payload =
-            request::Payload::TerminalImagePut(farcooler_protocol::v1::TerminalImagePut {
+            request::Payload::TerminalFilePut(farcooler_protocol::v1::TerminalFilePut {
                 terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
                 transfer_id: transfer_id.clone(),
                 mime: mime.to_string(),
+                name: name.to_string(),
                 total_size: total,
                 offset,
                 chunk: bytes::Bytes::copy_from_slice(chunk),
             });
-        match call(client, "terminal.paste_image", terminal, Some(payload)).await? {
-            Some(result::Value::TerminalImagePut(r)) => {
+        let answer = call(client, "terminal.paste_file", terminal, Some(payload)).await;
+
+        // A `NotFound` on the FIRST chunk is a daemon that has never heard of
+        // this method, not a terminal that has gone away.
+        //
+        // Every caller resolves the terminal before getting here — the CLI by
+        // listing terminals, the apps from a pane they are looking at — so the
+        // terminal existed a moment ago. What has not existed is the method: a
+        // daemon built before this feature rejects the name in `required_scope`
+        // and the refusal it sends is indistinguishable from a missing
+        // resource. Left unhandled it reaches a person as "that terminal isn't
+        // running anymore", which sends them to look at the terminal, the pane
+        // and the network — everywhere except the machine that needs updating.
+        if offset == 0 {
+            if let Err(ClientError::Daemon { code, .. }) = &answer {
+                if *code == farcooler_protocol::v1::ErrorCode::NotFound as i32 {
+                    return Err(ClientError::WrongResult {
+                        expected: "a machine new enough to accept a file",
+                        got: "one whose Far Cooler predates this feature",
+                    });
+                }
+            }
+        }
+
+        match answer? {
+            Some(result::Value::TerminalFilePut(r)) => {
                 offset = r.stored;
                 progress(r.stored, total);
                 if let Some(path) = r.path {
@@ -149,7 +175,7 @@ where
             }
             _ => {
                 return Err(ClientError::WrongResult {
-                    expected: "terminal_image_put",
+                    expected: "terminal_file_put",
                     got: "something else",
                 });
             }
@@ -159,7 +185,7 @@ where
     // Every chunk was accepted and the daemon never said it was finished, so
     // the two sides disagree about how big the image is.
     Err(ClientError::WrongResult {
-        expected: "a finished image",
+        expected: "a finished file",
         got: "a transfer that never completed",
     })
 }

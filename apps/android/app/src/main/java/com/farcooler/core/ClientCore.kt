@@ -119,19 +119,21 @@ class ClientCore {
         submit { NativeClient.nativeCall(it, method, args.toString()) }
 
     /**
-     * Paste an image into a terminal, and hand back the path it landed at.
+     * Paste a file into a terminal, and hand back the path it landed at.
      *
      * Its own entry point rather than a [call] method because the payload is
      * binary: the JSON boundary every other method uses would mean base64 in
      * both directions to carry bytes nothing in Kotlin looks at.
      */
-    suspend fun pasteImage(
+    suspend fun pasteFile(
         terminal: String,
+        name: String,
         mime: String,
         data: ByteArray,
         onProgress: (Long, Long) -> Unit,
     ): String {
-        val result = submit(onProgress) { NativeClient.nativePasteImage(it, terminal, mime, data) }
+        val result =
+            submit(onProgress) { NativeClient.nativePasteFile(it, terminal, name, mime, data) }
         return result["path"]?.jsonPrimitive?.contentOrNull
             ?: throw CoreException("The client core returned something unreadable.")
     }

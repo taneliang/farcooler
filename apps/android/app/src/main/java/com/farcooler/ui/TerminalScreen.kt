@@ -179,6 +179,7 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
             }
             pastes.send(
                 picked.data,
+                picked.name,
                 picked.mime,
                 picked.thumbnail,
                 ref.terminalId,

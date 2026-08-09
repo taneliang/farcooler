@@ -37,19 +37,19 @@ pub const MAX_CONTROL_ENVELOPE_BYTES: usize = 1024 * 1024;
 /// `TerminalFrame.payload` is capped at 64 KiB.
 pub const MAX_TERMINAL_PAYLOAD_BYTES: usize = 64 * 1024;
 
-/// One chunk of an image being pasted into a terminal.
+/// One chunk of a file being pasted into a terminal.
 ///
 /// Twice a terminal frame and an eighth of the envelope ceiling: big enough
-/// that a 16 MiB image is 128 round trips rather than a thousand, small enough
+/// that a 16 MiB file is 128 round trips rather than a thousand, small enough
 /// that live output interleaves between chunks instead of waiting behind one.
-pub const IMAGE_PASTE_CHUNK_BYTES: usize = 128 * 1024;
+pub const PASTE_CHUNK_BYTES: usize = 128 * 1024;
 
-/// The largest image a client may paste into a terminal.
+/// The largest file a client may paste into a terminal.
 ///
-/// Larger than any screenshot and smaller than a ProRAW photo. Checked on both
-/// sides: the client refuses before uploading anything, the daemon refuses
-/// before writing anything.
-pub const MAX_IMAGE_PASTE_BYTES: u64 = 16 * 1024 * 1024;
+/// Larger than any screenshot or ordinary document, and small enough that a
+/// failed transfer costs seconds rather than minutes. Checked on both sides:
+/// the client refuses before uploading anything, the daemon before writing it.
+pub const MAX_PASTE_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Each terminal retains the most recent 8 MiB of its current epoch.
 pub const REPLAY_BUFFER_BYTES: u64 = 8 * 1024 * 1024;

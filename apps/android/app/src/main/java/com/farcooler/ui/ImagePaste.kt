@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -60,6 +61,7 @@ class ImagePasteQueue {
 
     fun send(
         data: ByteArray,
+        name: String,
         mime: String,
         thumbnail: Bitmap?,
         terminal: String,
@@ -68,7 +70,7 @@ class ImagePasteQueue {
     ) {
         val job = ImagePasteJob(thumbnail, data.size.toLong())
         if (data.size > LIMIT) {
-            job.failure = "That image is too large to send. Images up to 16 MB work."
+            job.failure = "That file is too large to send. Files up to 16 MB work."
             jobs.add(job)
             return
         }
@@ -78,7 +80,7 @@ class ImagePasteQueue {
             job.sent = 0
             scope.launch {
                 runCatching {
-                    core.pasteImage(terminal, mime, data) { sent, total ->
+                    core.pasteFile(terminal, name, mime, data) { sent, total ->
                         job.sent = sent
                         if (total > 0) job.total = total
                     }
@@ -111,18 +113,25 @@ class ImagePasteQueue {
     private fun messageFor(error: Throwable): String {
         val text = (error.message ?: "").lowercase()
         return when {
-            text.contains("image format") ->
-                "Far Cooler can send PNG, JPEG, GIF, and WebP images."
-            text.contains("image size") ->
-                "That image is too large to send. Images up to 16 MB work."
+            // A machine whose daemon predates this feature refuses the method
+            // itself, and that refusal looks exactly like a missing resource.
+            text.contains("predates this feature") ->
+                "This machine's Far Cooler is too old to accept files. Update it and try again."
+            text.contains("file size") ->
+                "That file is too large to send. Files up to 16 MB work."
             text.contains("not found") -> "That terminal isn't running anymore."
             else -> "Couldn't reach this machine."
         }
     }
 }
 
-/** What a picked image is, once it is something the agents can open. */
-data class PickedImage(val data: ByteArray, val mime: String, val thumbnail: Bitmap?)
+/** What a picked image is, with the name it had where it came from. */
+data class PickedImage(
+    val data: ByteArray,
+    val name: String,
+    val mime: String,
+    val thumbnail: Bitmap?,
+)
 
 /**
  * Read a picked image, re-encoding only when it is a format an agent refuses.
@@ -138,7 +147,7 @@ fun readPickedImage(resolver: ContentResolver, uri: Uri): PickedImage? {
 
     val mime = resolver.getType(uri) ?: ""
     if (mime in setOf("image/png", "image/jpeg", "image/gif", "image/webp")) {
-        return PickedImage(raw, mime, thumbnail)
+        return PickedImage(raw, displayName(resolver, uri, mime), mime, thumbnail)
     }
 
     // HEIC and anything else: both agents refuse it, so an untouched photo
@@ -146,10 +155,27 @@ fun readPickedImage(resolver: ContentResolver, uri: Uri): PickedImage? {
     val bitmap = thumbnail ?: return null
     val out = ByteArrayOutputStream()
     return if (bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)) {
-        PickedImage(out.toByteArray(), "image/jpeg", bitmap)
+        PickedImage(out.toByteArray(), displayName(resolver, uri, "image/jpeg"), "image/jpeg", bitmap)
     } else {
         null
     }
+}
+
+/**
+ * What the picker's content URI is called, if anything.
+ *
+ * A `content://` URI carries no path worth reading, so the display name is
+ * asked for separately. Worth the query: `receipt-2026.pdf` in a prompt says
+ * what the agent is looking at, and the fallback says nothing.
+ */
+private fun displayName(resolver: ContentResolver, uri: Uri, mime: String): String {
+    val name = runCatching {
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+    if (name != null) return name
+    return if (mime == "image/jpeg") "photo.jpg" else "photo.png"
 }
 
 /** The chips for one screen, stacked over the bottom of the terminal. */

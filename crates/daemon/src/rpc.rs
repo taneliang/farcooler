@@ -93,11 +93,14 @@ fn required_scope(method: &str) -> Option<Scope> {
         // and tokens — and `read` is the scope handed to something that should
         // only see the shape of the fleet.
         | "terminal.screen"
-        // Pasting an image writes bytes to a pane and a file to the machine.
-        // The bytes are the same privilege as `terminal.write`; the file is
-        // written to a daemon-owned directory with a daemon-chosen name, so it
-        // grants no reach a write did not already have.
-        | "terminal.paste_image"
+        // Pasting a file writes bytes to a pane and a file to the machine.
+        //
+        // The bytes are the same privilege as `terminal.write`, and so is the
+        // file: anything that can type into a shell can already create a file
+        // of its choosing. That is why this accepts any type rather than only
+        // images — the restriction protected nothing and cost the case people
+        // actually want, which is dropping a PDF or a log on a pane.
+        | "terminal.paste_file"
         | "terminal.write" => Scope::Control,
         // A pane's agent channel is exactly as sensitive as its screen — it is
         // the same conversation, just structured — so it sits at the same
@@ -910,17 +913,18 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
-            // One chunk of an image on its way into a pane. The last one names
+            // One chunk of a file on its way into a pane. The last one names
             // the file and types its path; every other one only says how much
             // has landed, which is what the sender's next `offset` must be.
-            "terminal.paste_image" => {
+            "terminal.paste_file" => {
                 let id = Self::target(&req)?;
-                let Some(request::Payload::TerminalImagePut(p)) = req.payload else {
+                let Some(request::Payload::TerminalFilePut(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let stored = crate::pastes::put_chunk(
                     svc.root_dir(),
                     &p.transfer_id,
+                    &p.name,
                     p.total_size,
                     p.offset,
                     &p.chunk,
@@ -928,18 +932,18 @@ impl Rpc {
                 .await?;
                 let out = match stored {
                     crate::pastes::Stored::Partial { stored } => {
-                        farcooler_protocol::v1::TerminalImagePutResult { stored, path: None }
+                        farcooler_protocol::v1::TerminalFilePutResult { stored, path: None }
                     }
                     crate::pastes::Stored::Complete { path, stored } => {
                         let shown = path.to_string_lossy().to_string();
                         svc.paste_path(id, &shown).await?;
-                        farcooler_protocol::v1::TerminalImagePutResult {
+                        farcooler_protocol::v1::TerminalFilePutResult {
                             stored,
                             path: Some(shown),
                         }
                     }
                 };
-                Ok(result::Value::TerminalImagePut(out))
+                Ok(result::Value::TerminalFilePut(out))
             }
 
             "terminal.resize" => {
@@ -1381,7 +1385,7 @@ mod tests {
             "terminal.restart",
             "terminal.screen",
             "terminal.write",
-            "terminal.paste_image",
+            "terminal.paste_file",
             "layout.list",
             "layout.split",
             "layout.move",

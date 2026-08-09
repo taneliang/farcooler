@@ -414,3 +414,51 @@ waiter, for the reason that hop already existed.
 **`TerminalSurface` on macOS is now a wrapper over `TerminalCanvas`.** An
 `NSViewRepresentable` cannot overlay SwiftUI on itself, and the alternative was
 the chip written at both call sites.
+
+## Generalized to any file (2026-08-09)
+
+Dropping a PDF, a log or a CSV on a pane is the same act as dropping a
+screenshot, and the agent reads all of them the same way — by opening a path.
+So `terminal.paste_image` became `terminal.paste_file`, and the type gate is
+gone. Renamed rather than widened in place: a method called `paste_image` that
+writes PDFs is the kind of name this codebase's comments exist to prevent, and
+two days after landing, deployed to one machine that had to be reinstalled
+anyway, was the cheapest moment it will ever be.
+
+**One stated rationale reverses, and it should be said plainly.** The design
+argued that sniffing stops a client "naming arbitrary content `.png` on
+someone's machine". That was never a security boundary. This method sits at
+`CONTROL`, the same scope as `terminal.write`, which can type `curl … | sh` into
+a shell — a client that reaches either can already create any file it likes.
+The sniff bought a *usability* guarantee, that the agent could open what landed,
+and generalizing trades that guarantee for reach on purpose.
+
+What the sniff still does: override the extension when the bytes are a
+recognizable image. That is the one case where the bytes are more trustworthy
+than the label, and it costs nothing to be right about a PNG that arrived called
+`.txt`.
+
+**The sender's filename is now carried, and is the new untrusted surface.** A
+path ending in `quarterly-report.pdf` tells an agent what it is looking at;
+`2026-08-09-114812Z.bin` tells it nothing. But it is a string from another
+machine becoming a filename on this one, so `name_parts` REBUILDS it from
+allowed characters rather than filtering what it dislikes — nothing survives
+that could be a separator, a `..`, a NUL, a leading dot or a shell
+metacharacter, whatever went in. Tests cover the traversal cases directly.
+
+## Version skew reports itself (2026-08-09)
+
+A daemon built before this feature rejects the method name in `required_scope`
+and answers `NotFound` — indistinguishable, on the wire, from a terminal that
+has gone away. That reached a person as "That terminal isn't running anymore",
+which sends them to look at the terminal, the pane and the network, and never at
+the machine that needs updating. It cost a real debugging session.
+
+`actions::paste_file` now infers it: every caller resolves the terminal before
+getting here, so a `NotFound` on the FIRST chunk is a missing method, not a
+missing terminal. All four surfaces say so.
+
+The deeper fix — a distinct wire code for an unimplemented method — is worth
+having, but it only helps once the daemon returning it is new enough to know
+about it, which is exactly the daemon that is too old. The inference works
+today, against the machines that already exist.

@@ -488,15 +488,15 @@ enum TerminalCmd {
     Send { terminal: String, data: String },
     /// Send exact input bytes as hex. This is the terminal client input path.
     SendHex { terminal: String, hex: String },
-    /// Paste an image into a terminal.
+    /// Paste a file into a terminal.
     ///
     /// The file is copied to the machine the terminal is on and its path is
     /// typed into the pane, which is how an agent in that pane gets to look at
-    /// it. Prints the path on stdout.
+    /// it. Any type: an image, a PDF, a log, a CSV. Prints the path on stdout.
     ///
     /// An agent can use this to hand a chart or a screenshot to a SIBLING
     /// pane. Pasting into its own pane would feed it its own stdin.
-    PasteImage { terminal: String, file: PathBuf },
+    PasteFile { terminal: String, file: PathBuf },
     /// Print the rendered visible screen with color escapes intact.
     Screen { terminal: String },
     /// Stream live output bytes to stdout until killed. The terminal data plane.
@@ -2029,12 +2029,14 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         // No `proxy()` arm: this is an RPC, not a byte stream, so `connect_to`
         // already reaches a remote daemon over ssh — the same reason `seen` and
         // `stop` have none.
-        TerminalCmd::PasteImage { terminal, file } => {
+        TerminalCmd::PasteFile { terminal, file } => {
             let data = std::fs::read(&file)?;
             let (mut link, id) = terminal_by_record(host, &terminal).await?;
-            let path = farcooler_client::actions::paste_image(
+            let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+            let path = farcooler_client::actions::paste_file(
                 link.client_mut(),
                 id,
+                name,
                 mime_for(&file),
                 &data,
                 // Progress goes to stderr: stdout is the data channel, and the

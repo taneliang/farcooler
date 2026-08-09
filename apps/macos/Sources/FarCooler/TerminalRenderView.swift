@@ -131,8 +131,9 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         super.init(frame: .zero)
         measure()
         wantsLayer = true
-        // Dragging a screenshot onto a pane is the same intent as pasting one,
-        // and on a Mac it is the more natural of the two.
+        // Dropping a file on a pane is the same intent as pasting one, and on
+        // a Mac it is the more natural of the two. Any file: the thing being
+        // discussed is as often a PDF or a log as a screenshot.
         registerForDraggedTypes([.fileURL, .png, .tiff])
         // Applied once up front as well as on every later change: the observer
         // below fires on CHANGES, and a view built while a theme is already
@@ -704,15 +705,17 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         send(core.encode(paste: text))
     }
 
-    /// An image on a pasteboard, as a file when it has one.
+    /// Something worth sending on a pasteboard, as a file when it has one.
     ///
     /// The file is preferred over the data: it is the same bytes without a
-    /// re-encode, and against a local daemon it means nothing has to be copied
-    /// anywhere at all.
+    /// re-encode, it carries a name worth putting in a prompt, and against a
+    /// local daemon it means nothing has to be copied anywhere at all.
+    ///
+    /// Any file type. What the agent can do with a `.parquet` is the agent's
+    /// business; refusing to carry one is this app deciding for it.
     static func image(on pasteboard: NSPasteboard) -> PastedImage? {
-        let images: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tiff"]
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
-            let url = urls.first(where: { images.contains($0.pathExtension.lowercased()) })
+            let url = urls.first(where: { $0.isFileURL && !$0.hasDirectoryPath })
         {
             return .file(url)
         }

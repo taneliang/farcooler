@@ -215,16 +215,18 @@ pub unsafe extern "C" fn farcooler_client_call(
 /// {"path": "..."}}`. The bytes are copied before this returns, so the caller
 /// may free them immediately.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn farcooler_client_paste_image(
+pub unsafe extern "C" fn farcooler_client_paste_file(
     handle: *mut c_void,
     terminal: *const c_char,
+    name: *const c_char,
     mime: *const c_char,
     data: *const u8,
     len: usize,
 ) -> u64 {
     let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
     let Some(terminal) = (unsafe { read_str(terminal) }) else { return 0 };
-    let mime = unsafe { read_str(mime) }.unwrap_or_else(|| "image/png".into());
+    let name = unsafe { read_str(name) }.unwrap_or_default();
+    let mime = unsafe { read_str(mime) }.unwrap_or_else(|| "application/octet-stream".into());
     if data.is_null() || len == 0 {
         return 0;
     }
@@ -244,7 +246,7 @@ pub unsafe extern "C" fn farcooler_client_paste_image(
             (Some(session), Some(id)) => {
                 let queue = Arc::clone(&finished);
                 session
-                    .paste_image(id, &mime, &image, |sent, total| {
+                    .paste_file(id, &name, &mime, &image, |sent, total| {
                         queue.lock().expect("queue").push_back(
                             json!({"ticket": ticket, "progress": {"sent": sent, "total": total}})
                                 .to_string(),

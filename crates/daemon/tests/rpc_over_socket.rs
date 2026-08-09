@@ -1448,20 +1448,21 @@ async fn an_image_pasted_in_chunks_lands_as_one_file_and_is_typed_into_the_pane(
     let mut stored = 0u64;
     let mut landed = None;
     for chunk in image.chunks(128) {
-        let mut req = request("terminal.paste_image");
+        let mut req = request("terminal.paste_file");
         req.target_resource_id = Some(terminal.id.clone());
-        req.payload = Some(request::Payload::TerminalImagePut(
-            farcooler_protocol::v1::TerminalImagePut {
+        req.payload = Some(request::Payload::TerminalFilePut(
+            farcooler_protocol::v1::TerminalFilePut {
                 terminal_id: terminal.id.clone(),
                 transfer_id: transfer.clone(),
                 mime: "image/png".into(),
+                name: "shot.png".into(),
                 total_size: image.len() as u64,
                 offset: stored,
                 chunk: bytes::Bytes::copy_from_slice(chunk),
             },
         ));
-        let result = client.call(req).await.expect("terminal.paste_image");
-        let Some(result::Value::TerminalImagePut(r)) = result.value else { panic!("wrong result") };
+        let result = client.call(req).await.expect("terminal.paste_file");
+        let Some(result::Value::TerminalFilePut(r)) = result.value else { panic!("wrong result") };
         stored = r.stored;
         landed = r.path.or(landed);
     }
@@ -1521,13 +1522,14 @@ async fn a_paste_whose_offset_does_not_match_is_refused_over_the_wire() {
 
     let image = png(300);
     let transfer = farcooler_protocol::ids::new_id();
-    let mut first = request("terminal.paste_image");
+    let mut first = request("terminal.paste_file");
     first.target_resource_id = Some(terminal.id.clone());
-    first.payload = Some(request::Payload::TerminalImagePut(
-        farcooler_protocol::v1::TerminalImagePut {
+    first.payload = Some(request::Payload::TerminalFilePut(
+        farcooler_protocol::v1::TerminalFilePut {
             terminal_id: terminal.id.clone(),
             transfer_id: transfer.clone(),
             mime: "image/png".into(),
+            name: "shot.png".into(),
             total_size: image.len() as u64,
             offset: 0,
             chunk: bytes::Bytes::copy_from_slice(&image[..128]),
@@ -1537,13 +1539,14 @@ async fn a_paste_whose_offset_does_not_match_is_refused_over_the_wire() {
 
     // A gap. Accepting it would produce a file that sniffs as a PNG and
     // decodes to garbage.
-    let mut gap = request("terminal.paste_image");
+    let mut gap = request("terminal.paste_file");
     gap.target_resource_id = Some(terminal.id.clone());
-    gap.payload = Some(request::Payload::TerminalImagePut(
-        farcooler_protocol::v1::TerminalImagePut {
+    gap.payload = Some(request::Payload::TerminalFilePut(
+        farcooler_protocol::v1::TerminalFilePut {
             terminal_id: terminal.id.clone(),
             transfer_id: transfer.clone(),
             mime: "image/png".into(),
+            name: "shot.png".into(),
             total_size: image.len() as u64,
             offset: 256,
             chunk: bytes::Bytes::copy_from_slice(&image[256..]),

@@ -86,7 +86,7 @@ message Request {
     // there is nothing an upsert needs that a read does not already describe.
     HostSettings host_settings = 46;
     Theme theme = 47;
-    TerminalImagePut terminal_image_put = 48;
+    TerminalFilePut terminal_file_put = 48;
   }
 }
 
@@ -131,7 +131,7 @@ message Result {
     ThemeList theme_list = 20;
     AdapterList adapter_list = 21;
     AdapterTestResult adapter_test_result = 22;
-    TerminalImagePutResult terminal_image_put = 23;
+    TerminalFilePutResult terminal_file_put = 23;
   }
 }
 
@@ -943,19 +943,25 @@ message TerminalWrite {
   bytes payload = 1;
 }
 
-// One chunk of an image on its way to a terminal.
+// One chunk of a file on its way to a terminal.
 //
 // Chunked because it has to be: `MAX_CONTROL_ENVELOPE_BYTES` caps a control
-// envelope at 1 MiB, so an image is never one frame. It would be wrong even if
-// it fit — this shares a connection with live terminal output, and a single
-// huge envelope stalls every pane on it while it is written.
-message TerminalImagePut {
+// envelope at 1 MiB, so a file is never one frame. It would be wrong even if it
+// fit — this shares a connection with live terminal output, and a single huge
+// envelope stalls every pane on it while it is written.
+//
+// Any file, not only an image. The scope is `CONTROL`, the same as
+// `terminal.write` — a client that can type into a shell can already create any
+// file it likes — so restricting the type protected nothing. What it did cost
+// was the reason people reach for this: dropping a PDF, a log or a CSV on a
+// pane so the agent in it can read the thing being discussed.
+message TerminalFilePut {
   bytes terminal_id = 1;
   // Client-generated, and what names the partial file. Two pastes into the same
   // pane must not be able to append to each other's bytes.
   bytes transfer_id = 2;
-  // What the sender believes it is sending. The daemon sniffs the bytes and
-  // trusts those instead — this only picks the error message.
+  // What the sender believes it is sending. Advisory: it picks an extension
+  // only when `name` carries none and the bytes are not a recognizable image.
   string mime = 3;
   // Known before the first chunk, so an oversize send is refused immediately
   // rather than after the upload the sender already waited through.
@@ -964,9 +970,14 @@ message TerminalImagePut {
   // mismatch fails the transfer rather than writing at a guessed position.
   uint64 offset = 5;
   bytes chunk = 6;
+  // What the sender called it, if it had a name. Sanitized hard on the far
+  // side — it becomes a filename on someone else's machine — but worth keeping:
+  // `quarterly-report.pdf` in a prompt says what it is, and
+  // `2026-08-09-114812Z.bin` says nothing at all.
+  string name = 7;
 }
 
-message TerminalImagePutResult {
+message TerminalFilePutResult {
   uint64 stored = 1;
   // Final chunk only: the absolute path on the host, already typed into the
   // terminal. Quoted in the terminal when it contains a space; bare here.
