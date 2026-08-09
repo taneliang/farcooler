@@ -243,6 +243,17 @@ enum ImagePasteProcess {
 
                 // Read stderr incrementally so the ring moves. stdout is small
                 // — one path — and is drained after the process ends.
+                //
+                // Every line that is NOT progress is kept, because one of them
+                // is the reason this failed. Splitting the stream and holding
+                // only the trailing partial line threw the error away: it ends
+                // with a newline, so it was consumed as a complete line, found
+                // not to be progress, and dropped — leaving the failure path
+                // nothing to read and every failure reported as the catch-all,
+                // "Couldn't reach this machine", whatever had actually gone
+                // wrong. That cost a debugging session on a message that was
+                // being produced correctly the whole time.
+                var diagnostic = ""
                 var trailing = ""
                 let handle = err.fileHandleForReading
                 while true {
@@ -252,16 +263,27 @@ enum ImagePasteProcess {
                     var lines = trailing.components(separatedBy: "\n")
                     trailing = lines.removeLast()
                     for line in lines {
-                        if let (sent, total) = progress(in: line) { onProgress(sent, total) }
+                        if let (sent, total) = progress(in: line) {
+                            onProgress(sent, total)
+                        } else {
+                            diagnostic += line + "\n"
+                        }
                     }
                 }
+                diagnostic += trailing
 
                 let stdout = out.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
 
                 if process.terminationStatus != 0 {
+                    // Logged as well as mapped. The chip shows a sentence a
+                    // person can act on; the reason it was chosen has to be
+                    // recoverable afterwards, or the next unmapped failure is
+                    // another debugging session.
+                    let raw = diagnostic.trimmingCharacters(in: .whitespacesAndNewlines)
+                    NSLog("farcooler: paste-file failed: %@", raw)
                     continuation.resume(
-                        returning: .failure(PasteFailure(message: message(from: trailing))))
+                        returning: .failure(PasteFailure(message: message(from: raw))))
                     return
                 }
                 let path = String(data: stdout, encoding: .utf8)?
