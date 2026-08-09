@@ -180,6 +180,15 @@ sealed interface AgentEvent {
         val availableModels: List<AgentChoice>,
         val configOptions: List<ConfigOption>,
         val availableCommands: List<AgentChoice>,
+        /**
+         * Which protocol is carrying this conversation: `acp`, `claude`, or
+         * `codex`.
+         *
+         * Defaults to `acp` rather than being nullable, because that is what a
+         * session which never said it is: ACP was the only backend that
+         * existed when those transcripts were written.
+         */
+        val backend: String = "acp",
     ) : AgentEvent
 
     /**
@@ -273,6 +282,7 @@ sealed interface AgentEvent {
                         availableModels = body.choices("available_models"),
                         configOptions = body.configOptions("config_options"),
                         availableCommands = body.choices("available_commands"),
+                        backend = body.stringOrNull("backend") ?: "acp",
                     )
 
                     "Message" -> Message(

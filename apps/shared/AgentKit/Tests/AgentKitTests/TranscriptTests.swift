@@ -234,7 +234,7 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
             id: "model", name: "Model", description: "", category: "model",
             kind: "select", currentValue: "haiku",
             options: [AgentChoice(id: "opus", name: "Opus")])],
-        availableCommands: []))])
+        availableCommands: [], backend: "acp"))])
 
     t.selectConfigOptionLocally(id: "model", value: "opus")
     #expect(t.configOptions.first?.currentValue == "opus")

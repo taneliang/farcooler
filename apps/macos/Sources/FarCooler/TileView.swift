@@ -304,6 +304,13 @@ private struct TilePane: View {
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var drag = PaneDrag.shared
 
+    /// Which protocol this pane's chat is running on, once the session says.
+    ///
+    /// Empty until then, and the badge stays hidden rather than guessing: a
+    /// pane that has not connected has no protocol yet, and showing `acp`
+    /// before anything answered would be a claim rather than a report.
+    @State private var paneBackend: String = ""
+
     /// Which half of this pane a dragged terminal would land in, while it hovers.
     ///
     /// Read from the drag rather than held here. See `PaneDrag`.
@@ -335,7 +342,8 @@ private struct TilePane: View {
                     refusal: refusal,
                     isFocused: isFocused,
                     searchFiles: onSearchFiles,
-                    onResize: { _, _ in }
+                    onResize: { _, _ in },
+                    onBackend: { paneBackend = $0 }
                 )
                 // Identity includes the PANE MODE, not just the terminal.
                 //
@@ -463,6 +471,34 @@ private struct TilePane: View {
                 .lineLimit(1)
 
             Spacer(minLength: 4)
+
+            // Which protocol this chat is on, beside the name it belongs to.
+            //
+            // Only on an agent pane, because a terminal has no protocol — a
+            // badge on a shell would be answering a question nobody asked.
+            if isLive, terminal.isAgentPane, !paneBackend.isEmpty {
+                let native = paneBackend != "acp"
+                // "ACP" is an acronym — Agent Client Protocol — and lowercasing
+                // it made a proper noun look like a status word.
+                Text(native ? "Native" : "ACP")
+                    .font(.system(size: 9, weight: .medium))
+                    .fixedSize()
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .foregroundStyle(
+                        native ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+                    .background(
+                        native
+                            ? AnyShapeStyle(Color.accentColor.opacity(0.15))
+                            : AnyShapeStyle(Color.primary.opacity(0.06)),
+                        in: Capsule()
+                    )
+                    .help(
+                        native
+                            ? "Native: driven through \(paneBackend)'s own protocol, with no adapter and no npx"
+                            : "ACP: driven through an Agent Client Protocol adapter"
+                    )
+            }
 
             // Offered only where it would work, and only on a live pane.
             //

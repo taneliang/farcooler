@@ -1,17 +1,23 @@
 //! One ACP session: the conversation, the capability answers, and the events.
+//!
+//! Every function here speaks ACP — `initialize`, `session/load`, `session/new`,
+//! and the mode and model parsers that read their results. That is why the whole
+//! file lives in this crate rather than only the part that turned into
+//! `AcpBackend`: none of it was ever neutral.
 
 use std::path::{Path, PathBuf};
 
 use tokio::sync::mpsc;
 
-use crate::acp::conn::{AcpConnection, AcpError, AcpWriter, Incoming};
-use crate::acp::normalize::{relativize, update_to_events};
-use crate::acp::wire::Rpc;
-use crate::event::{
+use crate::conn::{AcpConnection, AcpError, AcpWriter, Incoming};
+use crate::normalize::{relativize, update_to_events};
+use crate::wire::Rpc;
+use farcooler_agent_core::event::{
     AgentChoice, AgentEvent, AgentGapReason, ConfigOption, Diff, EndReason, PermissionOption,
-    PromptImage, QueuedPrompt, Role, ToolStatus,
+    PromptImage, ToolStatus,
 };
-use crate::fs_guard::confine;
+use farcooler_agent_core::backend::BackendKind;
+use farcooler_agent_core::fs_guard::confine;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -251,6 +257,11 @@ pub fn end_reason(stop_reason: &str) -> EndReason {
 pub struct AgentSession {
     conn: AcpConnection,
     pub session_id: String,
+    /// Whether this adapter declared `agentCapabilities.loadSession` at
+    /// `initialize`. Kept rather than left a local, because it is what
+    /// `Capabilities::replay` reports and a backend cannot answer that
+    /// honestly without it.
+    pub can_load: bool,
     pub available_modes: Vec<String>,
     pub available_commands: Vec<String>,
     /// The id of the `session/prompt` we are waiting to see answered.
@@ -391,6 +402,7 @@ impl AgentSession {
                 available_models,
                 config_options,
                 available_commands: Vec::new(),
+                backend: BackendKind::Acp.as_str().to_string(),
             },
         );
 
@@ -413,6 +425,7 @@ impl AgentSession {
             Self {
                 conn,
                 session_id,
+                can_load,
                 // Ids only here: this field feeds the proto's
                 // `available_agent_modes`, which is a repeated string. The
                 // human names ride on the SessionStarted event, which is what
@@ -495,8 +508,6 @@ impl AgentSession {
             incoming,
             session_id: self.session_id,
             pending_prompt: self.pending_prompt,
-            queue: std::collections::VecDeque::new(),
-            next_queue_id: 0,
             worktree,
         }
     }
@@ -509,77 +520,32 @@ impl AgentSession {
 /// method on this type contains a `read_line`. That is what makes it sound to
 /// put `next_events` in a `tokio::select!` with commands arriving from a
 /// daemon link that can connect and disconnect at any time.
+///
+/// What is left here after the prompt queue moved to
+/// `farcooler_agent::chat::ChatSession` is entirely ACP: a writer, a frame
+/// receiver, and the request id whose response ends a turn.
 pub struct RunningSession {
     writer: AcpWriter,
     incoming: mpsc::UnboundedReceiver<Incoming>,
     pub session_id: String,
     /// See the field of the same name on `AgentSession`.
     pending_prompt: Option<u64>,
-    /// Prompts written while a turn was running, in the order they were
-    /// written. See `QueuedPrompt`.
-    queue: std::collections::VecDeque<QueuedPrompt>,
-    /// Names the queued prompts. Monotonic, never reused, so an edit or a
-    /// cancel cannot land on a different message than the one being looked at.
-    next_queue_id: u64,
     worktree: PathBuf,
 }
 
 impl RunningSession {
-    /// Send a prompt, or hold it until the current turn ends.
+    /// Start a turn.
     ///
-    /// An agent takes one turn at a time, and `session/prompt` sent during one
-    /// is not a second conversation — it is at best ignored and at worst
-    /// interleaved. This used to fire regardless, so a message typed while the
-    /// agent was working looked sent and might simply never have been.
-    ///
-    /// Held HERE rather than left with the adapter, because a message Far Cooler
-    /// is holding is one it can still show, rewrite, or take back.
-    pub async fn prompt(
-        &mut self,
-        text: &str,
-        images: Vec<PromptImage>,
-    ) -> Result<Vec<AgentEvent>, SessionError> {
-        // Anything already waiting goes first, even though no turn is running.
-        //
-        // A send that failed leaves its prompt at the head of the queue with
-        // nothing in flight — see `send_next_queued`. Without this, the message
-        // being written now would overtake it and the conversation would carry
-        // the user's words in an order they never wrote them in.
-        if self.pending_prompt.is_none() && !self.queue.is_empty() {
-            let mut events = self.send_next_queued().await;
-            let id = self.next_queue_id;
-            self.next_queue_id += 1;
-            self.queue.push_back(QueuedPrompt {
-                id: id.to_string(),
-                text: text.to_string(),
-                images,
-            });
-            events.push(self.queue_event());
-            return Ok(events);
-        }
-        if self.pending_prompt.is_some() {
-            let id = self.next_queue_id;
-            self.next_queue_id += 1;
-            self.queue.push_back(QueuedPrompt {
-                id: id.to_string(),
-                text: text.to_string(),
-                images,
-            });
-            return Ok(vec![self.queue_event()]);
-        }
-        self.send_prompt(text, &images).await?;
-        Ok(Vec::new())
+    /// The queue that used to wrap this is `ChatSession`'s now. Holding a
+    /// message so it can still be shown, rewritten, or taken back is Far
+    /// Cooler's own behavior rather than anything ACP offers, and it works the
+    /// same against a backend that is not ACP at all. What is left here is the
+    /// one thing the protocol actually does, which is send.
+    pub async fn prompt(&mut self, text: &str, images: &[PromptImage]) -> Result<(), SessionError> {
+        self.send_prompt(text, images).await
     }
 
-    /// Rewrite a prompt that has not been sent. Unknown ids are ignored: the
-    /// turn may have ended and sent it between the click and the message.
-    pub fn edit_queued(&mut self, id: &str, text: &str) -> Vec<AgentEvent> {
-        let Some(entry) = self.queue.iter_mut().find(|q| q.id == id) else { return Vec::new() };
-        entry.text = text.to_string();
-        vec![self.queue_event()]
-    }
-
-    /// Send a queued prompt NOW, without waiting for the turn to end.
+    /// Send into the turn already running.
     ///
     /// The adapter advertises `promptQueueing` and `steering`, meaning it will
     /// accept a prompt while a turn is running and Claude picks it up between
@@ -587,76 +553,24 @@ impl RunningSession {
     /// behavior when what you are sending is a correction — "stop, do it this
     /// way" is worth nothing once the wrong thing is done.
     ///
-    /// It is not the default, because the reason the queue exists is that a
-    /// message you can still see and still edit is worth more than one already
-    /// gone. This is the deliberate escape hatch: you looked at what you wrote
-    /// and decided it should interrupt.
+    /// `pending_prompt` is deliberately restored afterwards. It names the
+    /// request whose response ends the current turn, and a steering prompt
+    /// joins that turn rather than starting its own — letting `send_prompt`
+    /// overwrite it would leave the original turn with nothing to report its
+    /// end, and the pane would say Working forever.
     ///
-    /// `pending_prompt` is deliberately NOT reassigned. It names the turn whose
-    /// response ends the current turn, and a steering prompt joins that turn
-    /// rather than starting its own — overwriting it would leave the original
-    /// turn with nothing to report its end, and the pane would say Working
-    /// forever.
-    pub async fn steer_queued(&mut self, id: &str) -> Result<Vec<AgentEvent>, SessionError> {
-        let Some(index) = self.queue.iter().position(|q| q.id == id) else {
-            return Ok(Vec::new());
-        };
-        let queued = self.queue.remove(index).expect("index just found");
-
+    /// Note that `Capabilities::acp()` reports `native_steer: false`, so
+    /// `ChatSession` sends an ordinary `prompt` here instead and this is
+    /// currently unreachable through it. It is kept because the ACP capability
+    /// is real and the moment a client opts into it, this is the correct
+    /// implementation rather than one to be written under time pressure.
+    pub async fn steer(&mut self, text: &str, images: &[PromptImage]) -> Result<(), SessionError> {
         let pending = self.pending_prompt;
-        if let Err(e) = self.send_prompt(&queued.text, &queued.images).await {
-            self.queue.insert(index, queued);
-            return Err(e);
-        }
-        // Restored, for the reason in the doc comment above.
+        self.send_prompt(text, images).await?;
         if pending.is_some() {
             self.pending_prompt = pending;
         }
-
-        Ok(vec![
-            self.queue_event(),
-            AgentEvent::Message { role: Role::User, text: queued.text, parent: None },
-        ])
-    }
-
-    /// Take back a prompt that has not been sent.
-    pub fn cancel_queued(&mut self, id: &str) -> Vec<AgentEvent> {
-        let before = self.queue.len();
-        self.queue.retain(|q| q.id != id);
-        if self.queue.len() == before { return Vec::new() }
-        vec![self.queue_event()]
-    }
-
-    fn queue_event(&self) -> AgentEvent {
-        AgentEvent::PromptQueue { items: self.queue.iter().cloned().collect() }
-    }
-
-    /// The next queued prompt, sent now that the turn is over.
-    ///
-    /// Returns the user message as well, because this is the moment it truly
-    /// becomes part of the conversation — before this it was only waiting.
-    async fn send_next_queued(&mut self) -> Vec<AgentEvent> {
-        let Some(next) = self.queue.pop_front() else { return Vec::new() };
-        let mut events = vec![self.queue_event()];
-        match self.send_prompt(&next.text, &next.images).await {
-            Ok(()) => {
-                events.push(AgentEvent::Message { role: Role::User, text: next.text, parent: None });
-                events
-            }
-            Err(_) => {
-                // Put it back rather than losing it silently. A prompt that
-                // cannot be sent is still a prompt the user wrote.
-                //
-                // `pending_prompt` stays None, which is the honest state: no
-                // turn is in flight. That means the NEXT message goes straight
-                // out ahead of this one, so the failed send is retried here
-                // first — otherwise a stuck entry sits in the queue forever,
-                // since nothing but a turn ending ever drains it and no turn
-                // is running to end.
-                self.queue.push_front(next);
-                vec![self.queue_event()]
-            }
-        }
+        Ok(())
     }
 
     async fn send_prompt(&mut self, text: &str, images: &[PromptImage]) -> Result<(), SessionError> {
@@ -828,11 +742,11 @@ impl RunningSession {
                 if id.as_u64() == self.pending_prompt {
                     self.pending_prompt = None;
                     let reason = end_reason(result["stopReason"].as_str().unwrap_or_default());
-                    // The turn is over, so anything held back can go now. This
-                    // is the only moment it is safe to send one.
-                    let mut events = vec![AgentEvent::TurnEnded { reason }];
-                    events.extend(self.send_next_queued().await);
-                    return Ok(events);
+                    // Reporting the end is all this does now. Draining the
+                    // queue is `ChatSession`'s job, and it triggers on exactly
+                    // this event — which is what lets a backend that reports a
+                    // turn's end some other way get the same behavior for free.
+                    return Ok(vec![AgentEvent::TurnEnded { reason }]);
                 }
                 return Ok(Vec::new());
             }
@@ -941,7 +855,7 @@ impl RunningSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{AgentEvent, AgentGapReason};
+    use farcooler_agent_core::event::{AgentEvent, AgentGapReason};
 
     #[tokio::test]
     async fn next_events_on_a_closed_connection_reports_closure_not_a_hang() {
@@ -963,8 +877,6 @@ mod tests {
             incoming,
             session_id: "s".to_string(),
             pending_prompt: None,
-            queue: Default::default(),
-            next_queue_id: 0,
             worktree,
         };
 
@@ -1172,38 +1084,3 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod queue_tests {
-    use super::*;
-
-    /// A prompt written mid-turn waits, and says so.
-    ///
-    /// It used to be fired at the adapter regardless. An agent takes one turn
-    /// at a time, so the second `session/prompt` was at best ignored — the
-    /// message looked sent and simply never happened.
-    #[test]
-    fn a_prompt_written_during_a_turn_is_queued_rather_than_lost() {
-        let mut queue: std::collections::VecDeque<QueuedPrompt> = Default::default();
-        queue.push_back(QueuedPrompt {
-            id: "0".into(),
-            text: "first".into(),
-            images: Vec::new(),
-        });
-        queue.push_back(QueuedPrompt {
-            id: "1".into(),
-            text: "second".into(),
-            images: Vec::new(),
-        });
-
-        // Edited in place, by id rather than by position: the turn may end and
-        // send one between the click and the message arriving.
-        if let Some(entry) = queue.iter_mut().find(|q| q.id == "1") {
-            entry.text = "second, revised".into();
-        }
-        assert_eq!(queue[1].text, "second, revised");
-
-        queue.retain(|q| q.id != "0");
-        assert_eq!(queue.len(), 1);
-        assert_eq!(queue[0].id, "1", "withdrawing one must not renumber the rest");
-    }
-}

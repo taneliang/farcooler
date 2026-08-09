@@ -12,7 +12,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 
-use crate::acp::wire::Rpc;
+use crate::wire::Rpc;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AcpError {
@@ -307,7 +307,7 @@ impl AcpConnection {
     /// Requests are left exactly where they are. A `session/request_permission`
     /// dropped here would hang the agent on a question nobody will ever be
     /// asked.
-    pub fn take_pending_updates(&mut self) -> Vec<crate::event::AgentEvent> {
+    pub fn take_pending_updates(&mut self) -> Vec<farcooler_agent_core::event::AgentEvent> {
         let mut events = Vec::new();
         let mut kept = Vec::new();
         for incoming in std::mem::take(&mut self.pending_incoming) {
@@ -327,7 +327,7 @@ impl AcpConnection {
                 error: None,
             };
             match rpc.session_notification() {
-                Some(n) => events.extend(crate::acp::normalize::update_to_events(&n.update)),
+                Some(n) => events.extend(crate::normalize::update_to_events(&n.update)),
                 None => kept.push(incoming),
             }
         }

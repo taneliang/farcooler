@@ -1,0 +1,63 @@
+{
+ "thread": {
+  "id": "019fe8aa-a926-7332-b43d-6c9ca1b62f52",
+  "extra": null,
+  "sessionId": "019fe8aa-a926-7332-b43d-6c9ca1b62f52",
+  "forkedFromId": null,
+  "parentThreadId": null,
+  "preview": "Say: apple",
+  "ephemeral": false,
+  "section": null,
+  "sectionEnteredAt": null,
+  "historyMode": "legacy",
+  "modelProvider": "openai",
+  "createdAt": 1786314926,
+  "updatedAt": 1786314926,
+  "recencyAt": 1786314928,
+  "status": {
+   "type": "idle"
+  },
+  "path": "/Users/e-liang/.codex/sessions/2026/08/09/rollout-2026-08-09T15-35-26-019fe8aa-a926-7332-b43d-6c9ca1b62f52.jsonl",
+  "cwd": "/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T",
+  "cliVersion": "0.147.0",
+  "source": "vscode",
+  "canAcceptDirectInput": true,
+  "threadSource": null,
+  "agentNickname": null,
+  "agentRole": null,
+  "gitInfo": null,
+  "name": null,
+  "turns": [
+   {
+    "id": "019fe8aa-b2dc-7973-8dc1-bae31a56be1d",
+    "items": [
+     {
+      "type": "userMessage",
+      "id": "item-1",
+      "clientId": null,
+      "content": [
+       {
+        "type": "text",
+        "text": "Say: apple",
+        "text_elements": []
+       }
+      ]
+     },
+     {
+      "type": "agentMessage",
+      "id": "item-2",
+      "text": "apple",
+      "phase": "final_answer",
+      "memoryCitation": null
+     }
+    ],
+    "itemsView": "full",
+    "status": "completed",
+    "error": null,
+    "startedAt": 1786314928,
+    "completedAt": 1786314930,
+    "durationMs": 1686
+   }
+  ]
+ }
+}

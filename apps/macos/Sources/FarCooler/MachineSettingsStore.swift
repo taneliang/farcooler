@@ -203,7 +203,18 @@ struct AdapterInfo: Identifiable, Equatable {
         case unknown
     }
 
+    /// Which protocol Far Cooler speaks to this agent.
+    ///
+    /// `native` means the agent's own — `codex app-server`, or the Claude
+    /// CLI's stream-json control protocol — rather than an ACP adapter
+    /// wrapping it. Only some agents have one; see `nativeIsAvailable`.
+    enum Backend: String {
+        case acp
+        case native
+    }
+
     var preset: String
+    var backend: Backend
     var program: String
     var args: [String]
     var env: [String: String]
@@ -215,6 +226,14 @@ struct AdapterInfo: Identifiable, Equatable {
 
     var id: String { preset }
 
+    /// Whether this agent has a native backend at all.
+    ///
+    /// cursor has no protocol Far Cooler speaks first-party, opencode is
+    /// already a native subcommand behind ACP with nothing to gain, and an
+    /// adapter you added yourself has nothing compiled in for it. The editor
+    /// hides the control rather than offering a choice that cannot work.
+    var nativeIsAvailable: Bool { preset == "claude" || preset == "codex" }
+
     /// Whether Far Cooler can host this agent as a chat at all.
     ///
     /// An adapter with no program is a recognized agent that stays a terminal,
@@ -222,11 +241,13 @@ struct AdapterInfo: Identifiable, Equatable {
     var chatCapable: Bool { !program.trimmingCharacters(in: .whitespaces).isEmpty }
 
     init(
-        preset: String, program: String = "", args: [String] = [], env: [String: String] = [:],
+        preset: String, backend: Backend = .acp, program: String = "", args: [String] = [],
+        env: [String: String] = [:],
         commands: [String] = [], identity: [String] = [], blocked: [String] = [],
         working: [String] = [], origin: Origin = .user
     ) {
         self.preset = preset
+        self.backend = backend
         self.program = program
         self.args = args
         self.env = env
@@ -241,6 +262,8 @@ struct AdapterInfo: Identifiable, Equatable {
         guard let preset = json["preset"] as? String else { return nil }
         self.init(
             preset: preset,
+            // Absent means acp, matching an omitted `backend` key in the file.
+            backend: Backend(rawValue: json["backend"] as? String ?? "") ?? .acp,
             program: json["program"] as? String ?? "",
             args: json["args"] as? [String] ?? [],
             env: json["env"] as? [String: String] ?? [:],
@@ -254,6 +277,7 @@ struct AdapterInfo: Identifiable, Equatable {
     var commandJSON: String? {
         let body: [String: Any] = [
             "preset": preset,
+            "backend": backend.rawValue,
             "program": program,
             "args": args,
             "env": env,

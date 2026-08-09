@@ -36,6 +36,13 @@ struct AgentSurface: View {
     /// lays the whole window out against stale numbers — see the doc comment
     /// on `report(size:)`.
     let onResize: (Int, Int) async -> Void
+    /// Report which protocol is carrying this session, once it says.
+    ///
+    /// Passed up rather than drawn here because the badge belongs in the
+    /// pane's header, beside the name and the status dot, and that header is a
+    /// sibling of this view rather than a parent of it. Only the session knows
+    /// the answer, so it has to travel.
+    var onBackend: (String) -> Void = { _ in }
 
     @StateObject private var stream: AgentStream
     @ObservedObject private var preferences = Preferences.shared
@@ -51,7 +58,8 @@ struct AgentSurface: View {
         hostArguments: [String], linkGeneration: Int, refusal: @escaping () -> String?,
         isFocused: Bool,
         searchFiles: @escaping (String) async -> [String],
-        onResize: @escaping (Int, Int) async -> Void
+        onResize: @escaping (Int, Int) async -> Void,
+        onBackend: @escaping (String) -> Void = { _ in }
     ) {
         self.terminal = terminal
         self.binary = binary
@@ -62,6 +70,7 @@ struct AgentSurface: View {
         self.isFocused = isFocused
         self.searchFiles = searchFiles
         self.onResize = onResize
+        self.onBackend = onBackend
         // One stream per terminal, and the caller forces a fresh instance
         // whenever the terminal changes — see `.id(terminal.id)` at both call
         // sites — the same way `TerminalSurface` is re-attached rather than
@@ -205,6 +214,13 @@ struct AgentSurface: View {
             stream.start(
                 binary: binary, environment: environment, hostArguments: hostArguments,
                 refusal: refusal)
+        }
+        // Reported up as soon as the session says, and again if a restart
+        // changes it — flipping the Protocol picker and toggling the pane is
+        // exactly that, and a header still reading `acp` afterwards would be
+        // the wrong answer to the one question the badge exists to answer.
+        .onChange(of: stream.transcript.backend, initial: true) { _, backend in
+            onBackend(backend)
         }
     }
 

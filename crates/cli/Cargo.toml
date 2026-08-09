@@ -11,6 +11,10 @@ path = "src/main.rs"
 
 [dependencies]
 farcooler-agent.workspace = true
+farcooler-agent-core.workspace = true
+farcooler-acp.workspace = true
+farcooler-codex.workspace = true
+farcooler-claude.workspace = true
 farcooler-client.workspace = true
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true

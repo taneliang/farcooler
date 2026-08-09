@@ -1,7 +1,7 @@
 #[test]
 fn the_new_adapter_produces_no_spurious_gaps() {
-    use farcooler_agent::acp::{normalize::update_to_events, wire};
-    use farcooler_agent::event::AgentEvent;
+    use farcooler_acp::{normalize::update_to_events, wire};
+    use farcooler_agent_core::event::AgentEvent;
     let raw = std::fs::read_to_string("tests/fixtures/session_v064.jsonl").expect("fixture");
     let mut bad = Vec::new();
     for line in raw.lines().filter(|l| !l.trim().is_empty()) {

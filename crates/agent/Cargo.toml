@@ -7,6 +7,14 @@ license.workspace = true
 
 [dependencies]
 farcooler-protocol.workspace = true
+farcooler-agent-core.workspace = true
+farcooler-acp.workspace = true
+farcooler-codex.workspace = true
+farcooler-claude.workspace = true
+# The direction that matters is that farcooler-core must NOT depend on a
+# backend crate; this way round is fine, and it is what lets dispatch read
+# AdapterSpec.backend to choose one.
+farcooler-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

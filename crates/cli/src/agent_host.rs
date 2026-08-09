@@ -15,7 +15,10 @@ use std::time::Duration;
 use farcooler_agent::acp::conn::AcpConnection;
 use farcooler_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
 use farcooler_agent::ring::{AgentReplay, AgentRing};
+use farcooler_agent::chat::ChatSession;
 use farcooler_agent::session::AgentSession;
+use farcooler_agent_core::backend::AgentBackend;
+use farcooler_acp::backend::AcpBackend;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::{Notify, mpsc};
@@ -38,6 +41,12 @@ pub enum Status {
     /// Started, then said nothing. Distinct from missing, because the advice is
     /// different and "it did not start" would be a lie.
     AdapterSilent { preset: String, command: String },
+    /// A native backend refused, in its own words.
+    ///
+    /// Separate from the two above because the advice is different: the escape
+    /// hatch is a config edit, not an install. Version skew lands here, which
+    /// is the whole reason `BackendError::Incompatible` names both versions.
+    BackendFailed { preset: String, command: String, reason: String },
     Connected { session_id: String },
 }
 
@@ -56,8 +65,103 @@ pub fn status_line(status: &Status) -> String {
              Claude Code session, and neither answers nor exits. Check that the \
              daemon's environment has no CLAUDECODE variable set."
         ),
+        Status::BackendFailed { preset, command, reason } => format!(
+            "farcooler: the native backend for `{preset}` (`{command}`) could not start.\n\
+             {reason}\n\
+             Set `backend = \"acp\"` under `[adapters.{preset}]` in \
+             ~/.config/farcooler/config.toml to use the ACP adapter instead, then run \
+             `farcooler daemon ensure`.\n\
+             Terminal mode needs no backend and is unaffected."
+        ),
         Status::Connected { session_id } => {
             format!("farcooler: agent session {session_id} connected. Rendering natively.")
+        }
+    }
+}
+
+/// Start whichever backend this adapter asks for.
+///
+/// The one place the protocol is chosen. `Ok(Err(_))` is a backend that
+/// refused and said why; the caller turns that into a pane that stays a
+/// terminal rather than silently falling back to ACP.
+#[allow(clippy::type_complexity)]
+async fn start_backend(
+    preset: &str,
+    spec: farcooler_core::activity::AdapterSpec,
+    program: &str,
+    args: &[String],
+    worktree: &std::path::Path,
+    session: Option<String>,
+) -> Result<
+    (farcooler_agent::dispatch::Backend, Vec<farcooler_agent::event::AgentEvent>, String, Vec<String>),
+    farcooler_agent_core::backend::BackendError,
+> {
+    use farcooler_agent::dispatch::Backend;
+    use farcooler_agent_core::backend::BackendError;
+
+    match spec.backend {
+        farcooler_core::activity::AdapterBackend::Acp => {
+            let conn = AcpConnection::spawn(program, args, worktree)
+                .await
+                .map_err(|_| BackendError::Spawn)?;
+            let (agent, prelude) = AgentSession::start(conn, session)
+                .await
+                .map_err(|_| BackendError::Closed)?;
+            let session_id = agent.session_id.clone();
+            let modes = agent.available_modes.clone();
+            let can_load = agent.can_load;
+            Ok((
+                Backend::Acp(AcpBackend::new(agent.into_running(), can_load)),
+                prelude,
+                session_id,
+                modes,
+            ))
+        }
+        farcooler_core::activity::AdapterBackend::Native => {
+            // Resolved here for the reason `programs::find` exists: a
+            // Dock-launched daemon inherits launchd's PATH and finds nothing a
+            // package manager installed.
+            let resolved = farcooler_core::programs::find(program.trim())
+                .ok_or(BackendError::Spawn)?;
+            let launch = farcooler_agent_core::backend::Launch {
+                program: resolved,
+                args: args.to_vec(),
+                env: spec.env.clone(),
+            };
+            // The preset chooses WHICH native protocol. "Native" is not one
+            // wire: codex speaks app-server, claude speaks stream-json, and
+            // they share nothing but this branch.
+            match preset {
+                "codex" => {
+                    let (backend, prelude) = farcooler_codex::backend::CodexBackend::start(
+                        &launch,
+                        worktree.to_path_buf(),
+                        session,
+                    )
+                    .await?;
+                    let session_id = backend.thread_id.clone();
+                    Ok((Backend::Codex(backend), prelude, session_id, Vec::new()))
+                }
+                "claude" => {
+                    let (backend, prelude) = farcooler_claude::backend::ClaudeBackend::start(
+                        &launch,
+                        worktree.to_path_buf(),
+                        session,
+                    )
+                    .await?;
+                    let session_id = backend.session_id.clone();
+                    let modes = vec![
+                        "default".to_string(),
+                        "plan".to_string(),
+                        "dontAsk".to_string(),
+                        "bypassPermissions".to_string(),
+                    ];
+                    Ok((Backend::Claude(backend), prelude, session_id, modes))
+                }
+                other => Err(BackendError::Refused(format!(
+                    "`{other}` has no native backend; set backend = \"acp\" under [adapters.{other}]"
+                ))),
+            }
         }
     }
 }
@@ -157,40 +261,40 @@ pub async fn run(
         }
     }
 
-    let conn = match AcpConnection::spawn(&program, &args, &worktree).await {
-        Ok(c) => c,
-        Err(_) => {
-            println!(
-                "{}",
-                status_line(&Status::AdapterMissing {
-                    preset: agent_label,
-                    command
-                })
-            );
-            // Stay alive so the pane does not vanish and derive as an exit the
-            // user never caused. They read the message and switch modes.
-            std::future::pending::<()>().await;
-            unreachable!()
-        }
-    };
-
-    // Bounded, because an adapter that starts but never answers `initialize`
-    // is a real state and it looks like nothing at all: the process is alive,
-    // the pane is `running`, and the screen stays blank forever with no way for
-    // a user to tell whether it is slow or wedged. Observed in practice when
-    // the Claude SDK refuses to launch nested inside another Claude Code
-    // session — it neither answers nor exits.
+    // Bounded, because a backend that starts but never answers is a real state
+    // and it looks like nothing at all: the process is alive, the pane is
+    // `running`, and the screen stays blank forever with no way for a user to
+    // tell whether it is slow or wedged. Observed in practice when the Claude
+    // SDK refuses to launch nested inside another Claude Code session — it
+    // neither answers nor exits.
     //
     // Generous, because a cold `npx` genuinely has to fetch a package on first
     // use, and killing that would be worse than waiting.
     let started = tokio::time::timeout(
         std::time::Duration::from_secs(90),
-        AgentSession::start(conn, session),
+        start_backend(&agent_label, spec, &program, &args, &worktree, session),
     )
     .await;
 
-    let (agent, prelude) = match started {
-        Ok(result) => result?,
+    let (backend, prelude, session_id, available_modes) = match started {
+        Ok(Ok(ready)) => ready,
+        // A native backend that will not start leaves the pane a terminal and
+        // says why, rather than silently becoming ACP. Falling back would hand
+        // the user a quietly different transcript — fewer item types, no
+        // steering — for a protocol they did not choose, which is the class of
+        // thing this product refuses everywhere else.
+        Ok(Err(reason)) => {
+            println!(
+                "{}",
+                status_line(&Status::BackendFailed {
+                    preset: agent_label,
+                    command,
+                    reason: reason.to_string(),
+                })
+            );
+            std::future::pending::<()>().await;
+            unreachable!()
+        }
         Err(_) => {
             println!(
                 "{}",
@@ -206,13 +310,7 @@ pub async fn run(
             unreachable!()
         }
     };
-    println!("{}", status_line(&Status::Connected { session_id: agent.session_id.clone() }));
-
-    // Captured before `into_running()` consumes `agent`: `RunningSession`
-    // does not carry these, since nothing after startup needs to send them
-    // anywhere but the `Established` message a fresh daemon connection wants.
-    let session_id = agent.session_id.clone();
-    let available_modes = agent.available_modes.clone();
+    println!("{}", status_line(&Status::Connected { session_id: session_id.clone() }));
 
     let ring = Arc::new(Mutex::new(AgentRing::new()));
     {
@@ -228,7 +326,8 @@ pub async fn run(
     // arbitrary stretches, and the agent must keep working through all of
     // them. This task is the ONLY place `RunningSession` is touched, and it
     // runs independent of whether anyone is subscribed to the ring.
-    let mut running = agent.into_running();
+    // The prompt queue lives in `ChatSession`; the wire lives in the backend.
+    let mut chat = ChatSession::new(backend);
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<DaemonMessage>();
     // Signals the daemon-link loop that the ring has new events, so a
     // connected daemon does not have to poll. `notify_one` (not
@@ -253,7 +352,7 @@ pub async fn run(
                     // `handle_fs_write` has already touched the disk, so losing
                     // the race leaves the file written and the agent waiting
                     // forever for an answer that never comes.
-                    frame = running.recv_frame() => {
+                    frame = chat.backend_mut().recv_frame() => {
                         let frame = match frame {
                             Ok(frame) => frame,
                             Err(e) => {
@@ -262,8 +361,13 @@ pub async fn run(
                             }
                         };
                         // Handled to completion, uncancellable by construction.
-                        match running.handle(frame).await {
+                        match chat.backend_mut().handle(frame).await {
                             Ok(events) => {
+                                // Through `absorb` rather than straight to the
+                                // ring: a turn ending is what releases a queued
+                                // prompt, and this path must drain the queue on
+                                // exactly the same signal `next_events` does.
+                                let events = chat.absorb(events).await;
                                 if events.is_empty() { continue; }
                                 let mut ring = ring.lock().expect("ring mutex");
                                 for event in events {
@@ -285,7 +389,7 @@ pub async fn run(
                         // because the agent has not been told about it.
                         let mut produced: Vec<farcooler_agent::event::AgentEvent> = Vec::new();
                         let result = match cmd {
-                            DaemonMessage::Prompt { text, images } => match running.prompt(&text, images).await {
+                            DaemonMessage::Prompt { text, images } => match chat.prompt(&text, images).await {
                                 Ok(events) => {
                                     produced = events;
                                     Ok(())
@@ -293,15 +397,15 @@ pub async fn run(
                                 Err(e) => Err(e),
                             },
                             DaemonMessage::EditQueued { id, text } => {
-                                produced = running.edit_queued(&id, &text);
+                                produced = chat.edit_queued(&id, &text);
                                 Ok(())
                             }
                             DaemonMessage::CancelQueued { id } => {
-                                produced = running.cancel_queued(&id);
+                                produced = chat.cancel_queued(&id);
                                 Ok(())
                             }
                             DaemonMessage::SteerQueued { id } => {
-                                match running.steer_queued(&id).await {
+                                match chat.steer_queued(&id).await {
                                     Ok(events) => {
                                         produced = events;
                                         Ok(())
@@ -310,16 +414,23 @@ pub async fn run(
                                 }
                             }
                             DaemonMessage::Answer { request_id, option_id } => {
-                                let id: serde_json::Value = serde_json::from_str(&request_id)
-                                    .unwrap_or(serde_json::Value::String(request_id));
-                                running.answer(id, &option_id).await
+                                chat.backend_mut().answer(&request_id, &option_id).await
                             }
-                            DaemonMessage::SetMode { agent_mode } => running.set_mode(&agent_mode).await,
-                            DaemonMessage::SetModel { model } => running.set_model(&model).await,
+                            // `mode` and `model` are well-known config ids
+                            // rather than methods of their own — the wire keeps
+                            // three messages because shipped apps send three,
+                            // and the backend is what knows whether its
+                            // protocol has one setter or several.
+                            DaemonMessage::SetMode { agent_mode } => {
+                                chat.backend_mut().set_config_option("mode", &agent_mode).await
+                            }
+                            DaemonMessage::SetModel { model } => {
+                                chat.backend_mut().set_config_option("model", &model).await
+                            }
                             DaemonMessage::SetConfig { id, value } => {
-                                running.set_config_option(&id, &value).await
+                                chat.backend_mut().set_config_option(&id, &value).await
                             }
-                            DaemonMessage::Cancel => running.cancel().await,
+                            DaemonMessage::Cancel => chat.backend_mut().cancel().await,
                             // The daemon-link loop answers `Subscribe` itself
                             // by reading the ring directly; it never reaches
                             // this channel.

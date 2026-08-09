@@ -5,8 +5,8 @@
 //! samples, so a passing suite here means the normalizer survives contact with
 //! the actual wire format, not just the shapes its author guessed at.
 
-use farcooler_agent::acp::{normalize::update_to_events, wire};
-use farcooler_agent::event::{AgentEvent, AgentGapReason, Role};
+use farcooler_acp::{normalize::update_to_events, wire};
+use farcooler_agent_core::event::{AgentEvent, AgentGapReason, Role};
 
 const FIXTURES: [&str; 2] = ["session_basic.jsonl", "session_permission.jsonl"];
 

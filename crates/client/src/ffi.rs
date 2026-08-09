@@ -1000,6 +1000,16 @@ fn wire_adapter(
         // Set by the daemon on the way back out; a client claiming one would be
         // claiming something only the daemon can know.
         origin: 0,
+        // Unlike `origin`, this IS the client's to say: it is what the form is
+        // configured for, and it is what `adapter.test` has to exercise.
+        // Absent means acp, which is what every adapter that says nothing gets.
+        backend: args
+            .get("backend")
+            .and_then(|v| v.as_str())
+            .map(|name| {
+                farcooler_core::activity::AdapterBackend::parse(name).to_proto() as i32
+            })
+            .unwrap_or_default(),
     }
 }
 

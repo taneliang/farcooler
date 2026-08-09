@@ -1,0 +1,17 @@
+[package]
+name = "farcooler-claude"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+farcooler-agent-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+# `#[tokio::test]`, which the live-turn test needs and the crate itself does not.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

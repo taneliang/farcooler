@@ -209,10 +209,13 @@ public struct SubagentSummary: Decodable, Sendable, Equatable {
 }
 
 public enum AgentEvent: Sendable, Equatable {
+    /// `backend` is the protocol carrying this conversation — `acp`, `claude`,
+    /// or `codex`. Defaults to `acp` for a transcript written before the field
+    /// existed, which is what those sessions actually used.
     case sessionStarted(
         sessionID: String, agentMode: String?, availableModes: [AgentChoice],
         model: String?, availableModels: [AgentChoice], configOptions: [ConfigOption],
-        availableCommands: [AgentChoice])
+        availableCommands: [AgentChoice], backend: String)
     /// `parent` names the dispatch this belongs to when a subagent produced
     /// it. `nil` is the ordinary case: the agent itself spoke.
     case message(role: Role, text: String, parent: String?)
@@ -323,7 +326,8 @@ extension AgentEvent {
                     availableModes: p.availableModes, model: p.model,
                     availableModels: p.availableModels,
                     configOptions: p.configOptions,
-                    availableCommands: p.availableCommands)
+                    availableCommands: p.availableCommands,
+                    backend: p.backend ?? "acp")
             case "Message":
                 let p = try outer.decode(MessagePayload.self, forKey: key)
                 event = .message(role: p.role, text: p.text, parent: p.parent)
@@ -385,6 +389,10 @@ extension AgentEvent {
         let availableModels: [AgentChoice]
         let configOptions: [ConfigOption]
         let availableCommands: [AgentChoice]
+        /// Optional, and has to be: every transcript already in SQLite was
+        /// written before this field existed. Absent means ACP, which is the
+        /// only backend those sessions could have used.
+        let backend: String?
         enum CodingKeys: String, CodingKey {
             case sessionID = "session_id"
             case agentMode = "agent_mode"
@@ -393,6 +401,7 @@ extension AgentEvent {
             case availableModels = "available_models"
             case configOptions = "config_options"
             case availableCommands = "available_commands"
+            case backend
         }
     }
     // Every subagent field below is optional, and has to be: the daemon skips

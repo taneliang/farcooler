@@ -802,9 +802,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
+name = "farcooler-acp"
+version = "0.1.0"
+dependencies = [
+ "farcooler-agent-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+]
+
+[[package]]
 name = "farcooler-agent"
 version = "0.1.0"
 dependencies = [
+ "farcooler-acp",
+ "farcooler-agent-core",
+ "farcooler-claude",
+ "farcooler-codex",
+ "farcooler-core",
  "farcooler-protocol",
  "serde",
  "serde_json",
@@ -814,13 +830,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "farcooler-agent-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "farcooler-claude"
+version = "0.1.0"
+dependencies = [
+ "farcooler-agent-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+]
+
+[[package]]
 name = "farcooler-cli"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "clap",
+ "farcooler-acp",
  "farcooler-agent",
+ "farcooler-agent-core",
+ "farcooler-claude",
  "farcooler-client",
+ "farcooler-codex",
  "farcooler-core",
  "farcooler-daemon",
  "farcooler-protocol",
@@ -851,6 +890,17 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "farcooler-codex"
+version = "0.1.0"
+dependencies = [
+ "farcooler-agent-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
 ]
 
 [[package]]

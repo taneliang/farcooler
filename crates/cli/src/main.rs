@@ -988,6 +988,7 @@ async fn adapter(host: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible {
                             "program": a.program,
                             "args": a.args,
                             "origin": origin_label(a.origin),
+                            "backend": backend_label(a.backend),
                             "chatCapable": !a.program.is_empty(),
                         })
                     })
@@ -1004,7 +1005,13 @@ async fn adapter(host: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible {
                 } else {
                     format!("{} {}", a.program, a.args.join(" "))
                 };
-                println!("{:12}  {:10}  {}", a.preset, origin_label(a.origin), launch);
+                println!(
+                    "{:12}  {:10}  {:7}  {}",
+                    a.preset,
+                    origin_label(a.origin),
+                    backend_label(a.backend),
+                    launch
+                );
             }
         }
 
@@ -1136,6 +1143,12 @@ fn adapter_from_json(payload: &serde_json::Value) -> farcooler_protocol::v1::Ada
         identity: strings("identity"),
         blocked: strings("blocked"),
         working: strings("working"),
+        // Absent means acp, matching what an omitted `backend` key in the
+        // config file means. An app that predates this field keeps working.
+        backend: payload["backend"]
+            .as_str()
+            .map(|name| farcooler_core::activity::AdapterBackend::parse(name).to_proto() as i32)
+            .unwrap_or_default(),
         // The daemon decides this on the way back out. A caller claiming an
         // origin would be claiming something only the daemon can know.
         origin: 0,
@@ -1149,6 +1162,18 @@ fn origin_label(origin: i32) -> &'static str {
         Ok(farcooler_protocol::v1::AdapterOrigin::Override) => "override",
         Ok(farcooler_protocol::v1::AdapterOrigin::User) => "yours",
         _ => "unknown",
+    }
+}
+
+/// Which protocol an adapter speaks, as a person reads it.
+///
+/// Unspecified reads as `acp` rather than `unknown`, because that is what it
+/// means: a daemon or config file that says nothing about the backend is
+/// asking for the one every adapter had before the field existed.
+fn backend_label(backend: i32) -> &'static str {
+    match farcooler_protocol::v1::AdapterBackend::try_from(backend) {
+        Ok(farcooler_protocol::v1::AdapterBackend::Native) => "native",
+        _ => "acp",
     }
 }
 

@@ -6,8 +6,8 @@
 //! hand-written samples, so a pass here means the normalizer survived contact
 //! with the wire rather than with its author's idea of the wire.
 
-use farcooler_agent::acp::{normalize::update_to_events, wire};
-use farcooler_agent::event::AgentEvent;
+use farcooler_acp::{normalize::update_to_events, wire};
+use farcooler_agent_core::event::AgentEvent;
 
 fn events_from(fixture: &str) -> Vec<AgentEvent> {
     let raw = std::fs::read_to_string(format!("tests/fixtures/{fixture}")).expect("fixture");

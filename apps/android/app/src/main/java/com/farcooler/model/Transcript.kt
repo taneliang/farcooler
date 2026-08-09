@@ -146,6 +146,13 @@ class Transcript {
     var title: String? = null
         private set
 
+    /**
+     * Which protocol is carrying this conversation: `acp`, `claude`, or
+     * `codex`. Defaults to `acp`, which is what a session that never said is.
+     */
+    var backend: String = "acp"
+        private set
+
     /** Context-window usage, or null before the agent has reported any. */
     var contextUsed: Long? = null
         private set
@@ -466,6 +473,7 @@ class Transcript {
     private fun apply(event: AgentEvent) {
         when (event) {
             is AgentEvent.SessionStarted -> {
+                backend = event.backend
                 agentMode = event.agentMode
                 availableModes = event.availableModes
                 model = event.model

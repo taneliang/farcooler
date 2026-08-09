@@ -96,6 +96,14 @@ struct AdapterEditor: View {
 
     private var launchSection: some View {
         Section {
+            // Only for the agents that have one. Offering a choice that cannot
+            // work would be worse than not offering it — see `nativeIsAvailable`.
+            if draft.nativeIsAvailable {
+                Picker("Protocol", selection: $draft.backend) {
+                    Text("ACP Adapter").tag(AdapterInfo.Backend.acp)
+                    Text("Native").tag(AdapterInfo.Backend.native)
+                }
+            }
             TextField("Program", text: $draft.program, prompt: Text("npx"))
                 .autocorrectionDisabled()
             lines("Arguments", $argsText, prompt: "-y\n@agentclientprotocol/my-agent-acp")
@@ -104,7 +112,19 @@ struct AdapterEditor: View {
             Text("Launch")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                Text("One per line. Environment entries are KEY=value.")
+                if draft.nativeIsAvailable && draft.backend == .native {
+                    // Said here rather than discovered later: under Native the
+                    // arguments mean something different, and the protocol
+                    // flags are not yours to set.
+                    Text(
+                        "Native speaks this agent's own protocol, with no adapter and no npx. "
+                            + "Arguments are added after the flags the protocol needs."
+                    )
+                    Text("Chat mode still runs the ACP adapter — Test proves the native handshake only.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("One per line. Environment entries are KEY=value.")
+                }
                 Text("This is the half Test can prove.")
                     .foregroundStyle(.secondary)
             }

@@ -130,7 +130,7 @@ import Testing
     "available_commands":[]}}
     """
     let event = try AgentEvent.decode(from: json)
-    guard case let .sessionStarted(_, _, modes, model, models, options, _) = event else {
+    guard case let .sessionStarted(_, _, modes, model, models, options, _, backend) = event else {
         Issue.record("expected sessionStarted, got \(event)")
         return
     }
@@ -138,4 +138,26 @@ import Testing
     #expect(model == "haiku")
     #expect(models.first?.name == "Haiku")
     #expect(options.first?.id == "mode")
+    // These bytes carry no `backend` — they predate the field. Every
+    // transcript already in SQLite looks like this, and they were all ACP.
+    #expect(backend == "acp")
+}
+
+@Test func aNativeSessionSaysWhichProtocolIsCarryingIt() throws {
+    // The point of the field: two paths that behave differently — a native
+    // backend has no adapter to go stale and can steer into a running turn —
+    // should not be indistinguishable in the UI. Without this, telling them
+    // apart meant reading `ps`.
+    let json = """
+    {"SessionStarted":{"session_id":"s","agent_mode":null,\
+    "available_modes":[],"model":null,"available_models":[],\
+    "config_options":[],"available_commands":[],"backend":"codex"}}
+    """
+    guard case let .sessionStarted(_, _, _, _, _, _, _, backend) =
+        try AgentEvent.decode(from: json)
+    else {
+        Issue.record("expected sessionStarted")
+        return
+    }
+    #expect(backend == "codex")
 }

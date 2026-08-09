@@ -25,6 +25,13 @@ use crate::activity::Registry;
 /// agent has to say how to recognize it.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ConfigAdapter {
+    /// `"acp"` or `"native"`. Absent means `"acp"`, so a file written before
+    /// native backends existed keeps the behavior it had.
+    ///
+    /// A string rather than a typed enum, because an unrecognized value has to
+    /// fall back rather than fail the whole table — see `AdapterBackend::parse`.
+    #[serde(default)]
+    pub backend: Option<String>,
     pub program: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -402,6 +409,12 @@ pub fn write_adapter(path: &Path, name: &str, spec: &AdapterTable) -> std::io::R
     let Some(mut doc) = document_for_edit(path)? else { return Err(malformed(path)) };
 
     let mut table = toml_edit::Table::new();
+    // Written only when it is not the default. `backend = "acp"` on every
+    // table would be noise in a file whose whole point is being hand-edited,
+    // and absent already means acp — see `AdapterBackend::parse`.
+    if spec.backend != crate::activity::AdapterBackend::default() {
+        table.insert("backend", toml_edit::value(spec.backend.as_str()));
+    }
     table.insert("program", toml_edit::value(spec.program.trim()));
     table.insert("args", strings(&spec.args));
     // `env` is an inline table, matching how the docs write it and how a person
@@ -445,6 +458,9 @@ pub fn delete_adapter(path: &Path, name: &str) -> std::io::Result<()> {
 /// omit a field would be a writer that could silently inherit one.
 #[derive(Debug, Clone, Default)]
 pub struct AdapterTable {
+    /// Which protocol to speak. Written only when it is not the default, so a
+    /// file an editor saved reads the way a person would have written it.
+    pub backend: crate::activity::AdapterBackend,
     pub program: String,
     pub args: Vec<String>,
     pub env: std::collections::BTreeMap<String, String>,
@@ -999,6 +1015,38 @@ mod tests {
     }
 
     #[test]
+    fn switching_a_built_in_to_native_keeps_its_detection() {
+        // The exact shape the adapter editor writes when you flip the Protocol
+        // picker: launch fields changed, all four detection arrays empty. Empty
+        // has to mean "leave the built-in's alone", because if it meant "clear
+        // them" the agent would stop being recognized in a pane — and the
+        // toggle picks an adapter by the preset a pane was DETECTED as, so a
+        // codex nothing can identify could never reach its own backend.
+        let dir = scratch("native-keeps-detection");
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[adapters.codex]\nbackend = \"native\"\nprogram = \"codex\"\nargs = []\n\
+             commands = []\nidentity = []\nblocked = []\nworking = []\n",
+        )
+        .unwrap();
+
+        let r = registry_from(&path);
+        let rules = r.all().iter().find(|x| x.preset == "codex").expect("codex survives").clone();
+        assert_eq!(
+            rules.adapter.as_ref().map(|a| a.backend),
+            Some(crate::activity::AdapterBackend::Native),
+            "the override is what selects the protocol"
+        );
+        assert!(!rules.commands.is_empty(), "an emptied array must not clear detection");
+        assert!(!rules.identity.is_empty(), "same for the screen signatures");
+        assert!(
+            r.rules_for_command("codex").is_some(),
+            "a codex pane still has to be recognized as codex"
+        );
+    }
+
+    #[test]
     fn a_table_naming_something_new_adds_an_agent() {
         let dir = scratch("add");
         let path = dir.join("config.toml");
@@ -1051,6 +1099,50 @@ mod tests {
             "built-ins survive a file that fails to parse"
         );
         assert!(r.chat_capable("claude"));
+    }
+
+    /// The adapter for `preset`, or a panic naming what went wrong instead.
+    fn adapter_for(path: &std::path::Path, preset: &str) -> crate::activity::AdapterSpec {
+        registry_from(path)
+            .all()
+            .iter()
+            .find(|r| r.preset == preset)
+            .unwrap_or_else(|| panic!("no rules for {preset}"))
+            .adapter
+            .clone()
+            .unwrap_or_else(|| panic!("{preset} has no adapter"))
+    }
+
+    #[test]
+    fn an_adapter_defaults_to_acp_when_it_says_nothing() {
+        // Every preset shipping today speaks ACP. A file written before this
+        // field existed must keep working, and silence has to mean the
+        // behavior it already had.
+        let dir = scratch("backend-default");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[adapters.codex]\nprogram = \"npx\"\n").unwrap();
+        assert_eq!(adapter_for(&path, "codex").backend, crate::activity::AdapterBackend::Acp);
+    }
+
+    #[test]
+    fn an_adapter_can_ask_for_the_native_backend() {
+        let dir = scratch("backend-native");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[adapters.codex]\nbackend = \"native\"\nprogram = \"codex\"\n")
+            .unwrap();
+        assert_eq!(adapter_for(&path, "codex").backend, crate::activity::AdapterBackend::Native);
+    }
+
+    #[test]
+    fn an_unknown_backend_name_falls_back_to_acp_rather_than_losing_the_adapter() {
+        // Same contract as a malformed file: a typo in one field must not cost
+        // this agent its chat mode entirely. Falling back to the behavior the
+        // file had before it was edited is the safe direction to be wrong in.
+        let dir = scratch("backend-typo");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[adapters.codex]\nbackend = \"nativ\"\nprogram = \"codex\"\n")
+            .unwrap();
+        assert_eq!(adapter_for(&path, "codex").backend, crate::activity::AdapterBackend::Acp);
     }
 
     #[test]

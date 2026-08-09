@@ -108,6 +108,13 @@ public struct Transcript: Sendable {
     public private(set) var configOptions: [ConfigOption] = []
     /// What the agent calls this conversation, once it has named it.
     public private(set) var title: String?
+    /// Which protocol is carrying this conversation: `acp`, `claude`, or
+    /// `codex`.
+    ///
+    /// Defaults to `acp` rather than being optional, because that is what a
+    /// session which never said is: ACP was the only backend that existed
+    /// when those transcripts were written.
+    public private(set) var backend: String = "acp"
     /// Context-window usage, or nil before the agent has reported any.
     public private(set) var contextUsed: UInt64?
     public private(set) var contextSize: UInt64?
@@ -372,7 +379,9 @@ public struct Transcript: Sendable {
 
     private mutating func apply(_ event: AgentEvent) {
         switch event {
-        case let .sessionStarted(_, mode, modes, currentModel, models, options, commands):
+        case let .sessionStarted(
+            _, mode, modes, currentModel, models, options, commands, wire):
+            backend = wire
             agentMode = mode
             availableModes = modes
             model = currentModel

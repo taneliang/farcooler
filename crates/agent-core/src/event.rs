@@ -174,6 +174,12 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+/// What a `SessionStarted` with no `backend` recorded was: ACP was the only
+/// backend that existed when those transcripts were written.
+fn acp_backend() -> String {
+    crate::backend::BackendKind::Acp.as_str().to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AgentEvent {
     SessionStarted {
@@ -197,6 +203,19 @@ pub enum AgentEvent {
         /// and the picker needs it. Reused rather than a second struct of the
         /// same three fields.
         available_commands: Vec<AgentChoice>,
+        /// Which protocol is carrying this conversation: `acp`, `claude`, or
+        /// `codex`.
+        ///
+        /// Here rather than left for a user to infer from `ps`, because the
+        /// two paths behave differently in ways that show — a native backend
+        /// has no adapter to go stale and steers into a running turn, an ACP
+        /// one does neither — and a chat that cannot say which one it is makes
+        /// every such difference look like a bug.
+        ///
+        /// Defaulted, because every transcript already in SQLite was written
+        /// before this field existed and must still decode.
+        #[serde(default = "acp_backend")]
+        backend: String,
     },
     Message {
         role: Role,

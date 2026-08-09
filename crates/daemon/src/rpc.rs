@@ -335,6 +335,7 @@ impl Rpc {
                     blocked: rules.blocked.clone(),
                     working: rules.working.clone(),
                     origin: origin as i32,
+                    backend: spec.backend.to_proto() as i32,
                 }
             })
             .collect();
@@ -346,6 +347,7 @@ impl Rpc {
         wire_adapter: &farcooler_protocol::v1::Adapter,
     ) -> farcooler_core::config::AdapterTable {
         farcooler_core::config::AdapterTable {
+            backend: farcooler_core::activity::AdapterBackend::from_proto(wire_adapter.backend),
             program: wire_adapter.program.trim().to_string(),
             args: wire_adapter.args.clone(),
             env: wire_adapter.env.clone().into_iter().collect(),
@@ -549,14 +551,25 @@ impl Rpc {
                 // on first use and the bound is 90 seconds, which is far too
                 // long to hold a runtime worker.
                 let spec = farcooler_core::activity::AdapterSpec {
+                    // From the client, so Test exercises the protocol the form
+                    // is actually configured for. This used to be hardcoded to
+                    // ACP because the wire had no field for it, which meant a
+                    // native adapter was reported working by a button that had
+                    // only ever spoken ACP to it.
+                    backend: farcooler_core::activity::AdapterBackend::from_proto(p.backend),
                     program: p.program.trim().to_string(),
                     args: p.args.clone(),
                     env: p.env.clone().into_iter().collect(),
                 };
+                // The preset chooses WHICH native protocol, when the backend is
+                // native — codex speaks app-server, claude speaks stream-json,
+                // and they share nothing. It was already on the wire.
+                let preset = p.preset.trim().to_string();
                 let outcome = tokio::task::spawn_blocking(move || {
-                    farcooler_core::activity::handshake(
+                    farcooler_agent::dispatch::handshake(
+                        &preset,
                         &spec,
-                        farcooler_core::activity::HANDSHAKE_TIMEOUT,
+                        farcooler_agent::dispatch::HANDSHAKE_TIMEOUT,
                     )
                 })
                 .await
@@ -565,7 +578,7 @@ impl Rpc {
                 Ok(result::Value::AdapterTestResult(match outcome {
                     Ok(shake) => farcooler_protocol::v1::AdapterTestResult {
                         ok: true,
-                        reported: shake.reported,
+                        reported: shake,
                         failure: String::new(),
                     },
                     // The adapter's own words, not "the test failed": the

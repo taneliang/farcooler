@@ -3,6 +3,10 @@ resolver = "3"
 members = [
     "crates/protocol",
     "crates/core",
+    "crates/agent-core",
+    "crates/acp",
+    "crates/codex",
+    "crates/claude",
     "crates/agent",
     "crates/store",
     "crates/tmux",
@@ -23,6 +27,10 @@ license = "MIT"
 [workspace.dependencies]
 farcooler-protocol = { path = "crates/protocol" }
 farcooler-core = { path = "crates/core" }
+farcooler-agent-core = { path = "crates/agent-core" }
+farcooler-acp = { path = "crates/acp" }
+farcooler-codex = { path = "crates/codex" }
+farcooler-claude = { path = "crates/claude" }
 farcooler-agent = { path = "crates/agent" }
 farcooler-store = { path = "crates/store" }
 farcooler-tmux = { path = "crates/tmux" }

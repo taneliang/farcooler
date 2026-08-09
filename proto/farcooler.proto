@@ -506,6 +506,26 @@ message Adapter {
   repeated string blocked = 7;
   repeated string working = 8;
   AdapterOrigin origin = 9;
+  // Which protocol Far Cooler speaks to this agent.
+  //
+  // On the wire because `adapter.test` needs it: without it the daemon has to
+  // assume, and a Test button that confidently exercises ACP for an adapter
+  // configured as native reports a working adapter for a protocol that was
+  // never spoken to. Unspecified means ACP, so a client built before this
+  // field keeps the behavior it had.
+  AdapterBackend backend = 10;
+}
+
+// Which protocol Far Cooler speaks to an agent.
+//
+// `NATIVE` means the agent's own protocol — `codex app-server`, or the Claude
+// CLI's stream-json control protocol — rather than an ACP adapter wrapping it.
+// Not every preset has one: `cursor` and `opencode` are ACP-only, and an
+// adapter a user added in config.toml is always ACP.
+enum AdapterBackend {
+  ADAPTER_BACKEND_UNSPECIFIED = 0;
+  ADAPTER_BACKEND_ACP = 1;
+  ADAPTER_BACKEND_NATIVE = 2;
 }
 
 enum AdapterOrigin {

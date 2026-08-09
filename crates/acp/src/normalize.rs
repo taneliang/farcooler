@@ -1,7 +1,7 @@
 //! ACP updates in, normalized events out.
 
-use crate::acp::wire::{SessionUpdate, WirePlanEntry};
-use crate::event::{AgentEvent, AgentGapReason, PlanEntry, Role, ToolStatus};
+use crate::wire::{SessionUpdate, WirePlanEntry};
+use farcooler_agent_core::event::{AgentEvent, AgentGapReason, PlanEntry, Role, ToolStatus};
 
 fn status(raw: &str) -> ToolStatus {
     match raw {
@@ -13,8 +13,8 @@ fn status(raw: &str) -> ToolStatus {
 }
 
 /// The adapter's report of a finished subagent, as clients render it.
-fn summary(result: &crate::acp::wire::SubagentResult) -> crate::event::SubagentSummary {
-    crate::event::SubagentSummary {
+fn summary(result: &crate::wire::SubagentResult) -> farcooler_agent_core::event::SubagentSummary {
+    farcooler_agent_core::event::SubagentSummary {
         agent_type: result.agent_type.clone(),
         model: result.resolved_model.clone(),
         tokens: result.total_tokens,
@@ -52,7 +52,7 @@ fn detail(title: &str, raw_input: &serde_json::Value) -> String {
 /// right for a renderer that speaks markdown and noise for one that shows a
 /// monospace block. The fence is stripped here so every client does not have
 /// to.
-fn tool_text(content: &[crate::acp::wire::ToolContent]) -> Option<String> {
+fn tool_text(content: &[crate::wire::ToolContent]) -> Option<String> {
     let joined: String = content
         .iter()
         .filter_map(|c| c.content.as_ref().map(|b| b.text.clone()))
@@ -74,8 +74,8 @@ fn strip_fence(text: &str) -> String {
 }
 
 /// A diff carried directly on a tool call, rather than reconstructed.
-fn tool_diff(content: &[crate::acp::wire::ToolContent]) -> Option<crate::event::Diff> {
-    content.iter().find(|c| c.kind == "diff").map(|c| crate::event::Diff {
+fn tool_diff(content: &[crate::wire::ToolContent]) -> Option<farcooler_agent_core::event::Diff> {
+    content.iter().find(|c| c.kind == "diff").map(|c| farcooler_agent_core::event::Diff {
         path: c.path.clone(),
         old_text: c.old_text.clone(),
         new_text: c.new_text.clone().unwrap_or_default(),
@@ -130,7 +130,7 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
             vec![AgentEvent::CommandsAvailable {
                 commands: available_commands
                     .iter()
-                    .map(|c| crate::event::AgentChoice {
+                    .map(|c| farcooler_agent_core::event::AgentChoice {
                         id: c.name.clone(),
                         name: c.name.clone(),
                         description: c.description.clone(),
@@ -230,8 +230,8 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::wire::SessionUpdate;
-    use crate::event::{AgentEvent, AgentGapReason, Role, ToolStatus};
+    use crate::wire::SessionUpdate;
+    use farcooler_agent_core::event::{AgentEvent, AgentGapReason, Role, ToolStatus};
 
     #[test]
     fn an_agent_message_chunk_becomes_an_agent_message() {
