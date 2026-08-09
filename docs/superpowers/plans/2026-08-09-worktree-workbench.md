@@ -67,14 +67,14 @@
 - Consumes: nothing.
 - Produces: `Store::review_base(Uuid) -> Result<Option<String>>`, `Store::set_review_base(Uuid, &str) -> Result<()>`, `Store::mark_reviewed_with_gate(Uuid, &str, &str, &str, i64, i64, i64) -> Result<()>`, `Store::reviewed_mark(Uuid, &str) -> Result<Option<ReviewedMark>>`, `Store::stack_parent(Uuid, &str) -> Result<Option<String>>`, `Store::set_stack_parent(Uuid, &str, &str) -> Result<()>`. `ReviewedMark { head_commit: String, worktree_digest: String, gate_head: i64, gate_index: i64, marked_at: i64 }`.
 
-- [ ] **Step 1: Delete the buffer's integration tests**
+- [x] **Step 1: Delete the buffer's integration tests**
 
 ```bash
 cd "/Users/e-liang/Library/Application Support/com.farcooler.FarCooler/worktrees/overnight-review"
 git rm crates/store/tests/a_dispatch_is_never_claimed_before_it_is_delivered.rs
 ```
 
-- [ ] **Step 2: Cut migration 0007 down to the three tables that survive**
+- [x] **Step 2: Cut migration 0007 down to the three tables that survive**
 
 Replace the whole body of `migration_0007_review` in `crates/store/src/migrate.rs` with:
 
@@ -125,7 +125,7 @@ fn migration_0007_review(tx: &Transaction) -> rusqlite::Result<()> {
 }
 ```
 
-- [ ] **Step 3: Cut `crates/store/src/review.rs` to the surviving surface**
+- [x] **Step 3: Cut `crates/store/src/review.rs` to the surviving surface**
 
 Delete these items entirely: `Disposition`, `EntryStatus`, `DispatchState`, `ReviewEntry`, `Dispatch`, `Attachment`, `WorkspaceCounts`, `row_to_entry`, `row_to_dispatch`, `row_to_attachment`, `ENTRY_COLUMNS`, and every method from `capture_review_entry` through `is_viewed`, plus `record_attachment`, `attach_to_entry`, `attachment`, `entry_attachments`, `workspace_attachment_bytes`, `review_counts_by_workspace`, `entries_with_snapshots`, `clear_snapshot`, and the inline `mod tests`.
 
@@ -147,7 +147,7 @@ Replace the module doc comment with:
 
 Keep `ReviewedMark`, `review_base`, `set_review_base`, `mark_reviewed`, `mark_reviewed_with_gate`, `reviewed_mark`, `stack_parent`, `set_stack_parent` exactly as they are.
 
-- [ ] **Step 4: Add the guard test that the buffer stays gone**
+- [x] **Step 4: Add the guard test that the buffer stays gone**
 
 Append to `crates/store/src/review.rs`:
 
@@ -183,7 +183,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 5: Run the tests and verify they pass**
+- [x] **Step 5: Run the tests and verify they pass**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -192,7 +192,7 @@ cargo test -p farcooler-store 2>&1 | tail -20
 
 Expected: PASS, and the two new tests named above appear.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/store
@@ -214,7 +214,7 @@ git commit -m "refactor(store): delete the review buffer, keep what was never ab
 - Consumes: Task 1's store surface.
 - Produces: `review_ops::{change_set, commit_files, file_diff, set_base, inbox, stack_get, stack_set_parent, pr_refresh}` with unchanged signatures. `pb::InboxWorkspace { workspace_id, task_name, branch, changed_since_reviewed, insertions, deletions }` — the four count fields are removed.
 
-- [ ] **Step 1: Delete the buffer messages from the protocol**
+- [x] **Step 1: Delete the buffer messages from the protocol**
 
 In `proto/farcooler.proto`, delete these messages: `Disposition`, `EntryStatus`, `AnchorState`, `ReviewEntry`, `ReviewEntryList`, `ReviewCapture`, `ReviewUpdate`, `ReviewDelete`, `ReviewList`, `DispatchEntry`, `ReviewDispatchRequest`, `DispatchState`, `ReviewDispatch`, `ReviewMarkViewed`, `Attachment`, `AttachmentPut`, `AttachmentGet`, `AttachmentBytes`.
 
@@ -228,17 +228,17 @@ Do **not** renumber anything that remains. Tag numbers are permanent even when t
 
 In `InboxWorkspace`, delete the `open`, `dispatched`, `answered` and `dispatch_unknown` fields, leaving their tag numbers unused.
 
-- [ ] **Step 2: Rename the surviving methods from `review.*` to `changes.*`**
+- [x] **Step 2: Rename the surviving methods from `review.*` to `changes.*`**
 
 In `proto/farcooler.proto`, rename the remaining `Review*` messages: `ReviewSetBase` → `ChangesSetBase`, `ReviewMarkReviewed` → `ChangesMarkRead`, `ReviewInboxRequest` → `ChangesInboxRequest`, `ReviewInbox` → `ChangesInbox`, `ReviewCommit` → `ChangeCommit`. Rename their `Request`/`Result` arm names to match, keeping every tag number.
 
-- [ ] **Step 3: Cut `crates/daemon/src/review.rs`**
+- [x] **Step 3: Cut `crates/daemon/src/review.rs`**
 
 Delete `PromptEntry`, `compose_prompt`, `split_numbered_answer`, `leading_marker`, `attachments_dir`, `MAX_ATTACHMENT_BYTES`, `MAX_ATTACHMENTS_PER_ENTRY`, `MAX_ATTACHMENT_BYTES_PER_WORKSPACE`, `MAX_SNAPSHOT_BYTES_PER_WORKSPACE`, `put_attachment`, `read_attachment`, `image_dimensions`, `capture_manifest`, `resolve_entry`, and every test covering them.
 
 Keep `now_millis`, `CachedChangeSet`, `ReviewCache` and all its methods, and `cheap_gate`. Keep the two `cheap_gate` tests.
 
-- [ ] **Step 4: Cut `crates/daemon/src/review_ops.rs`**
+- [x] **Step 4: Cut `crates/daemon/src/review_ops.rs`**
 
 Delete `capture`, `update`, `delete`, `list`, `dispatch`, `mark_viewed`, `attachment_put`, `attachment_get`, `hydrate`, `fingerprint_now`, `read_anchor`, `read_manifest`, `enforce_snapshot_budget`, `pb_disposition`, `parse_disposition`, `pb_entry_status`, `pb_anchor_state`, and the whole inline `mod tests`.
 
@@ -305,7 +305,7 @@ pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
 }
 ```
 
-- [ ] **Step 5: Add `list_all_workspaces` to the store**
+- [x] **Step 5: Add `list_all_workspaces` to the store**
 
 The old `inbox` walked `review_counts_by_workspace`, which is gone. Add to `crates/store/src/store.rs`, beside `list_workspaces_for_repository`:
 
@@ -328,7 +328,7 @@ The old `inbox` walked `review_counts_by_workspace`, which is gone. Add to `crat
     }
 ```
 
-- [ ] **Step 6: Drop the deleted methods from the RPC table**
+- [x] **Step 6: Drop the deleted methods from the RPC table**
 
 In `crates/daemon/src/rpc.rs`, remove `review.capture`, `review.update`, `review.delete`, `review.list`, `review.dispatch`, `review.mark_viewed`, `review.attachment_put`, `review.attachment_get` from both `required_scope` and `dispatch`, and from the method list in `every_method_has_a_declared_scope`.
 
@@ -336,7 +336,7 @@ Rename the survivors in all three places: `review.change_set` → `changes.chang
 
 Delete `Service::send_review_prompt` from `crates/daemon/src/service.rs`, and `Watcher::announce_review_entry` from `crates/daemon/src/watch.rs`.
 
-- [ ] **Step 7: Build and run the whole suite**
+- [x] **Step 7: Build and run the whole suite**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -346,7 +346,7 @@ cargo test --workspace --no-fail-fast 2>&1 | grep -E "^test result" | awk -F'[ ;
 
 Expected: builds clean, 0 failures. The count drops by roughly 60 as the buffer's tests go.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add crates proto
@@ -365,7 +365,7 @@ git commit -m "refactor(daemon): review becomes changes, and loses the buffer"
 - Consumes: Task 2's `changes.*` methods.
 - Produces: `farcooler changes status|diff|files|read|inbox|stack`.
 
-- [ ] **Step 1: Rename the module and its command enum**
+- [x] **Step 1: Rename the module and its command enum**
 
 ```bash
 git mv crates/cli/src/review.rs crates/cli/src/changes.rs
@@ -377,7 +377,7 @@ Update every remaining `req("review.…")` to `req("changes.…")` and every pay
 
 In `crates/cli/src/main.rs`: `mod review;` → `mod changes;`, `Command::Review(review::ReviewCmd)` → `Command::Changes(changes::ChangesCmd)` with doc comment "What this worktree changed.", and the dispatch arm to `changes::changes(host, c, cli.json).await`.
 
-- [ ] **Step 2: Build and check the help output**
+- [x] **Step 2: Build and check the help output**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -387,7 +387,7 @@ cargo build -p farcooler-cli 2>&1 | grep -E "^error" -A4 | head -20
 
 Expected: builds clean, and help lists `status`, `diff`, `files`, `read`, `inbox`, `stack` with no `note`/`list`/`drop`/`send`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/cli
@@ -409,7 +409,7 @@ git commit -m "refactor(cli): farcooler review becomes farcooler changes"
 - Consumes: Task 3's CLI.
 - Produces: `ChangeSet`, `ChangedFile`, `ChangeCommit`, `WorkingTree`, `InboxRow`, and `ChangesStore` with `load(fresh:)`, `openFile(_:)`, `closeFile()`, `markRead()`, `@Published changeSet/diff/selectedFile/error`.
 
-- [ ] **Step 1: Create `ChangesModel.swift` with what survives**
+- [x] **Step 1: Create `ChangesModel.swift` with what survives**
 
 Move `ChangeSet`, `ReviewCommit` (renamed `ChangeCommit`), `ChangedFile`, `WorkingTree` and `InboxRow` verbatim out of `Review.swift`, minus `needsYou` and the four count fields on `InboxRow`:
 
@@ -503,7 +503,7 @@ enum DiffScope: String, CaseIterable, Identifiable {
 }
 ```
 
-- [ ] **Step 2: Delete `Review.swift` and rename the client calls**
+- [x] **Step 2: Delete `Review.swift` and rename the client calls**
 
 ```bash
 git rm apps/macos/Sources/FarCooler/Review.swift
@@ -528,13 +528,13 @@ Give `changesDiff` a scope parameter:
 
 Move the existing body of `reviewDiff` that walks the unified output into a `static func parseUnified(_ text: String) -> [DiffComputation.Line]` on `DaemonClient`, unchanged apart from the signature.
 
-- [ ] **Step 3: Remove the needs-you badge from the sidebar**
+- [x] **Step 3: Remove the needs-you badge from the sidebar**
 
 In `SidebarViews.swift`, delete the `if let review, review.needsYou > 0 { … }` block entirely. Keep the `+N −M` cluster. Rename the `review` property to `changes` and its type stays `InboxRow?`.
 
 In `ContentView.swift`, rename `reviewStatus(_:)` to `changesStatus(_:)` and the `review:` argument label to `changes:`.
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -543,7 +543,7 @@ cd apps/macos && ./build-vt.sh >/dev/null && swift build 2>&1 | grep -E "error:"
 
 Expected: no errors. `ReviewPane` and `reviewOpen` will still be referenced from `ContentView`; delete those references now — the inspector goes in Task 5.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A apps/macos
@@ -564,7 +564,7 @@ git commit -m "refactor(macos): the review buffer leaves the app"
 - Consumes: nothing.
 - Produces: `enum TileKind: Codable, Equatable { case tmux, diff, pr }`, `indirect enum TileNode: Codable, Equatable { case leaf(TileKind), split(Axis, [TileNode], [Double]) }`, `enum Axis: String, Codable { case horizontal, vertical }`, `TileLayout.default`, `TileLayout.load(workspace: String) -> TileNode`, `TileLayout.save(_ node: TileNode, workspace: String)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Swift package tests for the app target do not exist; put this in `apps/shared/AgentKit/Tests/AgentKitTests/` only if the types live in AgentKit. They do not — they are app-local. So this task's verification is a build plus a round-trip check written as an inline `#if DEBUG` assertion exercised by Step 4's manual run. Write `Tiles.swift` first:
 
@@ -649,7 +649,7 @@ enum TileLayout {
 }
 ```
 
-- [ ] **Step 2: Verify the round trip in a scratch binary**
+- [x] **Step 2: Verify the round trip in a scratch binary**
 
 ```bash
 cd "/Users/e-liang/Library/Application Support/com.farcooler.FarCooler/worktrees/overnight-review"
@@ -662,7 +662,7 @@ cd apps/macos && swift build 2>&1 | grep -E "error:" | head -5
 
 Expected: builds clean. A decode failure would surface as `TileLayout.load` returning `.default`, which is the safe direction.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/macos/Sources/FarCooler/Tiles.swift
@@ -681,7 +681,7 @@ git commit -m "feat(macos): a worktree's layout is a tree of tiles"
 - Consumes: `TileNode`, `TileKind`, `TileLayout` from Task 5; `ChangesStore` from Task 4.
 - Produces: `TileContainer(node: Binding<TileNode>, workspace: Workspace, changes: ChangesStore, tmux: () -> AnyView)`.
 
-- [ ] **Step 1: Write `TileContainer.swift`**
+- [x] **Step 1: Write `TileContainer.swift`**
 
 ```swift
 import SwiftUI
@@ -779,7 +779,7 @@ struct TilePlaceholder: View {
 }
 ```
 
-- [ ] **Step 2: Replace the inspector with the container in `ContentView`**
+- [x] **Step 2: Replace the inspector with the container in `ContentView`**
 
 Delete `@State private var reviewOpen`, the whole `.inspector(isPresented:)` modifier and the toolbar button that toggled it. Add:
 
@@ -842,7 +842,7 @@ with one `ChangesStore` per worktree, held the same way the layouts are:
 
 Point the `NavigationSplitView`'s detail closure at `workbench`.
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -851,7 +851,7 @@ cd apps/macos && swift build 2>&1 | grep -E "error:" | head -10
 
 Expected: fails only on `DiffTile`, which Task 7 creates. Add a temporary stub if needed to see the rest compile, then delete it in Task 7.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/macos
@@ -869,7 +869,7 @@ git commit -m "feat(macos): the worktree's main area is a tile tree, not an insp
 - Consumes: `ChangesStore`, `DiffScope`, `ChangedFile`, `DiffComputation.Line`.
 - Produces: `DiffTile(changes: ChangesStore)`.
 
-- [ ] **Step 1: Write `DiffTile.swift`**
+- [x] **Step 1: Write `DiffTile.swift`**
 
 ```swift
 import AgentKit
@@ -1120,7 +1120,7 @@ struct DiffTile: View {
 }
 ```
 
-- [ ] **Step 2: Build**
+- [x] **Step 2: Build**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -1129,7 +1129,7 @@ cd apps/macos && swift build 2>&1 | grep -E "error:" | head -10
 
 Expected: no errors.
 
-- [ ] **Step 3: Run it against a scratch daemon and read a real diff**
+- [x] **Step 3: Run it against a scratch daemon and read a real diff**
 
 ```bash
 cd "/Users/e-liang/Library/Application Support/com.farcooler.FarCooler/worktrees/overnight-review"
@@ -1152,13 +1152,13 @@ REPO=$(./target/release/farcooler repo register "$SCRATCH/dev/demo" | grep -oE '
 
 Then edit a file inside the created worktree, commit it, and run `./target/release/farcooler changes status tiles` to confirm the daemon sees it before opening the app.
 
-- [ ] **Step 4: Stop the scratch daemon by PID**
+- [x] **Step 4: Stop the scratch daemon by PID**
 
 ```bash
 kill "$(cat "$SCRATCH/d.pid")"
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/macos/Sources/FarCooler/DiffTile.swift
@@ -1177,7 +1177,7 @@ git commit -m "feat(macos): the diff tile, one concept at two widths"
 - Consumes: everything above.
 - Produces: a per-worktree tile menu in the toolbar that toggles a tile kind in and out of the layout.
 
-- [ ] **Step 1: Add toggling to `TileNode`**
+- [x] **Step 1: Add toggling to `TileNode`**
 
 Append to `Tiles.swift`:
 
@@ -1212,7 +1212,7 @@ extension TileNode {
 }
 ```
 
-- [ ] **Step 2: Add the toolbar menu in `ContentView`**
+- [x] **Step 2: Add the toolbar menu in `ContentView`**
 
 Beside the existing `openInEditorToolbar`:
 
@@ -1246,7 +1246,7 @@ Beside the existing `openInEditorToolbar`:
                 }
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -1255,7 +1255,7 @@ cd apps/macos && swift build 2>&1 | grep -E "error:" | head -10
 
 Expected: no errors.
 
-- [ ] **Step 4: Run the whole suite and build the app bundle**
+- [x] **Step 4: Run the whole suite and build the app bundle**
 
 ```bash
 cd "/Users/e-liang/Library/Application Support/com.farcooler.FarCooler/worktrees/overnight-review"
@@ -1267,7 +1267,7 @@ cd apps/shared/AgentKit && swift test 2>&1 | tail -2
 
 Expected: 0 failures on both.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/macos
@@ -1283,3 +1283,42 @@ git commit -m "feat(macos): choose what a worktree shows"
 **Known gap, stated rather than hidden:** the spec's Diff tile has three scopes — Branch, Commit, Local — and `DiffScope` here has two. Commit needs a commit picker, and the spec's own open question asks whether the PR tile should own commit selection instead. Rather than build a picker this plan would have to guess at, Commit is deferred to the PR tile's plan, where the commit list already exists.
 
 **Type consistency.** `ChangesStore` is used with that name in Tasks 4, 6 and 7. `changesJSON`/`changesDiff`/`changesMarkRead`/`changesSupported`/`changesError` are named identically in Tasks 4 and 7. `TileNode`/`TileKind`/`TileLayout` match across Tasks 5, 6 and 8. `InboxRow` loses `needsYou` in Task 4 and nothing later references it.
+
+---
+
+## What the plan did not predict
+
+Kept here rather than dropped, because each one was found by running the thing
+rather than by reading it, and each cost more than it should have.
+
+**The fractions were decorative.** Task 6 rendered splits with `HSplitView`,
+which sizes children by what they ask for. `TileNode` stored fractions, saved
+them and reloaded them, and the layout engine ignored every one — a 50/50
+default drew the Changes tile as a sliver wide enough for its scope picker and
+nothing else. Splits are sized from the fractions now, in `TileSizing`, which is
+also what lets a dragged divider be written down.
+
+**`build-app.sh` swallowed compile errors.** It sent `swift build`'s stdout to
+`/dev/null`, and that is where the Swift compiler writes diagnostics. A release
+build that failed left the previous bundle in place looking current, so two
+rounds of "the UI hasn't changed" went into finding a one-line type error that
+the debug build had not caught. Fixed in the same branch.
+
+**Task 5's verification step was a placeholder** — it said to write a scratch
+binary and then wrote a comment where the binary should be. `Tiles.swift` has no
+UI imports, so it compiles standalone: the real check exercises the Codable round
+trip, `toggling`, the collapse-a-one-child-split rule, the corrupt-payload
+fallback, and all of `TileSizing`.
+
+**Three things only a real worktree showed.** A layout with the Agents tile off
+lost the window's name, because all four `navigationTitle` calls live inside
+terminal views. An empty change set claimed "Nothing changed here" directly under
+the banner saying why it could not read anything. And with no base to name, it
+said "This branch matches ." — a sentence with a hole in it.
+
+**One test fails for reasons outside the code.** `rpc_over_socket`'s
+`removing_a_root_survives_a_stopped_terminal_in_the_main_checkout` fails under
+full parallelism on a machine with ~170 live tmux servers and ~1400 socket files
+in `/private/tmp/tmux-502`, which is exactly the exhaustion the harness comments
+at the top of that file describe. It passes alone and the whole suite passes with
+`--test-threads=2`. Nothing in this branch touches that path.
