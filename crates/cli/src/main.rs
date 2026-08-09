@@ -2638,21 +2638,6 @@ pub(crate) async fn resolve_workspace_id(
     Ok(uuid_of(&w.id))
 }
 
-/// A terminal by id prefix or by title.
-pub(crate) async fn resolve_terminal_id(
-    link: &mut Link,
-    needle: &str,
-) -> Result<Uuid, Box<dyn std::error::Error>> {
-    let terminals = list_terminals(link, None).await?;
-    let by_title: Vec<&farcooler_protocol::v1::Terminal> =
-        terminals.iter().filter(|t| t.title == needle).collect();
-    if by_title.len() == 1 {
-        return Ok(uuid_of(&by_title[0].id));
-    }
-    let t = resolve(&terminals, needle, |t| &t.id, "terminal")?;
-    Ok(uuid_of(&t.id))
-}
-
 fn resolve<'a, T>(
     items: &'a [T],
     prefix: &str,
