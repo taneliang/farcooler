@@ -241,72 +241,28 @@ fn migration_0005_drop_loss_dismissed(tx: &Transaction) -> rusqlite::Result<()> 
 /// repository so the race cannot normally happen. It exists so that if that
 /// lock is ever lost in a refactor, the symptom is an error rather than two
 /// sidebar rows for one directory.
-/// Review entries and the dispatch outbox.
+/// What a worktree is compared against, and whether you have read it.
 ///
-/// Two things here are deliberately absent, and both are the point.
+/// Edited in place rather than followed by an 0008 that drops what it just
+/// created: 0007 is unreleased and lives on this branch alone, so no database
+/// anywhere has ever run the version that made the buffer's tables.
 ///
-/// **No line numbers.** An anchor stores the TEXT it was written about and a
-/// fingerprint of what surrounded it. A line number is stale the moment an agent
-/// edits the file, and this schema must not be able to hold a stale fact — the
-/// same rule that keeps `running` out of the terminals table.
-///
-/// **No derived anchor state.** `status` is where the USER put the entry: open,
-/// dispatched, answered, resolved. Whether it is now outdated, ambiguous or in
-/// need of a re-read is computed against the worktree on every read. An entry
-/// can be dispatched and in need of a re-read at once, which is the normal state
-/// right after an agent lands a fix, and one column could not say both.
-///
-/// Attachment BYTES are not here either. They live beside the database, keyed by
-/// hash, for the reason `push.rs` keeps the relay token out of it: a database
-/// copied for support should not carry a screenshot of whatever was on screen.
+/// The buffer itself — entries, anchors, dispatches, attachments — is gone. It
+/// existed because there was nowhere to put a diff, so a comment had to be held
+/// somewhere until you could type it at an agent. With a diff tile beside an
+/// agent tile there is nothing to hold.
 fn migration_0007_review(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"
-        CREATE TABLE review_entries (
-            id BLOB PRIMARY KEY,
-            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-            body TEXT NOT NULL,
-            disposition TEXT NOT NULL,
-            status TEXT NOT NULL,
-            anchor_json TEXT NOT NULL,
-            manifest_json TEXT NOT NULL,
-            dispatch_id BLOB,
-            answer_text TEXT,
-            answer_terminal_id BLOB,
-            answer_correlation TEXT,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            resource_version INTEGER NOT NULL
-        );
-        CREATE INDEX review_entries_by_workspace
-            ON review_entries (workspace_id, status);
-
-        -- entry_id is nullable: bytes are uploaded BEFORE the comment they
-        -- belong to exists, so the client can show a thumbnail while the user is
-        -- still typing. An attachment nobody claims is swept later.
-        CREATE TABLE review_attachments (
-            id BLOB PRIMARY KEY,
-            entry_id BLOB REFERENCES review_entries(id) ON DELETE CASCADE,
-            workspace_id BLOB,
-            sha256 TEXT NOT NULL,
-            mime TEXT NOT NULL,
-            byte_size INTEGER NOT NULL,
-            width INTEGER NOT NULL DEFAULT 0,
-            height INTEGER NOT NULL DEFAULT 0,
-            created_at INTEGER NOT NULL
-        );
-        CREATE INDEX review_attachments_by_entry ON review_attachments (entry_id);
-        CREATE INDEX review_attachments_by_workspace ON review_attachments (workspace_id);
-
         -- What a workspace is compared against, when the user pinned it.
         CREATE TABLE review_bases (
             workspace_id BLOB PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
             base_ref TEXT NOT NULL
         );
 
-        -- "I have looked at this workspace." Stores the CHEAP gate as well as
-        -- the digest, so the inbox can answer "changed since you looked" with two
-        -- stats instead of a `git status` per worktree.
+        -- "I have looked at this worktree." Stores the CHEAP gate as well as
+        -- the digest, so the fleet can answer "changed since you looked" with
+        -- two stats instead of a `git status` per worktree.
         CREATE TABLE review_reviewed (
             workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
             branch TEXT NOT NULL,
@@ -325,36 +281,6 @@ fn migration_0007_review(tx: &Transaction) -> rusqlite::Result<()> {
             branch TEXT NOT NULL,
             parent_branch TEXT NOT NULL,
             PRIMARY KEY (repository_id, branch)
-        );
-
-        -- The outbox exists because a daemon can die between marking an entry
-        -- dispatched and the agent seeing the prompt, and ACP gives no receipt
-        -- to distinguish those. A row here is the only evidence that a send was
-        -- attempted at all.
-        CREATE TABLE review_dispatches (
-            id BLOB PRIMARY KEY,
-            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-            terminal_id BLOB NOT NULL,
-            disposition TEXT NOT NULL,
-            entry_ids_json TEXT NOT NULL,
-            prompt TEXT NOT NULL,
-            state TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            observed_at INTEGER
-        );
-        CREATE INDEX review_dispatches_pending
-            ON review_dispatches (state, created_at);
-
-        -- Viewed marks are keyed by CONTENT, so a file's mark clears itself the
-        -- moment an agent changes it, and by branch, so the same path can be
-        -- read on the tip and unread on a stack link.
-        CREATE TABLE review_viewed (
-            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-            branch TEXT NOT NULL,
-            path TEXT NOT NULL,
-            content_hash TEXT NOT NULL,
-            viewed_at INTEGER NOT NULL,
-            PRIMARY KEY (workspace_id, branch, path)
         );
         "#,
     )
