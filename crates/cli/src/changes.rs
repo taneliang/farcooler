@@ -75,7 +75,14 @@ pub async fn changes(host: Option<&str>, cmd: ChangesCmd, json: bool) -> Fallibl
             }
 
             println!("{}  vs {} ({})", cs.branch, cs.base_ref, &cs.base_commit[..8.min(cs.base_commit.len())]);
-            println!("  +{} -{} across {} files", cs.insertions, cs.deletions, cs.files.len());
+            let n = cs.files.len();
+            println!(
+                "  +{} -{} across {} {}",
+                cs.insertions,
+                cs.deletions,
+                n,
+                if n == 1 { "file" } else { "files" }
+            );
             if !cs.commits.is_empty() {
                 println!("\n  commits");
                 for c in &cs.commits {
