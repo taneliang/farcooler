@@ -113,10 +113,11 @@ class ImagePasteQueue {
     private fun messageFor(error: Throwable): String {
         val text = (error.message ?: "").lowercase()
         return when {
-            // A machine whose daemon predates this feature refuses the method
-            // itself, and that refusal looks exactly like a missing resource.
-            text.contains("predates this feature") ->
-                "This machine's Far Cooler is too old to accept files. Update it and try again."
+            // Two causes, indistinguishable on the wire: a daemon too old to
+            // know the method, or a pane that closed before the path could be
+            // typed. Named together rather than guessed at.
+            text.contains("predates this") ->
+                "That terminal may have closed, or this machine's Far Cooler may be too old."
             text.contains("file size") ->
                 "That file is too large to send. Files up to 16 MB work."
             text.contains("not found") -> "That terminal isn't running anymore."

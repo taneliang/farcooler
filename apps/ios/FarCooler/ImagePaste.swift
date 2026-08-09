@@ -102,10 +102,11 @@ final class ImagePasteQueue: ObservableObject {
     /// phone screen over a terminal.
     static func message(for error: Error) -> String {
         let text = error.localizedDescription.lowercased()
-        // A machine whose daemon predates this feature refuses the method
-        // itself, and that refusal looks exactly like a missing resource.
-        if text.contains("predates this feature") {
-            return "This machine's Far Cooler is too old to accept files. Update it and try again."
+        // Two causes, indistinguishable on the wire: a daemon too old
+        // to know the method, or a pane that closed before the path
+        // could be typed. Named together rather than guessed.
+        if text.contains("predates this") {
+            return "That terminal may have closed, or this machine's Far Cooler may be too old."
         }
         if text.contains("file size") {
             return "That file is too large to send. Files up to 16 MB work."

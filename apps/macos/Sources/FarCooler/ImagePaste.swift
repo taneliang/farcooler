@@ -311,12 +311,11 @@ enum ImagePasteProcess {
     /// method name — and none of them belong in a terminal pane.
     static func message(from stderr: String) -> String {
         let text = stderr.lowercased()
-        // A machine whose daemon predates this feature refuses the method
-        // itself, and the refusal is indistinguishable from a missing
-        // resource. `actions` works out which it was; this only has to not
-        // throw that away by falling through to a network message.
-        if text.contains("predates this feature") {
-            return "This machine's Far Cooler is too old to accept files. Update it and try again."
+        // Two causes, indistinguishable on the wire: a daemon too old
+        // to know the method, or a pane that closed before the path
+        // could be typed. Named together rather than guessed.
+        if text.contains("predates this") {
+            return "That terminal may have closed, or this machine's Far Cooler may be too old."
         }
         if text.contains("file size") {
             return "That file is too large to send. Files up to 16 MB work."

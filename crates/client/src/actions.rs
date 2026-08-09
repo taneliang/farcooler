@@ -143,23 +143,26 @@ where
             });
         let answer = call(client, "terminal.paste_file", terminal, Some(payload)).await;
 
-        // A `NotFound` on the FIRST chunk is a daemon that has never heard of
-        // this method, not a terminal that has gone away.
+        // A `NotFound` on the FIRST chunk has two causes and cannot tell
+        // them apart, so it names both rather than guessing.
         //
-        // Every caller resolves the terminal before getting here — the CLI by
-        // listing terminals, the apps from a pane they are looking at — so the
-        // terminal existed a moment ago. What has not existed is the method: a
-        // daemon built before this feature rejects the name in `required_scope`
-        // and the refusal it sends is indistinguishable from a missing
-        // resource. Left unhandled it reaches a person as "that terminal isn't
-        // running anymore", which sends them to look at the terminal, the pane
-        // and the network — everywhere except the machine that needs updating.
+        // One is a daemon built before this feature: it rejects the method in
+        // `required_scope` and the refusal is shaped exactly like a missing
+        // resource. The other is a pane that has gone away — the daemon types
+        // the path as the last act of the last chunk, and for a small file the
+        // first chunk IS the last, so a lost pane fails here too.
+        //
+        // This said only the first for a while, and confidently. It then told
+        // someone their machine was out of date when the terminal had simply
+        // died, which is the same failure as the catch-all it replaced: a
+        // definite answer that sends you to the wrong place. The raw text is
+        // logged either way, and that is what distinguishes them.
         if offset == 0 {
             if let Err(ClientError::Daemon { code, .. }) = &answer {
                 if *code == farcooler_protocol::v1::ErrorCode::NotFound as i32 {
                     return Err(ClientError::WrongResult {
-                        expected: "a machine new enough to accept a file",
-                        got: "one whose Far Cooler predates this feature",
+                        expected: "a terminal that is still running, on a machine new enough",
+                        got: "a terminal that has closed, or a Far Cooler that predates this",
                     });
                 }
             }
