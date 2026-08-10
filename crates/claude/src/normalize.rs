@@ -150,18 +150,31 @@ pub fn frame_to_events_from(frame: &serde_json::Value, origin: Origin) -> Vec<Ag
             let reason = end_reason(frame["stop_reason"].as_str().unwrap_or_default());
             vec![AgentEvent::TurnEnded { reason }]
         }
-        // Bookkeeping. `init` is read separately by the backend, and hooks
-        // firing are not transcript material — a Gap for one would draw
-        // "history missing" over an ordinary session start.
+        // Everything else is judged by whether it CARRIES A MESSAGE, not by
+        // whether its name is on a list.
         //
-        // The last four appear only in the on-disk transcript, never on the
-        // wire: the file records queue bookkeeping and hook attachments that
-        // the stream never sends. Left unlisted they became a Gap per record,
-        // which is a scissors icon between every restored turn.
-        "system" | "rate_limit_event" | "control_response" | "control_request"
-        | "control_cancel_request" | "stream_event" | "queue-operation" | "attachment"
-        | "summary" | "file-history-snapshot" => Vec::new(),
-        _ => vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }],
+        // The list was the bug, twice. Claude Code's record vocabulary is open
+        // and mostly metadata: a real transcript here holds `last-prompt`,
+        // `mode`, `ai-title`, `pr-link`, `permission-mode`, `file-history-delta`,
+        // `bridge-session`, `relocated`, `worktree-state`, `agent-name` and
+        // more, none of which is conversation. Enumerating them meant every
+        // name I had not seen became a Gap — a scissors icon reading "something
+        // happened here that this version cannot show" over a session where
+        // nothing had been lost.
+        //
+        // A record with no `message` is bookkeeping, and bookkeeping is not
+        // missing content. One that HAS a message and is still not understood
+        // is the case a Gap exists for, and that stays visible — so a genuinely
+        // new kind of conversation content is still reported rather than
+        // silently dropped, which is the property the whole derived transcript
+        // rests on.
+        _ => {
+            if frame["message"]["content"].is_null() {
+                Vec::new()
+            } else {
+                vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }]
+            }
+        }
     }
 }
 
@@ -494,11 +507,43 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_frame_is_a_visible_gap() {
+    fn an_unknown_record_carrying_a_message_is_a_visible_gap() {
+        // The property the derived transcript rests on: a new kind of
+        // conversation content is reported, never silently dropped.
         assert!(matches!(
-            frame_to_events(&serde_json::json!({ "type": "something_new" })).as_slice(),
+            frame_to_events(&serde_json::json!({
+                "type": "something_new",
+                "message": { "content": [{ "type": "text", "text": "words" }] }
+            }))
+            .as_slice(),
             [AgentEvent::Gap { reason: AgentGapReason::Unparsed }]
         ));
+    }
+
+    #[test]
+    fn unknown_bookkeeping_is_silent_because_nothing_was_lost() {
+        // These are real record types out of real transcripts. Judging them by
+        // name meant every one I had not seen drew "something happened here
+        // that this version cannot show" over a session where nothing had.
+        for kind in [
+            "last-prompt",
+            "mode",
+            "ai-title",
+            "pr-link",
+            "permission-mode",
+            "file-history-delta",
+            "bridge-session",
+            "relocated",
+            "worktree-state",
+            "agent-name",
+            "queue-operation",
+            "attachment",
+        ] {
+            assert!(
+                frame_to_events(&serde_json::json!({ "type": kind })).is_empty(),
+                "{kind} is bookkeeping, not lost content"
+            );
+        }
     }
 
     #[test]
