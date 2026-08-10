@@ -16,6 +16,14 @@ enum TileCommand: Equatable {
     case focusIndex(Int)
     case cycle
     case preset(TilePreset)
+    /// Give every pane in this layout the same share of it.
+    ///
+    /// Deliberately not presented as a tmux binding, because it is not one: in
+    /// tmux `=` is `choose-buffer`, and the even layouts are `M-1` and `M-2`.
+    /// This is Far Cooler's own, on the key a great many other apps use for
+    /// "make these equal" — and on the prefix rather than an Option chord,
+    /// which the terminal underneath has every right to want for itself.
+    case evenPanes
     case splitRight
     case splitDown
     case breakPane
@@ -188,6 +196,7 @@ final class PrefixMode: ObservableObject {
 
         switch first {
         case " ": return .cycle
+        case "=": return .evenPanes
         case "z": return .zoom
         case "a": return .toggleAgentPane
         case "o": return .focusNext

@@ -114,6 +114,26 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "terminal.agent_set_mode" | "terminal.agent_set_model" | "terminal.agent_set_config"
         | "terminal.agent_cancel"
         | "worktree.file_search" => Scope::Control,
+        // Review is `control`, and for exactly the reason the screen above is.
+        //
+        // A diff IS source. `read` is the scope handed to something that should
+        // only see the shape of the fleet, and serving file content there would
+        // quietly redefine what every already-enrolled read-only client is
+        // allowed to see — a change of security posture made as a side effect of
+        // adding a feature. `Scope` is host-wide (there is no per-repository
+        // authorization to reach for), so the honest answer is the scope that
+        // can already read a terminal screen, which already shows source.
+        "changes.change_set"
+        | "changes.commit_files"
+        | "changes.file_diff"
+        | "changes.set_base"
+        | "changes.mark_read"
+        | "stack.set_parent"
+        | "pr.refresh" => Scope::Control,
+        // Metadata about work, not the work. Counts, +/-, PR state and the
+        // needs-you badge let a read-scoped phone triage the fleet without being
+        // able to read a line of the code.
+        "changes.inbox" | "stack.get" => Scope::Read,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
         // no process — the worst a wrong one does is show you the wrong pane —
         // and it has to be reachable by an agent for any of this to be
@@ -1085,6 +1105,76 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
+            // ---- review ----
+            //
+            // Thin on purpose: every one of these is a call into `review_ops`,
+            // so the dispatch table stays a table and the logic stays testable
+            // without a wire frame around it.
+            "changes.change_set" => {
+                let Some(request::Payload::ChangeSetRequest(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::ChangeSet(crate::review_ops::change_set(svc, &p).await?))
+            }
+
+            "changes.commit_files" => {
+                let Some(request::Payload::CommitFilesRequest(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::FileChangeList(
+                    crate::review_ops::commit_files(svc, &p).await?,
+                ))
+            }
+
+            "changes.file_diff" => {
+                let Some(request::Payload::FileDiffRequest(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::FileDiff(crate::review_ops::file_diff(svc, &p).await?))
+            }
+
+            "changes.set_base" => {
+                let Some(request::Payload::ChangesSetBase(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::ChangeSet(crate::review_ops::set_base(svc, &p).await?))
+            }
+
+            "changes.mark_read" => {
+                let Some(request::Payload::ChangesMarkRead(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                crate::review_ops::mark_read(svc, &p).await?;
+                Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
+            }
+
+            "changes.inbox" => {
+                Ok(result::Value::ChangesInbox(crate::review_ops::inbox(svc).await?))
+            }
+
+            "stack.get" => {
+                let Some(request::Payload::StackGet(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::StackLinkList(crate::review_ops::stack_get(svc, &p).await?))
+            }
+
+            "stack.set_parent" => {
+                let Some(request::Payload::StackSetParent(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::StackLinkList(
+                    crate::review_ops::stack_set_parent(svc, &p).await?,
+                ))
+            }
+
+            "pr.refresh" => {
+                let Some(request::Payload::PrRefresh(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::StackLinkList(crate::review_ops::pr_refresh(svc, &p).await?))
+            }
+
             "terminal.agent_answer" => {
                 let Some(request::Payload::AgentAnswer(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -1224,6 +1314,20 @@ impl Rpc {
                         };
                         let title = if p.name.is_empty() { preset } else { p.name.as_str() };
                         svc.split_terminal(workspace, anchor, side, title, preset).await?;
+                        // A split is the one layout verb that CREATES a
+                        // terminal, so it is the one that changes the fleet.
+                        //
+                        // Only the layout was announced, and a layout carries
+                        // rectangles keyed by terminal id, not the terminals
+                        // themselves. So a client drew a rectangle for a pane
+                        // it had no record of and left it blank until some
+                        // unrelated read happened to fetch the fleet again —
+                        // seconds of empty space after every `⌃B %`, every
+                        // drop on an edge, and every diff opened from the
+                        // toolbar. `terminal.create` has always announced its
+                        // own arrival; this is the same announcement for the
+                        // other way a terminal can be born.
+                        self.watcher.announce_fleet_changed();
                         svc.layout(workspace).await?
                     }
                     // An existing pane moved against another, on an edge. The
@@ -1412,6 +1516,15 @@ mod tests {
             "layout.zoom",
             "layout.swap",
             "layout.group.select",
+            "changes.change_set",
+            "changes.commit_files",
+            "changes.file_diff",
+            "changes.set_base",
+            "changes.mark_read",
+            "changes.inbox",
+            "stack.get",
+            "stack.set_parent",
+            "pr.refresh",
         ] {
             assert!(required_scope(method).is_some(), "{method} has no declared scope");
         }

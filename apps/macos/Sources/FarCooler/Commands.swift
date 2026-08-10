@@ -108,6 +108,11 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("z", modifiers: [.command, .shift])
             Button("Next Arrangement  ⌃B space") { TileCommand.cycle.post() }
                 .keyboardShortcut(.space, modifiers: [.command, .shift])
+            // Double-clicking a divider evens out the two panes it separates.
+            // This is the same idea for the whole layout, and it is here rather
+            // than only on the divider because a gesture nobody has been told
+            // about needs somewhere to be discovered.
+            Button("Even Out Panes  ⌃B =") { TileCommand.evenPanes.post() }
             Menu("Arrangement") {
                 ForEach(TilePreset.allCases) { preset in
                     Button(preset.label) { TileCommand.preset(preset).post() }

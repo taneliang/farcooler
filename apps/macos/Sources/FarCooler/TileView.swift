@@ -28,6 +28,24 @@ struct TileView: View {
     /// whichever is active.
     let groups: [PaneGroup]
     let workspace: Workspace
+    /// This worktree's diff, for whichever pane is showing it.
+    ///
+    /// One store per worktree rather than one per pane: two changes panes in a
+    /// layout are two views of the same branch, and giving each its own store
+    /// would have them read the same diffs twice and disagree about which file
+    /// is open. Held even when no pane is in changes mode, which costs nothing
+    /// — it reads on appear, not on creation.
+    ///
+    /// Passed, NOT observed. `@ObservedObject` here was a real bug with a
+    /// stopwatch on it: this view owns every terminal in the window, and the
+    /// store publishes once per file read plus once per loading flag — some
+    /// hundred and thirty times for a forty-file branch. Each one invalidated
+    /// this whole view, so every pane's `NSView` was re-attached over and over
+    /// while a diff loaded, and for ten seconds the window did nothing else:
+    /// a pane split during it sat empty, and so did the diff that caused it.
+    /// Only `ChangesPane` observes it, which is the only view whose contents
+    /// actually change when it publishes.
+    let changes: ChangesStore
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
@@ -184,6 +202,7 @@ struct TileView: View {
 
         return TilePane(
             terminal: terminal,
+            changes: changes,
             binary: binary,
             environment: environment,
             hostArguments: hostArguments,
@@ -281,6 +300,12 @@ private struct TilePane: View {
     static let headerHeight: CGFloat = 22
 
     let terminal: Terminal
+    /// The worktree's diff, drawn when this pane is in changes mode.
+    ///
+    /// Passed rather than observed, for the reason `TileView.changes` gives at
+    /// length: a terminal pane must not be rebuilt because a diff two panes
+    /// over read another file.
+    let changes: ChangesStore
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
@@ -324,7 +349,16 @@ private struct TilePane: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            if isLive, terminal.isAgentPane {
+            if terminal.isChangesPane {
+                // Not gated on `isLive`, unlike the two surfaces below it. The
+                // process behind a changes pane exists to hold the rectangle
+                // and nothing else, so its liveness says nothing about whether
+                // the diff can be read — that comes from the daemon over the
+                // same channel the sidebar's counts do. A pane whose host was
+                // killed still shows the branch; it just cannot be split.
+                ChangesPane(changes: changes)
+                    .id("\(terminal.id)#changes")
+            } else if isLive, terminal.isAgentPane {
                 // Same empty `onResize` as the terminal case just below, and
                 // for the identical reason: `TileView.send(viewport:for:)`
                 // already tells tmux the WHOLE window's grid once, from the

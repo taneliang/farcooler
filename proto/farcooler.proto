@@ -87,6 +87,15 @@ message Request {
     HostSettings host_settings = 46;
     Theme theme = 47;
     TerminalFilePut terminal_file_put = 48;
+    ChangeSetRequest change_set_request = 49;
+    CommitFilesRequest commit_files_request = 50;
+    FileDiffRequest file_diff_request = 51;
+    ChangesSetBase changes_set_base = 52;
+    ChangesMarkRead changes_mark_read = 59;
+    StackGet stack_get = 62;
+    StackSetParent stack_set_parent = 63;
+    PrRefresh pr_refresh = 64;
+    ChangesInboxRequest changes_inbox = 65;
   }
 }
 
@@ -132,6 +141,11 @@ message Result {
     AdapterList adapter_list = 21;
     AdapterTestResult adapter_test_result = 22;
     TerminalFilePutResult terminal_file_put = 23;
+    ChangeSet change_set = 24;
+    FileChangeList file_change_list = 25;
+    FileDiff file_diff = 26;
+    StackLinkList stack_link_list = 32;
+    ChangesInbox changes_inbox = 33;
   }
 }
 
@@ -305,6 +319,13 @@ message Event {
     // anything, not once per workspace, so a client re-reads the fleet rather
     // than trying to apply it as a delta.
     Empty fleet_changed = 18;
+    // A workspace's change set moved: a commit landed, an agent wrote a file,
+    // a branch was checked out. Carries the workspace so a client knows which
+    // one to re-read; the set itself is fetched, because most clients are not
+    // looking at it and a lockfile regeneration would otherwise fan out
+    // thousands of file records to everyone.
+    ChangeSetChanged change_set_changed = 19;
+    StackLinkList stack_changed = 21;
   }
 }
 
@@ -660,6 +681,19 @@ enum PaneMode {
   // that works with no ACP adapter installed.
   PANE_MODE_TERMINAL = 1;
   PANE_MODE_AGENT = 2;
+  // What this worktree changed, rendered as a diff.
+  //
+  // A pane rather than a panel the client arranges for itself. The app had a
+  // second layout engine for exactly one view — a tree of tiles beside tmux's
+  // tree of panes — and the two could not agree about anything: the diff could
+  // not be zoomed, dragged onto another pane, broken out into its own window
+  // or reached by `⌃B` arrow keys, because every one of those is tmux's and
+  // the diff was not in it. It is now, and so is all of that, for free.
+  //
+  // Unlike the two above, this mode is not toggled onto an existing pane: it is
+  // what a pane created with the `changes` preset IS, for its whole life. There
+  // is no TUI underneath to switch back to.
+  PANE_MODE_CHANGES = 3;
 }
 
 // The four states a coding agent is in, plus the two non-answers.
@@ -1088,4 +1122,397 @@ enum ErrorCode {
   // location — a whole home directory or a system path — will never be
   // allowlistable, pick something narrower inside it instead."
   ERROR_CODE_SENSITIVE_ROOT = 21;
+  // Review. Six failures the review surface can produce that no existing code
+  // describes; each one has a sentence a person reads, and none of them ever
+  // carries a raw Rust error.
+  //
+  // "Can't find the branch this work is based on. Pick a base to compare against."
+  ERROR_CODE_BASE_UNRESOLVABLE = 22;
+  // "This file is too big to show." Offers Load More where paging helps.
+  ERROR_CODE_DIFF_TOO_LARGE = 23;
+  // "This is a merge commit. Far Cooler shows merges by their first parent."
+  // Also binary and submodule entries: there is no text diff to render.
+  ERROR_CODE_DIFF_UNSUPPORTED = 24;
+  // "Can't reach GitHub right now." PR state reads unknown; nothing blocks.
+  ERROR_CODE_PR_STATE_UNAVAILABLE = 25;
+  // "That's too big to attach. Images up to 4 MB, 4 per comment."
+  ERROR_CODE_ATTACHMENT_LIMIT = 26;
+  // "Far Cooler can't tell whether the agent got this." Offers Send Again.
+  ERROR_CODE_DISPATCH_UNKNOWN = 27;
+}
+
+// ---------------------------------------------------------------------------
+// Review
+//
+// What a branch changed, the comments a reviewer wrote about it, and where
+// those comments still point.
+//
+// Everything here that returns FILE CONTENT sits at `control`, not `read`. See
+// `required_scope` in the daemon: `read` is the scope handed to something that
+// should only see the shape of the fleet, and a diff is source code. `read`
+// still gets counts, +/- and PR state, which is metadata about work rather than
+// the work — enough to triage a fleet from a phone without being able to read it.
+// ---------------------------------------------------------------------------
+
+// Which comparison a client is asking about.
+message ChangeSetSelector {
+  oneof kind {
+    // The workspace's own branch against its base.
+    Empty workspace = 1;
+    // Any branch, against the workspace base or against its stack parent.
+    BranchAgainst branch = 2;
+  }
+}
+
+message BranchAgainst {
+  string branch = 1;
+  // True selects the branch's stack parent instead of the workspace base. One
+  // field rather than two selector types, because the only thing that differs
+  // between them is which side of the comparison the base comes from.
+  bool against_parent = 2;
+}
+
+message ChangeSetRequest {
+  bytes workspace_id = 1;
+  ChangeSetSelector selector = 2;
+  // Bypass the cache. The Refresh affordance: no watcher is perfect and the
+  // user must always have a way to be certain.
+  bool fresh = 3;
+}
+
+message ChangeSetChanged {
+  bytes workspace_id = 1;
+  uint64 version = 2;
+}
+
+// Where a base came from, because a guessed one silently produces a wrong diff
+// and the user is the only one who can spot it.
+enum BaseSource {
+  BASE_SOURCE_UNSPECIFIED = 0;
+  // The user pinned it.
+  BASE_SOURCE_RECORDED = 1;
+  BASE_SOURCE_UPSTREAM = 2;
+  // Nothing knew, so a local `main` or `master` was used. The only one the UI
+  // labels as a guess, because it is the only one that can silently be wrong.
+  BASE_SOURCE_GUESSED = 3;
+  // The branch has a pull request, and GitHub says what it is based on. Exact,
+  // and the only source that is right for a STACKED branch, whose base is its
+  // parent slice rather than the repository default.
+  BASE_SOURCE_PR_BASE = 4;
+  // The repository's own default branch, from `gh` or from `origin/HEAD`.
+  BASE_SOURCE_DEFAULT_BRANCH = 5;
+}
+
+enum FileStatus {
+  FILE_STATUS_UNSPECIFIED = 0;
+  FILE_STATUS_ADDED = 1;
+  FILE_STATUS_MODIFIED = 2;
+  FILE_STATUS_DELETED = 3;
+  FILE_STATUS_RENAMED = 4;
+  FILE_STATUS_COPIED = 5;
+  FILE_STATUS_TYPE_CHANGED = 6;
+  FILE_STATUS_UNTRACKED = 7;
+  FILE_STATUS_CONFLICTED = 8;
+}
+
+message FileChange {
+  // Worktree-RELATIVE. Not a host path, so it needs no `host_admin` gate — the
+  // same reasoning `WorktreeFileList` already relies on.
+  string path = 1;
+  FileStatus status = 2;
+  optional string old_path = 3;
+  uint32 insertions = 4;
+  uint32 deletions = 5;
+  // git reported `-` for both counts, which is how it says "not text". Distinct
+  // from 0/0, which is a real empty change.
+  bool binary = 6;
+  bool submodule = 7;
+}
+
+message FileChangeList { repeated FileChange items = 1; }
+
+message ChangeCommit {
+  string sha = 1;
+  string subject = 2;
+  string body = 3;
+  string author = 4;
+  int64 timestamp = 5;
+  uint32 files_changed = 6;
+  uint32 insertions = 7;
+  uint32 deletions = 8;
+}
+
+message WorkingTree {
+  repeated FileChange staged = 1;
+  repeated FileChange unstaged = 2;
+  repeated string untracked = 3;
+  repeated string conflicted = 4;
+}
+
+message ChangeSet {
+  bytes workspace_id = 1;
+  // Advances on every recompute. Not a resource_version: nothing here is
+  // stored, so there is no row to version — this is a cache generation.
+  uint64 version = 2;
+  string branch = 3;
+  string base_ref = 4;
+  BaseSource base_source = 5;
+  // The resolved merge base, shown because a wrong base is invisible otherwise.
+  string base_commit = 6;
+  string head_commit = 7;
+  repeated ChangeCommit commits = 8;
+  WorkingTree working_tree = 9;
+  // Per-file COUNTS for the whole branch. Never patch text: a branch that
+  // regenerated a lockfile touches thousands of files, and a phone must not
+  // receive that to draw a badge.
+  repeated FileChange files = 10;
+  uint32 insertions = 11;
+  uint32 deletions = 12;
+  string worktree_digest = 13;
+  int64 computed_at = 14;
+}
+
+message CommitFilesRequest {
+  bytes workspace_id = 1;
+  string sha = 2;
+}
+
+message DiffSelector {
+  oneof kind {
+    // The whole branch: merge base to HEAD.
+    Empty range = 1;
+    // One commit against its FIRST parent. Never `git show`, which prints a
+    // combined diff for a merge that an ordinary parser reads as nonsense.
+    string commit = 2;
+    // Index against HEAD.
+    Empty staged = 3;
+    // Worktree against index.
+    Empty unstaged = 4;
+    // Worktree against HEAD: everything uncommitted, staged or not.
+    //
+    // The one a person means by "what have I not committed yet", and the one an
+    // agent's work lands in. `unstaged` alone answered that question wrongly the
+    // moment anything was staged — a file added to the index vanished from its
+    // own diff, which reads as work undone rather than work staged.
+    Empty local = 5;
+  }
+}
+
+message FileDiffRequest {
+  bytes workspace_id = 1;
+  DiffSelector selector = 2;
+  string path = 3;
+  // Paging cursor, for a file whose diff exceeded a cap.
+  uint32 from_hunk = 4;
+  // Lines of unchanged context around each hunk. Zero means git's own default,
+  // which is three.
+  //
+  // What "expand this collapsed section" is made of: a diff is a set of hunks
+  // with the unchanged lines between them left out, and the only way to see
+  // those lines is to ask git for a diff that includes them. A client asks for
+  // a number large enough to swallow the gap it wants to open and shows the
+  // part it asked about.
+  uint32 context = 5;
+}
+
+enum DiffLineKind {
+  DIFF_LINE_KIND_UNSPECIFIED = 0;
+  DIFF_LINE_KIND_CONTEXT = 1;
+  DIFF_LINE_KIND_ADDED = 2;
+  DIFF_LINE_KIND_REMOVED = 3;
+}
+
+message DiffLine {
+  DiffLineKind kind = 1;
+  // Absent on the side the line does not exist on.
+  optional uint32 old_no = 2;
+  optional uint32 new_no = 3;
+  string text = 4;
+  // The file had no trailing newline here. Carried rather than normalized: a
+  // diff that drops it shows a real one-line change as no change at all.
+  bool no_newline = 5;
+}
+
+message Hunk {
+  // Position in THIS response, and the selection key. Meaningless outside it.
+  uint32 index = 1;
+  string header = 2;
+  uint32 old_start = 3;
+  uint32 old_lines = 4;
+  uint32 new_start = 5;
+  uint32 new_lines = 6;
+  repeated DiffLine lines = 7;
+  // Hash of the path and the CHANGED lines only.
+  //
+  // Not an identity: the same edit can legitimately appear twice in one file,
+  // and anything resolving an anchor must treat a second match as ambiguity
+  // rather than picking one. Context is excluded so that editing the code above
+  // a hunk does not move every comment attached below it.
+  string fingerprint = 8;
+}
+
+enum Truncation {
+  TRUNCATION_UNSPECIFIED = 0;
+  TRUNCATION_LINE_CAP = 1;
+  TRUNCATION_HUNK_CAP = 2;
+  TRUNCATION_BYTE_CAP = 3;
+  TRUNCATION_TIMEOUT = 4;
+}
+
+// Why a file has no hunks, when the reason is not "nothing changed".
+//
+// Present so a client renders the reason. An empty hunk list on its own reads
+// as "unchanged", which for a binary file or an unreadable patch is a lie.
+enum DiffUnsupported {
+  DIFF_UNSUPPORTED_UNSPECIFIED = 0;
+  DIFF_UNSUPPORTED_BINARY = 1;
+  DIFF_UNSUPPORTED_SUBMODULE = 2;
+  DIFF_UNSUPPORTED_COMBINED_DIFF = 3;
+  DIFF_UNSUPPORTED_MALFORMED = 4;
+}
+
+message FileDiff {
+  string path = 1;
+  repeated Hunk hunks = 2;
+  optional Truncation truncated = 3;
+  optional uint32 next_hunk = 4;
+  optional DiffUnsupported unsupported = 5;
+  // The commit had more than one parent and this is its first-parent view.
+  bool first_parent_of_merge = 6;
+  uint64 change_set_version = 7;
+}
+
+// ---------------------------------------------------------------------------
+// The buffer
+// ---------------------------------------------------------------------------
+
+message ChangesSetBase {
+  bytes workspace_id = 1;
+  string base_ref = 2;
+}
+
+message ChangesMarkRead {
+  bytes workspace_id = 1;
+  string branch = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+//
+// Bytes live BESIDE the database, keyed by hash, for the reason `push.rs` keeps
+// the relay token out of it: a database copied for support or debugging should
+// not carry a screenshot of whatever was on screen when somebody wrote a
+// comment. Content addressing also deduplicates the same screenshot attached to
+// several entries.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Stacks and PR state
+// ---------------------------------------------------------------------------
+
+// Where a branch's parent came from. A guess is labeled, because a wrong parent
+// produces a wrong diff and looks like a real one.
+enum ParentSource {
+  PARENT_SOURCE_UNSPECIFIED = 0;
+  PARENT_SOURCE_RECORDED = 1;
+  PARENT_SOURCE_UPSTREAM = 2;
+  PARENT_SOURCE_PR_BASE = 3;
+  PARENT_SOURCE_GUESSED = 4;
+}
+
+enum PrState {
+  PR_STATE_UNSPECIFIED = 0;
+  PR_STATE_UNKNOWN = 1;
+  PR_STATE_OPEN = 2;
+  PR_STATE_DRAFT = 3;
+  PR_STATE_MERGED = 4;
+  PR_STATE_CLOSED = 5;
+}
+
+enum CheckState {
+  CHECK_STATE_UNSPECIFIED = 0;
+  CHECK_STATE_UNKNOWN = 1;
+  CHECK_STATE_PASSING = 2;
+  CHECK_STATE_FAILING = 3;
+  CHECK_STATE_PENDING = 4;
+}
+
+enum ReviewDecision {
+  REVIEW_DECISION_UNSPECIFIED = 0;
+  REVIEW_DECISION_UNKNOWN = 1;
+  REVIEW_DECISION_APPROVED = 2;
+  REVIEW_DECISION_CHANGES_REQUESTED = 3;
+  REVIEW_DECISION_REVIEW_REQUIRED = 4;
+}
+
+message PrStatus {
+  uint32 number = 1;
+  string url = 2;
+  PrState state = 3;
+  CheckState checks = 4;
+  ReviewDecision review_decision = 5;
+  // The PR head as GitHub last saw it. Under a squash merge this is the ONLY
+  // way to establish that nothing local is unmerged: the branch's commits never
+  // appear in main with those SHAs, so ancestry can never prove it.
+  string head_oid = 6;
+  optional int64 merged_at = 7;
+  int64 fetched_at = 8;
+  bool stale = 9;
+}
+
+message StackLink {
+  string branch = 1;
+  string parent_branch = 2;
+  ParentSource parent_source = 3;
+  string head_commit = 4;
+  uint32 ahead = 5;
+  uint32 behind = 6;
+  optional PrStatus pr = 7;
+}
+
+message StackLinkList {
+  bytes repository_id = 1;
+  repeated StackLink items = 2;
+  // The parent chain formed a loop. Reported rather than followed, and the
+  // links returned are the ones walked before it was noticed.
+  bool cycle_detected = 3;
+}
+
+message StackGet {
+  bytes repository_id = 1;
+  string branch = 2;
+}
+
+message StackSetParent {
+  bytes repository_id = 1;
+  string branch = 2;
+  string parent_branch = 3;
+}
+
+message PrRefresh { bytes repository_id = 1; }
+
+// ---------------------------------------------------------------------------
+// The fleet inbox
+// ---------------------------------------------------------------------------
+
+message ChangesInboxRequest {}
+
+message InboxWorkspace {
+  bytes workspace_id = 1;
+  string task_name = 2;
+  string branch = 3;
+  // The change set moved since this workspace was last marked reviewed. Derived
+  // from the cheap two-syscall gate, never from a fleet-wide `git status`.
+  bool changed_since_reviewed = 8;
+  uint32 insertions = 9;
+  uint32 deletions = 10;
+}
+
+message ChangesInbox {
+  repeated InboxWorkspace items = 1;
+  // Entries in scopes this client cannot see, as an opaque count.
+  //
+  // Included rather than omitted: a triage surface that silently hides half the
+  // fleet is worse than one that says it is not showing you everything.
+  uint32 elsewhere = 2;
 }

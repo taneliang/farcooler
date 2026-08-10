@@ -267,6 +267,24 @@ impl Watcher {
         });
     }
 
+    /// A workspace's change set moved.
+    ///
+    /// Carries the workspace and a version, never the set: most clients are not
+    /// looking at a diff, and a lockfile regeneration would otherwise fan
+    /// thousands of file records out to every connected device.
+    pub fn announce_change_set(&self, workspace_id: Uuid, version: u64) {
+        let _ = self.events.send(Event {
+            event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+            sequence: 0,
+            payload: Some(farcooler_protocol::v1::event::Payload::ChangeSetChanged(
+                farcooler_protocol::v1::ChangeSetChanged {
+                    workspace_id: bytes::Bytes::copy_from_slice(workspace_id.as_bytes()),
+                    version,
+                },
+            )),
+        });
+    }
+
     /// Reconcile repositories whose worktrees moved, or all of them if forced.
     ///
     /// Broadcasts only when something actually changed, for the same reason
@@ -355,9 +373,40 @@ impl Watcher {
         let registry = self.service.registry();
 
         let mut live = Vec::new();
+        // Changes panes whose pane has gone. See the reap below the loop.
+        let mut spent = Vec::new();
         for workspace in &fleet {
             for terminal in &workspace.terminals {
                 let id = terminal.terminal.id;
+                // A diff that has been closed leaves nothing behind.
+                //
+                // Every other terminal keeps its record after the process ends,
+                // because the exit code answers a question somebody asked. A
+                // changes pane has no such answer: the record exists only to
+                // give a rectangle a mode, and once tmux has taken the
+                // rectangle away — `⌃B x`, a killed window, a quit tmux server
+                // — all it can contribute is a dead row called Changes in the
+                // sidebar of every worktree anyone ever opened one in.
+                //
+                // Only while the inventory is HEALTHY, which is the whole
+                // safety of this. `derive_terminal` reports every terminal on
+                // the machine as `Lost` when tmux cannot be read at all — so
+                // without this gate, one failed `list-panes` would delete every
+                // changes pane in the fleet and kill the panes on the way past,
+                // for a machine that was fine a second later.
+                if panes.inventory_healthy
+                    && terminal.terminal.pane_mode == farcooler_store::models::PaneMode::Changes
+                    && matches!(
+                        terminal.state(),
+                        // Exited is a pane that ran `exit` and was retained, or
+                        // one this app stopped; Lost is `⌃B x`, which leaves no
+                        // pane behind at all. Both mean the rectangle is gone.
+                        TerminalState::Exited | TerminalState::Lost
+                    )
+                {
+                    spent.push(id);
+                    continue;
+                }
                 // What is RUNNING, not what it was launched as — and with its
                 // arguments where there are any. `pane_current_command` is a
                 // process NAME, so `pnpm dev` arrives as `node`; the foreground
@@ -380,6 +429,19 @@ impl Watcher {
             }
         }
 
+        // Announced once for however many were reaped, because a client re-reads
+        // the fleet rather than applying this as a delta — the same contract
+        // `fleet_changed` already has for a reconcile pass that deleted a
+        // workspace.
+        if !spent.is_empty() {
+            for id in spent {
+                if let Err(e) = self.service.remove_terminal(id).await {
+                    tracing::debug!(terminal = %id, error = ?e, "closed changes pane not reaped");
+                }
+            }
+            self.announce_fleet_changed();
+        }
+
         // Terminals that are gone stop being tracked, or a restarted one would
         // inherit the activity of the process it replaced.
         {
@@ -397,6 +459,12 @@ impl Watcher {
             let (label, observed, chat_capable) = if !matches!(terminal_state, TerminalState::Running)
             {
                 (registry.describe(&command, ""), AgentActivity::None, false)
+            } else if pane_mode == farcooler_store::models::PaneMode::Changes {
+                // No screen read, because there is nothing on it to read. A
+                // changes pane runs a process that prints one line and waits;
+                // classifying it would spend a `capture-pane` per sample to
+                // learn, every time, that a diff is not an agent.
+                ("changes".to_string(), AgentActivity::None, false)
             } else if pane_mode == farcooler_store::models::PaneMode::Agent {
                 // The protocol, not the screen. An agent-mode pane shows the
                 // shim's status log, which matches no agent signature, so the

@@ -18,6 +18,17 @@ public enum DiffComputation {
         public let oldNumber: Int?
         public let newNumber: Int?
         public let text: String
+
+        /// Public so the review surface renders the SAME line model the agent
+        /// transcript does, rather than declaring a second one that is free to
+        /// disagree about what a changed line is.
+        public init(id: Int, kind: Kind, oldNumber: Int?, newNumber: Int?, text: String) {
+            self.id = id
+            self.kind = kind
+            self.oldNumber = oldNumber
+            self.newNumber = newNumber
+            self.text = text
+        }
     }
 
     /// Line-based diff of two whole file texts.

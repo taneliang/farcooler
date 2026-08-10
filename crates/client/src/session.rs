@@ -829,6 +829,11 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::AdapterTestResult(_) => "adapter_test_result",
         result::Value::Empty(_) => "empty",
         result::Value::TerminalFilePut(_) => "terminal_file_put",
+        result::Value::ChangeSet(_) => "change_set",
+        result::Value::FileChangeList(_) => "file_change_list",
+        result::Value::FileDiff(_) => "file_diff",
+        result::Value::StackLinkList(_) => "stack_link_list",
+        result::Value::ChangesInbox(_) => "changes_inbox",
     }
 }
 
@@ -876,6 +881,7 @@ fn activity_since(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
 fn pane_mode_label(mode: i32) -> &'static str {
     match farcooler_protocol::v1::PaneMode::try_from(mode) {
         Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
+        Ok(farcooler_protocol::v1::PaneMode::Changes) => "changes",
         // Unspecified from an older daemon is terminal: the mode that needs no
         // adapter and always works.
         _ => "terminal",

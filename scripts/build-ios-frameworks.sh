@@ -28,7 +28,7 @@ OUT="apps/ios/Frameworks"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-for CRATE in farcooler-vt farcooler-client; do
+for CRATE in farcooler-vt farcooler-client farcooler-review; do
   LIB="lib$(echo "$CRATE" | tr '-' '_').a"
   NAME="$(echo "$CRATE" | sed 's/farcooler-//')"
 

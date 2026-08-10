@@ -292,6 +292,7 @@ pub fn pane_mode(mode: models::PaneMode) -> i32 {
     match mode {
         models::PaneMode::Terminal => wire::PaneMode::Terminal as i32,
         models::PaneMode::Agent => wire::PaneMode::Agent as i32,
+        models::PaneMode::Changes => wire::PaneMode::Changes as i32,
     }
 }
 

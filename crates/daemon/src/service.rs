@@ -75,6 +75,31 @@ pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
+/// The preset whose pane is this worktree's diff.
+///
+/// A word rather than a flag on `terminal create`, because a preset is already
+/// the answer to "what is this pane for" and every path that opens a pane — the
+/// CLI's `layout split --preset`, a drop on an edge, the app's own button —
+/// carries one. Nothing new had to learn about changes panes to be able to make
+/// one.
+pub const CHANGES_PRESET: &str = "changes";
+
+/// The process a Changes pane runs.
+///
+/// tmux has no concept of a pane without one, so a surface the client draws
+/// still needs something to own the rectangle. This is that something and it
+/// does nothing else: it prints a line saying what the pane is and waits to be
+/// killed.
+///
+/// A subcommand of the CLI rather than `sleep infinity` for the reason
+/// `agent-host` is one: the pane's command is read back by the daemon, printed
+/// by `terminal list` and shown on a phone, and `sleep` in all three of those
+/// places says nothing about what the pane is.
+fn changes_host_command() -> String {
+    let binary = shim_binary(std::env::current_exe().ok().as_deref());
+    format!("{} pane-host --kind changes", shell_quote(&binary))
+}
+
 pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
     let shell = farcooler_core::shell::login_shell();
     let (agent, model) = match preset.split_once(':') {
@@ -98,6 +123,11 @@ pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
 
     match agent {
         "shell" => format!("{shell} -il"),
+        // Before the shell branches below, and deliberately not through one: a
+        // login shell would put a `.zshrc` between tmux and the process, and
+        // the one thing this pane has to do is exist for as long as tmux says
+        // it does.
+        CHANGES_PRESET => changes_host_command(),
         "claude" => format!("{shell} -ilc 'claude{flag}{session}'"),
         "codex" => format!("{shell} -ilc 'codex{flag}'"),
         "cursor" => format!("{shell} -ilc 'cursor-agent{flag}'"),
@@ -253,6 +283,29 @@ pub struct Service {
     /// event window. See `agent_supervisor` for why the transcript itself is
     /// not here.
     agents: agent_supervisor::AgentSupervisor,
+    /// Change sets, cached behind a two-syscall gate.
+    ///
+    /// Not in the store: nothing here is durable. It is a derivation of git, and
+    /// the only reason it is held at all is that recomputing it per keystroke of
+    /// scrolling would put a `git status` on the critical path of a phone.
+    pub review_cache: crate::review::ReviewCache,
+    /// PR state, in memory and nowhere else.
+    ///
+    /// Deliberately not durable. Writing it would mean a restarted daemon
+    /// confidently showing yesterday's "merged" for a PR that was reopened, and
+    /// "runtime state is derived, never stored" applies to a third party's
+    /// lifecycle at least as strongly as to our own. After a restart every PR
+    /// reads Unknown until a refresh succeeds.
+    pr_cache: std::sync::Mutex<std::collections::HashMap<Uuid, Option<Vec<crate::stack::PrInfo>>>>,
+    /// How many `gh` processes may run at once, across every repository.
+    gh_limit: Arc<tokio::sync::Semaphore>,
+    /// Each repository's default branch, once discovered.
+    ///
+    /// In memory like PR state, and for a weaker version of the same reason: it
+    /// changes about once in a repository's life, but writing it would mean a
+    /// restarted daemon confidently diffing against a default that has since
+    /// been renamed. Cheap to rediscover, so it is.
+    default_branches: std::sync::Mutex<std::collections::HashMap<Uuid, Option<String>>>,
     /// One mutex per repository, created on first use and never removed.
     ///
     /// Held across any sequence that mutates git and then writes a workspace
@@ -323,13 +376,78 @@ impl Service {
             root,
             registry,
             agents: agent_supervisor::AgentSupervisor::new(),
+            review_cache: crate::review::ReviewCache::new(),
+            pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+            gh_limit: Arc::new(tokio::sync::Semaphore::new(crate::stack::GH_MAX_CONCURRENT)),
+            default_branches: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    /// Wait for permission to run `gh`. Held for the length of the call.
+    pub async fn gh_permit(&self) -> tokio::sync::OwnedSemaphorePermit {
+        self.gh_limit
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("the gh semaphore is never closed")
+    }
+
+    /// A repository's default branch: GitHub's answer when `gh` can give one,
+    /// `origin/HEAD` when it cannot.
+    ///
+    /// Asked at most once per repository per daemon lifetime, including the
+    /// misses — a machine without `gh` must not pay for a process launch every
+    /// time somebody scrolls a diff.
+    pub async fn default_branch(&self, repository_id: Uuid, worktree: &Path) -> Option<String> {
+        if let Some(cached) =
+            self.default_branches.lock().unwrap_or_else(|e| e.into_inner()).get(&repository_id)
+        {
+            return cached.clone();
+        }
+
+        let found = {
+            let _permit = self.gh_permit().await;
+            crate::stack::fetch_default_branch(worktree).await
+        };
+        // `origin/HEAD` records the same fact without a network, and is right
+        // whenever the clone has ever been told.
+        let found = match found {
+            Some(name) => Some(name),
+            None => crate::change_set::default_branch_local(worktree).await,
+        };
+
+        self.default_branches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(repository_id, found.clone());
+        found
+    }
+
+    /// PR state as last read, or `None` when it has never been read since this
+    /// process started. `None` means Unknown to a client, never "not merged".
+    pub fn pr_cache_get(&self, repository_id: Uuid) -> Option<Vec<crate::stack::PrInfo>> {
+        self.pr_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&repository_id)
+            .cloned()
+            .flatten()
+    }
+
+    pub fn pr_cache_put(&self, repository_id: Uuid, prs: Option<Vec<crate::stack::PrInfo>>) {
+        self.pr_cache.lock().unwrap_or_else(|e| e.into_inner()).insert(repository_id, prs);
     }
 
     /// The supervisor for every terminal's agent session.
     pub fn agents(&self) -> &agent_supervisor::AgentSupervisor {
         &self.agents
+    }
+
+    /// Where this service's runtime data lives. Attachment blobs sit under it,
+    /// beside the database rather than inside it, and pasted files land there too.
+    pub fn root_dir(&self) -> &std::path::Path {
+        &self.root
     }
 
     /// The lock guarding one repository's git-plus-metadata sequences.
@@ -937,6 +1055,7 @@ impl Service {
         } else {
             term
         };
+        let term = self.mark_changes_pane(term, command_preset)?;
 
         // 2. Create and tag the window.
         let command = preset_command(command_preset, declared.as_deref());
@@ -1099,6 +1218,7 @@ impl Service {
             120,
             40,
         )?;
+        let term = self.mark_changes_pane(term, command_preset)?;
 
         let command = preset_command(command_preset, term.agent_session_id.as_deref());
         let created = self
@@ -1230,6 +1350,29 @@ impl Service {
         )
     }
 
+    /// Record that a pane created with the changes preset is a changes pane.
+    ///
+    /// Written at creation rather than derived later from the preset, because
+    /// the preset stops being true the moment anyone types into a pane and
+    /// `pane_mode` is what every client switches on to decide which surface to
+    /// draw. Hands back the updated record so the caller keeps a current
+    /// `resource_version` — the versions are checked on every write after this.
+    fn mark_changes_pane(
+        &self,
+        term: models::Terminal,
+        command_preset: &str,
+    ) -> Result<models::Terminal> {
+        if command_preset != CHANGES_PRESET {
+            return Ok(term);
+        }
+        self.store.set_pane_mode(
+            term.id,
+            term.resource_version,
+            models::PaneMode::Changes,
+            None,
+        )
+    }
+
     /// Toggle a terminal between hosting a TUI and hosting an ACP agent.
     ///
     /// The pane is respawned rather than replaced, so the terminal keeps its
@@ -1243,6 +1386,28 @@ impl Service {
     ) -> Result<models::Terminal> {
         let term = self.store.get_terminal(id)?;
         let ws = self.store.get_workspace(term.workspace_id)?;
+
+        // A changes pane is not a posture a pane is in, so it is not one this
+        // can move to or from.
+        //
+        // Refused in both directions rather than silently doing the nearest
+        // thing. Switching a changes pane to TERMINAL would respawn it as a
+        // login shell — the pane would still be on screen, still be called
+        // Changes by every client reading the record this call is about to
+        // change, and be a shell. Switching some other pane INTO changes mode
+        // would respawn whatever was running in it, which for an agent
+        // mid-turn is work nobody can get back. Opening a changes pane is
+        // `layout split --preset changes`; closing one is closing the pane.
+        if term.pane_mode == models::PaneMode::Changes {
+            return Err(DomainError::InvalidArgument {
+                what: "a changes pane has no terminal to switch to; close it instead",
+            });
+        }
+        if pane_mode == models::PaneMode::Changes {
+            return Err(DomainError::InvalidArgument {
+                what: "changes is a pane you open, not a mode you switch to",
+            });
+        }
 
         // `ConfirmationRequired` rather than a new code: a turn in flight is
         // exactly the existing "tell the user what this destroys and ask", and
@@ -1344,6 +1509,15 @@ impl Service {
             .map(|rules| rules.preset.clone());
 
         let command = match pane_mode {
+            // Already refused at the top of this function; spelled out rather
+            // than folded into a wildcard so that a fourth mode arriving here
+            // is a compile error instead of a pane quietly respawned as a
+            // login shell.
+            models::PaneMode::Changes => {
+                return Err(DomainError::InvalidArgument {
+                    what: "changes is a pane you open, not a mode you switch to",
+                });
+            }
             models::PaneMode::Terminal => {
                 let sid = session_id.clone().unwrap_or_default();
                 // Resumable only if there is something on disk to resume.
@@ -1554,10 +1728,6 @@ impl Service {
         self.runtime().cursor(id).await
     }
 
-    /// Where this service's runtime data lives.
-    pub fn root_dir(&self) -> &Path {
-        &self.root
-    }
 
     /// Whether the pane's program has asked for bracketed paste.
     pub async fn pane_bracketed_paste(&self, id: Uuid) -> Result<bool> {

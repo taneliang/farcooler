@@ -24,6 +24,16 @@ struct ContentView: View {
     /// already says which machine, and preselecting anything else would put
     /// the worktree on a machine other than the one the row named.
     @State private var newWorkspaceHost: String?
+    /// Each worktree's change state, kept across selection changes: a review is
+    /// a session, not a mode. Coming back to a worktree should still be showing
+    /// the file you were reading.
+    ///
+    /// There is no companion `tileLayouts` any more. The app used to hold a
+    /// tree of tiles per worktree, persisted per device, purely so the diff
+    /// could sit beside the terminals — a second layout engine next to tmux's,
+    /// which owns every rectangle in this window. The diff is a tmux pane now,
+    /// so where it sits is tmux's answer like every other pane's.
+    @State private var changesStores: [String: ChangesStore] = [:]
     @State private var showAddRepository = false
     @State private var showShortcuts = false
     @State private var showAbout = false
@@ -120,6 +130,35 @@ struct ContentView: View {
                 // them. This is the one place that decides which worktree the
                 // window is showing, which is exactly what the control acts on.
                 .openInEditorToolbar(workspace: detailWorkspace) { editorError = $0 }
+                .toolbar {
+                    // Not offered on a machine that has already said it cannot
+                    // read changes at all. Its daemon predates the whole
+                    // feature, so the split would open a pane running a
+                    // subcommand that machine has never heard of — a dead pane
+                    // where a diff was asked for, with nothing saying why.
+                    if let ws = detailWorkspace,
+                        store.client(for: ws)?.changesSupported != false
+                    {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button {
+                                toggleChangesPane(in: ws)
+                            } label: {
+                                Label("Changes", systemImage: "plusminus")
+                            }
+                            // Lit while one is open, the way a toggle in a
+                            // toolbar says which state you are in. This is a
+                            // `Button` rather than a `Toggle` because the two
+                            // directions are not symmetrical: opening splits a
+                            // pane, closing kills one, and a `Toggle`'s binding
+                            // would have to pretend they were one value.
+                            .symbolVariant(changesPane(in: ws) == nil ? .none : .fill)
+                            .help(
+                                changesPane(in: ws) == nil
+                                    ? "Show what this worktree changed, in a pane"
+                                    : "Close the changes pane")
+                        }
+                    }
+                }
                 .overlay(alignment: .top) {
                     ErrorBanner(message: errorBanner) { errorBanner = nil }
                 }
@@ -604,33 +643,7 @@ struct ContentView: View {
     @ViewBuilder
     private func projectRows(_ group: ProjectGroup, key: String, usable: Bool) -> some View {
         ForEach(group.shown) { ws in
-            WorkspaceSection(
-                workspace: ws,
-                isExpanded: expanded.contains(ws.id),
-                selection: $selection,
-                onToggle: { toggle(ws.id) },
-                onNewTerminal: { newTerminal(in: ws) },
-                onHide: {
-                    Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } }
-                },
-                onUnhide: {
-                    Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
-                },
-                onRemove: { removeWorkspace = ws },
-                onTerminalAction: { term, action in
-                    Task { await run(action, on: term, in: ws) }
-                },
-                layouts: store.client(for: ws)?.layouts[ws.id] ?? [],
-                onMoveToLayout: { term, group in
-                    moveToLayout(term, in: ws, group: group)
-                },
-                onDropTogether: { dragged, onto in
-                    placePane(dragged, onto: onto.id, side: .right, in: ws)
-                },
-                tiled: Set(store.client(for: ws)?.activeGroup(ws.id)?.terminals ?? []),
-                onEditorError: { editorError = $0 },
-                usable: usable
-            )
+            workspaceRow(ws, usable: usable)
         }
         if !group.hidden.isEmpty {
             HiddenWorktrees(
@@ -1024,6 +1037,123 @@ struct ContentView: View {
 
     // MARK: - Detail
 
+    /// One worktree's sidebar row.
+    ///
+    /// Extracted from the sidebar builder rather than written inline. With
+    /// eighteen arguments, most of them closures, this call sits right at the
+    /// type checker's budget — adding one more parameter to it pushed the whole
+    /// enclosing expression past "unable to type-check in reasonable time",
+    /// which is a compile error with no line number worth reading.
+    private func workspaceRow(_ ws: Workspace, usable: Bool) -> some View {
+        let client = store.client(for: ws)
+        let tiled = Set(client?.activeGroup(ws.id)?.terminals ?? [])
+        return WorkspaceSection(
+            workspace: ws,
+            isExpanded: expanded.contains(ws.id),
+            selection: $selection,
+            onToggle: { toggle(ws.id) },
+            onNewTerminal: { newTerminal(in: ws) },
+            onHide: {
+                Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } }
+            },
+            onUnhide: {
+                Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
+            },
+            onRemove: { removeWorkspace = ws },
+            onTerminalAction: { term, action in
+                Task { await run(action, on: term, in: ws) }
+            },
+            layouts: client?.layouts[ws.id] ?? [],
+            onMoveToLayout: { term, group in
+                moveToLayout(term, in: ws, group: group)
+            },
+            onDropTogether: { dragged, onto in
+                placePane(dragged, onto: onto.id, side: .right, in: ws)
+            },
+            tiled: tiled,
+            onEditorError: { editorError = $0 },
+            usable: usable,
+            changes: changesStatus(ws),
+            countsWidth: countsWidth
+        )
+    }
+
+    /// The diff column's width, for every row in the sidebar at once.
+    ///
+    /// Measured across the whole fleet rather than per row, because a column
+    /// each row sizes for itself is not a column — that was the alignment bug.
+    /// Computed here rather than inside the row for the same reason it is
+    /// measured at all: every row has to agree, and only this level can see
+    /// them all.
+    private var countsWidth: CGFloat {
+        SidebarMetrics.countsWidth(
+            store.clients.values.flatMap { Array($0.changesInbox.values) })
+    }
+
+    /// Diff status for one worktree, or nil when the fleet inbox has not been
+    /// read yet. Hoisted out of the sidebar builder: inline, the chained
+    /// optional subscript pushed that expression past the type checker's budget.
+    private func changesStatus(_ ws: Workspace) -> InboxRow? {
+        guard let client = store.client(for: ws) else { return nil }
+        return client.changesInbox[ws.short]
+    }
+
+    /// This worktree's changes pane, if it has one open.
+    ///
+    /// Asked of the ACTIVE layout rather than of the workspace's terminals,
+    /// because that is the question the toolbar button is answering: whether
+    /// the arrangement you are looking at is showing the diff. A changes pane
+    /// in a layout two tabs over is not on screen, and offering to close it
+    /// from here would close something the window is not showing.
+    private func changesPane(in ws: Workspace) -> Terminal? {
+        guard let group = store.client(for: ws)?.activeGroup(ws.id) else { return nil }
+        let inGroup = Set(group.panes.map(\.id))
+        return ws.terminals.first { inGroup.contains($0.id) && $0.isChangesPane }
+    }
+
+    /// Open this worktree's diff beside what is focused, or close the one that
+    /// is already open.
+    ///
+    /// A split of the focused pane, exactly as `⌃B %` and a drop on an edge
+    /// are: the daemon has one verb for "a new pane, here, running this", and a
+    /// changes pane is that verb with a different preset. Nothing new had to be
+    /// taught about layouts to put a diff into one.
+    private func toggleChangesPane(in ws: Workspace) {
+        if let open = changesPane(in: ws) {
+            // Killing the pane is the whole of it. The record goes with it, but
+            // the daemon does that — closing a diff from tmux's own `⌃B x` has
+            // to leave as little behind as closing it from here, so the reaping
+            // lives on the host where both can reach it, not in this button.
+            Task { await act(on: ws) { c in await c.stop(terminal: open.short) } }
+            return
+        }
+        Task {
+            let groups = await act(on: ws, default: []) { c in
+                // `beside: nil` means the focused pane, which is the daemon's
+                // own default and the same anchor `⌃B %` uses.
+                await c.split(ws, beside: nil, side: .right, preset: "changes")
+            }
+            reveal(groups, in: ws)
+        }
+    }
+
+    /// One changes store per worktree.
+    ///
+    /// Cached on the client too, not just the worktree. `FleetStore` drops a
+    /// `DaemonClient` when its machine leaves and builds a fresh one when it
+    /// comes back, and a store held over from the old one would go on talking to
+    /// a connection nobody is answering.
+    private func changesStore(for ws: Workspace, client: DaemonClient) -> ChangesStore {
+        if let existing = changesStores[ws.id], existing.client === client { return existing }
+        let made = ChangesStore(client: client, workspace: ws)
+        // Assigned outside the view update, because creating it IS a state
+        // change and SwiftUI is reading that state right now. An earlier version
+        // wrote it from a Task, which rebuilt the store on every render and threw
+        // away each load before it could finish — the panel sat permanently empty.
+        DispatchQueue.main.async { changesStores[ws.id] = made }
+        return made
+    }
+
     @ViewBuilder
     private var detail: some View {
         switch selection {
@@ -1044,7 +1174,7 @@ struct ContentView: View {
                 let c = store.client(for: ws), c.group(holding: termID, in: wsID) != nil,
                 let group = c.activeGroup(wsID)
             {
-                tiled(ws, group: group)
+                tiled(ws, client: c, group: group)
             } else if let ws = workspace(host: host, id: wsID),
                 let term = ws.terminals.first(where: { $0.id == termID })
             {
@@ -1082,10 +1212,11 @@ struct ContentView: View {
             // it does, showing a summary of the panes instead of the panes is a
             // click in the way.
             if let ws = workspace(host: host, id: wsID),
-                let group = store.client(for: ws)?.activeGroup(wsID),
+                let c = store.client(for: ws),
+                let group = c.activeGroup(wsID),
                 !group.terminals.isEmpty
             {
-                tiled(ws, group: group)
+                tiled(ws, client: c, group: group)
             } else if let ws = workspace(host: host, id: wsID) {
                 WorkspaceDetail(
                     workspace: ws,
@@ -1113,10 +1244,11 @@ struct ContentView: View {
     /// and while they were written out twice they drifted: the drag handler was
     /// fixed in one copy and not the other, so dropping a pane behaved differently
     /// depending on which sidebar row you had clicked last.
-    private func tiled(_ ws: Workspace, group: PaneGroup) -> some View {
+    private func tiled(_ ws: Workspace, client: DaemonClient, group: PaneGroup) -> some View {
         TileView(
-            groups: store.client(for: ws)?.layouts[ws.id] ?? [group],
+            groups: client.layouts[ws.id] ?? [group],
             workspace: ws,
+            changes: changesStore(for: ws, client: client),
             binary: store.client(for: ws)?.cliPath,
             environment: store.client(for: ws)?.cliEnvironment ?? [:],
             hostArguments: store.client(for: ws)?.cliHostArguments ?? [],
@@ -1441,6 +1573,20 @@ struct ContentView: View {
             await act(on: workspace) { c in await c.cycleLayout(workspace) }
 
         case .preset(let preset):
+            await act(on: workspace) { c in await c.applyPreset(preset, in: workspace) }
+
+        case .evenPanes:
+            // Which even arrangement, read off the panes rather than asked for.
+            //
+            // tmux has two — columns and rows — and picking the wrong one does
+            // not "even out" a layout, it turns it inside out: a stack of three
+            // becomes a row of three. So this counts how the window is already
+            // split, the same way `TileView.Viewport` does, and hands back the
+            // even version of the shape that is on screen.
+            let group = store.client(for: workspace)?.activeGroup(workspace.id)
+            let columns = Set(group?.panes.map(\.left) ?? []).count
+            let rows = Set(group?.panes.map(\.top) ?? []).count
+            let preset: TilePreset = columns >= rows ? .evenHorizontal : .evenVertical
             await act(on: workspace) { c in await c.applyPreset(preset, in: workspace) }
 
         case .splitRight, .splitDown:

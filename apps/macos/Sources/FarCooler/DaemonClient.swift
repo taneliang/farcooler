@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 
 /// Where a machine's connection stands.
@@ -49,6 +50,18 @@ enum HostState: Equatable {
 /// file for a socket client is the whole migration.
 @MainActor
 final class DaemonClient: ObservableObject {
+    /// Diff status per worktree short id, for the sidebar. Empty until read.
+    @Published var changesInbox: [String: InboxRow] = [:]
+    /// Whether this machine's daemon knows about review at all.
+    ///
+    /// `nil` until asked. `false` means the daemon ANSWERED and refused — which
+    /// on a machine installed before review is every review call, because an
+    /// unknown method is a `NOT_FOUND` there. Distinguished from "unreachable",
+    /// which is not the daemon's answer and must not be remembered as one.
+    @Published var changesSupported: Bool?
+    /// The last thing review failed with, verbatim from the daemon.
+    @Published var changesError: String?
+
     @Published var fleet: Fleet = .empty
     @Published var lastError: String?
     @Published var busy = false
@@ -579,6 +592,11 @@ final class DaemonClient: ObservableObject {
         do {
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
             hasLoaded = true
+            // Diff status for the whole sidebar, in one more call. Cheap by
+            // construction: the daemon answers it from counts it already holds
+            // plus a two-syscall gate per worktree, so a fleet where nothing is
+            // happening costs nothing to keep on screen.
+            Task { await self.refreshChangesInbox() }
             lastError = nil
             // Read before overwriting: `onReconnect` fires for a genuine
             // transition into `.connected`, not for a read that merely
@@ -761,6 +779,14 @@ final class DaemonClient: ObservableObject {
     // written out at each call site, which is where the last set of them drifted.
 
     /// A new terminal beside an existing pane. tmux's `split-window`.
+    ///
+    /// The only layout command that reads the fleet afterwards, because it is
+    /// the only one that creates a terminal. A layout is rectangles keyed by
+    /// terminal id; the terminal itself arrives in `fleet`, and until it does
+    /// the new pane is a rectangle this app can draw nothing into. The daemon
+    /// announces it too — see `layout.split` in `rpc.rs` — but that is for the
+    /// OTHER clients. Waiting for our own announcement to come back around the
+    /// event stream is a round trip spent looking at an empty pane.
     @discardableResult
     func split(
         _ workspace: Workspace, beside terminal: String?, side: TileDirection,
@@ -768,7 +794,9 @@ final class DaemonClient: ObservableObject {
     ) async -> [PaneGroup] {
         var rest = terminal.map { [$0] } ?? []
         rest += ["--side", side.rawValue, "--preset", preset]
-        return await layout(workspace, ["split"], rest)
+        let groups = await layout(workspace, ["split"], rest)
+        await refresh()
+        return groups
     }
 
     /// Move a pane against another, on an edge. The drag and drop.
@@ -1307,6 +1335,120 @@ final class DaemonClient: ObservableObject {
     /// which decides `.unreachable`'s reason and whether this is a machine
     /// that needs installing — calls `runRaw` directly instead. See there.
     @discardableResult
+    // ---- changes ----
+    //
+    // Every one of these is the same CLI the terminal rows already go through.
+    // A review surface the app could reach but an agent could not would make the
+    // one workflow this product is about the one thing nobody can automate.
+
+    func changesJSON(_ args: [String]) async -> Data? {
+        let (data, message) = await runRaw(args, background: true)
+        // Kept rather than dropped. Swallowing this is what made a machine
+        // running an older daemon look like a worktree with no changes: the call
+        // failed, the pane rendered an empty diff, and nothing anywhere said why.
+        changesError = data == nil ? message : nil
+        if data != nil { changesSupported = true }
+        return data
+    }
+
+    /// Diff status for every worktree on this machine, in one call.
+    ///
+    /// One call rather than one per row: the daemon answers it from counts it
+    /// already has plus a two-syscall gate, so a quiet fleet costs almost
+    /// nothing — and a per-row call would have put a `git` on a timer for every
+    /// worktree in the sidebar, which is exactly what makes a fleet view
+    /// expensive to leave open.
+    func refreshChangesInbox() async {
+        let (maybe, message) = await runRaw(["changes", "inbox", "--json"], background: true)
+        guard let data = maybe else {
+            // Only a CONNECTED machine refusing the call proves it cannot do it.
+            // A machine that is merely unreachable will answer differently once
+            // it is back, and remembering "unsupported" for it would be a lie
+            // that outlives the network.
+            if state == .connected {
+                changesSupported = false
+                changesError = message
+            }
+            return
+        }
+        changesSupported = true
+        changesError = nil
+        guard let rows = try? JSONDecoder().decode([InboxRow].self, from: data) else { return }
+        var byWorkspace: [String: InboxRow] = [:]
+        for r in rows { byWorkspace[r.workspaceId] = r }
+        changesInbox = byWorkspace
+    }
+
+    /// One file's diff, as lines the diff tile draws directly.
+    ///
+    /// Parsed from the CLI's unified output rather than recomputed here: the
+    /// daemon already refused what it could not read, and a second parser in the
+    /// app would be free to disagree with it about what a hunk is.
+    /// One file's diff. `context` is lines of unchanged context around each
+    /// hunk; zero leaves git's own default of three, and a large number is how
+    /// the lines a diff omits are recovered.
+    func changesDiff(
+        workspace: String, path: String, scope: DiffScope, context: Int = 0
+    ) async -> [DiffComputation.Line] {
+        var args = ["changes", "diff", workspace, path]
+        // `--local`, not `--unstaged`: everything uncommitted. Asking for the
+        // unstaged half alone meant a file went blank the moment it was staged,
+        // which reads as the work having been undone.
+        if scope == .local { args.append("--local") }
+        if context > 0 { args += ["--context", "\(context)"] }
+        guard let data = await run(args, background: true),
+            let text = String(data: data, encoding: .utf8)
+        else { return [] }
+        return Self.parseUnified(text)
+    }
+
+    static func parseUnified(_ text: String) -> [DiffComputation.Line] {
+        var lines: [DiffComputation.Line] = []
+        var next = 0
+        var oldNo = 0
+        var newNo = 0
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.hasPrefix("@@") {
+                // `@@ -a,b +c,d @@`
+                let parts = line.split(separator: " ")
+                if parts.count >= 3 {
+                    oldNo = Int(parts[1].dropFirst().split(separator: ",").first ?? "0") ?? 0
+                    newNo = Int(parts[2].dropFirst().split(separator: ",").first ?? "0") ?? 0
+                }
+                continue
+            }
+            guard let first = line.first else { continue }
+            let body = String(line.dropFirst())
+            switch first {
+            case "+":
+                lines.append(
+                    .init(id: next, kind: .added, oldNumber: nil, newNumber: newNo, text: body))
+                next += 1
+                newNo += 1
+            case "-":
+                lines.append(
+                    .init(id: next, kind: .removed, oldNumber: oldNo, newNumber: nil, text: body))
+                next += 1
+                oldNo += 1
+            case " ":
+                lines.append(
+                    .init(
+                        id: next, kind: .context, oldNumber: oldNo, newNumber: newNo, text: body))
+                next += 1
+                oldNo += 1
+                newNo += 1
+            default:
+                continue
+            }
+        }
+        return lines
+    }
+
+    func changesMarkRead(workspace: String) async {
+        _ = await run(["changes", "read", workspace])
+    }
+
     private func run(_ args: [String], background: Bool = false) async -> Data? {
         let (data, message) = await runRaw(args, background: background)
         if let message { lastError = message }

@@ -212,8 +212,19 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Whether to draw a chat or a VT grid.
     var isAgentPane: Bool { paneMode == "agent" }
 
+    /// Whether this pane is this worktree's diff.
+    ///
+    /// A real tmux pane like any other — it splits, drags, zooms and breaks out
+    /// — whose contents this app draws instead of a terminal grid. The process
+    /// behind it exists only to hold the rectangle; see `farcooler pane-host`.
+    var isChangesPane: Bool { paneMode == "changes" }
+
     /// Whether to offer the terminal/chat switch at all.
-    var canSwitchPaneMode: Bool { chatCapable == true }
+    ///
+    /// Never on a changes pane. There is no TUI underneath it to switch back
+    /// to, and the daemon refuses the call — offering a control that can only
+    /// produce an error message is worse than not offering it.
+    var canSwitchPaneMode: Bool { chatCapable == true && !isChangesPane }
 
     /// Whether an agent is running here at all, as opposed to a plain shell.
     ///
@@ -271,6 +282,12 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Only used when the daemon has one to give. The stored title is rejected
     /// here for the reason below: it is "Terminal 12", which is a counter.
     var label: String {
+        // Named for what it is, not for what is running in it. A changes pane's
+        // process is `farcooler`, and the daemon stores whatever title the
+        // split was asked for — neither is the word a person reading the header
+        // needs, and both are answers to a question about a program rather than
+        // about the pane.
+        if isChangesPane { return "Changes" }
         if !title.isEmpty, !Self.isPlaceholder(title) { return title }
         return Self.name(of: preset)
     }

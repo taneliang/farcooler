@@ -17,7 +17,19 @@ APP="build/Far Cooler.app"
 ./build-vt.sh >/dev/null
 
 echo "==> Building ($CONFIG)"
-swift build -c "$CONFIG" >/dev/null
+# Held rather than discarded, and printed when the build fails.
+#
+# `swift build` writes compiler diagnostics to STDOUT, so sending stdout to
+# /dev/null to keep the log quiet throws the errors away with it. The script
+# then exited on the missing binary saying nothing useful, while the last
+# bundle that DID build sat in place looking current — a long way to go to
+# find a one-line compile error.
+BUILD_LOG="$(mktemp -t farcooler-build)"
+trap 'rm -f "$BUILD_LOG"' EXIT
+if ! swift build -c "$CONFIG" >"$BUILD_LOG" 2>&1; then
+  cat "$BUILD_LOG"
+  exit 1
+fi
 
 BIN=".build/$CONFIG/Far Cooler"
 [ -x "$BIN" ] || { echo "build produced no binary at $BIN"; exit 1; }

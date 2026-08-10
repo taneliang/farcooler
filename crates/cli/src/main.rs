@@ -25,7 +25,9 @@ mod remote;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
+
+mod changes;
+pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use farcooler_daemon::runtime::Runtime;
 use farcooler_protocol::v1::{
     Repository, RepositoryRoot, Terminal, TerminalState, Workspace, WorkspaceState, request, result,
@@ -99,6 +101,9 @@ enum Command {
     /// Manage terminals inside a workspace.
     #[command(subcommand)]
     Terminal(TerminalCmd),
+    /// What a worktree changed.
+    #[command(subcommand)]
+    Changes(changes::ChangesCmd),
     /// Search a workspace's worktree files, for an agent chat's @-mention.
     #[command(subcommand)]
     Worktree(WorktreeCmd),
@@ -149,6 +154,19 @@ enum Command {
         /// and its argument vector never have to survive tmux's shell quoting.
         #[arg(long)]
         preset: Option<String>,
+    },
+    /// Hold a pane open for a surface the client draws. Started by the daemon.
+    ///
+    /// Not a command a user types either. tmux has no concept of a pane without
+    /// a process in it, so a pane whose contents are drawn by the app still
+    /// needs something to own the rectangle — this is that something, and it
+    /// does nothing but wait to be killed.
+    PaneHost {
+        /// What the pane is for. Only `changes` today; the argument exists so
+        /// that the next such surface is a value here rather than a second
+        /// subcommand that waits in a different way.
+        #[arg(long, default_value = "changes")]
+        kind: String,
     },
 }
 
@@ -618,7 +636,7 @@ async fn main() {
     }
 }
 
-type Fallible = Result<(), Box<dyn std::error::Error>>;
+pub(crate) type Fallible = Result<(), Box<dyn std::error::Error>>;
 
 /// Pair, unpair, or report — on this machine or, with `--host`, on another.
 ///
@@ -714,6 +732,7 @@ async fn run() -> Fallible {
         Command::Adapter(c) => adapter(host, c, cli.json).await,
         Command::Workspace(c) => workspace(host, c, cli.json).await,
         Command::Terminal(c) => terminal(host, c, cli.json).await,
+        Command::Changes(c) => changes::changes(host, c, cli.json).await,
         Command::Worktree(c) => worktree(host, c, cli.json).await,
         Command::Layout(c) => layout(host, c, cli.json).await,
         Command::Attach { workspace } => attach(host, &workspace).await,
@@ -743,7 +762,26 @@ async fn run() -> Fallible {
         Command::AgentHost { terminal, socket, worktree, session, preset } => {
             agent_host::run(terminal, socket, worktree, session, preset).await
         }
+        Command::PaneHost { kind } => pane_host(&kind).await,
     }
+}
+
+/// Hold a pane open until tmux takes it away.
+///
+/// The line it prints is for the one reader who ever sees this screen: someone
+/// who broke the pane out into a raw `tmux attach`, or a phone that renders the
+/// capture because it has no diff view of its own. A pane that printed nothing
+/// would look to both of them like a program that had crashed.
+async fn pane_host(kind: &str) -> Fallible {
+    let what = match kind {
+        "changes" => "changes",
+        other => return Err(format!("unknown pane kind: {other}").into()),
+    };
+    println!("Far Cooler is drawing this worktree's {what} here.");
+    // No signal handling: tmux kills the pane's process group, and a wait that
+    // caught SIGHUP to exit tidily would only be a slower way to be killed.
+    std::future::pending::<()>().await;
+    Ok(())
 }
 
 /// Start, stop, or replace the daemon on THIS machine.
@@ -2405,7 +2443,7 @@ async fn list_roots(link: &mut Link) -> Result<Vec<RepositoryRoot>, Box<dyn std:
     }
 }
 
-async fn list_repositories(link: &mut Link) -> Result<Vec<Repository>, Box<dyn std::error::Error>> {
+pub(crate) async fn list_repositories(link: &mut Link) -> Result<Vec<Repository>, Box<dyn std::error::Error>> {
     let r = link.call(req("repository.list")).await?;
     match expect_value(r.value, "repositories")? {
         result::Value::RepositoryList(l) => Ok(l.items),
@@ -2458,18 +2496,18 @@ fn short(id: Uuid) -> String {
     s[s.len() - 8..].to_string()
 }
 
-fn uuid_of(bytes: &[u8]) -> Uuid {
+pub(crate) fn uuid_of(bytes: &[u8]) -> Uuid {
     Uuid::from_slice(bytes).unwrap_or(Uuid::nil())
 }
 
 /// The inverse of `uuid_of`: an id going INTO a payload rather than out of
 /// one, for the agent-channel and worktree-search messages that carry their
 /// own id fields instead of using the envelope's `target_resource_id`.
-fn id_bytes(id: Uuid) -> bytes::Bytes {
+pub(crate) fn id_bytes(id: Uuid) -> bytes::Bytes {
     bytes::Bytes::copy_from_slice(id.as_bytes())
 }
 
-fn short_bytes(bytes: &[u8]) -> String {
+pub(crate) fn short_bytes(bytes: &[u8]) -> String {
     short(uuid_of(bytes))
 }
 
@@ -2510,6 +2548,7 @@ fn mime_for(path: &std::path::Path) -> &'static str {
 fn pane_mode_label(mode: i32) -> &'static str {
     match farcooler_protocol::v1::PaneMode::try_from(mode) {
         Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
+        Ok(farcooler_protocol::v1::PaneMode::Changes) => "changes",
         _ => "terminal",
     }
 }
@@ -2618,7 +2657,7 @@ fn normalize_id(text: &str) -> String {
 /// `farcooler workspace discover myrepo` is what anyone would write. Ids still
 /// work, and an ambiguous name is refused rather than guessed at — two projects
 /// called `api` on one host is a thing that happens.
-fn resolve_repository<'a>(
+pub(crate) fn resolve_repository<'a>(
     repositories: &'a [Repository],
     given: &str,
 ) -> Result<&'a Repository, String> {
@@ -2640,6 +2679,23 @@ fn resolve_repository<'a>(
 }
 
 /// Resolve a short id suffix, refusing an ambiguous match rather than guessing.
+/// A workspace by id prefix or by task name.
+pub(crate) async fn resolve_workspace_id(
+    link: &mut Link,
+    needle: &str,
+) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let workspaces = list_workspaces(link).await?;
+    // Name first: people type the task they gave it, and an id prefix is the
+    // fallback rather than the other way round.
+    let by_name: Vec<&Workspace> =
+        workspaces.iter().filter(|w| w.task_name == needle).collect();
+    if by_name.len() == 1 {
+        return Ok(uuid_of(&by_name[0].id));
+    }
+    let w = resolve(&workspaces, needle, |w| &w.id, "workspace")?;
+    Ok(uuid_of(&w.id))
+}
+
 fn resolve<'a, T>(
     items: &'a [T],
     prefix: &str,

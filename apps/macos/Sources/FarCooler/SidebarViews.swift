@@ -65,6 +65,38 @@ enum Grid {
 
     /// Space between one workspace and the next.
     static let group: CGFloat = 12
+
+    /// The gap between two trailing cells.
+    static let cell: CGFloat = 6
+}
+
+/// Measurements the sidebar takes from its own data.
+enum SidebarMetrics {
+    /// How wide the diff column has to be for every row in the fleet.
+    ///
+    /// Measured from the widest pair actually present, not guessed at, and
+    /// computed once per fleet update rather than per row. The font is fixed and
+    /// the strings are short, so this is a handful of `NSString.size` calls
+    /// against a list that is already in hand.
+    ///
+    /// Guessing was tried twice and has no good value: 78pt lines the numbers
+    /// up and takes the room out of the branch name, while anything narrow
+    /// enough to leave the branch alone is too narrow for a lockfile's counts
+    /// and lets the column go ragged again — which is the bug it was added for.
+    static func countsWidth(_ rows: [InboxRow]) -> CGFloat {
+        let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        var widest: CGFloat = 0
+        for row in rows where row.hasDiff {
+            // Built the same way the row builds it, thousands separators and
+            // all, so the measurement is of the string that gets drawn.
+            let text =
+                "+\(row.insertions.formatted()) -\(row.deletions.formatted())"
+            let w = (text as NSString).size(withAttributes: [.font: font]).width
+            widest = max(widest, w)
+        }
+        // Nothing in the fleet has a diff: no column, no cost.
+        return widest == 0 ? 0 : ceil(widest) + 2
+    }
 }
 
 /// One worktree, and its terminals when opened.
@@ -120,6 +152,20 @@ struct WorkspaceSection: View {
     /// already known to be unreachable are dimmed and inert rather than
     /// left to fail silently or hang on a dead connection.
     var usable: Bool = true
+
+    /// Diff status for this worktree, when the fleet inbox has been read.
+    ///
+    /// Absent is a real state and shows nothing at all, rather than a confident
+    /// `+0 -0` for a worktree nobody has looked at yet.
+    var changes: InboxRow?
+
+    /// How much room the diff column takes on every row in this list.
+    ///
+    /// One number for the whole sidebar — see `SidebarMetrics.countsWidth` —
+    /// because a column each row sizes for itself is not a column. Zero when
+    /// nothing in the fleet has a diff, so the space costs nothing until there
+    /// is something to put in it.
+    var countsWidth: CGFloat = 0
 
     @State private var hovering = false
 
@@ -182,17 +228,17 @@ struct WorkspaceSection: View {
                 }
 
                 Button(action: onNewTerminal) {
-                    HStack(spacing: Grid.gap) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 9, weight: .semibold))
-                            .frame(width: Grid.marker)
-                        Text("New terminal").font(.system(size: 12))
+                    SidebarRow(indent: 1) {
+                        HStack(spacing: SidebarGrid.gap) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 9, weight: .semibold))
+                                .frame(width: SidebarGrid.marker)
+                            Text("New terminal").font(.system(size: 12))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, SidebarGrid.rowVerticalPadding)
+                        .contentShape(Rectangle())
                     }
-                    .foregroundStyle(.tertiary)
-                    .padding(.vertical, 4)
-                    .padding(.leading, Grid.child)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .padding(.bottom, 4)
@@ -225,7 +271,7 @@ struct WorkspaceSection: View {
 
             Text(workspace.branch)
                 .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .padding(.leading, 7)
                 .layoutPriority(-1)
@@ -244,19 +290,48 @@ struct WorkspaceSection: View {
 
             Spacer(minLength: 6)
 
-            if !showsTerminals {
-                // What a closed worktree still has to answer: is anything
-                // happening in here?
-                Text(workspace.summary)
-                    .font(.system(size: 11))
-                    .foregroundStyle(workspace.attention.isEmpty ? .tertiary : .secondary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
+            if !showsTerminals && !workspace.attention.isEmpty {
+                // Attention is the only collapsed status worth permanent room.
+                // Terminal counts and "no terminals" repeat what expanding the
+                // row already says, while this dot is the reason to expand it.
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 6, height: 6)
+                    .accessibilityLabel(
+                        "\(workspace.attention.count) waiting on you in \(workspace.task)")
+            }
 
-                if !workspace.attention.isEmpty {
-                    Circle().fill(Color.orange).frame(width: 6, height: 6)
-                        .padding(.leading, 5)
-                }
+            // What changed in here, at a glance, without opening anything.
+            //
+            // Changed rows use one FIXED width. A minimum pins the right edge
+            // and lets the LEFT edge float, so the cell is only as wide as its
+            // own digits and the numbers start somewhere different on every
+            // changed row. A fixed cell gives those rows one left edge.
+            //
+            // The width comes from the fleet's own widest count, measured once
+            // per update rather than guessed: a guess is either too small, and
+            // the column it was supposed to fix goes ragged again, or too big,
+            // and it takes the room out of the branch name. An unchanged row
+            // does not render an invisible placeholder: alignment between
+            // values that do not exist is not worth truncating every branch.
+            //
+            // Inside the cell the pair stays tight and hugs the trailing edge.
+            // A width per NUMBER was tried and is worse than the problem: `+1`
+            // in a box sized for `+35,870` leaves a hole you could park a word
+            // in, and the pair stops reading as one thing.
+            if let changes, changes.hasDiff {
+                // One attributed Text means one baseline. Two sibling Text
+                // views can still land on adjacent device pixels after the
+                // stack reconciles their independently rounded font metrics.
+                changeCountsText(changes)
+                .font(.system(size: 10, design: .monospaced))
+                .lineLimit(1)
+                .fixedSize()
+                .frame(width: countsWidth, alignment: .trailing)
+                .padding(.leading, Grid.cell)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    "\(changes.insertions) insertions, \(changes.deletions) deletions")
             }
 
             Menu {
@@ -308,7 +383,7 @@ struct WorkspaceSection: View {
             .allowsHitTesting(usable)
             .padding(.leading, 2)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, SidebarGrid.rowVerticalPadding)
         .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
         .background(
             RoundedRectangle(cornerRadius: 6)
@@ -318,6 +393,15 @@ struct WorkspaceSection: View {
         .contentShape(Rectangle())
         .onTapGesture { selection = .workspace(host: workspace.host ?? "", id: workspace.id) }
         .onHover { hovering = $0 }
+    }
+
+    private func changeCountsText(_ changes: InboxRow) -> Text {
+        var additions = AttributedString("+\(changes.insertions.formatted())")
+        additions.foregroundColor = .green
+        var deletions = AttributedString(" -\(changes.deletions.formatted())")
+        deletions.foregroundColor = .red
+        additions.append(deletions)
+        return Text(additions)
     }
 }
 
@@ -362,7 +446,7 @@ struct ProjectHeader: View {
         // as the sidebar header's, which no amount of padding on a `Menu` could
         // achieve.
         SidebarRow {
-            HStack(spacing: 6) {
+            HStack(spacing: 0) {
                 // The chevron goes in `SidebarGrid.gutter` — the column this
                 // header already padded by and left empty — so collapsing costs
                 // no horizontal space and lands in the same column as every
@@ -380,61 +464,63 @@ struct ProjectHeader: View {
                     Spacer().frame(width: SidebarGrid.gutter)
                 }
 
-                Text(name.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .tracking(0.6)
-                Text("\(count)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.quaternary)
-                    .monospacedDigit()
-                if showHost {
-                    Text(host.isEmpty ? "this Mac" : host)
+                HStack(spacing: 6) {
+                    Text(name.uppercased())
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .tracking(0.6)
+                    Text("\(count)")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                HostDot(state: hostState, onReconnect: onReconnect)
-                Spacer()
+                        .monospacedDigit()
+                    if showHost {
+                        Text(host.isEmpty ? "this Mac" : host)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    HostDot(state: hostState, onReconnect: onReconnect)
+                    Spacer()
 
-                if onNewWorktree != nil || onNewTerminal != nil {
-                    SidebarMenuButton(
-                        systemImage: "plus",
-                        help: "Add to \(name)",
-                        items: [
-                            onNewWorktree.map {
-                                SidebarMenuItem(title: "New worktree in \(name)…", action: $0)
-                            },
-                            // The main checkout is a place people work — a quick
-                            // build, a look at main while a worktree is
-                            // mid-review — and it was the one directory this app
-                            // could not open a terminal in.
-                            onNewTerminal.map {
-                                SidebarMenuItem(title: "New terminal in \(name)", action: $0)
-                            },
-                        ].compactMap { $0 })
-                    // Shown on hover, like every other per-row control in a
-                    // sidebar. A `+` on every project header at all times is a
-                    // column of plus signs down a list meant to read as quiet
-                    // section labels.
-                    .opacity(hovering ? 1 : 0)
-                }
+                    if onNewWorktree != nil || onNewTerminal != nil {
+                        SidebarMenuButton(
+                            systemImage: "plus",
+                            help: "Add to \(name)",
+                            items: [
+                                onNewWorktree.map {
+                                    SidebarMenuItem(title: "New worktree in \(name)…", action: $0)
+                                },
+                                // The main checkout is a place people work — a quick
+                                // build, a look at main while a worktree is
+                                // mid-changes — and it was the one directory this app
+                                // could not open a terminal in.
+                                onNewTerminal.map {
+                                    SidebarMenuItem(title: "New terminal in \(name)", action: $0)
+                                },
+                            ].compactMap { $0 })
+                        // Shown on hover, like every other per-row control in a
+                        // sidebar. A `+` on every project header at all times is a
+                        // column of plus signs down a list meant to read as quiet
+                        // section labels.
+                        .opacity(hovering ? 1 : 0)
+                    }
 
-                if let onRemove {
-                    // Its own button rather than a second item on the `+`
-                    // menu: that menu is for adding things, and a destructive
-                    // action one row below "New worktree" is a misclick away
-                    // from removing a repository instead of branching one.
-                    SidebarMenuButton(
-                        systemImage: "ellipsis",
-                        help: "\(name) options",
-                        items: [SidebarMenuItem(title: "Remove \(name)…", action: onRemove)])
-                    .opacity(hovering ? 1 : 0)
+                    if let onRemove {
+                        // Its own button rather than a second item on the `+`
+                        // menu: that menu is for adding things, and a destructive
+                        // action one row below "New worktree" is a misclick away
+                        // from removing a repository instead of branching one.
+                        SidebarMenuButton(
+                            systemImage: "ellipsis",
+                            help: "\(name) options",
+                            items: [SidebarMenuItem(title: "Remove \(name)…", action: onRemove)])
+                        .opacity(hovering ? 1 : 0)
+                    }
                 }
             }
         }
-        .padding(.top, 14)
-        .padding(.bottom, 3)
+        .padding(.top, SidebarGrid.projectTopPadding)
+        .padding(.bottom, SidebarGrid.projectBottomPadding)
         .contentShape(Rectangle())
         // The whole row toggles, not just the chevron: a section label is a big
         // easy target and a 9-point glyph is not. The `+` and `…` are real
@@ -570,7 +656,7 @@ struct TerminalRow: View {
                     .allowsHitTesting(usable)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, SidebarGrid.rowVerticalPadding)
         // A terminal is one level in from its worktree; the highlight sits
         // inside the band exactly as the worktree row's does.
         .padding(.leading, SidebarGrid.edge - SidebarGrid.highlightInset + SidebarGrid.gutter)

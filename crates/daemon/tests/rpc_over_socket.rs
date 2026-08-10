@@ -1289,6 +1289,78 @@ async fn a_terminal_reports_its_pane_mode_to_a_client() {
     assert_eq!(terminal.pane_mode, farcooler_protocol::v1::PaneMode::Terminal as i32);
 }
 
+#[tokio::test]
+async fn a_pane_split_with_the_changes_preset_is_a_changes_pane() {
+    // The whole reason the diff stopped being a client-side tile: it is a pane
+    // like any other, made by the same verb, and it says so on the wire. A
+    // client that had to infer it from a command line would be back to guessing
+    // what a pane is for, which is what `pane_mode` exists to end.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let original = a_terminal(&mut client, &workspace.id, "one").await;
+
+    let list = layout_call(
+        &mut client,
+        "layout.split",
+        &workspace.id,
+        farcooler_protocol::v1::LayoutUpdate {
+            target: Some(original.id.clone()),
+            side: farcooler_protocol::v1::SplitSide::Right as i32,
+            command_preset: "changes".into(),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(list.items.len(), 1, "the diff joins the layout, it does not open its own");
+    assert_eq!(list.items[0].panes.len(), 2, "two panes: the terminal and the diff");
+
+    let mut terminals = request("terminal.list");
+    terminals.target_resource_id = Some(workspace.id.clone());
+    let result = client.call(terminals).await.expect("terminal.list");
+    let Some(result::Value::TerminalList(terminals)) = result.value else { panic!("wrong result") };
+    let changes = terminals
+        .items
+        .iter()
+        .find(|t| t.id != original.id)
+        .expect("the pane the split created");
+    assert_eq!(
+        changes.pane_mode,
+        farcooler_protocol::v1::PaneMode::Changes as i32,
+        "the preset it was created with is what the pane IS"
+    );
+    assert_eq!(
+        changes.state(),
+        farcooler_protocol::v1::TerminalState::Running,
+        "something is holding the rectangle, or tmux would have collapsed it"
+    );
+
+    // And it is not a posture that can be switched off, in either direction:
+    // there is no TUI underneath a diff to go back to.
+    let mut switch = request("terminal.set_pane_mode");
+    switch.payload = Some(request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
+        terminal_id: changes.id.clone(),
+        pane_mode: farcooler_protocol::v1::PaneMode::Terminal as i32,
+        force: false,
+    }));
+    assert!(
+        client.call(switch).await.is_err(),
+        "switching a changes pane to a shell leaves a pane every client still calls Changes"
+    );
+
+    let mut into = request("terminal.set_pane_mode");
+    into.payload = Some(request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
+        terminal_id: original.id.clone(),
+        pane_mode: farcooler_protocol::v1::PaneMode::Changes as i32,
+        force: false,
+    }));
+    assert!(
+        client.call(into).await.is_err(),
+        "a diff is a pane you open, not a mode that respawns whatever was running"
+    );
+}
+
 /// The real case `hiding_does_not_consult_terminal_state`
 /// (`crates/daemon/src/service.rs`) cannot manufacture: a terminal whose
 /// derived state is genuinely `Running`, which needs a live tmux pane behind

@@ -113,6 +113,13 @@ pub enum PaneMode {
     Terminal,
     /// `farcooler agent-host`, bridging an ACP agent.
     Agent,
+    /// `farcooler pane-host`, holding the rectangle a client draws this
+    /// worktree's diff into.
+    ///
+    /// Set when the pane is created and never changed: unlike the two above
+    /// there is no TUI underneath to switch back to, so this is what the pane
+    /// IS rather than a posture it is currently in.
+    Changes,
 }
 
 impl PaneMode {
@@ -120,12 +127,14 @@ impl PaneMode {
         match self {
             PaneMode::Terminal => 0,
             PaneMode::Agent => 1,
+            PaneMode::Changes => 2,
         }
     }
 
     pub fn from_i64(raw: i64) -> Self {
         match raw {
             1 => PaneMode::Agent,
+            2 => PaneMode::Changes,
             // Anything unrecognized is the mode that always works.
             _ => PaneMode::Terminal,
         }

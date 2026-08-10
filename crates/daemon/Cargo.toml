@@ -16,6 +16,8 @@ path = "src/main.rs"
 [dependencies]
 farcooler-agent.workspace = true
 farcooler-core.workspace = true
+farcooler-review.workspace = true
+sha2 = "0.10"
 farcooler-protocol.workspace = true
 farcooler-store.workspace = true
 farcooler-tmux.workspace = true

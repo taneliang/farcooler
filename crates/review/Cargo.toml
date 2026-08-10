@@ -1,0 +1,18 @@
+[package]
+name = "farcooler-review"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+# `staticlib` for the same reason `farcooler-vt` and `farcooler-client` have it:
+# iOS wants an archive to put in an XCFramework and Android wants one to link
+# into a `.so`. `rlib` keeps it usable from the daemon as an ordinary crate.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+farcooler-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"

@@ -15,6 +15,16 @@ struct PaneDivider: Identifiable {
     let side: TileDirection
     /// The strip you can grab, in points.
     let rect: CGRect
+    /// Cells this border would have to move for the two panes it separates to
+    /// be the same size. Zero when they already are, which is also what makes
+    /// a double-click on an even divider do nothing rather than jitter.
+    ///
+    /// The two panes it separates — not every pane in the window. A divider is
+    /// a boundary between exactly two things, and that is the question a
+    /// double-click on one asks. Evening out the whole window is a different
+    /// request with its own binding; doing that from a divider would rearrange
+    /// panes the pointer was nowhere near.
+    let evenBy: Int
 
     var id: String { "\(terminal)-\(side.rawValue)" }
 
@@ -53,7 +63,8 @@ extension PaneGroup {
                             x: x + width - thickness / 2,
                             y: y,
                             width: thickness,
-                            height: height)))
+                            height: height),
+                        evenBy: evenBy(pane, .right)))
             }
             if pane.top + pane.rows < rows {
                 found.append(
@@ -64,10 +75,55 @@ extension PaneGroup {
                             x: x,
                             y: y + height - thickness / 2,
                             width: width,
-                            height: thickness)))
+                            height: thickness),
+                        evenBy: evenBy(pane, .bottom)))
             }
         }
         return found
+    }
+
+    /// The neighbour across a pane's border, and how far to move it to halve
+    /// the space they share.
+    ///
+    /// Zero when there is no neighbour to speak of, which keeps the caller from
+    /// having to care: a border with nothing identifiable on the other side is
+    /// one a double-click should leave alone.
+    private func evenBy(_ pane: PaneRect, _ side: TileDirection) -> Int {
+        guard let other = neighbour(of: pane, on: side) else { return 0 }
+        let mine = side == .right ? pane.columns : pane.rows
+        let theirs = side == .right ? other.columns : other.rows
+        return (mine + theirs) / 2 - mine
+    }
+
+    /// The pane on the far side of a border.
+    ///
+    /// One cell further along, because that is the cell tmux leaves for the
+    /// divider itself. Where several panes start there — a column of three
+    /// against one tall pane — the one sharing the most edge with this pane
+    /// wins, which is the one a pointer on this stretch of the border is
+    /// actually between.
+    private func neighbour(of pane: PaneRect, on side: TileDirection) -> PaneRect? {
+        switch side {
+        case .right:
+            return panes
+                .filter { $0.left == pane.left + pane.columns + 1 }
+                .max { shared($0, pane, acrossRows: true) < shared($1, pane, acrossRows: true) }
+        case .bottom:
+            return panes
+                .filter { $0.top == pane.top + pane.rows + 1 }
+                .max { shared($0, pane, acrossRows: false) < shared($1, pane, acrossRows: false) }
+        case .left, .top:
+            // Never built: every divider is named for the pane whose right or
+            // bottom edge it is, so these two cannot reach here.
+            return nil
+        }
+    }
+
+    /// How many cells of border two panes have in common.
+    private func shared(_ a: PaneRect, _ b: PaneRect, acrossRows: Bool) -> Int {
+        let (aStart, aSize) = acrossRows ? (a.top, a.rows) : (a.left, a.columns)
+        let (bStart, bSize) = acrossRows ? (b.top, b.rows) : (b.left, b.columns)
+        return max(0, min(aStart + aSize, bStart + bSize) - max(aStart, bStart))
     }
 }
 
@@ -135,6 +191,13 @@ struct DividerHandle: NSViewRepresentable {
         view.vertical = divider.isVertical
         view.pointsPerCell = pointsPerCell
         view.onResize = { cells in onResize(divider.terminal, divider.side, cells) }
+        // The same resize the drag sends, with the arithmetic already done.
+        // A double-click on a divider means "make these two the same" in every
+        // app that has ever had one, and it is the gesture nobody has to be
+        // told about.
+        view.onEven = divider.evenBy == 0
+            ? nil
+            : { _ = onResize(divider.terminal, divider.side, divider.evenBy) }
     }
 }
 
@@ -142,6 +205,10 @@ final class DividerView: NSView {
     var vertical = true
     var pointsPerCell: CGFloat = 8
     var onResize: ((Int) -> Bool)?
+    /// Even out the two panes this divider separates. Nil when they already
+    /// are, so a double-click on a centred divider is a no-op rather than a
+    /// request the daemon has to refuse.
+    var onEven: (() -> Void)?
 
     /// Cells the layout has actually been moved by in this drag.
     ///
@@ -182,6 +249,15 @@ final class DividerView: NSView {
     override func mouseExited(with event: NSEvent) { hovering = false }
 
     override func mouseDown(with event: NSEvent) {
+        // Handled on the second DOWN rather than on the second UP, which is
+        // what makes it feel immediate — and no drag is started for it, so the
+        // few points the hand moves between the two clicks cannot also nudge
+        // the border it was about to centre.
+        if event.clickCount == 2 {
+            dragging = false
+            onEven?()
+            return
+        }
         origin = event.locationInWindow
         sent = 0
         dragging = true

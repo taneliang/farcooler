@@ -18,6 +18,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0004_pane_mode,
     migration_0005_drop_loss_dismissed,
     migration_0006_worktrees_are_managed,
+    migration_0007_review,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -240,6 +241,51 @@ fn migration_0005_drop_loss_dismissed(tx: &Transaction) -> rusqlite::Result<()> 
 /// repository so the race cannot normally happen. It exists so that if that
 /// lock is ever lost in a refactor, the symptom is an error rather than two
 /// sidebar rows for one directory.
+/// What a worktree is compared against, and whether you have read it.
+///
+/// Edited in place rather than followed by an 0008 that drops what it just
+/// created: 0007 is unreleased and lives on this branch alone, so no database
+/// anywhere has ever run the version that made the buffer's tables.
+///
+/// The buffer itself — entries, anchors, dispatches, attachments — is gone. It
+/// existed because there was nowhere to put a diff, so a comment had to be held
+/// somewhere until you could type it at an agent. With a diff tile beside an
+/// agent tile there is nothing to hold.
+fn migration_0007_review(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        -- What a workspace is compared against, when the user pinned it.
+        CREATE TABLE review_bases (
+            workspace_id BLOB PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+            base_ref TEXT NOT NULL
+        );
+
+        -- "I have looked at this worktree." Stores the CHEAP gate as well as
+        -- the digest, so the fleet can answer "changed since you looked" with
+        -- two stats instead of a `git status` per worktree.
+        CREATE TABLE review_reviewed (
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            branch TEXT NOT NULL,
+            head_commit TEXT NOT NULL,
+            worktree_digest TEXT NOT NULL,
+            gate_head INTEGER NOT NULL DEFAULT 0,
+            gate_index INTEGER NOT NULL DEFAULT 0,
+            marked_at INTEGER NOT NULL,
+            PRIMARY KEY (workspace_id, branch)
+        );
+
+        -- One branch's parent in a stack, when inference got it wrong and the
+        -- user said so.
+        CREATE TABLE review_stack_parents (
+            repository_id BLOB NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+            branch TEXT NOT NULL,
+            parent_branch TEXT NOT NULL,
+            PRIMARY KEY (repository_id, branch)
+        );
+        "#,
+    )
+}
+
 fn migration_0006_worktrees_are_managed(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"

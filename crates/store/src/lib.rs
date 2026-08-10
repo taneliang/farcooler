@@ -14,6 +14,7 @@
 mod backup;
 mod error;
 mod migrate;
+pub mod review;
 pub mod models;
 mod store;
 
