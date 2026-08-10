@@ -104,6 +104,23 @@ enum WorkspaceStyle {
 
     static var hairline: Color { Color.primary.opacity(0.11) }
 
+    /// Selection belongs to navigators, not to structural headings inside a
+    /// document. Keeping this semantic stops a file heading, a selected file,
+    /// and a focused pane from becoming three equally blue bars.
+    static var navigatorSelection: Color { Color.accentColor.opacity(0.13) }
+
+    /// A file boundary inside the diff. Deliberately neutral: it organizes the
+    /// document without pretending to be another selected control.
+    static var fileHeader: Color { paneChrome.opacity(0.68) }
+
+    /// The old/new line-number columns are supporting information, so they get
+    /// just enough surface to separate them from code without becoming a box.
+    static var diffGutter: Color { Color.primary.opacity(0.025) }
+
+    /// Feedback for an inline disclosure, used only while the pointer is over
+    /// it. The resting state stays almost invisible in a long diff.
+    static var disclosureHover: Color { Color.accentColor.opacity(0.08) }
+
     /// Resolve dynamic system colors in the app's effective appearance before
     /// mixing. Otherwise Aqua's light value can be captured while Dark Aqua is
     /// on screen, producing a flash when the theme changes.

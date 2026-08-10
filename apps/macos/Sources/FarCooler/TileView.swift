@@ -621,20 +621,27 @@ private struct TilePane: View {
     }
 
     private var changeCount: Text {
-        if changes.scope == .local {
-            let count = changes.files.count
-            return Text(count == 1 ? "1 file" : "\(count) files")
-                .foregroundColor(.secondary)
-                .font(.system(size: 10.5, design: .monospaced))
-        }
-        var value = AttributedString()
-        if changes.changeSet.insertions > 0 {
-            var added = AttributedString("+\(changes.changeSet.insertions)")
+        let files = changes.files
+        let fileCount = files.count
+        var value = AttributedString(fileCount == 1 ? "1 file" : "\(fileCount) files")
+        value.foregroundColor = .secondary
+
+        let insertions =
+            changes.scope == .branch
+            ? changes.changeSet.insertions
+            : files.reduce(0) { $0 + $1.insertions }
+        let deletions =
+            changes.scope == .branch
+            ? changes.changeSet.deletions
+            : files.reduce(0) { $0 + $1.deletions }
+
+        if insertions > 0 {
+            var added = AttributedString("  +\(insertions)")
             added.foregroundColor = .green
             value.append(added)
         }
-        if changes.changeSet.deletions > 0 {
-            var removed = AttributedString("\(value.characters.isEmpty ? "" : " ")−\(changes.changeSet.deletions)")
+        if deletions > 0 {
+            var removed = AttributedString(" −\(deletions)")
             removed.foregroundColor = .red
             value.append(removed)
         }

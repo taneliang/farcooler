@@ -55,7 +55,7 @@ struct ChangesPane: View {
                 }
                 if geo.size.width >= Self.wideEnough {
                     HStack(spacing: 0) {
-                        fileColumn.frame(width: 220)
+                        fileColumn.frame(width: fileColumnWidth(for: geo.size.width))
                         Divider()
                         VStack(spacing: 0) {
                             diffNavigator(compact: false)
@@ -77,6 +77,14 @@ struct ChangesPane: View {
         // Cancelled with the view, which is what keeps this honest: the poll
         // exists only while somebody is reading the diff.
         .task(id: changes.workspace.id) { await changes.follow() }
+    }
+
+    /// More room when the pane has it, without letting navigation consume the
+    /// document. At the compact breakpoint the diff still gets 400pt; in a
+    /// full-window review, long paths can breathe instead of becoming a column
+    /// of identical leading ellipses.
+    private func fileColumnWidth(for paneWidth: CGFloat) -> CGFloat {
+        min(280, max(220, paneWidth * 0.20))
     }
 
     /// An older machine cannot do this at all, and that is worth saying rather
@@ -206,7 +214,7 @@ struct ChangesPane: View {
             } else if let file = chosen {
                 FileStatusBadge(status: file.status, binary: file.binary)
                 Text(pathLabel(file))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.head)
                 Text(counts(file))
@@ -214,15 +222,22 @@ struct ChangesPane: View {
                     .foregroundStyle(.secondary)
             } else {
                 Text(chosenLabel)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 4)
 
             Divider().frame(height: 14).padding(.horizontal, 2)
-            navButton("arrow.up.to.line", help: "Previous hunk") { moveHunk(-1) }
-            navButton("arrow.down.to.line", help: "Next hunk") { moveHunk(1) }
+            let hunks = hunkTargets.count
+            if hunks > 0 {
+                Text(hunks == 1 ? "1 hunk" : "\(hunks) hunks")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
+            }
+            navButton("arrow.up.to.line", help: "Previous hunk or file") { moveHunk(-1) }
+            navButton("arrow.down.to.line", help: "Next hunk or file") { moveHunk(1) }
         }
         .padding(.horizontal, 6)
         .frame(height: 28)
@@ -255,13 +270,34 @@ struct ChangesPane: View {
 
     private func moveHunk(_ direction: Int) {
         let targets = hunkTargets
-        guard !targets.isEmpty else { return }
-        let current = lastHunkJump.flatMap { target in targets.firstIndex(of: target) }
-            ?? (direction > 0 ? -1 : 0)
-        let next = (current + direction + targets.count) % targets.count
-        lastHunkJump = targets[next]
+        guard !targets.isEmpty else {
+            moveFile(direction)
+            return
+        }
+
+        if let lastHunkJump,
+            let current = targets.firstIndex(of: lastHunkJump)
+        {
+            let next = current + direction
+            guard targets.indices.contains(next) else {
+                moveFile(direction)
+                return
+            }
+            jump(toHunk: targets[next])
+            return
+        }
+
+        guard let target = direction > 0 ? targets.first : targets.last else {
+            moveFile(direction)
+            return
+        }
+        jump(toHunk: target)
+    }
+
+    private func jump(toHunk target: String) {
+        lastHunkJump = target
         jumping = false
-        jumpTo = targets[next]
+        jumpTo = target
     }
 
     private var hunkTargets: [String] {
@@ -291,17 +327,19 @@ struct ChangesPane: View {
                     FileStatusBadge(status: file.status, binary: file.binary)
                 }
                 Text(chosenLabel)
+                    .font(.system(size: 10.5))
                     .lineLimit(1)
                     .truncationMode(.head)
                 Spacer(minLength: 0)
                 if let f = chosen {
-                    Text(counts(f)).foregroundStyle(.secondary)
+                    Text(counts(f))
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8))
                     .foregroundStyle(.secondary)
             }
-            .font(.system(size: 10.5, design: .monospaced))
             // Inside the label, so the padding is part of the target rather
             // than a margin around it.
             .padding(.horizontal, 8)
@@ -354,12 +392,14 @@ struct ChangesPane: View {
                             Button { jump(to: f) } label: {
                                 HStack(spacing: 6) {
                                     Text(pathLabel(f))
+                                        .font(.system(size: 11))
                                         .lineLimit(1)
                                         .truncationMode(.head)
                                     Spacer(minLength: 4)
-                                    Text(counts(f)).foregroundStyle(.secondary)
+                                    Text(counts(f))
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(.secondary)
                                 }
-                                .font(.system(size: 11, design: .monospaced))
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -434,28 +474,75 @@ struct ChangesPane: View {
         return "\(old) → \(file.path)"
     }
 
+    /// File name first, because that is how a list of source files is scanned.
+    /// The parent path remains just below it for the three `mod.rs` case.
+    private func fileNameLabel(_ file: ChangedFile) -> String {
+        let current = (file.path as NSString).lastPathComponent
+        guard file.status == .renamed, let old = file.oldPath, old != file.path else {
+            return current
+        }
+        return "\((old as NSString).lastPathComponent) → \(current)"
+    }
+
+    private func parentPathLabel(_ file: ChangedFile) -> String? {
+        let current = (file.path as NSString).deletingLastPathComponent
+        let currentLabel = current.isEmpty ? nil : current
+        guard file.status == .renamed, let old = file.oldPath, old != file.path else {
+            return currentLabel
+        }
+        let previous = (old as NSString).deletingLastPathComponent
+        if previous == current { return currentLabel }
+        let oldLabel = previous.isEmpty ? "." : previous
+        let newLabel = current.isEmpty ? "." : current
+        return "\(oldLabel) → \(newLabel)"
+    }
+
     /// The same list as the combo box, with room to show it.
     private var fileColumn: some View {
         VStack(spacing: 0) {
-            TextField("Filter", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11))
-                .padding(6)
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+                TextField("Filter files", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
+                Text("\(matches.count)")
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 7)
+            .frame(height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color.primary.opacity(0.045)))
+            .padding(.horizontal, 6)
+            .frame(height: 28)
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                         ForEach(matches) { f in
                             Button { jump(to: f) } label: {
-                            HStack(alignment: .top, spacing: 6) {
+                            HStack(alignment: .center, spacing: 6) {
                                 FileStatusBadge(status: f.status, binary: f.binary)
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(pathLabel(f))
-                                        .font(.system(size: 11, design: .monospaced))
+                                    HStack(spacing: 5) {
+                                        Text(fileNameLabel(f))
+                                            .font(.system(size: 11, weight: .medium))
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        Spacer(minLength: 3)
+                                        Text(counts(f))
+                                            .font(.system(size: 9.5, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize()
+                                    }
+                                    Text(parentPathLabel(f) ?? " ")
+                                        .font(.system(size: 9.5))
+                                        .foregroundStyle(.tertiary)
                                         .lineLimit(1)
                                         .truncationMode(.head)
-                                    Text(counts(f))
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(.secondary)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -469,7 +556,7 @@ struct ChangesPane: View {
                             .contentShape(Rectangle())
                             .background(
                                 changes.selectedFile == f.path
-                                    ? Color.accentColor.opacity(0.15) : .clear,
+                                    ? WorkspaceStyle.navigatorSelection : .clear,
                                 in: RoundedRectangle(cornerRadius: 4))
                         }
                         .buttonStyle(.plain)
@@ -767,14 +854,15 @@ struct ChangesPane: View {
                 .foregroundStyle(Color.accentColor.opacity(0.72))
             Text("  \(old ?? 0) → \(new ?? 0)")
                 .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            Text("\(index)")
-                .foregroundStyle(.tertiary)
+            Rectangle()
+                .fill(WorkspaceStyle.hairline.opacity(0.72))
+                .frame(height: 1)
+                .padding(.leading, 10)
                 .padding(.trailing, 8)
         }
         .font(.system(size: max(10.5, preferences.fontSize - 1), design: .monospaced))
         .padding(.vertical, 2)
-        .background(Color.accentColor.opacity(0.035))
+        .accessibilityLabel("Hunk \(index), old line \(old ?? 0), new line \(new ?? 0)")
     }
 
     /// The control that opens a gap.
@@ -784,32 +872,14 @@ struct ChangesPane: View {
     /// reads as a separator between files instead of a seam inside one.
     private func gapRow(_ path: String, _ index: Int, _ count: Int) -> some View {
         let refused = changes.tooWide.contains("\(path)#\(index)")
-        return Button {
+        return DiffGapControl(
+            count: count,
+            gutter: gutter,
+            font: codeFont,
+            refused: refused
+        ) {
             Task { await changes.open(gap: index, of: count, in: path) }
-        } label: {
-            HStack(spacing: 0) {
-                Image(systemName: refused ? "exclamationmark.triangle" : "arrow.up.arrow.down")
-                    .font(.system(size: 9))
-                    .frame(width: gutter * 2 + 12)
-                Text(
-                    refused
-                        ? "\(count) unchanged lines — too many to show"
-                        : (count == 1 ? "1 unchanged line" : "\(count) unchanged lines")
-                )
-                .font(codeFont)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 3)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // The whole strip, not just the words — the same hit-area fix the
-            // file rows needed.
-            .contentShape(Rectangle())
-            .background(Color.primary.opacity(0.05))
         }
-        .buttonStyle(.plain)
-        .disabled(refused)
-        .help("Show the lines this diff left out")
     }
 
     /// The line-number gutter, sized from the font rather than pinned, so it
@@ -848,20 +918,23 @@ struct ChangesPane: View {
 
             FileStatusBadge(status: f.status, binary: f.binary)
             Text(pathLabel(f))
-                .fontWeight(.semibold)
+                .font(.system(size: 11, weight: .semibold))
                 .lineLimit(1)
                 .truncationMode(.head)
-            Text(counts(f)).foregroundStyle(.secondary)
+            Text(counts(f))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
-        .font(codeFont)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            changes.selectedFile == f.path
-                ? AnyShapeStyle(Color.accentColor.opacity(0.16))
-                : AnyShapeStyle(.quaternary.opacity(0.35)))
+            WorkspaceStyle.fileHeader
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1)
+        }
     }
 
     private func lineRow(_ line: DiffComputation.Line) -> some View {
@@ -869,12 +942,17 @@ struct ChangesPane: View {
             Rectangle()
                 .fill(lineAccent(line.kind))
                 .frame(width: 2)
-            Text(line.oldNumber.map(String.init) ?? "")
-                .frame(width: gutter, alignment: .trailing)
-                .foregroundStyle(.tertiary)
-            Text(line.newNumber.map(String.init) ?? "")
-                .frame(width: gutter, alignment: .trailing)
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 0) {
+                Text(line.oldNumber.map(String.init) ?? "")
+                    .frame(width: gutter, alignment: .trailing)
+                Text(line.newNumber.map(String.init) ?? "")
+                    .frame(width: gutter, alignment: .trailing)
+            }
+            .foregroundStyle(.tertiary)
+            .background(WorkspaceStyle.diffGutter)
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(WorkspaceStyle.hairline.opacity(0.65)).frame(width: 1)
+            }
             Text(marker(line.kind))
                 .foregroundStyle(lineAccent(line.kind))
                 .frame(width: 12)
@@ -912,6 +990,61 @@ struct ChangesPane: View {
         case .removed: return .red.opacity(0.62)
         case .context: return .clear
         }
+    }
+}
+
+/// A quiet seam inside a file rather than a full-width toolbar stripe.
+///
+/// The entire row remains clickable, but only the small disclosure gets visual
+/// weight until hover. Repeated a dozen times in a lockfile, that difference is
+/// the difference between seeing code and seeing chrome.
+private struct DiffGapControl: View {
+    let count: Int
+    let gutter: CGFloat
+    let font: Font
+    let refused: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: gutter * 2 + 12)
+                HStack(spacing: 6) {
+                    Image(systemName: refused ? "exclamationmark.triangle" : "ellipsis")
+                        .font(.system(size: 9, weight: .medium))
+                    Text(
+                        refused
+                            ? "\(count) unchanged lines — too many to show"
+                            : (count == 1 ? "1 unchanged line" : "\(count) unchanged lines")
+                    )
+                    .font(font)
+                    if !refused {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                    }
+                }
+                .foregroundStyle(hovering && !refused ? .secondary : .tertiary)
+                .padding(.horizontal, 6)
+                .frame(height: 20)
+                .background(
+                    hovering && !refused ? WorkspaceStyle.disclosureHover : .clear,
+                    in: RoundedRectangle(cornerRadius: 4))
+
+                Rectangle()
+                    .fill(WorkspaceStyle.hairline.opacity(0.72))
+                    .frame(height: 1)
+                    .padding(.leading, 8)
+                    .padding(.trailing, 8)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(refused)
+        .help(refused ? "This gap is too large to show" : "Show unchanged lines")
+        .onHover { hovering = $0 }
     }
 }
 
