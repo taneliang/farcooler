@@ -197,7 +197,18 @@ impl ClaudeBackend {
 ///
 /// `None` when there is no file, which is a normal state and not an error.
 pub fn transcript_for(worktree: &std::path::Path, session_id: &str) -> Option<std::path::PathBuf> {
-    let dir: String = worktree
+    // The REALPATH, not the path as written. Claude Code munges the RESOLVED
+    // cwd, so a worktree under `/tmp` lands in `-private-tmp-…` on macOS and
+    // looking under `-tmp-…` finds an empty directory — a session that exists
+    // reported as no history at all. `session_discovery::discover_claude_session`
+    // already had to learn this; its comment records it as measured rather than
+    // guessed, and this had it wrong.
+    //
+    // A path that cannot be resolved is used as written, for the same reason
+    // that function gives: failing here would turn a missing directory into a
+    // confusing error about a different one.
+    let resolved = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
+    let dir: String = resolved
         .to_string_lossy()
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
