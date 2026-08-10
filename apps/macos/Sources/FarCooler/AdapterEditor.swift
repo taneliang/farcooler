@@ -120,7 +120,12 @@ struct AdapterEditor: View {
                         "Native speaks this agent's own protocol, with no adapter and no npx. "
                             + "Arguments are added after the flags the protocol needs."
                     )
-                    Text("Chat mode still runs the ACP adapter — Test proves the native handshake only.")
+                    // This used to read "Chat mode still runs the ACP adapter",
+                    // which stopped being true once `start_backend` began
+                    // dispatching on this field (`crates/cli/src/agent_host.rs`).
+                    // A footer describing the opposite of what the toggle does
+                    // is worse than no footer.
+                    Text("Chat mode uses this after the daemon restarts.")
                         .foregroundStyle(.secondary)
                 } else {
                     Text("One per line. Environment entries are KEY=value.")
