@@ -52,3 +52,42 @@ fn a_real_turn_contains_no_gaps() {
     let gaps: Vec<_> = events().into_iter().filter(|e| matches!(e, AgentEvent::Gap { .. })).collect();
     assert!(gaps.is_empty(), "unmapped frames in a real turn: {gaps:?}");
 }
+
+/// A real on-disk transcript, restored.
+///
+/// `fixtures/transcript.jsonl` is the file Claude Code itself wrote for a
+/// session that said "Remember the word: pineapple. Just say ok." and got back
+/// "ok". Copied out of ~/.claude/projects rather than composed.
+#[test]
+fn a_saved_transcript_restores_both_sides_of_the_conversation() {
+    // `--resume` replays nothing — it attaches the session and sends four hook
+    // frames and a control response. So a pane that waited for a replay showed
+    // an empty chat, and the transcript on disk is the only source there is.
+    let raw = include_str!("fixtures/transcript.jsonl");
+    let events = farcooler_claude::normalize::history_to_events(raw);
+
+    let prompts: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Message { role: Role::User, text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(prompts.len(), 1, "the prompt is restored exactly once: {events:?}");
+    assert!(prompts[0].contains("pineapple"), "{prompts:?}");
+
+    let answers: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Message { role: Role::Agent, text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(answers, ["ok"], "and so is the answer");
+
+    // The file interleaves record types the wire never sends —
+    // queue-operation, attachment. Left unlisted they became a Gap apiece,
+    // which is a scissors icon between every restored turn.
+    let gaps: Vec<_> = events.iter().filter(|e| matches!(e, AgentEvent::Gap { .. })).collect();
+    assert!(gaps.is_empty(), "restoring history must not report loss: {gaps:?}");
+}

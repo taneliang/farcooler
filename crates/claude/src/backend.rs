@@ -59,6 +59,9 @@ impl ClaudeBackend {
         }
         args.push(session_id.clone());
 
+        // Kept because the transcript path is derived from it, and `spawn`
+        // takes ownership.
+        let worktree_for_history = worktree.clone();
         let mut conn =
             ClaudeConnection::spawn(&launch.program, &args, &launch.env, worktree).await?;
         let (init_frame, seen) = conn.initialize().await?;
@@ -90,6 +93,43 @@ impl ClaudeBackend {
         // silent choice rather than a deliberate one.
         for frame in seen {
             prelude.extend(frame_to_events(&frame));
+        }
+
+        // History has to be READ, not waited for. `--resume` attaches the
+        // session so the agent keeps its context and replays nothing at all —
+        // measured against 2.1.226, a resume sends four hook frames and the
+        // control response and no conversation. A pane that waited for one
+        // showed an empty chat, which is exactly what it did.
+        if resume.is_some() {
+            match transcript_for(&worktree_for_history, &init.session_id) {
+                Some(path) => match std::fs::read_to_string(&path) {
+                    Ok(raw) => {
+                        let restored = crate::normalize::history_to_events(&raw);
+                        if restored.is_empty() {
+                            prelude.push(AgentEvent::Gap {
+                                reason: farcooler_agent_core::event::AgentGapReason::LoadEmpty,
+                            });
+                        } else {
+                            prelude.extend(restored);
+                        }
+                        prelude.push(AgentEvent::TurnEnded {
+                            reason: farcooler_agent_core::event::EndReason::EndTurn,
+                        });
+                    }
+                    Err(e) => prelude.push(AgentEvent::Gap {
+                        reason: farcooler_agent_core::event::AgentGapReason::LoadFailed {
+                            detail: format!("could not read {}: {e}", path.display()),
+                        },
+                    }),
+                },
+                // No file is the COMMON case rather than a failure: Claude Code
+                // writes a transcript only once a turn has happened, and every
+                // pane is handed a session id at launch. A chat opened and
+                // never typed into has nothing to restore, and nothing was lost.
+                None => prelude.push(AgentEvent::Gap {
+                    reason: farcooler_agent_core::event::AgentGapReason::LoadEmpty,
+                }),
+            }
         }
 
         let session_id = init.session_id;
@@ -145,6 +185,29 @@ impl ClaudeBackend {
             }
         }
     }
+}
+
+/// Where Claude Code keeps this session's transcript, if it wrote one.
+///
+/// `~/.claude/projects/<worktree, every non-alphanumeric turned into a
+/// dash>/<session id>.jsonl`. The daemon already derives the same directory
+/// name in `session_discovery::project_dir_name` to decide whether a terminal
+/// can be resumed at all; this is the same rule, reimplemented rather than
+/// shared because a backend crate must not depend on the daemon.
+///
+/// `None` when there is no file, which is a normal state and not an error.
+pub fn transcript_for(worktree: &std::path::Path, session_id: &str) -> Option<std::path::PathBuf> {
+    let dir: String = worktree
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let home = std::env::var("HOME").ok()?;
+    let path = std::path::Path::new(&home)
+        .join(".claude/projects")
+        .join(dir)
+        .join(format!("{session_id}.jsonl"));
+    path.exists().then_some(path)
 }
 
 /// A session id for a conversation that does not have one yet.

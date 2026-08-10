@@ -122,14 +122,30 @@ pub fn init_from(frame: &serde_json::Value) -> Init {
     }
 }
 
+/// Where a record came from, which decides whether the user's own words are
+/// part of it.
+///
+/// Live, the client has already drawn what you typed — see
+/// `Transcript.appendLocalUserMessage` — so taking the CLI's echo would render
+/// every prompt twice. History has no local echo behind it, so the same records
+/// are the only place the prompts exist. The identical split codex needed, for
+/// the identical reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    Live,
+    Replay,
+}
+
 /// What one stream-json frame means, if anything.
 pub fn frame_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
+    frame_to_events_from(frame, Origin::Live)
+}
+
+/// As `frame_to_events`, for a caller that knows where the record came from.
+pub fn frame_to_events_from(frame: &serde_json::Value, origin: Origin) -> Vec<AgentEvent> {
     match frame["type"].as_str().unwrap_or_default() {
         "assistant" => assistant_to_events(frame),
-        // The echo of a tool's result, and of the prompt. The prompt half is
-        // the client's own — it already put what you typed on screen — so only
-        // tool results are taken. Same doubling `Origin` prevents on codex.
-        "user" => user_to_events(frame),
+        "user" => user_to_events(frame, origin),
         "result" => {
             let reason = end_reason(frame["stop_reason"].as_str().unwrap_or_default());
             vec![AgentEvent::TurnEnded { reason }]
@@ -137,18 +153,62 @@ pub fn frame_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
         // Bookkeeping. `init` is read separately by the backend, and hooks
         // firing are not transcript material — a Gap for one would draw
         // "history missing" over an ordinary session start.
+        //
+        // The last four appear only in the on-disk transcript, never on the
+        // wire: the file records queue bookkeeping and hook attachments that
+        // the stream never sends. Left unlisted they became a Gap per record,
+        // which is a scissors icon between every restored turn.
         "system" | "rate_limit_event" | "control_response" | "control_request"
-        | "control_cancel_request" | "stream_event" => Vec::new(),
+        | "control_cancel_request" | "stream_event" | "queue-operation" | "attachment"
+        | "summary" | "file-history-snapshot" => Vec::new(),
         _ => vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }],
     }
 }
 
+/// A conversation restored from the transcript Claude Code writes to disk.
+///
+/// `--resume` does NOT replay it. Measured against 2.1.226: resuming attaches
+/// the session so the agent still has its context, and sends nothing at all —
+/// four hook frames and the control response, no `assistant`, no `user`. So a
+/// pane that waited for a replay showed an empty conversation, which is what it
+/// did.
+///
+/// The transcript is a JSONL file whose `user` and `assistant` records carry
+/// the same `message.content` shape the wire does, so the same normalizer reads
+/// them. Two things differ and both would have been silent: the parent field is
+/// `parentToolUseID` on disk against `parent_tool_use_id` on the wire, and the
+/// file interleaves record types the stream never sends.
+pub fn history_to_events(transcript: &str) -> Vec<AgentEvent> {
+    let mut events = Vec::new();
+    for line in transcript.lines().filter(|l| !l.trim().is_empty()) {
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            // A truncated last line is normal in a file being appended to.
+            continue;
+        };
+        events.extend(frame_to_events_from(&record, Origin::Replay));
+    }
+    events
+}
+
+/// The dispatch a record belongs to, when a subagent produced it.
+///
+/// ACP smuggles this through `_meta.claudeCode`; here it is a first-class
+/// field, which is one of the concrete things the native path buys.
+///
+/// Spelled BOTH ways, because the two sources disagree: the wire sends
+/// `parent_tool_use_id` and the on-disk transcript writes `parentToolUseID`.
+/// Reading only one silently flattens every restored subagent into the parent
+/// conversation.
+fn parent_of(record: &serde_json::Value) -> Option<String> {
+    record["parent_tool_use_id"]
+        .as_str()
+        .or_else(|| record["parentToolUseID"].as_str())
+        .map(str::to_string)
+}
+
 /// The agent's own content blocks.
 fn assistant_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
-    // Nested under a dispatch when a subagent produced it. ACP smuggles this
-    // through `_meta.claudeCode`; here it is a first-class field, which is one
-    // of the concrete things the native path buys.
-    let parent = frame["parent_tool_use_id"].as_str().map(str::to_string);
+    let parent = parent_of(frame);
     let Some(blocks) = frame["message"]["content"].as_array() else { return Vec::new() };
 
     blocks
@@ -189,17 +249,39 @@ fn assistant_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
         .collect()
 }
 
-/// A `user` frame: tool results, and the echo of the prompt.
-fn user_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
-    let parent = frame["parent_tool_use_id"].as_str().map(str::to_string);
+/// A `user` record: tool results, and the prompt itself.
+fn user_to_events(frame: &serde_json::Value, origin: Origin) -> Vec<AgentEvent> {
+    let parent = parent_of(frame);
+    // The on-disk transcript writes a bare string for a plain prompt, where the
+    // wire always sends blocks. Reading only the array shape loses every
+    // restored prompt that had no tool result beside it.
+    if let Some(text) = frame["message"]["content"].as_str() {
+        if origin == Origin::Live || text.is_empty() {
+            return Vec::new();
+        }
+        return vec![AgentEvent::Message {
+            role: Role::User,
+            text: text.to_string(),
+            parent,
+        }];
+    }
     let Some(blocks) = frame["message"]["content"].as_array() else { return Vec::new() };
 
     blocks
         .iter()
         .filter_map(|block| {
             if block["type"].as_str() != Some("tool_result") {
-                // A plain text block here is the prompt coming back. The client
-                // already drew it; drawing it again is the doubling bug.
+                // A text block here is the prompt. Live, the client already
+                // drew it and taking it again is the doubling bug; restoring
+                // history, this is the only place it exists.
+                if origin == Origin::Replay && block["type"].as_str() == Some("text") {
+                    let text = block["text"].as_str().unwrap_or_default().to_string();
+                    return (!text.is_empty()).then(|| AgentEvent::Message {
+                        role: Role::User,
+                        text,
+                        parent: parent.clone(),
+                    });
+                }
                 return None;
             }
             let failed = block["is_error"].as_bool().unwrap_or(false);
