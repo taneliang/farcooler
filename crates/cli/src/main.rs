@@ -414,7 +414,10 @@ enum WorkspaceCmd {
     /// Create a worktree and branch for one task.
     Create {
         repo: String,
-        task: String,
+        /// What to call the worktree. Becomes its directory, and cannot be
+        /// changed afterwards: at most 60 characters, and at least one of them
+        /// a letter or a number.
+        name: String,
         #[arg(long)]
         branch: String,
         #[arg(long, default_value = "HEAD")]
@@ -441,12 +444,12 @@ enum WorkspaceCmd {
     /// The branch may be remote-only — pushed from another machine, by a
     /// colleague, or by a cloud agent. A local tracking branch is created for
     /// it, so pushing back goes where it came from.
+    ///
+    /// The worktree is named after the branch's last segment, so
+    /// `feat/rate-limiting` resumes in a directory called `rate-limiting`.
     Adopt {
         repo: String,
         branch: String,
-        /// What to call it in the fleet. Defaults to the branch name.
-        #[arg(long)]
-        task: Option<String>,
     },
     /// List branches you could resume work on.
     Branches {
@@ -1417,14 +1420,18 @@ async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
 async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
     let mut link = connect_to(host).await?;
     match cmd {
-        WorkspaceCmd::Create { repo, task, branch, base, terminal, no_terminal } => {
+        WorkspaceCmd::Create { repo, name, branch, base, terminal, no_terminal } => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;
             let r = link
                 .call(with(
                     req_for("workspace.create", uuid_of(&target.id)),
                     request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
-                        task_name: task,
+                        // The field kept its wire name and changed meaning:
+                        // this is the worktree's name now. Renaming it would
+                        // have broken every shipped client to say the same
+                        // thing in different words.
+                        task_name: name,
                         branch,
                         base_revision: base,
                         terminal_preset: if no_terminal { String::new() } else { terminal },
@@ -1582,15 +1589,16 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
             }
         }
 
-        WorkspaceCmd::Adopt { repo, branch, task } => {
+        WorkspaceCmd::Adopt { repo, branch } => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;
-            let task = task.unwrap_or_else(|| branch.clone());
             let r = link
                 .call(with(
                     req_for("workspace.create", uuid_of(&target.id)),
                     request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
-                        task_name: task,
+                        // Ignored for an adoption: the daemon names the worktree
+                        // after the branch, so there is nothing to send.
+                        task_name: String::new(),
                         branch,
                         base_revision: String::new(),
                         terminal_preset: String::new(),

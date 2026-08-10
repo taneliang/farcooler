@@ -459,8 +459,8 @@ struct WorkspaceListView: View {
             }
         }
         .sheet(isPresented: $showNewWorkspace) {
-            NewWorkspaceView(repositories: connection.repositories, connection: connection) { repository, task, branch in
-                await connection.createWorkspace(repository: repository, task: task, branch: branch)
+            NewWorkspaceView(repositories: connection.repositories, connection: connection) { repository, name, branch in
+                await connection.createWorkspace(repository: repository, name: name, branch: branch)
             }
         }
         .sheet(isPresented: $showQuickTask) {
@@ -900,9 +900,9 @@ func attentionColor(_ agent: AgentActivity) -> Color {
     }
 }
 
-/// The second phase: the worktree has uncommitted work, so removal needs the
-/// task name typed exactly. Also where any other refusal surfaces, since
-/// there is no room for an error message inside a confirmationDialog.
+/// The second phase: the worktree has uncommitted work, so removal needs its
+/// name typed exactly. Also where any other refusal surfaces, since there is
+/// no room for an error message inside a confirmationDialog.
 struct RemoveWorktreeConfirmSheet: View {
     let workspace: Workspace
     let onRemove: (String) async -> Connection.RemoveWorktreeResult
@@ -1031,20 +1031,32 @@ struct NewWorkspaceView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var repository: String = ""
-    @State private var task = ""
+    @State private var name = ""
     @State private var branch = ""
     @State private var working = false
     @State private var showAddRepository = false
 
-    /// The branch this form suggests, from the task and the machine's prefix.
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
+
+    /// The folder this name lands in.
+    ///
+    /// Shown under the field because the name IS the worktree's directory now:
+    /// nothing encourages naming a worktree carefully while the thing being
+    /// named is invisible.
+    private var folder: String { TaskSlug.sanitize(trimmedName) }
+
+    /// Sixty is the machine's cap on a name.
+    private var isTooLong: Bool { trimmedName.unicodeScalars.count > 60 }
+
+    /// The branch this form suggests, from the name and the machine's prefix.
     ///
     /// This form had no suggestion at all and made you type a branch by hand,
     /// which meant the machine's branch prefix — the whole point of the setting
     /// — could not reach the one place on this screen that names a branch. Now
     /// it matches the Mac's sheet: type nothing and get the suggestion.
     private var suggestedBranch: String {
-        let trimmed = task.trimmingCharacters(in: .whitespaces)
-        return trimmed.isEmpty ? "" : TaskSlug.slug(from: trimmed, prefix: connection.branchPrefix)
+        trimmedName.isEmpty
+            ? "" : TaskSlug.slug(from: trimmedName, prefix: connection.branchPrefix)
     }
 
     private var effectiveBranch: String {
@@ -1052,9 +1064,11 @@ struct NewWorkspaceView: View {
         return typed.isEmpty ? suggestedBranch : typed
     }
 
+    /// Both name rules are checked here, not just left to the machine, because
+    /// `createWorkspace` swallows its error: a refused name would close this
+    /// sheet on a worktree that was never created and say nothing about why.
     private var isValid: Bool {
-        !repository.isEmpty && !task.trimmingCharacters(in: .whitespaces).isEmpty
-            && !effectiveBranch.isEmpty
+        !repository.isEmpty && !folder.isEmpty && !isTooLong && !effectiveBranch.isEmpty
     }
 
     var body: some View {
@@ -1065,17 +1079,20 @@ struct NewWorkspaceView: View {
                     ForEach(repositories) { Text($0.displayName).tag($0.id) }
                 }
                 Button("Add a repository…") { showAddRepository = true }
-                TextField("Task", text: $task)
+                TextField("Name", text: $name)
+                if !trimmedName.isEmpty { folderPreview }
                 TextField(
                     "Branch", text: $branch,
                     prompt: Text(
                         suggestedBranch.isEmpty
-                            ? connection.branchPrefix + "my-task" : suggestedBranch)
+                            ? connection.branchPrefix + "my-worktree" : suggestedBranch)
                 )
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 Section {
-                    Text("A workspace is one git worktree and branch, for one task.")
+                    Text(
+                        "A workspace is one git worktree and one branch. Its name is the "
+                        + "worktree's folder, so it can't be changed later.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -1090,7 +1107,7 @@ struct NewWorkspaceView: View {
                     Button("Create") {
                         working = true
                         Task {
-                            await onCreate(repository, task, effectiveBranch)
+                            await onCreate(repository, trimmedName, effectiveBranch)
                             working = false
                             dismiss()
                         }
@@ -1104,5 +1121,32 @@ struct NewWorkspaceView: View {
                 }
             }
         }
+    }
+
+    /// What the name becomes on disk, or why it cannot become anything.
+    ///
+    /// Both refusals are spelled out rather than left as a dimmed Create
+    /// button, which says a name is wrong without saying which rule it broke.
+    @ViewBuilder
+    private var folderPreview: some View {
+        if isTooLong {
+            refusal("A name can be at most 60 characters.")
+        } else if folder.isEmpty {
+            refusal("A name needs a letter or a number in it.")
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "folder").foregroundStyle(.tertiary)
+                Text(folder)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private func refusal(_ message: String) -> some View {
+        Label(message, systemImage: "exclamationmark.triangle")
+            .font(.caption)
+            .foregroundStyle(.orange)
     }
 }

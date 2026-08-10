@@ -45,19 +45,40 @@ class QuickTaskTest {
     }
 
     @Test
-    fun aShortSentenceIsItsOwnTitle() {
-        assertEquals("Fix the parser", TaskSlug.title("  Fix the parser  "))
+    fun aSentenceBecomesAWorktreeNameTheMachineWillAccept() {
+        // A name is a directory now: too long, or nothing left after sanitizing,
+        // and the create call fails somewhere in the middle of Quick Task rather
+        // than at the start of it.
+        assertEquals("fix-the-parser", TaskSlug.name("  Fix the parser  "))
+        assertEquals("ship-it", TaskSlug.name("Ship it!!!"))
+        assertTrue(TaskSlug.name("a".repeat(200)).length <= 60)
+        // A sentence with nothing sanitizable in it still names a directory.
+        assertEquals("task", TaskSlug.name("!!!"))
+        assertEquals("task", TaskSlug.sanitize(TaskSlug.name("!!!")))
+
+        // Kotlin calls 写 a letter and the machine does not, so a description
+        // with no ASCII in it has to fall back rather than hand over a name
+        // every character of which the daemon will dash away to nothing.
+        assertEquals("task", TaskSlug.name("写代码"))
+        // And an accent is dropped rather than transliterated: "caf", not "cafe".
+        // The machine would have done exactly this to it.
+        assertEquals("caf", TaskSlug.name("Café"))
+        assertTrue(
+            "every generated name must survive the machine's own sanitizing",
+            TaskSlug.sanitize(TaskSlug.name("写代码")).isNotEmpty(),
+        )
     }
 
     @Test
-    fun aLongSentenceIsCutOnAWordBoundary() {
-        val title = TaskSlug.title(
-            "Rewrite the authentication layer so that every request carries a token"
-        )
-        assertTrue(title.endsWith("…"))
-        assertTrue(title.length <= 43)
-        // Cut on a space, so the last word is whole rather than sliced.
-        assertTrue(title.dropLast(1).last().isLetterOrDigit())
+    fun sanitizingAgreesWithTheMachineAboutWhereANameLands() {
+        // Runs collapse and edges are trimmed, so a typed sentence and the slug
+        // of that sentence land in the same directory.
+        assertEquals("Rate-Limiting", TaskSlug.sanitize("Rate  Limiting!"))
+        assertEquals("Rate-Limiting", TaskSlug.sanitize("Rate-Limiting"))
+        // Case is information typed on purpose, and underscores are legal.
+        assertEquals("Keep_This", TaskSlug.sanitize("Keep_This"))
+        // Nothing left is a name the machine refuses, so the forms check for it.
+        assertEquals("", TaskSlug.sanitize("!!!"))
     }
 
     @Test

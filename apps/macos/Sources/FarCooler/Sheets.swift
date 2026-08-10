@@ -30,7 +30,7 @@ struct NewWorkspaceSheet: View {
     /// What a given machine says branch names start with. Per machine, because
     /// the branch is created on the one holding the repository.
     var branchPrefix: (String) -> String = { _ in "" }
-    let onCreate: (_ host: String, _ repo: String, _ task: String, _ branch: String, _ base: String)
+    let onCreate: (_ host: String, _ repo: String, _ name: String, _ branch: String, _ base: String)
         async -> String?
     @Environment(\.dismiss) private var dismiss
 
@@ -43,7 +43,7 @@ struct NewWorkspaceSheet: View {
     }
 
     @State private var choice: Choice?
-    @State private var task = ""
+    @State private var name = ""
     @State private var branch = ""
     @State private var base = "HEAD"
     @State private var working = false
@@ -62,14 +62,18 @@ struct NewWorkspaceSheet: View {
         return "\(entry.repository.displayName) — \(host)"
     }
 
-    /// Suggest a branch from the task name, the way a person would write it.
+    /// Suggest a branch from the name, the way a person would write it.
     ///
     /// The prefix used to be `feat/` written out here, which is where this and
     /// the task composer disagreed: the composer used none. It is now whatever
     /// the chosen machine says, defaulting to `feat/` — so the two agree and the
     /// answer is configurable in one place.
+    ///
+    /// This one lowercases and the directory below does not. A branch is a
+    /// slug by convention; a name is read back to the user, and the case they
+    /// typed is theirs.
     private var suggestedBranch: String {
-        let slug = task.lowercased()
+        let slug = name.lowercased()
             .map { $0.isLetter || $0.isNumber ? $0 : "-" }
             .reduce(into: "") { acc, c in
                 if c == "-" && acc.hasSuffix("-") { return }
@@ -79,9 +83,20 @@ struct NewWorkspaceSheet: View {
         return slug.isEmpty ? "" : branchPrefix(choice?.host ?? "") + slug
     }
 
+    /// The worktree this is about to create. Shown under the field because
+    /// naming a directory carefully is not something anyone does while the
+    /// directory is invisible.
+    private var worktreePath: String? {
+        guard let choice,
+            let entry = repositories.first(where: {
+                $0.host == choice.host && $0.repository.short == choice.short
+            })
+        else { return nil }
+        return WorktreeName.path(repository: entry.repository.displayName, name: name)
+    }
+
     private var canCreate: Bool {
-        choice != nil && !task.trimmingCharacters(in: .whitespaces).isEmpty
-            && !effectiveBranch.isEmpty && !working
+        choice != nil && WorktreeName.isValid(name) && !effectiveBranch.isEmpty && !working
     }
 
     private var effectiveBranch: String {
@@ -102,7 +117,7 @@ struct NewWorkspaceSheet: View {
                 working = true
                 error = nil
                 if let failure = await onCreate(
-                    choice.host, choice.short, task, effectiveBranch, base)
+                    choice.host, choice.short, name, effectiveBranch, base)
                 {
                     working = false
                     error = failure
@@ -120,7 +135,18 @@ struct NewWorkspaceSheet: View {
                     }
                 }
 
-                TextField("Task", text: $task, prompt: Text("add authentication"))
+                LabeledContent("Name") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("", text: $name, prompt: Text("rate-limiting"))
+                        if let worktreePath {
+                            Text(worktreePath)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                        }
+                    }
+                }
 
                 TextField(
                     "Branch", text: $branch,

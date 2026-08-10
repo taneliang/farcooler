@@ -660,13 +660,17 @@ final class Connection: ObservableObject {
         (body["adapters"] as? [[String: Any]] ?? []).compactMap(AdapterInfo.init(json:))
     }
 
-    func createWorkspace(repository: String, task: String, branch: String) async {
+    /// `name` names the worktree's directory. The wire key is still `task`,
+    /// which is what it was called when a workspace carried a typed-out task
+    /// alongside its directory; renaming the key would strand every shipped
+    /// app for nothing.
+    func createWorkspace(repository: String, name: String, branch: String) async {
         _ = try? await core.call(
             "workspace.create",
             // A shell, because a worktree with nothing running in it is a
             // directory. This is the manual form; the quick-task flow below
             // creates its own agent terminal and asks for none.
-            ["repository": repository, "task": task, "branch": branch, "terminal": "shell"])
+            ["repository": repository, "task": name, "branch": branch, "terminal": "shell"])
         await refresh()
     }
 
@@ -688,12 +692,12 @@ final class Connection: ObservableObject {
     /// Throws instead of swallowing the error, because the caller has nothing
     /// to create a terminal in if this fails and needs to say so rather than
     /// press on silently.
-    func createWorkspace(repository: String, task: String, branch: String, base: String)
+    func createWorkspace(repository: String, name: String, branch: String, base: String)
         async throws -> String
     {
         let data = try await core.call(
             "workspace.create",
-            ["repository": repository, "task": task, "branch": branch, "base": base])
+            ["repository": repository, "task": name, "branch": branch, "base": base])
         return try JSONDecoder().decode(IdentifiedReply.self, from: data).id
     }
 
@@ -734,8 +738,8 @@ final class Connection: ObservableObject {
         case failed(String)
     }
 
-    /// `confirm` must be the workspace's exact task name, unless the
-    /// worktree is clean, in which case it may be empty.
+    /// `confirm` must be the workspace's exact name, unless the worktree is
+    /// clean, in which case it may be empty.
     func removeWorktree(_ workspace: Workspace, confirm: String) async -> RemoveWorktreeResult {
         let data: Data
         do {

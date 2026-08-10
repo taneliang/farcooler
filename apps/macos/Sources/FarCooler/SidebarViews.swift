@@ -282,10 +282,20 @@ struct WorkspaceSection: View {
                 // a color. The row survives at all because it holds
                 // terminals worth keeping — an empty one is deleted by
                 // the daemon without asking.
+                //
+                // A deleted worktree and a moved one look identical from
+                // here — the reconciler sees a path stop existing either
+                // way — so the help covers the case the badge cannot name:
+                // after a move there are two rows, and only this one has
+                // the history.
                 Text("worktree gone")
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
                     .padding(.leading, 7)
+                    .help(
+                        "This worktree's directory is gone. If you moved it with git worktree "
+                            + "move, the directory it moved to is a separate workspace now — this "
+                            + "row keeps the terminals and agent transcripts from before the move.")
             }
 
             Spacer(minLength: 6)

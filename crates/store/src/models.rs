@@ -74,7 +74,6 @@ pub(crate) fn row_to_repository(row: &Row) -> rusqlite::Result<Repository> {
 pub struct Workspace {
     pub id: Uuid,
     pub repository_id: Uuid,
-    pub task_name: String,
     pub branch: String,
     pub worktree_path: String,
     /// The user asked not to see it. Never touches git.
@@ -88,18 +87,29 @@ pub struct Workspace {
     pub resource_version: u64,
 }
 
+impl Workspace {
+    /// What this workspace is called.
+    ///
+    /// Derived from the worktree path on every read rather than stored, for the
+    /// same reason no terminal stores whether it is running: a second copy of a
+    /// fact someone else owns is a copy that can be wrong. There is deliberately
+    /// no column a stale name could occupy. See `farcooler_core::names`.
+    pub fn name(&self) -> String {
+        farcooler_core::names::display(&self.worktree_path)
+    }
+}
+
 pub(crate) fn row_to_workspace(row: &Row) -> rusqlite::Result<Workspace> {
     Ok(Workspace {
         id: get_uuid(row, 0)?,
         repository_id: get_uuid(row, 1)?,
-        task_name: row.get(2)?,
-        branch: row.get(3)?,
-        worktree_path: row.get(4)?,
-        hidden: row.get(5)?,
-        creation_failed: row.get(6)?,
-        resource_version: row.get::<_, i64>(7)? as u64,
-        is_main_checkout: row.get(8)?,
-        worktree_missing: row.get(9)?,
+        branch: row.get(2)?,
+        worktree_path: row.get(3)?,
+        hidden: row.get(4)?,
+        creation_failed: row.get(5)?,
+        resource_version: row.get::<_, i64>(6)? as u64,
+        is_main_checkout: row.get(7)?,
+        worktree_missing: row.get(8)?,
     })
 }
 

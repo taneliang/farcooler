@@ -11,7 +11,7 @@ use farcooler_core::{
     DomainError, Result,
     derive::{self, DerivedTerminal},
     inventory::RuntimeInventory,
-    validate,
+    names, validate,
 };
 use farcooler_protocol::v1::{TerminalIntent, TerminalState, WorkspaceState};
 use farcooler_store::{Store, models};
@@ -487,6 +487,30 @@ impl Service {
         Ok(dir)
     }
 
+    /// Where a worktree of this name goes, once it is known nothing is there.
+    ///
+    /// One directory per repository, so the leaf is the worktree's name and
+    /// nothing else. Worktrees used to share one flat directory and carry their
+    /// repository as a prefix — `overnight-rate-limiting` — purely to keep two
+    /// projects' worktrees apart. A subdirectory does that structurally, and
+    /// leaves a name that reads as prose without anything being stripped back
+    /// off it. Worktrees created before this keep their flat paths and their
+    /// prefix; nothing moves them, because moving a directory out from under
+    /// someone to tidy up a label is worse than a wordy sidebar row.
+    ///
+    /// The existence check is here rather than left to git so the answer is
+    /// "a worktree of that name is already here" and not whatever git says
+    /// about a directory it declined to create.
+    fn worktree_dest(&self, repo: &models::Repository, name: &str) -> Result<PathBuf> {
+        let dir = self.worktrees_dir()?.join(names::slug(&repo.display_name));
+        std::fs::create_dir_all(&dir).map_err(|_| DomainError::OperationFailed)?;
+        let dest = dir.join(names::slug(name));
+        if dest.exists() {
+            return Err(DomainError::WorktreeExists);
+        }
+        Ok(dest)
+    }
+
     // ---- repository roots ----
 
     /// Add an allowlisted repository root.
@@ -593,11 +617,11 @@ impl Service {
     pub async fn create_workspace(
         &self,
         repository_id: Uuid,
-        task_name: &str,
+        name: &str,
         branch: &str,
         base_revision: &str,
     ) -> Result<models::Workspace> {
-        validate::task_name(task_name)?;
+        validate::worktree_name(name)?;
         validate::branch_name(branch)?;
 
         // Held until this function returns: everything below is "mutate git,
@@ -607,23 +631,12 @@ impl Service {
 
         let repo = self.store.get_repository(repository_id)?;
         let repo_path = self.repository_worktree(&repo);
-
-        let dest = self.worktrees_dir()?.join(format!(
-            "{}-{}",
-            sanitize(&repo.display_name),
-            sanitize(task_name)
-        ));
+        let dest = self.worktree_dest(&repo, name)?;
 
         let base_commit = git::resolve_revision(&repo_path, base_revision).await?;
         git::create_worktree(&repo_path, branch, base_revision, &dest).await?;
 
-        match self.store.create_workspace(
-            repository_id,
-            task_name,
-            branch,
-            &dest.to_string_lossy(),
-            false,
-        ) {
+        match self.store.create_workspace(repository_id, branch, &dest.to_string_lossy(), false) {
             Ok(ws) => Ok(ws),
             Err(e) => {
                 // Do not erase a possibly valuable worktree to make the database
@@ -663,14 +676,23 @@ impl Service {
     /// else, or produced by an agent running somewhere else entirely. Without
     /// this, picking that work up meant doing it by hand outside Far Cooler and
     /// then having Far Cooler not know about it.
+    ///
+    /// Takes no name. The worktree is named after the branch's last segment,
+    /// which is what anyone would have typed and what the reconciler would have
+    /// called it a tick later anyway — `feat/rate-limiting` lands in a directory
+    /// called `rate-limiting` and reads "rate limiting".
     pub async fn adopt_branch(
         &self,
         repository_id: Uuid,
-        task_name: &str,
         branch: &str,
     ) -> Result<models::Workspace> {
-        validate::task_name(task_name)?;
         validate::branch_name(branch)?;
+
+        // A branch is `feat/rate-limiting`; the worktree is `rate-limiting`. The
+        // prefix says what kind of work it is, which the sidebar row does not
+        // need to repeat for every worktree in the list.
+        let name = branch.rsplit('/').next().unwrap_or(branch);
+        validate::worktree_name(name)?;
 
         // Held until this function returns: everything below is "mutate git,
         // then write the row", and the reconciler must not see the gap.
@@ -679,22 +701,11 @@ impl Service {
 
         let repo = self.store.get_repository(repository_id)?;
         let repo_path = self.repository_worktree(&repo);
-
-        let dest = self.worktrees_dir()?.join(format!(
-            "{}-{}",
-            sanitize(&repo.display_name),
-            sanitize(task_name)
-        ));
+        let dest = self.worktree_dest(&repo, name)?;
 
         git::create_worktree_from_branch(&repo_path, branch, &dest).await?;
 
-        match self.store.create_workspace(
-            repository_id,
-            task_name,
-            branch,
-            &dest.to_string_lossy(),
-            false,
-        ) {
+        match self.store.create_workspace(repository_id, branch, &dest.to_string_lossy(), false) {
             Ok(workspace) => Ok(workspace),
             Err(e) => {
                 // The worktree exists but nothing records it. Remove it —
@@ -1878,12 +1889,6 @@ fn reject_sensitive_root(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn sanitize(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-        .collect()
-}
-
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1941,12 +1946,6 @@ mod tests {
         assert_ne!(stable_host_id("abc123"), stable_host_id("def456"));
     }
 
-    #[test]
-    fn sanitize_keeps_paths_predictable() {
-        assert_eq!(sanitize("my repo/name"), "my-repo-name");
-        assert_eq!(sanitize("ok_name-1"), "ok_name-1");
-    }
-
     /// A service backed by its own throwaway database.
     ///
     /// `keep` rather than letting the `TempDir` drop: the guard would delete
@@ -1972,7 +1971,7 @@ mod tests {
             .unwrap();
         service
             .store
-            .create_workspace(repo.id, "task", "branch", &worktree.display().to_string(), false)
+            .create_workspace(repo.id, "branch", &worktree.display().to_string(), false)
             .unwrap()
     }
 
@@ -2334,7 +2333,7 @@ mod remove_root_tests {
             .unwrap();
         let workspace = service
             .store
-            .create_workspace(repository.id, "main", "main", "/tmp/remove-root-tests", true)
+            .create_workspace(repository.id, "main", "/tmp/remove-root-tests", true)
             .unwrap();
         (service, root, workspace)
     }
@@ -2384,6 +2383,64 @@ mod remove_root_tests {
             other => panic!("expected RunningProcesses for a starting terminal, got {other:?}"),
         }
     }
+}
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+
+    /// One directory per repository, and the leaf is the name.
+    ///
+    /// The prefixed flat layout it replaced put the repository into every
+    /// name, so `overnight-rate-limiting` had to be read back with the project
+    /// repeated in a sidebar that already groups by project.
+    #[tokio::test]
+    async fn a_new_worktree_lands_under_its_repository_and_is_named_by_its_leaf() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc.create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD").await.unwrap();
+
+        assert_eq!(
+            Path::new(&ws.worktree_path),
+            dir.path().join("state").join("worktrees").join("repo").join("rate-limiting"),
+            "one directory per repository, so the leaf carries the name alone"
+        );
+        assert_eq!(ws.name(), "rate limiting", "and reads back as what was typed");
+    }
+
+    /// Two worktrees of one name in one repository is one directory, which the
+    /// filesystem settles before any uniqueness check we could write.
+    ///
+    /// The point of catching it here is the answer: "a worktree of that name is
+    /// already here", rather than whatever git says about a directory it
+    /// declined to create.
+    #[tokio::test]
+    async fn a_second_worktree_of_the_same_name_is_refused_by_name() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        svc.create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD").await.unwrap();
+
+        // Slugged the same, typed differently: the collision is between
+        // directories, not between the strings someone typed.
+        match svc.create_workspace(repo, "rate-limiting", "feat/rate-limiting-2", "HEAD").await {
+            Err(DomainError::WorktreeExists) => {}
+            other => panic!("expected WorktreeExists, got {other:?}"),
+        }
+    }
+
+    /// A resumed branch names its worktree after its last segment.
+    ///
+    /// `feat/` says what kind of work it is, which every row in the list would
+    /// otherwise repeat.
+    #[tokio::test]
+    async fn adopting_a_branch_names_the_worktree_after_it() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        git::git(&dir.path().join("repo"), &["branch", "feat/rate-limiting"]).await.unwrap();
+
+        let ws = svc.adopt_branch(repo, "feat/rate-limiting").await.unwrap();
+
+        assert_eq!(ws.name(), "rate limiting");
+        assert_eq!(ws.branch, "feat/rate-limiting", "the branch keeps its prefix; the name drops it");
+    }
+
 }
 
 #[cfg(test)]
@@ -2582,7 +2639,7 @@ mod remove_worktree_tests {
 
         let ws = svc
             .store
-            .set_workspace_identity(ws.id, ws.resource_version, &ws.task_name, &ws.branch, false)
+            .set_workspace_identity(ws.id, ws.resource_version, &ws.branch, false)
             .unwrap();
         assert!(!ws.is_main_checkout, "the test must start from the wrong flag to mean anything");
 

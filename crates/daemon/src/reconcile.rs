@@ -98,28 +98,6 @@ fn branch_of(worktree: &git::WorktreeInfo) -> String {
     })
 }
 
-/// The worktree's directory name, if it is one that can be stored as a task
-/// name.
-///
-/// A name git handed us, not one a user typed. If the directory is named
-/// something the validator refuses, skipping it silently would make a worktree
-/// permanently invisible with no way to find out why — hence the warning here
-/// rather than at each call site.
-fn usable_name(worktree: &git::WorktreeInfo, branch: &str) -> Option<String> {
-    let name = Path::new(&worktree.path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| branch.to_string());
-
-    match farcooler_core::validate::task_name(&name) {
-        Ok(()) => Some(name),
-        Err(e) => {
-            tracing::warn!(path = %worktree.path, error = ?e, "worktree name is not usable");
-            None
-        }
-    }
-}
-
 /// Reconcile one repository against git.
 ///
 /// Takes the repository's lock, so it cannot observe the gap inside
@@ -159,26 +137,17 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             // on any database written before migration 0006 added the column
             // with `DEFAULT 0`. Correct it here rather than leave it wrong
             // forever.
+            //
+            // The name is not among them, and there used to be a careful
+            // carve-out here explaining which workspaces could have theirs
+            // re-derived from git and which could not. A workspace is named by
+            // its worktree directory now, read on every access, so there is no
+            // stored name to go stale and nothing to decide.
             if let Some(ws) = known.iter().find(|w| canonical_or_raw(&w.worktree_path) == path) {
-                // The name is git's to correct for the main checkout only. A
-                // task workspace is named by whoever created it, and sits in a
-                // directory slugged from the project and the task together —
-                // re-deriving that name from the directory would rename every
-                // task in the sidebar into its slug on the next tick.
-                let name = if worktree.is_main {
-                    usable_name(worktree, &branch).unwrap_or_else(|| ws.task_name.clone())
-                } else {
-                    ws.task_name.clone()
-                };
-
-                if ws.task_name != name
-                    || ws.branch != branch
-                    || ws.is_main_checkout != worktree.is_main
-                {
+                if ws.branch != branch || ws.is_main_checkout != worktree.is_main {
                     match svc.store.set_workspace_identity(
                         ws.id,
                         ws.resource_version,
-                        &name,
                         &branch,
                         worktree.is_main,
                     ) {
@@ -195,13 +164,8 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             continue;
         }
 
-        let Some(name) = usable_name(worktree, &branch) else {
-            continue;
-        };
-
         match svc.store.create_workspace(
             repository_id,
-            &name,
             &branch,
             &worktree.path,
             worktree.is_main,
@@ -292,7 +256,7 @@ mod tests {
             .list_workspaces_for_repository(repo)
             .unwrap()
             .into_iter()
-            .map(|w| w.task_name)
+            .map(|w| w.name())
             .collect();
         n.sort();
         n
@@ -571,13 +535,7 @@ mod tests {
         assert!(main.is_main_checkout, "adoption must have gotten this right to start with");
 
         svc.store
-            .set_workspace_identity(
-                main.id,
-                main.resource_version,
-                &main.task_name,
-                &main.branch,
-                false,
-            )
+            .set_workspace_identity(main.id, main.resource_version, &main.branch, false)
             .unwrap();
         assert!(
             !svc.store.get_workspace(main.id).unwrap().is_main_checkout,
@@ -654,58 +612,24 @@ mod tests {
         assert!(again.is_quiet(), "healing must converge, not oscillate: {again:?}");
     }
 
-    /// The row an older Far Cooler wrote for a main checkout said `main` — the
-    /// name was a literal in `Service::register_repository`, not the
-    /// directory. Adoption stopped doing that, but nothing re-derived the rows
-    /// already written, so those repositories are still labeled `main` in the
-    /// sidebar instead of by their project directory.
+    /// A worktree keeps its name while the branch inside it moves.
     ///
-    /// Deleting the `task_name` comparison in `reconcile::repository` turns
-    /// this red.
-    #[tokio::test]
-    async fn a_legacy_main_checkout_row_stops_calling_itself_main() {
-        let (_dir, svc, repo) = fixture().await;
-        let main = svc.store.list_workspaces_for_repository(repo).unwrap().remove(0);
-        assert_eq!(main.task_name, "repo", "adoption names it after its directory");
-
-        svc.store
-            .update_workspace(
-                main.id,
-                main.resource_version,
-                "main",
-                &main.branch,
-                &main.worktree_path,
-                false,
-                false,
-            )
-            .unwrap();
-
-        let out = repository(&svc, repo).await.unwrap();
-
-        assert_eq!(out.healed, 1, "{out:?}");
-        assert_eq!(
-            svc.store.get_workspace(main.id).unwrap().task_name,
-            "repo",
-            "the pass must re-derive the name the way adoption would have"
-        );
-    }
-
-    /// Names are healed for the main checkout ONLY, because that is the only
-    /// one whose name git can be said to own.
+    /// This is the whole reason a workspace is named by its directory. One
+    /// worktree hosts a stack of commits over its life: you branch, you branch
+    /// again off that, you rebase, and the branch checked out in the directory
+    /// changes each time. A name taken from the branch would rename the
+    /// workspace on every one of those, so the sidebar row you were watching an
+    /// agent work in would keep becoming a different row.
     ///
-    /// A task workspace is named by the person who created it — "refactor
-    /// api" — and lives in a directory named after the project and the task
-    /// together. Healing its name from its directory the way the main
-    /// checkout's is healed would rewrite every task in the sidebar into a
-    /// slug on the next tick. Widening the `worktree.is_main` guard turns this
-    /// red.
+    /// The branch column still follows git — that is what `healed` counts here.
+    /// The name does not move with it.
     #[tokio::test]
-    async fn a_task_workspaces_own_name_is_left_alone() {
+    async fn a_worktree_keeps_its_name_as_the_branch_under_it_moves() {
         let (dir, svc, repo) = fixture().await;
-        let side = dir.path().join("repo-refactor-api");
+        let side = dir.path().join("rate-limiting");
         git::git(
             &dir.path().join("repo"),
-            &["worktree", "add", "-q", "-b", "feat/api", side.to_str().unwrap()],
+            &["worktree", "add", "-q", "-b", "feat/rate-limiting", side.to_str().unwrap()],
         )
         .await
         .unwrap();
@@ -718,22 +642,16 @@ mod tests {
             .into_iter()
             .find(|w| !w.is_main_checkout)
             .expect("the adopted worktree");
-        svc.store
-            .update_workspace(
-                ws.id,
-                ws.resource_version,
-                "refactor api",
-                &ws.branch,
-                &ws.worktree_path,
-                false,
-                false,
-            )
-            .unwrap();
+        assert_eq!(ws.name(), "rate limiting", "adoption names it after its directory");
 
+        // The next branch in the stack, checked out in the same worktree.
+        git::git(&side, &["checkout", "-q", "-b", "feat/rate-limiting-tests"]).await.unwrap();
         let out = repository(&svc, repo).await.unwrap();
 
-        assert!(out.is_quiet(), "nothing about this repository changed: {out:?}");
-        assert_eq!(svc.store.get_workspace(ws.id).unwrap().task_name, "refactor api");
+        assert_eq!(out.healed, 1, "the branch column follows git: {out:?}");
+        let after = svc.store.get_workspace(ws.id).unwrap();
+        assert_eq!(after.branch, "feat/rate-limiting-tests");
+        assert_eq!(after.name(), "rate limiting", "the name is the directory, which did not move");
     }
 
     #[tokio::test]

@@ -17,6 +17,12 @@ SQLite holds only what must outlive tmux: which workspaces exist, which branch
 each is on, and what you *intended* each terminal to be doing. tmux is the sole
 authority on whether a process is alive right now.
 
+The same rule decides what a workspace is called. Its name is its worktree's
+directory read back as prose, never a stored title — so there is no name that
+can disagree with the directory it describes, and none to keep in sync. Not the
+branch: one worktree hosts a stack of commits over its life, so naming it after
+the branch inside it would rename it every time the work moved forward.
+
 There is no database column in which a stale `running` could ever be written, so
 Far Cooler structurally cannot tell you an agent is running after it died. When a
 terminal is expected to be alive and no live exactly-tagged pane proves it, the
@@ -53,6 +59,7 @@ farcooler repo register ~/Dev/my-project
 
 # 3. Create task workspaces. Each is a real git worktree on a new branch.
 farcooler repo list                       # note the id
+# The name becomes the worktree's directory, and cannot be changed later.
 farcooler workspace create <repo-id> "add auth"   --branch feat/auth
 farcooler workspace create <repo-id> "fix parser" --branch fix/parser
 

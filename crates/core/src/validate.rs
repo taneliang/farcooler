@@ -8,9 +8,22 @@ pub fn display_name(s: &str) -> Result<()> {
     scalar_len(s, 1, 80, "display_name")
 }
 
-/// Task names are 1-120.
-pub fn task_name(s: &str) -> Result<()> {
-    scalar_len(s, 1, 120, "task_name")
+/// Worktree names are 1-60, and must survive slugging.
+///
+/// Sixty rather than a task name's old 120 because this is a path component
+/// now: it is the directory the worktree is created in, and it is what every
+/// client shows in a sidebar row. A name generated rather than typed —
+/// `write a haiku about worktrees in HAIKU.md` — is a directory nobody wants
+/// and a row nobody can read.
+///
+/// The slug check is the one that cannot be expressed as a length: a name of
+/// pure punctuation is 1-60 scalars and still has no directory to be.
+pub fn worktree_name(s: &str) -> Result<()> {
+    scalar_len(s, 1, 60, "worktree_name")?;
+    if crate::names::slug(s).is_empty() {
+        return Err(DomainError::InvalidArgument { what: "worktree_name" });
+    }
+    Ok(())
 }
 
 /// Command-preset identifiers are 1-64 ASCII characters.
@@ -67,6 +80,21 @@ mod tests {
         // 80 emoji is 80 scalars even though it is far more bytes.
         assert!(display_name(&"🌙".repeat(80)).is_ok());
         assert!(display_name(&"🌙".repeat(81)).is_err());
+    }
+
+    #[test]
+    fn worktree_names_are_bounded_and_must_slug_to_something() {
+        assert!(worktree_name("rate limiting").is_ok());
+        assert!(worktree_name("").is_err());
+        assert!(worktree_name(&"a".repeat(60)).is_ok());
+        assert!(worktree_name(&"a".repeat(61)).is_err());
+
+        // Within the length and still not a directory. The old task name had no
+        // reason to care; a name that has to become a path component does.
+        assert!(worktree_name("!!!").is_err(), "punctuation slugs to nothing");
+        assert!(worktree_name("---").is_err(), "so do dashes, once they are trimmed");
+        assert!(worktree_name("🌙").is_err(), "and so does an emoji on its own");
+        assert!(worktree_name("🌙 auth").is_ok(), "but it is fine beside something that survives");
     }
 
     #[test]

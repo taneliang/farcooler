@@ -100,6 +100,20 @@ struct ResumeBranch: View {
         return "\(entry.repository.displayName) — \(host)"
     }
 
+    /// The worktree the selected branch would be adopted into.
+    ///
+    /// Nothing here names it and nothing can: the daemon calls the directory
+    /// after the branch's last segment, so `feat/rate-limiting` arrives as a
+    /// row reading "rate limiting". A name that nobody chose is exactly the
+    /// kind that should be on screen before ↩ rather than after it.
+    private var worktreePath: String? {
+        guard let chosen, let branch = branches.first(where: { $0.id == selection }),
+            !branch.isCheckedOut
+        else { return nil }
+        let leaf = branch.name.split(separator: "/").last.map(String.init) ?? branch.name
+        return WorktreeName.path(repository: chosen.repository.displayName, name: leaf)
+    }
+
     private var visible: [BranchInfo] {
         guard !query.isEmpty else { return branches }
         let q = query.lowercased()
@@ -229,6 +243,15 @@ struct ResumeBranch: View {
             .labelsHidden().fixedSize().controlSize(.small)
 
             Spacer()
+            if let worktreePath {
+                Image(systemName: "folder").font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text(worktreePath)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .layoutPriority(-1)
+            }
             Text("↩ resume").font(.system(size: 11)).foregroundStyle(.tertiary)
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
         }

@@ -311,7 +311,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                         val workspaceId = runCatching {
                             target.createWorkspace(
                                 repository,
-                                TaskSlug.title(description),
+                                TaskSlug.name(description),
                                 TaskSlug.slug(description, branchPrefix),
                                 // Its own agent terminal is created a few lines
                                 // below, so the worktree must not also come up
@@ -423,7 +423,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
         ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
 
     var repositoryId by remember { mutableStateOf("") }
-    var task by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
     var branch by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
@@ -433,12 +433,19 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
         ?: kotlinx.coroutines.flow.MutableStateFlow(Connection.DEFAULT_BRANCH_PREFIX))
         .collectAsStateWithLifecycle()
 
+    val trimmedName = name.trim()
+    // The name IS the worktree's directory now, and nothing encourages naming
+    // one carefully while the thing being named is invisible.
+    val folder = TaskSlug.sanitize(trimmedName)
+    // Sixty is the machine's cap on a name.
+    val tooLong = trimmedName.codePointCount(0, trimmedName.length) > 60
+
     // This form used to make you type a branch by hand, which meant the
     // machine's branch prefix — the whole point of the setting — could not reach
     // the one place on this screen that names a branch. Now it matches the Mac's
     // sheet: type nothing and get the suggestion.
     val suggestedBranch =
-        if (task.isBlank()) "" else TaskSlug.slug(task.trim(), branchPrefix)
+        if (trimmedName.isEmpty()) "" else TaskSlug.slug(trimmedName, branchPrefix)
     val effectiveBranch = branch.trim().ifEmpty { suggestedBranch }
 
     LaunchedEffect(repositories) {
@@ -474,25 +481,50 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
             ) { repositoryId = it }
 
             OutlinedTextField(
-                value = task,
-                onValueChange = { task = it },
-                label = { Text("Task") },
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Name") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            // What the name becomes on disk, or why it cannot become anything.
+            // Both refusals are spelled out rather than left as a dimmed Create
+            // button, which says a name is wrong without saying which rule it
+            // broke.
+            if (trimmedName.isNotEmpty()) {
+                when {
+                    tooLong -> Text(
+                        "A name can be at most 60 characters.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    folder.isEmpty() -> Text(
+                        "A name needs a letter or a number in it.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    else -> Text(
+                        folder,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             OutlinedTextField(
                 value = branch,
                 onValueChange = { branch = it },
                 label = { Text("Branch") },
                 placeholder = {
-                    Text(suggestedBranch.ifEmpty { branchPrefix + "my-task" })
+                    Text(suggestedBranch.ifEmpty { branchPrefix + "my-worktree" })
                 },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
 
             Text(
-                "A worktree is one git worktree and branch, for one task.",
+                "A workspace is one git worktree and one branch. Its name is the worktree's " +
+                    "folder, so it can't be changed later.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -506,7 +538,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                     working = true
                     scope.launch {
                         runCatching {
-                            target.createWorkspace(repositoryId, task.trim(), effectiveBranch)
+                            target.createWorkspace(repositoryId, trimmedName, effectiveBranch)
                         }.onFailure {
                             failure = it.message
                             working = false
@@ -518,7 +550,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                     }
                 },
                 enabled = !working && repositoryId.isNotEmpty() &&
-                    task.isNotBlank() && effectiveBranch.isNotBlank(),
+                    folder.isNotEmpty() && !tooLong && effectiveBranch.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Create")

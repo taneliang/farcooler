@@ -19,6 +19,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0005_drop_loss_dismissed,
     migration_0006_worktrees_are_managed,
     migration_0007_review,
+    migration_0008_drop_task_name,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -298,6 +299,29 @@ fn migration_0006_worktrees_are_managed(tx: &Transaction) -> rusqlite::Result<()
     )
 }
 
+/// A workspace is named by its worktree, so it stores no name.
+///
+/// The column held a title typed separately from the branch, and the New
+/// workspace sheet derived the branch from it — so one answer was given twice
+/// and then nothing kept the two related. Most rows ended up restating their
+/// branch (`review` beside `feat/review`), worktrees the reconciler adopted were
+/// titled after their directory anyway, and the pairs drifted (`add tests`
+/// beside `feat/tests`).
+///
+/// The name now comes from the worktree's directory on every read. Not from the
+/// branch: one worktree hosts a stack of commits over its life, so the branch
+/// inside it changes as the stack is built, and naming a workspace after it
+/// would rename the workspace whenever the work moved forward.
+///
+/// This drops data. What it drops is a name that could differ from the
+/// directory it described, and every row's directory is still right there — a
+/// workspace at `…/overnight-rate-limiting` reads "overnight rate limiting"
+/// rather than the "rate limiting" someone typed. A wordier row for a few days
+/// is the cost of there being one name, and worktrees are short-lived.
+fn migration_0008_drop_task_name(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE workspaces DROP COLUMN task_name;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,6 +421,51 @@ mod tests {
         assert!(!main, "pre-existing rows default to not-main; reconcile corrects them");
     }
 
+    /// Dropping the name must not drop the workspace, or the terminals hanging
+    /// off it.
+    ///
+    /// A `DROP COLUMN` SQLite cannot do in place is a table rebuild, and a
+    /// rebuild is where a foreign key to a re-created `workspaces` row goes
+    /// wrong quietly: the rows survive, the terminals do not, and what the user
+    /// sees is a worktree that has forgotten every agent that ever ran in it.
+    #[test]
+    fn dropping_the_name_keeps_the_workspace_and_its_terminals() {
+        let mut conn = open();
+        for m in &MIGRATIONS[..7] {
+            let tx = conn.transaction().unwrap();
+            m(&tx).unwrap();
+            tx.commit().unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1);
+             INSERT INTO workspaces
+                 VALUES (x'04', x'03', 'rate limiting', 'feat/rate-limiting',
+                         '/r/wt/rate-limiting', 0, 0, 1, 0, 0);
+             INSERT INTO terminals (id, workspace_id, title, command_preset, intent,
+                                    runtime_confirmed, columns, rows, resource_version,
+                                    lease_generation, epoch)
+                 VALUES (x'05', x'04', 'Agent', 'claude', 0, 1, 80, 24, 1, 0, 0);",
+        )
+        .unwrap();
+
+        migrate(&mut conn, 7).unwrap();
+
+        let path: String = conn
+            .query_row("SELECT worktree_path FROM workspaces WHERE id = x'04'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(path, "/r/wt/rate-limiting", "the path IS the name now, so it must survive");
+
+        let terminals: i64 = conn
+            .query_row("SELECT count(*) FROM terminals WHERE workspace_id = x'04'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(terminals, 1, "the terminals must still point at the workspace");
+
+        let named: rusqlite::Result<String> = conn
+            .query_row("SELECT task_name FROM workspaces WHERE id = x'04'", [], |r| r.get(0));
+        assert!(named.is_err(), "the column is gone, not merely ignored");
+    }
+
     /// One path, one row. The reconciler and `create_workspace` can race, and
     /// the index is what turns that into an error instead of a duplicate.
     #[test]
@@ -406,12 +475,12 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
              INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1);
-             INSERT INTO workspaces VALUES (x'04', x'03', 'a', 'main', '/r/wt', 0, 0, 1, 0, 0);",
+             INSERT INTO workspaces VALUES (x'04', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0);",
         )
         .unwrap();
 
         let second = conn.execute_batch(
-            "INSERT INTO workspaces VALUES (x'05', x'03', 'b', 'main', '/r/wt', 0, 0, 1, 0, 0);",
+            "INSERT INTO workspaces VALUES (x'05', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0);",
         );
         assert!(second.is_err(), "a second row for the same path is refused");
     }

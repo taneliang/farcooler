@@ -383,7 +383,7 @@ pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
 
         items.push(pb::InboxWorkspace {
             workspace_id: id_bytes(ws.id),
-            task_name: ws.task_name,
+            task_name: ws.name(),
             branch: ws.branch,
             changed_since_reviewed: changed,
             insertions: ins,

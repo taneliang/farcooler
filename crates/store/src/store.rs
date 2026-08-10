@@ -269,14 +269,13 @@ impl Store {
     /// Every column of `workspaces`, in the order `row_to_workspace` reads them.
     /// Named once because three queries share it and a drifting column order is
     /// a silent field swap rather than a compile error.
-    const WORKSPACE_COLUMNS: &'static str = "id, repository_id, task_name, branch, \
+    const WORKSPACE_COLUMNS: &'static str = "id, repository_id, branch, \
          worktree_path, hidden, creation_failed, resource_version, is_main_checkout, \
          worktree_missing";
 
     pub fn create_workspace(
         &self,
         repository_id: Uuid,
-        task_name: &str,
         branch: &str,
         worktree_path: &str,
         is_main_checkout: bool,
@@ -285,13 +284,12 @@ impl Store {
         self.conn()
             .execute(
                 "INSERT INTO workspaces
-                 (id, repository_id, task_name, branch, worktree_path, hidden,
+                 (id, repository_id, branch, worktree_path, hidden,
                   creation_failed, resource_version, is_main_checkout, worktree_missing)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 1, ?6, 0)",
+                 VALUES (?1, ?2, ?3, ?4, 0, 0, 1, ?5, 0)",
                 params![
                     uuid_blob(id),
                     uuid_blob(repository_id),
-                    task_name,
                     branch,
                     worktree_path,
                     is_main_checkout
@@ -301,7 +299,6 @@ impl Store {
         Ok(Workspace {
             id,
             repository_id,
-            task_name: task_name.to_string(),
             branch: branch.to_string(),
             worktree_path: worktree_path.to_string(),
             hidden: false,
@@ -330,11 +327,13 @@ impl Store {
     pub fn list_all_workspaces(&self) -> Result<Vec<Workspace>> {
         let conn = self.conn();
         let mut stmt = conn
-            .prepare(
-                "SELECT id, repository_id, task_name, branch, worktree_path, hidden,
-                        creation_failed, resource_version, is_main_checkout, worktree_missing
-                 FROM workspaces WHERE hidden = 0 ORDER BY task_name",
-            )
+            .prepare(&format!(
+                // By path, which is by name: the name is the last component of
+                // it. Ordering by the column that no longer exists was the only
+                // thing the old title was load-bearing for here.
+                "SELECT {} FROM workspaces WHERE hidden = 0 ORDER BY worktree_path",
+                Self::WORKSPACE_COLUMNS
+            ))
             .map_err(map_err)?;
         let rows = stmt.query_map([], row_to_workspace).map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
@@ -353,12 +352,10 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn update_workspace(
         &self,
         id: Uuid,
         expected_version: u64,
-        task_name: &str,
         branch: &str,
         worktree_path: &str,
         hidden: bool,
@@ -366,10 +363,9 @@ impl Store {
     ) -> Result<Workspace> {
         self.run_versioned(
             "UPDATE workspaces
-             SET task_name = ?1, branch = ?2, worktree_path = ?3, hidden = ?4, creation_failed = ?5, resource_version = ?6
-             WHERE id = ?7 AND resource_version = ?8",
+             SET branch = ?1, worktree_path = ?2, hidden = ?3, creation_failed = ?4, resource_version = ?5
+             WHERE id = ?6 AND resource_version = ?7",
             &[
-                &task_name,
                 &branch,
                 &worktree_path,
                 &hidden,
@@ -426,27 +422,28 @@ impl Store {
     /// migration 0006's `is_main_checkout DEFAULT 0` leaves every pre-0006
     /// main checkout claiming not to be one.
     ///
-    /// Three columns in one statement because they are one fact from one
-    /// writer, taken from a single `git worktree list` record: splitting them
-    /// would mean two versioned updates, the second racing the version the
-    /// first just bumped. `hidden` and `creation_failed` are deliberately
-    /// absent for the reason `set_workspace_flags` exists at all — those are
-    /// the user's opinions, not git's facts, and passing them back unchanged
-    /// is how a concurrent hide gets silently reverted.
+    /// Both columns in one statement because they are one fact from one writer,
+    /// taken from a single `git worktree list` record: splitting them would mean
+    /// two versioned updates, the second racing the version the first just
+    /// bumped. `hidden` and `creation_failed` are deliberately absent for the
+    /// reason `set_workspace_flags` exists at all — those are the user's
+    /// opinions, not git's facts, and passing them back unchanged is how a
+    /// concurrent hide gets silently reverted.
+    ///
+    /// The name used to be healed here too. It no longer exists to heal: a
+    /// workspace is named by its worktree directory, read fresh on every access.
     pub fn set_workspace_identity(
         &self,
         id: Uuid,
         expected_version: u64,
-        task_name: &str,
         branch: &str,
         is_main_checkout: bool,
     ) -> Result<Workspace> {
         self.run_versioned(
             "UPDATE workspaces
-             SET task_name = ?1, branch = ?2, is_main_checkout = ?3, resource_version = ?4
-             WHERE id = ?5 AND resource_version = ?6",
+             SET branch = ?1, is_main_checkout = ?2, resource_version = ?3
+             WHERE id = ?4 AND resource_version = ?5",
             &[
-                &task_name,
                 &branch,
                 &is_main_checkout,
                 &(expected_version as i64 + 1),
@@ -815,12 +812,12 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/workspace", false).unwrap();
+        let ws = s.create_workspace(repo.id, "feature/x", "/wt/workspace", false).unwrap();
         assert!(!ws.hidden);
         assert_eq!(s.get_workspace(ws.id).unwrap(), ws);
 
         let updated =
-            s.update_workspace(ws.id, 1, "task", "feature/x", "/wt/workspace", true, false).unwrap();
+            s.update_workspace(ws.id, 1, "feature/x", "/wt/workspace", true, false).unwrap();
         assert!(updated.hidden);
         assert_eq!(updated.resource_version, 2);
     }
@@ -831,12 +828,12 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/flags", false).unwrap();
+        let ws = s.create_workspace(repo.id, "feature/x", "/wt/flags", false).unwrap();
         assert!(!ws.hidden && !ws.worktree_missing);
 
         let hidden = s.set_workspace_flags(ws.id, ws.resource_version, true, false).unwrap();
         assert!(hidden.hidden, "hidden is set");
-        assert_eq!(hidden.task_name, "task", "the name is untouched");
+        assert_eq!(hidden.name(), "flags", "the name is the worktree, and hiding moves nothing");
 
         let missing = s.set_workspace_flags(hidden.id, hidden.resource_version, true, true).unwrap();
         assert!(missing.hidden && missing.worktree_missing);
@@ -848,7 +845,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/terminal", false).unwrap();
+        let ws = s.create_workspace(repo.id, "feature/x", "/wt/terminal", false).unwrap();
         let term =
             s.create_terminal(ws.id, "shell", "claude", TerminalIntent::Running, 80, 24).unwrap();
         assert!(!term.runtime_confirmed);
@@ -888,7 +885,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/pane-mode", false).unwrap();
+        let ws = s.create_workspace(repo.id, "feature/x", "/wt/pane-mode", false).unwrap();
         let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
         assert_eq!(t.pane_mode, PaneMode::Terminal);
         assert_eq!(t.agent_session_id, None);
@@ -902,7 +899,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "task", "feature/x", "/wt/session-id", false).unwrap();
+        let ws = s.create_workspace(repo.id, "feature/x", "/wt/session-id", false).unwrap();
         let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
         let updated =
             s.set_pane_mode(t.id, t.resource_version, PaneMode::Agent, Some("abc-123".into())).unwrap();

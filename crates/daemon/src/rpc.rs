@@ -710,8 +710,17 @@ impl Rpc {
                 let Some(request::Payload::WorkspaceCreate(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                // `task_name` keeps its name on the wire and changes meaning:
+                // it is the worktree's name now, not a description of the work.
+                // Renaming the field would have made every shipped client fail
+                // to create a workspace against a new daemon, to say the same
+                // thing in different words.
+                //
+                // Adoption ignores it outright. A worktree taken over for a
+                // branch that already exists is named after that branch, so
+                // there is nothing for a caller to choose.
                 let ws = if p.adopt_existing {
-                    svc.adopt_branch(repository, &p.task_name, &p.branch).await?
+                    svc.adopt_branch(repository, &p.branch).await?
                 } else {
                     svc.create_workspace(repository, &p.task_name, &p.branch, &p.base_revision)
                         .await?
@@ -819,7 +828,7 @@ impl Rpc {
                     let Some(request::Payload::TypedConfirmation(p)) = req.payload else {
                         return Err(DomainError::ConfirmationRequired);
                     };
-                    if p.typed_confirmation.trim() != ws.task_name {
+                    if p.typed_confirmation.trim() != ws.name() {
                         return Err(DomainError::ConfirmationRequired);
                     }
                 }

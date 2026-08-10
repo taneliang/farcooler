@@ -189,7 +189,9 @@ struct TaskComposerView: View {
         guard !description.isEmpty, let repository = chosenRepository else { return }
 
         let branch = TaskSlug.slug(from: description, prefix: connection.branchPrefix)
-        let title = TaskSlug.title(from: description)
+        let name = TaskSlug.name(from: description)
+        // The worktree's directory, spoken the way the fleet list will show it.
+        let title = TaskSlug.displayName(of: name)
         let agentName = QuickAgents.agent(agentID).name
         let preset = QuickAgents.preset(agent: agentID, model: model)
 
@@ -198,7 +200,7 @@ struct TaskComposerView: View {
             let workspaceID: String
             do {
                 workspaceID = try await connection.createWorkspace(
-                    repository: repository.id, task: title, branch: branch, base: "")
+                    repository: repository.id, name: name, branch: branch, base: "")
             } catch {
                 phase = .failed("Could not create the worktree: \(error.localizedDescription)")
                 return

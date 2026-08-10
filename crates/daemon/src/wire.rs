@@ -127,7 +127,11 @@ pub fn workspace(view: &WorkspaceView, scope: Scope) -> wire::Workspace {
         id: id_bytes(ws.id),
         resource_version: ws.resource_version,
         repository_id: id_bytes(ws.repository_id),
-        task_name: ws.task_name.clone(),
+        // Still `task_name` on the wire, computed from the worktree path rather
+        // than read from a column. Every shipped client decodes this field, so
+        // it keeps its name and they keep working against a daemon that no
+        // longer stores one.
+        task_name: ws.name(),
         branch: ws.branch.clone(),
         worktree_path_token: path_token(ws.id),
         worktree_path: admin(scope).then(|| ws.worktree_path.clone()),

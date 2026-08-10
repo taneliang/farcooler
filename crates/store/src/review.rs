@@ -200,7 +200,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/tmp/root", 1).unwrap();
         let repo = s.create_repository(host, root.id, "r", "/tmp/root/r/.git", "").unwrap();
-        let ws = s.create_workspace(repo.id, "t", "feat/x", "/tmp/root/r-wt", false).unwrap();
+        let ws = s.create_workspace(repo.id, "feat/x", "/tmp/root/r-wt", false).unwrap();
 
         assert!(s.reviewed_mark(ws.id, "feat/x").unwrap().is_none());
         s.mark_reviewed_with_gate(ws.id, "feat/x", "head", "digest", 11, 22, 99).unwrap();
@@ -217,7 +217,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/tmp/root", 1).unwrap();
         let repo = s.create_repository(host, root.id, "r", "/tmp/root/r/.git", "").unwrap();
-        let ws = s.create_workspace(repo.id, "t", "feat/x", "/tmp/root/r-wt", false).unwrap();
+        let ws = s.create_workspace(repo.id, "feat/x", "/tmp/root/r-wt", false).unwrap();
 
         assert!(s.review_base(ws.id).unwrap().is_none());
         s.set_review_base(ws.id, "release/2").unwrap();

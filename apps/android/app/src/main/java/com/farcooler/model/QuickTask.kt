@@ -8,11 +8,11 @@ package com.farcooler.model
 // that is to make the rules identical rather than merely similar.
 
 /**
- * Turning a sentence into a branch name and a short title.
+ * Turning a sentence into a branch name and a worktree name.
  *
- * One sentence is both the task's name and, slugged, its branch. Keeping the
- * two derivations next to each other is what keeps them from drifting apart the
- * next time either one is tuned.
+ * One sentence is both the worktree's name and, slugged, its branch. Keeping
+ * the two derivations next to each other is what keeps them from drifting apart
+ * the next time either one is tuned.
  */
 object TaskSlug {
     /**
@@ -49,14 +49,51 @@ object TaskSlug {
         return prefix + (if (out.isEmpty()) "task" else out.toString())
     }
 
-    /** A short human title, for the workspace's task name. */
-    fun title(text: String): String {
-        val trimmed = text.trim()
-        if (trimmed.length <= 42) return trimmed
-        // Cut on a word boundary rather than mid-word.
-        val cut = trimmed.substring(0, 42)
-        val space = cut.lastIndexOf(' ')
-        return if (space >= 0) cut.substring(0, space) + "…" else "$cut…"
+    /**
+     * The worktree's name, which is the directory it is created in.
+     *
+     * The slug again, minus the branch prefix, rather than the trimmed sentence
+     * this used to hand over. A name is a path component now: the machine caps
+     * it at 60 characters and refuses one with no letters or numbers left after
+     * sanitizing, and a sentence can be either — "Ship it!!!" is the second.
+     * Slugging is the one derivation that can be neither, and it costs nothing,
+     * because the directory is read back as prose in the fleet list anyway.
+     */
+    fun name(text: String): String {
+        // Through `sanitize` and not merely `slug`, because the two disagree
+        // about what a letter is: Kotlin says yes to `é` and to 写, and the
+        // machine — which keeps ASCII and dashes everything else — says no to
+        // both. A description written in Chinese would otherwise slug to
+        // something this thinks is a name and the daemon refuses outright.
+        val name = sanitize(slug(text))
+        return name.ifEmpty { "task" }
+    }
+
+    /**
+     * The directory a typed name lands in.
+     *
+     * Duplicated from the machine for the same reason the branch prefix is
+     * applied here rather than there: the form shows the folder it is about to
+     * create, and a preview computed on the far side would be a preview that can
+     * lie. The machine still has the last word, and refuses a name this leaves
+     * empty.
+     */
+    fun sanitize(text: String): String {
+        val out = StringBuilder()
+        var lastWasDash = true // leading dashes are dropped
+        for (character in text) {
+            val kept = character == '_' || character in 'a'..'z' ||
+                character in 'A'..'Z' || character in '0'..'9'
+            if (kept) {
+                out.append(character)
+                lastWasDash = false
+            } else if (!lastWasDash) {
+                out.append('-')
+                lastWasDash = true
+            }
+        }
+        while (out.isNotEmpty() && out.last() == '-') out.deleteCharAt(out.lastIndex)
+        return out.toString()
     }
 }
 

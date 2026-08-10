@@ -864,7 +864,7 @@ Administrative semantics are explicit rather than implied:
 - Enrolling a device needs no method. A device that cannot already reach the host over SSH cannot use an enrolled key, so every device self-enrolls with the SSH access it already has, exactly as the first one did.
 - All three are `host_admin`, carry idempotency keys, target and version their resource, and produce audit records.
 
-IDs are UUIDv7. Display names are 1–80 UTF-8 scalar values; task names are 1–120; branch names must pass `git check-ref-format --branch`; command-preset identifiers are 1–64 ASCII characters. Arbitrary command text is stored in host-side presets and is not accepted through workspace creation. Individual binary terminal payloads are capped at 64 KiB.
+IDs are UUIDv7. Display names are 1–80 UTF-8 scalar values; worktree names are 1–60 and must contain at least one character that survives slugging to `[A-Za-z0-9_-]`, since the name is the worktree's directory; branch names must pass `git check-ref-format --branch`; command-preset identifiers are 1–64 ASCII characters. Arbitrary command text is stored in host-side presets and is not accepted through workspace creation. Individual binary terminal payloads are capped at 64 KiB.
 
 Events are resource snapshots or transitions: `host.changed`, `repository_root.changed`, `repository.changed`, `workspace.changed`, `terminal.changed`, `agent_session.changed`, `operation.changed`, and `client.revoked`. Each event includes the authoritative new resource version. `host.changed` carries daemon self-health but never authoritative reachability; clients update their local `HostConnection` from transport and heartbeat observations.
 
@@ -1032,7 +1032,7 @@ Onboarding requires no physical presence at the host. With working SSH access an
 5. The host appears with its health, route, and daemon version.
 6. Add an allowlisted repository root.
 7. Register an existing repository or clone a URL using host-managed git credentials.
-8. Create a task workspace by choosing repository, base revision, task name, branch name, and CLI preset.
+8. Create a task workspace by choosing repository, base revision, worktree name, branch name, and CLI preset. The name becomes the worktree's directory and cannot be changed afterwards.
 9. The daemon creates the worktree transaction, launches the terminal, and returns ordered output.
 
 MVP does not request broad Tailscale administrative API access or scan the tailnet. A client learns a host only from a user-entered SSH target. Host-key records and enrolled routes are stored locally on the client.

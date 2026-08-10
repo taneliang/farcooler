@@ -9,9 +9,9 @@ import SwiftUI
 /// the thought that started it.
 ///
 /// Everything in that list except the last item is derivable. The description
-/// IS the task name, the branch is a slug of it, the project is the one you
-/// were last in, and the agent is a preference. So there is one field, and what
-/// you type in it becomes the agent's first message.
+/// cut short names the worktree, the branch is a slug of it, the project is the
+/// one you were last in, and the agent is a preference. So there is one field,
+/// and what you type in it becomes the agent's first message.
 ///
 /// It stays open after submitting, because the stated need is several tasks in
 /// quick succession and a panel that closes on every one turns a burst into a
@@ -85,8 +85,29 @@ struct QuickCreate: View {
     private var branch: String {
         Branch.slug(from: text, prefix: branchPrefix(chosen?.host ?? ""))
     }
+
+    /// The name this task will carry, derived the same way `startTask` derives
+    /// the one it sends — a description cut to a title. It is a directory now
+    /// rather than a stored string, so what this becomes is what the sidebar
+    /// row says for as long as the worktree exists.
+    private var name: String {
+        Branch.title(from: text)
+    }
+
+    /// The worktree about to be created, which is the only thing naming this
+    /// task. Nobody typed it, so it is shown rather than left to be found.
+    private var worktreePath: String? {
+        guard let chosen, WorktreeName.isValid(name) else { return nil }
+        return WorktreeName.path(repository: chosen.repository.displayName, name: name)
+    }
+
+    /// A description of nothing but punctuation is a description the daemon
+    /// will refuse: it leaves no directory behind once slugged. `Branch.title`
+    /// keeps this well under the sixty-scalar ceiling, but the ceiling is
+    /// checked where the name is decided rather than assumed from a cut made
+    /// somewhere else.
     private var canSubmit: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chosen != nil
+        chosen != nil && WorktreeName.isValid(name)
     }
 
     var body: some View {
@@ -138,6 +159,19 @@ struct QuickCreate: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
             } else {
+                // Both halves of what is about to be made, because neither was
+                // typed: the directory is what this task will be called from
+                // here on, the branch is where its commits go. The path yields
+                // its width first — its tail is the name, and that is the end
+                // worth keeping.
+                if let worktreePath {
+                    Image(systemName: "folder").foregroundStyle(.tertiary)
+                    Text(worktreePath)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .layoutPriority(-1)
+                }
                 Image(systemName: "arrow.triangle.branch").foregroundStyle(.tertiary)
                 Text(branch).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -179,14 +213,74 @@ struct QuickCreate: View {
 
     private func submit() {
         let description = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !description.isEmpty, let chosen else { return }
+        // The same gate the footer shows, not a weaker one. ⏎ is the only way
+        // in here, and a name the daemon refuses would clear the draft on its
+        // way to a failure nothing on screen reports.
+        guard canSubmit, let chosen else { return }
         onSubmit(
             description, chosen.host, chosen.repository.id,
             Agents.preset(agent: agent, model: model))
 
-        justCreated = Branch.title(from: description)
+        justCreated = WorktreeName.display(name)
         // Cleared only on success, which is also what clears the draft.
         text = ""
+    }
+}
+
+/// Turning a name into a worktree directory.
+///
+/// Beside `Branch` because they are the two halves of the same question, asked
+/// of the same typed words. The rule below is the daemon's, mirrored: a
+/// workspace has no stored name any more, so the directory a worktree is
+/// created in IS its name, and a client offering to create one has to show
+/// which directory that will be. A preview computed by a rule merely close to
+/// the daemon's is a preview of a path that never gets created — the same trap
+/// `Branch.slug` avoids by applying the prefix here rather than on the far side.
+enum WorktreeName {
+    /// What a directory may contain, spelled out rather than asked of
+    /// `isLetter`, which answers yes for `é` where the daemon answers dash.
+    private static let safe = Set(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".unicodeScalars)
+
+    /// One path component: anything outside `[A-Za-z0-9_-]` becomes a dash,
+    /// runs of dashes collapse, and the ends are trimmed.
+    ///
+    /// Case survives, unlike a branch slug. The directory is read back as the
+    /// workspace's name, so `Rate Limiting` has to come out spelled the way it
+    /// went in.
+    static func slug(_ s: String) -> String {
+        s.unicodeScalars
+            .map { safe.contains($0) ? Character($0) : "-" }
+            .reduce(into: "") { acc, c in
+                if c == "-" && acc.hasSuffix("-") { return }
+                acc.append(c)
+            }
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    /// Where a worktree lands, from `worktrees` down. The daemon owns
+    /// everything above that and never tells a client what it is, but the tail
+    /// is the part being named.
+    static func path(repository: String, name: String) -> String {
+        "worktrees/\(slug(repository))/\(slug(name))"
+    }
+
+    /// Whether the daemon will take this as a name: at most sixty scalars, and
+    /// something left over once slugged. Checked here so a client cannot spend
+    /// a round trip being told what it already knew — a name of pure
+    /// punctuation is short enough and still has no directory to be.
+    static func isValid(_ s: String) -> Bool {
+        s.unicodeScalars.count <= 60 && !slug(s).isEmpty
+    }
+
+    /// What a typed name will read as once it has been through the filesystem
+    /// and back. Every client shows the directory, not what was typed, so a
+    /// client saying "started X" about a name it has not round-tripped is
+    /// naming something the sidebar does not call by that name.
+    static func display(_ name: String) -> String {
+        slug(name)
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
     }
 }
 

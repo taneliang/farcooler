@@ -724,13 +724,17 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
     /**
      * Create a worktree and branch, with a terminal already in it.
      *
+     * [name] names the worktree's directory. The wire key is still `task`, which
+     * is what it was called when a workspace carried a typed-out task alongside
+     * its directory; renaming the key would strand every shipped app for nothing.
+     *
      * `terminal` names what runs there; empty means none, which is what a caller
      * about to create its own agent terminal wants. A shell here, because a
      * worktree with nothing running in it is a directory.
      */
     suspend fun createWorkspace(
         repository: String,
-        task: String,
+        name: String,
         branch: String,
         terminal: String = "shell",
     ): String {
@@ -738,7 +742,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
             "workspace.create",
             args(
                 "repository" to repository,
-                "task" to task,
+                "task" to name,
                 "branch" to branch,
                 "base" to "",
                 "terminal" to terminal,

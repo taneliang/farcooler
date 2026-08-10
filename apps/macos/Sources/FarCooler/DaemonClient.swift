@@ -1021,14 +1021,18 @@ final class DaemonClient: ObservableObject {
         // branch the user was shown.
         let prefix = fleet.branchPrefix ?? ""
         let branch = await MainActor.run { Branch.slug(from: description, prefix: prefix) }
-        let title = await MainActor.run { Branch.title(from: description) }
+        // The positional is the worktree's name now rather than a description
+        // of the task, which is why a whole prompt is cut down before it is
+        // sent: it is about to become a directory, and the composer previewed
+        // the path it makes.
+        let name = await MainActor.run { Branch.title(from: description) }
 
         let before = Set(fleet.workspaces.map(\.id))
         // `--no-terminal`, because this creates its own agent terminal a few
         // lines below. Without it a task would come up with an unused shell
         // sitting beside the agent that is doing the work.
         _ = await run([
-            "workspace", "create", project, title, "--branch", branch, "--no-terminal",
+            "workspace", "create", project, name, "--branch", branch, "--no-terminal",
         ])
         await refresh()
 
