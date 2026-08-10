@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 
+use farcooler_agent_core::event::PromptImage;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
@@ -44,6 +45,56 @@ fn classify(value: serde_json::Value) -> Option<Incoming> {
     }
 }
 
+/// A prompt's `content` array: the question, then the pictures.
+///
+/// The image block is the Anthropic SDK's — `SDKUserMessage.message` is typed
+/// `MessageParam`, which `vendor/claude-sdk.d.ts` only IMPORTS from
+/// `@anthropic-ai/sdk`, so the pinned declarations cannot be read for this
+/// shape and an earlier version dropped every picture on those grounds. The
+/// shape below was measured against a live claude 2.1.226 instead: a 64x64 PNG
+/// sent this way beside "What color is this image?" came back "Red".
+///
+/// Worth sending even where it cannot be checked, because the two failures are
+/// not equally bad. A malformed block fails LOUDLY — 2.1.226 answers "an image
+/// in the conversation could not be processed and was removed", which is a
+/// thing a person can see and report. A dropped block fails silently, and the
+/// user is left arguing with an agent about a picture it was never shown.
+///
+/// The text goes first and unconditionally, so a rejected image can only ever
+/// cost the picture. Losing the picture is bad; losing the question with it
+/// would be worse.
+fn user_content(text: &str, images: &[PromptImage]) -> serde_json::Value {
+    let mut content = vec![serde_json::json!({ "type": "text", "text": text })];
+    for image in images {
+        content.push(serde_json::json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                // `media_type` is required and cannot be guessed from base64,
+                // so an image that arrived without one is sent as PNG — the
+                // format Far Cooler's own screenshot path produces. A wrong
+                // guess costs the picture, which is what omitting it costs too.
+                "media_type": if image.mime.is_empty() { "image/png" } else { &image.mime },
+                "data": image.base64,
+            },
+        }));
+    }
+    serde_json::Value::Array(content)
+}
+
+/// The `PermissionResult` that answers a `can_use_tool`.
+///
+/// `behavior`, not `decision`, and an `allow` MUST carry `updatedInput` or the
+/// CLI rejects it — a documented contract the SDK's own changelog records
+/// getting wrong.
+fn permission_response(allow: bool, input: serde_json::Value) -> serde_json::Value {
+    if allow {
+        serde_json::json!({ "behavior": "allow", "updatedInput": input })
+    } else {
+        serde_json::json!({ "behavior": "deny", "message": "Denied by the user" })
+    }
+}
+
 /// The write half, plus the process handle.
 pub struct ClaudeWriter {
     stdin: ChildStdin,
@@ -61,12 +112,34 @@ impl ClaudeWriter {
         self.stdin.flush().await.map_err(|_| ClaudeError::Closed)
     }
 
-    /// Send a prompt as a user message.
-    pub async fn send_user(&mut self, text: &str) -> Result<(), ClaudeError> {
+    /// Send a prompt as a user message, with any pictures attached to it.
+    pub async fn send_user(
+        &mut self,
+        text: &str,
+        images: &[PromptImage],
+    ) -> Result<(), ClaudeError> {
         self.write(serde_json::json!({
             "type": "user",
-            "message": { "role": "user", "content": [{ "type": "text", "text": text }] },
+            "message": { "role": "user", "content": user_content(text, images) },
             "parent_tool_use_id": null,
+        }))
+        .await
+    }
+
+    /// Answer a control request we do not understand, without pretending to.
+    ///
+    /// Every inbound control request has to be answered — the CLI blocks until
+    /// it is — but they do NOT share a response shape. `SDKControlRequestInner`
+    /// lists `hook_callback`, `elicitation`, `request_user_dialog` and
+    /// `mcp_message` as things the CLI can ask a client, and a hook callback
+    /// answered with `{"behavior":"allow","updatedInput":{}}` is not a hook
+    /// response — it is a permission verdict for a question nobody asked, which
+    /// is what this used to send. A bare success says only "heard you", which is
+    /// the honest amount. Answering each of those four properly is future work.
+    pub async fn respond_success(&mut self, request_id: &str) -> Result<(), ClaudeError> {
+        self.write(serde_json::json!({
+            "type": "control_response",
+            "response": { "subtype": "success", "request_id": request_id, "response": {} },
         }))
         .await
     }
@@ -106,20 +179,15 @@ impl ClaudeWriter {
 
     /// Answer a `can_use_tool` request.
     ///
-    /// `behavior`, not `decision`: the shape is the SDK's `PermissionResult`,
-    /// and an `allow` must carry `updatedInput` or the CLI rejects it — a
-    /// documented contract the SDK's own changelog records getting wrong.
+    /// `input` is the tool input the request itself carried, echoed back — see
+    /// `permission_response` for why an allow cannot be sent without it.
     pub async fn answer_permission(
         &mut self,
         request_id: &str,
         allow: bool,
         input: serde_json::Value,
     ) -> Result<(), ClaudeError> {
-        let response = if allow {
-            serde_json::json!({ "behavior": "allow", "updatedInput": input })
-        } else {
-            serde_json::json!({ "behavior": "deny", "message": "Denied by the user" })
-        };
+        let response = permission_response(allow, input);
         self.write(serde_json::json!({
             "type": "control_response",
             "response": { "subtype": "success", "request_id": request_id, "response": response },
@@ -281,5 +349,44 @@ mod tests {
     #[test]
     fn a_frame_with_no_type_is_dropped_rather_than_guessed_at() {
         assert!(classify(serde_json::json!({ "hello": 1 })).is_none());
+    }
+
+    #[test]
+    fn a_prompt_carries_its_picture_as_well_as_its_question() {
+        // Both blocks in the one `content` array, which is what a live 2.1.226
+        // answered "Red" to. Images used to be dropped here on the grounds that
+        // the source shape was unverified.
+        let content = user_content(
+            "what color is this",
+            &[PromptImage { mime: "image/png".into(), base64: "QUJD".into() }],
+        );
+        assert_eq!(content.as_array().map(Vec::len), Some(2), "{content}");
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "what color is this");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["source"]["type"], "base64");
+        assert_eq!(content[1]["source"]["media_type"], "image/png");
+        assert_eq!(content[1]["source"]["data"], "QUJD");
+    }
+
+    #[test]
+    fn a_picture_can_never_cost_the_question_it_came_with() {
+        // The text goes first and unconditionally, so a block the API refuses
+        // takes the picture and nothing else with it.
+        let content = user_content("still ask me", &[]);
+        assert_eq!(content.as_array().map(Vec::len), Some(1));
+        assert_eq!(content[0]["text"], "still ask me");
+    }
+
+    #[test]
+    fn an_allow_echoes_the_tools_input_because_the_cli_rejects_one_without() {
+        let response = permission_response(true, serde_json::json!({ "command": "ls" }));
+        assert_eq!(response["behavior"], "allow");
+        assert_eq!(response["updatedInput"]["command"], "ls");
+
+        // A deny carries a reason instead, and must NOT carry an input.
+        let denied = permission_response(false, serde_json::json!({ "command": "ls" }));
+        assert_eq!(denied["behavior"], "deny");
+        assert!(denied["updatedInput"].is_null(), "{denied}");
     }
 }

@@ -66,8 +66,37 @@ async fn a_real_turn_reaches_claude_and_comes_back_as_a_conversation() {
         .collect();
     assert!(echoed.is_empty(), "the prompt was echoed back and would render twice: {echoed:?}");
 
+    // Live, the ONLY source of agent text is the `stream_event` deltas — the
+    // finished `assistant` block is dropped on purpose, because the CLI sends
+    // both and taking both prints every answer twice. So a non-empty `spoken`
+    // above is also the proof that `--include-partial-messages` is on and that
+    // the deltas are being read. A short reply that arrives as more than one
+    // event is the streaming itself.
+    let pieces = collected
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::Message { role: Role::Agent, .. }))
+        .count();
+    assert!(pieces >= 1, "no streamed text at all: {collected:?}");
+
     let gaps: Vec<_> = collected.iter().filter(|e| matches!(e, AgentEvent::Gap { .. })).collect();
     assert!(gaps.is_empty(), "a real turn produced unmapped frames: {gaps:?}");
+
+    // The context meter's number, which arrives AFTER the turn ends because
+    // ending the turn is what asks for it. The CLI never volunteers it, so
+    // nothing else in this session would ever produce a `Usage`.
+    let usage = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            for event in backend.next_events().await.expect("the session outlives its turn") {
+                if let AgentEvent::Usage { used, size } = event {
+                    return (used, size);
+                }
+            }
+        }
+    })
+    .await
+    .expect("a turn ending has to ask what the context window costs");
+    assert!(usage.1 > 0, "a window of zero is nothing to measure against: {usage:?}");
+    assert!(usage.0 <= usage.1, "used more context than exists: {usage:?}");
 }
 
 fn which_claude() -> std::path::PathBuf {

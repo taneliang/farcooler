@@ -23,13 +23,36 @@ pub struct ClaudeBackend {
     writer: ClaudeWriter,
     incoming: tokio::sync::mpsc::UnboundedReceiver<Incoming>,
     pub session_id: String,
-    /// The input of each tool call we have seen, by id.
+    /// What each outstanding `can_use_tool` is asking about, keyed by the
+    /// CONTROL REQUEST id — the id its answer will be sent under.
     ///
-    /// Kept because answering a permission with `allow` requires echoing the
-    /// tool's input back as `updatedInput` — the CLI rejects an allow without
-    /// it. The request itself carries the input, so this is belt and braces
-    /// for the case where it does not.
-    tool_inputs: std::collections::HashMap<String, serde_json::Value>,
+    /// Answering with `allow` requires echoing the tool's input back as
+    /// `updatedInput`, which the CLI rejects an allow without. This used to be
+    /// keyed by the TOOL_USE id instead, scraped off assistant blocks on their
+    /// way past, while `answer` looked it up by the control request id that
+    /// `permission_event` puts in `AgentEvent::Permission.id`. Those are two
+    /// different identifiers — `toolu_01BJow…` against `46878485-200f-…` on a
+    /// real 2.1.226 ask — so the lookup missed every single time and every
+    /// Allow sent `{"behavior":"allow","updatedInput":{}}`. The control request
+    /// carries the input itself, so remembering it under the id the answer
+    /// arrives with is both simpler and correct.
+    permission_inputs: std::collections::HashMap<String, serde_json::Value>,
+    /// What each slash command does, by name, from whichever source last said.
+    ///
+    /// Needed because the two sources are not equally rich and the poorer one
+    /// arrives second. The `initialize` response sends objects with
+    /// descriptions; `system: init` sends bare names. Pushing the bare list
+    /// through unchanged refreshes the menu at the cost of emptying every
+    /// description in it — a picker that had said "Review a PR" a moment
+    /// earlier and now says nothing. `commands_changed` sends objects again, so
+    /// this fills the gap rather than papering over it permanently.
+    command_help: std::collections::HashMap<String, String>,
+    /// The `get_context_usage` request whose answer has not come back yet.
+    ///
+    /// The context meter needs a number the CLI only volunteers when asked, so
+    /// a turn ending asks. Kept as an id because `control_response` correlates
+    /// by one and nothing else does.
+    usage_request: Option<String>,
 }
 
 impl ClaudeBackend {
@@ -133,16 +156,47 @@ impl ClaudeBackend {
         }
 
         let session_id = init.session_id;
+        // Kept before `init` is dropped: `system: init` will push the same
+        // commands back as bare names, and these are the only descriptions
+        // this session will ever be told.
+        let command_help = init
+            .commands
+            .iter()
+            .filter(|c| !c.description.is_empty())
+            .map(|c| (c.name.clone(), c.description.clone()))
+            .collect();
         let (writer, incoming) = conn.split();
         Ok((
             ClaudeBackend {
                 writer,
                 incoming,
                 session_id,
-                tool_inputs: std::collections::HashMap::new(),
+                command_help,
+                permission_inputs: std::collections::HashMap::new(),
+                usage_request: None,
             },
             prelude,
         ))
+    }
+
+    /// A command list with the descriptions this session has already been
+    /// told, so a refresh cannot cost the menu its words.
+    ///
+    /// Remembers as well as fills: whichever push carried descriptions is the
+    /// one a later bare list is measured against.
+    fn described(&mut self, commands: Vec<AgentChoice>) -> Vec<AgentChoice> {
+        commands
+            .into_iter()
+            .map(|mut command| {
+                if command.description.is_empty() {
+                    command.description =
+                        self.command_help.get(&command.name).cloned().unwrap_or_default();
+                } else {
+                    self.command_help.insert(command.name.clone(), command.description.clone());
+                }
+                command
+            })
+            .collect()
     }
 
     /// Wait for one frame, and do nothing else. Safe in a `select!`.
@@ -154,36 +208,89 @@ impl ClaudeBackend {
     pub async fn handle(&mut self, incoming: Incoming) -> Result<Vec<AgentEvent>, BackendError> {
         match incoming {
             Incoming::Frame(frame) => {
-                // Remember tool inputs on the way past, so a permission answer
-                // can echo one back.
-                if let Some(blocks) = frame["message"]["content"].as_array() {
-                    for block in blocks {
-                        if block["type"] == "tool_use"
-                            && let Some(id) = block["id"].as_str()
-                        {
-                            self.tool_inputs.insert(id.to_string(), block["input"].clone());
+                // A `control_response` carries no `message`, so the normalizer
+                // is right to be silent about it — which is exactly why the
+                // correlation has to happen here, where the id we asked under
+                // is remembered.
+                if self.usage_request.is_some()
+                    && crate::handshake::control_response_id(&frame) == self.usage_request
+                {
+                    self.usage_request = None;
+                    return Ok(usage_events(&frame["response"]["response"]));
+                }
+
+                // `system` frames are otherwise silent, and the menu rode in on
+                // one. `init_from`'s comment claimed a session was refined by
+                // `system: init`, but its only caller was `start`, which never
+                // sees one — and `commands_changed` exists precisely to push a
+                // new list mid-session (skills discovered in a subdirectory,
+                // say) and was being dropped on the floor. So the picker showed
+                // whatever `initialize` happened to say at launch, forever.
+                //
+                // `CommandsAvailable`, never a second `SessionStarted`: a
+                // consumer is entitled to assume a session starts exactly once.
+                if frame["type"] == "system" {
+                    let subtype = frame["subtype"].as_str().unwrap_or_default();
+                    if subtype == "init" || subtype == "commands_changed" {
+                        let commands = self.described(init_from(&frame).commands);
+                        if !commands.is_empty() {
+                            return Ok(vec![AgentEvent::CommandsAvailable { commands }]);
                         }
                     }
                 }
-                Ok(frame_to_events(&frame))
+
+                let events = frame_to_events(&frame);
+                // Ask for the context number when the turn stops, because the
+                // CLI never volunteers it and the meter is dark without it. A
+                // failed send is dropped rather than reported: a missing meter
+                // is not worth failing a turn that has already succeeded.
+                if events.iter().any(|e| matches!(e, AgentEvent::TurnEnded { .. })) {
+                    self.usage_request =
+                        self.writer.control("get_context_usage", serde_json::json!({})).await.ok();
+                }
+                Ok(events)
             }
             Incoming::Control { request_id, request } => {
                 match request["subtype"].as_str().unwrap_or_default() {
-                    "can_use_tool" => Ok(vec![permission_event(&request_id, &request)]),
-                    // Anything else the CLI asks is answered with a bare
-                    // success rather than left hanging: an unanswered control
-                    // request blocks the turn, which is worse than a poor
-                    // answer to a question we do not understand.
+                    "can_use_tool" => {
+                        // The request carries the very input an allow has to
+                        // echo back, under the very id the answer will use.
+                        self.permission_inputs.insert(request_id.clone(), request["input"].clone());
+                        Ok(vec![permission_event(&request_id, &request)])
+                    }
+                    // Anything else the CLI asks is answered rather than left
+                    // hanging — an unanswered control request blocks the turn —
+                    // but answered with a bare success, not a permission
+                    // verdict. `SDKControlRequestInner` lets the CLI send
+                    // `hook_callback`, `elicitation`, `request_user_dialog` and
+                    // `mcp_message` on this channel, and each has its own
+                    // response shape; this used to reply to all four with
+                    // `{"behavior":"allow","updatedInput":{}}`, which is an
+                    // answer to a question none of them asked. Answering each
+                    // one properly is future work.
                     _ => {
-                        let _ = self
-                            .writer
-                            .answer_permission(&request_id, true, serde_json::json!({}))
-                            .await;
+                        let _ = self.writer.respond_success(&request_id).await;
                         Ok(Vec::new())
                     }
                 }
             }
         }
+    }
+}
+
+/// A `get_context_usage` answer, as the number the context meter draws.
+///
+/// `SDKControlGetContextUsageResponse` reports a dozen breakdowns; `Usage`
+/// wants two, and `totalTokens`/`maxTokens` are them. Measured on 2.1.226 a
+/// fresh session answered `{"totalTokens":25450,"maxTokens":1000000,…}`.
+///
+/// A zero `maxTokens` produces nothing at all — the same guard codex needs on
+/// `contextWindow`, for the same reason: a number with nothing to measure it
+/// against is not worth drawing, and dividing by it is worse.
+fn usage_events(response: &serde_json::Value) -> Vec<AgentEvent> {
+    match (response["totalTokens"].as_u64(), response["maxTokens"].as_u64()) {
+        (Some(used), Some(size)) if size > 0 => vec![AgentEvent::Usage { used, size }],
+        _ => Vec::new(),
     }
 }
 
@@ -401,13 +508,11 @@ impl AgentBackend for ClaudeBackend {
         }
     }
 
-    async fn prompt(&mut self, text: &str, _images: &[PromptImage]) -> Result<(), BackendError> {
-        // Images are dropped and the text kept. The wire takes content blocks
-        // that could carry them, but Far Cooler holds bytes and the block wants
-        // a media source shape not yet verified against a live CLI — sending a
-        // guess would fail the whole prompt. Losing the picture is bad; losing
-        // the question with it is worse.
-        Ok(self.writer.send_user(text).await?)
+    async fn prompt(&mut self, text: &str, images: &[PromptImage]) -> Result<(), BackendError> {
+        // Pictures included. They used to be dropped here on the grounds that
+        // the block's media source shape was unverified; it is verified now,
+        // against a live 2.1.226 — see `user_content`.
+        Ok(self.writer.send_user(text, images).await?)
     }
 
     async fn steer(&mut self, text: &str, images: &[PromptImage]) -> Result<(), BackendError> {
@@ -418,11 +523,9 @@ impl AgentBackend for ClaudeBackend {
     }
 
     async fn answer(&mut self, request_id: &str, option_id: &str) -> Result<(), BackendError> {
-        let input = self
-            .tool_inputs
-            .get(request_id)
-            .cloned()
-            .unwrap_or(serde_json::json!({}));
+        // `remove`, not `get`: a request is answered once, and a map that only
+        // ever grew would hold every tool input of the whole session.
+        let input = self.permission_inputs.remove(request_id).unwrap_or(serde_json::json!({}));
         Ok(self.writer.answer_permission(request_id, option_id == "allow", input).await?)
     }
 
@@ -573,5 +676,241 @@ mod tests {
     #[test]
     fn a_session_that_reports_nothing_offers_no_empty_pickers() {
         assert!(config_options(&crate::normalize::Init::default()).is_empty());
+    }
+
+    /// A backend whose CLI is `cat`, so everything it SENDS comes back as a
+    /// frame and can be asserted on.
+    ///
+    /// The wire is line-delimited JSON in both directions and `cat` is a
+    /// faithful echo of it, which makes it possible to test what an answer
+    /// actually puts on stdin — the half of these bugs that no amount of
+    /// normalizer testing could have caught, since the empty `updatedInput`
+    /// was a correct-looking call with the wrong key.
+    async fn echoing_backend() -> ClaudeBackend {
+        let conn = ClaudeConnection::spawn(
+            std::path::Path::new("/bin/cat"),
+            &[],
+            &Default::default(),
+            std::env::temp_dir(),
+        )
+        .await
+        .expect("cat must run");
+        let (writer, incoming) = conn.split();
+        ClaudeBackend {
+            writer,
+            incoming,
+            session_id: "test".into(),
+            command_help: std::collections::HashMap::new(),
+            permission_inputs: std::collections::HashMap::new(),
+            usage_request: None,
+        }
+    }
+
+    /// The exact `can_use_tool` a live 2.1.226 sent, trimmed to what is read.
+    ///
+    /// The two ids are the point: `request_id` is a UUID the CLI minted for the
+    /// ASK, `tool_use_id` names the assistant block. Keying the input by the
+    /// second and looking it up by the first is the bug below.
+    fn real_ask() -> (String, serde_json::Value) {
+        (
+            "46878485-200f-44e1-b27b-a70821eec0ff".to_string(),
+            serde_json::json!({
+                "subtype": "can_use_tool",
+                "tool_name": "Bash",
+                "input": { "command": "curl -s https://example.com/", "description": "Fetch it" },
+                "tool_use_id": "toolu_01A5aKxtkbRTQKMLULnQRAWe",
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn an_allow_carries_the_tools_real_input_and_not_an_empty_object() {
+        // The input was remembered under the TOOL_USE id and looked up under
+        // the CONTROL REQUEST id, so it missed every time and every approval
+        // sent `{"behavior":"allow","updatedInput":{}}` — which the CLI
+        // rejects, meaning no Allow this pane offered had ever worked.
+        let mut backend = echoing_backend().await;
+        let (request_id, request) = real_ask();
+
+        let events = backend
+            .handle(Incoming::Control { request_id: request_id.clone(), request })
+            .await
+            .expect("the ask has to reach the pane");
+        assert!(matches!(
+            events.as_slice(),
+            [AgentEvent::Permission { id, tool_call, .. }]
+                if id == &request_id && tool_call == "toolu_01A5aKxtkbRTQKMLULnQRAWe"
+        ));
+
+        backend.answer(&request_id, "allow").await.expect("the answer has to be sent");
+
+        let Incoming::Frame(sent) = backend.recv_frame().await.expect("cat echoes it") else {
+            panic!("an answer is a control_response, not a request");
+        };
+        assert_eq!(sent["response"]["request_id"], request_id);
+        assert_eq!(sent["response"]["response"]["behavior"], "allow");
+        assert_eq!(
+            sent["response"]["response"]["updatedInput"]["command"],
+            "curl -s https://example.com/",
+            "the CLI rejects an allow whose updatedInput is not the tool's own: {sent}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_question_that_is_not_a_permission_is_not_answered_with_a_verdict() {
+        // `hook_callback`, `elicitation`, `request_user_dialog` and
+        // `mcp_message` all arrive on this channel with their own response
+        // shapes. Every one of them used to be answered
+        // `{"behavior":"allow","updatedInput":{}}` — a permission verdict for a
+        // question nobody asked.
+        let mut backend = echoing_backend().await;
+        let events = backend
+            .handle(Incoming::Control {
+                request_id: "fc-hook".into(),
+                request: serde_json::json!({ "subtype": "hook_callback", "callback_id": "h1" }),
+            })
+            .await
+            .expect("it still has to be answered or the turn hangs");
+        assert!(events.is_empty(), "a hook callback is not conversation: {events:?}");
+
+        let Incoming::Frame(sent) = backend.recv_frame().await.expect("cat echoes it") else {
+            panic!("a response, not a request");
+        };
+        assert_eq!(sent["response"]["subtype"], "success");
+        assert_eq!(sent["response"]["request_id"], "fc-hook");
+        assert_eq!(sent["response"]["response"], serde_json::json!({}));
+        assert!(
+            sent["response"]["response"]["behavior"].is_null(),
+            "a hook response is not a permission verdict: {sent}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_turn_ending_asks_what_the_context_window_costs() {
+        // The CLI never volunteers the number, so nobody asking meant the
+        // meter stayed dark while codex and ACP both drew one.
+        let mut backend = echoing_backend().await;
+        let ended = backend
+            .handle(Incoming::Frame(serde_json::json!({
+                "type": "result", "stop_reason": "end_turn"
+            })))
+            .await
+            .expect("a turn has to be able to end");
+        assert!(matches!(ended.as_slice(), [AgentEvent::TurnEnded { .. }]));
+
+        let Incoming::Control { request_id, request } =
+            backend.recv_frame().await.expect("cat echoes what we asked")
+        else {
+            panic!("we sent a control_request");
+        };
+        assert_eq!(request["subtype"], "get_context_usage");
+
+        // And the answer, correlated by the id we asked under, becomes the
+        // number. `control_response` carries no message, so the normalizer is
+        // silent about it and this correlation cannot live there.
+        let usage = backend
+            .handle(Incoming::Frame(serde_json::json!({
+                "type": "control_response",
+                "response": { "subtype": "success", "request_id": request_id,
+                              "response": { "totalTokens": 25450, "maxTokens": 1000000 } },
+            })))
+            .await
+            .expect("the answer has to land");
+        assert!(
+            matches!(usage.as_slice(), [AgentEvent::Usage { used: 25450, size: 1000000 }]),
+            "{usage:?}"
+        );
+    }
+
+    #[test]
+    fn a_context_number_with_nothing_to_measure_it_against_is_not_drawn() {
+        // The guard codex needs on `contextWindow`, for the same reason: a
+        // meter with a zero denominator is worse than no meter.
+        assert!(usage_events(&serde_json::json!({ "totalTokens": 10, "maxTokens": 0 })).is_empty());
+        assert!(usage_events(&serde_json::json!({ "totalTokens": 10 })).is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_command_menu_is_refreshed_when_the_cli_pushes_a_new_one() {
+        // `init_from`'s comment claimed a session was refined by `system: init`
+        // and nothing ever called it with one, so the picker showed whatever
+        // `initialize` said at launch and never moved — including through
+        // `commands_changed`, which exists precisely to push a new list.
+        let mut backend = echoing_backend().await;
+
+        // `system: init` sends bare names.
+        let events = backend
+            .handle(Incoming::Frame(serde_json::json!({
+                "type": "system", "subtype": "init",
+                "slash_commands": ["review", "ship"],
+            })))
+            .await
+            .expect("a system frame is not an error");
+        assert!(
+            matches!(events.as_slice(), [AgentEvent::CommandsAvailable { commands }]
+                if commands.len() == 2 && commands[0].name == "review"),
+            "{events:?}"
+        );
+
+        // `commands_changed` sends objects, and keeps the descriptions.
+        let events = backend
+            .handle(Incoming::Frame(serde_json::json!({
+                "type": "system", "subtype": "commands_changed",
+                "commands": [{ "name": "review", "description": "Review a PR" }],
+            })))
+            .await
+            .expect("a system frame is not an error");
+        assert!(
+            matches!(events.as_slice(), [AgentEvent::CommandsAvailable { commands }]
+                if commands[0].description == "Review a PR"),
+            "{events:?}"
+        );
+
+        // A session still starts exactly once: never a second SessionStarted,
+        // which a consumer would read as a restart.
+        assert!(!events.iter().any(|e| matches!(e, AgentEvent::SessionStarted { .. })));
+    }
+
+    #[tokio::test]
+    async fn refreshing_the_menu_does_not_cost_it_the_words_it_already_had() {
+        // The two sources are not equally rich and the poorer one arrives
+        // second: `initialize` and `commands_changed` send descriptions,
+        // `system: init` sends bare names. Passing the bare list straight
+        // through refreshes the menu by emptying it — a picker that said
+        // "Review a PR" a moment ago and now says nothing at all.
+        let mut backend = echoing_backend().await;
+        backend.command_help.insert("review".into(), "Review a PR".into());
+
+        let events = backend
+            .handle(Incoming::Frame(serde_json::json!({
+                "type": "system", "subtype": "init", "slash_commands": ["review", "brand-new"],
+            })))
+            .await
+            .expect("a system frame is not an error");
+        let [AgentEvent::CommandsAvailable { commands }] = events.as_slice() else {
+            panic!("{events:?}");
+        };
+        assert_eq!(commands[0].description, "Review a PR");
+        // A name nobody has described yet stays blank rather than borrowing
+        // someone else's words. A picker you have to already know still beats
+        // no picker.
+        assert_eq!(commands[1].name, "brand-new");
+        assert_eq!(commands[1].description, "");
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_system_frame_stays_silent() {
+        // 2.1.226 sends six hook frames before it says anything else, plus
+        // `status` and `thinking_tokens` during a turn. None of them is a menu.
+        let mut backend = echoing_backend().await;
+        for subtype in ["hook_started", "hook_response", "status", "permission_denied"] {
+            let events = backend
+                .handle(Incoming::Frame(serde_json::json!({
+                    "type": "system", "subtype": subtype
+                })))
+                .await
+                .expect("still not an error");
+            assert!(events.is_empty(), "{subtype} should be silent: {events:?}");
+        }
     }
 }

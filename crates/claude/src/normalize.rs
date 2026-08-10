@@ -45,7 +45,16 @@ pub struct Init {
 /// names and arrive at different times. The `control_response` to `initialize`
 /// answers immediately with `commands` as objects; the `system: init` frame
 /// answers only once a prompt has been sent, with `slash_commands` as bare
-/// names. A session is built from the first and refined by the second.
+/// names. `SDKCommandsChangedMessage` is a third caller and takes the first
+/// shape again.
+///
+/// "A session is built from the first and refined by the second" is what this
+/// comment used to claim, and it was not true: the only caller was
+/// `ClaudeBackend::start`, which sees the initialize response and nothing else,
+/// so the refinement never happened. `ClaudeBackend::handle` now calls this on
+/// `system` frames too, which is what makes the sentence honest — but note that
+/// only the COMMANDS are taken from those, as `AgentEvent::CommandsAvailable`.
+/// A session still starts exactly once.
 pub fn init_from(frame: &serde_json::Value) -> Init {
     let commands = if let Some(list) = frame["commands"].as_array() {
         list.iter()
@@ -122,14 +131,25 @@ pub fn init_from(frame: &serde_json::Value) -> Init {
     }
 }
 
-/// Where a record came from, which decides whether the user's own words are
-/// part of it.
+/// Where a record came from, which decides whether the words in it have
+/// already been drawn by someone else.
 ///
 /// Live, the client has already drawn what you typed — see
 /// `Transcript.appendLocalUserMessage` — so taking the CLI's echo would render
 /// every prompt twice. History has no local echo behind it, so the same records
 /// are the only place the prompts exist. The identical split codex needed, for
 /// the identical reason.
+///
+/// The AGENT's words split the same way once `--include-partial-messages` is
+/// on, and this is the trap that flag sets: the CLI sends the `stream_event`
+/// deltas AND the finished `assistant` message afterwards, both carrying the
+/// whole answer. Measured on 2.1.226, a two-token reply arrived as `text_delta`
+/// "h", `text_delta` "i", then `assistant` `[{"type":"text","text":"hi"}]`.
+/// Reading both renders every answer twice — once as it streams and again
+/// underneath. So live, an assistant text or thinking block is DROPPED, because
+/// the deltas already said it. On replay there are no deltas — the on-disk
+/// transcript stores finished blocks — so those same blocks are the only place
+/// the answer exists. Tool calls are taken either way: nothing streams them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
     Live,
@@ -144,8 +164,9 @@ pub fn frame_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
 /// As `frame_to_events`, for a caller that knows where the record came from.
 pub fn frame_to_events_from(frame: &serde_json::Value, origin: Origin) -> Vec<AgentEvent> {
     match frame["type"].as_str().unwrap_or_default() {
-        "assistant" => assistant_to_events(frame),
+        "assistant" => assistant_to_events(frame, origin),
         "user" => user_to_events(frame, origin),
+        "stream_event" => stream_to_events(frame),
         "result" => {
             let reason = end_reason(frame["stop_reason"].as_str().unwrap_or_default());
             vec![AgentEvent::TurnEnded { reason }]
@@ -219,33 +240,39 @@ fn parent_of(record: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Words said, unless there were none.
+///
+/// An empty block is not silence worth an entry — 2.1.226 sends
+/// `{"type":"thinking","thinking":""}` on turns with no visible reasoning, and
+/// each one drew a blank thought bubble.
+fn spoken_words(role: Role, text: &serde_json::Value, parent: &Option<String>) -> Vec<AgentEvent> {
+    let text = text.as_str().unwrap_or_default();
+    if text.is_empty() {
+        return Vec::new();
+    }
+    vec![AgentEvent::Message { role, text: text.to_string(), parent: parent.clone() }]
+}
+
 /// The agent's own content blocks.
-fn assistant_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
+///
+/// Live, the text and thinking blocks are deliberately skipped: the
+/// `stream_event` deltas already delivered them word by word, and taking the
+/// finished block on top prints every answer a second time. See `Origin`.
+fn assistant_to_events(frame: &serde_json::Value, origin: Origin) -> Vec<AgentEvent> {
     let parent = parent_of(frame);
     let Some(blocks) = frame["message"]["content"].as_array() else { return Vec::new() };
+    let already_streamed = origin == Origin::Live;
 
     blocks
         .iter()
-        .filter_map(|block| match block["type"].as_str().unwrap_or_default() {
-            "text" => {
-                let text = block["text"].as_str().unwrap_or_default().to_string();
-                (!text.is_empty()).then(|| AgentEvent::Message {
-                    role: Role::Agent,
-                    text,
-                    parent: parent.clone(),
-                })
-            }
-            "thinking" => {
-                let text = block["thinking"].as_str().unwrap_or_default().to_string();
-                (!text.is_empty()).then(|| AgentEvent::Message {
-                    role: Role::Thought,
-                    text,
-                    parent: parent.clone(),
-                })
+        .flat_map(|block| match block["type"].as_str().unwrap_or_default() {
+            "text" if !already_streamed => spoken_words(Role::Agent, &block["text"], &parent),
+            "thinking" if !already_streamed => {
+                spoken_words(Role::Thought, &block["thinking"], &parent)
             }
             "tool_use" => {
                 let name = block["name"].as_str().unwrap_or_default();
-                Some(AgentEvent::ToolCall {
+                let mut out = vec![AgentEvent::ToolCall {
                     id: block["id"].as_str().unwrap_or_default().to_string(),
                     title: tool_title(name, &block["input"]),
                     kind: tool_kind(name).to_string(),
@@ -255,11 +282,55 @@ fn assistant_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
                     // The dispatch itself, which owns a block rather than
                     // being a row inside one.
                     subagent: name == "Task" || name == "Agent",
-                })
+                }];
+                // A todo write is BOTH: the row is how you see the call
+                // happened, and the plan is what it said. The row comes first
+                // because the plan is derived from it — and both are sent,
+                // because dropping the row would make the one tool call the
+                // agent runs most often invisible in the transcript.
+                if name == "TodoWrite"
+                    && let Some(entries) = plan_from_todo(&block["input"])
+                {
+                    out.push(AgentEvent::Plan { entries });
+                }
+                out
             }
-            _ => None,
+            _ => Vec::new(),
         })
         .collect()
+}
+
+/// A `stream_event` frame, as the answer arriving a piece at a time.
+///
+/// `SDKPartialAssistantMessage` wraps an Anthropic `BetaRawMessageStreamEvent`
+/// under `event` — a type `vendor/claude-sdk.d.ts` only imports, so the shapes
+/// below were read off a live 2.1.226 rather than out of the declarations.
+/// Only `content_block_delta` carries words; `message_start`,
+/// `content_block_start/stop`, `message_delta` and `message_stop` are framing
+/// and correctly produce nothing.
+///
+/// One event per delta, with no buffering, because the client coalesces
+/// consecutive same-role messages — see `Transcript.swift`. Buffering here
+/// would only delay what the flag was added to make immediate.
+fn stream_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
+    let event = &frame["event"];
+    if event["type"].as_str() != Some("content_block_delta") {
+        return Vec::new();
+    }
+    let delta = &event["delta"];
+    let (role, text) = match delta["type"].as_str().unwrap_or_default() {
+        "text_delta" => (Role::Agent, delta["text"].as_str().unwrap_or_default()),
+        "thinking_delta" => (Role::Thought, delta["thinking"].as_str().unwrap_or_default()),
+        // `input_json_delta` streams a tool call's arguments. Deliberately
+        // ignored: the finished `tool_use` block carries the whole input, and a
+        // row titled with half-parsed JSON is worse than one that appears a
+        // moment later.
+        _ => return Vec::new(),
+    };
+    if text.is_empty() {
+        return Vec::new();
+    }
+    vec![AgentEvent::Message { role, text: text.to_string(), parent: parent_of(frame) }]
 }
 
 /// A `user` record: tool results, and the prompt itself.
@@ -406,6 +477,11 @@ pub fn permission_event(request_id: &str, request: &serde_json::Value) -> AgentE
 /// Claude has no plan frame of its own — the todo list IS the plan, and it
 /// arrives as an ordinary tool call. Reading it here is what lets the same plan
 /// UI serve both agents.
+///
+/// That claim was false for as long as nothing called this: `PlanPanel` was
+/// fed by ACP and by codex, and a native Claude chat showed no plan at all
+/// while the agent wrote todo lists all turn. `assistant_to_events` calls it
+/// now, on a `tool_use` block named `TodoWrite`.
 pub fn plan_from_todo(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
     let todos = input["todos"].as_array()?;
     Some(
@@ -424,16 +500,111 @@ pub fn plan_from_todo(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_agents_words_come_from_assistant_text_blocks() {
-        let frame = serde_json::json!({
+    /// One assistant text block, as both a live frame and a restored one.
+    fn said(text: &str) -> serde_json::Value {
+        serde_json::json!({
             "type": "assistant", "parent_tool_use_id": null,
-            "message": { "content": [{ "type": "text", "text": "hi" }] }
-        });
+            "message": { "content": [{ "type": "text", "text": text }] }
+        })
+    }
+
+    #[test]
+    fn the_agents_words_come_from_assistant_text_blocks_on_replay() {
+        // On replay only. Live they come from the deltas — see below.
         assert!(matches!(
-            frame_to_events(&frame).as_slice(),
+            frame_to_events_from(&said("hi"), Origin::Replay).as_slice(),
             [AgentEvent::Message { role: Role::Agent, text, parent: None }] if text == "hi"
         ));
+    }
+
+    #[test]
+    fn an_answer_arrives_a_piece_at_a_time_while_it_is_being_written() {
+        // The whole point of `--include-partial-messages`: without these the
+        // pane sits on Working for the length of the answer and then prints it
+        // whole. The shape is 2.1.226's, captured rather than composed.
+        let delta = serde_json::json!({
+            "type": "stream_event", "parent_tool_use_id": null,
+            "event": { "type": "content_block_delta", "index": 0,
+                       "delta": { "type": "text_delta", "text": "h" } }
+        });
+        assert!(matches!(
+            frame_to_events(&delta).as_slice(),
+            [AgentEvent::Message { role: Role::Agent, text, .. }] if text == "h"
+        ));
+
+        let thought = serde_json::json!({
+            "type": "stream_event", "parent_tool_use_id": null,
+            "event": { "type": "content_block_delta", "index": 0,
+                       "delta": { "type": "thinking_delta", "thinking": "hmm" } }
+        });
+        assert!(matches!(
+            frame_to_events(&thought).as_slice(),
+            [AgentEvent::Message { role: Role::Thought, text, .. }] if text == "hmm"
+        ));
+    }
+
+    #[test]
+    fn a_streamed_answer_is_not_printed_again_when_the_block_lands() {
+        // The doubling trap `--include-partial-messages` sets: 2.1.226 sends
+        // BOTH the deltas and the finished `assistant` message, each carrying
+        // the whole answer. Taking both renders every reply twice, once
+        // streamed and once underneath.
+        assert!(frame_to_events(&said("hi")).is_empty(), "the deltas already said it");
+    }
+
+    #[test]
+    fn a_restored_answer_survives_because_history_has_no_deltas() {
+        // The other half of the same rule. `stream_event` frames are never
+        // written to the on-disk transcript, so suppressing the finished block
+        // on replay too would restore a conversation with the agent's side
+        // missing.
+        let raw = serde_json::to_string(&said("ok")).expect("json");
+        assert!(matches!(
+            history_to_events(&raw).as_slice(),
+            [AgentEvent::Message { role: Role::Agent, text, .. }] if text == "ok"
+        ));
+    }
+
+    #[test]
+    fn a_tool_call_is_reported_whether_it_is_live_or_restored() {
+        // Nothing streams a tool_use block, so the live/replay split that
+        // silences text must not touch it.
+        let frame = serde_json::json!({
+            "type": "assistant", "parent_tool_use_id": null,
+            "message": { "content": [{ "type": "tool_use", "id": "t1", "name": "Bash",
+                                       "input": { "command": "ls" } }] }
+        });
+        for origin in [Origin::Live, Origin::Replay] {
+            assert!(
+                matches!(
+                    frame_to_events_from(&frame, origin).as_slice(),
+                    [AgentEvent::ToolCall { title, .. }] if title == "ls"
+                ),
+                "{origin:?} lost the tool row"
+            );
+        }
+    }
+
+    #[test]
+    fn a_todo_write_draws_the_plan_as_well_as_the_row() {
+        // Both, not either: the row is how you see the call happened, the plan
+        // is what it said. `plan_from_todo` existed and was tested and nothing
+        // called it, so a native Claude chat showed no plan panel at all while
+        // ACP and codex both fed one.
+        let frame = serde_json::json!({
+            "type": "assistant", "parent_tool_use_id": null,
+            "message": { "content": [{ "type": "tool_use", "id": "t1", "name": "TodoWrite",
+                "input": { "todos": [{ "content": "write it", "status": "in_progress" }] } }] }
+        });
+        let events = frame_to_events(&frame);
+        assert!(
+            matches!(
+                events.as_slice(),
+                [AgentEvent::ToolCall { .. }, AgentEvent::Plan { entries }]
+                    if entries.len() == 1 && entries[0].content == "write it"
+            ),
+            "{events:?}"
+        );
     }
 
     #[test]
@@ -471,13 +642,24 @@ mod tests {
 
     #[test]
     fn a_subagents_words_carry_the_dispatch_they_belong_to() {
-        // ACP has to smuggle this through _meta.claudeCode. Native has a field.
+        // ACP has to smuggle this through _meta.claudeCode. Native has a field,
+        // and the streaming deltas carry it too.
         let frame = serde_json::json!({
             "type": "assistant", "parent_tool_use_id": "t1",
             "message": { "content": [{ "type": "text", "text": "inside" }] }
         });
         assert!(matches!(
-            frame_to_events(&frame).as_slice(),
+            frame_to_events_from(&frame, Origin::Replay).as_slice(),
+            [AgentEvent::Message { parent: Some(p), .. }] if p == "t1"
+        ));
+
+        let delta = serde_json::json!({
+            "type": "stream_event", "parent_tool_use_id": "t1",
+            "event": { "type": "content_block_delta",
+                       "delta": { "type": "text_delta", "text": "inside" } }
+        });
+        assert!(matches!(
+            frame_to_events(&delta).as_slice(),
             [AgentEvent::Message { parent: Some(p), .. }] if p == "t1"
         ));
     }
