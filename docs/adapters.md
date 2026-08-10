@@ -344,10 +344,18 @@ file IO and never ask, so there is nothing for that guard to apply to.
 The concrete one, past the flags: **subagent parentage**. ACP has to smuggle it
 through `_meta.claudeCode` (`crates/acp/src/wire.rs` — `parentToolUseId`,
 `subagent`, `toolResponse`, all inside a vendor extension on a frame that has no
-field for them). Natively it is a first-class field on the frame itself, on the
-finished message and on the streaming deltas alike: `parent_of` in
-`crates/claude/src/normalize.rs`, asserted by
-`a_subagents_words_carry_the_dispatch_they_belong_to`.
+field for them). Natively it is a first-class field on the frame itself:
+`parent_of` in `crates/claude/src/normalize.rs`, which reads it under both the
+spelling the wire uses and the one the on-disk transcript uses.
+
+One caveat worth stating rather than leaving to be discovered. A real `Agent`
+dispatch against 2.1.226, run with exactly the flags `launch_args` sends,
+produced **no** `assistant` or `stream_event` frame carrying a non-null
+`parent_tool_use_id` at all — the subagent surfaced as `system` frames Far
+Cooler keeps silent, one parented `user` frame, and the final tool result. So
+the field is read wherever it appears, and the restored-transcript half is
+measured, but "the agent's own words, attributed to the subagent that said
+them, live" is not something this pin has been observed to send.
 
 And there is no package in the supply chain to lose. The native path runs the
 agent's own installed binary, so nothing can be renamed or deprecated out from

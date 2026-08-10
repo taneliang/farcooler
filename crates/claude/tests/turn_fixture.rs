@@ -8,14 +8,20 @@
 //! `assistant` message on top of them.
 
 use farcooler_agent_core::event::{AgentEvent, EndReason, Role};
-use farcooler_claude::normalize::frame_to_events;
+use farcooler_claude::normalize::Live;
 
+/// The capture, through ONE `Live` in order — the way a pane sees it.
+///
+/// Stateful on purpose: whether a finished `assistant` block is drawn depends
+/// on whether the deltas for that message were actually seen, so replaying the
+/// frames through independent normalizers would not be the same test.
 fn events() -> Vec<AgentEvent> {
+    let mut live = Live::default();
     include_str!("fixtures/turn_basic.jsonl")
         .lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| serde_json::from_str::<serde_json::Value>(l).expect("fixture line is JSON"))
-        .flat_map(|v| frame_to_events(&v))
+        .flat_map(|v| live.frame_to_events(&v))
         .collect()
 }
 

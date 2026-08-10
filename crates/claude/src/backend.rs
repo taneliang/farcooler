@@ -6,7 +6,7 @@ use farcooler_agent_core::backend::{
 use farcooler_agent_core::event::{AgentChoice, AgentEvent, ConfigOption, PromptImage};
 
 use crate::conn::{ClaudeConnection, ClaudeError, ClaudeWriter, Incoming};
-use crate::normalize::{frame_to_events, init_from, permission_event};
+use crate::normalize::{init_from, permission_event};
 
 impl From<ClaudeError> for BackendError {
     fn from(e: ClaudeError) -> Self {
@@ -36,7 +36,37 @@ pub struct ClaudeBackend {
     /// Allow sent `{"behavior":"allow","updatedInput":{}}`. The control request
     /// carries the input itself, so remembering it under the id the answer
     /// arrives with is both simpler and correct.
+    ///
+    /// READ on answering, never taken. `answer` can run more than once for one
+    /// ask — `agent_host` calls it for every inbound `Answer` with no dedupe,
+    /// and a session fans out to several subscribers, so the Mac app and the
+    /// CLI both approving, or one client retrying, is an ordinary Tuesday.
+    /// Taking the entry meant the second call found nothing and sent the empty
+    /// `updatedInput` this whole field exists to prevent — the original bug,
+    /// reproduced on the second click. A failed write is the same story: the
+    /// entry would be gone before the write was even attempted.
+    ///
+    /// Cleared when the turn ends instead, which is a real bound rather than a
+    /// hopeful one: taking entries left anything never answered — a `cancel`
+    /// with an ask outstanding — in the map for the life of the session.
     permission_inputs: std::collections::HashMap<String, serde_json::Value>,
+    /// What the deltas have already drawn, so a finished block is not drawn
+    /// twice — and so an answer that never streamed is still drawn once.
+    live: crate::normalize::Live,
+    /// The command list last handed out, so an unchanged menu is not re-sent.
+    ///
+    /// `system: init` arrives after EVERY prompt, not once at connect —
+    /// measured on 2.1.226, two prompts produced two `init` frames of 118
+    /// commands each. Pushing all of them through the ring to every subscriber
+    /// once per turn is new traffic on a path that used to be silent.
+    ///
+    /// The first one is not churn, though, which is why the refresh is worth
+    /// having at all: on that same session the initialize response and
+    /// `system: init` disagreed on the CONTENTS, not merely the descriptions —
+    /// the former listed `gstack` where the latter listed `_gstack-command`.
+    /// So the first `init` corrects a menu entry that was wrong, and every
+    /// identical one after it says nothing.
+    commands_sent: Vec<AgentChoice>,
     /// What each slash command does, by name, from whichever source last said.
     ///
     /// Needed because the two sources are not equally rich and the poorer one
@@ -114,8 +144,9 @@ impl ClaudeBackend {
         // Anything the CLI said before announcing itself — the user's own hooks
         // fire first. Mostly nothing, but dropping them unread would be a
         // silent choice rather than a deliberate one.
+        let mut live = crate::normalize::Live::default();
         for frame in seen {
-            prelude.extend(frame_to_events(&frame));
+            prelude.extend(live.frame_to_events(&frame));
         }
 
         // History has to be READ, not waited for. `--resume` attaches the
@@ -156,9 +187,10 @@ impl ClaudeBackend {
         }
 
         let session_id = init.session_id;
-        // Kept before `init` is dropped: `system: init` will push the same
-        // commands back as bare names, and these are the only descriptions
-        // this session will ever be told.
+        // Kept before `init` is dropped. `system: init` will push these same
+        // commands back as bare names, and until a `commands_changed` arrives
+        // with objects again these are the only descriptions this session has
+        // been given.
         let command_help = init
             .commands
             .iter()
@@ -172,6 +204,11 @@ impl ClaudeBackend {
                 incoming,
                 session_id,
                 command_help,
+                // What `SessionStarted` just carried. The `system: init` after
+                // the first prompt repeats it verbatim, and re-announcing an
+                // identical menu is traffic for nothing.
+                commands_sent: init.commands,
+                live,
                 permission_inputs: std::collections::HashMap::new(),
                 usage_request: None,
             },
@@ -233,18 +270,31 @@ impl ClaudeBackend {
                     let subtype = frame["subtype"].as_str().unwrap_or_default();
                     if subtype == "init" || subtype == "commands_changed" {
                         let commands = self.described(init_from(&frame).commands);
-                        if !commands.is_empty() {
+                        // Only when it actually moved. `system: init` arrives
+                        // after every prompt with the same ~120 commands, and
+                        // pushing that through the ring to every subscriber
+                        // once a turn is traffic nobody asked for on a path
+                        // that used to be silent.
+                        if !commands.is_empty() && commands != self.commands_sent {
+                            self.commands_sent = commands.clone();
                             return Ok(vec![AgentEvent::CommandsAvailable { commands }]);
                         }
                     }
                 }
 
-                let events = frame_to_events(&frame);
-                // Ask for the context number when the turn stops, because the
-                // CLI never volunteers it and the meter is dark without it. A
-                // failed send is dropped rather than reported: a missing meter
-                // is not worth failing a turn that has already succeeded.
+                let events = self.live.frame_to_events(&frame);
                 if events.iter().any(|e| matches!(e, AgentEvent::TurnEnded { .. })) {
+                    // Nothing can answer an ask once the turn it belonged to is
+                    // over, so this is where the outstanding ones stop being
+                    // outstanding. Cleared here rather than taken on answering,
+                    // because answering can happen twice — see
+                    // `permission_inputs`.
+                    self.permission_inputs.clear();
+                    // Ask for the context number when the turn stops, because
+                    // the CLI never volunteers it and the meter is dark without
+                    // it. A failed send is dropped rather than reported: a
+                    // missing meter is not worth failing a turn that has
+                    // already succeeded.
                     self.usage_request =
                         self.writer.control("get_context_usage", serde_json::json!({})).await.ok();
                 }
@@ -523,9 +573,12 @@ impl AgentBackend for ClaudeBackend {
     }
 
     async fn answer(&mut self, request_id: &str, option_id: &str) -> Result<(), BackendError> {
-        // `remove`, not `get`: a request is answered once, and a map that only
-        // ever grew would hold every tool input of the whole session.
-        let input = self.permission_inputs.remove(request_id).unwrap_or(serde_json::json!({}));
+        // Read, not taken. Answering twice is ordinary — two clients on one
+        // session, or one retrying — and taking the input meant the second
+        // answer sent the empty `updatedInput` the CLI rejects. The turn
+        // ending is what clears these.
+        let input =
+            self.permission_inputs.get(request_id).cloned().unwrap_or(serde_json::json!({}));
         Ok(self.writer.answer_permission(request_id, option_id == "allow", input).await?)
     }
 
@@ -701,6 +754,8 @@ mod tests {
             incoming,
             session_id: "test".into(),
             command_help: std::collections::HashMap::new(),
+            commands_sent: Vec::new(),
+            live: Default::default(),
             permission_inputs: std::collections::HashMap::new(),
             usage_request: None,
         }
@@ -754,6 +809,56 @@ mod tests {
             "curl -s https://example.com/",
             "the CLI rejects an allow whose updatedInput is not the tool's own: {sent}"
         );
+    }
+
+    #[tokio::test]
+    async fn answering_the_same_ask_twice_carries_the_input_both_times() {
+        // `agent_host` calls `answer` for every inbound `Answer` with no
+        // dedupe, and a session fans out to several subscribers — so the Mac
+        // app and the CLI both approving, or one client retrying after a failed
+        // write, is ordinary. Taking the input on the first answer meant the
+        // second reproduced the very bug this map exists to prevent.
+        let mut backend = echoing_backend().await;
+        let (request_id, request) = real_ask();
+        backend
+            .handle(Incoming::Control { request_id: request_id.clone(), request })
+            .await
+            .expect("the ask has to reach the pane");
+
+        for attempt in 1..=2 {
+            backend.answer(&request_id, "allow").await.expect("the answer has to be sent");
+            let Incoming::Frame(sent) = backend.recv_frame().await.expect("cat echoes it") else {
+                panic!("a response, not a request");
+            };
+            assert_eq!(
+                sent["response"]["response"]["updatedInput"]["command"],
+                "curl -s https://example.com/",
+                "answer {attempt} sent an input the CLI would reject: {sent}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_ask_nobody_answered_does_not_outlive_its_turn() {
+        // The bound. Taking entries on answering left anything never answered —
+        // a `cancel` with an ask outstanding — in the map for the life of the
+        // session, which is the leak `remove` was supposed to prevent and did
+        // not.
+        let mut backend = echoing_backend().await;
+        let (request_id, request) = real_ask();
+        backend
+            .handle(Incoming::Control { request_id, request })
+            .await
+            .expect("the ask has to reach the pane");
+        assert_eq!(backend.permission_inputs.len(), 1);
+
+        backend
+            .handle(Incoming::Frame(serde_json::json!({
+                "type": "result", "stop_reason": "cancelled"
+            })))
+            .await
+            .expect("a turn has to be able to end");
+        assert!(backend.permission_inputs.is_empty(), "an ask cannot outlive its turn");
     }
 
     #[tokio::test]
@@ -872,6 +977,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_menu_that_did_not_move_is_not_announced_again() {
+        // `system: init` arrives after EVERY prompt, not once at connect —
+        // measured on 2.1.226, two prompts produced two `init` frames of 118
+        // commands each. Re-sending an identical list once a turn pushes it
+        // through the ring to every subscriber for nothing, on a path that was
+        // silent before.
+        let mut backend = echoing_backend().await;
+        let init = serde_json::json!({
+            "type": "system", "subtype": "init", "slash_commands": ["review", "ship"],
+        });
+
+        assert_eq!(backend.handle(Incoming::Frame(init.clone())).await.unwrap().len(), 1);
+        assert!(
+            backend.handle(Incoming::Frame(init.clone())).await.unwrap().is_empty(),
+            "the same menu, a second turn later, is not news"
+        );
+
+        // But a real change still gets through.
+        let events = backend
+            .handle(Incoming::Frame(serde_json::json!({
+                "type": "system", "subtype": "init",
+                "slash_commands": ["review", "ship", "deploy"],
+            })))
+            .await
+            .expect("a system frame is not an error");
+        assert!(
+            matches!(events.as_slice(), [AgentEvent::CommandsAvailable { commands }]
+                if commands.len() == 3),
+            "{events:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn refreshing_the_menu_does_not_cost_it_the_words_it_already_had() {
         // The two sources are not equally rich and the poorer one arrives
         // second: `initialize` and `commands_changed` send descriptions,
@@ -901,9 +1039,20 @@ mod tests {
     #[tokio::test]
     async fn an_ordinary_system_frame_stays_silent() {
         // 2.1.226 sends six hook frames before it says anything else, plus
-        // `status` and `thinking_tokens` during a turn. None of them is a menu.
+        // `status`, `thinking_tokens`, `task_started`/`task_updated`/
+        // `task_notification` around a subagent, and `permission_denied` when
+        // an ask is short-circuited. All captured live; none of them is a menu.
         let mut backend = echoing_backend().await;
-        for subtype in ["hook_started", "hook_response", "status", "permission_denied"] {
+        for subtype in [
+            "hook_started",
+            "hook_response",
+            "status",
+            "thinking_tokens",
+            "task_started",
+            "task_updated",
+            "task_notification",
+            "permission_denied",
+        ] {
             let events = backend
                 .handle(Incoming::Frame(serde_json::json!({
                     "type": "system", "subtype": subtype

@@ -114,13 +114,19 @@ impl CodexBackend {
             Err(_) => Vec::new(),
         };
 
+        // Reported the same way Claude reports its permission mode, so a client
+        // asking "what mode is this in" gets an answer from either backend
+        // rather than from one of them — and through `approval_picker`, so this
+        // and the `config_options` list cannot say different things.
+        let (agent_mode, available_modes) = match approval_picker(&approval) {
+            Some((current, options)) => (Some(current), options),
+            None => (None, Vec::new()),
+        };
+
         let mut prelude = vec![AgentEvent::SessionStarted {
             session_id: thread_id.clone(),
-            // Reported the same way Claude reports its permission mode, so a
-            // client asking "what mode is this in" gets an answer from either
-            // backend rather than from one of them.
-            agent_mode: approval.clone(),
-            available_modes: approval_policies(),
+            agent_mode,
+            available_modes,
             model: model.clone(),
             config_options: config_options(&model, &effort, &approval, &catalog),
             available_models: catalog
@@ -323,6 +329,29 @@ fn approval_policies() -> Vec<AgentChoice> {
     .collect()
 }
 
+/// The approval picker, when the thread reports a policy it can express.
+///
+/// ONE function because two surfaces publish this and they have to agree:
+/// `config_options` draws the picker, and `SessionStarted.available_modes` is
+/// what `agent_supervisor` stores and republishes as `availableAgentModes`.
+/// They did not agree — `available_modes` was filled unconditionally while
+/// `config_options` filtered — so a thread whose policy this cannot express
+/// still published a three-entry mode picker, and `DaemonMessage::SetMode`
+/// routes straight back to `Selector::Approval`. Choosing any entry would then
+/// flatten the very policy the filter one function away exists to protect.
+///
+/// `None` for a `{granular: {...}}` object, which reads as no string at all,
+/// and for a fourth string a later codex adds. Both would leave the current
+/// value naming an option that is not in the list, and a picker showing a
+/// setting it does not contain is a picker that lies about what is in force.
+/// The mode is withheld along with the menu rather than reported beside a list
+/// that excludes it.
+fn approval_picker(reported: &Option<String>) -> Option<(String, Vec<AgentChoice>)> {
+    let options = approval_policies();
+    let current = reported.as_ref().filter(|c| options.iter().any(|o| &&o.id == c))?;
+    Some((current.clone(), options))
+}
+
 /// The selectors this thread offers, as the generic list clients render.
 ///
 /// Model, reasoning effort, and approval policy, because those are what
@@ -356,22 +385,15 @@ fn config_options(
 
     // First, and `category: "mode"`, so the GUIs put it where Claude's mode
     // selector goes rather than somewhere else for the other backend.
-    //
-    // Offered only when the reported policy is one this picker can express. A
-    // `granular` policy — or a fourth string a later codex adds — would leave
-    // `current_value` naming an option that is not in the list, and the picker
-    // would draw whatever it fell back to as the setting in force. Reporting
-    // the wrong mode is worse than reporting none.
-    let policies = approval_policies();
-    if let Some(current) = approval.as_ref().filter(|c| policies.iter().any(|p| &&p.id == c)) {
+    if let Some((current_value, options)) = approval_picker(approval) {
         out.push(ConfigOption {
             id: "approval".into(),
             name: "Approvals".into(),
             description: String::new(),
             category: "mode".into(),
             kind: "select".into(),
-            current_value: current.clone(),
-            options: policies,
+            current_value,
+            options,
         });
     }
 
@@ -450,9 +472,18 @@ fn config_options(
 fn input_for(text: &str, images: &[PromptImage]) -> serde_json::Value {
     let mut input = vec![serde_json::json!({ "type": "text", "text": text })];
     for image in images {
+        // An empty `mime` would interpolate to `data:;base64,…`, which is a
+        // valid URL meaning `text/plain` — so the picture would be sent, and
+        // read as text, and rejected. The same `PromptImage` producer feeds the
+        // Claude backend, which already answers this by defaulting to PNG (see
+        // `claude/src/conn.rs`): the format Far Cooler's own screenshot path
+        // produces. Two backends taking the same input should not disagree
+        // about it, and a wrong guess costs the picture — which is what sending
+        // no type at all costs anyway.
+        let mime = if image.mime.is_empty() { "image/png" } else { &image.mime };
         input.push(serde_json::json!({
             "type": "image",
-            "url": format!("data:{};base64,{}", image.mime, image.base64),
+            "url": format!("data:{mime};base64,{}", image.base64),
         }));
     }
     serde_json::Value::Array(input)
@@ -633,6 +664,19 @@ mod tests {
     }
 
     #[test]
+    fn an_image_with_no_type_is_sent_as_png_rather_than_as_text() {
+        // `data:;base64,…` is a valid URL meaning text/plain, so the picture
+        // would be sent and then rejected. The Claude backend takes the same
+        // `PromptImage` and already defaults to PNG; two backends reading one
+        // input should not disagree about it.
+        let input = input_for("what is this", &[PromptImage {
+            mime: String::new(),
+            base64: "AAAA".into(),
+        }]);
+        assert_eq!(input[1]["url"], "data:image/png;base64,AAAA");
+    }
+
+    #[test]
     fn the_text_comes_first_so_a_refused_image_can_only_cost_the_picture() {
         // The guarantee that survived the rewrite: whatever happens to the
         // image, the question is in the prompt and it is in it first.
@@ -781,6 +825,25 @@ mod tests {
         assert_eq!(mode.kind, "select");
         assert_eq!(mode.current_value, "on-request");
         assert_eq!(mode.options.len(), 3);
+    }
+
+    #[test]
+    fn the_mode_list_and_the_mode_picker_never_disagree() {
+        // They did. `SessionStarted.available_modes` was filled
+        // unconditionally while `config_options` filtered, and
+        // `agent_supervisor` republishes that list as `availableAgentModes`
+        // with `SetMode` routing straight back to `Selector::Approval` — so a
+        // policy this cannot express still published a three-entry picker that
+        // would flatten it on the first click.
+        for reported in [None, Some("on-request".into()), Some("someLaterVariant".into())] {
+            let picker = approval_picker(&reported);
+            let listed = config_options(&None, &None, &reported, &[]);
+            assert_eq!(
+                picker.is_some(),
+                !listed.is_empty(),
+                "one surface offers a mode the other withholds: {reported:?}"
+            );
+        }
     }
 
     #[test]

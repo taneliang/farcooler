@@ -362,10 +362,13 @@ fn item_to_events(method: &str, item: &serde_json::Value, origin: Origin) -> Vec
         }
         "fileChange" => {
             let paths = change_paths(&item["changes"]);
-            let title = match paths.len() {
-                0 => "Edit".to_string(),
-                1 => paths[0].clone(),
-                n => format!("{n} files"),
+            // Counted off `changes` rather than off `paths`, which drops any
+            // change that named no file: "2 files" for two changes is right
+            // even when only one of them could be located.
+            let title = match item["changes"].as_array().map(Vec::as_slice).unwrap_or_default() {
+                [] => "Edit".to_string(),
+                [only] => change_title(only),
+                many => format!("{} files", many.len()),
             };
             if started {
                 return vec![AgentEvent::ToolCall {
@@ -433,14 +436,35 @@ fn item_to_events(method: &str, item: &serde_json::Value, origin: Origin) -> Vec
     }
 }
 
+/// Where a change ENDS UP.
+///
+/// `path` is where the file was. An `update` may also carry `move_path`, which
+/// is where it now is — `UpdatePatchChangeKind` in the vendored schema. Reading
+/// only `path` pointed every "reveal in editor" on a renamed file at a name
+/// that no longer exists on disk, and put the dead name in the diff too.
+fn change_path(change: &serde_json::Value) -> Option<&str> {
+    change["kind"]["move_path"].as_str().or_else(|| change["path"].as_str())
+}
+
 /// The files a `changes` array touches, in the order it lists them.
 fn change_paths(changes: &serde_json::Value) -> Vec<String> {
     changes
         .as_array()
-        .map(|c| {
-            c.iter().filter_map(|change| change["path"].as_str().map(str::to_string)).collect()
-        })
+        .map(|c| c.iter().filter_map(|change| change_path(change).map(str::to_string)).collect())
         .unwrap_or_default()
+}
+
+/// One change's file, as a row reads it.
+///
+/// A rename names both ends. The destination alone is where the file is, which
+/// is what `change_path` is for, but a row titled with it would report a moved
+/// file as an ordinary edit of a file that had never been anywhere else.
+fn change_title(change: &serde_json::Value) -> String {
+    let from = change["path"].as_str().unwrap_or_default();
+    match change["kind"]["move_path"].as_str() {
+        Some(to) if !from.is_empty() && to != from => format!("{from} → {to}"),
+        _ => change_path(change).unwrap_or("Edit").to_string(),
+    }
 }
 
 /// A `changes` array, as the one diff and the one body a tool row can hold.
@@ -456,19 +480,36 @@ fn change_view(changes: &serde_json::Value) -> (Option<Diff>, Option<String>) {
         return (None, None);
     };
     if let [only] = changes.as_slice() {
-        return (diff_of(only), None);
+        if let Some(diff) = diff_of(only) {
+            return (Some(diff), None);
+        }
+        // A patch this cannot read still has to go SOMEWHERE. Returning here
+        // with neither a diff nor a body drew an edit row with nothing at all
+        // under it, while two changes carrying the very same unreadable text
+        // would have shown both of them — the one-file case losing what the
+        // many-file case keeps.
+        return (None, patch_text(std::slice::from_ref(only)));
     }
-    let body: String = changes
-        .iter()
-        .map(|change| {
-            format!(
-                "{}\n{}\n",
-                change["path"].as_str().unwrap_or("(unnamed file)"),
-                change["diff"].as_str().unwrap_or_default()
-            )
-        })
-        .collect();
-    (None, Some(body))
+    (None, patch_text(changes))
+}
+
+/// The `changes` as raw patch text, labeled by file.
+///
+/// The fallback whenever a `Diff` cannot be built. `None` only when there is no
+/// text to show at all, so a row is never given a body consisting of filenames
+/// and blank lines.
+fn patch_text(changes: &[serde_json::Value]) -> Option<String> {
+    if changes.iter().all(|c| c["diff"].as_str().unwrap_or_default().is_empty()) {
+        return None;
+    }
+    Some(
+        changes
+            .iter()
+            .map(|change| {
+                format!("{}\n{}\n", change_title(change), change["diff"].as_str().unwrap_or(""))
+            })
+            .collect(),
+    )
 }
 
 /// One `FileUpdateChange`, as both sides of the edit.
@@ -497,8 +538,25 @@ fn change_view(changes: &serde_json::Value) -> (Option<Diff>, Option<String>) {
 /// and are not invented here — which is what a diff view wants anyway, since it
 /// computes its own alignment from the two strings it is handed.
 fn diff_of(change: &serde_json::Value) -> Option<Diff> {
-    let path = change["path"].as_str()?.to_string();
-    let body = change["diff"].as_str().unwrap_or_default().to_string();
+    // The destination, not the origin: a renamed file's diff has to name where
+    // the file actually is, or the editor opens nothing.
+    let path = change_path(change)?.to_string();
+    let mut body = change["diff"].as_str().unwrap_or_default();
+
+    // codex appends its own prose to a renamed file's patch. Observed on
+    // 0.147.0: `"@@ -1,2 +1,2 @@\n alpha\n-bravo\n+BRAVO\n\n\nMoved to: /abs/new"`.
+    // Inside a hunk that trailer reads as three context lines, so BOTH sides of
+    // the diff came out ending in two blank lines and a sentence that appears
+    // in no version of the file. Cut only when `move_path` says there was a
+    // move and the suffix matches it exactly — a later codex that words this
+    // differently falls back to the old behavior rather than to a wrong guess
+    // about where the patch stops. The rename is already in the row title.
+    if let Some(to) = change["kind"]["move_path"].as_str() {
+        if let Some(patch) = body.strip_suffix(format!("Moved to: {to}").as_str()) {
+            body = patch.trim_end_matches('\n');
+        }
+    }
+    let body = body.to_string();
 
     match change["kind"]["type"].as_str().unwrap_or_default() {
         // `old_text: None` is the vocabulary's word for "this file did not
@@ -516,12 +574,23 @@ fn diff_of(change: &serde_json::Value) -> Option<Diff> {
 /// diff view is a claim that nothing changed, which is a stronger and more
 /// wrong statement than showing nothing.
 fn diff_from_patch(path: String, patch: &str) -> Option<Diff> {
+    // Which side the previous line landed on, so `\ No newline at end of file`
+    // can be applied to it. A `-` line is the old file's last line, a `+` line
+    // is the new file's, and a CONTEXT line is the last line of both.
+    enum Side {
+        Old,
+        New,
+        Both,
+    }
+
     let mut old = String::new();
     let mut new = String::new();
     let mut in_hunk = false;
+    let mut last: Option<Side> = None;
     for line in patch.lines() {
         if line.starts_with("@@") {
             in_hunk = true;
+            last = None;
             continue;
         }
         // Nothing before the first `@@` is content. 0.147.0 sends no header
@@ -535,14 +604,37 @@ fn diff_from_patch(path: String, patch: &str) -> Option<Diff> {
             Some(b'+') => {
                 new.push_str(&line[1..]);
                 new.push('\n');
+                last = Some(Side::New);
             }
             Some(b'-') => {
                 old.push_str(&line[1..]);
                 old.push('\n');
+                last = Some(Side::Old);
             }
             // `\ No newline at end of file` is a note about the line above it,
-            // not a line of either side.
-            Some(b'\\') => {}
+            // not a line of either side — and the note has to be ACTED on. The
+            // loop appends `\n` to every line it takes, so leaving the marker
+            // to fall through gave the old side a terminator the file never
+            // had: a patch that adds nothing but a final newline came out with
+            // both sides identical, and a diff view drew the one line that
+            // changed as unchanged.
+            Some(b'\\') => {
+                match last {
+                    Some(Side::Old) => {
+                        old.pop();
+                    }
+                    Some(Side::New) => {
+                        new.pop();
+                    }
+                    Some(Side::Both) => {
+                        old.pop();
+                        new.pop();
+                    }
+                    // A marker with no line before it annotates nothing.
+                    None => {}
+                }
+                last = None;
+            }
             // Context, on both sides. A bare empty line is context too — some
             // patch writers strip the trailing space rather than emit " ".
             _ => {
@@ -551,6 +643,7 @@ fn diff_from_patch(path: String, patch: &str) -> Option<Diff> {
                 old.push('\n');
                 new.push_str(text);
                 new.push('\n');
+                last = Some(Side::Both);
             }
         }
     }
@@ -921,6 +1014,92 @@ mod tests {
         // stronger and more wrong statement than showing no diff at all.
         assert!(diff_of(&change("x.txt", "update", "")).is_none());
         assert!(diff_of(&change("x.txt", "update", "diff --git a/x.txt b/x.txt\n")).is_none());
+    }
+
+    #[test]
+    fn a_patch_this_cannot_read_still_shows_its_text_rather_than_nothing() {
+        // The one-file case was losing what the many-file case kept: when the
+        // diff could not be built, the row got neither a diff nor a body, so an
+        // edit rendered with nothing under it at all while the wire had sent
+        // the patch.
+        let unreadable = "diff --git a/x.txt b/x.txt\n";
+        let (diff, content) =
+            change_view(&serde_json::json!([change("x.txt", "update", unreadable)]));
+        assert!(diff.is_none(), "it is still not readable as a diff");
+        let content = content.expect("but the text has to survive");
+        assert!(content.contains(unreadable), "{content}");
+
+        // And a change with no text at all gets no body, rather than a body of
+        // a filename and two blank lines.
+        let (_, empty) = change_view(&serde_json::json!([change("x.txt", "update", "")]));
+        assert_eq!(empty, None);
+    }
+
+    #[test]
+    fn a_missing_final_newline_is_taken_off_the_side_it_belongs_to() {
+        // The marker annotates the line before it, and the loop appends `\n` to
+        // every line it takes — so ignoring it handed the old side a terminator
+        // the file never had. A patch whose whole content is the final newline
+        // then came out with both sides identical, and a diff view drew the one
+        // line that changed as unchanged.
+        let diff = diff_of(&change(
+            "x.txt",
+            "update",
+            "@@ -1 +1,2 @@\n-alpha\n\\ No newline at end of file\n+alpha\n+beta\n",
+        ))
+        .expect("a diff");
+        assert_eq!(diff.old_text.as_deref(), Some("alpha"), "no terminator, because it had none");
+        assert_eq!(diff.new_text, "alpha\nbeta\n");
+
+        // On a context line it is the last line of BOTH files.
+        let both = diff_of(&change(
+            "x.txt",
+            "update",
+            "@@ -1,2 +1,2 @@\n-a\n+A\n b\n\\ No newline at end of file\n",
+        ))
+        .expect("a diff");
+        assert_eq!(both.old_text.as_deref(), Some("a\nb"));
+        assert_eq!(both.new_text, "A\nb");
+    }
+
+    #[test]
+    fn a_renamed_file_is_located_where_it_now_is_and_named_by_both_ends() {
+        // Reading `path` alone pointed "reveal in editor" at a name that no
+        // longer exists: `move_path` is where the file went.
+        // The `diff` string is verbatim what 0.147.0 sent for a rename, prose
+        // trailer and all.
+        let renamed = serde_json::json!({
+            "path": "/w/old.rs",
+            "kind": { "type": "update", "move_path": "/w/new.rs" },
+            "diff": "@@ -1,2 +1,2 @@\n alpha\n-bravo\n+BRAVO\n\n\nMoved to: /w/new.rs"
+        });
+        let diff = diff_of(&renamed).expect("a diff");
+        assert_eq!(diff.path, "/w/new.rs", "where the file actually is now");
+        // The trailer is codex talking, not a line of the file. Read as a hunk
+        // it was three context lines, so both sides ended with two blank lines
+        // and a sentence that is in no version of the file.
+        assert_eq!(diff.old_text.as_deref(), Some("alpha\nbravo\n"));
+        assert_eq!(diff.new_text, "alpha\nBRAVO\n");
+
+        let events = frame_to_events(
+            "item/completed",
+            &serde_json::json!({ "item": { "type": "fileChange", "id": "f",
+                "status": "completed", "changes": [renamed] } }),
+            Origin::Live,
+        );
+        let [AgentEvent::ToolUpdate { title: Some(title), locations, .. }] = events.as_slice()
+        else {
+            panic!("expected one update: {events:?}");
+        };
+        assert_eq!(locations, &["/w/new.rs"], "the editor has to be able to open it");
+        assert_eq!(title, "/w/old.rs → /w/new.rs", "a move that reads as one");
+
+        // An ordinary edit still reads as one file, not as a move to itself.
+        let plain = serde_json::json!({
+            "path": "/w/same.rs", "kind": { "type": "update", "move_path": null },
+            "diff": "@@ -1 +1 @@\n-a\n+b\n"
+        });
+        assert_eq!(change_title(&plain), "/w/same.rs");
     }
 
     #[test]

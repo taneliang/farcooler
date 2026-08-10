@@ -140,31 +140,123 @@ pub fn init_from(frame: &serde_json::Value) -> Init {
 /// are the only place the prompts exist. The identical split codex needed, for
 /// the identical reason.
 ///
-/// The AGENT's words split the same way once `--include-partial-messages` is
-/// on, and this is the trap that flag sets: the CLI sends the `stream_event`
-/// deltas AND the finished `assistant` message afterwards, both carrying the
-/// whole answer. Measured on 2.1.226, a two-token reply arrived as `text_delta`
-/// "h", `text_delta` "i", then `assistant` `[{"type":"text","text":"hi"}]`.
-/// Reading both renders every answer twice — once as it streams and again
-/// underneath. So live, an assistant text or thinking block is DROPPED, because
-/// the deltas already said it. On replay there are no deltas — the on-disk
-/// transcript stores finished blocks — so those same blocks are the only place
-/// the answer exists. Tool calls are taken either way: nothing streams them.
+/// The AGENT's words need the same care once `--include-partial-messages` is
+/// on, but NOT on this flag — see `Live`, which decides that from evidence
+/// rather than from which side of the wire a frame came in on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
     Live,
     Replay,
 }
 
-/// What one stream-json frame means, if anything.
-pub fn frame_to_events(frame: &serde_json::Value) -> Vec<AgentEvent> {
-    frame_to_events_from(frame, Origin::Live)
+/// A live conversation, and which of its messages the deltas already drew.
+///
+/// This exists because `--include-partial-messages` sets a trap: the CLI sends
+/// the `stream_event` deltas AND the finished `assistant` message, both
+/// carrying the whole answer. Measured on 2.1.226, a two-token reply arrived as
+/// `text_delta` "h", `text_delta` "i", then `assistant`
+/// `[{"type":"text","text":"hi"}]`. Taking both renders every answer twice.
+///
+/// The first fix was to drop text and thinking from every LIVE assistant frame,
+/// which was wrong in a way this codebase specifically refuses. It assumed the
+/// deltas rather than observing them, so anything that cost them — the flag
+/// regressing, a user `args` entry, a CLI path that finishes a message without
+/// streaming it — deleted the agent's entire side of the conversation with no
+/// Gap, no error and nothing on screen to say so. A derived transcript is
+/// supposed to be able to say where it is incomplete; silent total text loss is
+/// the exact failure it is built to refuse.
+///
+/// So the drop is keyed to EVIDENCE: a message's words are suppressed only if a
+/// `text_delta` or `thinking_delta` was actually seen for that message. No
+/// deltas, no suppression, and the finished block renders as it always did.
+/// Every uncertainty here errs toward drawing an answer twice, which is visible
+/// and reportable, rather than toward dropping it, which is neither.
+///
+/// Correlated by `message.id`, which `message_start` and the finished
+/// `assistant` frame both carry and which was confirmed identical across them.
+/// A set rather than a take: one `message_start` can be followed by SEVERAL
+/// assistant frames sharing its id — a real dispatch sent the thinking block
+/// and the tool_use block as two frames, one message — so consuming the entry
+/// on the first would un-suppress the rest.
+#[derive(Debug, Default)]
+pub struct Live {
+    /// The message currently being streamed, from the last `message_start`.
+    ///
+    /// A `content_block_delta` does not name its message, so the deltas are
+    /// attributed to the message most recently started. That is sound only
+    /// while one stream runs at a time, which holds on this pin: a real
+    /// subagent dispatch produced NO `stream_event` frame with a
+    /// `parent_tool_use_id` at all, so there is no second stream to interleave
+    /// with. If that ever changes the misattribution shows up as an answer
+    /// drawn twice, not as one lost.
+    streaming: Option<String>,
+    /// Messages whose words have actually arrived as deltas.
+    drawn: std::collections::HashSet<String>,
 }
 
-/// As `frame_to_events`, for a caller that knows where the record came from.
+impl Live {
+    /// What one frame off the wire means, remembering what streamed.
+    pub fn frame_to_events(&mut self, frame: &serde_json::Value) -> Vec<AgentEvent> {
+        match frame["type"].as_str().unwrap_or_default() {
+            "stream_event" => {
+                self.remember(frame);
+                stream_to_events(frame)
+            }
+            "assistant" => {
+                let drawn = frame["message"]["id"]
+                    .as_str()
+                    .is_some_and(|id| self.drawn.contains(id));
+                assistant_to_events(frame, drawn)
+            }
+            "result" => {
+                // A turn is the natural lifetime: nothing streams after the
+                // result, so holding these any longer only grows the set.
+                self.streaming = None;
+                self.drawn.clear();
+                frame_to_events_from(frame, Origin::Live)
+            }
+            _ => frame_to_events_from(frame, Origin::Live),
+        }
+    }
+
+    /// Note what a `stream_event` proves about the message in flight.
+    fn remember(&mut self, frame: &serde_json::Value) {
+        let event = &frame["event"];
+        match event["type"].as_str().unwrap_or_default() {
+            "message_start" => {
+                self.streaming = event["message"]["id"].as_str().map(str::to_string);
+            }
+            // Only words count as evidence. `input_json_delta` and
+            // `signature_delta` are real deltas that draw nothing — the first
+            // streams a tool call's arguments, the second an encrypted thinking
+            // signature — so treating either as proof would suppress a block
+            // nobody had seen.
+            "content_block_delta" => {
+                let delta = &event["delta"];
+                let words = match delta["type"].as_str().unwrap_or_default() {
+                    "text_delta" => delta["text"].as_str(),
+                    "thinking_delta" => delta["thinking"].as_str(),
+                    _ => None,
+                };
+                if words.is_some_and(|w| !w.is_empty())
+                    && let Some(id) = &self.streaming
+                {
+                    self.drawn.insert(id.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// What one stream-json frame means, if anything.
+///
+/// Suppresses NOTHING on its own: with no record of what streamed, the only
+/// safe answer is to render what the frame carries. `Live` is what knows
+/// better, and it is the only thing that may drop an answer.
 pub fn frame_to_events_from(frame: &serde_json::Value, origin: Origin) -> Vec<AgentEvent> {
     match frame["type"].as_str().unwrap_or_default() {
-        "assistant" => assistant_to_events(frame, origin),
+        "assistant" => assistant_to_events(frame, false),
         "user" => user_to_events(frame, origin),
         "stream_event" => stream_to_events(frame),
         "result" => {
@@ -242,9 +334,12 @@ fn parent_of(record: &serde_json::Value) -> Option<String> {
 
 /// Words said, unless there were none.
 ///
-/// An empty block is not silence worth an entry — 2.1.226 sends
-/// `{"type":"thinking","thinking":""}` on turns with no visible reasoning, and
-/// each one drew a blank thought bubble.
+/// An empty block is not silence worth an entry. 2.1.226 really does send
+/// `{"type":"thinking","thinking":"","signature":"…"}` — encrypted reasoning,
+/// where the signature is the whole payload and there is no text at all — and
+/// every one of those drew a blank thought bubble. Reachable from both
+/// directions: on replay, and live whenever a block arrives with no deltas
+/// behind it.
 fn spoken_words(role: Role, text: &serde_json::Value, parent: &Option<String>) -> Vec<AgentEvent> {
     let text = text.as_str().unwrap_or_default();
     if text.is_empty() {
@@ -255,19 +350,25 @@ fn spoken_words(role: Role, text: &serde_json::Value, parent: &Option<String>) -
 
 /// The agent's own content blocks.
 ///
-/// Live, the text and thinking blocks are deliberately skipped: the
-/// `stream_event` deltas already delivered them word by word, and taking the
-/// finished block on top prints every answer a second time. See `Origin`.
-fn assistant_to_events(frame: &serde_json::Value, origin: Origin) -> Vec<AgentEvent> {
+/// `already_drawn` says the deltas have already delivered this message's words
+/// word by word, so taking the finished blocks on top would print the answer a
+/// second time. Only `Live` can know that, and only from having watched the
+/// deltas arrive — see `Live` for why it is never assumed.
+///
+/// Tool calls are taken either way. They DO stream — 2.1.226 opens a
+/// `content_block_start` carrying `{"type":"tool_use",…}` and then chunks the
+/// arguments as `input_json_delta` — but `stream_to_events` deliberately
+/// ignores both, so the finished block is the only place a tool row ever comes
+/// from and suppressing it would lose the call entirely.
+fn assistant_to_events(frame: &serde_json::Value, already_drawn: bool) -> Vec<AgentEvent> {
     let parent = parent_of(frame);
     let Some(blocks) = frame["message"]["content"].as_array() else { return Vec::new() };
-    let already_streamed = origin == Origin::Live;
 
     blocks
         .iter()
         .flat_map(|block| match block["type"].as_str().unwrap_or_default() {
-            "text" if !already_streamed => spoken_words(Role::Agent, &block["text"], &parent),
-            "thinking" if !already_streamed => {
+            "text" if !already_drawn => spoken_words(Role::Agent, &block["text"], &parent),
+            "thinking" if !already_drawn => {
                 spoken_words(Role::Thought, &block["thinking"], &parent)
             }
             "tool_use" => {
@@ -500,6 +601,15 @@ pub fn plan_from_todo(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
 mod tests {
     use super::*;
 
+    /// One frame off the wire, into a conversation with no history behind it.
+    ///
+    /// A fresh `Live` per call, so nothing has streamed and nothing is
+    /// suppressed — which is the right default for every test below that is
+    /// not about streaming.
+    fn once(frame: &serde_json::Value) -> Vec<AgentEvent> {
+        Live::default().frame_to_events(frame)
+    }
+
     /// One assistant text block, as both a live frame and a restored one.
     fn said(text: &str) -> serde_json::Value {
         serde_json::json!({
@@ -528,7 +638,7 @@ mod tests {
                        "delta": { "type": "text_delta", "text": "h" } }
         });
         assert!(matches!(
-            frame_to_events(&delta).as_slice(),
+            once(&delta).as_slice(),
             [AgentEvent::Message { role: Role::Agent, text, .. }] if text == "h"
         ));
 
@@ -538,9 +648,36 @@ mod tests {
                        "delta": { "type": "thinking_delta", "thinking": "hmm" } }
         });
         assert!(matches!(
-            frame_to_events(&thought).as_slice(),
+            once(&thought).as_slice(),
             [AgentEvent::Message { role: Role::Thought, text, .. }] if text == "hmm"
         ));
+    }
+
+    /// The frames 2.1.226 sends for one streamed message, in order.
+    ///
+    /// `message_start` names the message; the deltas carry the words but NOT
+    /// the id, which is why `Live` has to remember which message is in flight.
+    fn streamed(id: &str, text: &str) -> Vec<serde_json::Value> {
+        let mut frames = vec![serde_json::json!({
+            "type": "stream_event", "parent_tool_use_id": null,
+            "event": { "type": "message_start", "message": { "id": id, "content": [] } }
+        })];
+        frames.extend(text.chars().map(|c| {
+            serde_json::json!({
+                "type": "stream_event", "parent_tool_use_id": null,
+                "event": { "type": "content_block_delta", "index": 0,
+                           "delta": { "type": "text_delta", "text": c.to_string() } }
+            })
+        }));
+        frames
+    }
+
+    /// An `assistant` frame naming the message it completes.
+    fn finished(id: &str, text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "assistant", "parent_tool_use_id": null,
+            "message": { "id": id, "content": [{ "type": "text", "text": text }] }
+        })
     }
 
     #[test]
@@ -549,7 +686,103 @@ mod tests {
         // BOTH the deltas and the finished `assistant` message, each carrying
         // the whole answer. Taking both renders every reply twice, once
         // streamed and once underneath.
-        assert!(frame_to_events(&said("hi")).is_empty(), "the deltas already said it");
+        let mut live = Live::default();
+        let spoken: String = streamed("msg_1", "hi")
+            .iter()
+            .chain(std::iter::once(&finished("msg_1", "hi")))
+            .flat_map(|f| live.frame_to_events(f))
+            .filter_map(|e| match e {
+                AgentEvent::Message { role: Role::Agent, text, .. } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(spoken, "hi", "not hihi");
+    }
+
+    #[test]
+    fn an_answer_with_no_deltas_behind_it_is_still_drawn() {
+        // The failure the first version of this had, and the one that matters
+        // most: suppression keyed on Origin::Live alone assumed the deltas
+        // rather than observing them, so anything that cost them — the flag
+        // regressing, a user `args` entry, a CLI path that finishes a message
+        // without streaming it — deleted the agent's whole side of the
+        // conversation with no Gap and no error. Silent total text loss is the
+        // exact failure a derived transcript exists to refuse.
+        let mut live = Live::default();
+        assert!(
+            matches!(
+                live.frame_to_events(&finished("msg_1", "hi")).as_slice(),
+                [AgentEvent::Message { role: Role::Agent, text, .. }] if text == "hi"
+            ),
+            "an unstreamed answer must render, not vanish"
+        );
+    }
+
+    #[test]
+    fn only_the_message_that_actually_streamed_is_suppressed() {
+        // Evidence is per message, not per session: one answer streaming must
+        // not silence the next one that does not.
+        let mut live = Live::default();
+        for frame in streamed("msg_1", "hi") {
+            live.frame_to_events(&frame);
+        }
+        assert!(live.frame_to_events(&finished("msg_1", "hi")).is_empty());
+        assert_eq!(live.frame_to_events(&finished("msg_2", "later")).len(), 1);
+    }
+
+    #[test]
+    fn a_delta_that_draws_nothing_is_not_evidence_that_anything_was_drawn() {
+        // `input_json_delta` streams a tool call's arguments and
+        // `signature_delta` an encrypted thinking signature. Both are real
+        // deltas that put no words on screen, so counting either as proof
+        // would suppress a block nobody had seen. Both were captured off a
+        // live dispatch.
+        let mut live = Live::default();
+        live.frame_to_events(&serde_json::json!({
+            "type": "stream_event", "parent_tool_use_id": null,
+            "event": { "type": "message_start", "message": { "id": "msg_1" } }
+        }));
+        for kind in ["input_json_delta", "signature_delta"] {
+            live.frame_to_events(&serde_json::json!({
+                "type": "stream_event", "parent_tool_use_id": null,
+                "event": { "type": "content_block_delta", "index": 0,
+                           "delta": { "type": kind, "partial_json": "{\"a\":1}" } }
+            }));
+        }
+        assert_eq!(
+            live.frame_to_events(&finished("msg_1", "hi")).len(),
+            1,
+            "no words were drawn, so the block is still the only source"
+        );
+    }
+
+    #[test]
+    fn several_assistant_frames_can_share_one_streamed_message() {
+        // A real dispatch sent the thinking block and the tool_use block as two
+        // `assistant` frames under ONE message id and one `message_start`. So
+        // the evidence is a set, not something consumed on first use —
+        // consuming it would un-suppress every frame after the first.
+        let mut live = Live::default();
+        for frame in streamed("msg_1", "hi") {
+            live.frame_to_events(&frame);
+        }
+        assert!(live.frame_to_events(&finished("msg_1", "hi")).is_empty());
+        assert!(
+            live.frame_to_events(&finished("msg_1", "hi")).is_empty(),
+            "still the same message"
+        );
+    }
+
+    #[test]
+    fn what_streamed_is_forgotten_when_the_turn_ends() {
+        // Nothing streams after the result, so holding the ids past it only
+        // grows the set for the life of the session.
+        let mut live = Live::default();
+        for frame in streamed("msg_1", "hi") {
+            live.frame_to_events(&frame);
+        }
+        live.frame_to_events(&serde_json::json!({ "type": "result", "stop_reason": "end_turn" }));
+        assert_eq!(live.frame_to_events(&finished("msg_1", "hi")).len(), 1);
     }
 
     #[test]
@@ -566,23 +799,36 @@ mod tests {
     }
 
     #[test]
-    fn a_tool_call_is_reported_whether_it_is_live_or_restored() {
-        // Nothing streams a tool_use block, so the live/replay split that
-        // silences text must not touch it.
+    fn a_tool_call_survives_the_suppression_that_silences_text() {
+        // A tool block DOES stream — `content_block_start` with
+        // `{"type":"tool_use",…}` then `input_json_delta` chunks — but
+        // `stream_to_events` ignores both, so the finished block is the only
+        // place a tool row ever comes from. Suppressing it alongside the text
+        // would lose the call itself.
         let frame = serde_json::json!({
             "type": "assistant", "parent_tool_use_id": null,
-            "message": { "content": [{ "type": "tool_use", "id": "t1", "name": "Bash",
+            "message": { "id": "msg_1",
+                         "content": [{ "type": "text", "text": "running it" },
+                                     { "type": "tool_use", "id": "t1", "name": "Bash",
                                        "input": { "command": "ls" } }] }
         });
-        for origin in [Origin::Live, Origin::Replay] {
-            assert!(
-                matches!(
-                    frame_to_events_from(&frame, origin).as_slice(),
-                    [AgentEvent::ToolCall { title, .. }] if title == "ls"
-                ),
-                "{origin:?} lost the tool row"
-            );
+
+        // Live, with the text already streamed: the row survives alone.
+        let mut live = Live::default();
+        for f in streamed("msg_1", "running it") {
+            live.frame_to_events(&f);
         }
+        assert!(
+            matches!(
+                live.frame_to_events(&frame).as_slice(),
+                [AgentEvent::ToolCall { title, .. }] if title == "ls"
+            ),
+            "the streamed text goes, the tool row stays"
+        );
+
+        // And with nothing streamed, and on replay, both come through.
+        assert_eq!(once(&frame).len(), 2);
+        assert_eq!(frame_to_events_from(&frame, Origin::Replay).len(), 2);
     }
 
     #[test]
@@ -596,7 +842,7 @@ mod tests {
             "message": { "content": [{ "type": "tool_use", "id": "t1", "name": "TodoWrite",
                 "input": { "todos": [{ "content": "write it", "status": "in_progress" }] } }] }
         });
-        let events = frame_to_events(&frame);
+        let events = once(&frame);
         assert!(
             matches!(
                 events.as_slice(),
@@ -615,7 +861,7 @@ mod tests {
             "type": "user", "parent_tool_use_id": null,
             "message": { "content": [{ "type": "text", "text": "hello" }] }
         });
-        assert!(frame_to_events(&frame).is_empty());
+        assert!(once(&frame).is_empty());
     }
 
     #[test]
@@ -635,15 +881,40 @@ mod tests {
                                        "input": { "description": "find the bug" } }] }
         });
         assert!(matches!(
-            frame_to_events(&frame).as_slice(),
+            once(&frame).as_slice(),
             [AgentEvent::ToolCall { subagent: true, title, .. }] if title == "find the bug"
         ));
     }
 
     #[test]
-    fn a_subagents_words_carry_the_dispatch_they_belong_to() {
-        // ACP has to smuggle this through _meta.claudeCode. Native has a field,
-        // and the streaming deltas carry it too.
+    fn a_parented_record_is_read_as_the_dispatch_it_belongs_to() {
+        // ACP has to smuggle this through `_meta.claudeCode`; native has a
+        // field, and `parent_of` reads it wherever it appears.
+        //
+        // NOT a claim about what 2.1.226 sends. A real `Agent` dispatch was run
+        // through this pin with these exact flags and produced NO parented
+        // `assistant` frame and NO parented `stream_event` at all: the subagent
+        // surfaced as `system: task_started`/`task_updated`/`task_notification`
+        // (all silent), ONE parented `user` frame carrying the prompt it was
+        // given, and the dispatch's own `tool_result`. Only the `user` case
+        // below is a shape this pin was observed to send. The rest is
+        // deliberate leniency — the field is documented, costs nothing to read,
+        // and a CLI that starts sending it should not need a code change to be
+        // understood.
+        let dispatched = serde_json::json!({
+            "type": "user", "parentToolUseID": "toolu_01C8VVm16DcpURTrdPqWNtAN",
+            "message": { "content": [{ "type": "text", "text": "Reply with: banana" }] }
+        });
+        assert!(
+            matches!(
+                frame_to_events_from(&dispatched, Origin::Replay).as_slice(),
+                [AgentEvent::Message { parent: Some(p), .. }]
+                    if p == "toolu_01C8VVm16DcpURTrdPqWNtAN"
+            ),
+            "the one parented shape this pin actually sends"
+        );
+
+        // Unobserved on this pin, read anyway.
         let frame = serde_json::json!({
             "type": "assistant", "parent_tool_use_id": "t1",
             "message": { "content": [{ "type": "text", "text": "inside" }] }
@@ -659,7 +930,7 @@ mod tests {
                        "delta": { "type": "text_delta", "text": "inside" } }
         });
         assert!(matches!(
-            frame_to_events(&delta).as_slice(),
+            once(&delta).as_slice(),
             [AgentEvent::Message { parent: Some(p), .. }] if p == "t1"
         ));
     }
@@ -672,7 +943,7 @@ mod tests {
                                        "is_error": true, "content": "boom" }] }
         });
         assert!(matches!(
-            frame_to_events(&frame).as_slice(),
+            once(&frame).as_slice(),
             [AgentEvent::ToolUpdate { status: ToolStatus::Failed, content: Some(c), .. }]
                 if c == "boom"
         ));
@@ -682,7 +953,7 @@ mod tests {
     fn housekeeping_frames_are_silent_rather_than_gaps() {
         for kind in ["system", "rate_limit_event", "control_response", "stream_event"] {
             assert!(
-                frame_to_events(&serde_json::json!({ "type": kind })).is_empty(),
+                once(&serde_json::json!({ "type": kind })).is_empty(),
                 "{kind} should be silent"
             );
         }
@@ -693,7 +964,7 @@ mod tests {
         // The property the derived transcript rests on: a new kind of
         // conversation content is reported, never silently dropped.
         assert!(matches!(
-            frame_to_events(&serde_json::json!({
+            once(&serde_json::json!({
                 "type": "something_new",
                 "message": { "content": [{ "type": "text", "text": "words" }] }
             }))
@@ -722,7 +993,7 @@ mod tests {
             "attachment",
         ] {
             assert!(
-                frame_to_events(&serde_json::json!({ "type": kind })).is_empty(),
+                once(&serde_json::json!({ "type": kind })).is_empty(),
                 "{kind} is bookkeeping, not lost content"
             );
         }
