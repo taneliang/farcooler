@@ -98,7 +98,7 @@ struct Workspace: Decodable, Identifiable, Hashable {
         [repository, branch, (host?.isEmpty ?? true) ? nil : host]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
-            .joined(separator: " · ")
+            .joined(separator: " / ")
     }
 
     /// A one-line summary for a collapsed row.

@@ -43,14 +43,13 @@ struct ChangesPane: View {
     @State private var picking = false
     @State private var query = ""
     @FocusState private var filtering: Bool
+    @State private var lastHunkJump: String?
 
     private var codeFont: Font { Font(preferences.terminalFont() as CTFont) }
 
     var body: some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
-                header
-                Divider()
                 if changes.error != nil {
                     problem
                 }
@@ -58,105 +57,26 @@ struct ChangesPane: View {
                     HStack(spacing: 0) {
                         fileColumn.frame(width: 220)
                         Divider()
-                        diffBody
+                        VStack(spacing: 0) {
+                            diffNavigator(compact: false)
+                            Divider()
+                            diffBody
+                        }
                     }
                 } else {
                     VStack(spacing: 0) {
-                        filePicker
+                        diffNavigator(compact: true)
                         Divider()
                         diffBody
                     }
                 }
             }
         }
+        .background(WorkspaceStyle.document)
         .task(id: changes.workspace.id) { await changes.loadIfNeeded() }
         // Cancelled with the view, which is what keeps this honest: the poll
         // exists only while somebody is reading the diff.
         .task(id: changes.workspace.id) { await changes.follow() }
-    }
-
-    // MARK: - Chrome
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Picker("", selection: $changes.scope) {
-                ForEach(DiffScope.allCases) { s in Text(s.label).tag(s) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .onChange(of: changes.scope) { _, _ in
-                Task { await changes.load(fresh: true) }
-            }
-
-            Spacer(minLength: 4)
-
-            Text(changes.changeSet.branch)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .layoutPriority(-1)
-
-            counts
-
-            Button {
-                Task { await changes.load(fresh: true) }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Read the worktree again")
-
-            Button {
-                Task { await changes.markRead() }
-            } label: {
-                Image(systemName: "checkmark.circle")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Mark Read")
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-    }
-
-    private var counts: some View {
-        HStack(spacing: 4) {
-            countText
-            if changes.changeSet.isDirty {
-                Circle().fill(.orange).frame(width: 5, height: 5)
-            }
-        }
-        .font(.system(size: 10.5, design: .monospaced))
-    }
-
-    /// A single attributed run keeps additions and deletions on one exact
-    /// device-pixel baseline while preserving their semantic colors.
-    private var countText: Text {
-        // Line counts belong to the branch, and only to the branch. Local's are
-        // known one file at a time, as each is read, so a total there would
-        // climb as you scrolled and read as work arriving rather than as the
-        // view catching up. How many files are dirty is known immediately and
-        // is what the scope is actually about.
-        if changes.scope == .local {
-            let n = changes.files.count
-            return Text(n == 1 ? "1 file" : "\(n) files")
-        }
-        var text = AttributedString()
-        if changes.changeSet.insertions > 0 {
-            var additions = AttributedString("+\(changes.changeSet.insertions)")
-            additions.foregroundColor = .green
-            text.append(additions)
-        }
-        if changes.changeSet.deletions > 0 {
-            let separator = changes.changeSet.insertions > 0 ? " " : ""
-            var deletions = AttributedString("\(separator)-\(changes.changeSet.deletions)")
-            deletions.foregroundColor = .red
-            text.append(deletions)
-        }
-        return Text(text)
     }
 
     /// An older machine cannot do this at all, and that is worth saying rather
@@ -267,9 +187,89 @@ struct ChangesPane: View {
     private func jump(to f: ChangedFile) {
         picking = false
         changes.selectedFile = f.path
+        lastHunkJump = nil
         jumping = true
         jumpTo = f.path
         Task { await changes.ensure(f.path) }
+    }
+
+    /// Always-visible orientation and movement. At narrow widths the current
+    /// file opens the searchable picker; at wide widths the file column already
+    /// provides that choice, so the same space becomes a sticky current-file
+    /// label. Hunk movement remains available at either width.
+    private func diffNavigator(compact: Bool) -> some View {
+        HStack(spacing: 4) {
+            if compact {
+                navButton("chevron.up", help: "Previous file") { moveFile(-1) }
+                filePicker
+                navButton("chevron.down", help: "Next file") { moveFile(1) }
+            } else if let file = chosen {
+                FileStatusBadge(status: file.status, binary: file.binary)
+                Text(pathLabel(file))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                Text(counts(file))
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(chosenLabel)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 4)
+
+            Divider().frame(height: 14).padding(.horizontal, 2)
+            navButton("arrow.up.to.line", help: "Previous hunk") { moveHunk(-1) }
+            navButton("arrow.down.to.line", help: "Next hunk") { moveHunk(1) }
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 28)
+        .background(WorkspaceStyle.paneChrome.opacity(0.60))
+    }
+
+    private func navButton(_ symbol: String, help: String, action: @escaping () -> Void)
+        -> some View
+    {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 9.5, weight: .medium))
+                .frame(width: WorkspaceStyle.controlTarget, height: WorkspaceStyle.controlTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .disabled(changes.files.isEmpty)
+        .help(help)
+    }
+
+    private func moveFile(_ direction: Int) {
+        let files = changes.files
+        guard !files.isEmpty else { return }
+        let current = files.firstIndex { $0.path == changes.selectedFile }
+            ?? (direction > 0 ? -1 : 0)
+        let next = (current + direction + files.count) % files.count
+        jump(to: files[next])
+    }
+
+    private func moveHunk(_ direction: Int) {
+        let targets = hunkTargets
+        guard !targets.isEmpty else { return }
+        let current = lastHunkJump.flatMap { target in targets.firstIndex(of: target) }
+            ?? (direction > 0 ? -1 : 0)
+        let next = (current + direction + targets.count) % targets.count
+        lastHunkJump = targets[next]
+        jumping = false
+        jumpTo = targets[next]
+    }
+
+    private var hunkTargets: [String] {
+        let current = changes.selectedFile
+        return rows.compactMap { row in
+            guard row.path == current, case .hunk = row.kind else { return nil }
+            return row.id
+        }
     }
 
     /// Which file, when there is no room for a list.
@@ -287,6 +287,9 @@ struct ChangesPane: View {
     private var filePicker: some View {
         Button { picking = true } label: {
             HStack(spacing: 5) {
+                if let file = chosen {
+                    FileStatusBadge(status: file.status, binary: file.binary)
+                }
                 Text(chosenLabel)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -306,6 +309,7 @@ struct ChangesPane: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .help("Jump to a file")
         .popover(isPresented: $picking, arrowEdge: .bottom) { filterList }
         .onChange(of: picking) { _, open in
@@ -349,7 +353,7 @@ struct ChangesPane: View {
                         ForEach(Array(matches.enumerated()), id: \.element.id) { i, f in
                             Button { jump(to: f) } label: {
                                 HStack(spacing: 6) {
-                                    Text(f.path)
+                                    Text(pathLabel(f))
                                         .lineLimit(1)
                                         .truncationMode(.head)
                                     Spacer(minLength: 4)
@@ -423,6 +427,13 @@ struct ChangesPane: View {
         return parts.isEmpty ? "no lines" : parts.joined(separator: " ")
     }
 
+    private func pathLabel(_ file: ChangedFile) -> String {
+        guard file.status == .renamed, let old = file.oldPath, old != file.path else {
+            return file.path
+        }
+        return "\(old) → \(file.path)"
+    }
+
     /// The same list as the combo box, with room to show it.
     private var fileColumn: some View {
         VStack(spacing: 0) {
@@ -433,16 +444,19 @@ struct ChangesPane: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(matches) { f in
-                        Button { jump(to: f) } label: {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(f.path)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .lineLimit(1)
-                                    .truncationMode(.head)
-                                Text(counts(f))
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.secondary)
+                        ForEach(matches) { f in
+                            Button { jump(to: f) } label: {
+                            HStack(alignment: .top, spacing: 6) {
+                                FileStatusBadge(status: f.status, binary: f.binary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(pathLabel(f))
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .lineLimit(1)
+                                        .truncationMode(.head)
+                                    Text(counts(f))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 8)
@@ -623,6 +637,7 @@ struct ChangesPane: View {
         out.reserveCapacity(changes.files.count * 8)
         for f in changes.files {
             out.append(DiffRow(id: f.path, kind: .heading(f), path: f.path))
+            if changes.collapsedFiles.contains(f.path) { continue }
             if f.binary {
                 out.append(note(f, "Binary file — nothing to show"))
             } else if changes.isUntracked(f.path) {
@@ -662,7 +677,9 @@ struct ChangesPane: View {
     private func body(of f: ChangedFile, lines: [DiffComputation.Line]) -> [DiffRow] {
         var out: [DiffRow] = []
         var gap = 0
+        var hunk = 0
         var previous: Int?
+        var beginsHunk = true
 
         for (i, line) in lines.enumerated() {
             if let above = previous, let below = line.newNumber, below > above + 1 {
@@ -682,6 +699,16 @@ struct ChangesPane: View {
                             path: f.path))
                 }
                 gap += 1
+                beginsHunk = true
+            }
+            if beginsHunk {
+                out.append(
+                    DiffRow(
+                        id: "\(f.path)!hunk\(hunk)",
+                        kind: .hunk(hunk + 1, line.oldNumber, line.newNumber),
+                        path: f.path))
+                hunk += 1
+                beginsHunk = false
             }
             // Only a line with a new-side number can bound a gap. A removed line
             // has none, and treating its absence as a jump would open a gap
@@ -701,7 +728,10 @@ struct ChangesPane: View {
                 // Read when the heading comes into view, not when the branch
                 // loads: forty files would otherwise be forty round trips
                 // before anything drew.
-                .task(id: f.path) { await changes.ensure(f.path) }
+                .task(id: f.path) {
+                    guard !changes.collapsedFiles.contains(f.path) else { return }
+                    await changes.ensure(f.path)
+                }
                 // Where this heading sits relative to the top of the scroll, so
                 // the jump bar can name the file you are INSIDE.
                 //
@@ -725,7 +755,26 @@ struct ChangesPane: View {
             lineRow(line)
         case .gap(let path, let index, let count):
             gapRow(path, index, count)
+        case .hunk(let index, let old, let new):
+            hunkRow(index: index, old: old, new: new)
         }
+    }
+
+    private func hunkRow(index: Int, old: Int?, new: Int?) -> some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: gutter * 2 + 12)
+            Text("@@")
+                .foregroundStyle(Color.accentColor.opacity(0.72))
+            Text("  \(old ?? 0) → \(new ?? 0)")
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Text("\(index)")
+                .foregroundStyle(.tertiary)
+                .padding(.trailing, 8)
+        }
+        .font(.system(size: max(10.5, preferences.fontSize - 1), design: .monospaced))
+        .padding(.vertical, 2)
+        .background(Color.accentColor.opacity(0.035))
     }
 
     /// The control that opens a gap.
@@ -779,7 +828,26 @@ struct ChangesPane: View {
 
     private func fileHeading(_ f: ChangedFile) -> some View {
         HStack(spacing: 8) {
-            Text(f.path)
+            Button {
+                if changes.collapsedFiles.contains(f.path) {
+                    changes.collapsedFiles.remove(f.path)
+                    Task { await changes.ensure(f.path) }
+                } else {
+                    changes.collapsedFiles.insert(f.path)
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(changes.collapsedFiles.contains(f.path) ? -90 : 0))
+                    .frame(width: 16, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help(changes.collapsedFiles.contains(f.path) ? "Expand file" : "Collapse file")
+
+            FileStatusBadge(status: f.status, binary: f.binary)
+            Text(pathLabel(f))
                 .fontWeight(.semibold)
                 .lineLimit(1)
                 .truncationMode(.head)
@@ -798,18 +866,24 @@ struct ChangesPane: View {
 
     private func lineRow(_ line: DiffComputation.Line) -> some View {
         HStack(spacing: 0) {
+            Rectangle()
+                .fill(lineAccent(line.kind))
+                .frame(width: 2)
             Text(line.oldNumber.map(String.init) ?? "")
                 .frame(width: gutter, alignment: .trailing)
                 .foregroundStyle(.tertiary)
             Text(line.newNumber.map(String.init) ?? "")
                 .frame(width: gutter, alignment: .trailing)
                 .foregroundStyle(.tertiary)
-            Text(marker(line.kind)).frame(width: 12)
+            Text(marker(line.kind))
+                .foregroundStyle(lineAccent(line.kind))
+                .frame(width: 12)
             Text(line.text.isEmpty ? " " : line.text)
                 .fixedSize(horizontal: true, vertical: false)
             Spacer(minLength: 0)
         }
         .font(codeFont)
+        .padding(.vertical, 0.5)
         .background(background(line.kind))
     }
 
@@ -826,10 +900,40 @@ struct ChangesPane: View {
 
     private func background(_ kind: DiffComputation.Kind) -> Color {
         switch kind {
-        case .added: return .green.opacity(0.13)
-        case .removed: return .red.opacity(0.13)
+        case .added: return .green.opacity(0.07)
+        case .removed: return .red.opacity(0.07)
         case .context: return .clear
         }
+    }
+
+    private func lineAccent(_ kind: DiffComputation.Kind) -> Color {
+        switch kind {
+        case .added: return .green.opacity(0.62)
+        case .removed: return .red.opacity(0.62)
+        case .context: return .clear
+        }
+    }
+}
+
+private struct FileStatusBadge: View {
+    let status: ChangedFileStatus?
+    let binary: Bool
+
+    private var color: Color {
+        switch status {
+        case .added, .untracked: return .green
+        case .deleted, .conflicted: return .red
+        case .renamed, .copied: return .orange
+        case .modified, .typeChanged, .none: return .secondary
+        }
+    }
+
+    var body: some View {
+        Text(binary ? "B" : (status?.mark ?? "M"))
+            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+            .foregroundStyle(color)
+            .frame(width: 12, alignment: .center)
+            .help(binary ? "Binary file" : (status?.label ?? "Modified"))
     }
 }
 
@@ -863,6 +967,7 @@ struct DiffRow: Identifiable {
         case heading(ChangedFile)
         case note(String)
         case line(DiffComputation.Line)
+        case hunk(Int, Int?, Int?)
         /// The unchanged lines a diff left out: which file, which gap, and how
         /// many lines are hiding in it.
         case gap(String, Int, Int)

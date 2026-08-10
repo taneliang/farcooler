@@ -297,7 +297,7 @@ private struct TilePane: View {
     /// itself to its font would make the app's estimate of how much terminal fits
     /// wrong by however much it had grown, and being wrong in that direction wraps
     /// every long line twice.
-    static let headerHeight: CGFloat = 22
+    static let headerHeight: CGFloat = WorkspaceStyle.paneHeaderHeight
 
     let terminal: Terminal
     /// The worktree's diff, drawn when this pane is in changes mode.
@@ -500,9 +500,14 @@ private struct TilePane: View {
                 .frame(minWidth: 9)
 
             Text(terminal.label)
-                .font(.system(size: 11, weight: isFocused ? .medium : .regular))
+                .font(WorkspaceStyle.paneTitle)
                 .foregroundStyle(isFocused ? .primary : .secondary)
                 .lineLimit(1)
+                .layoutPriority(1)
+
+            if terminal.isChangesPane {
+                changesControls
+            }
 
             Spacer(minLength: 4)
 
@@ -546,8 +551,10 @@ private struct TilePane: View {
                     onSwitchPaneMode(terminal)
                 } label: {
                     Image(systemName: terminal.isAgentPane ? "terminal" : "bubble.left.and.text.bubble.right")
-                        .font(.system(size: 9))
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
+                        .frame(width: WorkspaceStyle.controlTarget, height: WorkspaceStyle.controlTarget)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(terminal.isAgentPane ? "Show the terminal (⌃B a)" : "Show the chat (⌃B a)")
@@ -562,7 +569,76 @@ private struct TilePane: View {
         }
         .padding(.horizontal, 8)
         .frame(height: Self.headerHeight)
-        .background(isFocused ? Color.accentColor.opacity(0.07) : Color.primary.opacity(0.03))
+        .background { PaneHeaderBackground(focused: isFocused) }
+    }
+
+    /// A changes pane owns its comparison controls in the same strip that names
+    /// it. This removes the second title bar that used to begin immediately
+    /// below “Changes” and gives every pane one clear piece of chrome.
+    private var changesControls: some View {
+        HStack(spacing: 7) {
+            Divider().frame(height: 14).padding(.horizontal, 2)
+
+            Picker(
+                "Comparison",
+                selection: Binding(
+                    get: { changes.scope },
+                    set: { changes.scope = $0 })
+            ) {
+                ForEach(DiffScope.allCases) { scope in
+                    Text(scope.label).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.mini)
+            .fixedSize()
+            .onChange(of: changes.scope) { _, _ in
+                Task { await changes.load(fresh: true) }
+            }
+
+            changeCount
+
+            if changes.changeSet.isDirty {
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 5, height: 5)
+                    .help("This worktree has uncommitted changes")
+            }
+
+            Button {
+                Task { await changes.load(fresh: true) }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 10))
+                    .frame(width: WorkspaceStyle.controlTarget, height: WorkspaceStyle.controlTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Refresh changes")
+        }
+    }
+
+    private var changeCount: Text {
+        if changes.scope == .local {
+            let count = changes.files.count
+            return Text(count == 1 ? "1 file" : "\(count) files")
+                .foregroundColor(.secondary)
+                .font(.system(size: 10.5, design: .monospaced))
+        }
+        var value = AttributedString()
+        if changes.changeSet.insertions > 0 {
+            var added = AttributedString("+\(changes.changeSet.insertions)")
+            added.foregroundColor = .green
+            value.append(added)
+        }
+        if changes.changeSet.deletions > 0 {
+            var removed = AttributedString("\(value.characters.isEmpty ? "" : " ")−\(changes.changeSet.deletions)")
+            removed.foregroundColor = .red
+            value.append(removed)
+        }
+        return Text(value).font(.system(size: 10.5, design: .monospaced))
     }
 }
 

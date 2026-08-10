@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var store = FleetStore()
     @ObservedObject private var preferences = Preferences.shared
+    @ObservedObject private var themes = Themes.shared
     @Environment(\.openSettings) private var openSettings
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
@@ -745,6 +746,7 @@ struct ContentView: View {
 
             statusBar
         }
+        .background(WorkspaceStyle.sidebar)
         // Declared in exactly one place. A second declaration on the
         // `NavigationSplitView`'s sidebar closure made which width the column
         // settled on nondeterministic, and the window drifted with it.
@@ -764,7 +766,7 @@ struct ContentView: View {
                 .foregroundStyle(.tertiary)
             TextField("Search worktrees and agents", text: $query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(.system(size: 12.5))
                 .focused($searchFocused)
             if !query.isEmpty {
                 Button { query = "" } label: {
@@ -776,8 +778,8 @@ struct ContentView: View {
             }
         }
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.055)))
 
         }
         .padding(.bottom, 6)
@@ -802,7 +804,7 @@ struct ContentView: View {
             // header naming one would be naming the wrong thing, or picking
             // a favorite among rows that are not ranked.
             Text("Fleet")
-                .font(.headline)
+                .font(.system(size: 15, weight: .semibold))
             if store.clients.values.contains(where: \.busy) { ProgressView().controlSize(.mini) }
 
             Spacer()

@@ -52,12 +52,50 @@ struct ChangeCommit: Decodable, Equatable, Identifiable {
 
 struct ChangedFile: Decodable, Equatable, Identifiable {
     var path: String
+    var status: ChangedFileStatus?
+    var oldPath: String?
     var insertions: Int
     var deletions: Int
     var binary: Bool
 
     var id: String { path }
     var name: String { (path as NSString).lastPathComponent }
+
+    enum CodingKeys: String, CodingKey {
+        case path, status, insertions, deletions, binary
+        case oldPath = "old_path"
+    }
+}
+
+enum ChangedFileStatus: String, Decodable {
+    case added, modified, deleted, renamed, copied
+    case typeChanged = "type_changed"
+    case untracked, conflicted
+
+    var mark: String {
+        switch self {
+        case .added, .untracked: return "A"
+        case .modified: return "M"
+        case .deleted: return "D"
+        case .renamed: return "R"
+        case .copied: return "C"
+        case .typeChanged: return "T"
+        case .conflicted: return "!"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .added: return "Added"
+        case .modified: return "Modified"
+        case .deleted: return "Deleted"
+        case .renamed: return "Renamed"
+        case .copied: return "Copied"
+        case .typeChanged: return "Type changed"
+        case .untracked: return "Untracked"
+        case .conflicted: return "Conflicted"
+        }
+    }
 }
 
 struct WorkingTree: Decodable, Equatable {
@@ -65,6 +103,18 @@ struct WorkingTree: Decodable, Equatable {
     var unstaged: [String]
     var untracked: [String]
     var conflicted: [String]
+    var changes: [WorkingTreeFile]?
+}
+
+struct WorkingTreeFile: Decodable, Equatable {
+    var path: String
+    var status: ChangedFileStatus
+    var oldPath: String?
+
+    enum CodingKeys: String, CodingKey {
+        case path, status
+        case oldPath = "old_path"
+    }
 }
 
 /// One worktree's line in the fleet's changed-since-you-looked list.
@@ -102,7 +152,7 @@ enum DiffScope: String, CaseIterable, Identifiable, Codable {
     var label: String {
         switch self {
         case .branch: return "Branch"
-        case .local: return "Local"
+        case .local: return "Uncommitted"
         }
     }
 }
@@ -145,6 +195,10 @@ final class ChangesStore: ObservableObject {
     /// the code that did not change — which is the thing a diff exists to
     /// avoid.
     @Published var openGaps: Set<String> = []
+
+    /// Files folded down to their heading. Kept in the store so a tmux layout
+    /// switch does not reopen a generated lockfile the user deliberately hid.
+    @Published var collapsedFiles: Set<String> = []
 
     /// Where the scroll was, held OUTSIDE the view.
     ///
@@ -226,6 +280,8 @@ final class ChangesStore: ObservableObject {
                 let lines = fileDiffs[path] ?? []
                 return ChangedFile(
                     path: path,
+                    status: localStatus(path),
+                    oldPath: nil,
                     insertions: lines.filter { $0.kind == .added }.count,
                     deletions: lines.filter { $0.kind == .removed }.count,
                     binary: false)
@@ -251,6 +307,13 @@ final class ChangesStore: ObservableObject {
         guard let w = changeSet.workingTree else { return [] }
         var seen = Set<String>()
         return (w.staged + w.unstaged + w.conflicted + w.untracked).filter { seen.insert($0).inserted }
+    }
+
+    private func localStatus(_ path: String) -> ChangedFileStatus {
+        guard let tree = changeSet.workingTree else { return .modified }
+        if tree.conflicted.contains(path) { return .conflicted }
+        if tree.untracked.contains(path) { return .untracked }
+        return tree.changes?.first(where: { $0.path == path })?.status ?? .modified
     }
 
     /// Whether this store has ever read the worktree.
@@ -301,6 +364,8 @@ final class ChangesStore: ObservableObject {
         if let open = selectedFile, !files.contains(where: { $0.path == open }) {
             selectedFile = nil
         }
+        let live = Set(files.map(\.path))
+        collapsedFiles = collapsedFiles.intersection(live)
     }
 
     /// Read one file's diff, if it has not been read already.

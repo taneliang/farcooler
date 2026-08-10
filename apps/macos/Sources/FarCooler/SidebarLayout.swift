@@ -33,19 +33,20 @@ enum SidebarGrid {
 
     /// A square tap target for an icon control, so every one of them occupies
     /// the same box whatever glyph is inside it.
-    static let control: CGFloat = 20
+    static let control: CGFloat = 24
 
     /// Breathing room inside primary worktree and terminal rows.
     ///
-    /// Five points keeps the fleet scannable without turning it into a table of
-    /// cramped 24-point lines; secondary rows such as Hidden remain denser.
-    static let rowVerticalPadding: CGFloat = 5
+    /// Four points gives single-line children a native source-list cadence and
+    /// leaves two-line worktrees comfortable without making a long fleet feel
+    /// vertically inflated. Secondary rows such as Hidden remain denser.
+    static let rowVerticalPadding: CGFloat = 4
 
     /// Project labels separate groups, so the space before one is deliberately
     /// larger than the space after it. That makes each heading belong to the
     /// worktrees below instead of floating halfway between two projects.
-    static let projectTopPadding: CGFloat = 18
-    static let projectBottomPadding: CGFloat = 4
+    static let projectTopPadding: CGFloat = 14
+    static let projectBottomPadding: CGFloat = 2
 }
 
 /// One row of the sidebar, in the band every other row uses.

@@ -226,35 +226,16 @@ struct WorkspaceSection: View {
                 ForEach(workspace.terminals) { t in
                     row(t, ordinal: numbering[t.id])
                 }
-
-                Button(action: onNewTerminal) {
-                    SidebarRow(indent: 1) {
-                        HStack(spacing: SidebarGrid.gap) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 9, weight: .semibold))
-                                .frame(width: SidebarGrid.marker)
-                            Text("New terminal").font(.system(size: 12))
-                        }
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, SidebarGrid.rowVerticalPadding)
-                        .contentShape(Rectangle())
-                    }
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 4)
-                // Making a terminal is a mutation same as any other, and one
-                // that would simply hang against a machine already known to
-                // be gone rather than fail fast the way `act(on:)` fails
-                // everything else.
-                .opacity(usable ? 1 : 0.55)
-                .allowsHitTesting(usable)
             }
         }
     }
 
-    /// One line. Name, branch, and — only when closed — what is inside.
+    /// A two-level heading: the worktree is what you choose, and the branch is
+    /// orientation. Giving each its own baseline keeps long branch names from
+    /// competing with the worktree name and makes terminals below read as real
+    /// children rather than another run of equal rows.
     private var header: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .center, spacing: 0) {
             Button(action: onToggle) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
@@ -265,38 +246,30 @@ struct WorkspaceSection: View {
             }
             .buttonStyle(.plain)
 
-            Text(workspace.task)
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(workspace.task)
+                    .font(WorkspaceStyle.sidebarPrimary)
+                    .lineLimit(1)
 
-            Text(workspace.branch)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.leading, 7)
-                .layoutPriority(-1)
+                HStack(spacing: 5) {
+                    Text(workspace.isMainCheckout ? "Primary checkout" : workspace.branch)
+                        .font(WorkspaceStyle.sidebarMetadata)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
 
-            if workspace.worktreeMissing {
-                // Said plainly, because every terminal in it is dead and
-                // the reason is not something the user can work out from
-                // a color. The row survives at all because it holds
-                // terminals worth keeping — an empty one is deleted by
-                // the daemon without asking.
-                //
-                // A deleted worktree and a moved one look identical from
-                // here — the reconciler sees a path stop existing either
-                // way — so the help covers the case the badge cannot name:
-                // after a move there are two rows, and only this one has
-                // the history.
-                Text("worktree gone")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
-                    .padding(.leading, 7)
-                    .help(
-                        "This worktree's directory is gone. If you moved it with git worktree "
-                            + "move, the directory it moved to is a separate workspace now — this "
-                            + "row keeps the terminals and agent transcripts from before the move.")
+                    if workspace.worktreeMissing {
+                        Text("worktree gone")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.orange)
+                            .help(
+                                "This worktree's directory is gone. If you moved it with git worktree "
+                                    + "move, the directory it moved to is a separate workspace now — this "
+                                    + "row keeps the terminals and agent transcripts from before the move.")
+                    }
+                }
             }
+            .layoutPriority(1)
 
             Spacer(minLength: 6)
 
@@ -329,75 +302,93 @@ struct WorkspaceSection: View {
             // A width per NUMBER was tried and is worse than the problem: `+1`
             // in a box sized for `+35,870` leaves a hole you could park a word
             // in, and the pair stops reading as one thing.
-            if let changes, changes.hasDiff {
-                // One attributed Text means one baseline. Two sibling Text
-                // views can still land on adjacent device pixels after the
-                // stack reconciles their independently rounded font metrics.
-                changeCountsText(changes)
-                .font(.system(size: 10, design: .monospaced))
-                .lineLimit(1)
-                .fixedSize()
-                .frame(width: countsWidth, alignment: .trailing)
-                .padding(.leading, Grid.cell)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(
-                    "\(changes.insertions) insertions, \(changes.deletions) deletions")
-            }
+            // Counts and hover actions are two states of one trailing cell.
+            // Keeping invisible controls after the counts still made SwiftUI
+            // reserve their width, which stranded the diff in the middle of
+            // the row. Sharing the cell pins both states to the native trailing
+            // edge and prevents the actions from shifting the row on hover.
+            ZStack(alignment: .trailing) {
+                if let changes, changes.hasDiff {
+                    // One attributed Text means one baseline. Two sibling Text
+                    // views can still land on adjacent device pixels after the
+                    // stack reconciles their independently rounded font metrics.
+                    changeCountsText(changes)
+                        .font(.system(size: 10, design: .monospaced))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(width: countsWidth, alignment: .trailing)
+                        .opacity(hovering || isSelected ? 0 : 1)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(
+                            "\(changes.insertions) insertions, \(changes.deletions) deletions")
+                }
 
-            Menu {
-                // First, because it is what you do with a worktree you can see
-                // in a list but are not currently looking at — which is the
-                // only thing this menu can do that the title bar cannot.
-                EditorMenuItems(
-                    workspace: workspace, onError: onEditorError,
-                    showsSettingsItem: false)
-                Divider()
-                Button("New terminal", action: onNewTerminal)
-                Divider()
-                if workspace.isHidden {
-                    Button("Unhide", action: onUnhide)
-                } else {
-                    Button("Hide", action: onHide)
+                HStack(spacing: 2) {
+                    Button(action: onNewTerminal) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(
+                                width: WorkspaceStyle.controlTarget,
+                                height: WorkspaceStyle.controlTarget)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("New terminal in \(workspace.task)")
+                    .opacity(hovering || isSelected ? (usable ? 1 : 0.45) : 0)
+                    .allowsHitTesting((hovering || isSelected) && usable)
+
+                    Menu {
+                        // First, because it is what you do with a worktree you can see
+                        // in a list but are not currently looking at — which is the
+                        // only thing this menu can do that the title bar cannot.
+                        EditorMenuItems(
+                            workspace: workspace, onError: onEditorError,
+                            showsSettingsItem: false)
+                        Divider()
+                        Button("New terminal", action: onNewTerminal)
+                        Divider()
+                        if workspace.isHidden {
+                            Button("Unhide", action: onUnhide)
+                        } else {
+                            Button("Hide", action: onHide)
+                        }
+                        // Absent, not disabled, for the main checkout. A daemon-side
+                        // refusal is a safety net; the button should not be there to
+                        // press.
+                        if workspace.worktreeMissing && !workspace.isMainCheckout {
+                            Button("Dismiss", action: onRemove)
+                        } else if !workspace.isMainCheckout {
+                            Button("Remove Worktree…", role: .destructive, action: onRemove)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(
+                                width: WorkspaceStyle.controlTarget,
+                                height: WorkspaceStyle.controlTarget)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .opacity(hovering || isSelected ? (usable ? 1 : 0.55) : 0)
+                    .allowsHitTesting((hovering || isSelected) && usable)
                 }
-                // Absent, not disabled, for the main checkout. A daemon-side
-                // refusal is a safety net; the button should not be there to
-                // press.
-                if workspace.worktreeMissing && !workspace.isMainCheckout {
-                    // A worktree whose directory is already gone needs no
-                    // confirmation: `removal_needs_confirmation` (Task 8)
-                    // answers false once the path is not a directory, so this
-                    // routes to the same removal path as everything else.
-                    // Excluded for the main checkout the same way "Remove
-                    // Worktree…" below is: `remove_worktree` refuses it
-                    // outright, so the button should not be offered at all.
-                    Button("Dismiss", action: onRemove)
-                } else if !workspace.isMainCheckout {
-                    Button("Remove Worktree…", role: .destructive, action: onRemove)
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 18, height: 16)
-                    .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            // Hover already gates visibility; an unusable machine's menu
-            // stays reachable by hover but reads as dimmed and does nothing
-            // — every item in it is a mutation (hide, remove, a new
-            // terminal, opening an editor on the worktree), and every one
-            // of those is exactly what `usable` says this machine cannot
-            // take right now.
-            .opacity(hovering ? (usable ? 1 : 0.55) : 0)
-            .allowsHitTesting(usable)
-            .padding(.leading, 2)
+            .frame(
+                width: max(countsWidth, WorkspaceStyle.controlTarget * 2 + 2),
+                alignment: .trailing)
+            .padding(.leading, Grid.cell)
         }
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
         .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.primary.opacity(0.08) : (hovering ? Color.primary.opacity(0.04) : .clear))
+                .fill(
+                    isSelected
+                        ? Color.accentColor.opacity(0.14)
+                        : (hovering ? Color.primary.opacity(0.045) : .clear))
         )
         .padding(.horizontal, SidebarGrid.highlightInset)
         .contentShape(Rectangle())
@@ -457,35 +448,38 @@ struct ProjectHeader: View {
         // achieve.
         SidebarRow {
             HStack(spacing: 0) {
-                // The chevron goes in `SidebarGrid.gutter` — the column this
-                // header already padded by and left empty — so collapsing costs
-                // no horizontal space and lands in the same column as every
-                // other disclosure in the sidebar. A `Spacer` of the same width
-                // holds the column when there is nothing to collapse, so a
-                // silent host's header does not sit one indent to the left of
-                // every real one.
+                // One semantic gutter, never an icon followed by a disclosure
+                // column. At rest it says what the row is; on hover a
+                // collapsible row becomes its control. A host with nothing to
+                // disclose keeps the machine icon rather than advertising a
+                // caret that cannot do anything.
                 if onToggleCollapse != nil {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                    ZStack(alignment: .leading) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 10, weight: .medium))
+                            .opacity(hovering ? 0 : 1)
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                            .opacity(hovering ? 1 : 0)
+                    }
+                    .foregroundStyle(.tertiary)
+                    .frame(width: SidebarGrid.gutter, alignment: .leading)
+                } else {
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.tertiary)
                         .frame(width: SidebarGrid.gutter, alignment: .leading)
-                } else {
-                    Spacer().frame(width: SidebarGrid.gutter)
                 }
 
                 HStack(spacing: 6) {
-                    Text(name.uppercased())
-                        .font(.system(size: 10, weight: .semibold))
+                    Text(name)
+                        .font(WorkspaceStyle.sectionTitle)
                         .foregroundStyle(.secondary)
-                        .tracking(0.6)
-                    Text("\(count)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
                     if showHost {
                         Text(host.isEmpty ? "this Mac" : host)
-                            .font(.system(size: 10))
+                            .font(.system(size: 10.5))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
@@ -622,11 +616,11 @@ struct TerminalRow: View {
     }
 
     var body: some View {
-        HStack(spacing: Grid.gap) {
+        HStack(spacing: 7) {
             StatusGlyph(status: status, size: Grid.marker)
 
             Text(terminal.label)
-                .font(.system(size: 13))
+                .font(.system(size: 12.5))
                 .lineLimit(1)
                 // The name yields before the status does. Which terminal it is
                 // matters less than what it wants, and the sidebar is narrow.
@@ -673,7 +667,10 @@ struct TerminalRow: View {
         .padding(.trailing, SidebarGrid.edge - SidebarGrid.highlightInset)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.primary.opacity(0.08) : (hovering ? Color.primary.opacity(0.04) : .clear))
+                .fill(
+                    isSelected
+                        ? Color.accentColor.opacity(0.13)
+                        : (hovering ? Color.primary.opacity(0.045) : .clear))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(Color.accentColor, lineWidth: targeted ? 2 : 0))

@@ -325,13 +325,33 @@ fn change_set_json(cs: &pb::ChangeSet) -> serde_json::Value {
         "files": cs.files.iter().map(|f| serde_json::json!({
             "path": f.path, "insertions": f.insertions, "deletions": f.deletions,
             "binary": f.binary,
+            "status": file_status_name(f.status),
+            "old_path": f.old_path,
         })).collect::<Vec<_>>(),
         "working_tree": cs.working_tree.as_ref().map(|w| serde_json::json!({
             "staged": w.staged.iter().map(|f| &f.path).collect::<Vec<_>>(),
             "unstaged": w.unstaged.iter().map(|f| &f.path).collect::<Vec<_>>(),
             "untracked": w.untracked,
             "conflicted": w.conflicted,
+            "changes": w.staged.iter().chain(w.unstaged.iter()).map(|f| serde_json::json!({
+                "path": f.path,
+                "status": file_status_name(f.status),
+                "old_path": f.old_path,
+            })).collect::<Vec<_>>(),
         })),
     })
 }
 
+fn file_status_name(status: i32) -> &'static str {
+    match pb::FileStatus::try_from(status).unwrap_or(pb::FileStatus::Unspecified) {
+        pb::FileStatus::Added => "added",
+        pb::FileStatus::Modified => "modified",
+        pb::FileStatus::Deleted => "deleted",
+        pb::FileStatus::Renamed => "renamed",
+        pb::FileStatus::Copied => "copied",
+        pb::FileStatus::TypeChanged => "type_changed",
+        pb::FileStatus::Untracked => "untracked",
+        pb::FileStatus::Conflicted => "conflicted",
+        pb::FileStatus::Unspecified => "modified",
+    }
+}

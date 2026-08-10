@@ -202,15 +202,47 @@ pub async fn commits_since(repo: &Path, base_commit: &str) -> Result<Vec<Commit>
 /// `-z` because a path is bytes, not a line: one containing a newline or a quote
 /// breaks the ordinary format, and `core.quotePath` mangles anything non-ASCII.
 pub async fn numstat(repo: &Path, base_commit: &str) -> Result<Vec<FileChange>> {
-    let raw = git_bytes(
+    let counts = git_bytes(
         repo,
         &["diff", "--numstat", "-z", "--find-renames", base_commit, "HEAD"],
     )
     .await?;
-    if !raw.ok {
+    let names = git_bytes(
+        repo,
+        &["diff", "--name-status", "-z", "--find-renames", base_commit, "HEAD"],
+    )
+    .await?;
+    if !counts.ok || !names.ok {
         return Err(DomainError::OperationFailed);
     }
-    Ok(parse_numstat_z(&raw.stdout))
+    let mut files = parse_numstat_z(&counts.stdout);
+    apply_name_status_z(&mut files, &names.stdout);
+    Ok(files)
+}
+
+/// Add the exact kind of change to the count records. `--numstat` tells us
+/// lines and renames, but calls every other path merely modified; the adjacent
+/// `--name-status` read distinguishes adds, deletes, copies, and type changes.
+/// Both use NUL records, so paths with tabs, newlines, and non-ASCII survive.
+pub fn apply_name_status_z(files: &mut [FileChange], bytes: &[u8]) {
+    let mut fields = bytes
+        .split(|b| *b == 0)
+        .filter(|field| !field.is_empty())
+        .map(|field| String::from_utf8_lossy(field).into_owned());
+
+    while let Some(token) = fields.next() {
+        let code = token.as_bytes().first().copied().unwrap_or(b'M');
+        let status = FileStatus::from_xy(code);
+        let (old_path, path) = if matches!(code, b'R' | b'C') {
+            (fields.next(), fields.next().unwrap_or_default())
+        } else {
+            (None, fields.next().unwrap_or_default())
+        };
+        if let Some(file) = files.iter_mut().find(|file| file.path == path) {
+            file.status = status;
+            if old_path.is_some() { file.old_path = old_path; }
+        }
+    }
 }
 
 /// `insertions \t deletions \t path NUL` — and for a rename, the path field is
@@ -535,6 +567,28 @@ mod tests {
         assert_eq!(v[0].status, FileStatus::Renamed);
         assert_eq!(v[0].old_path.as_deref(), Some("old/name.rs"));
         assert_eq!(v[0].path, "new/name.rs");
+    }
+
+    #[test]
+    fn name_status_distinguishes_adds_deletes_and_type_changes() {
+        let mut files = parse_numstat_z(
+            b"1\t0\tadded.rs\x000\t2\tdeleted.rs\x000\t0\ttype.rs\0",
+        );
+        apply_name_status_z(
+            &mut files,
+            b"A\0added.rs\0D\0deleted.rs\0T\0type.rs\0",
+        );
+        assert_eq!(files[0].status, FileStatus::Added);
+        assert_eq!(files[1].status, FileStatus::Deleted);
+        assert_eq!(files[2].status, FileStatus::TypeChanged);
+    }
+
+    #[test]
+    fn name_status_keeps_both_sides_of_a_rename() {
+        let mut files = parse_numstat_z(b"1\t1\t\0before.rs\0after.rs\0");
+        apply_name_status_z(&mut files, b"R100\0before.rs\0after.rs\0");
+        assert_eq!(files[0].status, FileStatus::Renamed);
+        assert_eq!(files[0].old_path.as_deref(), Some("before.rs"));
     }
 
     #[test]

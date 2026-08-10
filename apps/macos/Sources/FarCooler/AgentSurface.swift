@@ -177,7 +177,7 @@ struct AgentSurface: View {
             //
             // `textBackgroundColor` is what every native document surface uses,
             // so this follows the appearance the rest of the app already does.
-            .background(Color(nsColor: .textBackgroundColor))
+            .background(WorkspaceStyle.document)
             // Debounced by `.task(id:)` cancelling its predecessor, the same
             // trick `TileView.panels` uses against a window drag producing
             // one of these per frame.

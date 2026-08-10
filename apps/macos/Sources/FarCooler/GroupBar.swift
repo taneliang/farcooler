@@ -31,7 +31,7 @@ struct GroupBar: View {
         }
         // The row is one line of text tall whatever happens. Without this the
         // scroll view claims whatever height it is offered and the panes lose it.
-        .frame(height: 22)
+        .frame(height: 26)
         .padding(.bottom, Pane.inset)
         // Spring rather than a fixed curve: see `TileView.motion`. A tab
         // strip that takes the same 200ms whether one tab changed or five
@@ -46,7 +46,7 @@ struct GroupBar: View {
         } label: {
             HStack(spacing: 5) {
                 Text(label(group, position: position))
-                    .font(.system(size: 11, weight: active ? .medium : .regular))
+                    .font(.system(size: 11.5, weight: active ? .medium : .regular))
                     .lineLimit(1)
                 // Only where it says something. Every layout has at least one pane,
                 // so "1" beside eleven of twelve pills is a column of noise hiding
@@ -63,7 +63,7 @@ struct GroupBar: View {
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 5)
-                    .fill(active ? Color.primary.opacity(0.09) : .clear)
+                    .fill(active ? Color.accentColor.opacity(0.13) : .clear)
             )
             .contentShape(Rectangle())
         }

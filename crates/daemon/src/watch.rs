@@ -20,7 +20,7 @@
 //! traffic at all, which is what makes a phone holding an SSH session overnight
 //! reasonable.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -99,6 +99,18 @@ fn notification(activity: AgentActivity, label: &str) -> Option<(String, String)
 /// supervisor's — one owner, exactly as for a pane read off the screen.
 fn agent_observation(folded: AgentActivity) -> AgentActivity {
     activity::seen(folded)
+}
+
+/// A tagged pane with no durable terminal record is not a third workspace pane.
+/// It is residue from a close that removed the record before tmux collapsed the
+/// split. Leaving it in the layout gives clients a real rectangle with nothing
+/// they can render, which presents as a large blank column.
+fn orphaned_pane(
+    pane: &farcooler_core::inventory::TaggedPane,
+    daemon: Uuid,
+    terminals: &HashSet<Uuid>,
+) -> bool {
+    pane.daemon_id == daemon && !terminals.contains(&pane.terminal_id)
 }
 
 /// The daemon's live view of what every agent is doing.
@@ -360,7 +372,49 @@ impl Watcher {
 
         let Ok(fleet) = self.service.fleet().await else { return };
         let runtime = self.service.runtime();
-        let panes = self.service.inventory_snapshot();
+        let mut panes = self.service.inventory_snapshot();
+
+        // A record is written before its pane is created, so a managed pane
+        // whose terminal is absent from a successful fleet read can never be a
+        // starting terminal. It is an orphan. Reap it here, where the durable
+        // fleet and live inventory are already read together, then publish the
+        // repaired geometry so every open client fills the recovered space.
+        if panes.inventory_healthy {
+            let terminals: HashSet<Uuid> = fleet
+                .iter()
+                .flat_map(|workspace| workspace.terminals.iter().map(|terminal| terminal.terminal.id))
+                .collect();
+            let daemon = self.service.tmux.daemon_id();
+            let orphaned: Vec<_> = panes
+                .panes
+                .iter()
+                .filter(|pane| orphaned_pane(pane, daemon, &terminals))
+                .map(|pane| (pane.pane_id.clone(), pane.workspace_id, pane.terminal_id))
+                .collect();
+
+            let mut repaired = HashSet::new();
+            for (pane, workspace, terminal) in orphaned {
+                match self.service.tmux.kill_pane(&pane).await {
+                    Ok(true) => {
+                        repaired.insert(workspace);
+                        tracing::warn!(%pane, %terminal, "reaped orphaned managed pane");
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        tracing::warn!(%pane, %terminal, ?error, "orphaned pane could not be reaped");
+                    }
+                }
+            }
+
+            if !repaired.is_empty() {
+                panes = self.service.inventory.refresh().await;
+                for workspace in repaired {
+                    if let Ok(groups) = self.service.layout(workspace).await {
+                        self.publish_layout(workspace, &groups);
+                    }
+                }
+            }
+        }
 
         // One `ps` for the whole host, not one per pane: this is the sampling
         // loop, and a fleet of thirty panes must not mean thirty processes a
@@ -667,6 +721,44 @@ fn now_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tagged_pane(daemon: Uuid, terminal: Uuid) -> farcooler_core::inventory::TaggedPane {
+        farcooler_core::inventory::TaggedPane {
+            daemon_id: daemon,
+            workspace_id: Uuid::from_u128(2),
+            terminal_id: terminal,
+            schema_version: 1,
+            pane_id: "%1".into(),
+            window_id: "@1".into(),
+            columns: 80,
+            rows: 24,
+            left: 0,
+            top: 0,
+            window_active: true,
+            pane_active: true,
+            zoomed: false,
+            tty: "/dev/ttys001".into(),
+            dead: false,
+            dead_status: None,
+            command: "fish".into(),
+        }
+    }
+
+    #[test]
+    fn a_managed_pane_without_a_terminal_record_is_an_orphan() {
+        let daemon = Uuid::from_u128(1);
+        let terminal = Uuid::from_u128(3);
+        let pane = tagged_pane(daemon, terminal);
+
+        assert!(orphaned_pane(&pane, daemon, &HashSet::new()));
+        assert!(!orphaned_pane(&pane, daemon, &HashSet::from([terminal])));
+    }
+
+    #[test]
+    fn another_daemons_pane_is_never_reaped() {
+        let pane = tagged_pane(Uuid::from_u128(9), Uuid::from_u128(3));
+        assert!(!orphaned_pane(&pane, Uuid::from_u128(1), &HashSet::new()));
+    }
 
     #[test]
     fn only_a_blocked_or_finished_agent_is_worth_a_phone() {

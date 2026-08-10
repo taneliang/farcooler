@@ -57,7 +57,7 @@ extension View {
             // a dark terminal and far too heavy in light mode. The window's own
             // background follows the appearance, which is what a backdrop should
             // do.
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(WorkspaceStyle.canvas)
     }
 
     /// One terminal, as a card on the canvas.
@@ -77,7 +77,7 @@ extension View {
         clipShape(RoundedRectangle(cornerRadius: Pane.radius))
             .overlay(
                 RoundedRectangle(cornerRadius: Pane.radius)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                    .strokeBorder(WorkspaceStyle.hairline, lineWidth: 1)
             )
     }
 }

@@ -69,6 +69,80 @@ struct Theme: Decodable, Equatable, Identifiable {
     }
 }
 
+/// The visual vocabulary shared by the native workbench around the terminal.
+///
+/// Terminal themes still own terminal cells. These surfaces borrow only a small
+/// amount of their hue, blended into native macOS colors, so a Nord terminal and
+/// a native diff read as neighboring tools instead of unrelated applications.
+/// Keeping the values here also stops every pane and sidebar row from inventing
+/// another almost-identical gray, font size, and control target.
+@MainActor
+enum WorkspaceStyle {
+    static let paneHeaderHeight: CGFloat = 28
+    static let controlTarget: CGFloat = 24
+
+    static let paneTitle = Font.system(size: 11.5, weight: .medium)
+    static let sidebarPrimary = Font.system(size: 13, weight: .medium)
+    static let sidebarMetadata = Font.system(size: 11)
+    static let sectionTitle = Font.system(size: 11.5, weight: .semibold)
+
+    static var canvas: Color {
+        Color(nsColor: blend(.windowBackgroundColor, withTheme: 0.05))
+    }
+
+    static var sidebar: Color {
+        Color(nsColor: blend(.windowBackgroundColor, withTheme: 0.035))
+    }
+
+    static var document: Color {
+        Color(nsColor: blend(.textBackgroundColor, withTheme: 0.09))
+    }
+
+    static var paneChrome: Color {
+        Color(nsColor: blend(.controlBackgroundColor, withTheme: 0.14))
+    }
+
+    static var hairline: Color { Color.primary.opacity(0.11) }
+
+    /// Resolve dynamic system colors in the app's effective appearance before
+    /// mixing. Otherwise Aqua's light value can be captured while Dark Aqua is
+    /// on screen, producing a flash when the theme changes.
+    private static func blend(_ system: NSColor, withTheme amount: CGFloat) -> NSColor {
+        let appearance = NSApp?.effectiveAppearance
+            ?? NSAppearance(named: Themes.shared.current.dark ? .darkAqua : .aqua)!
+        var native = system
+        appearance.performAsCurrentDrawingAppearance {
+            native = system.usingColorSpace(.sRGB) ?? system
+        }
+        let themed = Themes.shared.current.backgroundColor.usingColorSpace(.sRGB)
+            ?? Themes.shared.current.backgroundColor
+
+        var nr: CGFloat = 0, ng: CGFloat = 0, nb: CGFloat = 0, na: CGFloat = 0
+        var tr: CGFloat = 0, tg: CGFloat = 0, tb: CGFloat = 0, ta: CGFloat = 0
+        native.getRed(&nr, green: &ng, blue: &nb, alpha: &na)
+        themed.getRed(&tr, green: &tg, blue: &tb, alpha: &ta)
+
+        return NSColor(
+            srgbRed: nr + (tr - nr) * amount,
+            green: ng + (tg - ng) * amount,
+            blue: nb + (tb - nb) * amount,
+            alpha: na)
+    }
+}
+
+/// A pane's chrome is one semantic surface. Focus adds a wash rather than a
+/// border, so switching panes is obvious without boxing the content in blue.
+struct PaneHeaderBackground: View {
+    let focused: Bool
+
+    var body: some View {
+        ZStack {
+            WorkspaceStyle.paneChrome
+            if focused { Color.accentColor.opacity(0.10) }
+        }
+    }
+}
+
 /// Every theme this machine offers, and which one is in force.
 ///
 /// One object rather than a preference holding colours: a theme defined on a
