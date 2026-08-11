@@ -213,6 +213,15 @@ impl Session {
                 json!({
                     "id": uuid_of(&w.id).to_string(),
                     "short": short(&w.id),
+                    // Which repository this worktree belongs to.
+                    //
+                    // Carried on the wire message all along and dropped here,
+                    // which is what made a phone unable to ask anything
+                    // repository-scoped about a workspace it was looking at —
+                    // `stack.get` and `pr.refresh` both take a repository id,
+                    // and the fleet was the only place a client learned about
+                    // workspaces at all.
+                    "repository": uuid_of(&w.repository_id).to_string(),
                     "task": w.task_name,
                     "branch": w.branch,
                     "worktree": w.worktree_path,
@@ -310,6 +319,10 @@ impl Session {
     /// `terminal_preset` empty means no terminal — which is what a caller about
     /// to create its own agent terminal wants, and what keeps this compatible
     /// with every caller that predates the parameter.
+    /// `adopt` takes `branch` over instead of creating it — the case where work
+    /// ARRIVED on a branch rather than starting on one: pushed from another
+    /// machine, handed over, or produced by a cloud agent. Creating is still
+    /// the default, because it is still the common case.
     pub async fn create_workspace(
         &mut self,
         repository: Uuid,
@@ -317,13 +330,14 @@ impl Session {
         branch: &str,
         base: &str,
         terminal_preset: &str,
+        adopt: bool,
     ) -> Result<Workspace, SessionError> {
         let payload = request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
             task_name: task.into(),
             branch: branch.into(),
             base_revision: base.into(),
             terminal_preset: terminal_preset.into(),
-            adopt_existing: false,
+            adopt_existing: adopt,
         });
         match self.value("workspace.create", Some(repository), Some(payload)).await? {
             result::Value::Workspace(w) => Ok(w),
@@ -782,6 +796,208 @@ impl Session {
         }
     }
 
+    // ---- changes, stacks and branches ----
+    //
+    // JSON out, like `fleet` and for the same reason stated at the top of this
+    // file: the phone clients reach the daemon only through this crate's FFI,
+    // and the shapes below are deliberately the ones `farcooler changes … --json`
+    // already prints, so a model decoded on the Mac decodes unchanged on a
+    // phone. Anything else would be two descriptions of one change set, free to
+    // disagree.
+
+    /// What a worktree changed, against its base.
+    pub async fn change_set(
+        &mut self,
+        workspace: Uuid,
+        fresh: bool,
+    ) -> Result<serde_json::Value, SessionError> {
+        let payload =
+            request::Payload::ChangeSetRequest(farcooler_protocol::v1::ChangeSetRequest {
+                workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+                selector: None,
+                fresh,
+            });
+        match self.value("changes.change_set", None, Some(payload)).await? {
+            result::Value::ChangeSet(cs) => Ok(change_set_json(&cs)),
+            other => Err(wrong("change_set", &other)),
+        }
+    }
+
+    /// One file's patch, in the comparison `scope` names.
+    ///
+    /// `context` of zero means git's own three, which is what a first read
+    /// wants; a caller opening one of the gaps between hunks asks for enough to
+    /// swallow it. See the Mac's `ChangesStore.open(gap:of:in:)` for why that is
+    /// per-gap rather than per-file.
+    pub async fn file_diff(
+        &mut self,
+        workspace: Uuid,
+        path: &str,
+        scope: &str,
+        context: u32,
+    ) -> Result<serde_json::Value, SessionError> {
+        use farcooler_protocol::v1::diff_selector::Kind;
+        let kind = match scope {
+            "local" => Kind::Local(farcooler_protocol::v1::Empty {}),
+            "staged" => Kind::Staged(farcooler_protocol::v1::Empty {}),
+            "unstaged" => Kind::Unstaged(farcooler_protocol::v1::Empty {}),
+            // Anything else is a commit sha, and the empty string is the branch
+            // range — the default every caller that names no scope gets.
+            "" | "branch" => Kind::Range(farcooler_protocol::v1::Empty {}),
+            sha => Kind::Commit(sha.to_string()),
+        };
+        let payload = request::Payload::FileDiffRequest(farcooler_protocol::v1::FileDiffRequest {
+            workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+            selector: Some(farcooler_protocol::v1::DiffSelector { kind: Some(kind) }),
+            path: path.to_string(),
+            from_hunk: 0,
+            context,
+        });
+        match self.value("changes.file_diff", None, Some(payload)).await? {
+            result::Value::FileDiff(d) => Ok(file_diff_json(&d)),
+            other => Err(wrong("file_diff", &other)),
+        }
+    }
+
+    /// The files one commit touched.
+    pub async fn commit_files(
+        &mut self,
+        workspace: Uuid,
+        sha: &str,
+    ) -> Result<serde_json::Value, SessionError> {
+        let payload =
+            request::Payload::CommitFilesRequest(farcooler_protocol::v1::CommitFilesRequest {
+                workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+                sha: sha.to_string(),
+            });
+        match self.value("changes.commit_files", None, Some(payload)).await? {
+            result::Value::FileChangeList(l) => Ok(json!({
+                "files": l.items.iter().map(file_change_json).collect::<Vec<_>>()
+            })),
+            other => Err(wrong("file_change_list", &other)),
+        }
+    }
+
+    /// Every worktree that changed since it was last looked at.
+    pub async fn changes_inbox(&mut self) -> Result<serde_json::Value, SessionError> {
+        let payload =
+            request::Payload::ChangesInbox(farcooler_protocol::v1::ChangesInboxRequest {});
+        match self.value("changes.inbox", None, Some(payload)).await? {
+            result::Value::ChangesInbox(inbox) => Ok(json!({
+                "items": inbox.items.iter().map(|w| json!({
+                    "workspace_id": uuid_of(&w.workspace_id).to_string(),
+                    "short": short(&w.workspace_id),
+                    "task_name": w.task_name,
+                    "branch": w.branch,
+                    "changed_since_reviewed": w.changed_since_reviewed,
+                    "insertions": w.insertions,
+                    "deletions": w.deletions,
+                })).collect::<Vec<_>>(),
+                "elsewhere": inbox.elsewhere,
+            })),
+            other => Err(wrong("changes_inbox", &other)),
+        }
+    }
+
+    /// Mark a worktree as read, which is what clears its inbox badge.
+    pub async fn changes_mark_read(&mut self, workspace: Uuid) -> Result<(), SessionError> {
+        let payload =
+            request::Payload::ChangesMarkRead(farcooler_protocol::v1::ChangesMarkRead {
+                workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+                branch: String::new(),
+            });
+        self.value("changes.mark_read", None, Some(payload)).await?;
+        Ok(())
+    }
+
+    /// Pin what this worktree is compared against.
+    ///
+    /// The affordance that exists because a GUESSED base produces a wrong diff
+    /// that looks exactly like a right one — see `BaseSource` in the protocol.
+    pub async fn changes_set_base(
+        &mut self,
+        workspace: Uuid,
+        base_ref: &str,
+    ) -> Result<serde_json::Value, SessionError> {
+        let payload = request::Payload::ChangesSetBase(farcooler_protocol::v1::ChangesSetBase {
+            workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+            base_ref: base_ref.to_string(),
+        });
+        match self.value("changes.set_base", None, Some(payload)).await? {
+            result::Value::ChangeSet(cs) => Ok(change_set_json(&cs)),
+            other => Err(wrong("change_set", &other)),
+        }
+    }
+
+    /// The branches in a repository, for resuming onto one that already exists.
+    pub async fn branches(&mut self, repository: Uuid) -> Result<serde_json::Value, SessionError> {
+        match self.value("branch.list", Some(repository), None).await? {
+            result::Value::BranchList(l) => Ok(json!({
+                "branches": l.items.iter().map(|b| json!({
+                    "name": b.name,
+                    "local": b.local,
+                    "remote": b.remote,
+                    // git refuses a second checkout of the same branch, so a
+                    // client has to be able to show this before someone picks it.
+                    "checkedOut": b.checked_out,
+                    "subject": b.subject,
+                    "updatedAt": b.updated_at.as_ref().map(|t| t.seconds * 1000),
+                })).collect::<Vec<_>>()
+            })),
+            other => Err(wrong("branch_list", &other)),
+        }
+    }
+
+    /// A branch's parent chain and the PR state along it.
+    pub async fn stack(
+        &mut self,
+        repository: Uuid,
+        branch: &str,
+    ) -> Result<serde_json::Value, SessionError> {
+        let payload = request::Payload::StackGet(farcooler_protocol::v1::StackGet {
+            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+            branch: branch.to_string(),
+        });
+        match self.value("stack.get", Some(repository), Some(payload)).await? {
+            result::Value::StackLinkList(l) => Ok(stack_json(&l)),
+            other => Err(wrong("stack_link_list", &other)),
+        }
+    }
+
+    /// Ask GitHub again, rather than answering from what was last read.
+    pub async fn pr_refresh(&mut self, repository: Uuid) -> Result<serde_json::Value, SessionError> {
+        let payload = request::Payload::PrRefresh(farcooler_protocol::v1::PrRefresh {
+            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+        });
+        match self.value("pr.refresh", Some(repository), Some(payload)).await? {
+            result::Value::StackLinkList(l) => Ok(stack_json(&l)),
+            other => Err(wrong("stack_link_list", &other)),
+        }
+    }
+
+    /// What the daemon is, and what it can do.
+    ///
+    /// Named apart from the `daemon_version` accessor above, which answers from
+    /// the hello this session already exchanged and costs nothing. This one is a
+    /// round trip and is worth it only for `capabilities`, which the hello does
+    /// not carry.
+    pub async fn daemon_capabilities(&mut self) -> Result<serde_json::Value, SessionError> {
+        match self.value("daemon.version", None, None).await? {
+            result::Value::DaemonVersion(v) => Ok(json!({
+                "daemonVersion": v.daemon_version,
+                "protocolVersions": v.protocol_versions,
+                "capabilities": v.capabilities,
+            })),
+            other => Err(wrong("daemon_version", &other)),
+        }
+    }
+
+    /// Remove a repository root. The paired `add` already exists above.
+    pub async fn remove_repository_root(&mut self, root: Uuid) -> Result<(), SessionError> {
+        self.value("repository_root.remove", Some(root), None).await?;
+        Ok(())
+    }
+
     async fn value(
         &mut self,
         method: &str,
@@ -834,6 +1050,167 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::FileDiff(_) => "file_diff",
         result::Value::StackLinkList(_) => "stack_link_list",
         result::Value::ChangesInbox(_) => "changes_inbox",
+    }
+}
+
+/// A change set, in the shape `farcooler changes status --json` prints.
+///
+/// Kept byte-identical to `crates/cli/src/changes.rs::change_set_json` on
+/// purpose: the Mac decodes that, the phones decode this, and two spellings of
+/// one change set is how the same worktree ends up described two ways.
+fn change_set_json(cs: &farcooler_protocol::v1::ChangeSet) -> serde_json::Value {
+    json!({
+        "branch": cs.branch,
+        "base_ref": cs.base_ref,
+        "base_source": base_source_name(cs.base_source),
+        "base_commit": cs.base_commit,
+        "head_commit": cs.head_commit,
+        "insertions": cs.insertions,
+        "deletions": cs.deletions,
+        "commits": cs.commits.iter().map(|c| json!({
+            "sha": c.sha,
+            "subject": c.subject,
+            "author": c.author,
+            "timestamp": c.timestamp,
+        })).collect::<Vec<_>>(),
+        "files": cs.files.iter().map(file_change_json).collect::<Vec<_>>(),
+        "working_tree": cs.working_tree.as_ref().map(|w| json!({
+            "staged": w.staged.iter().map(|f| &f.path).collect::<Vec<_>>(),
+            "unstaged": w.unstaged.iter().map(|f| &f.path).collect::<Vec<_>>(),
+            "untracked": w.untracked,
+            "conflicted": w.conflicted,
+            "changes": w.staged.iter().chain(w.unstaged.iter()).map(|f| json!({
+                "path": f.path,
+                "status": file_status_name(f.status),
+                "old_path": f.old_path,
+            })).collect::<Vec<_>>(),
+        })),
+    })
+}
+
+fn file_change_json(f: &farcooler_protocol::v1::FileChange) -> serde_json::Value {
+    json!({
+        "path": f.path,
+        "status": file_status_name(f.status),
+        "old_path": f.old_path,
+        "insertions": f.insertions,
+        "deletions": f.deletions,
+        "binary": f.binary,
+    })
+}
+
+/// One file's patch, flattened out of its hunks.
+///
+/// The hunk boundaries survive as `gap` markers rather than as nesting: a
+/// client draws a diff as one list and needs to know where the unchanged lines
+/// were left out, which is exactly what the jump between two hunks' line
+/// numbers says. `AgentKit.DiffComputation` already parses this shape.
+fn file_diff_json(d: &farcooler_protocol::v1::FileDiff) -> serde_json::Value {
+    use farcooler_protocol::v1::{DiffLineKind, DiffUnsupported};
+    json!({
+        "path": d.path,
+        // Why there are no hunks, when the reason is not "nothing changed". An
+        // empty list on its own reads as unchanged, which for a binary file is
+        // a lie — see `DiffUnsupported` in the protocol.
+        "unsupported": d.unsupported.and_then(|u| match DiffUnsupported::try_from(u) {
+            Ok(DiffUnsupported::Binary) => Some("binary"),
+            Ok(DiffUnsupported::Submodule) => Some("submodule"),
+            Ok(DiffUnsupported::CombinedDiff) => Some("combined_diff"),
+            Ok(DiffUnsupported::Malformed) => Some("malformed"),
+            _ => None,
+        }),
+        "truncated": d.truncated.is_some(),
+        "firstParentOfMerge": d.first_parent_of_merge,
+        "hunks": d.hunks.iter().map(|h| json!({
+            "index": h.index,
+            "header": h.header,
+            "oldStart": h.old_start,
+            "newStart": h.new_start,
+            "lines": h.lines.iter().map(|l| json!({
+                "kind": match DiffLineKind::try_from(l.kind) {
+                    Ok(DiffLineKind::Added) => "added",
+                    Ok(DiffLineKind::Removed) => "removed",
+                    _ => "context",
+                },
+                "oldNumber": l.old_no,
+                "newNumber": l.new_no,
+                "text": l.text,
+                "noNewline": l.no_newline,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn stack_json(l: &farcooler_protocol::v1::StackLinkList) -> serde_json::Value {
+    use farcooler_protocol::v1::{CheckState, ParentSource, PrState, ReviewDecision};
+    json!({
+        // Reported rather than followed: a parent chain that loops is walked as
+        // far as it was walked, and a client that silently drew it would draw a
+        // stack that does not exist.
+        "cycleDetected": l.cycle_detected,
+        "links": l.items.iter().map(|k| json!({
+            "branch": k.branch,
+            "parentBranch": k.parent_branch,
+            // Only a GUESS is worth labeling. The others are recorded facts;
+            // a guessed parent produces a wrong diff and looks like a right one.
+            "parentGuessed": ParentSource::try_from(k.parent_source) == Ok(ParentSource::Guessed),
+            "ahead": k.ahead,
+            "behind": k.behind,
+            "pr": k.pr.as_ref().map(|p| json!({
+                "number": p.number,
+                "url": p.url,
+                "state": match PrState::try_from(p.state) {
+                    Ok(PrState::Open) => "open",
+                    Ok(PrState::Draft) => "draft",
+                    Ok(PrState::Merged) => "merged",
+                    Ok(PrState::Closed) => "closed",
+                    _ => "unknown",
+                },
+                "checks": match CheckState::try_from(p.checks) {
+                    Ok(CheckState::Passing) => "passing",
+                    Ok(CheckState::Failing) => "failing",
+                    Ok(CheckState::Pending) => "pending",
+                    _ => "unknown",
+                },
+                "review": match ReviewDecision::try_from(p.review_decision) {
+                    Ok(ReviewDecision::Approved) => "approved",
+                    Ok(ReviewDecision::ChangesRequested) => "changes_requested",
+                    Ok(ReviewDecision::ReviewRequired) => "review_required",
+                    _ => "unknown",
+                },
+                // Whether this was read from GitHub long enough ago to doubt.
+                "stale": p.stale,
+            })),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn file_status_name(status: i32) -> &'static str {
+    use farcooler_protocol::v1::FileStatus;
+    match FileStatus::try_from(status).unwrap_or(FileStatus::Unspecified) {
+        FileStatus::Added => "added",
+        FileStatus::Modified => "modified",
+        FileStatus::Deleted => "deleted",
+        FileStatus::Renamed => "renamed",
+        FileStatus::Copied => "copied",
+        FileStatus::TypeChanged => "type_changed",
+        FileStatus::Untracked => "untracked",
+        FileStatus::Conflicted => "conflicted",
+        FileStatus::Unspecified => "modified",
+    }
+}
+
+/// Where the base came from, because only one of these is a guess and only a
+/// guess is worth warning about.
+fn base_source_name(source: i32) -> &'static str {
+    use farcooler_protocol::v1::BaseSource;
+    match BaseSource::try_from(source).unwrap_or(BaseSource::Unspecified) {
+        BaseSource::Recorded => "recorded",
+        BaseSource::Upstream => "upstream",
+        BaseSource::Guessed => "guessed",
+        BaseSource::PrBase => "pr_base",
+        BaseSource::DefaultBranch => "default_branch",
+        BaseSource::Unspecified => "unknown",
     }
 }
 

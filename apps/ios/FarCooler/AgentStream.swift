@@ -137,7 +137,49 @@ final class AgentStream: ObservableObject {
                 ["mime": $0.mime, "base64": $0.data.base64EncodedString()]
             }
         }
-        _ = try? await core.call("terminal.agent_prompt", args)
+        do {
+            _ = try await core.call("terminal.agent_prompt", args)
+            sendFailure = nil
+        } catch {
+            // Said out loud, and retryable.
+            //
+            // This was `try?`. The message had already been echoed into the
+            // transcript by the line above, so a send that failed looked
+            // exactly like a send that worked — your words on screen and an
+            // agent that never answered. That is the whole of "the message
+            // appears in the chat but nothing happens", and it is worse with a
+            // picture attached, where a multi-megabyte payload is the most
+            // likely thing to fail.
+            sendFailure = SendFailure(message: Self.message(for: error)) { [weak self] in
+                await self?.send(text, images: images)
+            }
+        }
+    }
+
+    /// A message that did not go, and the way to try it again.
+    ///
+    /// Deliberately NOT folded into `connectionError`: that one is cleared by
+    /// every successful poll, which for a failed send would mean the warning
+    /// disappearing a second or two after it appeared, while the undelivered
+    /// message stayed on screen looking sent.
+    struct SendFailure: Identifiable {
+        let id = UUID()
+        let message: String
+        let retry: () async -> Void
+    }
+
+    @Published var sendFailure: SendFailure?
+
+    /// The core's answer, as something worth putting on a phone screen.
+    private static func message(for error: Error) -> String {
+        let text = error.localizedDescription.lowercased()
+        if text.contains("too large") || text.contains("payload") {
+            return "That was too large to send. Try a smaller image."
+        }
+        if text.contains("not found") {
+            return "That agent isn't running anymore."
+        }
+        return "Couldn't reach this machine. Your message wasn't sent."
     }
 
     /// Rewrite a message that has not gone out yet.

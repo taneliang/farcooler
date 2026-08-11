@@ -138,6 +138,80 @@ final class ImagePasteQueue: ObservableObject {
     }
 }
 
+/// Making a picture small enough to ride WITH a prompt.
+///
+/// Two paths carry an image to a host and they have opposite constraints.
+/// `terminal.paste_file` streams in chunks — that is what `crates/client` says
+/// it exists for — so a phone photo goes over it whole, at any size. A prompt's
+/// image is a content block inside ONE control envelope, and the protocol caps
+/// an envelope at `MAX_CONTROL_ENVELOPE_BYTES` (1 MiB, in
+/// crates/protocol/src/lib.rs). `framing::encode` refuses to encode a larger
+/// one, so an untouched 4032x3024 photo — three to eight megabytes — could
+/// never be sent as a prompt attachment and failed every time, reported as
+/// though the machine were unreachable.
+///
+/// Shrinking rather than raising the cap: the cap is a deliberate guard on the
+/// control channel, and full resolution buys nothing here anyway. Models
+/// downscale on receipt, so the pixels past their limit are spent on the wire
+/// and then thrown away.
+enum PromptImageBudget {
+    /// Comfortably inside the 1 MiB envelope with the prompt, the terminal id
+    /// and protobuf framing alongside it. Deliberately not 1 MiB minus a few
+    /// bytes: several images can ride one prompt.
+    static let maxBytes = 500 * 1024
+
+    /// The long edge to fit inside. Past this a model downsamples anyway, so
+    /// the extra pixels cost upload time and buy no accuracy.
+    static let maxDimension: CGFloat = 1568
+
+    /// The bytes to actually send, and the type they are.
+    ///
+    /// An image already inside the budget is sent UNTOUCHED — a screenshot is
+    /// usually small, usually PNG, and usually full of small text that a
+    /// re-encode would smear. Only what cannot fit is resized, and then as
+    /// JPEG, because a photograph is what "too big" almost always means.
+    static func fit(_ image: UIImage, original: Data, mime: String) -> (Data, String)? {
+        if original.count <= maxBytes { return (original, mime) }
+
+        var candidate = image
+        let longEdge = max(image.size.width, image.size.height)
+        if longEdge > maxDimension {
+            candidate = resize(image, scale: maxDimension / longEdge)
+        }
+
+        // Step the quality down rather than guessing one that works: the same
+        // pixel count compresses to wildly different sizes depending on what is
+        // in the picture, so a fixed quality either wastes budget on a flat
+        // screenshot or overshoots on a detailed photograph.
+        for quality in [0.8, 0.6, 0.45, 0.3] as [CGFloat] {
+            if let data = candidate.jpegData(compressionQuality: quality),
+                data.count <= maxBytes
+            {
+                return (data, "image/jpeg")
+            }
+        }
+
+        // Still too big at the lowest quality worth sending: halve the edge once
+        // more and take whatever that gives. A picture this stubborn is
+        // enormous, and something legible beats nothing.
+        let smaller = resize(candidate, scale: 0.5)
+        return smaller.jpegData(compressionQuality: 0.5).map { ($0, "image/jpeg") }
+    }
+
+    private static func resize(_ image: UIImage, scale: CGFloat) -> UIImage {
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        // Opaque, and at scale 1: a UIImage carries the screen's scale factor,
+        // so rendering at the device's 3x would silently produce three times the
+        // pixels asked for — which is the bug this whole type exists to avoid.
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+}
+
 /// The chips for one pane, stacked over the bottom of it.
 struct ImagePasteChips: View {
     @ObservedObject var queue: ImagePasteQueue

@@ -14,6 +14,12 @@ final class MachineSettingsModel: ObservableObject {
     @Published private(set) var branchPrefix = ""
     @Published private(set) var themes: [Theme] = []
     @Published private(set) var adapters: [AdapterInfo] = []
+    /// What the machine says about itself, once it has been asked. Optional
+    /// rather than a blank default, so a daemon too old to answer shows nothing
+    /// instead of showing zeroes that look like real readings.
+    @Published private(set) var health: HostHealth?
+    @Published private(set) var repositories: [Repository] = []
+    @Published private(set) var roots: [RepositoryRoot] = []
     @Published var failure: String?
     @Published private(set) var loading = false
 
@@ -29,6 +35,17 @@ final class MachineSettingsModel: ObservableObject {
         branchPrefix = connection.branchPrefix
         themes = await connection.hostThemes()
         adapters = await connection.adapters()
+        health = await connection.health()
+        repositories = connection.repositories
+        roots = await connection.repositoryRoots()
+    }
+
+    func removeRoot(_ root: RepositoryRoot) async {
+        guard await connection.removeRepositoryRoot(root.id) else {
+            failure = "That machine wouldn't stop watching that folder."
+            return
+        }
+        roots.removeAll { $0.id == root.id }
     }
 
     func setBranchPrefix(_ prefix: String) async {
@@ -133,6 +150,9 @@ struct MachineSettingsView: View {
 
     var body: some View {
         Form {
+            healthSection
+            repositoriesSection
+
             Section {
                 HStack {
                     TextField("Branch prefix", text: $prefixDraft, prompt: Text("feat/"))
@@ -251,6 +271,92 @@ struct MachineSettingsView: View {
                 ) { edited in
                     Task { await model.save(adapter: edited) }
                 }
+            }
+        }
+    }
+
+    /// What this machine is and whether it is well.
+    ///
+    /// First, because it is the question you open this screen with when
+    /// something is wrong — and because it is what says whether the rest of the
+    /// screen can be trusted. Absent entirely on a daemon too old to answer,
+    /// rather than shown as zeroes.
+    @ViewBuilder
+    private var healthSection: some View {
+        if let health = model.health {
+            Section {
+                LabeledContent("Status") {
+                    Label(
+                        health.healthy ? "Healthy" : "Degraded",
+                        systemImage: health.healthy ? "checkmark.circle.fill"
+                            : "exclamationmark.triangle.fill")
+                        .foregroundStyle(health.healthy ? .green : .orange)
+                        .labelStyle(.titleAndIcon)
+                }
+                // The daemon's own reasons, one per row. Summarizing them would
+                // throw away the only part that says what to do about it.
+                ForEach(health.reasons, id: \.self) { reason in
+                    Text(reason)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Far Cooler", value: health.daemonVersion)
+                LabeledContent("Platform", value: health.platform)
+                LabeledContent("Live panes", value: "\(health.livePanes)")
+            } header: {
+                Text("This Machine")
+            } footer: {
+                Text("Protocol \(health.protocolVersion).")
+            }
+        }
+    }
+
+    /// Where work can start, and which folders the machine looks in.
+    ///
+    /// Two lists rather than one because they answer different questions, and
+    /// only the second is something this screen can change: a repository is
+    /// registered by starting work in it, a root is a standing permission.
+    @ViewBuilder
+    private var repositoriesSection: some View {
+        if !model.repositories.isEmpty {
+            Section("Repositories") {
+                ForEach(model.repositories) { repository in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(repository.displayName)
+                        if !repository.remote.isEmpty {
+                            Text(repository.remote)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
+            }
+        }
+
+        if !model.roots.isEmpty {
+            Section {
+                ForEach(model.roots) { root in
+                    // "Hidden" rather than a blank row: a phone with read scope
+                    // is told the root exists and deliberately not told where it
+                    // is, and an empty row reads as a bug rather than a rule.
+                    Text(root.displayPath ?? "Hidden")
+                        .font(root.displayPath == nil ? .body.italic() : .body)
+                        .foregroundStyle(root.displayPath == nil ? .secondary : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                .onDelete { offsets in
+                    let targets = offsets.map { model.roots[$0] }
+                    Task { for root in targets { await model.removeRoot(root) } }
+                }
+            } header: {
+                Text("Watched Folders")
+            } footer: {
+                Text(
+                    "Far Cooler looks for repositories in these. Removing one stops "
+                    + "the search; nothing on the machine is deleted.")
             }
         }
     }

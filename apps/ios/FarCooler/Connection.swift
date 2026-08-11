@@ -117,6 +117,10 @@ final class Connection: ObservableObject {
     // same core, rather than opening a second SSH session just to poll one
     // terminal's screen.
     let core = ClientCore()
+
+    /// One review store per worktree, outliving the panes that show them. See
+    /// `ChangesStores` for why they cannot live in the view.
+    lazy var changesStores = ChangesStores(core: core)
     private var poller: Task<Void, Never>?
 
     /// The machine this connection is for, remembered so a reconnection has
@@ -588,6 +592,61 @@ final class Connection: ObservableObject {
         return Self.themes(from: body)
     }
 
+    /// The branches in a repository, newest first as the daemon orders them.
+    ///
+    /// What makes "resume onto a branch" possible from a phone: work arrives on
+    /// a branch at least as often as it starts on one — pushed from another
+    /// machine, handed over, or produced by a cloud agent — and before this the
+    /// only way to pick one up here was to type its name exactly.
+    func branches(repository: String) async -> [Branch] {
+        guard let data = try? await core.call("branch.list", ["repository": repository])
+        else { return [] }
+        return (try? JSONDecoder().decode(BranchList.self, from: data))?.branches ?? []
+    }
+
+    /// A branch's parent chain and the PR state along it.
+    func stack(repository: String, branch: String) async -> StackResponse? {
+        guard let data = try? await core.call(
+            "stack.get", ["repository": repository, "branch": branch])
+        else { return nil }
+        return try? JSONDecoder().decode(StackResponse.self, from: data)
+    }
+
+    /// Ask GitHub again rather than answering from what was last read.
+    func refreshPullRequests(repository: String) async -> StackResponse? {
+        guard let data = try? await core.call("pr.refresh", ["repository": repository])
+        else { return nil }
+        return try? JSONDecoder().decode(StackResponse.self, from: data)
+    }
+
+    /// What the machine says about itself.
+    ///
+    /// The fleet already carries `runtime_healthy` as a bare bool, which is
+    /// enough to tint a chip and not enough to act on: "something is wrong" is
+    /// not an actionable sentence. This is the same `host.health` the Mac reads,
+    /// with the daemon's own reasons attached.
+    func health() async -> HostHealth? {
+        guard let data = try? await core.call("host.health") else { return nil }
+        return try? JSONDecoder().decode(HostHealth.self, from: data)
+    }
+
+    /// The repositories Far Cooler knows on this machine, and the roots it
+    /// discovered them under.
+    ///
+    /// Two calls rather than one because they answer different questions — what
+    /// you can start work in, and which directories the daemon is allowed to
+    /// look in — and only the second is removable.
+    func repositoryRoots() async -> [RepositoryRoot] {
+        guard let data = try? await core.call("repository_root.list") else { return [] }
+        return (try? JSONDecoder().decode(RepositoryRootList.self, from: data))?.roots ?? []
+    }
+
+    /// Stop watching a directory. The repositories already registered under it
+    /// are the machine's business, not this call's.
+    func removeRepositoryRoot(_ id: String) async -> Bool {
+        ((try? await core.call("repository_root.remove", ["root": id])) != nil)
+    }
+
     func setBranchPrefix(_ prefix: String) async -> String? {
         guard let data = try? await core.call(
             "settings.set_branch_prefix", ["prefix": prefix]),
@@ -664,13 +723,22 @@ final class Connection: ObservableObject {
     /// which is what it was called when a workspace carried a typed-out task
     /// alongside its directory; renaming the key would strand every shipped
     /// app for nothing.
-    func createWorkspace(repository: String, name: String, branch: String) async {
+    /// `adopt` takes an EXISTING branch over instead of creating one. The
+    /// worktree is then named after that branch, so `name` is ignored — the
+    /// daemon says so too, and this passes it anyway rather than pretending the
+    /// two calls have different shapes.
+    func createWorkspace(
+        repository: String, name: String, branch: String, adopt: Bool = false
+    ) async {
         _ = try? await core.call(
             "workspace.create",
             // A shell, because a worktree with nothing running in it is a
             // directory. This is the manual form; the quick-task flow below
             // creates its own agent terminal and asks for none.
-            ["repository": repository, "task": name, "branch": branch, "terminal": "shell"])
+            [
+                "repository": repository, "task": name, "branch": branch,
+                "terminal": "shell", "adopt": adopt,
+            ])
         await refresh()
     }
 

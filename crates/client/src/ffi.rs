@@ -677,6 +677,10 @@ async fn dispatch(
             // manual form asks for a shell. A caller creating its own agent
             // terminal — the quick-task flow — passes an empty string, which is
             // also what an older client that never sends the key gets.
+            // Adopt an existing branch rather than create one. Absent from an
+            // older client, and absent means create — the behavior every caller
+            // that predates the key already had.
+            let adopt = args.get("adopt").and_then(|v| v.as_bool()).unwrap_or(false);
             let workspace = session
                 .create_workspace(
                     id("repository")?,
@@ -684,6 +688,7 @@ async fn dispatch(
                     &text("branch"),
                     &base,
                     &text("terminal"),
+                    adopt,
                 )
                 .await?;
             Ok(json!({ "id": uuid_of(&workspace.id).to_string() }))
@@ -709,6 +714,87 @@ async fn dispatch(
                     Ok(json!({ "confirmationRequired": true }))
                 }
             }
+        }
+
+        // ---- changes ----
+        //
+        // The review surface, reachable from a phone at last. The Mac gets all
+        // of this by shelling out to `farcooler changes … --json`; a phone has
+        // no CLI to shell out to, so every one of these was unreachable and the
+        // whole feature was a desktop feature by accident rather than by design.
+
+        "changes.change_set" => {
+            let fresh = args.get("fresh").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(session.change_set(id("workspace")?, fresh).await?)
+        }
+
+        "changes.file_diff" => {
+            let context = args.get("context").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            Ok(session
+                .file_diff(id("workspace")?, &text("path"), &text("scope"), context)
+                .await?)
+        }
+
+        "changes.commit_files" => {
+            Ok(session.commit_files(id("workspace")?, &text("sha")).await?)
+        }
+
+        "changes.inbox" => Ok(session.changes_inbox().await?),
+
+        "changes.mark_read" => {
+            session.changes_mark_read(id("workspace")?).await?;
+            Ok(json!({}))
+        }
+
+        "changes.set_base" => {
+            Ok(session.changes_set_base(id("workspace")?, &text("baseRef")).await?)
+        }
+
+        // ---- branches, stacks and PRs ----
+
+        "branch.list" => Ok(session.branches(id("repository")?).await?),
+
+        "stack.get" => Ok(session.stack(id("repository")?, &text("branch")).await?),
+
+        "pr.refresh" => Ok(session.pr_refresh(id("repository")?).await?),
+
+        // ---- the machine itself ----
+
+        "daemon.version" => Ok(session.daemon_capabilities().await?),
+
+        "host.health" => {
+            let host = session.host().await?;
+            let degraded =
+                host.self_health == farcooler_protocol::v1::SelfHealth::Degraded as i32;
+            Ok(json!({
+                "platform": host.platform,
+                "daemonVersion": host.daemon_version,
+                "protocolVersion": host.protocol_version,
+                "healthy": !degraded,
+                // Why it is degraded, in the daemon's own words. Shown rather
+                // than summarized: the client cannot know which of these
+                // matters, and "something is wrong" is not an actionable
+                // sentence.
+                "reasons": host.self_health_reasons,
+                "livePanes": host.live_terminal_count,
+            }))
+        }
+
+        "repository_root.list" => {
+            let roots = session.roots().await?;
+            Ok(json!({
+                "roots": roots.iter().map(|r| json!({
+                    "id": uuid_of(&r.id).to_string(),
+                    // Absent unless this client holds `host_admin`; a phone with
+                    // read scope sees the root exists without seeing where it is.
+                    "displayPath": r.display_path,
+                })).collect::<Vec<_>>()
+            }))
+        }
+
+        "repository_root.remove" => {
+            session.remove_repository_root(id("root")?).await?;
+            Ok(json!({}))
         }
 
         "repository_root.add" => {

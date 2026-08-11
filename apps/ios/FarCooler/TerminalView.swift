@@ -36,24 +36,26 @@ struct TerminalView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @StateObject private var session: TerminalSession
-    /// The terminal this screen is showing right now.
+    /// The terminal this pane shows. Fixed for the pane's lifetime.
     ///
-    /// A `@State` copy rather than a stored `let`, because the tab strip lets
-    /// this screen point at a different terminal without ever leaving it —
-    /// see `TerminalTabStrip`. Everything below that used to read `terminal`
-    /// reads `current` instead, so switching tabs updates the title, the
-    /// empty-state copy and the drawn grid together rather than leaving any
-    /// of them talking about the terminal you tapped away from.
-    @State private var current: Terminal
+    /// This used to be `@State` that the tab strip reassigned, because one
+    /// `TerminalView` was reused for every pane in the workspace. It is a `let`
+    /// now: `PaneHost` keeps one of these per visited pane and shows the
+    /// current one, so a pane never becomes a different pane.
+    let terminal: Terminal
+    /// Whether this pane is the one on screen.
+    ///
+    /// The pane stays MOUNTED when it is not — that is the whole point, and
+    /// what keeps its scroll offset, its folds and its grid — but nothing that
+    /// costs the network or the host may keep running. `onAppear`/`onDisappear`
+    /// cannot express that: they stop firing once a view is merely hidden
+    /// rather than removed. Everything that used to hang off them hangs off
+    /// this instead.
+    let isVisible: Bool
     @State private var ctrlArmed = false
     @State private var altArmed = false
     @State private var focusRequest = 0
     @State private var dismissRequest = 0
-    @State private var showWorkspaceList = false
-    /// Images on their way into this pane. One queue per screen, so switching
-    /// terminals does not lose a transfer that is still running.
-    @StateObject private var pastes = ImagePasteQueue()
-    @State private var pickedImage: PhotosPickerItem?
     /// The URL a long press landed on, which is also what presents the dialog.
     ///
     /// One value rather than a flag plus a string: a dialog that can be shown
@@ -80,18 +82,19 @@ struct TerminalView: View {
         TerminalMetrics.cell(.terminal(fontChoice, size: fontSize))
     }
 
-    /// The machines to switch between, offered inside the switcher sheet.
-    ///
-    /// Optional because this screen works perfectly well without one — it is
-    /// the terminal, not the fleet — and because the previews and the demo
-    /// path construct it with no store at all.
-    let hosts: HostStore?
+    /// Images on their way into this pane, owned by `PaneHost` so a transfer
+    /// started on one pane survives switching to another.
+    @ObservedObject var pastes: ImagePasteQueue
 
-    init(terminal: Terminal, connection: Connection, hosts: HostStore? = nil) {
+    init(
+        terminal: Terminal, isVisible: Bool, connection: Connection, pastes: ImagePasteQueue
+    ) {
         self.connection = connection
-        self.hosts = hosts
-        _session = StateObject(wrappedValue: TerminalSession(terminalID: terminal.id, core: connection.core))
-        _current = State(initialValue: terminal)
+        self.terminal = terminal
+        self.isVisible = isVisible
+        self.pastes = pastes
+        _session = StateObject(
+            wrappedValue: TerminalSession(terminalID: terminal.id, core: connection.core))
     }
 
     /// The workspace `current` actually lives in, looked up fresh each time
@@ -107,78 +110,82 @@ struct TerminalView: View {
     /// every time, the screen kept drawing a VT grid, and the change only
     /// appeared after navigating away and back, which rebuilt the copy.
     private var live: Terminal {
-        guard let workspace = currentWorkspace?.id else { return current }
-        return connection.terminal(current.id, in: workspace) ?? current
+        guard let workspace = currentWorkspace?.id else { return terminal }
+        return connection.terminal(terminal.id, in: workspace) ?? terminal
     }
 
     private var currentWorkspace: Workspace? {
-        connection.fleet.workspaces.first { $0.terminals.contains { $0.id == current.id } }
+        connection.fleet.workspaces.first { $0.terminals.contains { $0.id == terminal.id } }
     }
 
     /// Which of several identically-labeled siblings `current` is — the
     /// same numbering `FleetView` and `TerminalTabStrip` use, so a terminal
     /// reads as "claude 2" everywhere or nowhere.
     private var currentOrdinal: Int? {
-        currentWorkspace?.ordinals()[current.id]
+        currentWorkspace?.ordinals()[terminal.id]
     }
 
-    private var currentName: String { current.displayName(ordinal: currentOrdinal) }
+    private var currentName: String { terminal.displayName(ordinal: currentOrdinal) }
 
     var body: some View {
         VStack(spacing: 0) {
             // Chosen by `terminal.isAgentPane`, which the daemon sets — never
             // derived here, the same rule that keeps `activity` and
             // `agentMode` as reported rather than guessed at. `AgentView` is
-            // given `current.id` as its SwiftUI identity: a tab switch
+            // given `terminal.id` as its SwiftUI identity: a tab switch
             // between two agent panes recreates it rather than retargeting
             // an existing `AgentStream`, which is simpler than the terminal
             // side's `TerminalSession.switchTo` and correct here because an
             // agent session has no live ssh channel to hand off — a fresh
             // subscribe from seq 0 costs one round trip, not a stream.
             if live.isAgentPane {
-                AgentView(terminalID: current.id, workspaceID: currentWorkspace?.id, connection: connection)
-                    .id(current.id)
+                AgentView(
+                    terminalID: terminal.id, workspaceID: currentWorkspace?.id,
+                    connection: connection, isVisible: isVisible)
+                    .id(terminal.id)
+            } else if live.isChangesPane, let workspace = currentWorkspace {
+                // A review of the worktree, not a tty.
+                //
+                // This branch did not exist, so a `changes` pane fell through
+                // to the VT renderer below and drew whatever bytes were on a
+                // pane that has none — the mode has been in the fleet all
+                // along, with nothing on this platform able to show it.
+                //
+                // Keyed on the WORKSPACE rather than the terminal: what is
+                // being reviewed is the worktree, and two changes panes in one
+                // workspace are the same review.
+                // The store comes from `Connection`, so the scroll position,
+                // which files are folded, and the diffs already read all
+                // survive switching to another tab and back. Held in the view,
+                // they were rebuilt from nothing on every return.
+                ChangesView(
+                    store: connection.changesStores.store(for: workspace.id),
+                    workspaceName: workspace.task)
+                    .id(workspace.id)
             } else {
                 GeometryReader { geo in
                     phaseContent(size: geo.size)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .task(id: GridSize(width: geo.size.width, height: geo.size.height, cell: cellSize)) {
+                        // Size is asserted only by the pane you are LOOKING at.
+                        //
+                        // tmux sizes a pane to its smallest attached client, so
+                        // several mounted panes all telling the host their
+                        // geometry would have them fighting over it — which is
+                        // the content jumping around on open, made worse rather
+                        // than better by keeping panes alive. A hidden pane is
+                        // laid out but says nothing.
+                        .task(
+                            id: GridSize(
+                                width: geo.size.width, height: geo.size.height, cell: cellSize,
+                                visible: isVisible)
+                        ) {
+                            guard isVisible else { return }
                             await session.configure(
                                 columns: columns(for: geo.size), rows: rows(for: geo.size))
                         }
                 }
             }
-            // Both bars live at the bottom, in thumb reach. The tab strip used
-            // to sit under the title, which put the one control you use
-            // constantly — switching terminal — at the far end of the screen
-            // from the hand holding the phone. That still holds; what changed
-            // is that it floats now instead of sitting on a slab of its own.
         }
-        // The strip lives in the bottom safe area, not in the stack and not in
-        // the keyboard's accessory.
-        //
-        // In the stack it sat under the keyboard when one came up. In the
-        // accessory it rode up correctly but an accessory floats OVER content,
-        // so the terminal was laid out as though the strip were not there and
-        // the grid's last line ended up behind it. A safe-area inset is the one
-        // placement the layout actually accounts for: the grid shrinks by
-        // exactly the strip's height, and keyboard avoidance carries both up
-        // together.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            // Spaced on BOTH sides.
-            //
-            // The inset sits inside the terminal's own background, so with no
-            // padding the strip read as welded to the bottom of the grid, and
-            // with none below it crowded the key row that rides up on the
-            // keyboard. Two floating bars need to look like two floating bars:
-            // air above, air below, and the grid ending cleanly before either.
-            TerminalTabStrip(
-                workspaces: connection.fleet.workspaces, current: current, onSelect: select
-            )
-            .padding(.top, 8)
-            .padding(.bottom, 10)
-        }
-        .background(TerminalPalette.background)
         // The link a long press landed on. Titled with the URL itself, because
         // "Open Link" without saying which link is a button that asks you to
         // trust output an agent produced.
@@ -193,185 +200,40 @@ struct TerminalView: View {
             Button("Copy Link") { UIPasteboard.general.string = heldLink }
             Button("Cancel", role: .cancel) {}
         }
-        // A terminal is dark regardless of the phone's own appearance — the
-        // host doesn't know or care whether this device is in Light Mode, and
-        // neither should the screen showing its output.
-        .preferredColorScheme(Themes.shared.current.colorScheme)
-        // The task and its branch, not `currentName` — the terminal already
-        // names itself in its tab strip chip, and repeating it here would
-        // waste the one line of title bar a phone has on something already on
-        // screen.
-        // Same reasoning as the Mac's `Workspace.windowTitle`/`windowSubtitle`
-        // (apps/macos/Sources/FarCooler/Model.swift): the place you are is
-        // the workspace, and that's true regardless of which of its
-        // terminals is focused. The host itself is left out — unlike the
-        // Mac, this screen is already scoped to one host by the time you're
-        // looking at it, so naming it again would answer a question nobody
-        // is asking here.
-        .navigationTitle(currentWorkspace?.task ?? currentName)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            // Only when there is something wrong, and then unmissably.
-            //
-            // The machine bar carries this permanently, but the bar lives on
-            // the worktree list and this screen is the one people actually sit
-            // on — a terminal that has quietly stopped updating is exactly
-            // where a frozen link is noticed and, before this, the only place
-            // it could not be acted on without first opening the switcher.
-            if connection.phase != .connected {
-                ToolbarItem(placement: .topBarLeading) {
-                    LinkStatusChip(connection: connection)
-                }
-            }
-
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 0) {
-                    Text(currentWorkspace?.task ?? currentName)
-                        .font(.headline)
-                        .lineLimit(1)
-                    if let branch = currentWorkspace?.branch {
-                        Text(branch)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            // Terminal or chat, on the pane that can be either.
-            //
-            // The Mac puts this in the pane header; a phone has no pane header,
-            // so it goes in the bar that is already this screen's chrome. Shown
-            // only where it would work — `canSwitchPaneMode` already reflects
-            // the daemon's own registry-backed `chat_capable` check, so a pane
-            // whose agent has no adapter never gets the button in the first
-            // place; the shim itself is told which adapter to speak via
-            // `--preset`, rather than assuming one for everything.
-            if live.canSwitchPaneMode {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task {
-                            await connection.setPaneMode(
-                                live, to: live.isAgentPane ? "terminal" : "agent")
-                        }
-                    } label: {
-                        Image(
-                            systemName: live.isAgentPane
-                                ? "terminal" : "bubble.left.and.text.bubble.right")
-                    }
-                    .accessibilityLabel(live.isAgentPane ? "Show the terminal" : "Show the chat")
-                }
-            }
-
-            // Handing the agent something to look at.
-            //
-            // In the bar rather than the key row: that row is already nine keys
-            // wide and its own comment records what a tenth did to a phone. The
-            // clipboard item appears only when there is an image on it, so the
-            // menu is one item most of the time.
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    PhotosPicker(selection: $pickedImage, matching: .images) {
-                        Label("Choose Photo", systemImage: "photo")
-                    }
-                    if UIPasteboard.general.hasImages {
-                        Button {
-                            if let image = UIPasteboard.general.image {
-                                pastes.send(image, terminal: live.id, core: connection.core)
-                            }
-                        } label: {
-                            Label("Paste Image", systemImage: "doc.on.clipboard")
-                        }
-                    }
-                } label: {
-                    Image(systemName: "photo.badge.plus")
-                }
-                .accessibilityLabel("Send an image")
-            }
-
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showWorkspaceList = true } label: {
-                    Image(systemName: "square.stack")
-                }
-                .accessibilityLabel("Switch terminal")
-            }
-        }
-        // Over the terminal, above the key row, and gone the moment the path
-        // is typed. Nothing about a transfer is ever written into the pane
-        // itself: the path is the only thing that reaches the program.
-        .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
-        .onChange(of: pickedImage) { _, item in
-            guard let item else { return }
-            let terminal = live.id
-            let core = connection.core
-            Task {
-                // Loaded as data rather than as an `Image`: the picker hands
-                // back the original file, and re-encoding a screenshot through
-                // SwiftUI would smear the small text that is usually the whole
-                // reason someone is sending one.
-                guard let data = try? await item.loadTransferable(type: Data.self),
-                    let image = UIImage(data: data)
-                else {
-                    pickedImage = nil
-                    return
-                }
-                pastes.send(image, terminal: terminal, core: core)
-                pickedImage = nil
-            }
-        }
-        .sheet(isPresented: $showWorkspaceList) {
-            NavigationStack {
-                WorkspaceListView(
-                    connection: connection,
-                    onSelect: { terminal in
-                        select(terminal)
-                        showWorkspaceList = false
-                    },
-                    onDismiss: { showWorkspaceList = false },
-                    hosts: hosts
-                )
-                .navigationTitle("Worktrees")
-                .navigationBarTitleDisplayMode(.inline)
-            }
-        }
-        // Which pane is on screen, so a banner about THIS one is suppressed
-        // while banners about the others still arrive — see `Notifier`.
+        // What this pane costs while it is not on screen: nothing.
         //
-        // It is also what ends `done`: a pane on screen has been read, so each
-        // of these three moments marks it seen rather than waiting up to three
-        // seconds for the poll to notice. See `Connection.markVisibleSeen`.
-        .onAppear {
-            Notifier.shared.visibleTerminal = current.id
-            Task { await connection.markVisibleSeen() }
-        }
-        .onChange(of: current.id) { _, id in
-            Notifier.shared.visibleTerminal = id
-            Task { await connection.markVisibleSeen() }
-        }
-        .onDisappear {
-            session.stop()
-            Notifier.shared.visibleTerminal = nil
+        // The stream is a second ssh channel and the poll is traffic to the
+        // host, so a mounted-but-hidden pane must hold neither. Driven by
+        // `isVisible` rather than `onDisappear`, which no longer fires — the
+        // pane is hidden, not removed, and that is what keeps its grid.
+        .task(id: isVisible) {
+            if isVisible {
+                session.relink()
+                Notifier.shared.visibleTerminal = terminal.id
+                await connection.markVisibleSeen()
+            } else {
+                session.stop()
+            }
         }
         // Returning to the foreground carries no geometry of its own — this
-        // screen's size has not changed — but the pane is shared, and someone
-        // on the Mac could have resized the shared window while this device
-        // was backgrounded and not watching. `reassertSize` re-asks for the
-        // size already on file rather than computing a new one.
+        // pane's size has not changed — but the pane is shared, and someone on
+        // the Mac could have resized the shared window while this device was
+        // backgrounded and not watching. `reassertSize` re-asks for the size
+        // already on file rather than computing a new one.
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard phase == .active, isVisible else { return }
             session.reassertSize()
-            // Coming back to the app is reading whatever it comes back to. The
-            // notification did its job while the phone was away; leaving the
-            // pane flagged afterwards makes you dismiss the same news twice.
             Task { await connection.markVisibleSeen() }
         }
         // The link under this pane was replaced.
         //
-        // A stream is a second SSH channel on the session that just died, so
-        // everything this screen had open went with it. `TerminalSession`
+        // A stream is a second ssh channel on the session that just died, so
+        // everything this pane had open went with it. `TerminalSession`
         // survives that on its own by falling back to polling, which is the
         // right behavior and the slower path; this puts it back on the stream
         // now that there is one to be on.
         .onChange(of: connection.reconnectGeneration) { _, _ in
+            guard isVisible else { return }
             session.relink()
         }
     }
@@ -633,25 +495,11 @@ struct TerminalView: View {
         let usable = size.height - padding.top - padding.bottom
         return max(1, Int((usable / cellSize.height).rounded(.down)))
     }
+    // `select` is gone. Switching panes is `PaneHost`'s job now, and it does
+    // it by showing a different, already-mounted pane rather than by pointing
+    // this one somewhere else — which is what makes a pane's grid, scroll
+    // offset and fold state survive the switch.
 
-    /// Point this screen at a different terminal without leaving it — what
-    /// both the tab strip and the switcher sheet's rows do on a tap, kept in
-    /// one place so the two never disagree about what "switching" means.
-    private func select(_ terminal: Terminal) {
-        guard terminal.id != current.id else { return }
-        current = terminal
-        // An agent pane draws nothing from `TerminalSession` — there is no
-        // ssh stream to retarget, and leaving one open on the terminal just
-        // tapped away from would keep a channel alive for a pane nothing is
-        // showing. `stop()` releases it the same way leaving this screen
-        // entirely does in `.onDisappear`; the branch below still runs the
-        // ordinary retarget whenever the newly selected tab is a terminal.
-        if terminal.isAgentPane {
-            session.stop()
-        } else {
-            session.switchTo(terminal.id)
-        }
-    }
 
     // MARK: - Input
 
@@ -708,6 +556,9 @@ struct TerminalView: View {
         var width: Double
         var height: Double
         var cell: CGSize
+        /// Part of the key so that becoming visible re-asserts the size, and
+        /// becoming hidden stops asserting it, without the geometry changing.
+        var visible: Bool
     }
 }
 

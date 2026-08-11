@@ -21,6 +21,13 @@ struct Fleet: Decodable {
 struct Workspace: Decodable, Identifiable, Hashable {
     var id: String
     var short: String
+    /// Which repository this worktree belongs to.
+    ///
+    /// Optional because an older daemon's fleet never carried it, and one
+    /// missing field must not fail the decode of the whole fleet. Everything
+    /// repository-scoped a client can ask about a workspace — its stack, its
+    /// pull request — needs this.
+    var repository: String?
     var task: String
     var branch: String
     var worktree: String?
@@ -88,6 +95,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
 
     /// Whether to draw a chat or a VT grid.
     var isAgentPane: Bool { paneMode == "agent" }
+
+    /// Whether this pane is a review of what its worktree changed.
+    ///
+    /// The daemon has served this mode since the review surface landed, and the
+    /// phone had no branch for it: a `changes` pane fell past `isAgentPane` to
+    /// the VT renderer and was drawn as a raw terminal — a grid of whatever
+    /// bytes were on a pane that is not a tty. See `ChangesView`.
+    var isChangesPane: Bool { paneMode == "changes" }
 
     /// Whether this pane can be shown as a chat.
     ///
@@ -217,6 +232,83 @@ struct Repository: Decodable, Identifiable, Hashable {
 
 struct RepositoryList: Decodable {
     var repositories: [Repository]
+}
+
+/// A directory the daemon is allowed to discover repositories under.
+struct RepositoryRoot: Decodable, Identifiable, Hashable {
+    var id: String
+    /// Absent unless this client holds `host_admin`, which is the point: a
+    /// read-scoped phone learns that a root exists without learning where on
+    /// the machine it is. Shown as "Hidden" rather than as an empty row.
+    var displayPath: String?
+}
+
+struct RepositoryRootList: Decodable {
+    var roots: [RepositoryRoot]
+}
+
+/// A branch, for resuming onto work that already exists.
+struct Branch: Decodable, Identifiable, Hashable {
+    var name: String
+    var local: Bool
+    var remote: String?
+    /// git refuses a second checkout of the same branch, so this has to be
+    /// shown BEFORE somebody picks it — otherwise the only feedback is a
+    /// failure after the fact.
+    var checkedOut: Bool
+    var subject: String
+
+    var id: String { name }
+    /// A branch that exists only on a remote still works: adopting one creates
+    /// the local tracking branch. Worth labeling, because it is the difference
+    /// between resuming your own work and picking up someone else's.
+    var isRemoteOnly: Bool { !local && remote != nil }
+}
+
+struct BranchList: Decodable {
+    var branches: [Branch]
+}
+
+/// One branch's place in a stack, and what GitHub says about it.
+struct StackLink: Decodable, Identifiable, Hashable {
+    var branch: String
+    var parentBranch: String
+    /// Only a guess is labeled. The other sources are recorded facts; a guessed
+    /// parent produces a wrong diff that looks like a right one.
+    var parentGuessed: Bool
+    var ahead: Int
+    var behind: Int
+    var pr: PullRequest?
+
+    var id: String { branch }
+}
+
+struct PullRequest: Decodable, Hashable {
+    var number: Int
+    var url: String
+    var state: String
+    var checks: String
+    var review: String
+    /// Read from GitHub long enough ago to doubt. Shown rather than hidden: a
+    /// stale "passing" is the one reading that would mislead.
+    var stale: Bool
+}
+
+struct StackResponse: Decodable {
+    var cycleDetected: Bool
+    var links: [StackLink]
+}
+
+/// What the machine says about its own daemon.
+struct HostHealth: Decodable {
+    var platform: String
+    var daemonVersion: String
+    var protocolVersion: Int
+    var healthy: Bool
+    /// The daemon's own words. Shown rather than summarized: this client cannot
+    /// know which of them matters.
+    var reasons: [String]
+    var livePanes: Int
 }
 
 /// The states a terminal can be in, grouped by what a user should do about it.

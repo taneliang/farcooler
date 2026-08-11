@@ -17,23 +17,20 @@ struct FleetView: View {
 
     @StateObject private var connection = Connection()
 
-    /// Which terminal to open automatically, decided once per connection
+    /// Which terminal this screen is showing, decided once per connection
     /// attempt and then left alone.
     ///
     /// Recomputing this on every poll would mean a terminal finishing its
     /// work while this screen is open — an ordinary thing to happen while
     /// someone is reading it — yanks them onto a different pane mid-read.
     /// `nil` with `landingDecided` true means the fleet genuinely has no
-    /// terminals, which is what falls back to `list` below; `nil` with it
+    /// terminals, which is what falls back to the list below; `nil` with it
     /// false means a connection attempt hasn't finished yet.
+    ///
+    /// Assigning it is also how the empty-state list opens a terminal, and
+    /// that is deliberately a REPLACEMENT rather than a push — see `connected`.
     @State private var landing: Terminal?
     @State private var landingDecided = false
-
-    /// Pushed when a terminal is tapped in the fallback list — the only
-    /// place this screen still pushes, since the landing terminal above
-    /// takes the direct route and the switcher sheet (`WorkspaceListView`
-    /// from `TerminalView`) selects in place instead of navigating.
-    @State private var pushed: Terminal?
 
     /// Whether to offer a way off the spinner yet. See `waitedLongEnough`.
     @State private var stalled = false
@@ -65,9 +62,21 @@ struct FleetView: View {
                 connected
             }
         }
-        .navigationDestination(item: $pushed) { terminal in
-            TerminalView(terminal: terminal, connection: connection, hosts: store)
-        }
+        // No `navigationDestination` here, and that absence is the fix.
+        //
+        // The list used to PUSH a terminal while the landing terminal was
+        // rendered as the stack root, so whether the terminal screen had a back
+        // button at all depended on whether the fleet happened to be empty at
+        // the moment this screen connected — and backing out of a pushed
+        // terminal landed on a list that, by then, usually had a terminal to go
+        // straight back into. One screen at two stack depths is one screen with
+        // two different answers to "what does back mean here".
+        //
+        // Now there is one: the terminal is always the root, opening one from
+        // the empty-state list REPLACES the list rather than stacking on it,
+        // and every other way of changing terminal — the tab strip, the
+        // switcher sheet — already retargeted in place. Nothing pushes, so
+        // nothing can be backed out of into itself.
         .sheet(isPresented: $editing) {
             HostEditorView(
                 existing: host,
@@ -84,6 +93,18 @@ struct FleetView: View {
         // plausible way the session died in the first place.
         .onChange(of: scenePhase) { _, phase in
             connection.setActive(phase == .active)
+        }
+        // A fleet that empties has nothing for the terminal screen to show.
+        //
+        // `landing` was decided once and never revisited, so removing the last
+        // worktree left this sitting on a pane that no longer exists, with the
+        // switcher sheet as the only way out and nothing in it. Deliberately
+        // keyed on the fleet being EMPTY rather than on `landing` still being
+        // present: `TerminalView` moves on from the terminal it opened with
+        // whenever the tab strip is used, so "the terminal we landed on is
+        // gone" is a routine, correct state and must not yank anyone anywhere.
+        .onChange(of: terminalCount) { _, count in
+            if count == 0 { landing = nil }
         }
     }
 
@@ -149,9 +170,20 @@ struct FleetView: View {
     @ViewBuilder
     private var connected: some View {
         if let landing {
-            TerminalView(terminal: landing, connection: connection, hosts: store)
+            PaneHost(terminal: landing, connection: connection, hosts: store)
+                // Deliberately NOT keyed on the terminal.
+                //
+                // `TerminalView` owns which terminal it is showing and swaps it
+                // in place — see its `select`, which retargets the live ssh
+                // stream rather than opening a second one. Keying it here would
+                // tear the screen down and rebuild it on every tab tap,
+                // dropping the stream to reopen it a moment later.
+                .id(landingIdentity)
         } else if landingDecided {
-            WorkspaceListView(connection: connection, onSelect: { pushed = $0 }, hosts: store)
+            // The empty-state list. Choosing here REPLACES this screen with the
+            // terminal rather than pushing onto it, so the terminal is the root
+            // whichever way you arrived at it.
+            WorkspaceListView(connection: connection, onSelect: { landing = $0 }, hosts: store)
                 .navigationTitle(host.label)
                 .navigationBarTitleDisplayMode(.inline)
         } else {
@@ -159,6 +191,19 @@ struct FleetView: View {
                 .navigationTitle(host.label)
                 .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    /// What makes the terminal screen a NEW screen rather than the same one.
+    ///
+    /// Only the transition from "no terminal" to "a terminal" does — which is
+    /// the empty-state list opening the first one. Every later change of
+    /// terminal is `TerminalView`'s own business and must not rebuild it.
+    private var landingIdentity: Bool { landing != nil }
+
+    /// How many terminals the whole fleet has. Watched rather than the fleet
+    /// itself, because this screen only cares about the one transition.
+    private var terminalCount: Int {
+        connection.fleet.workspaces.reduce(0) { $0 + $1.terminals.count }
     }
 
     /// Connect, then decide `landing` from whatever fleet that connection
@@ -459,8 +504,9 @@ struct WorkspaceListView: View {
             }
         }
         .sheet(isPresented: $showNewWorkspace) {
-            NewWorkspaceView(repositories: connection.repositories, connection: connection) { repository, name, branch in
-                await connection.createWorkspace(repository: repository, name: name, branch: branch)
+            NewWorkspaceView(repositories: connection.repositories, connection: connection) { repository, name, branch, adopt in
+                await connection.createWorkspace(
+                    repository: repository, name: name, branch: branch, adopt: adopt)
             }
         }
         .sheet(isPresented: $showQuickTask) {
@@ -680,6 +726,17 @@ struct FleetList: View {
     let onAction: (Connection.Action, Terminal) -> Void
 
     @State private var hiddenExpanded = false
+    /// Which workspace's stack is being looked at. One value rather than a flag
+    /// plus two strings: a sheet that can be presented with nothing to show is
+    /// a sheet that will eventually be presented with nothing to show.
+    @State private var stackTarget: StackTarget?
+
+    /// A repository and a branch — everything `stack.get` needs.
+    struct StackTarget: Identifiable {
+        let repository: String
+        let branch: String
+        var id: String { "\(repository)#\(branch)" }
+    }
 
     private var shown: [Workspace] { fleet.workspaces.filter { !$0.isHidden } }
     private var hidden: [Workspace] { fleet.workspaces.filter(\.isHidden) }
@@ -734,6 +791,19 @@ struct FleetList: View {
                                 Task { await connection.createTerminal(workspace: workspace) }
                             } label: {
                                 Label("New terminal", systemImage: "plus")
+                            }
+                            // Where this branch sits, and what GitHub says.
+                            // Only offered when the daemon told us which
+                            // repository the worktree belongs to — an older one
+                            // did not, and a menu item that cannot work is
+                            // worse than one that is not there.
+                            if let repository = workspace.repository, !workspace.branch.isEmpty {
+                                Button {
+                                    stackTarget = StackTarget(
+                                        repository: repository, branch: workspace.branch)
+                                } label: {
+                                    Label("Stack & Pull Request", systemImage: "square.stack.3d.up")
+                                }
                             }
                             if workspace.isHidden {
                                 Button {
@@ -822,6 +892,12 @@ struct FleetList: View {
                     .foregroundStyle(.secondary)
                 }
             }
+        }
+        .sheet(item: $stackTarget) { target in
+            StackView(
+                repository: target.repository,
+                branch: target.branch,
+                connection: connection)
         }
     }
 }
@@ -1027,7 +1103,7 @@ struct AddRepositorySheet: View {
 struct NewWorkspaceView: View {
     let repositories: [Repository]
     let connection: Connection
-    let onCreate: (String, String, String) async -> Void
+    let onCreate: (String, String, String, Bool) async -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var repository: String = ""
@@ -1035,6 +1111,14 @@ struct NewWorkspaceView: View {
     @State private var branch = ""
     @State private var working = false
     @State private var showAddRepository = false
+    @State private var showBranchPicker = false
+    /// Set when a branch was picked from the list rather than typed.
+    ///
+    /// Adoption is a different operation, not a flag on the same one: the
+    /// daemon takes the branch over and names the worktree after it, so the
+    /// name field stops mattering and the form says so rather than collecting
+    /// something it will throw away.
+    @State private var adopting: Branch?
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
 
@@ -1068,7 +1152,10 @@ struct NewWorkspaceView: View {
     /// `createWorkspace` swallows its error: a refused name would close this
     /// sheet on a worktree that was never created and say nothing about why.
     private var isValid: Bool {
-        !repository.isEmpty && !folder.isEmpty && !isTooLong && !effectiveBranch.isEmpty
+        // Adoption has nothing to validate but the repository: the branch was
+        // picked from a list the machine produced, and the name comes from it.
+        if adopting != nil { return !repository.isEmpty }
+        return !repository.isEmpty && !folder.isEmpty && !isTooLong && !effectiveBranch.isEmpty
     }
 
     var body: some View {
@@ -1079,22 +1166,55 @@ struct NewWorkspaceView: View {
                     ForEach(repositories) { Text($0.displayName).tag($0.id) }
                 }
                 Button("Add a repository…") { showAddRepository = true }
-                TextField("Name", text: $name)
-                if !trimmedName.isEmpty { folderPreview }
-                TextField(
-                    "Branch", text: $branch,
-                    prompt: Text(
-                        suggestedBranch.isEmpty
-                            ? connection.branchPrefix + "my-worktree" : suggestedBranch)
-                )
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                Section {
-                    Text(
-                        "A workspace is one git worktree and one branch. Its name is the "
-                        + "worktree's folder, so it can't be changed later.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+
+                if let adopting {
+                    // Adoption collapses the form: there is nothing to name and
+                    // nothing to branch from.
+                    Section {
+                        LabeledContent("Resuming") {
+                            Text(adopting.name)
+                                .font(.footnote.monospaced())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Button("Start a new branch instead") { self.adopting = nil }
+                    } footer: {
+                        Text(
+                            "Far Cooler takes this branch over in a new worktree named after "
+                            + "it. Nothing on the branch changes.")
+                    }
+                } else {
+                    TextField("Name", text: $name)
+                    if !trimmedName.isEmpty { folderPreview }
+                    TextField(
+                        "Branch", text: $branch,
+                        prompt: Text(
+                            suggestedBranch.isEmpty
+                                ? connection.branchPrefix + "my-worktree" : suggestedBranch)
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                    // The other way work arrives.
+                    //
+                    // Before this the only option was a new branch, so picking
+                    // up something pushed from another machine — or produced by
+                    // a cloud agent — meant typing its name exactly and hoping.
+                    if !repository.isEmpty {
+                        Button {
+                            showBranchPicker = true
+                        } label: {
+                            Label("Resume an existing branch…", systemImage: "arrow.uturn.down")
+                        }
+                    }
+
+                    Section {
+                        Text(
+                            "A workspace is one git worktree and one branch. Its name is the "
+                            + "worktree's folder, so it can't be changed later.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("New workspace")
@@ -1104,10 +1224,14 @@ struct NewWorkspaceView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
+                    Button(adopting == nil ? "Create" : "Resume") {
                         working = true
                         Task {
-                            await onCreate(repository, trimmedName, effectiveBranch)
+                            if let adopting {
+                                await onCreate(repository, adopting.name, adopting.name, true)
+                            } else {
+                                await onCreate(repository, trimmedName, effectiveBranch, false)
+                            }
                             working = false
                             dismiss()
                         }
@@ -1118,6 +1242,11 @@ struct NewWorkspaceView: View {
             .sheet(isPresented: $showAddRepository) {
                 AddRepositorySheet(connection: connection) { newId in
                     repository = newId
+                }
+            }
+            .sheet(isPresented: $showBranchPicker) {
+                BranchPicker(repository: repository, connection: connection) { branch in
+                    adopting = branch
                 }
             }
         }

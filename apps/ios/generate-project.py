@@ -32,12 +32,17 @@ SOURCES = [
     "TerminalSession.swift",
     "TerminalTabStrip.swift",
     "TerminalView.swift",
+    "PaneHost.swift",
+    "DockedBar.swift",
     "ImagePaste.swift",
     "AgentStream.swift",
     "AgentView.swift",
     "MachineSettings.swift",
     "ThemeEditorView.swift",
     "AdapterEditorView.swift",
+    "Changes.swift",
+    "ChangesView.swift",
+    "BranchAndStack.swift",
 ]
 
 # `AgentKit`'s own sources, compiled directly into this target rather than

@@ -16,8 +16,20 @@ struct AgentView: View {
     let terminalID: String
     let workspaceID: String?
     @ObservedObject var connection: Connection
+    /// Whether this pane is the one on screen.
+    ///
+    /// The view stays mounted when it is not — that is what keeps the
+    /// transcript's scroll position and the composer's draft — so the polling
+    /// subscription has to be started and stopped from here rather than from
+    /// `onAppear`/`onDisappear`, which no longer fire on a pane switch.
+    var isVisible: Bool = true
 
     @StateObject private var stream: AgentStream
+    /// How far the keyboard — the docked composer included — reaches up the
+    /// screen. See `KeyboardInset`.
+    @StateObject private var keyboard = KeyboardInset()
+    /// How tall the docked composer measured. Reported up out of `DockedBar`.
+    @State private var barHeight: CGFloat = 0
     /// Whether the transcript should follow its own tail — true while the
     /// reader is parked at the bottom, false once they scroll away.
     @State private var followingTail = true
@@ -27,10 +39,13 @@ struct AgentView: View {
     /// `scrollPosition(id:)` binds one type.
     private static let endOfTranscript = Int.max
 
-    init(terminalID: String, workspaceID: String?, connection: Connection) {
+    init(
+        terminalID: String, workspaceID: String?, connection: Connection, isVisible: Bool = true
+    ) {
         self.terminalID = terminalID
         self.workspaceID = workspaceID
         self.connection = connection
+        self.isVisible = isVisible
         _stream = StateObject(wrappedValue: AgentStream(terminal: terminalID, core: connection.core))
     }
 
@@ -101,7 +116,37 @@ struct AgentView: View {
                 // last line stays reachable. The Mac reached the same place by
                 // the same route, after building it by hand first and freezing
                 // the app.
-                .safeAreaInset(edge: .bottom, spacing: 0) { composerStack }
+                // The composer is part of the KEYBOARD now, not part of this
+                // screen — see `DockedBar`. `DockedBar` itself draws nothing
+                // here; it is a zero-size representable whose only job is to
+                // exist in the hierarchy so its controller can hold first
+                // responder and vend the bar.
+                .background(
+                    DockedBar(height: $barHeight) { composerStack }
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
+                )
+                // Automatic avoidance off, and the room made by hand.
+                //
+                // A docked accessory covers the bottom of the screen with the
+                // keyboard DOWN, and SwiftUI's avoidance insets by nothing in
+                // that state — so the conversation ran underneath the composer.
+                // Adding the bar's height on top of avoidance is not the fix
+                // either: with the keyboard UP, avoidance already counts the
+                // accessory, and adding it again leaves a bar-sized gap. So the
+                // one number that is correct in both states — the keyboard's
+                // own overlap, accessory included — is used for both.
+                .ignoresSafeArea(.keyboard, edges: .bottom)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    // The larger of the two, because each is right in one state
+                    // and blind in the other. With the keyboard DOWN the
+                    // accessory is simply on screen and posts no keyboard-frame
+                    // notification at all, so only its measured height knows it
+                    // is there. With the keyboard UP the reported frame already
+                    // includes the accessory and is the taller number, so it
+                    // wins — and nothing is counted twice.
+                    Color.clear.frame(height: max(keyboard.height, barHeight))
+                }
                 // How the conversation MEETS the glass over it.
                 //
                 // `safeAreaInset` puts the composer there and tells the scroll
@@ -112,11 +157,21 @@ struct AgentView: View {
                 // gradient mask — which pegged a core — was trying to exist.
                 .scrollEdgeEffectStyle(.soft, for: .bottom)
         }
-        .onAppear { stream.start() }
-        .onDisappear { stream.stop() }
+        // Polling follows VISIBILITY, not mounting. A hidden pane keeps its
+        // transcript and its scroll offset and costs the host nothing.
+        .task(id: isVisible) {
+            if isVisible { stream.start() } else { stream.stop() }
+        }
     }
 
     /// Everything that sits over the bottom of the conversation.
+    ///
+    /// Carries its own swipe-down-to-dismiss, because `scrollDismissesKeyboard`
+    /// cannot: that only responds to drags on the SCROLL VIEW, and on a phone
+    /// the composer and the tab strip below it cover most of the bottom of the
+    /// screen — which is exactly where a thumb starts a downward flick. Swiping
+    /// the keyboard away worked only if you reached up into the transcript
+    /// first, which is not a gesture anybody performs deliberately.
     @ViewBuilder
     private var composerStack: some View {
         // Grouped so the composer and whatever sits above it behave as ONE
@@ -150,6 +205,35 @@ struct AgentView: View {
                     ApprovalCard(pending: pending) { optionID in
                         Task { await stream.answer(pending.id, optionID) }
                     }
+                    .padding(.horizontal, 12)
+                }
+
+                // A message that did not go, said so beside the composer.
+                //
+                // Here rather than in the transcript, and beside the composer
+                // rather than at the top: the undelivered message is already
+                // drawn in the transcript looking sent, so the correction
+                // belongs where the eye is — on the thing that would send it
+                // again.
+                if let failure = stream.sendFailure {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(failure.message)
+                            .font(.footnote)
+                        Spacer(minLength: 8)
+                        Button("Retry") { Task { await failure.retry() } }
+                            .font(.footnote.weight(.semibold))
+                        Button {
+                            stream.sendFailure = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .accessibilityLabel("Dismiss")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .modifier(GlassSurface(radius: 14))
                     .padding(.horizontal, 12)
                 }
 
@@ -249,6 +333,23 @@ struct AgentView: View {
             }
             // What the scroll view holds still while content around it
             // changes height — see the stack above.
+            // Drag the transcript down and the keyboard goes with it.
+            //
+            // `.interactively`: the keyboard tracks the finger and comes back if
+            // the drag is reversed, which is what the platform's own messaging
+            // surfaces do and what a thumb already expects.
+            //
+            // It starts moving only once the touch reaches the keyboard's own
+            // frame — that is `UIScrollView.keyboardDismissMode = .interactive`,
+            // which is defined in terms of the keyboard's rect and knows nothing
+            // about the composer and tab strip stacked above it. So the drag has
+            // to cross both bars before anything happens. Making the keyboard
+            // respond sooner means making those bars part of it — an
+            // `inputAccessoryView` — which is a trade this app has already
+            // refused once for the tab strip: an accessory floats OVER content,
+            // so the grid was laid out as though the strip were not there and
+            // its last line ended up behind it.
+            .scrollDismissesKeyboard(.interactively)
             .scrollPosition($scrollPosition, anchor: .bottom)
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 // Whether the reader is parked at the tail. 40pt of slack,
@@ -1140,8 +1241,15 @@ private struct AgentComposer: View {
 
     private var token: ComposerToken { activeToken(in: text, cursor: cursor) }
 
+    /// A picture on its own is a message.
+    ///
+    /// This was text-only, which disagreed with `send` — that guard has always
+    /// accepted either — so the one case where the disagreement showed was a
+    /// screenshot with nothing typed: the thumbnail sat in the strip with the
+    /// send button greyed out beside it, and the only way forward was to type
+    /// something you did not mean.
     private var canSend: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
     var body: some View {
@@ -1456,13 +1564,13 @@ private struct AgentComposer: View {
 
     // MARK: Attachments
     //
-    // TODO(agent-images): `terminal.agent_prompt` (crates/client/src/ffi.rs)
-    // only carries `text` today — there is no image content block on the
-    // wire yet. Wiring the picker itself is straightforward and done below;
-    // wiring delivery needs a protocol change this task's scope does not
-    // cover, so an attached image is shown and can be removed, but sending
-    // silently leaves it behind rather than pretending it went anywhere.
-    // Paste is the same story: reachable, not delivered.
+    // Delivered, end to end: the picker fills `attachments`, `send` hands them
+    // to `AgentStream.send`, which base64s them into `terminal.agent_prompt`;
+    // `ffi.rs` decodes them into `ImageBlock`s and the daemon passes them to
+    // the shim. The comment that used to sit here said the wire could not carry
+    // an image and that sending deliberately dropped it — that was true of the
+    // Claude backend and of nothing else, and it stayed here long after the
+    // protocol grew the block.
 
     private var attachmentStrip: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1513,7 +1621,19 @@ private struct AgentComposer: View {
             // often as anything else, and telling the agent the wrong type
             // fails at the far end.
             let mime = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg"
-            attachments.append(ComposerAttachment(image: image, data: data, mime: mime))
+            // Shrunk to fit ONE control envelope, which is what a prompt's
+            // image has to fit inside — see `PromptImageBudget`. Sending the
+            // original bytes is what a picked photo used to do, and the
+            // protocol refused every one of them over a megabyte.
+            guard let (payload, payloadMime) = PromptImageBudget.fit(
+                image, original: data, mime: mime)
+            else {
+                attachmentError = "That photo couldn't be prepared to send."
+                photoPickerItem = nil
+                return
+            }
+            attachments.append(
+                ComposerAttachment(image: image, data: payload, mime: payloadMime))
             attachmentError = nil
             photoPickerItem = nil
         }
@@ -1536,7 +1656,13 @@ private struct AgentComposer: View {
 private struct ComposerAttachment: Identifiable {
     let id = UUID()
     let image: UIImage
-    /// The original bytes, kept so the agent gets the picture the user picked
+    /// The bytes to send — the original when it already fits inside one control
+    /// envelope, a resized JPEG when it did not. See `PromptImageBudget`.
+    ///
+    /// The `image` above stays the FULL-size one, because it is what the
+    /// thumbnail is drawn from and shrinking that would show a worse picture
+    /// than was actually sent.
+    /// Formerly the original bytes, kept so the agent gets the picture the user picked
     /// rather than one re-encoded from a `UIImage` for display.
     let data: Data
     let mime: String
@@ -1715,6 +1841,20 @@ private struct ComposerTextView: UIViewRepresentable {
 /// No fallback. This app's minimum is iOS 26, so the material-and-hairline
 /// approximation that used to sit behind an availability check was dead code
 /// pretending to be portability.
+/// Putting the keyboard away without owning the field that raised it.
+///
+/// The composer's text view is a `UIViewRepresentable` several layers down, so
+/// there is no `FocusState` up here to set false. Asking the responder chain is
+/// the framework's own answer to "whatever is focused, stop being focused" and
+/// does not require this view to know what that is.
+@MainActor
+enum KeyboardDismissal {
+    static func now() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
 struct GlassSurface: ViewModifier {
     var radius: CGFloat = 24
 
