@@ -17,6 +17,12 @@ struct AgentRowView: View {
     /// by eye.
     var pending: PendingPermission?
     var onAnswer: ((String) -> Void)?
+    /// Put a sent message back in the composer for a rewrite.
+    ///
+    /// Threaded down exactly the way `onAnswer` is: the row that draws the
+    /// text is where the closure is called, and only `AgentSurface` knows
+    /// what "put it back" means.
+    var onEditMessage: ((String) -> Void)?
 
     var body: some View {
         switch row.kind {
@@ -24,7 +30,12 @@ struct AgentRowView: View {
         // inside the block it belongs to, so drawing it a second time as text
         // would say the same thing twice.
         case let .message(role, text, _):
-            MessageRow(role: role, text: text, isLive: isLast)
+            MessageRow(
+                role: role, text: text, isLive: isLast,
+                // Only the user's own words are editable — an agent reply or a
+                // thought was never something typed into the composer, so
+                // there is nothing to put back into it.
+                onEdit: role == .user ? { onEditMessage?(text) } : nil)
         case let .tool(tool):
             ToolRowView(tool: tool, isLive: isLast, pending: pending, onAnswer: onAnswer)
         case let .subagent(block):
@@ -135,6 +146,8 @@ private struct MessageRow: View {
     let role: Role
     let text: String
     var isLive: Bool = false
+    /// `nil` for every row that is not the user's own — see `AgentRowView`.
+    var onEdit: (() -> Void)?
 
     var body: some View {
         switch role {
@@ -142,18 +155,32 @@ private struct MessageRow: View {
             // Right-aligned with a fill, the one place in the transcript that
             // is not the agent talking — it has to read as a different voice
             // at a glance, not just on close reading.
-            HStack {
+            HStack(alignment: .top, spacing: 6) {
                 Spacer(minLength: 32)
-                Text(text)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    // `quaternary` rather than a hand-mixed opacity: it is the
-                    // fill AppKit uses for exactly this — a grouped surface
-                    // that must stay legible in both appearances without
-                    // anyone picking two numbers and hoping.
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
+                // Trailing-aligned, text over its own controls — the same
+                // shape `QueuedRow` uses for the message still waiting to
+                // send, so a sent message and a queued one read as the same
+                // kind of thing rather than two designs beside each other.
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(text)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        // `quaternary` rather than a hand-mixed opacity: it is the
+                        // fill AppKit uses for exactly this — a grouped surface
+                        // that must stay legible in both appearances without
+                        // anyone picking two numbers and hoping.
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
+
+                    if let onEdit {
+                        Button("Edit", action: onEdit)
+                            .buttonStyle(.plain)
+                            .help("Put this message back in the composer")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
         case .agent:

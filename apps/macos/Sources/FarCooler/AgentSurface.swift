@@ -60,6 +60,13 @@ struct AgentSurface: View {
     @State private var tail = TailFollow()
     /// The row the scroll view holds still while heights around it resolve.
     @State private var scrollPosition = ScrollPosition(idType: Int.self)
+    /// A sent message on its way back into the composer, via Edit.
+    ///
+    /// Owned here rather than by the composer or the row: the row that
+    /// offers Edit and the field it fills are siblings, not parent and
+    /// child, so the value has to live above both — the same reason `tail`
+    /// above is not owned by the scroll view it steers.
+    @State private var prefill: String?
 
     init(
         terminal: Terminal, binary: String?, environment: [String: String],
@@ -167,7 +174,8 @@ struct AgentSurface: View {
                             // fills what it is given — so a layout chosen from it
                             // cannot feed back into it. The freeze came from height,
                             // which does.
-                            width: proxy.size.width)
+                            width: proxy.size.width,
+                            prefill: $prefill)
                             .padding(10)
                     }
                 }
@@ -259,7 +267,8 @@ struct AgentSurface: View {
                         onAnswer: { optionID in
                             guard let id = stream.transcript.pendingPermission?.id else { return }
                             Task { await stream.answer(id, optionID) }
-                        }
+                        },
+                        onEditMessage: { prefill = $0 }
                     )
                     .id(row.id)
                 }

@@ -27,6 +27,11 @@ struct AgentComposer: View {
     /// How much room the pane has, which decides how many selectors are shown
     /// inline and how many move into the overflow menu.
     let width: CGFloat
+    /// Text handed in from outside — the Edit action on a sent message.
+    ///
+    /// A binding rather than a method, because the composer owns its text and
+    /// a second writer would have to reach into `@State` to set it.
+    @Binding var prefill: String?
 
     @State private var text = ""
     @State private var cursor = 0
@@ -144,6 +149,21 @@ struct AgentComposer: View {
                 .onTapGesture {}
         )
         .modifier(GlassCard())
+        // Edit, on one of your own sent messages, hands its text back in here.
+        //
+        // No focus request alongside it — `isFocused` above is the PANE's
+        // focus, threaded down from the owner and read by the field's own
+        // coordinator around line 772. The composer cannot focus itself, and
+        // a second focus source here would fight that coordinator instead of
+        // cooperating with it. It does not need to: Edit is only reachable by
+        // clicking inside a pane that is already focused, so this field is
+        // already taking keystrokes the moment the text lands.
+        .onChange(of: prefill) { _, incoming in
+            guard let incoming, !incoming.isEmpty else { return }
+            text = incoming
+            cursor = incoming.count
+            prefill = nil
+        }
         // Debounced by `.task(id:)` itself: a token that changes on every
         // keystroke cancels its predecessor for free, which is the whole
         // debounce — see `TileView.panels` for the same trick against a
