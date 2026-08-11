@@ -240,7 +240,7 @@ fun AgentScreen(model: AppModel, ref: TerminalRef, connection: Connection) {
                 onSetConfig = { id, value -> stream.setConfig(id, value) },
                 onSetMode = { mode -> stream.setMode(mode) },
                 onCancel = { stream.cancel() },
-                onSend = { text, images -> stream.send(text, images, whileWorking = isWorking) },
+                onSend = { text, images -> stream.send(text, images) },
             )
         }
     }

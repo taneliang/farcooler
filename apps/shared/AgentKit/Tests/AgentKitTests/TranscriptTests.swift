@@ -521,3 +521,105 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
         summary: nil, interrupted: false)
     #expect(one.subtitle == "1 step")
 }
+
+@Test func aQueuedMessageLeavesTheTranscriptItWasDrawnIn() {
+    // Drawn immediately so your words never vanish, then withdrawn once the
+    // daemon says it was held: it belongs in the queue, where it can still be
+    // edited, not in the conversation it has not joined yet.
+    var t = Transcript()
+    t.appendLocalUserMessage("use unittest")
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "use unittest", parent: nil) })
+
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "use unittest")
+    ]))])
+
+    #expect(!t.rows.contains { $0.kind == .message(role: .user, text: "use unittest", parent: nil) })
+    #expect(t.queue.count == 1)
+}
+
+@Test func aMessageSentStraightAwayKeepsItsRow() {
+    // Nothing queued it, so nothing withdraws it. This is the ordinary path
+    // and the one that must not regress.
+    var t = Transcript()
+    t.appendLocalUserMessage("add tests")
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: []))])
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "add tests", parent: nil) })
+}
+
+@Test func aQueueEntryThatMatchesNothingWithdrawsNothing() {
+    // The failure mode is a duplicate row, never a message the user wrote and
+    // never saw again.
+    var t = Transcript()
+    t.appendLocalUserMessage("add tests")
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "something else")
+    ]))])
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "add tests", parent: nil) })
+}
+
+@Test func sendingTheSameTextTwiceWithOnlyOneHeldWithdrawsExactlyOneRow() {
+    // Two identical sends leave two identical unconfirmed echoes and two
+    // identical rows. Matching with `contains` instead of consuming a match
+    // per queue entry would let one held item cancel both rows, deleting the
+    // one that genuinely went out with no queue entry left to show for it.
+    var t = Transcript()
+    t.appendLocalUserMessage("retry")
+    t.appendLocalUserMessage("retry")
+    #expect(t.rows.count == 2)
+
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "retry")
+    ]))])
+
+    #expect(t.rows.count == 1)
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "retry", parent: nil) })
+    // The FIRST row is the survivor: of two identical sends it is the earlier
+    // one that went out and the later one that is still waiting in the queue.
+    #expect(t.rows.first?.id == 0)
+}
+
+@Test func aHeldMessageEndsAsExactlyOneRowOnceTheQueueDrains() {
+    // The whole round trip the local echo exists for, in the order the daemon
+    // really emits it: drawn, withdrawn when the queue reports it held, then
+    // drawn once by the daemon's own message when the turn ends and
+    // `send_next_queued` finally sends it. The payoff is the count at the end
+    // — an echo that outlived its queue event, or a withdrawal that failed to
+    // consume it, leaves the user reading their own instruction twice.
+    var t = Transcript()
+    t.appendLocalUserMessage("use unittest")
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "use unittest")
+    ]))])
+    #expect(!t.rows.contains { $0.kind == .message(role: .user, text: "use unittest", parent: nil) })
+
+    t.apply([
+        Sequenced(seq: 1, event: .turnEnded(reason: "EndTurn")),
+        Sequenced(seq: 2, event: .promptQueue(items: [])),
+        Sequenced(seq: 3, event: .message(role: .user, text: "use unittest", parent: nil)),
+    ])
+
+    let sent = t.rows.filter {
+        $0.kind == .message(role: .user, text: "use unittest", parent: nil)
+    }
+    #expect(sent.count == 1)
+    #expect(t.queue.isEmpty)
+}
+
+@Test func aReplayedMessageAfterAnEpochResetSurvivesAStaleEcho() {
+    // An unconfirmed echo describes an uncertain send from the epoch that
+    // recorded it. Left alive across `resetForNewEpoch`, it can collide with
+    // a message replayed into the new epoch — one that genuinely happened —
+    // and a promptQueue naming that text would delete restored history that
+    // was never in question.
+    var t = Transcript()
+    t.appendLocalUserMessage("use unittest")
+    t.resetForNewEpoch()
+    t.apply([Sequenced(seq: 0, event: .message(role: .user, text: "use unittest", parent: nil))])
+
+    t.apply([Sequenced(seq: 1, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "use unittest")
+    ]))])
+
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "use unittest", parent: nil) })
+}

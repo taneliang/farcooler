@@ -2,16 +2,26 @@
 //!
 //! `fixtures/turn_basic.jsonl` is every frame `claude` 2.1.226 sent during one
 //! turn, captured by `fixtures/capture_turn.py` rather than written by hand.
+//! The capture uses the same flags `handshake::launch_args` sends, so it
+//! includes the `stream_event` deltas `--include-partial-messages` buys — and
+//! therefore the doubling those deltas invite, since the CLI sends the finished
+//! `assistant` message on top of them.
 
 use farcooler_agent_core::event::{AgentEvent, EndReason, Role};
-use farcooler_claude::normalize::frame_to_events;
+use farcooler_claude::normalize::Live;
 
+/// The capture, through ONE `Live` in order — the way a pane sees it.
+///
+/// Stateful on purpose: whether a finished `assistant` block is drawn depends
+/// on whether the deltas for that message were actually seen, so replaying the
+/// frames through independent normalizers would not be the same test.
 fn events() -> Vec<AgentEvent> {
+    let mut live = Live::default();
     include_str!("fixtures/turn_basic.jsonl")
         .lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| serde_json::from_str::<serde_json::Value>(l).expect("fixture line is JSON"))
-        .flat_map(|v| frame_to_events(&v))
+        .flat_map(|v| live.frame_to_events(&v))
         .collect()
 }
 
@@ -26,7 +36,20 @@ fn a_real_turn_produces_the_answer_and_ends() {
             _ => None,
         })
         .collect();
+    // "hi", not "hihi". The CLI sent this answer TWICE in the capture — once
+    // as `text_delta` "h" and "i", then again as a finished `assistant` block
+    // holding "hi" — and reading both is how every reply would render a second
+    // time underneath itself.
     assert_eq!(spoken, "hi");
+
+    // And piece by piece rather than in one go, which is the whole point of
+    // asking for partial messages: a pane that gets one event at the end sits
+    // on Working for the length of the answer.
+    let pieces = all
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::Message { role: Role::Agent, .. }))
+        .count();
+    assert_eq!(pieces, 2, "the answer streamed as its two deltas: {all:?}");
 
     assert!(
         all.iter().any(|e| matches!(e, AgentEvent::TurnEnded { reason: EndReason::EndTurn })),

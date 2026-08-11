@@ -4,10 +4,16 @@ import json, os, subprocess, tempfile, threading, time
 env = {k: v for k, v in os.environ.items()
        if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT")}
 
+# The flags `handshake::launch_args` sends, so the capture is what a pane
+# actually sees. `--include-partial-messages` above all: without it the CLI
+# sends no stream_event frames and the fixture would not contain the deltas the
+# normalizer now reads the answer from.
 args = ["claude", "--print",
         "--input-format", "stream-json",
         "--output-format", "stream-json",
         "--verbose",
+        "--include-partial-messages",
+        "--permission-prompt-tool", "stdio",
         "--permission-mode", "bypassPermissions"]
 
 p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,

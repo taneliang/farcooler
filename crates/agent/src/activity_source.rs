@@ -10,18 +10,23 @@
 
 use farcooler_protocol::v1::AgentActivity;
 
-use crate::event::AgentEvent;
+use crate::event::{AgentEvent, Role};
 
 /// The activity this event implies, or `None` if it implies nothing.
 pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
     match event {
         AgentEvent::Permission { .. } => Some(AgentActivity::Blocked),
         AgentEvent::TurnEnded { .. } => Some(AgentActivity::Idle),
-        AgentEvent::Message { .. }
+        // The AGENT's words. What the user typed says nothing about what the
+        // agent is doing — a pane that went busy because a person typed was
+        // reporting the wrong actor, and `send_next_queued` emits exactly that
+        // event every time a queued prompt goes out.
+        AgentEvent::Message { role: Role::Agent | Role::Thought, .. }
         | AgentEvent::ToolCall { .. }
         | AgentEvent::ToolUpdate { .. }
         | AgentEvent::Plan { .. }
         | AgentEvent::Resolved { .. } => Some(AgentActivity::Working),
+        AgentEvent::Message { role: Role::User, .. } => None,
         // Bookkeeping. Says nothing about whether the agent needs you.
         AgentEvent::SessionStarted { .. }
         | AgentEvent::ModeSet { .. }
@@ -89,5 +94,21 @@ mod tests {
         // you, and reporting one would make a fleet row flicker.
         assert_eq!(observe(&AgentEvent::Gap { reason: AgentGapReason::RingTrimmed }), None);
         assert_eq!(observe(&AgentEvent::ModeSet { agent_mode: "plan".into() }), None);
+    }
+
+    #[test]
+    fn your_own_words_are_not_the_agent_working() {
+        // A pane went busy because a PERSON typed. `send_next_queued` and
+        // `steer_queued` both emit the user's message, and each one moved the
+        // badge before the agent had done anything at all.
+        assert_eq!(
+            observe(&AgentEvent::Message { role: Role::User, text: "hi".into(), parent: None }),
+            None
+        );
+        // The agent's own words still are.
+        assert_eq!(
+            observe(&AgentEvent::Message { role: Role::Agent, text: "hi".into(), parent: None }),
+            Some(AgentActivity::Working)
+        );
     }
 }

@@ -24,6 +24,21 @@ pub const PINNED_CLAUDE_VERSION: &str = "2.1.226";
 ///
 /// `--verbose` is not optional decoration: the CLI requires it alongside
 /// stream-json output.
+///
+/// `--include-partial-messages` buys the `stream_event` frames that let an
+/// answer appear a word at a time instead of landing whole. Without it 2.1.226
+/// sends the finished `assistant` message and nothing before it, so a pane sat
+/// on Working for the length of the answer and then printed all of it at once,
+/// while codex — which streams by default — did not. The SDK spells the same
+/// switch `includePartialMessages`.
+///
+/// `--permission-prompt-tool stdio` is what makes the CLI ASK. Measured against
+/// 2.1.226: without it, a tool that needs approval is auto-denied and the agent
+/// replies "this session is non-interactive so the prompt can't be answered" —
+/// no `can_use_tool` control request is ever sent, so Far Cooler's Allow/Deny
+/// row could not appear and the whole permission path was dead code. With it,
+/// the CLI sends `can_use_tool` and blocks on the answer, which is the surface
+/// `answer_permission` was written for.
 pub fn launch_args(extra: &[String]) -> Vec<String> {
     let mut args = vec![
         "--print".to_string(),
@@ -32,6 +47,9 @@ pub fn launch_args(extra: &[String]) -> Vec<String> {
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
+        "--include-partial-messages".to_string(),
+        "--permission-prompt-tool".to_string(),
+        "stdio".to_string(),
     ];
     args.extend_from_slice(extra);
     args
@@ -203,6 +221,25 @@ mod tests {
         assert!(args.windows(2).any(|w| w == ["--input-format", "stream-json"]), "{args:?}");
         assert!(args.windows(2).any(|w| w == ["--output-format", "stream-json"]), "{args:?}");
         assert!(args.contains(&"--verbose".to_string()), "{args:?}");
+    }
+
+    #[test]
+    fn partial_messages_are_asked_for_so_an_answer_streams() {
+        // Without this, 2.1.226 sends the finished `assistant` message and
+        // nothing before it: the pane sits on Working for the whole answer and
+        // then prints it in one go, while codex streams.
+        assert!(launch_args(&[]).contains(&"--include-partial-messages".to_string()));
+    }
+
+    #[test]
+    fn the_cli_is_told_to_ask_rather_than_auto_deny() {
+        // Measured against 2.1.226: without `--permission-prompt-tool stdio` a
+        // tool needing approval is auto-denied and the agent says the session
+        // is non-interactive. No `can_use_tool` request is sent at all, so the
+        // Allow/Deny row never appeared and every permission answer in this
+        // crate was unreachable.
+        let args = launch_args(&[]);
+        assert!(args.windows(2).any(|w| w == ["--permission-prompt-tool", "stdio"]), "{args:?}");
     }
 
     #[test]

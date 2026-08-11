@@ -171,18 +171,17 @@ final class AgentStream: ObservableObject {
         return true
     }
 
-    func send(_ text: String, images: [ComposerImage] = [], whileWorking: Bool) async {
+    func send(_ text: String, images: [ComposerImage] = []) async {
         guard !refuseIfNeeded() else { return }
-        // Echoed locally only when it is going out NOW.
+        // Always drawn, never predicted.
         //
-        // A message written mid-turn does not become part of the conversation
-        // when you press return — the agent is busy, and it waits. Drawing it
-        // in the transcript anyway claimed something that had not happened; it
-        // shows up in the queue instead, and joins the transcript at the moment
-        // it is actually sent.
-        if !whileWorking {
-            transcript.appendLocalUserMessage(text)
-        }
+        // This used to echo only when the composer believed no turn was
+        // running — a guess made from fleet state about a decision taken on
+        // the agent channel. Guessing wrong meant the message reached the
+        // model and was drawn by nobody. The daemon answers with a
+        // `PromptQueue` if it held the message, and `Transcript` withdraws the
+        // row then; until it does, what you typed is on screen.
+        transcript.appendLocalUserMessage(text)
         // Written to a temp file and handed to the CLI by path.
         //
         // The CLI reads the bytes and puts them in the prompt as image blocks;
