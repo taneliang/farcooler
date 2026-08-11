@@ -26,14 +26,50 @@ can guess or steal.
 
 ## Shape
 
-    account ──owns──> devices  (apns / fcm token)
-            └─owns──> daemons  (hashed bearer token, scoped to the account)
+    account ──owns──> devices          (apns / fcm token, + push-to-start token)
+            ├─owns──> daemons          (hashed bearer token, scoped to the account)
+            └─has───> live_activities  (one update token per terminal)
 
 - **Identity** is WorkOS. The relay verifies a WorkOS session JWT and never
   stores a password, an email/password flow, or a session of its own.
 - **Storage** is D1: accounts, devices, daemons. Small, relational, and the
   same everywhere.
 - **Metrics** are Analytics Engine, deliberately NOT D1 — see `analytics.ts`.
+
+## Live Activities
+
+A `/v1/notify` that carries a `status` also drives the lock-screen card for that
+terminal, on top of the alert. Three tokens are involved and none is
+interchangeable:
+
+- the **device token**, for the alert;
+- the **push-to-start token**, one per app install, which is the only way to
+  create a card while the app is not running — which is the whole point, since
+  the agent blocks while the phone is in a pocket;
+- the **update token**, issued per running activity and dead when it ends, which
+  the app reports to `/v1/devices/activity` and withdraws with `updateToken:
+  null`.
+
+The alert is the guarantee and the card is the enhancement: an activity push
+that fails is logged and dropped, never allowed to cost anyone the
+notification. A daemon that sends no `status` gets the alert and nothing else,
+exactly as before.
+
+**Known hole.** A card the relay push-started has no update token until the
+person next opens the app, so between those two moments the relay cannot end it
+— an agent answered from the Mac leaves "Needs You" on the lock screen. The
+start payload therefore carries a `stale-date` an hour out, which marks the card
+as out of date without removing it. Deliberately not a `dismissal-date`: a card
+that disappears on a timer while the agent is genuinely still blocked deletes
+the one notification this product exists to deliver.
+
+## Sandbox and production
+
+A locally-signed build has `aps-environment: development` and so holds a
+*sandbox* APNs token, which `api.push.apple.com` rejects with `BadDeviceToken`.
+`devices.environment` records which service issued the token; NULL means
+production, because that is what every device registered before the column
+existed must have been.
 
 ## Self-hosting
 

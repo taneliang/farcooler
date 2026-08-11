@@ -191,16 +191,63 @@ public final class Account: NSObject, ObservableObject {
     /// filed, the daemon's pushes reach zero addresses, and the settings screen
     /// goes on saying "Notifications can reach this device."
     @discardableResult
-    public func registerDevice(pushToken: String, platform: String, label: String) async -> Bool {
+    public func registerDevice(
+        pushToken: String,
+        platform: String,
+        label: String,
+        environment: String,
+        liveActivityStartToken: String? = nil
+    ) async -> Bool {
         guard let token = await accessToken() else { return false }
+        var payload: [String: Any] = [
+            "pushToken": pushToken, "platform": platform, "label": label,
+            // So the devices screen can show which of your machines is
+            // behind, without anyone having to go and look.
+            "version": AppVersion.reported,
+            // Which APNs the relay has to talk to for this token. A build
+            // installed from Xcode gets a sandbox token and the App Store build
+            // of the same source gets a production one; sending either to the
+            // wrong host is answered with `BadDeviceToken` and nothing else, so
+            // the phone stays silent and the relay records a delivery it thinks
+            // it attempted correctly.
+            "environment": environment,
+        ]
+        // Omitted rather than sent as null when there is none, so the relay's
+        // COALESCE keeps a token it already has. The Mac has no Live Activities
+        // and a device can register before ActivityKit has handed one over —
+        // neither should erase a good token.
+        if let liveActivityStartToken {
+            payload["liveActivityStartToken"] = liveActivityStartToken
+        }
+        let body = try? await post("/v1/devices", payload, bearer: token)
+        return body != nil
+    }
+
+    /// File the push token for one running Live Activity, or clear it.
+    ///
+    /// Separate from the device token and from the push-to-start token, because
+    /// ActivityKit issues three different things: one that addresses the device,
+    /// one that can create an activity, and one per activity that can update or
+    /// end that specific card. Only the third can take a card off the lock
+    /// screen, and the relay cannot mint it — the phone has to send it up after
+    /// the activity starts.
+    ///
+    /// `updateToken: nil` says the activity is over and the relay should forget
+    /// it. Without that, an ended card leaves a row that the next `done` would
+    /// try to end again, pushing to a token APNs has already retired.
+    @discardableResult
+    public func registerActivityToken(
+        terminal: String, updateToken: String?, environment: String
+    ) async -> Bool {
+        guard let token = await accessToken() else { return false }
+        // NSNull rather than leaving the key out or passing the Optional along:
+        // JSONSerialization throws on a bare `Optional.none`, and an absent key
+        // reads to the relay as "no change" — but clearing is the entire point
+        // of the nil case.
+        let update: Any = updateToken.map { $0 as Any } ?? NSNull()
         let body = try? await post(
-            "/v1/devices",
-            [
-                "pushToken": pushToken, "platform": platform, "label": label,
-                // So the devices screen can show which of your machines is
-                // behind, without anyone having to go and look.
-                "version": AppVersion.reported,
-            ],
+            "/v1/devices/activity",
+            ["terminal": terminal, "updateToken": update, "environment": environment],
             bearer: token)
         return body != nil
     }

@@ -34,6 +34,14 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <!-- Without this ActivityKit reports activities as disabled outright:
+         `areActivitiesEnabled` is false, `Activity.request` throws, and no push
+         can start one either. It is not a permission — the person still has a
+         switch in Settings — it is the app declaring that it has a Live Activity
+         at all, and the failure without it looks identical to a person having
+         turned the feature off. -->
+    <key>NSSupportsLiveActivities</key>
+    <true/>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIApplicationSceneManifest</key>

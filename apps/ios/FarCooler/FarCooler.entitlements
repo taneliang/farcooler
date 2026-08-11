@@ -6,11 +6,17 @@
          keychain write fails with errSecMissingEntitlement (-34018). The device
          then cannot hold an identity: each call generated a key, failed to store
          it, and generated another next time — so it authenticated with one key
-         and displayed a different one to authorise, which looks exactly like a
-         host rejecting a correct key. -->
+         and displayed a different one to authorize, which looks exactly like a
+         host rejecting a correct key.
+
+         `$(AppIdentifierPrefix)` is not decoration. A real provisioning profile
+         grants `TEAMID.*` and nothing else, so a bare group name matches
+         nothing the profile allows and the device build fails to sign at all.
+         The prefix expands to empty when there is no profile, which is what
+         keeps the ad-hoc simulator build signing exactly as before. -->
     <key>keychain-access-groups</key>
     <array>
-        <string>com.farcooler.ios</string>
+        <string>$(AppIdentifierPrefix)com.farcooler.ios</string>
     </array>
 
     <!-- Remote notifications. `development` so a locally-signed build gets a

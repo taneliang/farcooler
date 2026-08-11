@@ -21,6 +21,7 @@ SOURCES = [
     "FleetView.swift",
     "Model.swift",
     "Notifications.swift",
+    "LiveActivities.swift",
     "Reachability.swift",
     "Settings.swift",
     "Store.swift",
@@ -57,6 +58,13 @@ AGENTKIT_SOURCES = [
     "AccountDevicesView.swift",
     "AccountSection.swift",
     "AppVersion.swift",
+    # The one type the app and the widget extension both have to agree on, down
+    # to the field names — ActivityKit matches a push to a running card by the
+    # type's name and decodes the payload straight into its ContentState. It is
+    # therefore in BOTH this list and `ACTIVITY_SOURCES` below: two targets, two
+    # binaries, one file. See `activity_build_ids` for why that needs a second
+    # set of build ids rather than reusing these.
+    "AgentActivityAttributes.swift",
     "AgentEvent.swift",
     "Composer.swift",
     "DiffComputation.swift",
@@ -72,6 +80,22 @@ AGENTKIT_SOURCES = [
     "VersionSection.swift",
     "Transcript.swift",
 ]
+# The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
+#
+# A second target and a second binary, which is not a structural choice: WidgetKit
+# renders Live Activities out of process so a card keeps drawing when the app is
+# not running, and that is the only case the feature exists for. An app cannot
+# draw its own Live Activity.
+#
+# Nothing from `SOURCES` is available here. The extension has no Rust core, no
+# connection, and no fleet — everything it draws arrives in the push that started
+# it, which is why `AgentActivityAttributes` carries plain strings rather than
+# ids to look up.
+ACTIVITY_SOURCES = [
+    "FarCoolerActivityBundle.swift",
+    "AgentActivityWidget.swift",
+]
+
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
 
 # Bundled rather than downloaded — see Fonts/README.md for why a terminal
@@ -94,6 +118,16 @@ KEYS = [
     "frameworksGroup", "fontsGroup", "agentKitGroup", "product", "sourcesPhase",
     "frameworksPhase", "resourcesPhase", "buildConfigList", "targetConfigList",
     "debug", "release", "targetDebug", "targetRelease",
+    # The widget extension: its own target, product, group, sources phase and
+    # configuration pair, plus the three objects that attach it to the app —
+    # `embedPhase` copies the built .appex into the app's PlugIns, and
+    # `activityDependency`/`activityProxy` are the pair Xcode requires to say
+    # "build that target first". Without the dependency the app can be built
+    # against a stale extension, or none at all, and the only symptom is a Live
+    # Activity that never appears.
+    "activityTarget", "activityProduct", "activityGroup", "activitySourcesPhase",
+    "activityConfigList", "activityDebug", "activityRelease", "embedPhase",
+    "activityDependency", "activityProxy",
 ]
 
 
@@ -104,18 +138,39 @@ def oid(seed):
 
 ids = {
     name: oid(name)
-    for name in SOURCES + AGENTKIT_SOURCES + FRAMEWORKS + FONTS + [ASSET_CATALOG]
+    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + FRAMEWORKS + FONTS
+    + [ASSET_CATALOG]
 }
 build_ids = {
     name: oid("build/" + name)
-    for name in SOURCES + AGENTKIT_SOURCES + FRAMEWORKS + FONTS + [ASSET_CATALOG]
+    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + FRAMEWORKS + FONTS
+    + [ASSET_CATALOG]
 }
+
+# A PBXBuildFile is "this file, compiled into THIS target", so a file two targets
+# both compile needs two of them pointing at one PBXFileReference. Reusing a
+# single build id puts the same object in two sources phases, which Xcode reads
+# as one target's file appearing twice and fails with "multiple commands
+# produce". `AgentActivityAttributes.swift` is the whole reason this exists; the
+# extension's own sources are in here too so the two lists stay symmetrical.
+activity_build_ids = {
+    name: oid("activity-build/" + name)
+    for name in ACTIVITY_SOURCES + ["AgentActivityAttributes.swift"]
+}
+
 P = {key: oid(key) for key in KEYS}
+
+# The built .appex, copied into the app's PlugIns folder.
+#
+# `RemoveHeadersOnCopy` is what Xcode's own template writes here. It is not
+# optional decoration: without it the copy carries headers into the bundle and
+# App Store validation rejects the upload.
+EMBED_BUILD_ID = oid("build/embed-activity")
 
 
 def file_refs():
     lines = []
-    for name in SOURCES + AGENTKIT_SOURCES:
+    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES:
         lines.append(
             f"\t\t{ids[name]} /* {name} */ = {{isa = PBXFileReference; "
             f"lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = \"<group>\"; }};"
@@ -141,6 +196,12 @@ def file_refs():
         "explicitFileType = wrapper.application; includeInIndex = 0; "
         "path = FarCooler.app; sourceTree = BUILT_PRODUCTS_DIR; };"
     )
+    lines.append(
+        f"\t\t{P['activityProduct']} /* FarCoolerActivity.appex */ = "
+        "{isa = PBXFileReference; explicitFileType = \"wrapper.app-extension\"; "
+        "includeInIndex = 0; path = FarCoolerActivity.appex; "
+        "sourceTree = BUILT_PRODUCTS_DIR; };"
+    )
     return "\n".join(lines)
 
 
@@ -165,6 +226,16 @@ def build_files():
         f"\t\t{build_ids[ASSET_CATALOG]} /* {ASSET_CATALOG} in Resources */ = "
         f"{{isa = PBXBuildFile; fileRef = {ids[ASSET_CATALOG]}; }};"
     )
+    for name, build_id in activity_build_ids.items():
+        lines.append(
+            f"\t\t{build_id} /* {name} in Sources */ = {{isa = PBXBuildFile; "
+            f"fileRef = {ids[name]}; }};"
+        )
+    lines.append(
+        f"\t\t{EMBED_BUILD_ID} /* FarCoolerActivity.appex in Embed Foundation Extensions */ = "
+        f"{{isa = PBXBuildFile; fileRef = {P['activityProduct']}; "
+        "settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };"
+    )
     return "\n".join(lines)
 
 
@@ -179,6 +250,10 @@ source_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in SOURCES)
 framework_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FRAMEWORKS)
 font_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FONTS)
 agentkit_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in AGENTKIT_SOURCES)
+activity_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in ACTIVITY_SOURCES)
+activity_source_list = "\n".join(
+    f"\t\t\t\t{activity_build_ids[n]} /* {n} in Sources */," for n in activity_build_ids
+)
 # `agentKitGroup`'s `path` is "../shared/AgentKit/Sources/AgentKit", which
 # only resolves to the right directory (`apps/shared/AgentKit/Sources/AgentKit`)
 # if the group sits directly under `mainGroup` — a sibling of `sourcesGroup`,
@@ -245,6 +320,32 @@ TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tHEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";
 \t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;"""
 
+# The widget extension's settings, deliberately NOT sharing TARGET_COMMON.
+#
+# It links no Rust core, so the header and framework search paths above would
+# point it at an include directory it has no business in. What it must share is
+# the version pair: an extension whose CFBundleVersion disagrees with the app it
+# is embedded in is refused at INSTALL time, not at build time, so the mismatch
+# only ever shows up on a device.
+#
+# SKIP_INSTALL is required of every embedded extension. Without it the .appex is
+# copied to the archive's root as well as into the app, and the upload is
+# rejected for containing a top-level product that is not an application.
+#
+# The bundle id has to be the app's with one component appended — that is the
+# rule for an app extension, not a convention, and a name that does not nest
+# fails to sign against the app's profile.
+ACTIVITY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
+\t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
+\t\t\t\tPRODUCT_NAME = FarCoolerActivity;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.activity;
+\t\t\t\tINFOPLIST_FILE = FarCoolerActivity/Info.plist;
+\t\t\t\tCODE_SIGN_STYLE = Manual;
+\t\t\t\tCODE_SIGN_IDENTITY = "-";
+\t\t\t\tCODE_SIGNING_ALLOWED = YES;
+\t\t\t\tCODE_SIGNING_REQUIRED = NO;
+\t\t\t\tSKIP_INSTALL = YES;"""
+
 PBXPROJ = f"""// !$*UTF8*$!
 {{
 \tarchiveVersion = 1;
@@ -276,6 +377,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tisa = PBXGroup;
 \t\t\tchildren = (
 \t\t\t\t{P['sourcesGroup']} /* FarCooler */,
+\t\t\t\t{P['activityGroup']} /* FarCoolerActivity */,
 \t\t\t\t{P['agentKitGroup']} /* AgentKit */,
 \t\t\t\t{ids[ASSET_CATALOG]} /* {ASSET_CATALOG} */,
 \t\t\t\t{P['frameworksGroup']} /* Frameworks */,
@@ -290,6 +392,14 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t\t{P['fontsGroup']} /* Fonts */,
 \t\t\t);
 \t\t\tpath = FarCooler;
+\t\t\tsourceTree = "<group>";
+\t\t}};
+\t\t{P['activityGroup']} /* FarCoolerActivity */ = {{
+\t\t\tisa = PBXGroup;
+\t\t\tchildren = (
+{activity_children}
+\t\t\t);
+\t\t\tpath = FarCoolerActivity;
 \t\t\tsourceTree = "<group>";
 \t\t}};
 \t\t{P['fontsGroup']} /* Fonts */ = {{
@@ -321,6 +431,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tisa = PBXGroup;
 \t\t\tchildren = (
 \t\t\t\t{P['product']} /* FarCooler.app */,
+\t\t\t\t{P['activityProduct']} /* FarCoolerActivity.appex */,
 \t\t\t);
 \t\t\tname = Products;
 \t\t\tsourceTree = "<group>";
@@ -335,13 +446,29 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t\t{P['sourcesPhase']},
 \t\t\t\t{P['frameworksPhase']},
 \t\t\t\t{P['resourcesPhase']},
+\t\t\t\t{P['embedPhase']},
 \t\t\t);
 \t\t\tbuildRules = ();
-\t\t\tdependencies = ();
+\t\t\tdependencies = (
+\t\t\t\t{P['activityDependency']},
+\t\t\t);
 \t\t\tname = FarCooler;
 \t\t\tproductName = FarCooler;
 \t\t\tproductReference = {P['product']};
 \t\t\tproductType = "com.apple.product-type.application";
+\t\t}};
+\t\t{P['activityTarget']} /* FarCoolerActivity */ = {{
+\t\t\tisa = PBXNativeTarget;
+\t\t\tbuildConfigurationList = {P['activityConfigList']};
+\t\t\tbuildPhases = (
+\t\t\t\t{P['activitySourcesPhase']},
+\t\t\t);
+\t\t\tbuildRules = ();
+\t\t\tdependencies = ();
+\t\t\tname = FarCoolerActivity;
+\t\t\tproductName = FarCoolerActivity;
+\t\t\tproductReference = {P['activityProduct']};
+\t\t\tproductType = "com.apple.product-type.app-extension";
 \t\t}};
 /* End PBXNativeTarget section */
 
@@ -364,9 +491,42 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tprojectRoot = "";
 \t\t\ttargets = (
 \t\t\t\t{P['target']} /* FarCooler */,
+\t\t\t\t{P['activityTarget']} /* FarCoolerActivity */,
 \t\t\t);
 \t\t}};
 /* End PBXProject section */
+
+/* Begin PBXContainerItemProxy section */
+\t\t{P['activityProxy']} = {{
+\t\t\tisa = PBXContainerItemProxy;
+\t\t\tcontainerPortal = {P['project']};
+\t\t\tproxyType = 1;
+\t\t\tremoteGlobalIDString = {P['activityTarget']};
+\t\t\tremoteInfo = FarCoolerActivity;
+\t\t}};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+\t\t{P['embedPhase']} /* Embed Foundation Extensions */ = {{
+\t\t\tisa = PBXCopyFilesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tdstPath = "";
+\t\t\tdstSubfolderSpec = 13;
+\t\t\tfiles = (
+\t\t\t\t{EMBED_BUILD_ID} /* FarCoolerActivity.appex in Embed Foundation Extensions */,
+\t\t\t);
+\t\t\tname = "Embed Foundation Extensions";
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+\t\t{P['activityDependency']} = {{
+\t\t\tisa = PBXTargetDependency;
+\t\t\ttarget = {P['activityTarget']};
+\t\t\ttargetProxy = {P['activityProxy']};
+\t\t}};
+/* End PBXTargetDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
 \t\t{P['resourcesPhase']} = {{
@@ -385,6 +545,14 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildActionMask = 2147483647;
 \t\t\tfiles = (
 {source_list}
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
+\t\t{P['activitySourcesPhase']} = {{
+\t\t\tisa = PBXSourcesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+{activity_source_list}
 \t\t\t);
 \t\t\trunOnlyForDeploymentPostprocessing = 0;
 \t\t}};
@@ -424,6 +592,20 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t}};
 \t\t\tname = Release;
 \t\t}};
+\t\t{P['activityDebug']} /* Debug */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{ACTIVITY_COMMON}
+\t\t\t}};
+\t\t\tname = Debug;
+\t\t}};
+\t\t{P['activityRelease']} /* Release */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{ACTIVITY_COMMON}
+\t\t\t}};
+\t\t\tname = Release;
+\t\t}};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -441,6 +623,15 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildConfigurations = (
 \t\t\t\t{P['targetDebug']} /* Debug */,
 \t\t\t\t{P['targetRelease']} /* Release */,
+\t\t\t);
+\t\t\tdefaultConfigurationIsVisible = 0;
+\t\t\tdefaultConfigurationName = Release;
+\t\t}};
+\t\t{P['activityConfigList']} = {{
+\t\t\tisa = XCConfigurationList;
+\t\t\tbuildConfigurations = (
+\t\t\t\t{P['activityDebug']} /* Debug */,
+\t\t\t\t{P['activityRelease']} /* Release */,
 \t\t\t);
 \t\t\tdefaultConfigurationIsVisible = 0;
 \t\t\tdefaultConfigurationName = Release;

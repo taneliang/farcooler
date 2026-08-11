@@ -12,6 +12,7 @@
 		B7B7E8CABF6354C393CCA4AA /* FleetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F342BD83956A52AFA8E283D4; };
 		9F5AA511436B5EA797092474 /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABF4CE4F60F5562A55DABDA; };
 		65BC051A08EB52D1925F8E13 /* Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 187F8E7EBB055EE28B4E67E0; };
+		7423900B94565142B7F0ECA2 /* LiveActivities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DA0715B4C1755E399CDEF4E; };
 		0477432E534753A0B759DC6F /* Reachability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C039D3E60E15306853FA113; };
 		6D4A0EFB0B5D560DAFE9179A /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B544A71636558E0931C038F; };
 		14CC0B48DA7A59509BAB17BF /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44EFA7B6FE3153B686B0EA92; };
@@ -32,6 +33,7 @@
 		6BC64D16CD585BCF8FE27CF3 /* AccountDevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA7B7C8BCE5A55DDA3550FE3; };
 		F96E491D15E457A18C63D257 /* AccountSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7093A96D0DB3550E8E6FA109; };
 		4EF5F2C42876520BAAF43538 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FAC520458BB54C78801B53E; };
+		8689527729B45DF5AA10338D /* AgentActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5E1D385C5E578E98BEE858; };
 		4DA1B4EE5A72553AA017D4B2 /* AgentEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 823B9C2C792F5A4EAF165645; };
 		9B567005FFE2529E9DAA23A5 /* Composer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288A7984A1835381AFF6A4C3; };
 		632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15A666CD6FD525982BAC34F; };
@@ -45,6 +47,10 @@
 		6C87999BD8695773BC9A037A /* IosevkaNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E57A0A7090B459EA8D69806B; };
 		D461E214179654D68E69ABD2 /* IosevkaNerdFontMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 718EE640EBC05D97A1B17342; };
 		8F1B001C907B5268A8EBA5BE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1AD44E8CEF485BABA3BB3DE1; };
+		BDCC925B56DF5538A7C835A6 /* FarCoolerActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73BE33D4405A51BF837B4F76; };
+		EE8F1C5946115EF7B679A3B5 /* AgentActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD12E9188AE54C68252C53C; };
+		113F0BA4C91958E58D847D86 /* AgentActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5E1D385C5E578E98BEE858; };
+		5E56AE26EA37573BB9DA7ADB /* FarCoolerActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 519B5ED0E0F35300BA7F8EDA; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +60,7 @@
 		F342BD83956A52AFA8E283D4 /* FleetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetView.swift; sourceTree = "<group>"; };
 		4ABF4CE4F60F5562A55DABDA /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
 		187F8E7EBB055EE28B4E67E0 /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
+		2DA0715B4C1755E399CDEF4E /* LiveActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivities.swift; sourceTree = "<group>"; };
 		2C039D3E60E15306853FA113 /* Reachability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reachability.swift; sourceTree = "<group>"; };
 		2B544A71636558E0931C038F /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		44EFA7B6FE3153B686B0EA92 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
@@ -74,6 +81,7 @@
 		DA7B7C8BCE5A55DDA3550FE3 /* AccountDevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDevicesView.swift; sourceTree = "<group>"; };
 		7093A96D0DB3550E8E6FA109 /* AccountSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSection.swift; sourceTree = "<group>"; };
 		7FAC520458BB54C78801B53E /* AppVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersion.swift; sourceTree = "<group>"; };
+		FF5E1D385C5E578E98BEE858 /* AgentActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityAttributes.swift; sourceTree = "<group>"; };
 		823B9C2C792F5A4EAF165645 /* AgentEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentEvent.swift; sourceTree = "<group>"; };
 		288A7984A1835381AFF6A4C3 /* Composer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Composer.swift; sourceTree = "<group>"; };
 		B15A666CD6FD525982BAC34F /* DiffComputation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffComputation.swift; sourceTree = "<group>"; };
@@ -82,12 +90,15 @@
 		9F21B2F4E7305C52A6B39A5D /* TokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStore.swift; sourceTree = "<group>"; };
 		E5B7BC3FED5259D183C18D69 /* VersionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionSection.swift; sourceTree = "<group>"; };
 		3F7004A6B092527BAE191DD2 /* Transcript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcript.swift; sourceTree = "<group>"; };
+		73BE33D4405A51BF837B4F76 /* FarCoolerActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarCoolerActivityBundle.swift; sourceTree = "<group>"; };
+		7CD12E9188AE54C68252C53C /* AgentActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityWidget.swift; sourceTree = "<group>"; };
 		C58051F3AA0C5DE2A3B15416 /* farcooler_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_vt.xcframework; path = Frameworks/farcooler_vt.xcframework; sourceTree = "<group>"; };
 		78C00FC7C5AC5565A723E44C /* farcooler_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_client.xcframework; path = Frameworks/farcooler_client.xcframework; sourceTree = "<group>"; };
 		E57A0A7090B459EA8D69806B /* IosevkaNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Regular.ttf; sourceTree = "<group>"; };
 		718EE640EBC05D97A1B17342 /* IosevkaNerdFontMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Bold.ttf; sourceTree = "<group>"; };
 		1AD44E8CEF485BABA3BB3DE1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = ../shared/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		A133A464581D57FABB4108BE /* FarCooler.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FarCooler.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		519B5ED0E0F35300BA7F8EDA /* FarCoolerActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FarCoolerActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -107,6 +118,7 @@
 			isa = PBXGroup;
 			children = (
 				DC2B394B789C517AA24120A8 /* FarCooler */,
+				36B5E35C81075470A9DE1C51 /* FarCoolerActivity */,
 				4C4542875C415F8685B9A60E /* AgentKit */,
 				1AD44E8CEF485BABA3BB3DE1 /* Assets.xcassets */,
 				7BF7610560DA5A64A5782FD6 /* Frameworks */,
@@ -123,6 +135,7 @@
 				F342BD83956A52AFA8E283D4 /* FleetView.swift */,
 				4ABF4CE4F60F5562A55DABDA /* Model.swift */,
 				187F8E7EBB055EE28B4E67E0 /* Notifications.swift */,
+				2DA0715B4C1755E399CDEF4E /* LiveActivities.swift */,
 				2C039D3E60E15306853FA113 /* Reachability.swift */,
 				2B544A71636558E0931C038F /* Settings.swift */,
 				44EFA7B6FE3153B686B0EA92 /* Store.swift */,
@@ -144,6 +157,15 @@
 			path = FarCooler;
 			sourceTree = "<group>";
 		};
+		36B5E35C81075470A9DE1C51 /* FarCoolerActivity */ = {
+			isa = PBXGroup;
+			children = (
+				73BE33D4405A51BF837B4F76 /* FarCoolerActivityBundle.swift */,
+				7CD12E9188AE54C68252C53C /* AgentActivityWidget.swift */,
+			);
+			path = FarCoolerActivity;
+			sourceTree = "<group>";
+		};
 		318B509E6A965252B6B6AD0E /* Fonts */ = {
 			isa = PBXGroup;
 			children = (
@@ -160,6 +182,7 @@
 				DA7B7C8BCE5A55DDA3550FE3 /* AccountDevicesView.swift */,
 				7093A96D0DB3550E8E6FA109 /* AccountSection.swift */,
 				7FAC520458BB54C78801B53E /* AppVersion.swift */,
+				FF5E1D385C5E578E98BEE858 /* AgentActivityAttributes.swift */,
 				823B9C2C792F5A4EAF165645 /* AgentEvent.swift */,
 				288A7984A1835381AFF6A4C3 /* Composer.swift */,
 				B15A666CD6FD525982BAC34F /* DiffComputation.swift */,
@@ -186,6 +209,7 @@
 			isa = PBXGroup;
 			children = (
 				A133A464581D57FABB4108BE /* FarCooler.app */,
+				519B5ED0E0F35300BA7F8EDA /* FarCoolerActivity.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -200,13 +224,29 @@
 				B80F12BD5B455B29AE0DF96F,
 				BD06D3E3D0E55D4FA8204FD6,
 				7E266E705A115865B3DE1CE2,
+				A07C1A18360C50F0B8E2EA12,
 			);
 			buildRules = ();
-			dependencies = ();
+			dependencies = (
+				E49E6B036C9058E78E77D80C,
+			);
 			name = FarCooler;
 			productName = FarCooler;
 			productReference = A133A464581D57FABB4108BE;
 			productType = "com.apple.product-type.application";
+		};
+		332717FB6A2A5089A274E500 /* FarCoolerActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5D3B47E2686157CF8B6BC2D6;
+			buildPhases = (
+				0F0EFDB141DF52688DDA76E4,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = FarCoolerActivity;
+			productName = FarCoolerActivity;
+			productReference = 519B5ED0E0F35300BA7F8EDA;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -229,9 +269,42 @@
 			projectRoot = "";
 			targets = (
 				F71A1340A17D5BAAA17AAE9D /* FarCooler */,
+				332717FB6A2A5089A274E500 /* FarCoolerActivity */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXContainerItemProxy section */
+		7DA0194BED2B52D6A2E68D4D = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C9A7D3CE0F735C64936BDAE6;
+			proxyType = 1;
+			remoteGlobalIDString = 332717FB6A2A5089A274E500;
+			remoteInfo = FarCoolerActivity;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A07C1A18360C50F0B8E2EA12 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5E56AE26EA37573BB9DA7ADB /* FarCoolerActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		E49E6B036C9058E78E77D80C = {
+			isa = PBXTargetDependency;
+			target = 332717FB6A2A5089A274E500;
+			targetProxy = 7DA0194BED2B52D6A2E68D4D;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
 		7E266E705A115865B3DE1CE2 = {
@@ -257,6 +330,7 @@
 				B7B7E8CABF6354C393CCA4AA /* FleetView.swift in Sources */,
 				9F5AA511436B5EA797092474 /* Model.swift in Sources */,
 				65BC051A08EB52D1925F8E13 /* Notifications.swift in Sources */,
+				7423900B94565142B7F0ECA2 /* LiveActivities.swift in Sources */,
 				0477432E534753A0B759DC6F /* Reachability.swift in Sources */,
 				6D4A0EFB0B5D560DAFE9179A /* Settings.swift in Sources */,
 				14CC0B48DA7A59509BAB17BF /* Store.swift in Sources */,
@@ -277,6 +351,7 @@
 				6BC64D16CD585BCF8FE27CF3 /* AccountDevicesView.swift in Sources */,
 				F96E491D15E457A18C63D257 /* AccountSection.swift in Sources */,
 				4EF5F2C42876520BAAF43538 /* AppVersion.swift in Sources */,
+				8689527729B45DF5AA10338D /* AgentActivityAttributes.swift in Sources */,
 				4DA1B4EE5A72553AA017D4B2 /* AgentEvent.swift in Sources */,
 				9B567005FFE2529E9DAA23A5 /* Composer.swift in Sources */,
 				632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */,
@@ -285,6 +360,16 @@
 				A4677749D2C9588EB8FA703D /* TokenStore.swift in Sources */,
 				A057A865719A51ED8C536CF7 /* VersionSection.swift in Sources */,
 				739934EC2264588692457640 /* Transcript.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0F0EFDB141DF52688DDA76E4 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BDCC925B56DF5538A7C835A6 /* FarCoolerActivityBundle.swift in Sources */,
+				EE8F1C5946115EF7B679A3B5 /* AgentActivityWidget.swift in Sources */,
+				113F0BA4C91958E58D847D86 /* AgentActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -325,9 +410,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 88ff942)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 5596ec0)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 308;
+				CURRENT_PROJECT_VERSION = 318;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -349,9 +434,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 88ff942)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 5596ec0)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 308;
+				CURRENT_PROJECT_VERSION = 318;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -365,6 +450,38 @@
 				SWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR)/include/vt $(BUILT_PRODUCTS_DIR)/include/client";
 				HEADER_SEARCH_PATHS = "$(BUILT_PRODUCTS_DIR)/include/**";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+			};
+			name = Release;
+		};
+		3BAB684FE4795172873CF9FB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				CURRENT_PROJECT_VERSION = 318;
+				PRODUCT_NAME = FarCoolerActivity;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.activity;
+				INFOPLIST_FILE = FarCoolerActivity/Info.plist;
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = NO;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		1E0B32246E525CB29AA3C470 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MARKETING_VERSION = 0.1.0;
+				CURRENT_PROJECT_VERSION = 318;
+				PRODUCT_NAME = FarCoolerActivity;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.activity;
+				INFOPLIST_FILE = FarCoolerActivity/Info.plist;
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = NO;
+				SKIP_INSTALL = YES;
 			};
 			name = Release;
 		};
@@ -385,6 +502,15 @@
 			buildConfigurations = (
 				FE785DA885045FADB511F3CE /* Debug */,
 				33C729E7BC50562081AFF17F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5D3B47E2686157CF8B6BC2D6 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3BAB684FE4795172873CF9FB /* Debug */,
+				1E0B32246E525CB29AA3C470 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

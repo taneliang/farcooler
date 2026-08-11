@@ -106,6 +106,11 @@ struct RootView: View {
             Notifier.shared.requestAuthorization()
             PushRegistration.shared.label = { UIDevice.current.name }
             AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
+            // Alongside the push token and for the same reason: the tokens that
+            // let the relay raise and dismiss a lock screen card can only be
+            // collected while the app is running, and the case the card exists
+            // for is the app NOT running.
+            LiveActivities.shared.start()
         }
     }
 }

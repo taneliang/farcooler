@@ -13,7 +13,14 @@
 
 import { record, type Metrics } from './analytics'
 import { verifySession } from './workos'
-import { sendPush } from './push'
+import {
+  isEnvironment,
+  sendLiveActivity,
+  sendPush,
+  type Activity,
+  type ActivityState,
+  type Environment,
+} from './push'
 
 export interface Env {
   DB: D1Database
@@ -60,6 +67,8 @@ export default {
           return await logout(request, env)
         case '/v1/devices':
           return await registerDevice(request, env)
+        case '/v1/devices/activity':
+          return await registerActivity(request, env)
         case '/v1/account':
           return await listAccount(request, env)
         case '/v1/devices/revoke':
@@ -216,19 +225,33 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
     pushToken: string
     label?: string
     version?: string
+    environment?: unknown
+    liveActivityStartToken?: unknown
   }>()
   if (body.platform !== 'apns' && body.platform !== 'fcm') return json({ error: 'platform' }, 400)
   if (!body.pushToken) return json({ error: 'pushToken' }, 400)
 
-  // `version` is optional and stays optional: an App Store build from before
-  // this column existed still registers, it just has nothing to report.
+  const environment = readEnvironment(body.environment)
+  if (environment instanceof Response) return environment
+
+  // `version`, `environment` and the push-to-start token are all optional and
+  // all COALESCEd: an App Store build from before a column existed still
+  // registers, and — this is the part that bit `version` first — re-registering
+  // from that older build must not erase what a newer one reported. `label` is
+  // assigned rather than coalesced because every build has always sent it, so
+  // an absent one is a rename to the default and not an old client.
   await env.DB.prepare(
-    `INSERT INTO devices (id, account_id, platform, push_token, label, version, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO devices
+       (id, account_id, platform, push_token, label, version, environment,
+        live_activity_start_token, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (platform, push_token)
      DO UPDATE SET account_id = excluded.account_id,
                    label = excluded.label,
                    version = COALESCE(excluded.version, devices.version),
+                   environment = COALESCE(excluded.environment, devices.environment),
+                   live_activity_start_token = COALESCE(
+                     excluded.live_activity_start_token, devices.live_activity_start_token),
                    updated_at = excluded.updated_at`,
   )
     .bind(
@@ -238,6 +261,10 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
       body.pushToken,
       body.label ?? 'Device',
       typeof body.version === 'string' ? body.version.slice(0, 64) : null,
+      environment,
+      typeof body.liveActivityStartToken === 'string' && body.liveActivityStartToken
+        ? body.liveActivityStartToken
+        : null,
       Date.now(),
     )
     .run()
@@ -246,6 +273,74 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
     platform: body.platform,
   })
   return json({ ok: true })
+}
+
+/// Remember how to reach the Live Activity currently running for a terminal.
+///
+/// Separate from `/v1/devices` because the two tokens have nothing in common
+/// but the word: the push-to-start token belongs to the app install and is
+/// known at registration, while an update token exists only once an activity is
+/// already running and dies with it. The app has to report it after the fact,
+/// and there is no moment at which both are known together.
+///
+/// `updateToken: null` is how the app says the activity is over.
+async function registerActivity(request: Request, env: Env): Promise<Response> {
+  const account = await requireAccount(request, env)
+  if (account instanceof Response) return account
+
+  const body = await request.json<{
+    terminal?: unknown
+    updateToken?: unknown
+    environment?: unknown
+  }>()
+  // The row is keyed on the terminal. Without one, every agent on the account
+  // would collapse onto a single card that contradicts all of them.
+  if (typeof body.terminal !== 'string' || !body.terminal) return json({ error: 'terminal' }, 400)
+
+  const environment = readEnvironment(body.environment)
+  if (environment instanceof Response) return environment
+
+  if (body.updateToken === null) {
+    await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND terminal = ?`)
+      .bind(account, body.terminal)
+      .run()
+    // `ok` unconditionally, unlike `revokeOwned`: there may legitimately be no
+    // row, because ending an activity from `/v1/notify` already deleted it, and
+    // the app reporting the same truth a moment later has not failed at
+    // anything.
+    return json({ ok: true })
+  }
+  if (typeof body.updateToken !== 'string' || !body.updateToken) {
+    return json({ error: 'updateToken' }, 400)
+  }
+
+  // The token is assigned rather than coalesced: APNs issues a new one per
+  // activity and the previous one is already dead, so keeping it would leave
+  // the relay pushing at an address nothing is listening to.
+  await env.DB.prepare(
+    `INSERT INTO live_activities (id, account_id, terminal, update_token, environment, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (account_id, terminal)
+     DO UPDATE SET update_token = excluded.update_token,
+                   environment = COALESCE(excluded.environment, live_activities.environment),
+                   updated_at = excluded.updated_at`,
+  )
+    .bind(crypto.randomUUID(), account, body.terminal, body.updateToken, environment, Date.now())
+    .run()
+
+  return json({ ok: true })
+}
+
+/// The APNs environment a request named, or the response to send instead.
+///
+/// Absent is NULL, which reads as production, because that is what every client
+/// built before this field existed is. Anything else is a 400 rather than a
+/// fall-through to production: a fall-through is precisely the bug the field
+/// was added to fix, and one that a typo could reinstate without a trace.
+function readEnvironment(value: unknown): Environment | null | Response {
+  if (value === undefined || value === null) return null
+  if (isEnvironment(value)) return value
+  return json({ error: 'environment' }, 400)
 }
 
 /// Everything this account has registered, for the apps' management screen.
@@ -396,6 +491,26 @@ const TOKEN_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000
 /// The body is deliberately thin. A title and a terminal are enough to get
 /// someone to open the app, and the relay has no business holding a
 /// conversation's contents in transit.
+///
+/// `status` and `label` are the newest fields and, like every field added here,
+/// optional forever: a daemon built before them sends neither and gets exactly
+/// the behavior it always got, which is the alert push and nothing else.
+interface Notification {
+  title: string
+  subtitle?: string
+  terminal?: string
+  version?: string
+  status?: string
+  label?: string
+}
+
+interface Device {
+  platform: string
+  push_token: string
+  environment: string | null
+  live_activity_start_token: string | null
+}
+
 async function notify(request: Request, env: Env): Promise<Response> {
   const header = request.headers.get('authorization') ?? ''
   const token = header.startsWith('Bearer ') ? header.slice(7) : ''
@@ -405,35 +520,40 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // a token that does not exist. NULL means a pairing issued before expiries
   // existed, which keeps working — logging those machines out to introduce a
   // policy would break a feature people had just set up.
+  //
+  // `label` comes along because it is the machine's name, which is one of the
+  // three things a Live Activity's card says.
   const daemon = await env.DB.prepare(
-    `SELECT id, account_id FROM daemons
+    `SELECT id, account_id, label FROM daemons
      WHERE token_hash = ? AND (expires_at IS NULL OR expires_at > ?)`,
   )
     .bind(await sha256(token), Date.now())
-    .first<{ id: string; account_id: string }>()
+    .first<{ id: string; account_id: string; label: string }>()
   if (!daemon) return json({ error: 'unauthorised' }, 401)
 
-  const body = await request.json<{
-    title: string
-    subtitle?: string
-    terminal?: string
-    version?: string
-  }>()
+  const body = await request.json<Notification>()
   if (!body.title) return json({ error: 'title' }, 400)
 
   const devices = await env.DB.prepare(
-    `SELECT platform, push_token FROM devices WHERE account_id = ?`,
+    `SELECT platform, push_token, environment, live_activity_start_token
+     FROM devices WHERE account_id = ?`,
   )
     .bind(daemon.account_id)
-    .all<{ platform: string; push_token: string }>()
+    .all<Device>()
 
   let delivered = 0
   for (const device of devices.results ?? []) {
-    const ok = await sendPush(env, device.platform, device.push_token, {
-      title: body.title,
-      subtitle: body.subtitle ?? '',
-      terminal: body.terminal ?? '',
-    })
+    const ok = await sendPush(
+      env,
+      device.platform,
+      device.push_token,
+      {
+        title: body.title,
+        subtitle: body.subtitle ?? '',
+        terminal: body.terminal ?? '',
+      },
+      device.environment,
+    )
     if (ok) delivered += 1
     await record(
       env.METRICS,
@@ -442,6 +562,18 @@ async function notify(request: Request, env: Env): Promise<Response> {
       daemon.account_id,
       { platform: device.platform, ok },
     )
+  }
+
+  // The lock screen comes second, and never at the alert's expense.
+  //
+  // After the loop above so that a Live Activity push cannot delay or displace
+  // the alert, and swallowed so that a dead activity token cannot turn a
+  // notification that WAS delivered into a 500 — the daemon would retry it, and
+  // the user would be interrupted twice for one event.
+  try {
+    await pushActivity(env, daemon, body, devices.results ?? [])
+  } catch (error) {
+    console.error('live activity push failed', error)
   }
 
   // Version alongside last-seen, and from the same request, because a machine
@@ -458,6 +590,123 @@ async function notify(request: Request, env: Env): Promise<Response> {
     .run()
 
   return json({ delivered })
+}
+
+/// Put what just happened on the lock screen, if the daemon said enough for it
+/// to mean anything.
+///
+/// Returns without doing a thing unless the daemon named a status this relay
+/// understands. An unrecognized one is IGNORED rather than rejected: the daemon
+/// ships separately from the relay and will eventually send a status invented
+/// after this code was written, and a 400 there would cost the user the alert —
+/// the one part of this route that is actually promised.
+async function pushActivity(
+  env: Env,
+  daemon: { account_id: string; label: string },
+  body: Notification,
+  devices: Device[],
+): Promise<void> {
+  const status = body.status
+  if (status !== 'blocked' && status !== 'done') return
+
+  // No terminal, no activity. `live_activities` is keyed on it, and a row under
+  // the empty string is every agent on the account sharing one card that
+  // contradicts all of them — worse than no card at all.
+  const terminal = body.terminal ?? ''
+  if (!terminal) return
+
+  const state: ActivityState = {
+    status,
+    // The daemon's own words when it has any. When it has none, a blocked card
+    // still needs to say what it is waiting for — "Needs You" alone does not —
+    // but a finished one does not, because the card already reads "Finished"
+    // above this line and repeating it is the sort of thing you cannot unsee.
+    detail: body.subtitle || (status === 'blocked' ? 'Waiting for your answer' : ''),
+  }
+  const alert = { title: body.title, body: body.subtitle ?? '' }
+
+  const running = await env.DB.prepare(
+    `SELECT update_token, environment FROM live_activities
+     WHERE account_id = ? AND terminal = ?`,
+  )
+    .bind(daemon.account_id, terminal)
+    .first<{ update_token: string; environment: string | null }>()
+
+  if (status === 'done') {
+    // Nothing to end, and nothing to start either: a push-to-start announcing
+    // that something already finished leaves a card on the lock screen that the
+    // relay can never take back, because the app never gets an update token for
+    // an activity it did not know was coming.
+    if (!running) return
+
+    await deliverActivity(env, daemon.account_id, running.update_token, running.environment, {
+      event: 'end',
+      state,
+      alert,
+    })
+    await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND terminal = ?`)
+      .bind(daemon.account_id, terminal)
+      .run()
+    return
+  }
+
+  if (running) {
+    await deliverActivity(env, daemon.account_id, running.update_token, running.environment, {
+      event: 'update',
+      state,
+      alert,
+    })
+    return
+  }
+
+  // Nothing running, so create one from the outside. This is the reason the
+  // push-to-start token is stored at all: the agent blocks while the phone is
+  // in a pocket, and there is nothing awake on the device to start a card.
+  for (const device of devices) {
+    if (device.platform !== 'apns' || !device.live_activity_start_token) continue
+    await deliverActivity(
+      env,
+      daemon.account_id,
+      device.live_activity_start_token,
+      device.environment,
+      {
+        event: 'start',
+        state,
+        alert,
+        attributes: {
+          terminal,
+          // The agent's name if the daemon sent one, and the notification's
+          // title if it did not. A blank line on the card would be worse than
+          // repeating what the alert already said.
+          label: body.label || body.title,
+          machine: daemon.label,
+        },
+      },
+    )
+  }
+}
+
+/// One activity push, counted.
+///
+/// A separate event name from the alert's on purpose: these fail for reasons
+/// the alert does not — an update token that outlived its activity, a payload
+/// the app cannot decode — and folding them into `notification_failed` would
+/// make the delivery rate that actually matters look worse than it is.
+async function deliverActivity(
+  env: Env,
+  account: string,
+  token: string,
+  environment: string | null,
+  activity: Activity,
+): Promise<void> {
+  const ok = await sendLiveActivity(env, token, activity, environment)
+  await record(
+    env.METRICS,
+    env.ANALYTICS_SALT,
+    ok ? 'activity_sent' : 'activity_failed',
+    account,
+    { platform: 'apns', ok },
+  )
 }
 
 // MARK: - Helpers

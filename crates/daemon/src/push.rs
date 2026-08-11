@@ -75,13 +75,36 @@ impl Pairing {
 
 /// What the relay is told.
 ///
-/// A title, a line under it, and which terminal to open. Never a transcript,
-/// never a command, never output — the relay is a delivery service, and a
-/// payload it cannot read is a payload it cannot leak.
+/// A title, a line under it, which terminal to open, and the two facts a Live
+/// Activity needs. Never a transcript, never a command, never output — the
+/// relay is a delivery service, and a payload it cannot read is a payload it
+/// cannot leak.
 #[derive(Debug, serde::Serialize)]
 struct Notification<'a> {
     title: &'a str,
     subtitle: &'a str,
+    /// `"blocked"` or `"done"`: whether the phone raises the live card on the
+    /// lock screen or dismisses the one already there.
+    ///
+    /// Told rather than worked out, because the only other place this fact
+    /// exists in the payload is inside `title`, which is a human sentence. A
+    /// relay that read "needs you" out of one would be a second copy of the
+    /// same rule, in another language, breaking the day the copy changed.
+    ///
+    /// A daemon too old to send this omits the field and the relay falls back
+    /// to a plain notification — so an empty or invented status is worse than
+    /// none, and this is never either.
+    status: &'a str,
+    /// What the agent is called, on its own: the resolved agent name — "claude",
+    /// "codex", a harness preset — and not the worktree, which does not exist at
+    /// the call site. Deliberately the same string already interpolated into
+    /// `title`, so the live card and the notification under it cannot disagree
+    /// about what they are naming.
+    ///
+    /// It is already inside `title` as a fragment, and that is exactly the
+    /// problem: the live card puts the name and the status in separate places
+    /// on the lock screen, and neither can be cut back out of a sentence.
+    label: &'a str,
     terminal: &'a str,
     /// What this machine is running, so the devices screen can show which of
     /// someone's machines is behind without them going to each one to look.
@@ -103,13 +126,22 @@ pub async fn notify(
     pairing: &Pairing,
     title: &str,
     subtitle: &str,
+    status: &str,
+    label: &str,
     terminal: &str,
 ) {
     let url = format!("{}/v1/notify", pairing.relay.trim_end_matches('/'));
     let result = client
         .post(&url)
         .bearer_auth(&pairing.token)
-        .json(&Notification { title, subtitle, terminal, version: farcooler_protocol::BUILD })
+        .json(&Notification {
+            title,
+            subtitle,
+            status,
+            label,
+            terminal,
+            version: farcooler_protocol::BUILD,
+        })
         .send()
         .await;
 

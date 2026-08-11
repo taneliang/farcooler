@@ -34,6 +34,22 @@ public final class PushRegistration: ObservableObject {
     /// will set `fcm`.
     public var platform = "apns"
 
+    /// ActivityKit's push-to-start token, when the app has one.
+    ///
+    /// Filed with the device rather than on a route of its own because it is
+    /// another address for the same phone, and because the two arrive in either
+    /// order — re-registering when it lands is one line here instead of a second
+    /// piece of hold-until-signed-in bookkeeping.
+    ///
+    /// Nil on the Mac, permanently. There are no Live Activities there and the
+    /// relay's COALESCE is what keeps that from erasing a phone's token.
+    public var liveActivityStartToken: String? {
+        didSet {
+            guard liveActivityStartToken != oldValue else { return }
+            Task { await sendIfPossible() }
+        }
+    }
+
     /// The last token APNs gave us, held until there is an account to file it
     /// under. Registration and sign-in finish in either order, and whichever is
     /// second completes the pair.
@@ -50,10 +66,48 @@ public final class PushRegistration: ObservableObject {
     public func sendIfPossible() async {
         guard let token, Account.shared.isSignedIn else { return }
         let ok = await Account.shared.registerDevice(
-            pushToken: token, platform: platform, label: label())
+            pushToken: token,
+            platform: platform,
+            label: label(),
+            environment: Self.environment,
+            liveActivityStartToken: liveActivityStartToken)
         registered = ok
         lastError = ok ? nil : "Could not tell the relay how to reach this device."
     }
+
+    /// Which APNs issued this device's token: `development` or `production`.
+    ///
+    /// Read out of the embedded provisioning profile rather than compiled in
+    /// behind `#if DEBUG`, because those two do not line up. A Release build
+    /// installed from Xcode is still development-signed, and the same source
+    /// through TestFlight is not — the build configuration is simply not the
+    /// question being asked. The entitlement is.
+    ///
+    /// This matters because getting it wrong is silent. A sandbox token sent to
+    /// production APNs is refused with `BadDeviceToken`; nothing crashes,
+    /// nothing logs on the phone, and the relay records an attempt it believes
+    /// it made correctly. The phone just never rings.
+    ///
+    /// Production whenever the answer cannot be found, because that is the App
+    /// Store case — the one where there is no developer watching to notice.
+    public static let environment: String = {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+            let data = try? Data(contentsOf: url)
+        else { return "production" }
+
+        // The profile is a CMS signature wrapping a plain XML plist. We are not
+        // the audience for the signature — the OS already checked it, and this
+        // is reading our own bundle — so this finds the payload rather than
+        // pulling in Security to unwrap it properly.
+        guard let start = data.range(of: Data("<plist".utf8)),
+            let end = data.range(of: Data("</plist>".utf8), in: start.upperBound..<data.endIndex),
+            let parsed = try? PropertyListSerialization.propertyList(
+                from: data[start.lowerBound..<end.upperBound], format: nil) as? [String: Any],
+            let entitlements = parsed["Entitlements"] as? [String: Any],
+            let environment = entitlements["aps-environment"] as? String
+        else { return "production" }
+        return environment
+    }()
 
     /// Not surfaced as an error by the caller: registration fails on the
     /// simulator and in any build without a push entitlement, neither of which

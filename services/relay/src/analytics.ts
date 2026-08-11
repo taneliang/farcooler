@@ -48,6 +48,12 @@ export type EventName =
   | 'daemon_paired'
   | 'notification_sent'
   | 'notification_failed'
+  // Live Activity pushes, kept apart from the alert's counters because they
+  // fail for reasons the alert cannot — an update token that outlived its
+  // activity, a payload the app's ContentState cannot decode — and mixing them
+  // in would make the delivery rate that actually matters look worse than it is.
+  | 'activity_sent'
+  | 'activity_failed'
 
 /// One data point per interesting thing.
 ///

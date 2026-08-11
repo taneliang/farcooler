@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Far Cooler</string>
+    <key>CFBundlePackageType</key>
+    <string>XPC!</string>
+    <!-- Deferred to build settings for the same reason the app's are: an
+         extension whose version disagrees with the app it is embedded in is
+         rejected at install, not at build, so a literal here is a failure that
+         only shows up on a device. generate-project.py fills both from
+         scripts/version.sh, which is the one thing that knows. -->
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <!-- What makes this a WidgetKit extension rather than any other kind. There
+         is no NSExtensionPrincipalClass and there must not be: WidgetKit finds
+         the @main WidgetBundle itself, and naming a class here makes the
+         extension fail to load with no other symptom than a Live Activity that
+         never appears. -->
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.widgetkit-extension</string>
+    </dict>
+</dict>
+</plist>

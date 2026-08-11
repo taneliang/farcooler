@@ -65,18 +65,46 @@ const RECONCILE_BACKSTOP: Duration = Duration::from_secs(30);
 /// certainty re-reads.
 const EVENT_BACKLOG: usize = 256;
 
+/// Everything the relay is told about one agent changing state.
+///
+/// A struct rather than a tuple because `status` is not interchangeable with
+/// the two sentences beside it: the relay switches on it to decide whether a
+/// live card goes up or comes down, and three `String`s in a row is a
+/// signature where transposing two of them still compiles and only shows up as
+/// a lock screen that never clears.
+struct Notice {
+    title: String,
+    subtitle: String,
+    /// `"blocked"` or `"done"`, and nothing else — an empty or invented status
+    /// tells the relay it is talking to a daemon it should stop trusting. It is
+    /// `&'static str` so there is nowhere for a computed one to come from.
+    status: &'static str,
+}
+
 /// What, if anything, is worth waking a phone for.
 ///
 /// Split out from the sending so it can be tested at all: the rule it encodes —
 /// two states out of five — is the difference between a product people keep
 /// notifications on for and one they mute, and the sending half is a spawn and
 /// a filesystem read that no test can reach through.
-fn notification(activity: AgentActivity, label: &str) -> Option<(String, String)> {
+///
+/// The status the phone acts on is decided HERE, next to the sentence the
+/// person reads, and not anywhere else. Both come off the same `AgentActivity`,
+/// and two matches on it in two files is the pair that drifts: the live card
+/// would say one thing and the notification under it another, for the same
+/// agent, in the same second.
+fn notification(activity: AgentActivity, label: &str) -> Option<Notice> {
     match activity {
-        AgentActivity::Blocked => {
-            Some((format!("{label} needs you"), "Waiting for your answer".to_string()))
-        }
-        AgentActivity::Done => Some((format!("{label} finished"), String::new())),
+        AgentActivity::Blocked => Some(Notice {
+            title: format!("{label} needs you"),
+            subtitle: "Waiting for your answer".to_string(),
+            status: "blocked",
+        }),
+        AgentActivity::Done => Some(Notice {
+            title: format!("{label} finished"),
+            subtitle: String::new(),
+            status: "done",
+        }),
         _ => None,
     }
 }
@@ -187,13 +215,27 @@ impl Watcher {
     /// Reading the pairing file happens in the spawned task for the same
     /// reason. It is blocking I/O, and it does not belong under a lock either.
     fn push_if_paired(&self, terminal: Uuid, activity: AgentActivity, label: &str) {
-        let Some((title, subtitle)) = notification(activity, label) else { return };
+        let Some(notice) = notification(activity, label) else { return };
+        // Owned, because the spawned task outlives this call by design and the
+        // label is borrowed from the sampling loop's stack. The sentences are
+        // already owned — the label is the one the phone needs on its own, for
+        // the half of the live card that is not a sentence.
+        let label = label.to_string();
         // Cheap: a `reqwest::Client` is a handle to a shared pool, so this
         // clone keeps the connection reuse the one-client-per-daemon buys.
         let client = self.push.clone();
         tokio::spawn(async move {
             let Some(pairing) = crate::push::Pairing::load() else { return };
-            crate::push::notify(&client, &pairing, &title, &subtitle, &terminal.to_string()).await;
+            crate::push::notify(
+                &client,
+                &pairing,
+                &notice.title,
+                &notice.subtitle,
+                notice.status,
+                &label,
+                &terminal.to_string(),
+            )
+            .await;
         });
     }
 
@@ -772,16 +814,25 @@ mod tests {
 
     #[test]
     fn a_blocked_agent_says_what_it_wants() {
-        let (title, subtitle) = notification(AgentActivity::Blocked, "claude").expect("blocked");
-        assert_eq!(title, "claude needs you");
-        assert_eq!(subtitle, "Waiting for your answer");
+        let notice = notification(AgentActivity::Blocked, "claude").expect("blocked");
+        assert_eq!(notice.title, "claude needs you");
+        assert_eq!(notice.subtitle, "Waiting for your answer");
+        // What raises the live card. The relay is deliberately not in the
+        // business of reading "needs you" out of the title, so if this word
+        // ever changes shape the lock screen stops working and nothing else
+        // does — which is why it is asserted rather than left to the copy.
+        assert_eq!(notice.status, "blocked");
     }
 
     #[test]
     fn a_finished_agent_needs_no_second_line() {
-        let (title, subtitle) = notification(AgentActivity::Done, "claude").expect("done");
-        assert_eq!(title, "claude finished");
-        assert!(subtitle.is_empty());
+        let notice = notification(AgentActivity::Done, "claude").expect("done");
+        assert_eq!(notice.title, "claude finished");
+        assert!(notice.subtitle.is_empty());
+        // And what takes the card back down. An empty subtitle is fine; an
+        // empty status would leave a live card up on the lock screen until the
+        // system expired it hours later.
+        assert_eq!(notice.status, "done");
     }
 
     /// The gate that keeps this off the hot path.
