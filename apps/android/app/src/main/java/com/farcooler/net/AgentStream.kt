@@ -140,15 +140,18 @@ class AgentStream(
         }
     }
 
-    fun send(text: String, images: List<Attachment> = emptyList(), whileWorking: Boolean = false) {
+    fun send(text: String, images: List<Attachment> = emptyList()) {
         scope.launch {
-            // Echoed locally only when it is going out NOW. A message written
-            // mid-turn waits in the queue and joins the transcript when it is
-            // actually sent.
-            if (!whileWorking) {
-                transcript.appendLocalUserMessage(text)
-                _revision.value = transcript.revision
-            }
+            // Drawn immediately, whether or not this turns out to be queued —
+            // the daemon's next PromptQueue withdraws it if it was held.
+            // Predicting the outcome here read fleet state about a decision
+            // taken on the agent channel, and the two could disagree for the
+            // few milliseconds between a turn ending and this client
+            // noticing: the echo was suppressed for a queue row that never
+            // came, the CLI's own echo was dropped as a duplicate, and the
+            // message reached the model without ever being drawn.
+            transcript.appendLocalUserMessage(text)
+            _revision.value = transcript.revision
             // Base64 through the core, which decodes it into the protocol's
             // bytes. The picture travels WITH the prompt; there is no path,
             // because a path from a phone means nothing on the host.

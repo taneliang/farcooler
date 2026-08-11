@@ -544,6 +544,76 @@ class TranscriptTest {
     }
 
     @Test
+    fun `a queued message leaves the transcript it was drawn in`() {
+        // Drawn immediately so your words never vanish, then withdrawn once
+        // the daemon says it was held: it belongs in the queue, where it can
+        // still be edited, not in the conversation it has not joined yet.
+        val t = Transcript()
+        t.appendLocalUserMessage("use unittest")
+        assertTrue(t.rows.any { it.messageText == "use unittest" })
+
+        t.apply(listOf(seq(0, AgentEvent.PromptQueue(listOf(QueuedPrompt("0", "use unittest"))))))
+
+        assertFalse(t.rows.any { it.messageText == "use unittest" })
+        assertEquals(1, t.queue.size)
+    }
+
+    @Test
+    fun `a message sent straight away keeps its row`() {
+        // Nothing queued it, so nothing withdraws it. This is the ordinary
+        // path and the one that must not regress.
+        val t = Transcript()
+        t.appendLocalUserMessage("add tests")
+        t.apply(listOf(seq(0, AgentEvent.PromptQueue(emptyList()))))
+        assertTrue(t.rows.any { it.messageText == "add tests" })
+    }
+
+    @Test
+    fun `a queue entry that matches nothing withdraws nothing`() {
+        // The failure mode is a duplicate row, never a message the user wrote
+        // and never saw again.
+        val t = Transcript()
+        t.appendLocalUserMessage("add tests")
+        t.apply(listOf(seq(0, AgentEvent.PromptQueue(listOf(QueuedPrompt("0", "something else"))))))
+        assertTrue(t.rows.any { it.messageText == "add tests" })
+    }
+
+    @Test
+    fun `sending the same text twice with only one held withdraws exactly one row`() {
+        // Two identical sends leave two identical unconfirmed echoes and two
+        // identical rows. Matching with `any`/`contains` instead of consuming
+        // a match per queue entry would let one held item cancel both rows,
+        // deleting the one that genuinely went out with no queue entry left
+        // to show for it.
+        val t = Transcript()
+        t.appendLocalUserMessage("retry")
+        t.appendLocalUserMessage("retry")
+        assertEquals(2, t.rows.size)
+
+        t.apply(listOf(seq(0, AgentEvent.PromptQueue(listOf(QueuedPrompt("0", "retry"))))))
+
+        assertEquals(1, t.rows.size)
+        assertTrue(t.rows.any { it.messageText == "retry" })
+    }
+
+    @Test
+    fun `a replayed message after an epoch reset survives a stale echo`() {
+        // An unconfirmed echo describes an uncertain send from the epoch that
+        // recorded it. Left alive across resetForNewEpoch, it can collide
+        // with a message replayed into the new epoch — one that genuinely
+        // happened — and a PromptQueue naming that text would delete restored
+        // history that was never in question.
+        val t = Transcript()
+        t.appendLocalUserMessage("use unittest")
+        t.resetForNewEpoch()
+        t.apply(listOf(seq(0, message("use unittest", role = Role.USER))))
+
+        t.apply(listOf(seq(1, AgentEvent.PromptQueue(listOf(QueuedPrompt("0", "use unittest"))))))
+
+        assertTrue(t.rows.any { it.messageText == "use unittest" })
+    }
+
+    @Test
     fun anEpochResetClearsTheConversationButKeepsTheSelectors() {
         // The cursor a transcript holds counts positions in a stream that no
         // longer exists, so the rows built from it describe a conversation that

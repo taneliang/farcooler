@@ -211,6 +211,24 @@ class Transcript {
     /** The id the next row will take. Monotonic, never reused. */
     private var nextRowId = 0
 
+    /**
+     * Messages drawn straight from the composer that the daemon has not yet
+     * accounted for.
+     *
+     * The composer used to PREDICT whether a message would be queued, by
+     * reading fleet state while the thing it predicted read the agent
+     * channel. In the window between a turn ending on one and the other
+     * noticing, it guessed wrong: the echo was suppressed for a queue row
+     * that never came, the CLI's own echo was dropped as a duplicate, and the
+     * message reached the model without ever being drawn.
+     *
+     * So the client draws first and asks after. An entry lives only until the
+     * next [AgentEvent.PromptQueue], which is the event that answers the
+     * question — a queue that carries the text means it was held, and one
+     * that does not means it went out.
+     */
+    private val unconfirmedEchoes = mutableListOf<String>()
+
     private fun changed() {
         revision += 1
     }
@@ -233,6 +251,11 @@ class Transcript {
         cursor = 0
         nextRowId = 0
         breakBeforeNextMessage = false
+        // An echo names an uncertain send from THIS epoch. Left alive, it can
+        // collide with a message replayed into the new epoch — a real row —
+        // and the next PromptQueue naming that text would delete restored
+        // history that was never in question.
+        unconfirmedEchoes.clear()
         changed()
     }
 
@@ -284,7 +307,25 @@ class Transcript {
         // The agent's reply is a new turn's worth of speech, not a continuation
         // of what the user just typed.
         breakBeforeNextMessage = true
+        unconfirmedEchoes.add(text)
         changed()
+    }
+
+    /**
+     * Withdraw the last user message drawn locally with this exact text.
+     *
+     * The LAST, because a repeated instruction is a thing people really send
+     * twice, and withdrawing the older one would leave the transcript showing
+     * the wrong instance as still waiting.
+     */
+    private fun removeLastLocalUserMessage(text: String) {
+        val index = rows.indexOfLast {
+            val kind = it.kind
+            kind is TranscriptRow.Kind.Message &&
+                kind.role == Role.USER && kind.parent == null && kind.text == text
+        }
+        if (index < 0) return
+        rows = rows.toMutableList().also { it.removeAt(index) }
     }
 
     /**
@@ -564,10 +605,35 @@ class Transcript {
 
             is AgentEvent.ModeSet -> agentMode = event.agentMode
 
-            // Wholesale, like the plan: the daemon sends the whole queue on
-            // every change, and a client reconstructing it from adds and
-            // removes could disagree with what will actually be sent.
-            is AgentEvent.PromptQueue -> queue = event.items
+            is AgentEvent.PromptQueue -> {
+                // Wholesale, like the plan: the daemon sends the whole queue
+                // on every change, and a client reconstructing it from adds
+                // and removes could disagree with what will actually be
+                // sent.
+                queue = event.items
+                // Anything drawn from the composer that turns out to be HELD
+                // is withdrawn from the conversation — it has not joined it
+                // yet, and in the queue it can still be edited or taken
+                // back. Anything not named here went out, so it stays and
+                // stops being pending: this event is the daemon's answer
+                // either way, which is what bounds the list to the few
+                // milliseconds between typing and the reply.
+                //
+                // Matched one at a time against a working copy, not with
+                // `any`/`contains`: the same text sent twice before this
+                // event leaves two identical echoes, and a non-consuming
+                // match would let one held queue item cancel both rows —
+                // deleting the one that genuinely went out, with no queue
+                // entry left to show for it.
+                val unmatchedEchoes = unconfirmedEchoes.toMutableList()
+                for (item in event.items) {
+                    val index = unmatchedEchoes.indexOf(item.text)
+                    if (index < 0) continue
+                    unmatchedEchoes.removeAt(index)
+                    removeLastLocalUserMessage(item.text)
+                }
+                unconfirmedEchoes.clear()
+            }
 
             is AgentEvent.TurnEnded -> {
                 // Nothing to DRAW, but it is a seam: the next message begins a
