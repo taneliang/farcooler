@@ -77,6 +77,16 @@ pub struct ClaudeBackend {
     /// earlier and now says nothing. `commands_changed` sends objects again, so
     /// this fills the gap rather than papering over it permanently.
     command_help: std::collections::HashMap<String, String>,
+    /// The task list `TaskCreate` and `TaskUpdate` build, as the plan panel.
+    ///
+    /// The third correlation this backend keeps, and the same shape as the
+    /// other two: a fact that arrives on one frame and is needed on another. A
+    /// `TaskCreate` carries no id — the id is in the RESULT text, which reaches
+    /// this pane as a `tool_result` block correlated by `tool_use_id`. `Tasks`
+    /// is what remembers the call in between. See its doc comment for why the
+    /// list moves on the result rather than on the call, and for what happens
+    /// when a `TodoWrite` wants the same panel.
+    tasks: crate::normalize::Tasks,
     /// The `get_context_usage` request whose answer has not come back yet.
     ///
     /// The context meter needs a number the CLI only volunteers when asked, so
@@ -145,8 +155,13 @@ impl ClaudeBackend {
         // fire first. Mostly nothing, but dropping them unread would be a
         // silent choice rather than a deliberate one.
         let mut live = crate::normalize::Live::default();
+        // Built here rather than at the end, so the restore below fills the
+        // very tracker this session goes on using — see `history_to_events_with`.
+        let mut tasks = crate::normalize::Tasks::default();
         for frame in seen {
-            prelude.extend(live.frame_to_events(&frame));
+            let mut events = live.frame_to_events(&frame);
+            tasks.fold(&frame, &mut events);
+            prelude.extend(events);
         }
 
         // History has to be READ, not waited for. `--resume` attaches the
@@ -158,7 +173,12 @@ impl ClaudeBackend {
             match transcript_for(&worktree_for_history, &init.session_id) {
                 Some(path) => match std::fs::read_to_string(&path) {
                     Ok(raw) => {
-                        let restored = crate::normalize::history_to_events(&raw);
+                        // Through the session's OWN task tracker, so a resumed
+                        // pane rebuilds its task list AND can still update it:
+                        // a `TaskUpdate` after a resume names an id handed out
+                        // before it, and an id this tracker never learned is
+                        // ignored by design.
+                        let restored = crate::normalize::history_to_events_with(&raw, &mut tasks);
                         if restored.is_empty() {
                             prelude.push(AgentEvent::Gap {
                                 reason: farcooler_agent_core::event::AgentGapReason::LoadEmpty,
@@ -209,6 +229,7 @@ impl ClaudeBackend {
                 // identical menu is traffic for nothing.
                 commands_sent: init.commands,
                 live,
+                tasks,
                 permission_inputs: std::collections::HashMap::new(),
                 usage_request: None,
             },
@@ -282,7 +303,12 @@ impl ClaudeBackend {
                     }
                 }
 
-                let events = self.live.frame_to_events(&frame);
+                let mut events = self.live.frame_to_events(&frame);
+                // After the normalizer, because the plan the task tools draw is
+                // derived from the very rows it just produced — and because a
+                // `TodoWrite`'s plan has to already be in `events` for the
+                // two-writers rule to be able to drop it.
+                self.tasks.fold(&frame, &mut events);
                 if events.iter().any(|e| matches!(e, AgentEvent::TurnEnded { .. })) {
                     // Nothing can answer an ask once the turn it belonged to is
                     // over, so this is where the outstanding ones stop being
@@ -756,6 +782,7 @@ mod tests {
             command_help: std::collections::HashMap::new(),
             commands_sent: Vec::new(),
             live: Default::default(),
+            tasks: Default::default(),
             permission_inputs: std::collections::HashMap::new(),
             usage_request: None,
         }
@@ -1034,6 +1061,48 @@ mod tests {
         // no picker.
         assert_eq!(commands[1].name, "brand-new");
         assert_eq!(commands[1].description, "");
+    }
+
+    #[tokio::test]
+    async fn a_pane_watching_the_task_tools_draws_the_plan_panel() {
+        // What the user actually saw: five rows titled literally "TaskCreate"
+        // and no panel, because a task's id lives only in its result text and
+        // nothing here was correlating the two.
+        let mut backend = echoing_backend().await;
+
+        let called = backend
+            .handle(Incoming::Frame(serde_json::json!({
+                "type": "assistant", "parent_tool_use_id": null,
+                "message": { "content": [{ "type": "tool_use", "id": "toolu_01A",
+                    "name": "TaskCreate",
+                    "input": { "subject": "Read the schemas", "description": "all three" } }] }
+            })))
+            .await
+            .expect("an assistant frame is not an error");
+        assert!(
+            matches!(called.as_slice(), [AgentEvent::ToolCall { title, .. }]
+                if title == "Read the schemas"),
+            "the row names the work: {called:?}"
+        );
+
+        // And the panel appears when the result confirms the task, which is
+        // also the only frame that ever says what its id is.
+        let confirmed = backend
+            .handle(Incoming::Frame(serde_json::json!({
+                "type": "user", "parent_tool_use_id": null,
+                "message": { "content": [{ "type": "tool_result", "tool_use_id": "toolu_01A",
+                    "is_error": false,
+                    "content": "Task #1 created successfully: Read the schemas" }] }
+            })))
+            .await
+            .expect("a user frame is not an error");
+        assert!(
+            matches!(confirmed.as_slice(),
+                [AgentEvent::ToolUpdate { .. }, AgentEvent::Plan { entries }]
+                    if entries.len() == 1 && entries[0].content == "Read the schemas"
+                        && entries[0].status == "pending"),
+            "{confirmed:?}"
+        );
     }
 
     #[tokio::test]

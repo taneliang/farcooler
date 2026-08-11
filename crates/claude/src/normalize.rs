@@ -305,13 +305,27 @@ pub fn frame_to_events_from(frame: &serde_json::Value, origin: Origin) -> Vec<Ag
 /// `parentToolUseID` on disk against `parent_tool_use_id` on the wire, and the
 /// file interleaves record types the stream never sends.
 pub fn history_to_events(transcript: &str) -> Vec<AgentEvent> {
+    history_to_events_with(transcript, &mut Tasks::default())
+}
+
+/// The same, against a task list the caller goes on using.
+///
+/// `Tasks` is the one piece of this normalizer whose state has to OUTLIVE the
+/// restore. A `TaskUpdate` arriving after a resume names an id that was handed
+/// out before it, so a pane that rebuilt its list into a throwaway tracker
+/// would draw the restored tasks once and then ignore every update to them —
+/// see `Tasks` for why an unknown id is ignored rather than invented.
+/// `ClaudeBackend::start` passes its own.
+pub fn history_to_events_with(transcript: &str, tasks: &mut Tasks) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     for line in transcript.lines().filter(|l| !l.trim().is_empty()) {
         let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
             // A truncated last line is normal in a file being appended to.
             continue;
         };
-        events.extend(frame_to_events_from(&record, Origin::Replay));
+        let mut from_record = frame_to_events_from(&record, Origin::Replay);
+        tasks.fold(&record, &mut from_record);
+        events.extend(from_record);
     }
     events
 }
@@ -502,6 +516,16 @@ fn result_text(content: &serde_json::Value) -> Option<String> {
 ///
 /// The command for a shell, the path for a file operation, the tool's own name
 /// otherwise. A row reading "Bash" tells you less than the command it ran.
+///
+/// The task tools are here because of what the fallback did to them: a session
+/// that called `TaskCreate` five times drew five rows every one of which said
+/// literally "TaskCreate", which is the worst version of this — five rows that
+/// are not merely uninformative but indistinguishable. `TaskUpdate` has the
+/// same shape of problem and less to work with, since an update that only moves
+/// a status carries nothing but `taskId`.
+///
+/// `TaskList` deliberately gets no case: it takes no parameters at all, so its
+/// own name is the whole truth about it.
 fn tool_title(name: &str, input: &serde_json::Value) -> String {
     let field = |key: &str| input[key].as_str().map(str::to_string);
     match name {
@@ -512,9 +536,31 @@ fn tool_title(name: &str, input: &serde_json::Value) -> String {
         "Glob" | "Grep" => field("pattern").unwrap_or_else(|| name.to_string()),
         "WebFetch" => field("url").unwrap_or_else(|| name.to_string()),
         "WebSearch" => field("query").unwrap_or_else(|| name.to_string()),
+        // `Task` and `Agent` are the SUBAGENT dispatch, unrelated to the
+        // `Task*` tools below despite the shared prefix.
         "Task" | "Agent" => field("description").unwrap_or_else(|| name.to_string()),
+        "TaskCreate" => field("subject").unwrap_or_else(|| name.to_string()),
+        "TaskUpdate" => task_update_title(input).unwrap_or_else(|| name.to_string()),
         _ => name.to_string(),
     }
+}
+
+/// A `TaskUpdate` row, named for whatever it actually says.
+///
+/// A new `subject` is a rename and IS the row. Otherwise the only required
+/// field is `taskId`, so the row is the task it moved plus the state it moved
+/// it to — because the update most often made is a status change, and without
+/// the status three of those in a row would read identically, which is the
+/// complaint that brought this whole function here.
+fn task_update_title(input: &serde_json::Value) -> Option<String> {
+    if let Some(subject) = input["subject"].as_str().filter(|s| !s.is_empty()) {
+        return Some(subject.to_string());
+    }
+    let id = task_key(input["taskId"].as_str()?);
+    Some(match input["status"].as_str().filter(|s| !s.is_empty()) {
+        Some(status) => format!("Task #{id}: {status}"),
+        None => format!("Task #{id}"),
+    })
 }
 
 /// The generic kind a client renders an icon from.
@@ -595,6 +641,292 @@ pub fn plan_from_todo(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
             })
             .collect(),
     )
+}
+
+/// A task id as this crate keys tasks by.
+///
+/// `#` is display sugar. The result sentence writes `Task #2` and `TaskUpdate`
+/// is documented to take `"2"`, so both are trimmed to the same key. That costs
+/// nothing and means a model that writes `taskId: "#2"` still hits the task it
+/// meant, instead of being discarded as an id nobody created.
+fn task_key(id: &str) -> String {
+    id.trim().trim_start_matches('#').trim().to_string()
+}
+
+/// The id a `TaskCreate` was given, read out of the sentence announcing it.
+///
+/// THIS IS STRING PARSING OF A HUMAN-READABLE TOOL RESULT, and it is fragile on
+/// purpose rather than by oversight — there is no other source. `TaskCreate`'s
+/// input carries no id at all: it takes a `subject` and a `description`, and
+/// every task is created `pending`. `TaskUpdate` addresses tasks by `taskId`.
+/// The only place those two facts are ever joined is the result text,
+/// `Task #2 created successfully: <subject>`. So a CLI that rewords that
+/// sentence silently costs every later update its target, and nothing in the
+/// protocol will say so. That is exactly why an unparsed create still lands in
+/// the panel under a key of its own — see `Tasks::create`. The failure this can
+/// cause is "that task stops responding to updates", never "that task is
+/// invisible".
+///
+/// Anchored on `Task #` AND on the words after the id, because "created
+/// successfully" alone is not distinctive: on this same pin a `Write` answers
+/// "File created successfully at: /a/b.rs".
+///
+/// The sentence was written here from the tool's declaration and has since been
+/// MEASURED against a live call, which answered exactly
+/// `Task #1 created successfully: Verify the TaskCreate result string format`.
+/// `TaskUpdate` takes the bare number — `"1"`, no `#` — and answers
+/// `Updated task #1 status`, so the `#` really is display sugar on one side of
+/// the pair and absent on the other, which is why `task_key` trims it.
+fn created_task_id(result: &str) -> Option<String> {
+    let (_, after) = result.split_once("Task #")?;
+    let (id, rest) = after.split_once(' ')?;
+    (!id.is_empty() && rest.starts_with("created successfully")).then(|| task_key(id))
+}
+
+/// One task, as the panel draws it.
+#[derive(Debug)]
+struct Task {
+    /// `TaskUpdate`'s `taskId`, or a stand-in when the result could not be read.
+    key: String,
+    subject: String,
+    status: String,
+}
+
+/// A `TaskCreate` or `TaskUpdate` whose result has not come back yet.
+#[derive(Debug)]
+struct PendingCall {
+    name: String,
+    input: serde_json::Value,
+}
+
+/// The task list `TaskCreate` and `TaskUpdate` build, as the plan panel.
+///
+/// Claude has no plan frame; `plan_from_todo` already reads a `TodoWrite` as
+/// one. The task tools are the second way the same agent keeps the same kind of
+/// list, and until this existed they were five rows titled "TaskCreate" and no
+/// panel at all.
+///
+/// Stateful, and here rather than in `backend.rs` for the reason `Live` is here:
+/// `history_to_events` has to rebuild the same list off a restored transcript,
+/// and it can only do that if the machine that builds it is reachable from this
+/// module. `ClaudeBackend` owns the instance, exactly as it owns `Live`.
+///
+/// # Why the list changes on the RESULT and never on the call
+///
+/// A `TaskUpdate` could be applied the moment its `tool_use` block lands, and
+/// that would draw sooner. It is not, and the reason is not tidiness:
+///
+/// - `TaskCreate` has no choice. Its id exists only in its result, so a task
+///   cannot be listed under the id later updates will use until the result
+///   arrives.
+/// - Mixing the two therefore REORDERS them. One assistant message can carry
+///   several tool_use blocks — the report that prompted this had five creates
+///   in a row — so an optimistic `TaskUpdate` would be applied before the
+///   create it follows had been confirmed, hit an id this tracker had not
+///   learned yet, and be dropped by the rule two paragraphs down. A dropped
+///   update is silent and permanent; a late one costs milliseconds, because
+///   these tools are local and their results follow immediately.
+/// - A call can also be DENIED. An optimistic panel would show a task moved to
+///   `completed` that the agent was never allowed to move, and nothing would
+///   ever correct it.
+///
+/// So: confirmed, uniformly. Consistency is worth more than the latency here.
+///
+/// # The rules that make it safe
+///
+/// - An update naming an id this pane never watched being created is IGNORED,
+///   not invented. A subagent owns tasks of its own that this pane never saw
+///   created, and a row conjured out of an id with no subject would be a blank
+///   line in the panel.
+/// - `status: "deleted"` removes a task rather than rendering as a state. The
+///   Mac app's `PlanStatus` knows `pending` / `in_progress` / `completed`,
+///   which is TodoWrite's vocabulary and happens to be the task tools' too;
+///   `deleted` is the one word that is not a state a task can be shown in.
+/// - `Plan` is emitted only when the list actually moved, for the reason
+///   `commands_sent` exists: this rides the same ring to every subscriber, and
+///   an unchanged list re-announced is traffic for nothing.
+///
+/// # Two writers, one panel
+///
+/// `TodoWrite` and the task tools can both be live in one session, and they
+/// draw the same surface. The task tools win WHILE THEY HAVE A LIST, and the
+/// asymmetry is what decides it rather than a preference: a `TodoWrite` always
+/// sends its whole list, so it can re-assert itself on its very next call, but
+/// a task list is ACCUMULATED across many calls and cannot be re-derived — once
+/// a todo list has replaced it, nothing short of the agent re-creating every
+/// task brings it back. So the recoverable writer yields to the unrecoverable
+/// one. It is not sticky: when the last task is deleted the list is empty, the
+/// task tools stop suppressing anything, and `TodoWrite` owns the panel again
+/// rather than leaving it dead.
+///
+/// # This list is not the tool's list, deliberately
+///
+/// Measured against a live pair of calls: a task moved to `completed` DISAPPEARS
+/// from `TaskList` — it answered "No tasks found" with one completed task
+/// outstanding — and a later `TaskUpdate` naming it answers "Task not found".
+/// So the tool's own list is work REMAINING, and this one is not: a completed
+/// task stays on the panel, struck through, exactly as a finished `TodoWrite`
+/// entry does. That divergence is the point of the panel. A plan you are
+/// watching should show what has been done, and a list that empties itself as
+/// the agent succeeds would read as the plan being lost rather than finished.
+///
+/// It also means the "Task not found" answer to an update of a completed task
+/// is an ERROR result, which changes nothing here — the same rule that already
+/// protects the panel from a denied call.
+#[derive(Debug, Default)]
+pub struct Tasks {
+    /// Every task, in the order it was created — which is the order the panel
+    /// draws, so updates edit in place and never reorder.
+    tasks: Vec<Task>,
+    /// Task calls awaiting their result, by `tool_use` id — the only thing that
+    /// correlates a call with the result carrying its id.
+    pending: std::collections::HashMap<String, PendingCall>,
+    /// The entries last handed out, so an unchanged list is not re-announced.
+    sent: Vec<PlanEntry>,
+}
+
+impl Tasks {
+    /// Fold one frame's task bookkeeping into the events it produced.
+    ///
+    /// Takes the events rather than returning some, because the two-writers
+    /// rule above can only be applied where a `TodoWrite`'s plan and the task
+    /// list are both in view — and this is the one place they are.
+    pub fn fold(&mut self, frame: &serde_json::Value, events: &mut Vec<AgentEvent>) {
+        match frame["type"].as_str().unwrap_or_default() {
+            "assistant" => self.remember_calls(frame),
+            "user" => self.apply_results(frame),
+            "result" => {
+                // A tool call and its result always land inside one turn, so
+                // anything still waiting when the turn ends — a cancel with a
+                // call in flight — is never going to be answered. The same
+                // bound `permission_inputs` gets, for the same reason: without
+                // it the map only grows.
+                self.pending.clear();
+                return;
+            }
+            _ => return,
+        }
+
+        if !self.tasks.is_empty() {
+            // The task tools hold the panel. See "Two writers, one panel".
+            events.retain(|e| !matches!(e, AgentEvent::Plan { .. }));
+        }
+
+        let entries = self.entries();
+        if entries != self.sent {
+            self.sent = entries.clone();
+            events.push(AgentEvent::Plan { entries });
+        }
+    }
+
+    /// The list, as the panel's own shape.
+    fn entries(&self) -> Vec<PlanEntry> {
+        self.tasks
+            .iter()
+            .map(|t| PlanEntry {
+                content: t.subject.clone(),
+                priority: String::new(),
+                status: t.status.clone(),
+            })
+            .collect()
+    }
+
+    /// Note the task calls an assistant message makes, to be applied when they
+    /// come back.
+    fn remember_calls(&mut self, frame: &serde_json::Value) {
+        let Some(blocks) = frame["message"]["content"].as_array() else { return };
+        for block in blocks {
+            if block["type"].as_str() != Some("tool_use") {
+                continue;
+            }
+            let name = block["name"].as_str().unwrap_or_default();
+            // `TaskList` is deliberately absent: it takes no parameters and
+            // changes nothing, so watching it would only be a way to get the
+            // list wrong.
+            if name != "TaskCreate" && name != "TaskUpdate" {
+                continue;
+            }
+            let Some(id) = block["id"].as_str() else { continue };
+            self.pending.insert(
+                id.to_string(),
+                PendingCall { name: name.to_string(), input: block["input"].clone() },
+            );
+        }
+    }
+
+    /// Apply the calls whose results have now landed.
+    fn apply_results(&mut self, frame: &serde_json::Value) {
+        let Some(blocks) = frame["message"]["content"].as_array() else { return };
+        for block in blocks {
+            if block["type"].as_str() != Some("tool_result") {
+                continue;
+            }
+            let Some(tool_use_id) = block["tool_use_id"].as_str() else { continue };
+            let Some(call) = self.pending.remove(tool_use_id) else { continue };
+            // A failed or denied call did nothing, so the list did nothing
+            // either. This is NOT the unparsed-result case below: an error
+            // result is the CLI saying the task was not created, and drawing
+            // one anyway would put a task in the panel that the agent does not
+            // have and cannot be told about.
+            if block["is_error"].as_bool().unwrap_or(false) {
+                continue;
+            }
+            let result = result_text(&block["content"]).unwrap_or_default();
+            match call.name.as_str() {
+                "TaskCreate" => self.create(tool_use_id, &call.input, &result),
+                _ => self.update(&call.input),
+            }
+        }
+    }
+
+    /// A confirmed `TaskCreate`, as a row.
+    fn create(&mut self, tool_use_id: &str, input: &serde_json::Value, result: &str) {
+        // The required field, falling back to the other required field. A row
+        // with no words is a blank line in the panel, which is a worse way to
+        // be wrong than a long one.
+        let subject = ["subject", "description"]
+            .iter()
+            .find_map(|k| input[*k].as_str().filter(|s| !s.is_empty()))
+            .unwrap_or_default()
+            .to_string();
+
+        // An unreadable result costs this task its ID, never its ROW. A list
+        // that quietly omits a task is worse than one that cannot later update
+        // it: the first is a lie about what the agent is doing, the second is
+        // one stale line.
+        //
+        // The stand-in cannot collide with a real id. A real one is whatever
+        // `Task #<id> created successfully` names, and this is a `tool_use` id
+        // under a prefix no such sentence has ever carried — so a `TaskUpdate`
+        // can never accidentally address a task whose id was never learned.
+        let key = created_task_id(result)
+            .unwrap_or_else(|| format!("unidentified:{tool_use_id}"));
+
+        match self.tasks.iter_mut().find(|t| t.key == key) {
+            Some(existing) => existing.subject = subject,
+            None => self.tasks.push(Task { key, subject, status: "pending".to_string() }),
+        }
+    }
+
+    /// A confirmed `TaskUpdate`, applied in place so the order holds.
+    fn update(&mut self, input: &serde_json::Value) {
+        let Some(key) = input["taskId"].as_str().map(task_key) else { return };
+        // Ignored, not invented — a subagent may own tasks this pane never
+        // watched being created, and so may a session resumed from a transcript
+        // that was truncated before them.
+        let Some(at) = self.tasks.iter().position(|t| t.key == key) else { return };
+
+        if input["status"].as_str() == Some("deleted") {
+            self.tasks.remove(at);
+            return;
+        }
+        if let Some(subject) = input["subject"].as_str().filter(|s| !s.is_empty()) {
+            self.tasks[at].subject = subject.to_string();
+        }
+        if let Some(status) = input["status"].as_str().filter(|s| !s.is_empty()) {
+            self.tasks[at].status = status.to_string();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1004,6 +1336,338 @@ mod tests {
         assert!(matches!(end_reason("something"), EndReason::EndTurn));
         assert!(matches!(end_reason("interrupted"), EndReason::Cancelled));
         assert!(matches!(end_reason("max_output_tokens"), EndReason::MaxTokens));
+    }
+
+    /// An assistant message making one task tool call.
+    fn task_call(id: &str, name: &str, input: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "type": "assistant", "parent_tool_use_id": null,
+            "message": { "content": [{ "type": "tool_use", "id": id, "name": name,
+                                       "input": input }] }
+        })
+    }
+
+    /// The `tool_result` that call comes back as.
+    fn task_result(id: &str, text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "user", "parent_tool_use_id": null,
+            "message": { "content": [{ "type": "tool_result", "tool_use_id": id,
+                                       "is_error": false, "content": text }] }
+        })
+    }
+
+    /// Every frame in a create, folded, as the plan the panel ends up drawing.
+    ///
+    /// Returns the LAST plan rather than all of them, because `Plan` replaces
+    /// the panel wholesale — the last one is what a person sees.
+    fn plan_after(tasks: &mut Tasks, frames: &[serde_json::Value]) -> Option<Vec<PlanEntry>> {
+        let mut last = None;
+        for frame in frames {
+            let mut events = frame_to_events_from(frame, Origin::Live);
+            tasks.fold(frame, &mut events);
+            for event in events {
+                if let AgentEvent::Plan { entries } = event {
+                    last = Some(entries);
+                }
+            }
+        }
+        last
+    }
+
+    /// A whole task, created and confirmed, as two frames.
+    fn created(tool_use: &str, subject: &str, task_id: &str) -> Vec<serde_json::Value> {
+        vec![
+            task_call(tool_use, "TaskCreate", serde_json::json!({ "subject": subject,
+                                                                  "description": "because" })),
+            task_result(tool_use, &format!("Task #{task_id} created successfully: {subject}")),
+        ]
+    }
+
+    #[test]
+    fn a_task_row_is_named_for_the_work_and_not_for_the_tool() {
+        // Five creates drew five rows reading literally "TaskCreate" —
+        // indistinguishable from one another, which is worse than merely
+        // uninformative.
+        assert_eq!(
+            tool_title("TaskCreate", &serde_json::json!({ "subject": "Wire the panel" })),
+            "Wire the panel"
+        );
+        // An update that renames says the new name.
+        assert_eq!(
+            tool_title("TaskUpdate", &serde_json::json!({ "taskId": "2",
+                                                          "subject": "Wire it properly" })),
+            "Wire it properly"
+        );
+        // An update that only moves a status has nothing but the id, so it says
+        // the id AND the state — three status changes in a row would otherwise
+        // read identically, which is the original complaint again.
+        assert_eq!(
+            tool_title("TaskUpdate", &serde_json::json!({ "taskId": "2",
+                                                          "status": "in_progress" })),
+            "Task #2: in_progress"
+        );
+        assert_eq!(tool_title("TaskUpdate", &serde_json::json!({ "taskId": "#2" })), "Task #2");
+        // `TaskList` takes no parameters, so its own name is the whole truth.
+        assert_eq!(tool_title("TaskList", &serde_json::json!({})), "TaskList");
+    }
+
+    #[test]
+    fn the_task_tools_build_the_same_plan_panel_the_todo_list_does() {
+        // The report that brought this here: five TaskCreates, repeated
+        // TaskUpdates, five opaque rows and no panel at all.
+        let mut tasks = Tasks::default();
+        let mut frames = created("t1", "Read the schemas", "1");
+        frames.extend(created("t2", "Wire the panel", "2"));
+        frames.push(task_call("t3", "TaskUpdate", serde_json::json!({ "taskId": "2",
+                                                                      "status": "in_progress" })));
+        frames.push(task_result("t3", "Task #2 updated"));
+
+        let plan = plan_after(&mut tasks, &frames).expect("a plan");
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[0].content, "Read the schemas");
+        assert_eq!(plan[0].status, "pending", "every task is created pending");
+        assert_eq!(plan[1].content, "Wire the panel");
+        assert_eq!(plan[1].status, "in_progress");
+    }
+
+    #[test]
+    fn a_task_list_keeps_the_order_it_was_created_in() {
+        // The panel draws them in list order, so an update must edit in place.
+        // Moving the updated task to the end would shuffle the list under
+        // someone reading it.
+        let mut tasks = Tasks::default();
+        let mut frames = created("t1", "first", "1");
+        frames.extend(created("t2", "second", "2"));
+        frames.extend(created("t3", "third", "3"));
+        frames.push(task_call("t4", "TaskUpdate", serde_json::json!({ "taskId": "1",
+                                                                      "status": "completed" })));
+        frames.push(task_result("t4", "Task #1 updated"));
+
+        let plan = plan_after(&mut tasks, &frames).expect("a plan");
+        let order: Vec<_> = plan.iter().map(|e| e.content.as_str()).collect();
+        assert_eq!(order, ["first", "second", "third"]);
+    }
+
+    #[test]
+    fn a_task_whose_result_nobody_could_parse_is_still_in_the_list() {
+        // The id lives ONLY in the result sentence, so a reworded CLI costs the
+        // correlation. A list that quietly omits a task is a lie about what the
+        // agent is doing; one that cannot later update a task is a stale line.
+        let mut tasks = Tasks::default();
+        let plan = plan_after(
+            &mut tasks,
+            &[
+                task_call("t1", "TaskCreate", serde_json::json!({ "subject": "Ship it" })),
+                task_result("t1", "Created."),
+            ],
+        )
+        .expect("the task appears anyway");
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].content, "Ship it");
+
+        // And its key cannot be hit by accident — an update for a real id does
+        // not land on it.
+        let after = plan_after(
+            &mut tasks,
+            &[
+                task_call("t2", "TaskUpdate", serde_json::json!({ "taskId": "t1",
+                                                                  "status": "completed" })),
+                task_result("t2", "Task #t1 updated"),
+            ],
+        );
+        assert!(after.is_none(), "nothing changed, so nothing was announced: {after:?}");
+    }
+
+    #[test]
+    fn an_update_naming_a_task_this_pane_never_saw_created_is_ignored() {
+        // Ignored, not invented: a subagent owns tasks of its own, and a row
+        // conjured out of a bare id would be a blank line in the panel.
+        let mut tasks = Tasks::default();
+        let plan = plan_after(
+            &mut tasks,
+            &[
+                task_call("t1", "TaskUpdate", serde_json::json!({ "taskId": "9",
+                                                                  "status": "completed" })),
+                task_result("t1", "Task #9 updated"),
+            ],
+        );
+        assert!(plan.is_none(), "{plan:?}");
+    }
+
+    #[test]
+    fn a_deleted_task_leaves_the_list_rather_than_showing_a_state() {
+        // `PlanStatus` in the Mac app knows pending, in_progress and completed.
+        // `deleted` is the one word in the task tools' vocabulary that is not a
+        // state a task can be drawn in.
+        let mut tasks = Tasks::default();
+        let mut frames = created("t1", "keep", "1");
+        frames.extend(created("t2", "drop", "2"));
+        frames.push(task_call("t3", "TaskUpdate", serde_json::json!({ "taskId": "2",
+                                                                      "status": "deleted" })));
+        frames.push(task_result("t3", "Task #2 deleted"));
+
+        let plan = plan_after(&mut tasks, &frames).expect("a plan");
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].content, "keep");
+    }
+
+    #[test]
+    fn nothing_joins_the_list_until_its_result_confirms_it() {
+        // The emit-timing decision, and the reason it is uniform: a TaskCreate
+        // has no id before its result, so applying a TaskUpdate at call time
+        // instead would reorder the two and drop updates that arrive in the
+        // same assistant message as the create they follow.
+        let mut tasks = Tasks::default();
+        let call = task_call("t1", "TaskCreate", serde_json::json!({ "subject": "Ship it" }));
+        assert!(plan_after(&mut tasks, &[call]).is_none(), "not yet — it has no id yet");
+
+        let confirm = task_result("t1", "Task #1 created successfully: Ship it");
+        assert_eq!(plan_after(&mut tasks, &[confirm]).expect("now").len(), 1);
+    }
+
+    #[test]
+    fn a_task_call_that_failed_changes_nothing() {
+        // A denied or errored call did nothing, so the list did nothing. This
+        // is not the unparsed-result case: an error result is the CLI saying
+        // the task was never created, and drawing it anyway would put a task in
+        // the panel that the agent does not have.
+        let mut tasks = Tasks::default();
+        let plan = plan_after(
+            &mut tasks,
+            &[
+                task_call("t1", "TaskCreate", serde_json::json!({ "subject": "Ship it" })),
+                serde_json::json!({
+                    "type": "user", "parent_tool_use_id": null,
+                    "message": { "content": [{ "type": "tool_result", "tool_use_id": "t1",
+                                               "is_error": true,
+                                               "content": "The user doesn't want to proceed" }] }
+                }),
+            ],
+        );
+        assert!(plan.is_none(), "{plan:?}");
+    }
+
+    #[test]
+    fn a_task_list_that_did_not_move_is_not_announced_again() {
+        // The same rule `commands_sent` follows: this rides the ring to every
+        // subscriber, and a re-announced identical list is traffic for nothing.
+        let mut tasks = Tasks::default();
+        assert!(plan_after(&mut tasks, &created("t1", "one", "1")).is_some());
+
+        // A TaskList changes nothing, and neither does an update that sets the
+        // status a task already had.
+        let quiet = plan_after(
+            &mut tasks,
+            &[
+                task_call("t2", "TaskList", serde_json::json!({})),
+                task_result("t2", "1 task: #1 one (pending)"),
+                task_call("t3", "TaskUpdate", serde_json::json!({ "taskId": "1",
+                                                                  "status": "pending" })),
+                task_result("t3", "Task #1 updated"),
+            ],
+        );
+        assert!(quiet.is_none(), "{quiet:?}");
+    }
+
+    #[test]
+    fn a_todo_write_does_not_take_a_panel_a_task_list_is_holding() {
+        // Two writers, one surface. The task tools win while they have a list,
+        // because a TodoWrite always sends its whole list and can re-assert
+        // itself next call, while an accumulated task list cannot be rebuilt
+        // once something has replaced it.
+        let mut tasks = Tasks::default();
+        plan_after(&mut tasks, &created("t1", "the real work", "1")).expect("a task list");
+
+        let todo = serde_json::json!({
+            "type": "assistant", "parent_tool_use_id": null,
+            "message": { "content": [{ "type": "tool_use", "id": "t2", "name": "TodoWrite",
+                "input": { "todos": [{ "content": "something else", "status": "pending" }] } }] }
+        });
+        let mut events = frame_to_events_from(&todo, Origin::Live);
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::Plan { .. })), "the todo made one");
+        tasks.fold(&todo, &mut events);
+        assert!(
+            !events.iter().any(|e| matches!(e, AgentEvent::Plan { .. })),
+            "and the task list keeps the panel: {events:?}"
+        );
+        // The row itself survives — only the plan is dropped.
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::ToolCall { .. })));
+
+        // Once the last task is deleted the panel is free again, rather than
+        // dead: this rule is not sticky.
+        plan_after(
+            &mut tasks,
+            &[
+                task_call("t3", "TaskUpdate", serde_json::json!({ "taskId": "1",
+                                                                  "status": "deleted" })),
+                task_result("t3", "Task #1 deleted"),
+            ],
+        )
+        .expect("an emptied list is itself a change");
+        let mut events = frame_to_events_from(&todo, Origin::Live);
+        tasks.fold(&todo, &mut events);
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::Plan { .. })), "{events:?}");
+    }
+
+    #[test]
+    fn a_restored_transcript_rebuilds_the_task_list_it_ended_with() {
+        // Replay reads the same records through the same normalizer, and the
+        // on-disk transcript carries the same tool_use and tool_result shapes
+        // the wire does — so a resumed pane gets its panel back rather than an
+        // empty one under a conversation full of task rows.
+        let mut frames = created("t1", "first", "1");
+        frames.extend(created("t2", "second", "2"));
+        frames.push(task_call("t3", "TaskUpdate", serde_json::json!({ "taskId": "1",
+                                                                      "status": "completed" })));
+        frames.push(task_result("t3", "Task #1 updated"));
+        let transcript: String = frames
+            .iter()
+            .map(|f| serde_json::to_string(f).expect("json") + "\n")
+            .collect();
+
+        // Through a tracker the caller keeps, which is what lets an update
+        // arriving AFTER the resume still find the task it names.
+        let mut tasks = Tasks::default();
+        let events = history_to_events_with(&transcript, &mut tasks);
+        let plan = events
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                AgentEvent::Plan { entries } => Some(entries.clone()),
+                _ => None,
+            })
+            .expect("the restored plan");
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[0].status, "completed");
+
+        let live = plan_after(
+            &mut tasks,
+            &[
+                task_call("t4", "TaskUpdate", serde_json::json!({ "taskId": "2",
+                                                                  "status": "in_progress" })),
+                task_result("t4", "Task #2 updated"),
+            ],
+        )
+        .expect("a task created before the resume is still updatable");
+        assert_eq!(live[1].status, "in_progress");
+    }
+
+    #[test]
+    fn a_created_task_id_is_read_only_out_of_the_sentence_that_announces_one() {
+        // String parsing of a human-readable result, because the id is nowhere
+        // else — TaskCreate's input has none. Anchored on both halves of the
+        // sentence, because "created successfully" alone is not distinctive: a
+        // `Write` on this same pin answers "File created successfully at: …".
+        assert_eq!(
+            created_task_id("Task #2 created successfully: Wire the panel").as_deref(),
+            Some("2")
+        );
+        assert_eq!(
+            created_task_id("File created successfully at: /a/b.rs (file state is current)"),
+            None
+        );
+        assert_eq!(created_task_id("Task #2 was made"), None);
+        assert_eq!(created_task_id(""), None);
     }
 
     #[test]
