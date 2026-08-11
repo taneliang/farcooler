@@ -574,6 +574,36 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
 
     #expect(t.rows.count == 1)
     #expect(t.rows.contains { $0.kind == .message(role: .user, text: "retry", parent: nil) })
+    // The FIRST row is the survivor: of two identical sends it is the earlier
+    // one that went out and the later one that is still waiting in the queue.
+    #expect(t.rows.first?.id == 0)
+}
+
+@Test func aHeldMessageEndsAsExactlyOneRowOnceTheQueueDrains() {
+    // The whole round trip the local echo exists for, in the order the daemon
+    // really emits it: drawn, withdrawn when the queue reports it held, then
+    // drawn once by the daemon's own message when the turn ends and
+    // `send_next_queued` finally sends it. The payoff is the count at the end
+    // — an echo that outlived its queue event, or a withdrawal that failed to
+    // consume it, leaves the user reading their own instruction twice.
+    var t = Transcript()
+    t.appendLocalUserMessage("use unittest")
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "use unittest")
+    ]))])
+    #expect(!t.rows.contains { $0.kind == .message(role: .user, text: "use unittest", parent: nil) })
+
+    t.apply([
+        Sequenced(seq: 1, event: .turnEnded(reason: "EndTurn")),
+        Sequenced(seq: 2, event: .promptQueue(items: [])),
+        Sequenced(seq: 3, event: .message(role: .user, text: "use unittest", parent: nil)),
+    ])
+
+    let sent = t.rows.filter {
+        $0.kind == .message(role: .user, text: "use unittest", parent: nil)
+    }
+    #expect(sent.count == 1)
+    #expect(t.queue.isEmpty)
 }
 
 @Test func aReplayedMessageAfterAnEpochResetSurvivesAStaleEcho() {

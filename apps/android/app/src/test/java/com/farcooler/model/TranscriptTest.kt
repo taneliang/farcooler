@@ -594,6 +594,36 @@ class TranscriptTest {
 
         assertEquals(1, t.rows.size)
         assertTrue(t.rows.any { it.messageText == "retry" })
+        // The FIRST row is the survivor: of two identical sends it is the
+        // earlier one that went out and the later one that is still waiting in
+        // the queue.
+        assertEquals(0, t.rows.first().id)
+    }
+
+    @Test
+    fun `a held message ends as exactly one row once the queue drains`() {
+        // The whole round trip the local echo exists for, in the order the
+        // daemon really emits it: drawn, withdrawn when the queue reports it
+        // held, then drawn once by the daemon's own message when the turn ends
+        // and `send_next_queued` finally sends it. The payoff is the count at
+        // the end — an echo that outlived its queue event, or a withdrawal
+        // that failed to consume it, leaves the user reading their own
+        // instruction twice.
+        val t = Transcript()
+        t.appendLocalUserMessage("use unittest")
+        t.apply(listOf(seq(0, AgentEvent.PromptQueue(listOf(QueuedPrompt("0", "use unittest"))))))
+        assertFalse(t.rows.any { it.messageText == "use unittest" })
+
+        t.apply(
+            listOf(
+                seq(1, AgentEvent.TurnEnded("EndTurn")),
+                seq(2, AgentEvent.PromptQueue(emptyList())),
+                seq(3, message("use unittest", role = Role.USER)),
+            )
+        )
+
+        assertEquals(1, t.rows.count { it.messageText == "use unittest" })
+        assertTrue(t.queue.isEmpty())
     }
 
     @Test

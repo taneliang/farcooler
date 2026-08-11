@@ -147,6 +147,15 @@ public struct Transcript: Sendable {
     /// The id the next row will take. Monotonic, never reused.
     private var nextRowID = 0
 
+    /// One message drawn straight from the composer, and the row it drew.
+    ///
+    /// The row id is carried rather than the text alone so a withdrawal can
+    /// name its row exactly. See `unconfirmedEchoes`.
+    private struct LocalEcho {
+        let rowID: Int
+        let text: String
+    }
+
     /// Messages drawn straight from the composer that the daemon has not yet
     /// accounted for.
     ///
@@ -157,11 +166,26 @@ public struct Transcript: Sendable {
     /// that never came, the CLI's own echo was dropped as a duplicate, and the
     /// message reached the model without ever being drawn.
     ///
-    /// So the client draws first and asks after. An entry lives only until the
-    /// next `promptQueue`, which is the event that answers the question — a
+    /// So the client draws first and asks after. Entries are cleared at the
+    /// NEXT `promptQueue`, which is the event that answers the question — a
     /// queue that carries the text means it was held, and one that does not
-    /// means it went out.
-    private var unconfirmedEchoes: [String] = []
+    /// means it went out. On the ordinary path that event never arrives at
+    /// all: `ChatSession::prompt` returns no events for a message that goes
+    /// straight to the backend, so an entry can sit here for the rest of the
+    /// epoch. That is not a leak to fix by dropping entries on a timer — it is
+    /// why the match in `promptQueue` CONSUMES. Each queue item settles at
+    /// most one echo, so an entry nobody ever answers can never withdraw a row
+    /// that a later, different message drew.
+    ///
+    /// Carrying the row id also removes a trap. Re-finding the row by text
+    /// would be correct only while no daemon-emitted `Message { role: User }`
+    /// can land after a live echo carrying the same words — which holds solely
+    /// because `send_next_queued` and `steer_queued` both emit their queue
+    /// event BEFORE the message. Swap those two lines in the daemon and a text
+    /// search would withdraw the genuine, already-delivered row instead of the
+    /// echo, and nothing on screen would look wrong. An id cannot make that
+    /// mistake, so the ordering stops being load-bearing.
+    private var unconfirmedEchoes: [LocalEcho] = []
 
     public init() {}
 
@@ -184,7 +208,9 @@ public struct Transcript: Sendable {
         // An echo names an uncertain send from THIS epoch. Left alive, it can
         // collide with a message replayed into the new epoch — a real row —
         // and the next promptQueue naming that text would delete restored
-        // history that was never in question.
+        // history that was never in question. Row ids restart here too, so a
+        // surviving echo would not merely match by text: its recorded id would
+        // name a real row of the new epoch.
         unconfirmedEchoes = []
     }
 
@@ -387,27 +413,31 @@ public struct Transcript: Sendable {
     /// A chat that swallows your own words reads as broken even when the turn
     /// underneath it is running perfectly.
     ///
-    /// Only for a message going out NOW. One written mid-turn is queued
-    /// instead, and joins the transcript when it is actually sent.
+    /// Called on EVERY send, including one written mid-turn. The client used
+    /// to decide up front which sends would be queued and skip drawing those;
+    /// it read that from stale state and a message that actually went straight
+    /// out was never drawn at all. So a mid-turn message is drawn here like
+    /// any other and withdrawn again by the `promptQueue` that reports it held.
     public mutating func appendLocalUserMessage(_ text: String) {
+        // Recorded before the append, because that is the id the row is about
+        // to be given — the withdrawal below has to name this exact row.
+        let rowID = nextRowID
         // Always the top level: what the user typed is addressed to the
         // session, never to one subagent inside it.
         append(.message(role: .user, text: text, parent: nil))
         // The agent's reply is a new turn's worth of speech, not a
         // continuation of what the user just typed.
         breakBeforeNextMessage = true
-        unconfirmedEchoes.append(text)
+        unconfirmedEchoes.append(LocalEcho(rowID: rowID, text: text))
     }
 
-    /// Withdraw the last user message drawn locally with this exact text.
+    /// Withdraw one row by the id it was created with.
     ///
-    /// The LAST, because a repeated instruction is a thing people really send
-    /// twice, and withdrawing the older one would leave the transcript showing
-    /// the wrong instance as still waiting.
-    private mutating func removeLastLocalUserMessage(_ text: String) {
-        guard let index = rows.lastIndex(where: {
-            $0.kind == .message(role: .user, text: text, parent: nil)
-        }) else { return }
+    /// By id and not by contents: ids are handed out once per epoch and never
+    /// reused, so this withdraws the row that was drawn and nothing that
+    /// merely reads like it.
+    private mutating func removeRow(id: Int) {
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
         rows.remove(at: index)
     }
 
@@ -505,20 +535,31 @@ public struct Transcript: Sendable {
             // Anything drawn from the composer that turns out to be HELD is
             // withdrawn from the conversation — it has not joined it yet, and
             // in the queue it can still be edited or taken back. Anything not
-            // named here went out, so it stays and stops being pending: this
-            // event is the daemon's answer either way, which is what bounds
-            // the list to the few milliseconds between typing and the reply.
+            // named here went out, so it stays. Either way every echo
+            // outstanding when this arrived is now answered, so the list is
+            // cleared. An echo that no `promptQueue` ever answers — the whole
+            // ordinary path — simply waits here; see `unconfirmedEchoes`.
             //
             // Matched one at a time against a working copy, not with
             // `contains`: the same text sent twice before this event leaves
             // two identical echoes, and a non-consuming match would let one
             // held queue item cancel both rows — deleting the one that
             // genuinely went out, with no queue entry left to show for it.
+            //
+            // The LAST matching echo, because when two identical sends are
+            // outstanding it is the earlier one that went out and the later
+            // one that is still waiting. Withdrawing the earlier row would
+            // leave the transcript showing the agent's answer above the
+            // question it answered.
             var unmatchedEchoes = unconfirmedEchoes
             for item in items {
-                guard let index = unmatchedEchoes.firstIndex(of: item.text) else { continue }
-                unmatchedEchoes.remove(at: index)
-                removeLastLocalUserMessage(item.text)
+                guard
+                    let index = unmatchedEchoes.lastIndex(where: { $0.text == item.text })
+                else { continue }
+                let echo = unmatchedEchoes.remove(at: index)
+                // By id: the echo already knows which row it drew, so this
+                // cannot mistake a real user message for the echo of one.
+                removeRow(id: echo.rowID)
             }
             unconfirmedEchoes.removeAll()
 
