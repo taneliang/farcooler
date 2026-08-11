@@ -147,6 +147,22 @@ public struct Transcript: Sendable {
     /// The id the next row will take. Monotonic, never reused.
     private var nextRowID = 0
 
+    /// Messages drawn straight from the composer that the daemon has not yet
+    /// accounted for.
+    ///
+    /// The composer used to PREDICT whether a message would be queued, by
+    /// reading fleet state while the thing it predicted read the agent
+    /// channel. In the window between a turn ending on one and the other
+    /// noticing, it guessed wrong: the echo was suppressed for a queue row
+    /// that never came, the CLI's own echo was dropped as a duplicate, and the
+    /// message reached the model without ever being drawn.
+    ///
+    /// So the client draws first and asks after. An entry lives only until the
+    /// next `promptQueue`, which is the event that answers the question — a
+    /// queue that carries the text means it was held, and one that does not
+    /// means it went out.
+    private var unconfirmedEchoes: [String] = []
+
     public init() {}
 
     /// Throw away everything and start again.
@@ -375,6 +391,19 @@ public struct Transcript: Sendable {
         // The agent's reply is a new turn's worth of speech, not a
         // continuation of what the user just typed.
         breakBeforeNextMessage = true
+        unconfirmedEchoes.append(text)
+    }
+
+    /// Withdraw the last user message drawn locally with this exact text.
+    ///
+    /// The LAST, because a repeated instruction is a thing people really send
+    /// twice, and withdrawing the older one would leave the transcript showing
+    /// the wrong instance as still waiting.
+    private mutating func removeLastLocalUserMessage(_ text: String) {
+        guard let index = rows.lastIndex(where: {
+            $0.kind == .message(role: .user, text: text, parent: nil)
+        }) else { return }
+        rows.remove(at: index)
     }
 
     private mutating func apply(_ event: AgentEvent) {
@@ -468,6 +497,16 @@ public struct Transcript: Sendable {
             // every change, and a client reconstructing it from adds and
             // removes could disagree with what will actually be sent.
             queue = items
+            // Anything drawn from the composer that turns out to be HELD is
+            // withdrawn from the conversation — it has not joined it yet, and
+            // in the queue it can still be edited or taken back. Anything not
+            // named here went out, so it stays and stops being pending: this
+            // event is the daemon's answer either way, which is what bounds
+            // the list to the few milliseconds between typing and the reply.
+            for text in unconfirmedEchoes where items.contains(where: { $0.text == text }) {
+                removeLastLocalUserMessage(text)
+            }
+            unconfirmedEchoes.removeAll()
 
         case .turnEnded:
             // Nothing to DRAW, but it is a seam: the next message begins a new

@@ -521,3 +521,39 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
         summary: nil, interrupted: false)
     #expect(one.subtitle == "1 step")
 }
+
+@Test func aQueuedMessageLeavesTheTranscriptItWasDrawnIn() {
+    // Drawn immediately so your words never vanish, then withdrawn once the
+    // daemon says it was held: it belongs in the queue, where it can still be
+    // edited, not in the conversation it has not joined yet.
+    var t = Transcript()
+    t.appendLocalUserMessage("use unittest")
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "use unittest", parent: nil) })
+
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "use unittest")
+    ]))])
+
+    #expect(!t.rows.contains { $0.kind == .message(role: .user, text: "use unittest", parent: nil) })
+    #expect(t.queue.count == 1)
+}
+
+@Test func aMessageSentStraightAwayKeepsItsRow() {
+    // Nothing queued it, so nothing withdraws it. This is the ordinary path
+    // and the one that must not regress.
+    var t = Transcript()
+    t.appendLocalUserMessage("add tests")
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: []))])
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "add tests", parent: nil) })
+}
+
+@Test func aQueueEntryThatMatchesNothingWithdrawsNothing() {
+    // The failure mode is a duplicate row, never a message the user wrote and
+    // never saw again.
+    var t = Transcript()
+    t.appendLocalUserMessage("add tests")
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "something else")
+    ]))])
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "add tests", parent: nil) })
+}
