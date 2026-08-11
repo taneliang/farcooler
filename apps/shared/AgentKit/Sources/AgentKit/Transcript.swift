@@ -181,6 +181,11 @@ public struct Transcript: Sendable {
         cursor = 0
         nextRowID = 0
         breakBeforeNextMessage = false
+        // An echo names an uncertain send from THIS epoch. Left alive, it can
+        // collide with a message replayed into the new epoch — a real row —
+        // and the next promptQueue naming that text would delete restored
+        // history that was never in question.
+        unconfirmedEchoes = []
     }
 
     public mutating func apply(_ events: [Sequenced]) {
@@ -503,8 +508,17 @@ public struct Transcript: Sendable {
             // named here went out, so it stays and stops being pending: this
             // event is the daemon's answer either way, which is what bounds
             // the list to the few milliseconds between typing and the reply.
-            for text in unconfirmedEchoes where items.contains(where: { $0.text == text }) {
-                removeLastLocalUserMessage(text)
+            //
+            // Matched one at a time against a working copy, not with
+            // `contains`: the same text sent twice before this event leaves
+            // two identical echoes, and a non-consuming match would let one
+            // held queue item cancel both rows — deleting the one that
+            // genuinely went out, with no queue entry left to show for it.
+            var unmatchedEchoes = unconfirmedEchoes
+            for item in items {
+                guard let index = unmatchedEchoes.firstIndex(of: item.text) else { continue }
+                unmatchedEchoes.remove(at: index)
+                removeLastLocalUserMessage(item.text)
             }
             unconfirmedEchoes.removeAll()
 

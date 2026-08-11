@@ -557,3 +557,39 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     ]))])
     #expect(t.rows.contains { $0.kind == .message(role: .user, text: "add tests", parent: nil) })
 }
+
+@Test func sendingTheSameTextTwiceWithOnlyOneHeldWithdrawsExactlyOneRow() {
+    // Two identical sends leave two identical unconfirmed echoes and two
+    // identical rows. Matching with `contains` instead of consuming a match
+    // per queue entry would let one held item cancel both rows, deleting the
+    // one that genuinely went out with no queue entry left to show for it.
+    var t = Transcript()
+    t.appendLocalUserMessage("retry")
+    t.appendLocalUserMessage("retry")
+    #expect(t.rows.count == 2)
+
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "retry")
+    ]))])
+
+    #expect(t.rows.count == 1)
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "retry", parent: nil) })
+}
+
+@Test func aReplayedMessageAfterAnEpochResetSurvivesAStaleEcho() {
+    // An unconfirmed echo describes an uncertain send from the epoch that
+    // recorded it. Left alive across `resetForNewEpoch`, it can collide with
+    // a message replayed into the new epoch — one that genuinely happened —
+    // and a promptQueue naming that text would delete restored history that
+    // was never in question.
+    var t = Transcript()
+    t.appendLocalUserMessage("use unittest")
+    t.resetForNewEpoch()
+    t.apply([Sequenced(seq: 0, event: .message(role: .user, text: "use unittest", parent: nil))])
+
+    t.apply([Sequenced(seq: 1, event: .promptQueue(items: [
+        QueuedPrompt(id: "0", text: "use unittest")
+    ]))])
+
+    #expect(t.rows.contains { $0.kind == .message(role: .user, text: "use unittest", parent: nil) })
+}
