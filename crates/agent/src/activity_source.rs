@@ -10,7 +10,7 @@
 
 use farcooler_protocol::v1::AgentActivity;
 
-use crate::event::AgentEvent;
+use crate::event::{AgentEvent, Role};
 
 /// The activity this event implies, or `None` if it implies nothing.
 pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
@@ -21,12 +21,12 @@ pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
         // agent is doing — a pane that went busy because a person typed was
         // reporting the wrong actor, and `send_next_queued` emits exactly that
         // event every time a queued prompt goes out.
-        AgentEvent::Message { role: crate::event::Role::Agent | crate::event::Role::Thought, .. }
+        AgentEvent::Message { role: Role::Agent | Role::Thought, .. }
         | AgentEvent::ToolCall { .. }
         | AgentEvent::ToolUpdate { .. }
         | AgentEvent::Plan { .. }
         | AgentEvent::Resolved { .. } => Some(AgentActivity::Working),
-        AgentEvent::Message { role: crate::event::Role::User, .. } => None,
+        AgentEvent::Message { role: Role::User, .. } => None,
         // Bookkeeping. Says nothing about whether the agent needs you.
         AgentEvent::SessionStarted { .. }
         | AgentEvent::ModeSet { .. }
