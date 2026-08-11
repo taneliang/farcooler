@@ -163,11 +163,7 @@ struct AgentView: View {
                     workspaceID: workspaceID,
                     core: connection.core,
                     onSend: { text, images in
-                        // Whether this goes out now or waits is the shim's call,
-                        // but the echo depends on the answer — see
-                        // `AgentStream.send`.
-                        let working = isWorking
-                        Task { await stream.send(text, images: images, whileWorking: working) }
+                        Task { await stream.send(text, images: images) }
                     },
                     onSetMode: { mode in Task { await stream.setMode(mode) } }
                 )

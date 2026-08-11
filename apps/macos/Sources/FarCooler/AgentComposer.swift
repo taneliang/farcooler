@@ -656,11 +656,7 @@ struct AgentComposer: View {
         cursor = 0
         attachments = []
         suggestions = []
-        // Whether this is going out now or joining the queue is the daemon's
-        // decision, but the composer already knows the answer and the echo
-        // depends on it — see `AgentStream.send`.
-        let working = terminal.agent == .working
-        Task { await stream.send(body, images: images, whileWorking: working) }
+        Task { await stream.send(body, images: images) }
     }
 }
 
