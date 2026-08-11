@@ -49,7 +49,15 @@ struct AgentSurface: View {
     @State private var lastReportedGeometry: (columns: Int, rows: Int) = (0, 0)
     /// Whether the transcript should follow its own tail — true while the
     /// reader is parked at the bottom, false once they scroll away.
-    @State private var followingTail = true
+    ///
+    /// A box rather than a `@State Bool`, and that is not a style choice.
+    /// Nothing DRAWS this: it is read by one `onChange` closure and rendered
+    /// nowhere. As view state, every report from the scroll geometry — which
+    /// is several a second while a reply streams — re-evaluated this whole
+    /// body, and that body contains the `LazyVStack` below, so each one cost a
+    /// full subview placement pass over the transcript. `ChangesStore` keeps
+    /// its own scroll out of `@Published` for exactly this reason.
+    @State private var tail = TailFollow()
     /// The row the scroll view holds still while heights around it resolve.
     @State private var scrollPosition = ScrollPosition(idType: Int.self)
 
@@ -281,13 +289,32 @@ struct AgentSurface: View {
         // height. That second half is the point — it is what stops a lazy
         // stack's corrections from dragging the text out from under the reader.
         .scrollPosition($scrollPosition, anchor: .bottom)
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            // Whether the reader is parked at the tail. 40pt of slack, because
-            // "at the bottom" after a redraw is rarely exact.
-            geometry.contentOffset.y + geometry.containerSize.height
-                >= geometry.contentSize.height - 40
-        } action: { _, atBottom in
-            followingTail = atBottom
+        // Detaching asks what the READER did, not how far the end is.
+        //
+        // The distance to the end is the wrong question while a reply streams,
+        // for two separate reasons. It is unstable: content grows without the
+        // offset moving, so the gap to the end opens and closes on its own
+        // several times a second, and every flip used to write view state and
+        // re-place the lazy stack. And it is WRONG: one tool call printing two
+        // hundred lines opens that gap by far more than 40pt in a single
+        // event, which stopped the transcript following its tail with nobody
+        // having touched the scroll.
+        //
+        // Growth moves `contentSize`. Only a reader moves `contentOffset`
+        // BACKWARDS — this view's own `scrollTo` below only ever moves it
+        // towards the end. So detaching asks about the offset, and re-attaching
+        // asks the original "is the end on screen" question, unchanged, with
+        // its 40pt of slack because "at the bottom" after a redraw is rarely
+        // exact. Re-attaching is tested first, so a height estimate that
+        // resolves SHORTER than it was guessed — which walks the offset back
+        // while the end stays pinned — cannot be read as scrolling up.
+        .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { old, new in
+            if new.contentOffset.y + new.containerSize.height
+                >= new.contentSize.height - 40 {
+                tail.following = true
+            } else if new.contentOffset.y < old.contentOffset.y - 0.5 {
+                tail.following = false
+            }
         }
         // Keyed on the CURSOR, not the row count: a streamed reply coalesces
         // into the row already on screen, so the count does not change while
@@ -296,10 +323,23 @@ struct AgentSurface: View {
             // Only while the reader is at the tail. Scrolling to the end on
             // every event made reading anything older impossible — a streamed
             // reply fires several a second, and each one yanked the view down.
-            guard followingTail else { return }
-            withAnimation(Motion.snap) {
-                scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
-            }
+            guard tail.following else { return }
+            // NOT animated, and that is the fix rather than a preference.
+            //
+            // `Motion.snap` is a spring with a 0.22s response, and
+            // `AgentStream` polls every 0.2s. Once a backend streams token
+            // deltas, every one of those polls carries something, so the scroll
+            // was re-targeted before it could ever settle and the scroll view
+            // was in motion for the entire length of a turn BY CONSTRUCTION —
+            // moving the offset every frame, firing the geometry observer above
+            // on every frame, and re-placing a lazy stack of thousands of rows
+            // behind each one. That is the pegged core, and no amount of
+            // de-duplicating the observer fixes it while the animation is what
+            // keeps the geometry moving.
+            //
+            // Unanimated, one event is one settled step. It still reads as
+            // continuous, because the steps arrive five times a second.
+            scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
         }
         .onAppear { scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom) }
     }
@@ -349,6 +389,16 @@ struct AgentSurface: View {
             permission(gating: row) != nil
         }
         return shown ? nil : pending
+    }
+
+    /// Whether the transcript is chasing its own end.
+    ///
+    /// A reference type held in `@State` — the same trick `MenuAnchor` uses —
+    /// so that writing it is genuinely free. A `@State Bool` invalidates the
+    /// view on every write whether or not anything reads it, and what reads
+    /// this is one closure that draws nothing. See `tail` above.
+    private final class TailFollow {
+        var following = true
     }
 
     /// Everything that changes what this view's size is worth in cells.
