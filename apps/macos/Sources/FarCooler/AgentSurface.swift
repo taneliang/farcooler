@@ -258,7 +258,7 @@ struct AgentSurface: View {
             // height correction above the viewport then moves the SCROLLBAR,
             // which is honest because the content really did get taller, without
             // moving what is being read.
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 12) {
                 ForEach(stream.transcript.rows) { row in
                     AgentRowView(
                         row: row,

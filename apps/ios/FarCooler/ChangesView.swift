@@ -18,8 +18,6 @@ struct ChangesView: View {
     /// tab switch and the scroll, the folds and the fetched diffs must not be.
     @ObservedObject var store: ChangesStore
     let workspaceName: String
-
-
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
@@ -59,33 +57,6 @@ struct ChangesView: View {
         // perfect, and the user must always have a way to be certain.
         .refreshable { await store.load(fresh: true) }
         .task { await store.loadIfNeeded() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Picker("Showing", selection: $store.scope) {
-                        ForEach(DiffScope.allCases) { scope in
-                            Text(scope.label).tag(scope)
-                        }
-                    }
-                    Divider()
-                    // What clears the badge on this worktree everywhere — the
-                    // fleet row here, and the Mac's sidebar.
-                    Button {
-                        Task { await store.markRead() }
-                    } label: {
-                        Label("Mark as Reviewed", systemImage: "checkmark.circle")
-                    }
-                    Button {
-                        Task { await store.load(fresh: true) }
-                    } label: {
-                        Label("Recompute", systemImage: "arrow.clockwise")
-                    }
-                } label: {
-                    Image(systemName: "line.3.horizontal.decrease.circle")
-                }
-                .accessibilityLabel("Review options")
-            }
-        }
     }
 
     /// Branch, base, and the two numbers — the whole worktree in one card.
@@ -141,6 +112,40 @@ struct ChangesView: View {
         }
         .padding(12)
         .background(ChangesSurface.card, in: .rect(cornerRadius: 14))
+    }
+}
+
+/// The changes pane's contextual toolbar control.
+///
+/// Owned by `PaneHost`, not `ChangesView`: the host owns every navigation-bar
+/// item and can therefore keep their order stable as panes change. A mounted
+/// child contributing its own toolbar item made SwiftUI merge two independent
+/// toolbar trees, which moved the worktree switcher whenever this menu appeared.
+struct ChangesToolbarMenu: View {
+    @ObservedObject var store: ChangesStore
+
+    var body: some View {
+        Menu {
+            Picker("Showing", selection: $store.scope) {
+                ForEach(DiffScope.allCases) { scope in
+                    Text(scope.label).tag(scope)
+                }
+            }
+            Divider()
+            Button {
+                Task { await store.markRead() }
+            } label: {
+                Label("Mark as Reviewed", systemImage: "checkmark.circle")
+            }
+            Button {
+                Task { await store.load(fresh: true) }
+            } label: {
+                Label("Recompute", systemImage: "arrow.clockwise")
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+        }
+        .accessibilityLabel("Review options")
     }
 }
 

@@ -764,11 +764,17 @@ struct FleetList: View {
                     // beats one that comes to you by moving the list.
                     ForEach(workspace.terminals) { terminal in
                         Button { onSelect(terminal) } label: {
-                            TerminalRow(terminal: terminal, ordinal: numbering[terminal.id]) { action in
-                                onAction(action, terminal)
-                            }
+                            TerminalRow(terminal: terminal, ordinal: numbering[terminal.id])
+                                // A list row's label otherwise sizes to its
+                                // text. Give selection the whole visible row,
+                                // including the blank trailing space a thumb
+                                // naturally lands in.
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("fleet-terminal-\(terminal.id)")
+                        .swipeActions(edge: .trailing) { terminalActions(for: terminal) }
                     }
                     if workspace.terminals.isEmpty {
                         Text("No terminals").font(.callout).foregroundStyle(.secondary)
@@ -841,12 +847,13 @@ struct FleetList: View {
                             ForEach(workspace.terminals) { terminal in
                                 Button { onSelect(terminal) } label: {
                                     TerminalRow(
-                                        terminal: terminal, ordinal: numbering[terminal.id]
-                                    ) { action in
-                                        onAction(action, terminal)
-                                    }
+                                        terminal: terminal, ordinal: numbering[terminal.id])
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityIdentifier("fleet-terminal-\(terminal.id)")
+                                .swipeActions(edge: .trailing) { terminalActions(for: terminal) }
                             }
                             HStack {
                                 Text(workspace.task).font(.caption).foregroundStyle(.secondary)
@@ -900,6 +907,18 @@ struct FleetList: View {
                 connection: connection)
         }
     }
+
+    @ViewBuilder
+    private func terminalActions(for terminal: Terminal) -> some View {
+        let kind = StateKind.parse(terminal.state)
+        if kind == .lost {
+            Button("Dismiss") { onAction(.dismissLost, terminal) }.tint(.gray)
+        }
+        Button("Restart") { onAction(.restart, terminal) }.tint(.blue)
+        if kind == .running || kind == .starting {
+            Button("Stop", role: .destructive) { onAction(.stop, terminal) }
+        }
+    }
 }
 
 struct TerminalRow: View {
@@ -908,7 +927,6 @@ struct TerminalRow: View {
     /// `Workspace.ordinals()`, or nil when its label is unique in the
     /// workspace and numbering it would answer a question nobody asked.
     var ordinal: Int?
-    let onAction: (Connection.Action) -> Void
 
     private var kind: StateKind { StateKind.parse(terminal.state) }
 
@@ -940,15 +958,7 @@ struct TerminalRow: View {
                     .accessibilityLabel(terminal.agent.label)
             }
         }
-        .swipeActions(edge: .trailing) {
-            if kind == .lost {
-                Button("Dismiss") { onAction(.dismissLost) }.tint(.gray)
-            }
-            Button("Restart") { onAction(.restart) }.tint(.blue)
-            if kind == .running || kind == .starting {
-                Button("Stop", role: .destructive) { onAction(.stop) }
-            }
-        }
+        .contentShape(Rectangle())
     }
 }
 

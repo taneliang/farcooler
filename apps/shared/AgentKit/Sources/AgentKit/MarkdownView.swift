@@ -204,15 +204,30 @@ public struct MarkdownText: View {
     /// same markdown — agents write lists and code in their thinking too.
     public var secondary: Bool = false
 
+    @ScaledMetric(relativeTo: .body)
+    private var h1Size = MarkdownTypeScale.h1
+    @ScaledMetric(relativeTo: .body)
+    private var h2Size = MarkdownTypeScale.h2
+    @ScaledMetric(relativeTo: .body)
+    private var h3Size = MarkdownTypeScale.h3
+
     public init(text: String, secondary: Bool = false) {
         self.text = text
         self.secondary = secondary
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ForEach(Array(Markdown.blocks(text).enumerated()), id: \.offset) { _, block in
+        let blocks = Markdown.blocks(text)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 view(for: block)
+                    .padding(
+                        .top,
+                        index == 0
+                            ? 0
+                            : MarkdownBlockSpacing.gap(
+                                after: role(for: blocks[index - 1]),
+                                before: role(for: block)))
             }
         }
         .font(secondary ? .caption : .body)
@@ -227,12 +242,13 @@ public struct MarkdownText: View {
         case let .paragraph(text):
             Text(Markdown.inline(text))
                 .fixedSize(horizontal: false, vertical: true)
+                .lineSpacing(3)
 
         case let .heading(level, text):
             Text(Markdown.inline(text))
                 .font(headingFont(level))
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 2)
+                .lineSpacing(2)
 
         case let .bullet(text, depth):
             marker("•", text: text, depth: depth)
@@ -250,6 +266,7 @@ public struct MarkdownText: View {
                 Rectangle().fill(.quaternary).frame(width: 2)
                 Text(Markdown.inline(text))
                     .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(3)
             }
 
         case .rule:
@@ -269,49 +286,152 @@ public struct MarkdownText: View {
                 .frame(minWidth: 14, alignment: .trailing)
             Text(Markdown.inline(text))
                 .fixedSize(horizontal: false, vertical: true)
+                .lineSpacing(3)
             Spacer(minLength: 0)
         }
         .padding(.leading, CGFloat(depth) * 14)
     }
 
     private func headingFont(_ level: Int) -> Font {
+        // A heading must be distinct from both body and inline bold. Semantic
+        // `.headline` is the same point size as body on Apple platforms, so a
+        // weight-only H3 looked exactly like a bold phrase. This small custom
+        // ramp keeps all three levels legible without turning chat into a title
+        // page; `@ScaledMetric` preserves accessibility scaling.
+        if secondary {
+            switch level {
+            case 1, 2: return .caption.weight(.semibold)
+            default: return .caption.weight(.medium)
+            }
+        }
+
         switch level {
-        case 1: secondary ? .callout.bold() : .title3.bold()
-        case 2: secondary ? .caption.bold() : .headline
-        default: secondary ? .caption.bold() : .subheadline.bold()
+        case 1: return .system(size: h1Size, weight: .semibold)
+        case 2: return .system(size: h2Size, weight: .semibold)
+        default: return .system(size: h3Size, weight: .semibold)
+        }
+    }
+
+    private func role(for block: Markdown.Block) -> MarkdownBlockRole {
+        switch block {
+        case .paragraph: .paragraph
+        case let .heading(level, _): .heading(level: level)
+        case .bullet, .numbered: .listItem
+        case .code: .code
+        case .quote: .quote
+        case .rule: .rule
+        case .table: .table
         }
     }
 }
 
-/// A pipe table, drawn as a grid.
+enum MarkdownTypeScale {
+    #if os(macOS)
+    static let h1: CGFloat = 20
+    static let h2: CGFloat = 17
+    static let h3: CGFloat = 15
+    #else
+    static let h1: CGFloat = 24
+    static let h2: CGFloat = 21
+    static let h3: CGFloat = 19
+    #endif
+}
+
+/// A full-width agent reply inside a transcript row.
 ///
-/// `Grid` rather than nested stacks: a table's whole purpose is that a column
-/// lines up down the page, and stacks each measure their own row.
+/// This is deliberately not an `HStack { MarkdownText; Spacer }`. A flexible
+/// text view inside that stack is first measured with an unspecified width, so
+/// SwiftUI reports its one-line height and only wraps it later when the final
+/// width is assigned. The wrapped glyphs draw outside that reported height and
+/// the transcript places the next row on top of them. Directly proposing the
+/// row's width lets `Text` report every rendered line on both UIKit and AppKit.
+public struct AgentReplyText: View {
+    public let text: String
+    public let trailingClearance: CGFloat
+
+    public init(text: String, trailingClearance: CGFloat) {
+        self.text = text
+        self.trailingClearance = trailingClearance
+    }
+
+    public var body: some View {
+        MarkdownText(text: text)
+            // Keep long desktop panes in a comfortable reading measure. The
+            // phone is narrower than this and therefore remains full width.
+            .frame(maxWidth: 680, alignment: .leading)
+            .padding(.trailing, trailingClearance)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+enum MarkdownBlockRole: Equatable {
+    case paragraph
+    case heading(level: Int)
+    case listItem
+    case code
+    case quote
+    case rule
+    case table
+}
+
+enum MarkdownBlockSpacing {
+    /// Space expresses the relationship between blocks, not a global constant.
+    /// List items belong together; a heading hugs the content it introduces;
+    /// a new section needs enough air to be found while scanning.
+    static func gap(after previous: MarkdownBlockRole, before current: MarkdownBlockRole) -> CGFloat {
+        if previous == .rule { return 16 }
+
+        if case .heading = previous {
+            if case .heading = current { return 12 }
+            return 8
+        }
+
+        if case let .heading(level) = current {
+            switch level {
+            case 1: return 24
+            case 2: return 20
+            default: return 16
+            }
+        }
+
+        if current == .rule { return 18 }
+        if previous == .listItem, current == .listItem { return 8 }
+
+        switch (previous, current) {
+        case (.paragraph, .paragraph),
+             (.listItem, .paragraph),
+             (.table, .paragraph):
+            return 16
+        case (.paragraph, .listItem),
+             (.quote, .paragraph),
+             (.code, .paragraph):
+            return 12
+        default:
+            return 10
+        }
+    }
+}
+
+/// A pipe table, drawn as native vertical and horizontal flow.
 ///
-/// It scrolls sideways rather than wrapping its cells. A tiled pane can be
-/// narrow, and a table squeezed to fit is a table you cannot read — where a
-/// table pushed off the edge of a pane takes the reply's whole layout with it.
+/// Equal flexible cells keep the rules aligned while each `HStack` takes the
+/// height of its tallest wrapping cell. Most importantly, the `VStack` owns
+/// row placement. There is no separately calculated Y coordinate that can
+/// become stale when UIKit and AppKit produce different text metrics.
 private struct MarkdownTable: View {
     let header: [String]
     let rows: [[String]]
 
     var body: some View {
-        // A real grid with real rules.
-        //
         // The first version scrolled sideways with single-line cells, which is
         // fine for a two-column list of paths and useless for the tables an
         // agent actually writes — a cell of prose became "Adds roughly 4–8 hou…"
         // and the sentence was simply gone. Cells wrap and the table fits the
-        // pane instead; `Grid` is what keeps the columns aligned once they do,
-        // which nested stacks cannot do when rows are different heights.
-        // `SwiftUI.Grid`, spelled out: this module has an `enum Grid` of its
-        // own (`SidebarViews.swift`) which shadows it everywhere. Unqualified,
-        // the compiler resolves to that and reports "Grid cannot be constructed
-        // because it has no accessible initializers" — an error that says
-        // nothing about the actual problem.
-        SwiftUI.Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+        // pane instead. Each native row expands around its wrapped content,
+        // so the next row cannot begin until that content has taken its space.
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(allRows.indices, id: \.self) { row in
-                GridRow {
+                HStack(alignment: .top, spacing: 0) {
                     ForEach(0..<columnCount, id: \.self) { column in
                         cellView(row: row, column: column)
                     }
@@ -325,23 +445,21 @@ private struct MarkdownTable: View {
             RoundedRectangle(cornerRadius: 5).strokeBorder(.quaternary)
         }
         .clipShape(RoundedRectangle(cornerRadius: 5))
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     /// The header is just the first row, so one loop draws the whole table.
     private var allRows: [[String]] { [header] + rows }
 
-    /// One cell, as its own function.
-    ///
-    /// Inline in the `Grid` builder this defeated the type checker outright —
-    /// the error it reports for that is "Grid has no accessible initializers",
-    /// which points at the wrong line entirely.
+    /// One cell, as its own function, shared by header and body rows.
     private func cellView(row: Int, column: Int) -> some View {
         let text: String = {
             let cells = allRows[row]
             return column < cells.count ? cells[column] : ""
         }()
         return Text(Markdown.inline(text))
+            .font(.callout)
+            .lineSpacing(1)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .modifier(TableCell(column: column, isHeader: row == 0))
@@ -364,7 +482,7 @@ private struct TableCell: ViewModifier {
         content
             .fontWeight(isHeader ? .semibold : .regular)
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.vertical, 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .overlay(alignment: .leading) {
                 // Every column but the first draws the rule to its left, so

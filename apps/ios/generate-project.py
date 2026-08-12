@@ -101,6 +101,8 @@ ACTIVITY_SOURCES = [
     "AgentActivityWidget.swift",
 ]
 
+UI_TEST_SOURCES = ["KeyboardTabStripTests.swift"]
+
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
 
 # Bundled rather than downloaded — see Fonts/README.md for why a terminal
@@ -133,6 +135,11 @@ KEYS = [
     "activityTarget", "activityProduct", "activityGroup", "activitySourcesPhase",
     "activityConfigList", "activityDebug", "activityRelease", "embedPhase",
     "activityDependency", "activityProxy",
+    # Real-device interaction regressions. The target depends on the app but is
+    # never embedded in it; Xcode installs its runner only for a test action.
+    "uiTestTarget", "uiTestProduct", "uiTestGroup", "uiTestSourcesPhase",
+    "uiTestFrameworksPhase", "uiTestConfigList", "uiTestDebug", "uiTestRelease",
+    "uiTestDependency", "uiTestProxy",
 ]
 
 
@@ -143,12 +150,12 @@ def oid(seed):
 
 ids = {
     name: oid(name)
-    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + FRAMEWORKS + FONTS
+    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + UI_TEST_SOURCES + FRAMEWORKS + FONTS
     + [ASSET_CATALOG]
 }
 build_ids = {
     name: oid("build/" + name)
-    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + FRAMEWORKS + FONTS
+    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + UI_TEST_SOURCES + FRAMEWORKS + FONTS
     + [ASSET_CATALOG]
 }
 
@@ -175,7 +182,7 @@ EMBED_BUILD_ID = oid("build/embed-activity")
 
 def file_refs():
     lines = []
-    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES:
+    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + UI_TEST_SOURCES:
         lines.append(
             f"\t\t{ids[name]} /* {name} */ = {{isa = PBXFileReference; "
             f"lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = \"<group>\"; }};"
@@ -207,6 +214,12 @@ def file_refs():
         "includeInIndex = 0; path = FarCoolerActivity.appex; "
         "sourceTree = BUILT_PRODUCTS_DIR; };"
     )
+    lines.append(
+        f"\t\t{P['uiTestProduct']} /* FarCoolerUITests.xctest */ = "
+        "{isa = PBXFileReference; explicitFileType = wrapper.cfbundle; "
+        "includeInIndex = 0; path = FarCoolerUITests.xctest; "
+        "sourceTree = BUILT_PRODUCTS_DIR; };"
+    )
     return "\n".join(lines)
 
 
@@ -236,6 +249,11 @@ def build_files():
             f"\t\t{build_id} /* {name} in Sources */ = {{isa = PBXBuildFile; "
             f"fileRef = {ids[name]}; }};"
         )
+    for name in UI_TEST_SOURCES:
+        lines.append(
+            f"\t\t{build_ids[name]} /* {name} in Sources */ = {{isa = PBXBuildFile; "
+            f"fileRef = {ids[name]}; }};"
+        )
     lines.append(
         f"\t\t{EMBED_BUILD_ID} /* FarCoolerActivity.appex in Embed Foundation Extensions */ = "
         f"{{isa = PBXBuildFile; fileRef = {P['activityProduct']}; "
@@ -258,6 +276,10 @@ agentkit_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in AGENTKIT_S
 activity_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in ACTIVITY_SOURCES)
 activity_source_list = "\n".join(
     f"\t\t\t\t{activity_build_ids[n]} /* {n} in Sources */," for n in activity_build_ids
+)
+ui_test_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in UI_TEST_SOURCES)
+ui_test_source_list = "\n".join(
+    f"\t\t\t\t{build_ids[n]} /* {n} in Sources */," for n in UI_TEST_SOURCES
 )
 # `agentKitGroup`'s `path` is "../shared/AgentKit/Sources/AgentKit", which
 # only resolves to the right directory (`apps/shared/AgentKit/Sources/AgentKit`)
@@ -351,6 +373,17 @@ ACTIVITY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCODE_SIGNING_REQUIRED = NO;
 \t\t\t\tSKIP_INSTALL = YES;"""
 
+UI_TEST_COMMON = """\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.uitests;
+\t\t\t\tGENERATE_INFOPLIST_FILE = YES;
+\t\t\t\tTEST_TARGET_NAME = FarCooler;
+\t\t\t\tLD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+\t\t\t\tCODE_SIGN_STYLE = Manual;
+\t\t\t\tCODE_SIGN_IDENTITY = "-";
+\t\t\t\tCODE_SIGNING_ALLOWED = YES;
+\t\t\t\tCODE_SIGNING_REQUIRED = NO;
+\t\t\t\tSKIP_INSTALL = YES;"""
+
 PBXPROJ = f"""// !$*UTF8*$!
 {{
 \tarchiveVersion = 1;
@@ -375,6 +408,12 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t);
 \t\t\trunOnlyForDeploymentPostprocessing = 0;
 \t\t}};
+\t\t{P['uiTestFrameworksPhase']} = {{
+\t\t\tisa = PBXFrameworksBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = ();
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -383,6 +422,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tchildren = (
 \t\t\t\t{P['sourcesGroup']} /* FarCooler */,
 \t\t\t\t{P['activityGroup']} /* FarCoolerActivity */,
+\t\t\t\t{P['uiTestGroup']} /* FarCoolerUITests */,
 \t\t\t\t{P['agentKitGroup']} /* AgentKit */,
 \t\t\t\t{ids[ASSET_CATALOG]} /* {ASSET_CATALOG} */,
 \t\t\t\t{P['frameworksGroup']} /* Frameworks */,
@@ -405,6 +445,14 @@ PBXPROJ = f"""// !$*UTF8*$!
 {activity_children}
 \t\t\t);
 \t\t\tpath = FarCoolerActivity;
+\t\t\tsourceTree = "<group>";
+\t\t}};
+\t\t{P['uiTestGroup']} /* FarCoolerUITests */ = {{
+\t\t\tisa = PBXGroup;
+\t\t\tchildren = (
+{ui_test_children}
+\t\t\t);
+\t\t\tpath = FarCoolerUITests;
 \t\t\tsourceTree = "<group>";
 \t\t}};
 \t\t{P['fontsGroup']} /* Fonts */ = {{
@@ -437,6 +485,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tchildren = (
 \t\t\t\t{P['product']} /* FarCooler.app */,
 \t\t\t\t{P['activityProduct']} /* FarCoolerActivity.appex */,
+\t\t\t\t{P['uiTestProduct']} /* FarCoolerUITests.xctest */,
 \t\t\t);
 \t\t\tname = Products;
 \t\t\tsourceTree = "<group>";
@@ -475,6 +524,20 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tproductReference = {P['activityProduct']};
 \t\t\tproductType = "com.apple.product-type.app-extension";
 \t\t}};
+\t\t{P['uiTestTarget']} /* FarCoolerUITests */ = {{
+\t\t\tisa = PBXNativeTarget;
+\t\t\tbuildConfigurationList = {P['uiTestConfigList']};
+\t\t\tbuildPhases = (
+\t\t\t\t{P['uiTestSourcesPhase']},
+\t\t\t\t{P['uiTestFrameworksPhase']},
+\t\t\t);
+\t\t\tbuildRules = ();
+\t\t\tdependencies = ({P['uiTestDependency']}, );
+\t\t\tname = FarCoolerUITests;
+\t\t\tproductName = FarCoolerUITests;
+\t\t\tproductReference = {P['uiTestProduct']};
+\t\t\tproductType = "com.apple.product-type.bundle.ui-testing";
+\t\t}};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -497,6 +560,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\ttargets = (
 \t\t\t\t{P['target']} /* FarCooler */,
 \t\t\t\t{P['activityTarget']} /* FarCoolerActivity */,
+\t\t\t\t{P['uiTestTarget']} /* FarCoolerUITests */,
 \t\t\t);
 \t\t}};
 /* End PBXProject section */
@@ -508,6 +572,13 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tproxyType = 1;
 \t\t\tremoteGlobalIDString = {P['activityTarget']};
 \t\t\tremoteInfo = FarCoolerActivity;
+\t\t}};
+\t\t{P['uiTestProxy']} = {{
+\t\t\tisa = PBXContainerItemProxy;
+\t\t\tcontainerPortal = {P['project']};
+\t\t\tproxyType = 1;
+\t\t\tremoteGlobalIDString = {P['target']};
+\t\t\tremoteInfo = FarCooler;
 \t\t}};
 /* End PBXContainerItemProxy section */
 
@@ -530,6 +601,11 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tisa = PBXTargetDependency;
 \t\t\ttarget = {P['activityTarget']};
 \t\t\ttargetProxy = {P['activityProxy']};
+\t\t}};
+\t\t{P['uiTestDependency']} = {{
+\t\t\tisa = PBXTargetDependency;
+\t\t\ttarget = {P['target']};
+\t\t\ttargetProxy = {P['uiTestProxy']};
 \t\t}};
 /* End PBXTargetDependency section */
 
@@ -561,6 +637,14 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t);
 \t\t\trunOnlyForDeploymentPostprocessing = 0;
 \t\t}};
+\t\t{P['uiTestSourcesPhase']} = {{
+\t\t\tisa = PBXSourcesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+{ui_test_source_list}
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -570,6 +654,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 {COMMON}
 \t\t\t\tONLY_ACTIVE_ARCH = YES;
 \t\t\t\tSWIFT_OPTIMIZATION_LEVEL = "-Onone";
+\t\t\t\tSWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 \t\t\t\tGCC_OPTIMIZATION_LEVEL = 0;
 \t\t\t\tENABLE_TESTABILITY = YES;
 \t\t\t}};
@@ -611,6 +696,20 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t}};
 \t\t\tname = Release;
 \t\t}};
+\t\t{P['uiTestDebug']} /* Debug */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{UI_TEST_COMMON}
+\t\t\t}};
+\t\t\tname = Debug;
+\t\t}};
+\t\t{P['uiTestRelease']} /* Release */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{UI_TEST_COMMON}
+\t\t\t}};
+\t\t\tname = Release;
+\t\t}};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -637,6 +736,15 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildConfigurations = (
 \t\t\t\t{P['activityDebug']} /* Debug */,
 \t\t\t\t{P['activityRelease']} /* Release */,
+\t\t\t);
+\t\t\tdefaultConfigurationIsVisible = 0;
+\t\t\tdefaultConfigurationName = Release;
+\t\t}};
+\t\t{P['uiTestConfigList']} = {{
+\t\t\tisa = XCConfigurationList;
+\t\t\tbuildConfigurations = (
+\t\t\t\t{P['uiTestDebug']} /* Debug */,
+\t\t\t\t{P['uiTestRelease']} /* Release */,
 \t\t\t);
 \t\t\tdefaultConfigurationIsVisible = 0;
 \t\t\tdefaultConfigurationName = Release;

@@ -120,6 +120,9 @@ private struct TabChip: View {
             .foregroundStyle(isCurrent ? Color.white : Color.white.opacity(0.75))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("terminal-tab-\(terminal.id)")
+        .accessibilityValue(isCurrent ? "current" : "")
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }
 

@@ -33,6 +33,16 @@ struct AgentView: View {
     /// Whether the transcript should follow its own tail — true while the
     /// reader is parked at the bottom, false once they scroll away.
     @State private var followingTail = true
+    /// Holds the reader's pre-keyboard intent across the viewport animation.
+    ///
+    /// The keyboard and the scroll view do not update in one layout pass: the
+    /// viewport becomes shorter first, which briefly makes an actually
+    /// tail-following transcript report that it is no longer at the bottom.
+    /// Remembering the intent until the keyboard settles prevents that
+    /// transient geometry from being mistaken for a user scroll.
+    @State private var pinsTailThroughKeyboardResize = false
+    /// Invalidates an older keyboard-settle task when another frame arrives.
+    @State private var keyboardResizeGeneration = 0
     /// The row the scroll view holds still while heights around it resolve.
     @State private var scrollPosition = ScrollPosition(idType: Int.self)
     /// The end of the content. `Int` like every row id, because
@@ -109,6 +119,10 @@ struct AgentView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcriptBody
+                .modifier(
+                    AgentLayoutProbe(
+                        keyboardHeight: keyboard.height, barHeight: barHeight,
+                        followingTail: followingTail))
                 // The composer sits in the transcript's bottom safe area, which
                 // is the framework's own answer to "a control resting on
                 // scrolling content": the conversation runs the full height and
@@ -122,7 +136,7 @@ struct AgentView: View {
                 // exist in the hierarchy so its controller can hold first
                 // responder and vend the bar.
                 .background(
-                    DockedBar(height: $barHeight) { composerStack }
+                    DockedBar(height: $barHeight, isActive: isVisible) { composerStack }
                         .frame(width: 0, height: 0)
                         .accessibilityHidden(true)
                 )
@@ -145,7 +159,9 @@ struct AgentView: View {
                     // is there. With the keyboard UP the reported frame already
                     // includes the accessory and is the taller number, so it
                     // wins — and nothing is counted twice.
-                    Color.clear.frame(height: max(keyboard.height, barHeight))
+                    // Nothing reserved by a pane that is not on screen: its bar
+                    // is not docked, so there is nothing down there to clear.
+                    Color.clear.frame(height: isVisible ? max(keyboard.height, barHeight) : 0)
                 }
                 // How the conversation MEETS the glass over it.
                 //
@@ -333,6 +349,11 @@ struct AgentView: View {
             }
             // What the scroll view holds still while content around it
             // changes height — see the stack above.
+            // Start at the conversation's tail even when the transcript is too
+            // long for the lazy stack to finish laying out before `onAppear`.
+            // The imperative scroll below remains useful when returning to a
+            // mounted pane; this is the reliable first-layout anchor.
+            .defaultScrollAnchor(.bottom)
             // Drag the transcript down and the keyboard goes with it.
             //
             // `.interactively`: the keyboard tracks the finger and comes back if
@@ -352,12 +373,22 @@ struct AgentView: View {
             .scrollDismissesKeyboard(.interactively)
             .scrollPosition($scrollPosition, anchor: .bottom)
             .onScrollGeometryChange(for: Bool.self) { geometry in
-                // Whether the reader is parked at the tail. 40pt of slack,
-                // because "at the bottom" after a redraw is rarely exact.
-                geometry.contentOffset.y + geometry.containerSize.height
-                    >= geometry.contentSize.height - 40
+                // `visibleRect` already accounts for every safe-area inset.
+                // Adding `containerSize` to `contentOffset` does not, which
+                // makes a bottom-inset scroll view look permanently short of
+                // its tail even after the user has reached it.
+                // 40pt of slack, because "at the bottom" after a redraw is
+                // rarely exact while a lazy row is resolving its height.
+                geometry.visibleRect.maxY >= geometry.contentSize.height - 40
             } action: { _, atBottom in
-                followingTail = atBottom
+                // A keyboard resize briefly reports "not at bottom" before
+                // the new content inset and scroll position meet. That is
+                // layout churn, not the reader scrolling away.
+                if pinsTailThroughKeyboardResize {
+                    followingTail = true
+                } else {
+                    followingTail = atBottom
+                }
             }
             // Keyed on the CURSOR, not the row count. A streamed reply
             // coalesces into the row already on screen, so the count does
@@ -370,6 +401,41 @@ struct AgentView: View {
                 guard followingTail else { return }
                 withAnimation(.easeOut(duration: 0.2)) {
                     scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
+                }
+            }
+            .onChange(of: keyboard.height) { oldHeight, newHeight in
+                let oldInset = max(oldHeight, barHeight)
+                let newInset = max(newHeight, barHeight)
+                guard newInset > oldInset,
+                    followingTail || pinsTailThroughKeyboardResize
+                else { return }
+
+                pinsTailThroughKeyboardResize = true
+                keyboardResizeGeneration += 1
+                let generation = keyboardResizeGeneration
+
+                // Preserve the reader's intent, not the old coordinates. The
+                // keyboard changes its frame over several layout passes. Pin
+                // throughout that animation, then release only after one final
+                // re-anchor at the settled size. A single next-run-loop scroll
+                // is too early on iOS 26 and leaves the final rows underneath
+                // the keyboard.
+                Task { @MainActor in
+                    for delay in [0, 80, 160, 260, 420] {
+                        if delay == 0 {
+                            await Task.yield()
+                        } else {
+                            try? await Task.sleep(for: .milliseconds(delay))
+                        }
+                        guard generation == keyboardResizeGeneration else { return }
+                        scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
+                    }
+                    // Let the final scroll geometry publish while the pin is
+                    // still active, so it cannot undo the preserved intent.
+                    await Task.yield()
+                    guard generation == keyboardResizeGeneration else { return }
+                    followingTail = true
+                    pinsTailThroughKeyboardResize = false
                 }
             }
             .onAppear { scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom) }
@@ -398,6 +464,27 @@ struct AgentView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// Debug-only layout telemetry for the real-device keyboard regression.
+/// Release builds keep the stable identifier but do not expose implementation
+/// measurements as a VoiceOver value.
+private struct AgentLayoutProbe: ViewModifier {
+    let keyboardHeight: CGFloat
+    let barHeight: CGFloat
+    let followingTail: Bool
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        content
+            .accessibilityIdentifier("agent-transcript")
+            .accessibilityValue(
+                Text(verbatim:
+                    "keyboard=\(Int(keyboardHeight.rounded()));bar=\(Int(barHeight.rounded()));tail=\(followingTail ? "true" : "false")"))
+        #else
+        content.accessibilityIdentifier("agent-transcript")
+        #endif
     }
 }
 
@@ -481,10 +568,7 @@ private struct MessageRow: View {
             // uses. Plain `Text` here meant a table arrived as a wall of pipes
             // and a heading as a line starting with a hash: the same
             // conversation, unreadable on the phone.
-            HStack {
-                MarkdownText(text: text)
-                Spacer(minLength: 40)
-            }
+            AgentReplyText(text: text, trailingClearance: 40)
 
         case .thought:
             // Open while it is being written, closed once it is done.
@@ -700,7 +784,7 @@ private struct SubagentBlockView: View {
 
             if showing && !block.children.isEmpty {
                 Divider()
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     if hidden > 0 {
                         Button("… \(hidden) more") { withAnimation(Self.motion) { showingAll = true } }
                             .buttonStyle(.plain)
@@ -721,7 +805,9 @@ private struct SubagentBlockView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .background(
+            Color.primary.opacity(running || pending != nil ? 0.07 : 0.035),
+            in: RoundedRectangle(cornerRadius: 8))
         .animation(Self.motion, value: showing)
         // Children arrive one at a time while the subagent works, and a block
         // that grew by a row per frame with no animation flickered its way down
@@ -739,7 +825,8 @@ private struct SubagentBlockView: View {
                 .fill(dotColor)
                 .frame(width: 7, height: 7)
             Text(block.tool.title)
-                .font(.callout.weight(.medium))
+                .font(.subheadline.weight(running || pending != nil ? .semibold : .medium))
+                .foregroundStyle(running || pending != nil ? .primary : .secondary)
                 .lineLimit(1)
                 // Truncated in the middle, because a dispatch's title is the
                 // prompt it was given and the end of that sentence says more

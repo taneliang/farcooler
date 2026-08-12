@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-11T23:17:26-07:00",
+  "captureTransport": "existing-xcode-device-screenshot",
+  "debugBridgeStateSnapshotAvailable": false,
+  "device": {
+    "model": "iPhone 15 Pro Max",
+    "os": "iOS 26.6 (23G71)",
+    "orientation": "portrait"
+  },
+  "screen": {
+    "bundleIdentifier": "com.farcooler.ios",
+    "paneKind": "agent/changes",
+    "screenshot": "tab-strip-behind-navigation-after-keyboard-dismissal-post.png"
+  },
+  "reproduction": [
+    "Open an agent pane and note the worktree switcher's horizontal toolbar position.",
+    "Switch to a changes pane and compare the worktree switcher with Review options.",
+    "Observe that the worktree switcher moves left when the pane-specific item appears.",
+    "Open a transcript containing Markdown headings on iOS or macOS.",
+    "Observe headings jumping from conversation text to platform title sizes."
+  ],
+  "expected": "The worktree switcher is always the rightmost toolbar control. Transcript headings retain hierarchy without changing away from the conversation's base text size."
+}

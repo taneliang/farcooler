@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-11T23:38:00-07:00",
+  "captureTransport": "user-provided-macos-screenshot",
+  "debugBridgeStateSnapshotAvailable": false,
+  "platform": "macOS",
+  "screen": {
+    "surface": "agent conversation transcript",
+    "screenshot": "wrapped-agent-message-row-overlap-pre.png"
+  },
+  "reproduction": [
+    "Open an agent transcript containing a wrapped Markdown paragraph followed by another transcript row.",
+    "Use a pane width that makes the paragraph beginning 'Safe bet:' wrap onto a second line.",
+    "Observe the following 'Task #9: completed' row being placed over the paragraph's second line."
+  ],
+  "observed": "The Markdown text draws at its wrapped height, but the surrounding message row reports a one-line height to the transcript stack.",
+  "expected": "A wrapped agent message reserves its complete rendered height before the next transcript row begins."
+}

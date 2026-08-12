@@ -31,6 +31,14 @@ struct DockedBar<Content: View>: UIViewControllerRepresentable {
     /// keyboard-frame notification — it is simply on screen — so nothing else
     /// knows it is there and the transcript ran underneath it.
     @Binding var height: CGFloat
+    /// Whether this bar should be docked at all.
+    ///
+    /// An input accessory lives in the KEYBOARD's window, not in the view that
+    /// vends it, so hiding that view does nothing to it. `PaneHost` keeps every
+    /// visited pane mounted, so without this every chat pane ever opened went on
+    /// holding first responder and went on drawing its composer — over the
+    /// terminal, and over a changes pane that has no composer at all.
+    var isActive: Bool
     @ViewBuilder var content: () -> Content
 
     func makeUIViewController(context: Context) -> DockedBarController {
@@ -46,6 +54,9 @@ struct DockedBar<Content: View>: UIViewControllerRepresentable {
             height = measured
         }
         controller.update(rootView: AnyView(content()))
+        // After the content, so a bar becoming active docks with the right
+        // thing in it rather than with whatever it last held.
+        controller.setActive(isActive)
     }
 }
 
@@ -88,8 +99,8 @@ final class KeyboardInset: ObservableObject {
                 forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
             ) { [weak self] _ in
                 // Hiding leaves the accessory docked, so this is not zero — the
-                // next frame change reports what is left. Nothing is assumed
-                // here beyond "the keyboard part is going away".
+                // next valid frame change reports what is left. Nothing is
+                // assumed here beyond "the keyboard part is going away".
                 MainActor.assumeIsolated { self?.height = 0 }
             })
     }
@@ -104,7 +115,14 @@ final class KeyboardInset: ObservableObject {
             let screen = (note.object as? UIScreen) ?? UIApplication.shared.connectedScenes
                 .compactMap({ ($0 as? UIWindowScene)?.screen }).first
         else { return }
-        height = max(0, screen.bounds.height - frame.origin.y)
+        let overlap = max(0, screen.bounds.height - frame.origin.y)
+        // When the accessory's controller takes first responder back after an
+        // interactive dismissal, iOS 26 emits a synthetic keyboard frame whose
+        // origin is zero. Treating that as geometry reserves the entire screen
+        // (932 points on the regression device) and leaves the transcript a
+        // tiny strip. A software keyboard cannot legitimately cover virtually
+        // the whole display; the remaining accessory is measured independently.
+        height = overlap >= screen.bounds.height * 0.8 ? 0 : overlap
     }
 }
 
@@ -143,8 +161,29 @@ final class DockedBarController: UIViewController {
         view.isUserInteractionEnabled = false
     }
 
-    override var canBecomeFirstResponder: Bool { true }
-    override var inputAccessoryView: UIView? { bar }
+    /// Only the pane on screen may dock. See `DockedBar.isActive`.
+    private var isActive = false
+
+    override var canBecomeFirstResponder: Bool { isActive }
+    override var inputAccessoryView: UIView? { isActive ? bar : nil }
+
+    func setActive(_ active: Bool) {
+        guard active != isActive else { return }
+        isActive = active
+        if active {
+            becomeFirstResponder()
+        } else {
+            // The controller is not necessarily the first responder — while
+            // somebody is typing, the text view INSIDE the accessory is — so
+            // resigning here is not enough to put the keyboard away when the
+            // pane is switched off screen. Asking the responder chain is.
+            KeyboardDismissal.now()
+            resignFirstResponder()
+        }
+        // Without this UIKit keeps showing the accessory it already had; the
+        // two properties above are only consulted when inputs are reloaded.
+        reloadInputViews()
+    }
 
     /// Called when the bar's measured height changes. Set by the representable.
     var onHeightChange: ((CGFloat) -> Void)? {
@@ -155,8 +194,8 @@ final class DockedBarController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // Docked from the start, so the composer is on screen before anybody
-        // taps into it.
-        becomeFirstResponder()
+        // taps into it — but only if this pane is the one being looked at.
+        if isActive { becomeFirstResponder() }
     }
 
     func update(rootView: AnyView) {

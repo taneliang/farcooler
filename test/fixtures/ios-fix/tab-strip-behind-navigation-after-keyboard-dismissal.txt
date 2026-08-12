@@ -1,0 +1,1 @@
+After dismissing the keyboard, the pane tab strip is rendered behind the status/navigation bars; it must remain below the navigation bar and tappable.

@@ -41,6 +41,13 @@ struct PaneHost: View {
     @StateObject private var pastes = ImagePasteQueue()
     @State private var pickedImage: PhotosPickerItem?
     @State private var showPhotoPicker = false
+    /// The navigation bar's lower edge in window coordinates. iOS 26 changes
+    /// the hosting view's top proposal while an input accessory is active; the
+    /// bar itself does not move, so it is the stable boundary for the tab strip.
+    @State private var navigationBarBottom: CGFloat?
+    /// Height of the floating strip and its breathing room, used as scroll
+    /// content inset without shortening the full-bleed scroll surface.
+    @State private var tabStripHeight: CGFloat = 0
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -70,42 +77,71 @@ struct PaneHost: View {
     }
 
     var body: some View {
-        ZStack {
-            ForEach(visited) { pane in
-                TerminalView(
-                    terminal: pane,
-                    isVisible: pane.id == current.id,
-                    connection: connection,
-                    pastes: pastes)
-                    // Hidden, not removed. `opacity` keeps the view in the
-                    // hierarchy — which is what preserves its state — while
-                    // `allowsHitTesting` stops a pane nobody can see from
-                    // swallowing taps meant for the one on top of it.
-                    .opacity(pane.id == current.id ? 1 : 0)
-                    .allowsHitTesting(pane.id == current.id)
-                    // Never recycled onto a different terminal.
-                    .id(pane.id)
+        GeometryReader { geometry in
+            let contentTop = geometry.frame(in: .global).minY
+            let fallbackBarBottom = contentTop + geometry.safeAreaInsets.top
+            let navigationClearance = max(
+                0, (navigationBarBottom ?? fallbackBarBottom) - contentTop)
+
+            ZStack(alignment: .top) {
+                // Pane content remains full-bleed. It scrolls behind the
+                // navigation bar and the floating glass strip, preserving the
+                // depth and edge treatment of the original screen.
+                ZStack {
+                    ForEach(visited) { pane in
+                        TerminalView(
+                            terminal: pane,
+                            isVisible: pane.id == current.id,
+                            connection: connection,
+                            pastes: pastes)
+                            // Hidden, not removed. `opacity` keeps the view in the
+                            // hierarchy — which is what preserves its state — while
+                            // `allowsHitTesting` stops a pane nobody can see from
+                            // swallowing taps meant for the one on top of it.
+                            .opacity(pane.id == current.id ? 1 : 0)
+                            .allowsHitTesting(pane.id == current.id)
+                            // Never recycled onto a different terminal.
+                            .id(pane.id)
+                    }
+                }
+                // The scroll surface extends beneath the navigation chrome,
+                // but its resting content begins below the bar and tab strip.
+                // Unlike padding, a safe-area inset is consumed by ScrollView
+                // as content inset, so rows can still travel behind the glass
+                // when the user scrolls.
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    Color.clear.frame(height: navigationClearance + tabStripHeight)
+                }
+
+                // An overlay, not layout chrome: pin only the control while
+                // leaving the scroll surface underneath at full height.
+                TerminalTabStrip(
+                    workspaces: connection.fleet.workspaces, current: current, onSelect: select
+                )
+                .padding(.top, 6)
+                .padding(.bottom, 8)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    guard abs(tabStripHeight - height) > 0.5 else { return }
+                    tabStripHeight = height
+                }
+                .padding(.top, navigationClearance)
+            }
+            .overlay {
+                NavigationBarBoundaryReader(bottom: $navigationBarBottom)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
             }
         }
-        // At the TOP, where it does not move.
+        // Underlap the navigation chrome consistently in both keyboard states.
+        // The tab overlay above uses the bar's real frame to stay below it.
+        .ignoresSafeArea(.container, edges: .top)
+        // Painted past every edge, including under the home indicator and
+        // behind the docked composer.
         //
-        // The strip lived in the bottom safe area, for thumb reach — switching
-        // pane is the control you touch most, and the bottom is where the hand
-        // holding the phone already is. What that cost was a fixed position:
-        // down there it shares the bottom with the composer and the keyboard,
-        // so it rode up and down with every keyboard, and sat at a different
-        // height on a chat pane than on a terminal one. A control you aim at
-        // constantly is worth more with a constant location than with a shorter
-        // reach, and it also keeps the strip out of the input accessory view
-        // the composer is about to become.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            TerminalTabStrip(
-                workspaces: connection.fleet.workspaces, current: current, onSelect: select
-            )
-            .padding(.top, 6)
-            .padding(.bottom, 8)
-        }
-        .background(TerminalPalette.background)
+        // A background that stops at the safe area leaves the band below it
+        // showing the window's own black, which reads as a bar across the
+        // bottom of the screen rather than as the terminal's ground continuing.
+        .background(TerminalPalette.background.ignoresSafeArea())
         // Over the panes, above the key row, and gone the moment the path is
         // typed. Nothing about a transfer is ever written into the pane itself.
         .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
@@ -168,6 +204,9 @@ struct PaneHost: View {
         // also has to come out of `visited`, or its `TerminalView` would stay
         // mounted forever holding a session for a pane the host has forgotten.
         .onChange(of: liveTerminalIDs) { _, ids in prune(to: ids) }
+        // Keyboard room is owned by each pane below. The outer host remains
+        // full-height so its navigation boundary and tab overlay never move.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     @ToolbarContentBuilder
@@ -195,12 +234,15 @@ struct PaneHost: View {
             }
         }
 
-        // Terminal or chat, on the pane that can be either. Shown only where it
-        // would work: `canSwitchPaneMode` reflects the daemon's own
-        // registry-backed check, so a pane whose agent has no adapter never gets
-        // the button in the first place.
-        if live.canSwitchPaneMode {
-            ToolbarItem(placement: .topBarTrailing) {
+        // All trailing controls live in ONE ordered group. `ChangesView` used
+        // to contribute Review options from its own toolbar tree; SwiftUI then
+        // merged parent and child items in a different order on each pane.
+        // Keeping ownership here makes the final button invariant: the
+        // worktree switcher is declared last and is always rightmost.
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            // Terminal or chat, on the pane that can be either. Shown only
+            // where the daemon says switching is supported.
+            if live.canSwitchPaneMode {
                 Button {
                     Task {
                         await connection.setPaneMode(
@@ -213,13 +255,10 @@ struct PaneHost: View {
                 }
                 .accessibilityLabel(live.isAgentPane ? "Show the terminal" : "Show the chat")
             }
-        }
 
-        // Only on a pane that is actually a terminal: this sends an image by
-        // typing its PATH into a tty, which a chat pane's own composer does
-        // properly and a review pane has no use for at all.
-        if !live.isAgentPane && !live.isChangesPane {
-            ToolbarItem(placement: .topBarTrailing) {
+            // Only on a pane that is actually a terminal: this sends an image
+            // by typing its path into a tty.
+            if !live.isAgentPane && !live.isChangesPane {
                 Menu {
                     // A plain Button, and the picker hangs off the screen: a
                     // `PhotosPicker` placed directly in a menu renders as a row
@@ -244,9 +283,11 @@ struct PaneHost: View {
                 }
                 .accessibilityLabel("Send an image")
             }
-        }
 
-        ToolbarItem(placement: .topBarTrailing) {
+            if live.isChangesPane, let workspace = currentWorkspace {
+                ChangesToolbarMenu(store: connection.changesStores.store(for: workspace.id))
+            }
+
             Button { showWorkspaceList = true } label: {
                 Image(systemName: "square.stack")
             }
@@ -285,5 +326,52 @@ struct PaneHost: View {
     private func markVisible() {
         Notifier.shared.visibleTerminal = current.id
         Task { await connection.markVisibleSeen() }
+    }
+}
+
+/// Reports the actual UIKit navigation-bar boundary instead of inferring it
+/// from SwiftUI's keyboard-dependent safe-area proposal.
+private struct NavigationBarBoundaryReader: UIViewRepresentable {
+    @Binding var bottom: CGFloat?
+
+    func makeUIView(context: Context) -> NavigationBarBoundaryProbe {
+        NavigationBarBoundaryProbe()
+    }
+
+    func updateUIView(_ view: NavigationBarBoundaryProbe, context: Context) {
+        view.onChange = { measured in
+            guard bottom != measured else { return }
+            bottom = measured
+        }
+        view.report()
+    }
+}
+
+private final class NavigationBarBoundaryProbe: UIView {
+    var onChange: ((CGFloat) -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        report()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        report()
+    }
+
+    func report() {
+        guard let window else { return }
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let controller = current as? UIViewController,
+                let bar = controller.navigationController?.navigationBar
+            {
+                let measured = bar.convert(bar.bounds, to: window).maxY
+                DispatchQueue.main.async { [weak self] in self?.onChange?(measured) }
+                return
+            }
+            responder = current.next
+        }
     }
 }

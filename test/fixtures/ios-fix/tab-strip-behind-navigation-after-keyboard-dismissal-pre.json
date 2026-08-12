@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-11T22:25:06-07:00",
+  "captureTransport": "xcode-device-screenshot",
+  "debugBridgeStateSnapshotAvailable": false,
+  "device": {
+    "model": "iPhone 15 Pro Max",
+    "os": "iOS 26.6 (23G71)",
+    "orientation": "portrait",
+    "displayPixels": {
+      "width": 1290,
+      "height": 2796,
+      "scale": 3
+    }
+  },
+  "screen": {
+    "bundleIdentifier": "com.farcooler.ios",
+    "workspaceTitle": "overnight sample",
+    "paneKind": "agent",
+    "keyboardVisible": false,
+    "screenshot": "tab-strip-behind-navigation-after-keyboard-dismissal-pre.png"
+  },
+  "reproduction": [
+    "Open an agent pane that has the docked composer.",
+    "Focus the composer to show the software keyboard.",
+    "Dismiss the software keyboard.",
+    "Observe that the pane tab strip is laid out at the display's top edge behind the status and navigation bars."
+  ],
+  "expected": "The pane tab strip remains directly below the navigation bar before, during, and after keyboard dismissal and remains tappable."
+}

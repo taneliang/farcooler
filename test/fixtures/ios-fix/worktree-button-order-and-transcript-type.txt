@@ -1,0 +1,1 @@
+The worktree switcher moves when pane-specific toolbar items appear, and Markdown headings jump to oversized title fonts in both iOS and macOS transcripts; the switcher must stay rightmost and transcript type must remain one readable base size.

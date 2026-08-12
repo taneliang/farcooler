@@ -52,6 +52,9 @@ struct TerminalView: View {
     /// rather than removed. Everything that used to hang off them hangs off
     /// this instead.
     let isVisible: Bool
+    /// How far the keyboard reaches up, its key row included. See the grid's
+    /// bottom inset below.
+    @StateObject private var keyboard = KeyboardInset()
     @State private var ctrlArmed = false
     @State private var altArmed = false
     @State private var focusRequest = 0
@@ -183,6 +186,26 @@ struct TerminalView: View {
                             await session.configure(
                                 columns: columns(for: geo.size), rows: rows(for: geo.size))
                         }
+                }
+                // OUTSIDE the `GeometryReader`, and that is the entire fix.
+                //
+                // This inset was inside it, wrapped around the content — which
+                // insets what is DRAWN and leaves the reader measuring the full
+                // height it was proposed. So `geo.size` never shrank, the grid
+                // kept every row, `columns/rows` asked tmux for a pane the
+                // screen could no longer show, and the bottom lines sat behind
+                // the keyboard. Out here the reader itself is proposed the
+                // smaller height, so the geometry it reports is the geometry the
+                // user can actually see.
+                //
+                // `PaneHost` no longer takes the framework's automatic
+                // avoidance — it lifted the whole container and carried the tab
+                // strip up behind the navigation bar — so the grid asks for its
+                // own room. `KeyboardInset` reports the keyboard's whole reach,
+                // the key row accessory included, which is what the automatic
+                // behavior used to remove.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    Color.clear.frame(height: isVisible ? keyboard.height : 0)
                 }
             }
         }

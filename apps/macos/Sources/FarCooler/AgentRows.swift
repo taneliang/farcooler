@@ -186,10 +186,7 @@ private struct MessageRow: View {
         case .agent:
             // Plain body text, full width. This is the common case and the
             // one that should cost the eye nothing extra to read.
-            HStack {
-                MarkdownText(text: text)
-                Spacer(minLength: 32)
-            }
+            AgentReplyText(text: text, trailingClearance: 32)
 
         case .thought:
             // Open while it is being written, closed once it is done.
@@ -455,7 +452,7 @@ private struct SubagentBlockView: View {
 
             if showing && !block.children.isEmpty {
                 Divider()
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     // Above the rows it hides, because that is where they are:
                     // these are the OLDEST children, and an affordance for them
                     // placed below the newest ones would point the wrong way.
@@ -482,7 +479,11 @@ private struct SubagentBlockView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 7))
+        .background(
+            running || pending != nil
+                ? AnyShapeStyle(.quinary)
+                : AnyShapeStyle(Color.primary.opacity(0.035)),
+            in: RoundedRectangle(cornerRadius: 7))
         .animation(Motion.snap, value: showing)
         // Driven by the model rather than by the toggle alone: children arrive
         // while the block is open, and an unanimated insert makes the
@@ -498,7 +499,8 @@ private struct SubagentBlockView: View {
                 .rotationEffect(.degrees(showing ? 90 : 0))
             StatusGlyph(status: status, size: 7)
             Text(block.tool.title)
-                .font(.callout.weight(.medium))
+                .font(.subheadline.weight(running || pending != nil ? .semibold : .medium))
+                .foregroundStyle(running || pending != nil ? .primary : .secondary)
                 // One line, for the reason `ToolRowView` gives: an adapter puts
                 // whole paths in a title, and a wrapped one turns a status row
                 // into the largest thing on screen.

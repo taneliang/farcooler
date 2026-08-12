@@ -1,0 +1,1 @@
+A wrapped agent reply draws two lines but reports only one line of row height, causing the following transcript row to overlap it on both macOS and iOS; every message row must reserve the Markdown renderer's full wrapped height.

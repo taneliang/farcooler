@@ -55,6 +55,7 @@
 		BDCC925B56DF5538A7C835A6 /* FarCoolerActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73BE33D4405A51BF837B4F76; };
 		EE8F1C5946115EF7B679A3B5 /* AgentActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD12E9188AE54C68252C53C; };
 		113F0BA4C91958E58D847D86 /* AgentActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5E1D385C5E578E98BEE858; };
+		B5DE26931A0854B5A557FE8A /* KeyboardTabStripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29DA60E46FE1567A99E720AC; };
 		5E56AE26EA37573BB9DA7ADB /* FarCoolerActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 519B5ED0E0F35300BA7F8EDA; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -102,6 +103,7 @@
 		3F7004A6B092527BAE191DD2 /* Transcript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcript.swift; sourceTree = "<group>"; };
 		73BE33D4405A51BF837B4F76 /* FarCoolerActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarCoolerActivityBundle.swift; sourceTree = "<group>"; };
 		7CD12E9188AE54C68252C53C /* AgentActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityWidget.swift; sourceTree = "<group>"; };
+		29DA60E46FE1567A99E720AC /* KeyboardTabStripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardTabStripTests.swift; sourceTree = "<group>"; };
 		C58051F3AA0C5DE2A3B15416 /* farcooler_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_vt.xcframework; path = Frameworks/farcooler_vt.xcframework; sourceTree = "<group>"; };
 		78C00FC7C5AC5565A723E44C /* farcooler_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_client.xcframework; path = Frameworks/farcooler_client.xcframework; sourceTree = "<group>"; };
 		E57A0A7090B459EA8D69806B /* IosevkaNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Regular.ttf; sourceTree = "<group>"; };
@@ -109,6 +111,7 @@
 		1AD44E8CEF485BABA3BB3DE1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = ../shared/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		A133A464581D57FABB4108BE /* FarCooler.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FarCooler.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		519B5ED0E0F35300BA7F8EDA /* FarCoolerActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FarCoolerActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		54C77836D1A35B5FB47F2833 /* FarCoolerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FarCoolerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -121,6 +124,12 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7C8FFD3EAE885E6BBBD06CE1 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -129,6 +138,7 @@
 			children = (
 				DC2B394B789C517AA24120A8 /* FarCooler */,
 				36B5E35C81075470A9DE1C51 /* FarCoolerActivity */,
+				CB0B3065ED87572CA8FB0522 /* FarCoolerUITests */,
 				4C4542875C415F8685B9A60E /* AgentKit */,
 				1AD44E8CEF485BABA3BB3DE1 /* Assets.xcassets */,
 				7BF7610560DA5A64A5782FD6 /* Frameworks */,
@@ -181,6 +191,14 @@
 			path = FarCoolerActivity;
 			sourceTree = "<group>";
 		};
+		CB0B3065ED87572CA8FB0522 /* FarCoolerUITests */ = {
+			isa = PBXGroup;
+			children = (
+				29DA60E46FE1567A99E720AC /* KeyboardTabStripTests.swift */,
+			);
+			path = FarCoolerUITests;
+			sourceTree = "<group>";
+		};
 		318B509E6A965252B6B6AD0E /* Fonts */ = {
 			isa = PBXGroup;
 			children = (
@@ -225,6 +243,7 @@
 			children = (
 				A133A464581D57FABB4108BE /* FarCooler.app */,
 				519B5ED0E0F35300BA7F8EDA /* FarCoolerActivity.appex */,
+				54C77836D1A35B5FB47F2833 /* FarCoolerUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -263,6 +282,20 @@
 			productReference = 519B5ED0E0F35300BA7F8EDA;
 			productType = "com.apple.product-type.app-extension";
 		};
+		F0CA39CF6B485727AF158E0A /* FarCoolerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 69D2C7568A4359CAA8D3CC7D;
+			buildPhases = (
+				1FB6D4CECED05254AF88D6E5,
+				7C8FFD3EAE885E6BBBD06CE1,
+			);
+			buildRules = ();
+			dependencies = (6E2AE370B8AF5E40A11AB4D0, );
+			name = FarCoolerUITests;
+			productName = FarCoolerUITests;
+			productReference = 54C77836D1A35B5FB47F2833;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -285,6 +318,7 @@
 			targets = (
 				F71A1340A17D5BAAA17AAE9D /* FarCooler */,
 				332717FB6A2A5089A274E500 /* FarCoolerActivity */,
+				F0CA39CF6B485727AF158E0A /* FarCoolerUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -296,6 +330,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 332717FB6A2A5089A274E500;
 			remoteInfo = FarCoolerActivity;
+		};
+		605AB321FC1F5C9CA7F7D665 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C9A7D3CE0F735C64936BDAE6;
+			proxyType = 1;
+			remoteGlobalIDString = F71A1340A17D5BAAA17AAE9D;
+			remoteInfo = FarCooler;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -318,6 +359,11 @@
 			isa = PBXTargetDependency;
 			target = 332717FB6A2A5089A274E500;
 			targetProxy = 7DA0194BED2B52D6A2E68D4D;
+		};
+		6E2AE370B8AF5E40A11AB4D0 = {
+			isa = PBXTargetDependency;
+			target = F71A1340A17D5BAAA17AAE9D;
+			targetProxy = 605AB321FC1F5C9CA7F7D665;
 		};
 /* End PBXTargetDependency section */
 
@@ -393,6 +439,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1FB6D4CECED05254AF88D6E5 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B5DE26931A0854B5A557FE8A /* KeyboardTabStripTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -407,6 +461,7 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ONLY_ACTIVE_ARCH = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				ENABLE_TESTABILITY = YES;
 			};
@@ -430,9 +485,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 3b224bf)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 7b45dd8)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 320;
+				CURRENT_PROJECT_VERSION = 322;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -454,9 +509,9 @@
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
 				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 3b224bf)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 7b45dd8)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 320;
+				CURRENT_PROJECT_VERSION = 322;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -477,7 +532,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 320;
+				CURRENT_PROJECT_VERSION = 322;
 				PRODUCT_NAME = FarCoolerActivity;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.activity;
 				INFOPLIST_FILE = FarCoolerActivity/Info.plist;
@@ -493,10 +548,42 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 320;
+				CURRENT_PROJECT_VERSION = 322;
 				PRODUCT_NAME = FarCoolerActivity;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.activity;
 				INFOPLIST_FILE = FarCoolerActivity/Info.plist;
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = NO;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		94B4E64211BA5BD080E9CF90 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.uitests;
+				GENERATE_INFOPLIST_FILE = YES;
+				TEST_TARGET_NAME = FarCooler;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = NO;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		480F9DC175FC59DCB08DFB97 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.uitests;
+				GENERATE_INFOPLIST_FILE = YES;
+				TEST_TARGET_NAME = FarCooler;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				CODE_SIGN_STYLE = Manual;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGNING_ALLOWED = YES;
@@ -531,6 +618,15 @@
 			buildConfigurations = (
 				3BAB684FE4795172873CF9FB /* Debug */,
 				1E0B32246E525CB29AA3C470 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		69D2C7568A4359CAA8D3CC7D = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				94B4E64211BA5BD080E9CF90 /* Debug */,
+				480F9DC175FC59DCB08DFB97 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
