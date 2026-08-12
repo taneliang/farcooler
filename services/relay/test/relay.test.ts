@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import worker from '../src/index'
+import { topicMismatch } from '../src/push'
 
 /// What the relay must never get wrong.
 ///
@@ -628,5 +629,51 @@ describe('/v1/notify and Live Activities', () => {
     await post('/v1/notify', { title: 'hi', status: 'blocked' }, 'mine')
 
     expect(pushes(calls).length).toBe(1)
+  })
+})
+
+// MARK: - The one secret whose wrongness is invisible
+
+/// A relay holding another channel's APNs topic.
+///
+/// There is one relay per channel and `apns-topic` must equal the receiving
+/// app's bundle identifier, which differs per channel. Get it wrong and APNs
+/// rejects every push for a token/topic mismatch — `sendApns` returns false and
+/// the daemon is told only that a notification "failed". Six secrets have to be
+/// right per environment; this is the one nothing would report.
+describe('topic and channel must agree', () => {
+  it('accepts a topic wearing its own channel suffix', () => {
+    expect(topicMismatch({ CHANNEL: 'canary', APNS_TOPIC: 'com.farcooler.ios.canary' })).toBeNull()
+    expect(topicMismatch({ CHANNEL: 'preview', APNS_TOPIC: 'com.farcooler.ios.preview' })).toBeNull()
+    expect(topicMismatch({ CHANNEL: 'stable', APNS_TOPIC: 'com.farcooler.ios' })).toBeNull()
+  })
+
+  it('catches the exact misconfiguration this guards', () => {
+    // The canary relay provisioned by copying the stable secrets, which is how
+    // this actually happens.
+    const problem = topicMismatch({ CHANNEL: 'canary', APNS_TOPIC: 'com.farcooler.ios' })
+    expect(problem).toContain('canary')
+    expect(problem).toContain('com.farcooler.ios')
+  })
+
+  it("catches a stable relay wearing another channel's suffix", () => {
+    expect(topicMismatch({ CHANNEL: 'stable', APNS_TOPIC: 'com.farcooler.ios.preview' })).toContain(
+      'stable',
+    )
+  })
+
+  it('says so when the channel itself is not one it knows', () => {
+    expect(topicMismatch({ CHANNEL: 'beta', APNS_TOPIC: 'com.farcooler.ios.beta' })).toContain(
+      'beta',
+    )
+  })
+
+  it('stays quiet when there is nothing to compare', () => {
+    // A deployment made before this check declared no channel, and every one of
+    // those is the stable relay. Refusing on absence would take push down on
+    // the one channel that must never lose it.
+    expect(topicMismatch({ APNS_TOPIC: 'com.farcooler.ios' })).toBeNull()
+    expect(topicMismatch({ CHANNEL: 'stable' })).toBeNull()
+    expect(topicMismatch({})).toBeNull()
   })
 })

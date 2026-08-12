@@ -17,6 +17,7 @@ import {
   isEnvironment,
   sendLiveActivity,
   sendPush,
+  topicMismatch,
   type Activity,
   type ActivityState,
   type Environment,
@@ -37,6 +38,10 @@ export interface Env {
   APNS_KEY_ID: string
   APNS_TEAM_ID: string
   APNS_TOPIC: string
+  /// Which channel this deployment IS, so it can check that the APNs topic
+  /// above belongs to it. Set per environment in wrangler.toml; absent on a
+  /// deployment made before this check, which is only ever the stable one.
+  CHANNEL?: string
   FCM_SERVICE_ACCOUNT: string
 }
 
@@ -533,6 +538,24 @@ async function notify(request: Request, env: Env): Promise<Response> {
 
   const body = await request.json<Notification>()
   if (!body.title) return json({ error: 'title' }, 400)
+
+  // A misconfigured deployment, said out loud rather than delivered as silence.
+  //
+  // `apns-topic` must equal the receiving app's bundle id and each channel has
+  // its own, so a relay deployed as one channel holding another's topic has
+  // every push rejected by APNs — with `sendApns` returning false and the
+  // daemon told only that a notification "failed". This is the one secret whose
+  // wrongness is invisible, and it is invisible on the path people are least
+  // likely to be watching.
+  //
+  // 500, not 400: nothing is wrong with what the machine asked for. Refused
+  // before any device is read, because delivering to none of them and calling
+  // it a delivery is the failure being prevented.
+  const misconfigured = topicMismatch(env)
+  if (misconfigured) {
+    console.error(`relay misconfigured: ${misconfigured}`)
+    return json({ error: 'relay misconfigured', detail: misconfigured }, 500)
+  }
 
   const devices = await env.DB.prepare(
     `SELECT platform, push_token, environment, live_activity_start_token

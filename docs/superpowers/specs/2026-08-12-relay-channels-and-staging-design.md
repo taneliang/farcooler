@@ -185,19 +185,39 @@ when it changes, since a token issued by one relay means nothing to another.
 
 ## Deployment
 
+Each relay gets its code the way its channel does, so the deploy story is the
+same shape as the app one rather than a second story to learn:
+
 | Trigger | Target |
 | --- | --- |
-| push to `main` touching `services/relay/**` | release, as today |
-| `workflow_dispatch`, `environment: beta` | beta, from any ref |
-| `workflow_dispatch`, `environment: dev` | dev, from any ref |
+| push to `main` touching `services/relay/**` | dev, continuously |
+| promote to beta | beta, from `promote.yml`, at the tagged commit |
+| promote to release | release, from `promote.yml`, at the tagged commit |
+| `workflow_dispatch` | any of them, from any ref |
 
-Release keeps its cadence exactly, and the reason `relay.yml` gives still holds:
-it must roll forward on demand because an App Store build cannot.
+`relay.yml` used to deploy **production** on every push to main, and its own
+comment said it had to: an App Store release takes days and can never be rolled
+forward on demand, so there will always be phones running an app from months ago
+that the relay must keep serving.
 
-The beta and dev deployments take **any ref**, which is what makes them useful
-for testing a relay change: push a branch, deploy it to beta, try it against a
-real app, then merge. No button stands between a fix and the users who need it,
-because the button is on the other two.
+That is true, and it argues for **additive-only** — which is what actually keeps
+a months-old app working. It does not argue for shipping every commit straight to
+the people running those apps with nothing in between. So the continuous cadence
+moves to dev, and the ability to roll forward on demand stays as
+`workflow_dispatch`, which can put any commit on the release relay in one press.
+
+**Beta and release are called from `promote.yml` rather than triggered by their
+tag**, and that is not a preference. A tag pushed with the default
+`GITHUB_TOKEN` raises no event — GitHub suppresses those to prevent recursion —
+so `on: push: tags` in `relay.yml` would look correct, never fire, and leave the
+beta relay silently months behind the app talking to it. It is the same trap
+`promote.yml` already works around by building in a job that `needs:` its tag
+job.
+
+That job depends on the **tag only, not the app build**. The relay is
+additive-only, so a newer one serves an older app by construction; making a relay
+deploy wait on a Swift compile would couple two things with no reason to fail
+together, and a signing failure would strand the relay.
 
 Migrations run before the code on every path, for the reason the workflow already
 states: the previous Worker is still serving while the new one rolls out.

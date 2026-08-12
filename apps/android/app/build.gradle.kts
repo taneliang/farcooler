@@ -45,7 +45,7 @@ fun versionScript(vararg args: String): String {
 
 val marketingVersion = versionScript().ifEmpty { "0.0.0" }
 val buildNumber = versionScript("build").toIntOrNull() ?: 1
-val releaseChannel = versionScript("channel").ifEmpty { "dev" }
+val releaseChannel = versionScript("channel").ifEmpty { "local" }
 val displayVersion = versionScript("display").ifEmpty { marketingVersion }
 
 // The terminal's typeface, staged rather than copied into this app.
@@ -77,7 +77,14 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.farcooler.android"
+        // One application id per channel, so all four install side by side and
+        // none can see another's data. Stable keeps the bare id: it is what any
+        // existing install already has, and changing it would orphan those
+        // rather than update them.
+        applicationId = when (releaseChannel) {
+            "stable" -> "com.farcooler.android"
+            else -> "com.farcooler.android.$releaseChannel"
+        }
 
         // Android 17. Stated by the product, not inferred: Far Cooler's Android
         // client exists for a phone running the current OS, and every API below

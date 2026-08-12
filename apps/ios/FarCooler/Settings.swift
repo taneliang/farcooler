@@ -238,6 +238,11 @@ struct SettingsView: View {
             // Last, because it is the thing you scroll to when something has
             // gone wrong rather than something you set.
             VersionSection(daemon: connection?.daemon) { UIPasteboard.general.string = $0 }
+
+            // Beside the version for the same reason: both answer "what is this
+            // build actually talking to", which is the question you have when
+            // notifications are not arriving.
+            RelaySection()
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)

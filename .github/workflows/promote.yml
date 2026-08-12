@@ -1,9 +1,9 @@
-# Promoting a commit to beta, and a beta to release.
+# Promoting a commit to preview, and a preview to stable.
 #
-# Two buttons. Dev is every push to main and needs nothing here; beta and
-# release are deliberate acts, so they are `workflow_dispatch` rather than a
-# branch trigger. There are no channel branches — a tag names what a build is,
-# and main is the only line.
+# Two buttons. Local and canary need nothing here — canary is every push to
+# main — while preview and stable are deliberate acts, so they are
+# `workflow_dispatch` rather than a branch trigger. There are no channel
+# branches: a tag names what a build is, and main is the only line.
 #
 # ONE WORKFLOW, NOT TWO, and that is load-bearing: a tag pushed with the default
 # GITHUB_TOKEN does not trigger another workflow. GitHub suppresses those events
@@ -25,7 +25,7 @@ on:
         description: Which channel to promote to
         required: true
         type: choice
-        options: [beta, release]
+        options: [preview, stable]
       confirm_version:
         description: The version you believe you are shipping: e.g. 0.2.0
         required: true
@@ -48,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Every tag, because picking the next beta number means reading the
+          # Every tag, because picking the next preview number means reading the
           # ones that exist. A shallow clone would silently restart at 1 and
           # collide with a tag someone already installed.
           fetch-depth: 0
@@ -67,18 +67,18 @@ jobs:
             exit 1
           fi
 
-          if [ "${{ inputs.channel }}" = "beta" ]; then
-            # Highest existing beta plus one, NOT a count: counting regenerates
-            # a number that already exists the moment any beta tag is deleted or
-            # made by hand.
-            highest="$(git tag --list "v$version-beta.*" \
-              | sed 's/.*-beta\.//' | sort -n | tail -1 || true)"
-            tag="v$version-beta.$(( ${highest:-0} + 1 ))"
+          if [ "${{ inputs.channel }}" = "preview" ]; then
+            # Highest existing preview plus one, NOT a count: counting regenerates
+            # a number that already exists the moment any preview tag is deleted
+            # or made by hand.
+            highest="$(git tag --list "v$version-preview.*" \
+              | sed 's/.*-preview\.//' | sort -n | tail -1 || true)"
+            tag="v$version-preview.$(( ${highest:-0} + 1 ))"
 
             # A rename must go forward. Going back is rejected at upload and
             # unfixable afterwards, the same class of mistake version.sh already
             # warns about for build numbers.
-            newest="$(git tag --list 'v*' | sed 's/^v//;s/-beta\..*//' \
+            newest="$(git tag --list 'v*' | sed 's/^v//;s/-preview\..*//' \
               | sort -V | tail -1 || true)"
             if [ -n "$newest" ] && [ "$newest" != "$version" ]; then
               lower="$(printf '%s\n%s\n' "$version" "$newest" | sort -V | head -1)"
@@ -118,10 +118,31 @@ jobs:
     with:
       # The tag being built, so version.sh answers for THIS channel rather than
       # for whichever tag sorts first on the commit. Promotion puts two tags on
-      # one commit — beta and release have different bundle identifiers and are
-      # therefore different artifacts — and without this a promoted commit
-      # reports `release` forever, including to anyone rebuilding the beta.
+      # one commit — preview and stable have different bundle identifiers and
+      # are therefore different artifacts — and without this a promoted commit
+      # reports `stable` forever, including to anyone rebuilding the preview.
       tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit
+
+  # This channel's relay moves with this channel.
+  #
+  # `needs: tag` only, deliberately — not the app build. The relay is
+  # additive-only, so a newer one serves an older app by construction; making a
+  # relay deploy wait on a Swift compile would couple two things that have no
+  # reason to fail together, and a signing failure would strand the relay.
+  #
+  # Called rather than triggered by the tag: a tag pushed with the default
+  # GITHUB_TOKEN raises no event, so `on: push: tags` in relay.yml would look
+  # right and never fire. See that file's header.
+  relay:
+    name: Deploy the ${{ inputs.channel }} relay
+    needs: tag
+    uses: ./.github/workflows/relay.yml
+    with:
+      environment: ${{ inputs.channel }}
+      # The tag, so this channel's relay is built from this channel's source
+      # rather than from whatever has landed on main since the tag was cut.
+      ref: ${{ needs.tag.outputs.tag }}
     secrets: inherit
 
   baseline:

@@ -255,8 +255,14 @@ struct SettingsView: View {
         // seeing what can notify you are one subject.
         ScrollView {
             VStack(spacing: 0) {
-                Form { AccountSection() }
-                    .formStyle(.grouped)
+                Form {
+                    AccountSection()
+                    // Under the account rather than in its own tab: which relay
+                    // this build talks to is the answer to "why is nothing
+                    // notifying me", and that question starts here.
+                    RelaySection()
+                }
+                .formStyle(.grouped)
                 AccountDevicesView()
             }
         }

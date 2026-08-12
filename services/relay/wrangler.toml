@@ -1,6 +1,42 @@
+# One relay per channel.
+#
+# The channels design partitions everything on a machine — runtime directory,
+# database, tmux server, binary name, bundle identifier — and this carries that
+# through the server. Four deployments, four databases, four WorkOS
+# environments, four hostnames.
+#
+# NOT one relay that knows about channels, and the reason is authentication:
+# `verifySession` fetches the JWKS for WORKOS_CLIENT_ID and the code exchange
+# spends WORKOS_API_KEY, so a single relay serving two WorkOS environments would
+# have to choose which credentials to verify a token against BEFORE it knows who
+# the caller is. Accounts do not carry across anyway — `accounts.id` is the
+# WorkOS user id, so a preview on its own WorkOS environment issues ids from a
+# different namespace and the same person is already two rows.
+#
+# The payoff is that `src/` needs no idea any of this exists. Every per-channel
+# value is a var or a secret, so the code is single-tenant for whichever channel
+# it was deployed as. See
+# docs/superpowers/specs/2026-08-12-relay-channels-and-staging-design.md.
+#
+# Bindings are NOT inherited by environments. Wrangler inherits `main` and
+# `compatibility_date` but not vars, databases or bindings, so each block below
+# repeats the full set. An environment missing one does not fail to deploy — it
+# fails at runtime, on a request, which is a much worse place to find out.
+
 name = "farcooler-relay"
 main = "src/index.ts"
 compatibility_date = "2026-01-15"
+
+# The hostname every stable client is compiled to reach.
+#
+# In the file rather than bound in the dashboard, which is where it lived
+# before: `crates/daemon/src/push.rs`, `Account.swift` and `Account.kt` all
+# default to this, and those defaults ship inside App Store binaries that cannot
+# be told a new one for days. A hostname that load-bearing should not be a click
+# that exists in no diff and no backup.
+#
+# Safe to re-declare: wrangler treats an already-bound custom domain as a no-op.
+routes = [{ pattern = "relay.farcooler.com", custom_domain = true }]
 
 # Identity, devices, and pairings. Small and relational.
 [[d1_databases]]
@@ -15,6 +51,14 @@ dataset = "farcooler_events"
 
 [vars]
 WORKOS_CLIENT_ID = "REPLACE"
+# Which channel this deployment IS.
+#
+# Only so the relay can check that APNS_TOPIC belongs to it. That secret must
+# equal the receiving app's bundle identifier and each channel has its own, so
+# a relay holding another channel's topic has every push rejected by APNs with
+# nothing anywhere saying so. Six secrets have to be right per environment and
+# this is the one whose wrongness is invisible. See `topicMismatch` in push.ts.
+CHANNEL = "stable"
 # Everything else is a secret, set with `wrangler secret put`:
 #   WORKOS_API_KEY      verifying session tokens
 #   APNS_KEY_P8         the Apple auth key
@@ -23,6 +67,15 @@ WORKOS_CLIENT_ID = "REPLACE"
 #   APNS_TOPIC          the iOS bundle id
 #   FCM_SERVICE_ACCOUNT the Google service account JSON, for Android
 #   ANALYTICS_SALT      rotates monthly; see analytics.ts
+#
+# Per environment, with `--env`:
+#   wrangler secret put APNS_TOPIC --env preview
+#
+# APNS_TOPIC is the one that differs by more than value: it must equal the
+# RECEIVING APP'S BUNDLE ID, and each channel has its own. A preview relay
+# holding the stable topic reproduces exactly the bug this partition exists to
+# fix —
+# APNS rejects the pairing, the notification never arrives, and nothing says so.
 
 # Throttling for /v1/auth/*, the only routes anyone can call without a
 # credential — and two of them spend the WorkOS API key per request, so
@@ -33,4 +86,108 @@ WORKOS_CLIENT_ID = "REPLACE"
 name = "AUTH_LIMIT"
 type = "ratelimit"
 namespace_id = "1001"
+simple = { limit = 30, period = 60 }
+
+# ---------------------------------------------------------------------------
+# preview
+#
+# What the EXTERNAL TestFlight app and `farcoolerd-preview` talk to. Its own
+# everything: a WorkOS environment, so a preview sign-in is a different account
+# namespace; its own D1, so a preview pairing cannot notify a stable app; its
+# own APNS topic, because the preview app is a different bundle.
+#
+# Deployed when a preview is promoted, at the tagged commit, so this relay is
+# the preview's own code. `workflow_dispatch` also puts any ref here, which is how a
+# relay change gets tried against a real app before it is promoted anywhere.
+# See .github/workflows/relay.yml.
+# ---------------------------------------------------------------------------
+[env.preview]
+name = "farcooler-relay-preview"
+routes = [{ pattern = "relay-preview.farcooler.com", custom_domain = true }]
+
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "farcooler-preview"
+database_id = "REPLACE_WITH_PREVIEW_D1_ID"
+
+# Its own dataset, not a shared one with a channel column: an analytics query
+# that had to remember to filter is a query someone will forget to filter.
+[[env.preview.analytics_engine_datasets]]
+binding = "METRICS"
+dataset = "farcooler_events_preview"
+
+[env.preview.vars]
+WORKOS_CLIENT_ID = "REPLACE_WITH_PREVIEW_WORKOS_CLIENT_ID"
+CHANNEL = "preview"
+
+# A separate namespace, so a burst against preview cannot spend the stable
+# relay's rate-limit budget.
+[[env.preview.unsafe.bindings]]
+name = "AUTH_LIMIT"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 30, period = 60 }
+
+# ---------------------------------------------------------------------------
+# canary
+#
+# What the INTERNAL TestFlight app and `farcoolerd-canary` talk to. Every push
+# to main lands here, so this is the relay that breaks first — which is the
+# whole job. Its data is expendable in a way no other channel's is.
+# ---------------------------------------------------------------------------
+[env.canary]
+name = "farcooler-relay-canary"
+routes = [{ pattern = "relay-canary.farcooler.com", custom_domain = true }]
+
+[[env.canary.d1_databases]]
+binding = "DB"
+database_name = "farcooler-canary"
+database_id = "REPLACE_WITH_CANARY_D1_ID"
+
+[[env.canary.analytics_engine_datasets]]
+binding = "METRICS"
+dataset = "farcooler_events_canary"
+
+[env.canary.vars]
+WORKOS_CLIENT_ID = "REPLACE_WITH_CANARY_WORKOS_CLIENT_ID"
+CHANNEL = "canary"
+
+[[env.canary.unsafe.bindings]]
+name = "AUTH_LIMIT"
+type = "ratelimit"
+namespace_id = "1004"
+simple = { limit = 30, period = 60 }
+
+# ---------------------------------------------------------------------------
+# local
+#
+# What a build made on somebody's own machine talks to.
+#
+# Defined here so the shape is complete and a local build has somewhere to
+# point, but it need not be PROVISIONED until someone wants push notifications
+# out of one. Until then a local build's registration fails visibly, which is
+# the honest behaviour for a channel whose whole point is that nothing is
+# settled.
+# ---------------------------------------------------------------------------
+[env.local]
+name = "farcooler-relay-local"
+routes = [{ pattern = "relay-local.farcooler.com", custom_domain = true }]
+
+[[env.local.d1_databases]]
+binding = "DB"
+database_name = "farcooler-local"
+database_id = "REPLACE_WITH_LOCAL_D1_ID"
+
+[[env.local.analytics_engine_datasets]]
+binding = "METRICS"
+dataset = "farcooler_events_local"
+
+[env.local.vars]
+WORKOS_CLIENT_ID = "REPLACE_WITH_LOCAL_WORKOS_CLIENT_ID"
+CHANNEL = "local"
+
+[[env.local.unsafe.bindings]]
+name = "AUTH_LIMIT"
+type = "ratelimit"
+namespace_id = "1003"
 simple = { limit = 30, period = 60 }

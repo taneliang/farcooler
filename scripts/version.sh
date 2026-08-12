@@ -77,9 +77,24 @@ build() {
 # is unaffected and still defaults to dev.
 channel() {
   if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-    echo dev
+    echo local
     return
   fi
+
+  # `canary` is every push to main, which carries NO TAG — so unlike preview and
+  # stable it cannot be derived from one, and CI has to say so outright.
+  #
+  # This is not the flag the comment above argues against. Forgetting it yields
+  # `local`, which is the safe direction: a build that cannot prove what it is
+  # stays isolated from every other channel's data. Forgetting a flag that
+  # defaulted to `stable` would be the opposite.
+  case "${FARCOOLER_CHANNEL:-}" in
+    canary|preview|stable|local) echo "$FARCOOLER_CHANNEL"; return ;;
+    "") ;;
+    # A name this script does not know. Local, for the same reason an unstamped
+    # bundle is: something we cannot read must not promote itself.
+    *) echo local; return ;;
+  esac
   # An argument, else `FARCOOLER_TAG`, else the tag on HEAD.
   #
   # The environment variable is how the promotion workflow reaches the build
@@ -99,13 +114,13 @@ channel() {
   # nor an error.
   tag="${1:-${FARCOOLER_TAG:-$(git tag --points-at HEAD 2>/dev/null | grep '^v' | head -1 || true)}}"
   case "$tag" in
-    "") echo dev ;;
-    *-beta.*) echo beta ;;
-    v*) echo release ;;
-    # Something that is not a version tag at all. Dev, for the same reason an
+    "") echo local ;;
+    *-preview.*) echo preview ;;
+    v*) echo stable ;;
+    # Something that is not a version tag at all. Local, for the same reason an
     # unstamped bundle is: a name we cannot read must not be able to promote
-    # itself to release.
-    *) echo dev ;;
+    # itself to stable.
+    *) echo local ;;
   esac
 }
 
@@ -116,14 +131,16 @@ channel() {
 # the whole point is that someone looking at a bug report can tell.
 display() {
   case "$(channel "$1")" in
-    release) marketing ;;
-    beta)
+    stable) marketing ;;
+    preview)
       # From the named tag when there is one, so a promoted commit still says
-      # which beta it was rather than reading the release tag beside it.
-      n=$(printf '%s' "${1:-$(git tag --points-at HEAD 2>/dev/null | grep '^v.*-beta\.' | head -1)}" | sed 's/.*-beta\.//')
-      echo "$(marketing) (beta ${n:-?})"
+      # which preview it was rather than reading the stable tag beside it.
+      n=$(printf '%s' "${1:-$(git tag --points-at HEAD 2>/dev/null | grep '^v.*-preview\.' | head -1)}" | sed 's/.*-preview\.//')
+      echo "$(marketing) (preview ${n:-?})"
       ;;
-    *) echo "$(marketing) (dev $(git rev-parse --short HEAD 2>/dev/null || echo unknown))" ;;
+    # Canary and local both name the commit, because neither has a number and
+    # the commit is the only thing that tells two of them apart in a bug report.
+    *) echo "$(marketing) ($(channel "$1") $(git rev-parse --short HEAD 2>/dev/null || echo unknown))" ;;
   esac
 }
 

@@ -38,9 +38,10 @@ pub fn runtime_dir_for(channel: farcooler_protocol::Channel) -> Result<PathBuf> 
         return Ok(PathBuf::from(over));
     }
     let app = match channel {
-        Channel::Release => "FarCooler",
-        Channel::Beta => "FarCoolerBeta",
-        Channel::Dev => "FarCoolerDev",
+        Channel::Stable => "FarCooler",
+        Channel::Preview => "FarCoolerPreview",
+        Channel::Canary => "FarCoolerCanary",
+        Channel::Local => "FarCoolerLocal",
     };
     let dirs = directories::ProjectDirs::from("com", "farcooler", app)
         .ok_or(DomainError::OperationFailed)?;
@@ -148,31 +149,36 @@ mod tests {
     /// parallel with every other test in this crate — which matters, because
     /// `FARCOOLER_HOME` is process-global and a test that set it would move the
     /// ground under the ones running beside it.
+    const ALL: [Channel; 4] =
+        [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable];
+
     #[test]
     fn each_channel_gets_its_own_runtime_directory() {
-        let dev = runtime_dir_for(Channel::Dev).unwrap();
-        let beta = runtime_dir_for(Channel::Beta).unwrap();
-        let release = runtime_dir_for(Channel::Release).unwrap();
-        assert_ne!(dev, beta);
-        assert_ne!(beta, release);
-        assert_ne!(dev, release);
+        let dirs: Vec<_> = ALL.iter().map(|c| runtime_dir_for(*c).unwrap()).collect();
+        let unique: std::collections::BTreeSet<_> = dirs.iter().collect();
+        assert_eq!(unique.len(), ALL.len(), "two channels would share a database: {dirs:?}");
     }
 
     #[test]
     fn a_channel_directory_is_a_sibling_never_a_child() {
-        // Nesting beta inside release would mean deleting a release install
-        // deletes the beta's database with it.
-        let beta = runtime_dir_for(Channel::Beta).unwrap();
-        let release = runtime_dir_for(Channel::Release).unwrap();
-        assert!(!beta.starts_with(&release), "{beta:?} must not sit inside {release:?}");
-        assert!(!release.starts_with(&beta), "{release:?} must not sit inside {beta:?}");
+        // Nesting one inside another would mean deleting the outer install
+        // takes the inner one's database with it.
+        for a in ALL {
+            for b in ALL {
+                if a == b {
+                    continue;
+                }
+                let (x, y) = (runtime_dir_for(a).unwrap(), runtime_dir_for(b).unwrap());
+                assert!(!x.starts_with(&y), "{x:?} must not sit inside {y:?}");
+            }
+        }
     }
 
     #[test]
-    fn release_keeps_the_directory_it_has_always_had() {
+    fn stable_keeps_the_directory_it_has_always_had() {
         // An existing install must not move. If this ever changes, every
         // workspace and terminal a user already has disappears on upgrade.
-        let release = runtime_dir_for(Channel::Release).unwrap();
+        let release = runtime_dir_for(Channel::Stable).unwrap();
         let historic = directories::ProjectDirs::from("com", "farcooler", "FarCooler")
             .unwrap()
             .data_dir()

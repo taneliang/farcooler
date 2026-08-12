@@ -22,23 +22,23 @@ public enum AppVersion {
         string("CFBundleVersion") ?? "0"
     }
 
-    /// `dev`, `beta`, or `release`.
+    /// `local`, `canary`, `preview`, or `stable`.
     public static var channel: String {
         let value = string("FarCoolerChannel") ?? ""
         // A build with nothing stamped is one somebody made by hand, which is a
-        // dev build whatever it says. Defaulting the other way would let an
+        // local build whatever it says. Defaulting the other way would let an
         // unstamped build pass itself off as a release.
-        return value.isEmpty ? "dev" : value
+        return value.isEmpty ? "local" : value
     }
 
-    public static var isRelease: Bool { channel == "release" }
+    public static var isRelease: Bool { channel == "stable" }
 
     /// What a person is shown: `0.2.0`, `0.2.0 (beta 3)`, `0.2.0 (dev a1b2c3)`.
     public static var display: String {
         if let stamped = string("FarCoolerDisplayVersion"), !stamped.isEmpty { return stamped }
         // Reconstructed rather than blank, so a bundle that missed the stamp
         // still says something true.
-        return channel == "release" ? marketing : "\(marketing) (\(channel))"
+        return channel == "stable" ? marketing : "\(marketing) (\(channel))"
     }
 
     /// What the relay is told, and what it shows back on the devices screen.

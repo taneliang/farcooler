@@ -328,13 +328,29 @@ def version(kind):
 # button, and sign-in buys notifications and nothing else.
 WORKOS_CLIENT_ID = os.environ.get("FARCOOLER_WORKOS_CLIENT_ID", "")
 
+CHANNEL = version("channel")
+
+# One bundle identifier per channel, so all four install side by side and none
+# can see another's data — the same partition the daemon's runtime directory and
+# binary name follow.
+#
+# It is also what decides which APNs topic a notification must be sent under,
+# because `apns-topic` has to EQUAL this string. The relay for this channel
+# holds it as a secret; the two have to agree or the push is rejected and
+# nothing says so.
+#
+# Stable keeps the bare identifier. It is the App Store record that already
+# exists, and changing it would create a second app rather than update the one
+# people have.
+BUNDLE_ID = "com.farcooler.ios" if CHANNEL == "stable" else f"com.farcooler.ios.{CHANNEL}"
+
 TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
-\t\t\t\tFARCOOLER_CHANNEL = {version("channel")};
+\t\t\t\tFARCOOLER_CHANNEL = {CHANNEL};
 \t\t\t\tFARCOOLER_DISPLAY_VERSION = "{version("display")}";
 \t\t\t\tFARCOOLER_WORKOS_CLIENT_ID = "{WORKOS_CLIENT_ID}";
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
 \t\t\t\tPRODUCT_NAME = FarCooler;
-\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID};
 \t\t\t\tINFOPLIST_FILE = FarCooler/Info.plist;
 \t\t\t\tCODE_SIGN_STYLE = Manual;
 \t\t\t\tCODE_SIGN_IDENTITY = "-";
@@ -365,7 +381,7 @@ TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 ACTIVITY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
 \t\t\t\tPRODUCT_NAME = FarCoolerActivity;
-\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.activity;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID}.activity;
 \t\t\t\tINFOPLIST_FILE = FarCoolerActivity/Info.plist;
 \t\t\t\tCODE_SIGN_STYLE = Manual;
 \t\t\t\tCODE_SIGN_IDENTITY = "-";
@@ -374,7 +390,7 @@ ACTIVITY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tSKIP_INSTALL = YES;"""
 
 UI_TEST_COMMON = """\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";
-\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.uitests;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID}.uitests;
 \t\t\t\tGENERATE_INFOPLIST_FILE = YES;
 \t\t\t\tTEST_TARGET_NAME = FarCooler;
 \t\t\t\tLD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";

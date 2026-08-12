@@ -39,6 +39,67 @@ function apnsHost(environment: string | null | undefined): string {
   return environment === 'development' ? 'api.sandbox.push.apple.com' : 'api.push.apple.com'
 }
 
+/// The suffix a channel's bundle identifier carries. Stable has none.
+const CHANNEL_SUFFIX: Record<string, string> = {
+  stable: '',
+  preview: '.preview',
+  canary: '.canary',
+  local: '.local',
+}
+
+/// Whether this deployment's APNs topic belongs to the channel it was deployed
+/// as, and what is wrong when it does not.
+///
+/// There is one relay per channel and `apns-topic` MUST equal the receiving
+/// app's bundle identifier, which differs per channel. A relay deployed as
+/// `canary` holding the stable topic therefore reproduces exactly the bug the
+/// partition exists to prevent: APNs rejects every push for a token/topic
+/// mismatch, and nothing anywhere says so — `sendApns` returns a boolean and
+/// the daemon is told only that a notification "failed".
+///
+/// Six secrets have to be right per environment and this is the one whose
+/// wrongness is invisible, so it is worth the twenty lines to make it loud.
+///
+/// Checked by SUFFIX rather than against a computed identifier: this service
+/// does not know what the app is called, and a check that had to be told would
+/// be a second copy of the bundle id scheme to keep in step. Asking only
+/// whether the shape agrees with the channel catches the real mistake — a topic
+/// belonging to the wrong channel — without inventing a dependency.
+export function topicMismatch(env: {
+  CHANNEL?: string
+  APNS_TOPIC?: string
+}): string | null {
+  const channel = env.CHANNEL
+  const topic = env.APNS_TOPIC
+  // A deployment that never declared a channel is one made before this check,
+  // and every one of those is the stable relay. Nothing to compare it against,
+  // and refusing on absence would take push down on the one channel that must
+  // never lose it.
+  if (!channel || !topic) return null
+
+  const suffix = CHANNEL_SUFFIX[channel]
+  if (suffix === undefined) {
+    return `CHANNEL is "${channel}", which is not a channel this relay knows.`
+  }
+
+  const others = Object.entries(CHANNEL_SUFFIX)
+    .filter(([name, value]) => name !== channel && value !== '')
+    .map(([, value]) => value)
+
+  if (suffix === '') {
+    // Stable's topic is the bare identifier, so the mistake to catch is a topic
+    // wearing SOMEBODY ELSE'S suffix.
+    const wrong = others.find(other => topic.endsWith(other))
+    return wrong
+      ? `APNS_TOPIC "${topic}" ends with "${wrong}", but this relay is deployed as stable.`
+      : null
+  }
+
+  return topic.endsWith(suffix)
+    ? null
+    : `APNS_TOPIC "${topic}" does not end with "${suffix}", but this relay is deployed as ${channel}.`
+}
+
 export async function sendPush(
   env: any,
   platform: string,

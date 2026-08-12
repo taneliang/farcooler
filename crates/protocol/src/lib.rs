@@ -33,61 +33,74 @@ pub const BUILD: &str = env!("FARCOOLER_BUILD");
 
 /// Which installation this build belongs to.
 ///
-/// Three channels are three separate installs that coexist on one machine —
-/// separate runtime directory, database, tmux server and binary name — so this
-/// is not a label. It decides where the daemon lives.
+/// Four channels are four separate installs that coexist on one machine —
+/// separate runtime directory, database, tmux server, binary name and bundle
+/// identifier — so this is not a label. It decides where the daemon lives.
 ///
-/// Compile time, never a flag or an environment variable. `scripts/version.sh`
-/// makes the same call about the channel it derives: "a flag is a thing to
-/// forget on the build that mattered." A daemon that could be told which
-/// channel it is could be told wrong, and being wrong means a beta writing into
-/// the release database.
+/// The names are the ones a developer tool audience already knows: `nightly`
+/// and `canary` and `stable` mean the same things in Rust, Chrome and Zed as
+/// they mean here.
+///
+/// Compile time, never a flag someone types. `scripts/version.sh` makes the
+/// same call about the channel it derives: "a flag is a thing to forget on the
+/// build that mattered." A daemon that could be told which channel it is could
+/// be told wrong, and being wrong means a preview build writing into the stable
+/// database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Channel {
-    Dev,
-    Beta,
-    Release,
+    /// Built on somebody's machine. Nothing is settled and nothing is promised.
+    Local,
+    /// Every push to `main`, published to internal testers automatically. The
+    /// build that breaks first so the others do not.
+    Canary,
+    /// A `-preview.N` tag, for external testers.
+    Preview,
+    /// A release tag. What everyone else runs.
+    Stable,
 }
 
 impl Channel {
     pub fn as_str(self) -> &'static str {
         match self {
-            Channel::Dev => "dev",
-            Channel::Beta => "beta",
-            Channel::Release => "release",
+            Channel::Local => "local",
+            Channel::Canary => "canary",
+            Channel::Preview => "preview",
+            Channel::Stable => "stable",
         }
     }
 
-    /// Anything unrecognized is `dev`.
+    /// Anything unrecognized is `local`.
     ///
-    /// The safe direction: a dev build isolates itself from everything, so
-    /// guessing wrong costs a separate empty fleet. Guessing `release` wrong
-    /// costs someone else's.
-    pub fn from_str_or_dev(s: &str) -> Self {
-        Self::from_str_or_dev_const(s)
+    /// The safe direction, and the reason it is worth stating: a local build
+    /// isolates itself from everything, so guessing wrong costs a separate
+    /// empty fleet. Guessing `stable` wrong costs someone else's.
+    pub fn from_str_or_local(s: &str) -> Self {
+        Self::from_str_or_local_const(s)
     }
 
     /// What this channel's daemon is called on disk.
     ///
     /// The SCHEME is frozen, not the literal: `farcoolerd[-<channel>]`. An App
     /// Store binary hardcodes the path it asks a machine for, which makes the
-    /// shape of this name as public as any proto message — and release's has no
+    /// shape of this name as public as any proto message — and stable's has no
     /// suffix precisely so that every client already in the field keeps
     /// resolving exactly what it always did.
     pub fn daemon_binary_name(self) -> &'static str {
         match self {
-            Channel::Release => "farcoolerd",
-            Channel::Beta => "farcoolerd-beta",
-            Channel::Dev => "farcoolerd-dev",
+            Channel::Stable => "farcoolerd",
+            Channel::Preview => "farcoolerd-preview",
+            Channel::Canary => "farcoolerd-canary",
+            Channel::Local => "farcoolerd-local",
         }
     }
 
     /// What this channel's CLI is called on disk. Same rule as the daemon's.
     pub fn cli_binary_name(self) -> &'static str {
         match self {
-            Channel::Release => "farcooler",
-            Channel::Beta => "farcooler-beta",
-            Channel::Dev => "farcooler-dev",
+            Channel::Stable => "farcooler",
+            Channel::Preview => "farcooler-preview",
+            Channel::Canary => "farcooler-canary",
+            Channel::Local => "farcooler-local",
         }
     }
 
@@ -96,17 +109,18 @@ impl Channel {
     /// `match` on a `&str` is not permitted in a const context, so this matches
     /// on bytes. One implementation with two entry points rather than two
     /// implementations: the round-trip test covers both.
-    const fn from_str_or_dev_const(s: &str) -> Self {
+    const fn from_str_or_local_const(s: &str) -> Self {
         match s.as_bytes() {
-            b"release" => Channel::Release,
-            b"beta" => Channel::Beta,
-            _ => Channel::Dev,
+            b"stable" => Channel::Stable,
+            b"preview" => Channel::Preview,
+            b"canary" => Channel::Canary,
+            _ => Channel::Local,
         }
     }
 }
 
 /// The channel this binary was built for, stamped by `build.rs`.
-pub const CHANNEL: Channel = Channel::from_str_or_dev_const(env!("FARCOOLER_CHANNEL"));
+pub const CHANNEL: Channel = Channel::from_str_or_local_const(env!("FARCOOLER_CHANNEL"));
 
 /// What a daemon can do, by name.
 ///
@@ -258,26 +272,37 @@ pub const MAX_ROWS: u32 = 200;
 mod tests {
     use super::*;
 
+    /// Every channel, so a match arm added to one list and forgotten in another
+    /// fails here rather than shipping.
+    const ALL_CHANNELS: [Channel; 4] =
+        [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable];
+
     #[test]
     fn a_channel_round_trips_through_its_name() {
-        for c in [Channel::Dev, Channel::Beta, Channel::Release] {
-            assert_eq!(Channel::from_str_or_dev(c.as_str()), c);
+        for c in ALL_CHANNELS {
+            assert_eq!(Channel::from_str_or_local(c.as_str()), c);
         }
     }
 
     #[test]
-    fn an_unknown_channel_is_dev_not_release() {
+    fn an_unknown_channel_is_local_not_stable() {
         // Defaulting the other way would let a hand-made build pass itself off
         // as a release. scripts/version.sh makes the same choice for the same
         // reason.
-        assert_eq!(Channel::from_str_or_dev(""), Channel::Dev);
-        assert_eq!(Channel::from_str_or_dev("nonsense"), Channel::Dev);
-        assert_eq!(Channel::from_str_or_dev("RELEASE"), Channel::Dev);
+        assert_eq!(Channel::from_str_or_local(""), Channel::Local);
+        assert_eq!(Channel::from_str_or_local("nonsense"), Channel::Local);
+        assert_eq!(Channel::from_str_or_local("STABLE"), Channel::Local);
+        // The names this replaced. A build stamped by an older checkout must
+        // not silently land on the wrong channel — `local` is where anything
+        // unreadable belongs.
+        assert_eq!(Channel::from_str_or_local("release"), Channel::Local);
+        assert_eq!(Channel::from_str_or_local("beta"), Channel::Local);
+        assert_eq!(Channel::from_str_or_local("dev"), Channel::Local);
     }
 
     #[test]
-    fn the_stamped_channel_is_one_of_the_three() {
-        assert!(matches!(CHANNEL, Channel::Dev | Channel::Beta | Channel::Release));
+    fn the_stamped_channel_is_one_of_the_four() {
+        assert!(ALL_CHANNELS.contains(&CHANNEL));
     }
 
     #[test]
@@ -331,18 +356,18 @@ mod tests {
         // Every release client already in the field resolves
         // `~/.local/bin/farcoolerd`. A suffix here strands all of them at once,
         // and an App Store build cannot be corrected for days.
-        assert_eq!(Channel::Release.daemon_binary_name(), "farcoolerd");
-        assert_eq!(Channel::Release.cli_binary_name(), "farcooler");
+        assert_eq!(Channel::Stable.daemon_binary_name(), "farcoolerd");
+        assert_eq!(Channel::Stable.cli_binary_name(), "farcooler");
     }
 
     #[test]
     fn each_channel_has_its_own_binary_name() {
         for names in [
-            [Channel::Dev, Channel::Beta, Channel::Release].map(Channel::daemon_binary_name),
-            [Channel::Dev, Channel::Beta, Channel::Release].map(Channel::cli_binary_name),
+            ALL_CHANNELS.map(Channel::daemon_binary_name),
+            ALL_CHANNELS.map(Channel::cli_binary_name),
         ] {
             let unique: std::collections::BTreeSet<_> = names.iter().collect();
-            assert_eq!(unique.len(), 3, "two channels cannot share one path: {names:?}");
+            assert_eq!(unique.len(), ALL_CHANNELS.len(), "two channels cannot share one path: {names:?}");
         }
     }
 }

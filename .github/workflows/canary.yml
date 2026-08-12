@@ -1,0 +1,125 @@
+# Every push to main, to internal TestFlight.
+#
+# The channel that breaks first so the others do not. Nobody presses anything:
+# if it is on main, it is on someone's phone within the hour, which is the only
+# way a bug gets found before it reaches an external tester.
+#
+# WHY THIS IS NOT A TAG. Preview and stable derive their channel from one —
+# `v0.2.0-preview.3` says what it is — but a commit on main carries no tag, so
+# `scripts/version.sh` cannot derive anything and CI has to say so outright with
+# `FARCOOLER_CHANNEL`. Forgetting to would yield `local`, which is the safe
+# direction: a build that cannot prove what it is stays isolated from every
+# other channel's data.
+#
+# Tagging every commit instead was the alternative, and it is worse — a tag per
+# push is thousands of refs naming builds nobody will ever install again, and
+# `git tag --list` becomes useless for the two channels where tags mean
+# something.
+name: Canary
+
+on:
+  push:
+    branches: [main]
+    # The relay has its own workflow and its own cadence, so a relay-only commit
+    # should not spend twenty minutes of macOS runner time shipping an identical
+    # app to TestFlight.
+    paths-ignore: ['services/relay/**', 'docs/**', '**/*.md']
+  workflow_dispatch:
+
+# One canary at a time, and the newest wins. Two pushes a minute apart would
+# otherwise race to upload, and App Store Connect takes whichever finishes last
+# rather than whichever is newer.
+concurrency:
+  group: canary
+  cancel-in-progress: true
+
+env:
+  FARCOOLER_CHANNEL: canary
+
+jobs:
+  ios:
+    name: iOS (internal TestFlight)
+    runs-on: macos-latest
+    # Without the App Store key this cannot upload anything. Through `vars`, not
+    # `secrets`: the `secrets` context is unavailable in an `if`, so
+    # `secrets.X != ''` compares '' to '' and is ALWAYS false — it fails closed,
+    # which is exactly why it looks like it works.
+    if: vars.CANARY_TESTFLIGHT == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `git rev-list --count HEAD` is the App Store build number, and a
+          # shallow clone makes it 1. scripts/version.sh refuses outright rather
+          # than emitting a plausible wrong answer, so this is not optional.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the Rust xcframeworks
+        run: ./scripts/build-ios-frameworks.sh
+
+      - name: Generate the Xcode project
+        run: ./apps/ios/generate-project.py
+        env:
+          FARCOOLER_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
+
+      # The canary's own bundle identifier — `com.farcooler.ios.canary`, which
+      # generate-project.py derives from the channel — so it installs alongside
+      # the preview and the stable app rather than replacing either.
+      #
+      # It follows that this is a SEPARATE App Store Connect record with its own
+      # internal tester group, and that its APNs topic is that identifier. The
+      # canary relay's APNS_TOPIC secret has to match, or every push is rejected
+      # and nothing says so.
+      - name: Archive and upload
+        working-directory: apps/ios
+        env:
+          APP_STORE_KEY_ID: ${{ secrets.APP_STORE_KEY_ID }}
+          APP_STORE_ISSUER_ID: ${{ secrets.APP_STORE_ISSUER_ID }}
+          APP_STORE_KEY_P8: ${{ secrets.APP_STORE_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APP_STORE_KEY_P8" | base64 --decode \
+            > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+
+          xcodebuild -project FarCooler.xcodeproj -scheme FarCooler \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath build/FarCooler.xcarchive archive \
+            -allowProvisioningUpdates \
+            -authenticationKeyID "$APP_STORE_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+
+          xcodebuild -exportArchive \
+            -archivePath build/FarCooler.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyID "$APP_STORE_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+
+          xcrun altool --upload-app -f build/export/FarCooler.ipa -t ios \
+            --apiKey "$APP_STORE_KEY_ID" --apiIssuer "$APP_STORE_ISSUER_ID"
+
+  # The Mac app is built but NOT published anywhere.
+  #
+  # It has no TestFlight — a Developer ID app is distributed directly — and
+  # attaching a canary build to a GitHub release would put it beside the stable
+  # download, which is the one place it must never appear. Building it here
+  # still earns its keep: `build-app.sh` is the step that has gone wrong before,
+  # and a canary that compiles is the evidence the next promotion will too.
+  macos:
+    name: macOS (build only)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Far Cooler.app
+        run: apps/macos/build-app.sh
+        env:
+          FARCOOLER_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}

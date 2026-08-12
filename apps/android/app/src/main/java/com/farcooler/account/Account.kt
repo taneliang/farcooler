@@ -410,7 +410,28 @@ class Account(context: Context) {
     }.getOrNull()
 
     companion object {
-        const val DEFAULT_RELAY = "https://relay.farcooler.com"
+        /**
+         * The relay this build's channel talks to.
+         *
+         * One relay per channel, the same partition the application id follows.
+         * They are separate deployments with separate databases and separate
+         * WorkOS environments, so signing in on the beta is a different account
+         * from signing in on the release — which it already was, since the
+         * WorkOS user id is the account id and each environment issues its own.
+         *
+         * Release's URL is unchanged and must stay that way: it is compiled
+         * into store builds that cannot be told a new one on demand. Matches
+         * the iOS derivation exactly.
+         */
+        val DEFAULT_RELAY: String
+            get() = when (AppVersion.channel) {
+                "stable" -> "https://relay.farcooler.com"
+                "preview" -> "https://relay-preview.farcooler.com"
+                "canary" -> "https://relay-canary.farcooler.com"
+                // Anything unstamped is a local build — see AppVersion.channel,
+                // which defaults the same way and for the same reason.
+                else -> "https://relay-local.farcooler.com"
+            }
         private const val SCHEME = "farcooler"
         private const val REDIRECT_URI = "farcooler://auth"
 

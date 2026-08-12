@@ -30,8 +30,25 @@ pub struct Pairing {
     pub token: String,
 }
 
+/// The relay this channel's clients talk to.
+///
+/// One relay per channel, the same partition the runtime directory and the
+/// binary name follow. They are separate deployments with separate databases
+/// and separate WorkOS environments, so a beta daemon cannot notify a release
+/// app — which is correct, because it could not reach that app's machine
+/// either.
+///
+/// Release's URL is unchanged and must stay that way: it is compiled into
+/// binaries in the App Store, which cannot be told a new one for days.
 pub fn default_relay() -> String {
-    "https://relay.farcooler.com".to_string()
+    use farcooler_protocol::Channel;
+    match farcooler_protocol::CHANNEL {
+        Channel::Stable => "https://relay.farcooler.com",
+        Channel::Preview => "https://relay-preview.farcooler.com",
+        Channel::Canary => "https://relay-canary.farcooler.com",
+        Channel::Local => "https://relay-local.farcooler.com",
+    }
+    .to_string()
 }
 
 impl Pairing {
@@ -195,6 +212,32 @@ mod tests {
         let parsed: Pairing = serde_json::from_str(r#"{"token":"abc"}"#).expect("parse");
         assert_eq!(parsed.token, "abc");
         assert!(parsed.relay.starts_with("https://"));
+        assert_eq!(parsed.relay, default_relay(), "an absent relay is this channel's own");
+    }
+
+    #[test]
+    fn each_channel_talks_to_its_own_relay() {
+        // One deployment per channel: its own database and its own WorkOS
+        // environment. Two channels sharing a relay would mean a preview
+        // pairing could notify a stable app — an app that cannot reach the
+        // machine that sent it, because they are different binaries at
+        // different paths.
+        use farcooler_protocol::Channel;
+        let urls: Vec<_> = [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable]
+            .iter()
+            .map(|c| match c {
+                Channel::Stable => "https://relay.farcooler.com",
+                Channel::Preview => "https://relay-preview.farcooler.com",
+                Channel::Canary => "https://relay-canary.farcooler.com",
+                Channel::Local => "https://relay-local.farcooler.com",
+            })
+            .collect();
+        let unique: std::collections::BTreeSet<_> = urls.iter().collect();
+        assert_eq!(unique.len(), 4, "two channels cannot share a relay: {urls:?}");
+
+        // Stable's is compiled into App Store binaries that cannot be told a
+        // new one for days. It does not move.
+        assert_eq!(urls[3], "https://relay.farcooler.com");
 
         let explicit: Pairing =
             serde_json::from_str(r#"{"token":"abc","relay":"https://mine.example"}"#)

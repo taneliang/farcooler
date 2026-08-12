@@ -37,16 +37,17 @@ fn cli_name() -> &'static str {
 
 /// The systemd unit file name for this channel.
 ///
-/// Channel-specific for the same reason the binary is: installing a beta must
-/// not replace the release daemon's supervision. It would, silently, and the
-/// symptom would be a machine that stops coming back after a reboot as the
+/// Channel-specific for the same reason the binary is: installing a preview
+/// must not replace the stable daemon's supervision. It would, silently, and
+/// the symptom would be a machine that stops coming back after a reboot as the
 /// wrong channel.
 fn systemd_unit_name() -> &'static str {
     use farcooler_protocol::Channel;
     match farcooler_protocol::CHANNEL {
-        Channel::Release => "farcooler.service",
-        Channel::Beta => "farcooler-beta.service",
-        Channel::Dev => "farcooler-dev.service",
+        Channel::Stable => "farcooler.service",
+        Channel::Preview => "farcooler-preview.service",
+        Channel::Canary => "farcooler-canary.service",
+        Channel::Local => "farcooler-local.service",
     }
 }
 
@@ -54,9 +55,10 @@ fn systemd_unit_name() -> &'static str {
 fn launchd_label() -> &'static str {
     use farcooler_protocol::Channel;
     match farcooler_protocol::CHANNEL {
-        Channel::Release => "com.farcooler.daemon.remote",
-        Channel::Beta => "com.farcooler.daemon.remote.beta",
-        Channel::Dev => "com.farcooler.daemon.remote.dev",
+        Channel::Stable => "com.farcooler.daemon.remote",
+        Channel::Preview => "com.farcooler.daemon.remote.preview",
+        Channel::Canary => "com.farcooler.daemon.remote.canary",
+        Channel::Local => "com.farcooler.daemon.remote.local",
     }
 }
 
@@ -876,7 +878,7 @@ mod tests {
         // It would, silently, and the machine would come back from a reboot as
         // whichever channel was installed last.
         use farcooler_protocol::Channel;
-        assert_eq!(Channel::Release.daemon_binary_name(), "farcoolerd");
+        assert_eq!(Channel::Stable.daemon_binary_name(), "farcoolerd");
         // The unit and label this build uses are consistent with its binary:
         // all three are derived from the same CHANNEL, so a build cannot write
         // one channel's unit pointing at another channel's binary.

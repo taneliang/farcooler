@@ -18,8 +18,8 @@ system. Nothing else holds a literal:
 
     ./scripts/version.sh          0.2.0
     ./scripts/version.sh build    1284             # commit count, for the stores
-    ./scripts/version.sh channel  dev|beta|release
-    ./scripts/version.sh display  0.2.0 (beta 3)   # what a person is shown
+    ./scripts/version.sh channel  local|canary|preview|stable
+    ./scripts/version.sh display  0.2.0 (preview 3)  # what a person is shown
     farcooler --version           0.2.0+a1b2c3     # what components report to each other
 
 The last one is not this script. The stamp components check against each other
@@ -48,58 +48,79 @@ change to the system.
 - **MINOR** — features.
 - **PATCH** — fixes.
 
-## Channels: dev, beta, release
+## Channels: local, canary, preview, stable
 
-A beta of `0.2.0` **is** `0.2.0` — same code, same marketing version, same App
-Store entry. What differs is which build someone has, and that is what the
-channel answers. Without it, a bug report says "0.2.0" and there is no way to
-know which one they had.
+A preview of `0.2.0` **is** `0.2.0` — same marketing version, different build.
+What differs is which one someone has, and that is what the channel answers.
+Without it a bug report says "0.2.0" and there is no way to know which.
+
+The names are the ones a developer-tool audience already knows: Rust ships
+`nightly`/`beta`/`stable`, Chrome ships a `canary`, Zed ships `preview`.
+
+| Channel | Who has it | How it is built |
+| --- | --- | --- |
+| `local` | you, on your own machine | `cargo build`, no CI |
+| `canary` | internal TestFlight | every push to `main`, automatically |
+| `preview` | external TestFlight | Promote → `preview`, tagged `v0.2.0-preview.N` |
+| `stable` | everyone | Promote → `stable`, tagged `v0.2.0` |
+
+All four install side by side: separate bundle identifier, runtime directory,
+database, tmux server, binary name and relay. A canary cannot see a stable
+install's fleet, which is what makes it safe to run one on the machine your real
+work lives on.
 
 The channel is derived from a tag, never from a flag someone remembers to pass:
 
 | Tag | Channel | Shown as |
 | --- | --- | --- |
-| clean tag `v0.2.0` | `release` | `0.2.0` |
-| clean tag `v0.2.0-beta.3` | `beta` | `0.2.0 (beta 3)` |
-| untagged, or a dirty tree | `dev` | `0.2.0 (dev a1b2c3)` |
+| clean tag `v0.2.0` | `stable` | `0.2.0` |
+| clean tag `v0.2.0-preview.3` | `preview` | `0.2.0 (preview 3)` |
+| `FARCOOLER_CHANNEL=canary`, set by CI | `canary` | `0.2.0 (canary a1b2c3)` |
+| untagged, or a dirty tree | `local` | `0.2.0 (local a1b2c3)` |
 
-**Which tag, though.** Promotion puts two on one commit — beta and release have
-different bundle identifiers, so a release is a *rebuild* of the beta's source
-rather than a re-upload of its binary. `git tag --points-at HEAD` then returns
-both, sorted, and `v0.2.0` comes before `v0.2.0-beta.3`. So `version.sh channel`
-takes an optional tag, and the promotion workflow passes what it just created
-via `FARCOOLER_TAG`. Without it a promoted commit would report `release`
-forever, and anyone rebuilding the beta from it would get a binary that installs
-at the release path and writes the release runtime directory.
+Canary is the one that cannot be derived: a commit on `main` carries no tag, so
+CI states it outright. Forgetting to yields `local`, which is the safe
+direction — a build that cannot prove what it is stays isolated from every other
+channel's data.
 
-**A channel is a separate installation**, not a label: its own runtime
-directory, database, tmux server, binary name and service unit, so all three can
-coexist on one machine and none can see another's state. See
-`docs/superpowers/specs/2026-08-11-release-channels-design.md`.
+**Which tag, though.** Promotion puts two on one commit — preview and stable have
+different bundle identifiers, so a stable release is a *rebuild* of the
+preview's source rather than a re-upload of its binary. `git tag --points-at
+HEAD` then returns both, sorted, and `v0.2.0` comes before `v0.2.0-preview.3`.
+So `version.sh channel` takes an optional tag, and the promotion workflow passes
+what it just created via `FARCOOLER_TAG`. Without it a promoted commit would
+report `stable` forever, and anyone rebuilding the preview from it would get a
+binary that installs at the stable path and writes the stable runtime directory.
+
+**A channel is a separate installation**, not a label: its own bundle
+identifier, runtime directory, database, tmux server, binary name, service unit
+and relay, so all four coexist on one machine and none can see another's state.
+See `docs/superpowers/specs/2026-08-11-release-channels-design.md`.
 
 Both apps stamp it into their `Info.plist` at build time (`FarCoolerChannel`,
 `FarCoolerDisplayVersion`), `AgentKit.AppVersion` reads it back, Settings shows
-it under the account row, and it is what each device reports to the relay. A
-tag containing `-beta.` is published as a GitHub prerelease, so it never becomes
+it under the account row, and it is what each device reports to its relay. A tag
+containing `-preview.` is published as a GitHub prerelease, so it never becomes
 the download someone lands on.
 
-An unstamped bundle reports `dev`, deliberately: defaulting the other way would
-let a hand-made build pass itself off as a release.
+An unstamped bundle reports `local`, deliberately: defaulting the other way
+would let a hand-made build pass itself off as a release.
 
 ## Cutting one
 
-Dev is automatic. Beta and release are buttons — the **Promote** workflow, run
-from the Actions tab, choosing a channel and typing the version you believe you
-are shipping.
+Local and canary are automatic. Preview and stable are buttons — the **Promote**
+workflow, run from the Actions tab, choosing a channel and typing the version you
+believe you are shipping.
 
 There are no channel branches. Everything happens on `main`, and a tag names
 what a build is.
 
 | | What runs it | What it tags |
 | --- | --- | --- |
-| dev | every push to `main` | nothing — dev has no compatibility promise to record |
-| beta | Promote → `beta` | `v<version>-beta.<highest + 1>` |
-| release | Promote → `release` | `v<version>` on the beta's commit |
+| local | a build on your machine | nothing |
+| canary | every push to `main` | nothing — canary has no compatibility promise to record |
+| preview | Promote → `preview` | `v<version>-preview.<highest + 1>` |
+| stable | Promote → `stable` | `v<version>` on the preview's commit |
 
 **The version is confirmed, never chosen.** The button reads
 `[workspace.package] version` from `Cargo.toml` and refuses unless what you
@@ -113,9 +134,9 @@ Nothing else needs incrementing. `build-app.sh` stamps the bundled plist,
 `generate-project.py` fills in `MARKETING_VERSION`, and `build.gradle.kts` reads
 `versionCode`/`versionName` — all from `version.sh`, all at build time.
 
-**Renaming a version in flight** costs one pull request and the next beta press:
-bump `Cargo.toml`, promote, and the counter restarts at `beta.1` because that
-build genuinely is the first beta of the new version. The abandoned tags stay
+**Renaming a version in flight** costs one pull request and the next preview
+press: bump `Cargo.toml`, promote, and the counter restarts at `preview.1`
+because that build genuinely is the first preview of the new version. The abandoned tags stay
 where they are — they name builds that really did reach TestFlight. A rename
 must go *forward*; the button refuses a version sorting below one already
 tagged, because App Store Connect will not accept a build number below one it
@@ -138,21 +159,40 @@ Signing is conditional throughout. Without a Developer ID the Mac job still
 produces a working ad-hoc-signed app, which is what a contributor gets and what
 must keep working for them.
 
-## The relay is different
+## The relay: one per channel
 
-`services/relay` deploys continuously from `main` (`.github/workflows/relay.yml`),
-not with releases. It has to: an App Store release takes days to review and can
-never be rolled forward on demand, so there will always be phones running an app
-from months ago that the relay must still serve.
+There are three, and each gets its code the way its channel does
+(`.github/workflows/relay.yml`):
+
+| Trigger | Target |
+| --- | --- |
+| push to `main` touching `services/relay/**` | canary, continuously |
+| Promote → `preview` | preview, at the tagged commit |
+| Promote → `stable` | stable, at the tagged commit |
+| Actions → Relay → Run workflow | any of them, from any ref |
+
+Four deployments rather than one channel-aware relay, because a preview lives in
+its own WorkOS environment: `accounts.id` **is** the WorkOS user id, so the
+accounts do not carry across anyway, and one relay serving two environments
+would have to choose which credentials to verify a token against before it knows
+who the caller is. Every per-channel value was already a var or a secret, so
+`services/relay/src` needs no idea any of this exists.
+
+`APNS_TOPIC` is the one that must differ by more than value: it has to equal the
+**receiving app's bundle id**, and each channel has its own. A preview relay holding
+the stable topic means APNS rejects every push and nothing says so.
 
 **Additive only.** New routes and new optional fields; never a removed route,
 never a changed meaning, never a new required field on an existing request. A
 route that genuinely must change shape becomes `/v2/…`, and `/v1/…` keeps
 working until the analytics say nobody is calling it.
 
-One relay serves every channel. It already has to be compatible with app builds
-months old, so a second deployment would double that obligation to buy isolation
-the `channel` column already provides.
+That rule is what lets a months-old app keep working — not the deploy cadence.
+Production used to deploy on every push to `main` for that reason, which
+confused the two: additivity is what serves old apps, and shipping every commit
+straight to the people running them is a separate decision. Canary is the
+continuous one now, and `workflow_dispatch` still puts any commit on the release
+relay in one press when something is actually broken.
 
 ## The wire has the same rule
 
@@ -182,9 +222,9 @@ in `Request.required_capabilities` turns that into a refusal.
 `./scripts/proto-lint.py` enforces the first rule against
 `proto/baseline/<channel>.proto`, which the promotion workflow commits. How long
 a field is frozen depends on the channel: **permanent** once it ships in a
-release, **one beta** in beta — that is where the protocol's shape is still
+stable release, **one preview** in preview — that is where the protocol's shape is still
 being discovered, and carrying every exploratory field to 1.0 is worse than a
-tester having to update. Dev freezes nothing.
+tester having to update. Canary and local freeze nothing.
 
 ## CI
 

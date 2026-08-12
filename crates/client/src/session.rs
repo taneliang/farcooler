@@ -33,7 +33,7 @@ pub enum SessionError {
     WrongResult { expected: &'static str, got: &'static str },
     /// Names the binary this client actually asked for.
     ///
-    /// A beta client asks for `farcoolerd-beta`, so a message naming
+    /// A preview client asks for `farcoolerd-preview`, so a message naming
     /// `farcoolerd` would send someone to check the wrong thing — and finding
     /// it installed would make the error look like a lie.
     #[error(
@@ -145,7 +145,7 @@ impl Session {
         // ~/.local/bin, where `host install` puts the binary.
         //
         // The name carries this client's own channel, which is what keeps a
-        // beta app off a release daemon: they are different binaries at
+        // preview app off a stable daemon: they are different binaries at
         // different paths, so the two never meet rather than meeting and
         // having to negotiate.
         let streams = transport.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
@@ -1366,7 +1366,7 @@ mod tests {
         let error: SessionError = ClientError::Closed.into();
         assert!(matches!(error, SessionError::DaemonMissing { .. }));
         assert!(error.to_string().contains("installed"));
-        // It names the binary this build actually asked for. A beta client that
+        // It names the binary this build actually asked for. A preview client that
         // reported `farcoolerd` would send someone to check the wrong thing,
         // and finding that installed would make the message look like a lie.
         assert!(error.to_string().contains(daemon_binary()));

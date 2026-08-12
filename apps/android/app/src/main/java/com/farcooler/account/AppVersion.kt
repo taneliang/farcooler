@@ -23,9 +23,9 @@ object AppVersion {
     val build: String get() = BuildConfig.VERSION_CODE.toString()
 
     /** `dev`, `beta`, or `release`. */
-    val channel: String get() = BuildConfig.CHANNEL.ifEmpty { "dev" }
+    val channel: String get() = BuildConfig.CHANNEL.ifEmpty { "local" }
 
-    val isRelease: Boolean get() = channel == "release"
+    val isRelease: Boolean get() = channel == "stable"
 
     /** What a person is shown: `0.2.0`, `0.2.0 (beta 3)`, `0.2.0 (dev a1b2c3)`. */
     val display: String get() = BuildConfig.VERSION_NAME.ifEmpty { marketing }

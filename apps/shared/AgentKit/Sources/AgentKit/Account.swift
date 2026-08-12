@@ -34,7 +34,26 @@ public final class Account: NSObject, ObservableObject {
         set { defaults.set(newValue, forKey: "account.relay") }
     }
 
-    public static let defaultRelay = "https://relay.farcooler.com"
+    /// The relay this build's channel talks to.
+    ///
+    /// One relay per channel, the same partition the bundle identifier follows.
+    /// They are separate deployments with separate databases and separate
+    /// WorkOS environments, so signing in on the beta is a different account
+    /// from signing in on the release — which it already was, since the WorkOS
+    /// user id is the account id and each environment issues its own.
+    ///
+    /// Release's URL is unchanged and must stay that way: it is compiled into
+    /// binaries in the App Store, which cannot be told a new one for days.
+    public static var defaultRelay: String {
+        switch AppVersion.channel {
+        case "stable": return "https://relay.farcooler.com"
+        case "preview": return "https://relay-preview.farcooler.com"
+        case "canary": return "https://relay-canary.farcooler.com"
+        // Anything unstamped is a local build — see `AppVersion.channel`, which
+        // defaults the same way and for the same reason.
+        default: return "https://relay-local.farcooler.com"
+        }
+    }
 
     /// The AuthKit client id for this project. Public: it names the app, not the
     /// bearer, and every OAuth public client ships one.
