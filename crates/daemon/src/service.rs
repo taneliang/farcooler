@@ -256,6 +256,13 @@ pub struct Service {
     pub tmux: TmuxServer,
     pub inventory: LiveInventory,
     pub host_id: Uuid,
+    /// This install's id — the same string the tmux server is named after.
+    ///
+    /// Held rather than re-read, for the reason `root` is: the file it comes
+    /// from sits under a directory the environment can move. It is also what
+    /// marks a worktree as belonging to this install rather than to another
+    /// one sharing the machine.
+    install_id: String,
     /// Where this service's runtime data lives.
     ///
     /// Held rather than re-derived from `FARCOOLER_HOME` at each use. The
@@ -373,6 +380,7 @@ impl Service {
             tmux,
             inventory,
             host_id,
+            install_id,
             root,
             registry,
             agents: agent_supervisor::AgentSupervisor::new(),
@@ -448,6 +456,11 @@ impl Service {
     /// beside the database rather than inside it, and pasted files land there too.
     pub fn root_dir(&self) -> &std::path::Path {
         &self.root
+    }
+
+    /// Which install this is. See the field.
+    pub fn install_id(&self) -> &str {
+        &self.install_id
     }
 
     /// The lock guarding one repository's git-plus-metadata sequences.
@@ -635,6 +648,10 @@ impl Service {
 
         let base_commit = git::resolve_revision(&repo_path, base_revision).await?;
         git::create_worktree(&repo_path, branch, base_revision, &dest).await?;
+        // Claim it before anyone can adopt it. Another install sharing this
+        // machine sees the same worktree in `git worktree list` and would
+        // otherwise take it for its own fleet.
+        git::mark_owner(&dest, &self.install_id).await;
 
         match self.store.create_workspace(repository_id, branch, &dest.to_string_lossy(), false) {
             Ok(ws) => Ok(ws),
@@ -704,6 +721,7 @@ impl Service {
         let dest = self.worktree_dest(&repo, name)?;
 
         git::create_worktree_from_branch(&repo_path, branch, &dest).await?;
+        git::mark_owner(&dest, &self.install_id).await;
 
         match self.store.create_workspace(repository_id, branch, &dest.to_string_lossy(), false) {
             Ok(workspace) => Ok(workspace),

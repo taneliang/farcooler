@@ -389,6 +389,10 @@ private struct ToolRowView: View {
         case .inProgress: return .working
         case .completed: return .done
         case .failed: return .failed
+        // A status a newer daemon invented. `exited` is the honest mapping:
+        // it finished, it is not animating, and it claims neither the green of
+        // `done` nor the red of `failed` for something we could not read.
+        case .unknown: return .exited
         }
     }
 }
@@ -531,6 +535,8 @@ private struct SubagentBlockView: View {
         case .inProgress: return .working
         case .completed: return .done
         case .failed: return .failed
+        // See the sibling mapping above: finished, without claiming how.
+        case .unknown: return .exited
         }
     }
 

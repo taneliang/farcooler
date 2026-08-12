@@ -1630,3 +1630,96 @@ async fn a_paste_whose_offset_does_not_match_is_refused_over_the_wire() {
         "expected a specific refusal, got {err:?}"
     );
 }
+
+#[tokio::test]
+async fn the_handshake_says_what_this_machine_can_do() {
+    // The whole drift mechanism: a client learns what a machine supports BY
+    // NAME, in the handshake, before its first request. Nothing here compares
+    // version strings, which is the point — `PROTOCOL_VERSION` is reserved for
+    // a framing break and is expected never to move.
+    let h = start(Scope::HostAdmin).await;
+    let client = connect(&h).await;
+
+    let advertised = &client.server_hello().capabilities;
+    assert!(!advertised.is_empty(), "a daemon that advertises nothing can be asked for nothing");
+    for floor in
+        [farcooler_protocol::capability::WORKSPACES, farcooler_protocol::capability::TERMINALS]
+    {
+        assert!(advertised.iter().any(|c| c == floor), "{floor} is the floor; every daemon has it");
+    }
+}
+
+#[tokio::test]
+async fn the_two_capability_lists_cannot_disagree() {
+    // `ServerHello` and `daemon.version` answer the same question, so they are
+    // built from the same table. A second copy is the drift the table exists to
+    // prevent.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let hello = client.server_hello().capabilities.clone();
+
+    let value = client.call(request("daemon.version")).await.expect("version");
+    let Some(farcooler_protocol::v1::result::Value::DaemonVersion(v)) = value.value else {
+        panic!("expected a daemon version");
+    };
+    assert_eq!(hello, v.capabilities);
+}
+
+#[tokio::test]
+async fn a_capability_this_machine_lacks_is_refused_before_anything_runs() {
+    // The case negotiation alone cannot catch: a NEW FIELD on an existing
+    // payload, which an older daemon drops as an unknown proto3 field while
+    // doing the old thing. The client names the capability that field belongs
+    // to, and the refusal replaces the silence.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let mut req = request("workspace.list");
+    req.required_capabilities = vec!["time-travel".into()];
+
+    match client.call(req).await {
+        Err(ClientError::Daemon { code, retryable, .. }) => {
+            assert_eq!(code, ErrorCode::CapabilityUnsupported as i32);
+            assert!(!retryable, "no amount of retrying updates the other side");
+        }
+        other => panic!("expected a capability refusal, got {other:?}"),
+    }
+
+    // And the connection survives it, so a client can degrade and carry on
+    // rather than reconnecting.
+    assert!(client.call(request("daemon.version")).await.is_ok());
+}
+
+#[tokio::test]
+async fn a_capability_this_machine_has_is_not_refused() {
+    // The other half: naming a capability that IS advertised must change
+    // nothing. A check that refused everything would pass the test above while
+    // breaking every real call.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let mut req = request("workspace.list");
+    req.required_capabilities = vec![farcooler_protocol::capability::WORKSPACES.into()];
+    assert!(client.call(req).await.is_ok());
+}
+
+#[tokio::test]
+async fn a_method_this_daemon_never_heard_of_says_so_precisely() {
+    // Not NOT_FOUND, which this used to be. To a newer app asking for a feature
+    // this build predates, "no such method" and "no such workspace" were the
+    // same code — so it could neither dim the control nor say anything a person
+    // could act on.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    match client.call(request("workspace.teleport")).await {
+        Err(ClientError::Daemon { code, message, .. }) => {
+            assert_eq!(code, ErrorCode::CapabilityUnsupported as i32);
+            assert!(
+                message.to_lowercase().contains("older"),
+                "the message has to tell a person what to do: {message}"
+            );
+        }
+        other => panic!("expected a capability refusal, got {other:?}"),
+    }
+}

@@ -206,6 +206,14 @@ impl<R: AsyncRead + Unpin> Connection<R> {
                 max_control_envelope_bytes: farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES as u32,
                 max_terminal_payload_bytes: farcooler_protocol::MAX_TERMINAL_PAYLOAD_BYTES as u32,
                 granted_scope: cfg.granted_scope as i32,
+                // Answered in the handshake so every client knows what this
+                // machine can do before its first request, at no extra round
+                // trip. Built from `capability::ALL`, the same table
+                // `daemon.version` and the dispatcher read.
+                capabilities: farcooler_protocol::capability::ALL
+                    .iter()
+                    .map(|c| (*c).to_string())
+                    .collect(),
             })),
         };
         self.send(&reply).await?;

@@ -10,6 +10,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
+/**
+ * Who said it.
+ *
+ * A role this build has never heard of reads as [AGENT]: it is content from the
+ * agent's side of the conversation, and showing it beats discarding the message
+ * that carried it. Matches the iOS decoder exactly.
+ */
 enum class Role(val wire: String) {
     USER("User"),
     AGENT("Agent"),
@@ -24,10 +31,25 @@ enum class ToolStatus(val wire: String) {
     PENDING("Pending"),
     IN_PROGRESS("InProgress"),
     COMPLETED("Completed"),
-    FAILED("Failed");
+    FAILED("Failed"),
+
+    /**
+     * A status a later daemon invented that this build cannot name.
+     *
+     * Its own entry rather than a fallback onto [PENDING], which is what this
+     * did before. The UI reads pending as STILL RUNNING — see `AgentRows.kt`'s
+     * `running` and `Transcript.kt:46` — and every status likely to be added
+     * (cancelled, rejected, timed out) is terminal, so the old fallback left a
+     * finished tool call spinning forever. This product does not tell that kind
+     * of lie about liveness anywhere else.
+     *
+     * Not [COMPLETED] either: that renders green, and claiming success for
+     * something unreadable would be a different lie.
+     */
+    UNKNOWN("");
 
     companion object {
-        fun parse(raw: String?): ToolStatus = entries.firstOrNull { it.wire == raw } ?: PENDING
+        fun parse(raw: String?): ToolStatus = entries.firstOrNull { it.wire == raw } ?: UNKNOWN
     }
 }
 

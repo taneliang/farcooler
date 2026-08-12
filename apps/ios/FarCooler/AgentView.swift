@@ -712,6 +712,9 @@ private func toolStatusColor(_ status: ToolStatus) -> Color {
     case .inProgress: return .secondary
     case .completed: return .green
     case .failed: return .red
+    // A status from a newer daemon. Neutral on purpose: it finished, and
+    // claiming either success or failure would be inventing a detail.
+    case .unknown: return .secondary
     }
 }
 

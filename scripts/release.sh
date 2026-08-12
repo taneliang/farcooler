@@ -1,42 +1,34 @@
 #!/bin/bash
-# Cut a release.
+# Move the one version number.
 #
-#   ./scripts/release.sh 0.2.0            a release
-#   ./scripts/release.sh 0.2.0 --beta 1   a TestFlight beta of that release
+#   ./scripts/release.sh 0.2.0
 #
-# Bumps the one version number, commits it, and tags. CI does the rest — see
-# .github/workflows/release.yml, which builds every component from the single
-# commit this tag points at. That is the whole reason this is a script and not a
-# checklist: four components built from four checkouts is four things that can
-# disagree about what version they are.
+# This no longer tags, and no longer ships anything. Shipping is the **Promote**
+# workflow in the Actions tab: pick a channel, type the version you believe you
+# are shipping, and it tags and builds in one run.
+#
+# The split is deliberate. A tag must point at a commit that has been BUILT and
+# RUN as a beta, and a script that bumped the version and tagged in one breath
+# would be tagging a commit nobody had tried — `.github/workflows/release.yml`
+# builds every component from the single commit a tag points at, so that commit
+# had better be one that already worked.
+#
+# So the version moves here, on `main`, as an ordinary pull request. Then you
+# press the button. `crates/protocol/build.rs` stamps FARCOOLER_BUILD from this
+# literal, which is why the button can only ever CONFIRM the version and never
+# choose one: a tag naming a version Cargo.toml disagreed with would have the
+# binary and the plist reporting different releases to each other.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 VERSION="${1:-}"
-BETA="${3:-}"
-if [ -z "$VERSION" ] || { [ -n "${2:-}" ] && [ "${2:-}" != "--beta" ]; }; then
-  echo "usage: release.sh <version> [--beta <n>]    (currently $(scripts/version.sh))" >&2
+if [ -z "$VERSION" ]; then
+  echo "usage: release.sh <version>    (currently $(scripts/version.sh))" >&2
+  echo "" >&2
+  echo "Moves [workspace.package] version in Cargo.toml and commits it." >&2
+  echo "To ship, run the Promote workflow from the Actions tab." >&2
   exit 1
-fi
-if [ "${2:-}" = "--beta" ] && ! echo "$BETA" | grep -qE '^[0-9]+$'; then
-  echo "--beta needs a number: release.sh $VERSION --beta 1" >&2
-  exit 1
-fi
-
-# The tag carries the channel; Cargo.toml never does.
-#
-# A beta of 0.2.0 IS 0.2.0 — same code, same marketing version, same App Store
-# entry. What differs is which build someone has, and that is what the tag and
-# scripts/version.sh's channel answer. Putting `-beta.1` in the marketing
-# version instead would show it to every user in Settings and change the version
-# every component compares.
-if [ -n "$BETA" ]; then
-  TAG="v$VERSION-beta.$BETA"
-  WHAT="beta $BETA of $VERSION"
-else
-  TAG="v$VERSION"
-  WHAT="$VERSION"
 fi
 
 # Semver, and the middle number is the one that moves.
@@ -52,19 +44,31 @@ if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
 fi
 
 if [ -n "$(git status --porcelain)" ]; then
-  echo "working tree is dirty — a release must name one commit exactly" >&2
+  echo "working tree is dirty — the version bump must be its own commit" >&2
   exit 1
 fi
 
-if git rev-parse "$TAG" >/dev/null 2>&1; then
-  echo "$TAG already exists" >&2
+CURRENT="$(scripts/version.sh)"
+if [ "$CURRENT" = "$VERSION" ]; then
+  echo "Cargo.toml already says $VERSION. Nothing to do." >&2
+  echo "To ship it, run the Promote workflow from the Actions tab." >&2
   exit 1
 fi
 
-# The only edit, and only when the version actually moves. A second beta of a
-# version already in Cargo.toml is a tag and nothing else — there is no commit
-# to make, and making an empty one would move the build number for no reason.
-if [ "$(scripts/version.sh)" != "$VERSION" ]; then
+# A version can only go forward.
+#
+# App Store Connect will not accept a build below one it already has, and that
+# is unfixable afterwards — the same class of mistake scripts/version.sh warns
+# about for build numbers. Going 0.3.2 → 0.4.0 mid-beta is ordinary and cheap;
+# going back is not recoverable.
+LOWER="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | head -1)"
+if [ "$LOWER" = "$VERSION" ]; then
+  echo "$VERSION is not ahead of $CURRENT." >&2
+  echo "A version can only go forward: the app stores will not take a build" >&2
+  echo "numbered below one they already have, and that cannot be undone." >&2
+  exit 1
+fi
+
 python3 - "$VERSION" <<'PY'
 import re
 import sys
@@ -87,17 +91,17 @@ cargo update --workspace --offline >/dev/null 2>&1 || cargo update --workspace >
 
 git add Cargo.toml Cargo.lock
 git commit -q -m "release: $VERSION"
-fi
-
-git tag -a "$TAG" -m "Far Cooler $WHAT"
 
 cat <<EOF
 
-Tagged $TAG — $WHAT, build $(scripts/version.sh build).
-The apps will report it as: $(scripts/version.sh display)
+Moved $CURRENT → $VERSION, build $(scripts/version.sh build).
 
-Push it and CI builds everything from this commit:
+Push it, land it on main, then ship from the Actions tab:
 
-    git push origin main "$TAG"
+    git push origin HEAD
+
+    Actions → Promote → Run workflow
+      channel:          beta
+      confirm_version:  $VERSION
 
 EOF

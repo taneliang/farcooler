@@ -31,15 +31,21 @@ use uuid::Uuid;
 type Fallible<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 pub enum Status {
+    // `AdapterMissing` was here. An adapter that cannot be launched at all now
+    // arrives as `BackendError` and renders as `BackendFailed`, so nothing
+    // could construct this any more — see `crates/agent-core/src/backend.rs`,
+    // which records folding four of these into one error. Removed rather than
+    // kept: a state the program can no longer reach is a comment pretending to
+    // be code.
+    /// Started, then said nothing. Distinct from a failure to start, because
+    /// the advice is different and "it did not start" would be a lie.
+    ///
     /// `preset` is what to call the agent (`claude`, `cursor`, …); `command` is
     /// what was actually run. Every npx-wrapped adapter shares the same
     /// `program` — `npx` — so a message keyed on `program` alone cannot say
     /// which of the four agents failed. It has to be `command` (`program` plus
     /// its args, which for an npx adapter is where the real package name
     /// lives) and `preset` together.
-    AdapterMissing { preset: String, command: String },
-    /// Started, then said nothing. Distinct from missing, because the advice is
-    /// different and "it did not start" would be a lie.
     AdapterSilent { preset: String, command: String },
     /// A native backend refused, in its own words.
     ///
@@ -52,11 +58,6 @@ pub enum Status {
 
 pub fn status_line(status: &Status) -> String {
     match status {
-        Status::AdapterMissing { preset, command } => format!(
-            "farcooler: could not start the ACP adapter for `{preset}` (`{command}`).\n\
-             Install it, or switch this terminal back to terminal mode — \
-             terminal mode needs no adapter and is unaffected."
-        ),
         Status::AdapterSilent { preset, command } => format!(
             "farcooler: the ACP adapter for `{preset}` (`{command}`) started but never answered.\n\
              Nothing is wrong with this terminal — switch it back to terminal mode \
@@ -111,7 +112,7 @@ async fn start_backend(
             let modes = agent.available_modes.clone();
             let can_load = agent.can_load;
             Ok((
-                Backend::Acp(AcpBackend::new(agent.into_running(), can_load)),
+                Backend::Acp(Box::new(AcpBackend::new(agent.into_running(), can_load))),
                 prelude,
                 session_id,
                 modes,
@@ -140,7 +141,7 @@ async fn start_backend(
                     )
                     .await?;
                     let session_id = backend.thread_id.clone();
-                    Ok((Backend::Codex(backend), prelude, session_id, Vec::new()))
+                    Ok((Backend::Codex(Box::new(backend)), prelude, session_id, Vec::new()))
                 }
                 "claude" => {
                     let (backend, prelude) = farcooler_claude::backend::ClaudeBackend::start(
@@ -156,7 +157,7 @@ async fn start_backend(
                         "dontAsk".to_string(),
                         "bypassPermissions".to_string(),
                     ];
-                    Ok((Backend::Claude(backend), prelude, session_id, modes))
+                    Ok((Backend::Claude(Box::new(backend)), prelude, session_id, modes))
                 }
                 other => Err(BackendError::Refused(format!(
                     "`{other}` has no native backend; set backend = \"acp\" under [adapters.{other}]"
@@ -634,7 +635,7 @@ mod tests {
         // The pane is a real pane and the user can attach to it. When the
         // adapter cannot start, what is written here is the entire error
         // message they get, so it has to stand alone.
-        let line = status_line(&Status::AdapterMissing {
+        let line = status_line(&Status::AdapterSilent {
             preset: "cursor".into(),
             command: "npx -y cursor-agent-acp".into(),
         });
@@ -650,11 +651,11 @@ mod tests {
         // Claude, codex and cursor all failing with an identical message —
         // "could not start the ACP adapter `npx`" — told a user nothing about
         // which agent had actually broken.
-        let claude = status_line(&Status::AdapterMissing {
+        let claude = status_line(&Status::AdapterSilent {
             preset: "claude".into(),
             command: "npx -y @agentclientprotocol/claude-agent-acp".into(),
         });
-        let codex = status_line(&Status::AdapterMissing {
+        let codex = status_line(&Status::AdapterSilent {
             preset: "codex".into(),
             command: "npx -y @agentclientprotocol/codex-acp".into(),
         });

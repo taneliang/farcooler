@@ -113,6 +113,32 @@ class AgentEventTest {
     }
 
     @Test
+    fun anUnknownToolStatusIsNotMistakenForStillRunning() {
+        // The gap an unknown VARIANT name does not cover: a variant this build
+        // knows, carrying an enum value it does not.
+        //
+        // This used to fall back to PENDING, which the UI reads as still
+        // running — see `AgentRows.kt`'s `running` and `Transcript.kt:46`.
+        // Every status likely to be invented (cancelled, rejected, timed out)
+        // is terminal, so that left a finished tool call spinning forever.
+        val event = AgentEvent.decode(
+            """{"ToolCall":{"id":"t1","title":"Read","kind":"read","status":"Cancelled","locations":[]}}"""
+        )
+        val call = event as AgentEvent.ToolCall
+        assertEquals(ToolStatus.UNKNOWN, call.status)
+    }
+
+    @Test
+    fun anUnknownRoleStillShowsWhatWasSaid() {
+        // A role is not worth losing a message over: whatever it is called, it
+        // came from the agent's side of the conversation.
+        val event = AgentEvent.decode("""{"Message":{"role":"Narrator","text":"hello"}}""")
+        val message = event as AgentEvent.Message
+        assertEquals(Role.AGENT, message.role)
+        assertEquals("hello", message.text)
+    }
+
+    @Test
     fun unreadableJsonIsAGapRatherThanACrash() {
         // Kotlin's decode does not throw, unlike Swift's, so this is the case
         // that has to be asserted rather than inferred from a `try?` at the

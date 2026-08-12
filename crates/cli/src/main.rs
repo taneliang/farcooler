@@ -841,6 +841,11 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
     let terminals = list_terminals(&mut link, None).await?;
     let host_facts = host_get(&mut link).await?;
     let healthy = host_facts.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
+    // What this machine can do, by name, from the handshake. The Mac app reads
+    // it here because it drives remote machines through this CLI rather than
+    // through the FFI the phones use — same answer, same source, one round trip
+    // fewer than asking.
+    let capabilities = link.daemon_capabilities().to_vec();
 
     if json {
         println!(
@@ -852,6 +857,11 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
                 // fact a client needs, not a detail. It is how a fix that was
                 // compiled and tested goes on reproducing in the app.
                 "buildsMatch": host_facts.daemon_version == farcooler_protocol::BUILD,
+                // Distinct from `buildsMatch`, and they answer different
+                // questions. That one is "are these the same build"; this is
+                // "what can that machine do", which is the one a client acts on
+                // when it is newer than the machine it reached.
+                "capabilities": capabilities,
                 "platform": host_facts.platform,
                 "branchPrefix": host_facts.settings
                     .as_ref()

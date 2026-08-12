@@ -31,10 +31,15 @@ pub enum SessionError {
     Protocol(String),
     #[error("the daemon returned {got} where {expected} was expected")]
     WrongResult { expected: &'static str, got: &'static str },
+    /// Names the binary this client actually asked for.
+    ///
+    /// A beta client asks for `farcoolerd-beta`, so a message naming
+    /// `farcoolerd` would send someone to check the wrong thing — and finding
+    /// it installed would make the error look like a lie.
     #[error(
-        "connected, but `farcoolerd --stdio` did not answer. Is Far Cooler installed on that host?"
+        "connected, but `{daemon} --stdio` did not answer. Is Far Cooler installed on that machine?"
     )]
-    DaemonMissing,
+    DaemonMissing { daemon: &'static str },
     #[error("the host runs protocol {daemon}; this client speaks {client}")]
     VersionMismatch { daemon: u32, client: u32 },
     /// The link underneath this session is gone.
@@ -59,9 +64,9 @@ impl SessionError {
     /// exists, a closed pipe is a closed pipe.
     pub fn is_disconnect(&self) -> bool {
         match self {
-            SessionError::Ssh(_) | SessionError::Disconnected(_) | SessionError::DaemonMissing => {
-                true
-            }
+            SessionError::Ssh(_)
+            | SessionError::Disconnected(_)
+            | SessionError::DaemonMissing { .. } => true,
             SessionError::Protocol(_)
             | SessionError::WrongResult { .. }
             | SessionError::VersionMismatch { .. } => false,
@@ -74,7 +79,9 @@ impl From<ClientError> for SessionError {
         match error {
             // Silence from the far side almost always means the command did not
             // exist, not that the protocol went wrong.
-            ClientError::Closed | ClientError::NoHello => SessionError::DaemonMissing,
+            ClientError::Closed | ClientError::NoHello => {
+                SessionError::DaemonMissing { daemon: daemon_binary() }
+            }
             ClientError::VersionMismatch { daemon, client } => {
                 SessionError::VersionMismatch { daemon, client }
             }
@@ -121,13 +128,27 @@ pub struct Session {
     _ssh: Option<ssh::Session>,
 }
 
+/// The daemon this client is built to talk to.
+///
+/// One place rather than at each call site: the two `exec` invocations below
+/// and the error that names the binary must agree, and a client that asked for
+/// one daemon and then reported another would be actively misleading.
+fn daemon_binary() -> &'static str {
+    farcooler_protocol::CHANNEL.daemon_binary_name()
+}
+
 impl Session {
     /// Connect over SSH and start a daemon session on the far side.
     pub async fn connect_ssh(destination: &ssh::Destination) -> Result<Self, SessionError> {
         let mut transport = ssh::Session::open(destination).await?;
         // Named by tilde, not bare: a non-login ssh exec's PATH often lacks
         // ~/.local/bin, where `host install` puts the binary.
-        let streams = transport.exec("~/.local/bin/farcoolerd --stdio").await?;
+        //
+        // The name carries this client's own channel, which is what keeps a
+        // beta app off a release daemon: they are different binaries at
+        // different paths, so the two never meet rather than meeting and
+        // having to negotiate.
+        let streams = transport.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
 
         let client = Client::over(
             Box::new(streams.reader) as Reader,
@@ -159,7 +180,8 @@ impl Session {
             SessionError::Protocol("streaming needs an ssh session".into())
         })?;
         // Named by tilde, not bare: see connect_ssh above.
-        let streams = ssh.exec(&format!("~/.local/bin/farcoolerd --stream {terminal}")).await?;
+        let streams =
+            ssh.exec(&format!("~/.local/bin/{} --stream {terminal}", daemon_binary())).await?;
         // The write half is kept, though nothing is ever written to it.
         //
         // Dropping it closes that side of the channel, and ssh reports a closed
@@ -192,6 +214,34 @@ impl Session {
 
     pub fn daemon_version(&self) -> &str {
         &self.client.server_hello().daemon_version
+    }
+
+    /// What the machine on the other end can do, by name.
+    ///
+    /// Learned in the handshake, so it is available before the first request.
+    /// A client that is newer than the machine it reached uses this to DIM the
+    /// controls that machine cannot serve, with a reason — rather than hiding
+    /// them, which makes the same app look different on two machines for no
+    /// stated cause, or letting them fail on use, which teaches people that
+    /// buttons sometimes do nothing.
+    pub fn capabilities(&self) -> &[String] {
+        &self.client.server_hello().capabilities
+    }
+
+    /// Whether the machine can do something, by name.
+    ///
+    /// Empty means a daemon too old to answer the question at all — every one
+    /// of those predates capabilities, so it has exactly the feature set that
+    /// existed then. Reporting `true` for the two floor capabilities and
+    /// `false` for the rest is the honest reading, and it is what lets a new
+    /// app talk to an old machine without a special case at every call site.
+    pub fn can(&self, capability: &str) -> bool {
+        let advertised = self.capabilities();
+        if advertised.is_empty() {
+            return capability == farcooler_protocol::capability::WORKSPACES
+                || capability == farcooler_protocol::capability::TERMINALS;
+        }
+        advertised.iter().any(|c| c == capability)
     }
 
     // ---- reads ----
@@ -1314,8 +1364,12 @@ mod tests {
         // The single most common remote failure, and it must not surface as a
         // protocol error nobody can act on.
         let error: SessionError = ClientError::Closed.into();
-        assert!(matches!(error, SessionError::DaemonMissing));
+        assert!(matches!(error, SessionError::DaemonMissing { .. }));
         assert!(error.to_string().contains("installed"));
+        // It names the binary this build actually asked for. A beta client that
+        // reported `farcoolerd` would send someone to check the wrong thing,
+        // and finding that installed would make the message look like a lie.
+        assert!(error.to_string().contains(daemon_binary()));
     }
 
     #[test]
@@ -1355,8 +1409,9 @@ mod tests {
         // At connect time it is a diagnosis: go install Far Cooler over there.
         // Mid-session it can only mean the pipe closed under us, so it counts
         // as a drop — and the message stays the useful one either way.
-        assert!(SessionError::DaemonMissing.is_disconnect());
-        assert!(SessionError::DaemonMissing.to_string().contains("installed"));
+        let missing = SessionError::DaemonMissing { daemon: daemon_binary() };
+        assert!(missing.is_disconnect());
+        assert!(missing.to_string().contains("installed"));
     }
 
     #[test]

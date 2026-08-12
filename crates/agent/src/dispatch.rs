@@ -66,10 +66,21 @@ pub fn handshake(
     }
 }
 
+/// Every variant is boxed, so the enum is one pointer wide.
+///
+/// Unboxed these are 552, 328 and 288 bytes, and an enum is as large as its
+/// largest variant — so every holder paid for Claude whichever backend was
+/// actually running, and the value is moved on each of the eight dispatch
+/// methods below. Boxing all three rather than only the big ones: the lint is
+/// about the DIFFERENCE between variants, so leaving one inline just makes that
+/// one the outlier.
+///
+/// Every match arm binds by reference and calls a method, so auto-deref makes
+/// the box invisible everywhere except the three places one is built.
 pub enum Backend {
-    Acp(AcpBackend),
-    Codex(farcooler_codex::backend::CodexBackend),
-    Claude(farcooler_claude::backend::ClaudeBackend),
+    Acp(Box<AcpBackend>),
+    Codex(Box<farcooler_codex::backend::CodexBackend>),
+    Claude(Box<farcooler_claude::backend::ClaudeBackend>),
 }
 
 /// One frame from whichever backend is running.

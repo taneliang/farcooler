@@ -91,11 +91,41 @@ public struct DaemonBuild: Equatable, Sendable {
     /// one that knows both stamps.
     public let matches: Bool
     public let platform: String
+    /// What that machine can do, by name.
+    ///
+    /// Distinct from `matches`, and they answer different questions. That one
+    /// is "were these built from the same source"; this is "what can that
+    /// machine do", which is the one an app acts on when it is newer than the
+    /// machine it reached — App Store review takes days, `host install` takes
+    /// one command, and those clocks do not tick together.
+    ///
+    /// Empty means a daemon old enough to predate the question. See
+    /// `can(_:)`, which reads that as the features that existed then rather
+    /// than as a machine that can do nothing.
+    public let capabilities: Set<String>
 
-    public init(version: String, matches: Bool, platform: String) {
+    public init(
+        version: String, matches: Bool, platform: String, capabilities: Set<String> = []
+    ) {
         self.version = version
         self.matches = matches
         self.platform = platform
+        self.capabilities = capabilities
+    }
+
+    /// Whether this machine can do something, by name.
+    ///
+    /// A control whose capability is missing is shown DIMMED with a reason,
+    /// never hidden: the same app showing different controls on two machines
+    /// with nothing said about why reads as a bug, and this app already tells
+    /// you when a machine has no Far Cooler installed rather than omitting it.
+    public func can(_ capability: String) -> Bool {
+        // A daemon that answered nothing predates capabilities entirely, so it
+        // has exactly the feature set that existed then — workspaces and
+        // terminals. Treating silence as "can do nothing" would blank the UI
+        // against every daemon older than this change.
+        if capabilities.isEmpty { return capability == "workspaces" || capability == "terminals" }
+        return capabilities.contains(capability)
     }
 
     /// The same build, spelled the way the app spells its own.

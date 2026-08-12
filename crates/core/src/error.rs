@@ -79,6 +79,18 @@ pub enum DomainError {
     #[error("the agent may or may not have received this dispatch")]
     DispatchUnknown,
 
+    /// This machine's Far Cooler is older than what the client asked for.
+    ///
+    /// Distinct from `NotFound`, which it used to arrive as. "No such
+    /// workspace" and "this machine cannot do that yet" call for opposite
+    /// responses, and a newer app could not tell them apart — so it could
+    /// neither dim the control nor say anything a person could act on.
+    ///
+    /// Names the capability, because "update it" is only useful advice if the
+    /// person can tell which feature is missing.
+    #[error("this machine is running an older Far Cooler that can't do this yet")]
+    CapabilityUnsupported { needed: &'static str },
+
     #[error("path is outside every allowlisted repository root")]
     PathNotAllowed,
 
@@ -136,6 +148,8 @@ impl DomainError {
             // Retryable in the sense that Send Again is the answer, though only
             // a person may decide to press it.
             DomainError::DispatchUnknown => (ErrorCode::DispatchUnknown, true),
+            // Never retryable: no amount of retrying updates the other side.
+            DomainError::CapabilityUnsupported { .. } => (ErrorCode::CapabilityUnsupported, false),
         }
     }
 
@@ -192,6 +206,7 @@ mod tests {
             DomainError::PrStateUnavailable,
             DomainError::AttachmentLimit,
             DomainError::DispatchUnknown,
+            DomainError::CapabilityUnsupported { needed: "changes" },
         ]
     }
 

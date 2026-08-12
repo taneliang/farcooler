@@ -39,6 +39,16 @@ message ServerHello {
   uint32 max_control_envelope_bytes = 3;
   uint32 max_terminal_payload_bytes = 4;
   Scope granted_scope = 5;
+  // What this daemon can do, by name.
+  //
+  // The mechanism that lets an app and a daemon drift. `protocol_version` is
+  // reserved for a framing break that additivity cannot express and is expected
+  // never to move; everything a client must know exists, it asks for HERE, by
+  // name, rather than by comparing version strings.
+  //
+  // In the handshake rather than behind `daemon.version`, so every client has
+  // the answer before its first request at no extra round trip.
+  repeated string capabilities = 6;
 }
 
 message Request {
@@ -51,6 +61,23 @@ message Request {
   optional uint64 expected_resource_version = 4;
   optional uint64 expected_lease_generation = 5;
   optional string idempotency_key = 6;
+  // Capabilities this request needs the daemon to have.
+  //
+  // Another generic precondition, checked in the same dispatcher and for the
+  // same reason as the four above: a daemon that lacks one refuses with
+  // CAPABILITY_UNSUPPORTED before any domain logic runs.
+  //
+  // It exists for the case negotiation alone cannot catch. A new FIELD on an
+  // existing payload is dropped by an older daemon as an unknown proto3 field,
+  // which means it does the old thing while the client believes it asked for
+  // the new one — silently, with no error and nothing in a log. A client that
+  // fills in such a field names the capability it belongs to here, and the
+  // refusal becomes loud.
+  //
+  // On the envelope rather than checked at each call site because there are
+  // some thirty of those, and a check that can be forgotten at any one of them
+  // leaves the silence exactly where it was.
+  repeated string required_capabilities = 7;
 
   oneof payload {
     Empty empty = 20;
@@ -61,7 +88,11 @@ message Request {
     TerminalResize terminal_resize = 25;
     TerminalStop terminal_stop = 26;
     TypedConfirmation typed_confirmation = 27;
-    TerminalAttach terminal_attach = 28;
+    // 28 was TerminalAttach. Streaming a terminal is a second SSH exec of
+    // `farcoolerd --stream <id>`, not a wire method — see
+    // `crates/client/src/session.rs` — so this had no handler, no scope entry
+    // and no caller. Retired rather than reused, like 30 below.
+    TerminalAttach terminal_attach = 28 [deprecated = true];
     LayoutUpdate layout_update = 29;
     // 30 was WorktreeImport. Worktrees are adopted by the daemon's reconciler
     // now, so there is nothing for a client to import. The tag is retired
@@ -126,7 +157,8 @@ message Result {
     TerminalList terminal_list = 9;
     Operation operation = 10;
     DaemonVersion daemon_version = 11;
-    TerminalAttachResult terminal_attach = 12;
+    // 12 was TerminalAttachResult. See `Request`'s tag 28.
+    TerminalAttachResult terminal_attach = 12 [deprecated = true];
     BranchList branch_list = 13;
     PaneGroupList pane_group_list = 14;
     WorktreeList worktree_list = 15;
@@ -1139,6 +1171,15 @@ enum ErrorCode {
   ERROR_CODE_ATTACHMENT_LIMIT = 26;
   // "Far Cooler can't tell whether the agent got this." Offers Send Again.
   ERROR_CODE_DISPATCH_UNKNOWN = 27;
+  // This machine's Far Cooler is too old for what was asked.
+  //
+  // Distinct from NOT_FOUND, which it used to arrive as. "No such workspace"
+  // and "this machine cannot do this yet" call for opposite responses from a
+  // client, and a newer app could not tell them apart — so it could neither
+  // degrade nor say anything useful.
+  //
+  // Never retryable: no amount of retrying updates the other side.
+  ERROR_CODE_CAPABILITY_UNSUPPORTED = 28;
 }
 
 // ---------------------------------------------------------------------------

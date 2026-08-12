@@ -1,16 +1,47 @@
 import Foundation
 
-public enum Role: String, Decodable, Sendable {
+/// Who said it.
+///
+/// A role this build has never heard of reads as `agent`: it is content from
+/// the agent's side of the conversation, and showing it is better than throwing
+/// away the message that carried it. Matches the Android decoder exactly.
+public enum Role: String, Sendable {
     case user = "User"
     case agent = "Agent"
     case thought = "Thought"
 }
 
-public enum ToolStatus: String, Decodable, Sendable {
+extension Role: Decodable {
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Role(rawValue: raw) ?? .agent
+    }
+}
+
+public enum ToolStatus: String, Sendable {
     case pending = "Pending"
     case inProgress = "InProgress"
     case completed = "Completed"
     case failed = "Failed"
+    /// A status a later daemon invented that this build cannot name.
+    ///
+    /// Its own case rather than a fallback onto `pending`, because the UI reads
+    /// pending as STILL RUNNING — `Transcript.swift:45` and `AgentView.swift:590`
+    /// both spin on it — and every status likely to be added (cancelled,
+    /// rejected, timed out) is terminal. Falling back to `pending` would leave
+    /// a finished tool call spinning forever, which is precisely the kind of
+    /// lie about liveness this product refuses to tell.
+    ///
+    /// It is also not `completed`: that renders green, and claiming success for
+    /// something we could not read would be a different lie.
+    case unknown
+}
+
+extension ToolStatus: Decodable {
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ToolStatus(rawValue: raw) ?? .unknown
+    }
 }
 
 /// Why history is missing, as the daemon named it.

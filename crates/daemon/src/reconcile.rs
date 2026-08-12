@@ -164,6 +164,24 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             continue;
         }
 
+        // A worktree another install made is not ours to adopt.
+        //
+        // git reports every worktree of a repository regardless of which daemon
+        // created it, so without this two installs sharing a machine each adopt
+        // the other's, show it in their own fleet, and can start agents in the
+        // same directory at the same time on separate tmux servers. This is the
+        // rule `@farcooler_daemon_id` already applies to panes, extended to the
+        // thing that outlives them.
+        //
+        // Unmarked is adoptable: that is a worktree a person made by hand, and
+        // picking those up is what adoption is for.
+        if let Some(owner) = git::owner_of(Path::new(&worktree.path)).await
+            && owner != svc.install_id()
+        {
+            tracing::debug!(path = %worktree.path, %owner, "worktree belongs to another install");
+            continue;
+        }
+
         match svc.store.create_workspace(
             repository_id,
             &branch,
@@ -685,5 +703,65 @@ mod tests {
         let out = repository(&svc, repo).await.unwrap();
         assert_eq!(out.adopted, 0);
         assert_eq!(names(&svc, repo), vec!["repo".to_string()]);
+    }
+}
+
+/// Two installs on one machine do not adopt each other's worktrees.
+///
+/// The property the whole channel design rests on, and the reason a worktree
+/// needs an owner at all: `list_worktrees` reports what GIT knows, and git knows
+/// every worktree of a repository regardless of which daemon made it.
+#[cfg(test)]
+mod isolation_tests {
+    use crate::test_support::two_daemons;
+
+    #[tokio::test]
+    async fn a_worktree_one_install_made_is_not_adopted_by_another() {
+        let (_dir, a, b, repo_a, repo_b) = two_daemons().await;
+
+        let ws = a.create_workspace(repo_a, "rate limiting", "feat/rate", "HEAD").await.unwrap();
+
+        let outcome = super::repository(&b, repo_b).await.unwrap();
+        assert_eq!(
+            outcome.adopted, 0,
+            "the other install's worktree must not be adopted: two daemons in one \
+             directory means two agents writing the same files"
+        );
+
+        let seen = b.store.list_workspaces_for_repository(repo_b).unwrap();
+        assert!(
+            !seen.iter().any(|w| w.worktree_path == ws.worktree_path),
+            "it must not appear in the other install's fleet either"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_installs_have_different_identities() {
+        let (_dir, a, b, _, _) = two_daemons().await;
+        assert_ne!(
+            a.install_id(),
+            b.install_id(),
+            "the tmux server is `tmux -L farcooler-<install-id>`, so equal ids \
+             would mean one tmux server and therefore shared panes"
+        );
+        assert_ne!(a.host_id, b.host_id);
+    }
+
+    #[tokio::test]
+    async fn a_hand_made_worktree_is_still_adopted() {
+        // Adoption exists so that a worktree someone made by hand gets picked
+        // up. Ownership must not cost that: an UNMARKED worktree belongs to
+        // nobody and is fair game, and only a DIFFERENT install's mark refuses.
+        let (dir, _a, b, _, repo_b) = two_daemons().await;
+        let by_hand = dir.path().join("by-hand");
+        crate::git::git(
+            &dir.path().join("repo"),
+            &["worktree", "add", "-b", "manual", &by_hand.to_string_lossy(), "HEAD"],
+        )
+        .await
+        .unwrap();
+
+        let outcome = super::repository(&b, repo_b).await.unwrap();
+        assert_eq!(outcome.adopted, 1, "an unmarked worktree is still adopted");
     }
 }

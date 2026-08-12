@@ -110,12 +110,20 @@ final class AgentStream: ObservableObject {
                 connectionError = nil
                 return
             }
-            let decoded = batch.events.compactMap { frame -> Sequenced? in
-                // A malformed single frame does not need to fail the whole
-                // batch — `AgentEvent.decode` already turns an event this
-                // client does not recognize into `.gap(.unparsed)` rather
-                // than throwing; only truly unreadable JSON reaches here.
-                guard let event = try? AgentEvent.decode(from: frame.payloadJson) else { return nil }
+            let decoded = batch.events.map { frame -> Sequenced in
+                // A malformed single frame does not fail the whole batch, and
+                // it does not vanish either.
+                //
+                // `AgentEvent.decode` already turns an event this client does
+                // not RECOGNIZE into `.gap(.unparsed)`, so what reaches the
+                // fallback here is genuinely unreadable JSON. That used to be
+                // dropped by a `compactMap`, which left a hole in the
+                // transcript with nothing to show it: the agent did something,
+                // this build could not read it, and the screen simply omitted
+                // it. A gap marker is the format's own word for exactly that,
+                // and saying "something here I can't show" is the only honest
+                // rendering of a payload we failed to parse.
+                let event = (try? AgentEvent.decode(from: frame.payloadJson)) ?? .gap(.unparsed)
                 return Sequenced(seq: frame.seq, event: event)
             }
             transcript.apply(decoded)

@@ -42,6 +42,29 @@ fn main() -> Result<()> {
         if dirty { "-dirty" } else { "" }
     );
 
+    // Which channel this build belongs to, from the one implementation of the
+    // question.
+    //
+    // Shelling out to `scripts/version.sh` rather than re-deriving it here: a
+    // second implementation of "what channel is this" is exactly the drift that
+    // script exists to prevent, and this build script already shells out to git
+    // twice above.
+    //
+    // A missing or failing script is `dev`, deliberately, and for the reason
+    // version.sh gives about an unstamped bundle: defaulting the other way
+    // would let a build made outside the release path call itself a release.
+    println!("cargo:rerun-if-changed=../../scripts/version.sh");
+    println!("cargo:rerun-if-changed=../../.git/refs/tags");
+    let channel = std::process::Command::new("../../scripts/version.sh")
+        .arg("channel")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "dev".to_string());
+    println!("cargo:rustc-env=FARCOOLER_CHANNEL={channel}");
+
     let mut cfg = prost_build::Config::new();
     cfg.bytes(["."]);
     cfg.compile_protos(&["../../proto/farcooler.proto"], &["../../proto"])?;

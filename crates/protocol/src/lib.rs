@@ -31,6 +31,185 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// same build", and they are different questions.
 pub const BUILD: &str = env!("FARCOOLER_BUILD");
 
+/// Which installation this build belongs to.
+///
+/// Three channels are three separate installs that coexist on one machine —
+/// separate runtime directory, database, tmux server and binary name — so this
+/// is not a label. It decides where the daemon lives.
+///
+/// Compile time, never a flag or an environment variable. `scripts/version.sh`
+/// makes the same call about the channel it derives: "a flag is a thing to
+/// forget on the build that mattered." A daemon that could be told which
+/// channel it is could be told wrong, and being wrong means a beta writing into
+/// the release database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel {
+    Dev,
+    Beta,
+    Release,
+}
+
+impl Channel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Channel::Dev => "dev",
+            Channel::Beta => "beta",
+            Channel::Release => "release",
+        }
+    }
+
+    /// Anything unrecognized is `dev`.
+    ///
+    /// The safe direction: a dev build isolates itself from everything, so
+    /// guessing wrong costs a separate empty fleet. Guessing `release` wrong
+    /// costs someone else's.
+    pub fn from_str_or_dev(s: &str) -> Self {
+        Self::from_str_or_dev_const(s)
+    }
+
+    /// What this channel's daemon is called on disk.
+    ///
+    /// The SCHEME is frozen, not the literal: `farcoolerd[-<channel>]`. An App
+    /// Store binary hardcodes the path it asks a machine for, which makes the
+    /// shape of this name as public as any proto message — and release's has no
+    /// suffix precisely so that every client already in the field keeps
+    /// resolving exactly what it always did.
+    pub fn daemon_binary_name(self) -> &'static str {
+        match self {
+            Channel::Release => "farcoolerd",
+            Channel::Beta => "farcoolerd-beta",
+            Channel::Dev => "farcoolerd-dev",
+        }
+    }
+
+    /// What this channel's CLI is called on disk. Same rule as the daemon's.
+    pub fn cli_binary_name(self) -> &'static str {
+        match self {
+            Channel::Release => "farcooler",
+            Channel::Beta => "farcooler-beta",
+            Channel::Dev => "farcooler-dev",
+        }
+    }
+
+    /// The same rule in a form a `const` can call.
+    ///
+    /// `match` on a `&str` is not permitted in a const context, so this matches
+    /// on bytes. One implementation with two entry points rather than two
+    /// implementations: the round-trip test covers both.
+    const fn from_str_or_dev_const(s: &str) -> Self {
+        match s.as_bytes() {
+            b"release" => Channel::Release,
+            b"beta" => Channel::Beta,
+            _ => Channel::Dev,
+        }
+    }
+}
+
+/// The channel this binary was built for, stamped by `build.rs`.
+pub const CHANNEL: Channel = Channel::from_str_or_dev_const(env!("FARCOOLER_CHANNEL"));
+
+/// What a daemon can do, by name.
+///
+/// The mechanism that lets an app and a daemon drift apart, and the reason
+/// `PROTOCOL_VERSION` above is expected never to move. A client that needs to
+/// know whether a feature exists asks for it BY NAME rather than by comparing
+/// version strings — no arithmetic, no compatibility matrix, and a name that
+/// has shipped is permanent.
+///
+/// One table with three consumers: the daemon builds `ServerHello.capabilities`
+/// and `DaemonVersion.capabilities` from it, and the CLI reports it. A second
+/// copy is exactly the drift this exists to prevent.
+///
+/// Named per user-visible FEATURE, not per method. A client asks "does this
+/// machine do stacks", never "does it implement stack.set_parent".
+pub mod capability {
+    /// Workspaces, repositories and roots. The floor: a daemon without this is
+    /// not a daemon, and every build that has ever existed has it.
+    pub const WORKSPACES: &str = "workspaces";
+    /// Terminals, their screens and their input. Also the floor.
+    pub const TERMINALS: &str = "terminals";
+    /// Agent pane mode: the structured conversation, its prompts and its queue.
+    pub const AGENT: &str = "agent";
+    /// The review surface: change sets, diffs, commits, the inbox.
+    pub const CHANGES: &str = "changes";
+    /// Stacked branches and their pull requests.
+    pub const STACK: &str = "stack";
+    /// tmux tiling driven from a client.
+    pub const LAYOUT: &str = "layout";
+    /// Pasting a file into a terminal.
+    pub const PASTE: &str = "paste";
+    /// Reading and writing adapter configuration.
+    pub const ADAPTERS: &str = "adapters";
+    /// Themes and machine settings.
+    pub const THEMES: &str = "themes";
+
+    /// Every capability this build has, in a stable order.
+    ///
+    /// Stable so that two daemons of the same build produce byte-identical
+    /// hellos, which makes the list diffable in a log.
+    pub const ALL: &[&str] =
+        &[WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES];
+
+    /// The capability a method belongs to, or `None` if there is no such
+    /// method.
+    ///
+    /// Exhaustive by construction, exactly as the daemon's `required_scope` is:
+    /// a method with no row here is unreachable rather than silently ungated,
+    /// so adding a handler without adding a row fails loudly in tests instead
+    /// of shipping an unnamed feature.
+    pub fn for_method(method: &str) -> Option<&'static str> {
+        Some(match method {
+            "host.get" | "host.health" | "daemon.version" | "daemon.shutdown" => WORKSPACES,
+            "repository.list"
+            | "repository.register"
+            | "repository_root.list"
+            | "repository_root.add"
+            | "repository_root.remove"
+            | "workspace.list"
+            | "workspace.create"
+            | "workspace.hide"
+            | "workspace.unhide"
+            | "workspace.remove_worktree"
+            | "branch.list"
+            | "worktree.list"
+            | "worktree.file_search" => WORKSPACES,
+            "terminal.list"
+            | "terminal.create"
+            | "terminal.screen"
+            | "terminal.write"
+            | "terminal.resize"
+            | "terminal.stop"
+            | "terminal.seen"
+            | "terminal.remove"
+            | "terminal.dismiss_lost"
+            | "terminal.restart" => TERMINALS,
+            "terminal.paste_file" => PASTE,
+            "terminal.set_pane_mode"
+            | "terminal.agent_subscribe"
+            | "terminal.agent_prompt"
+            | "terminal.agent_answer"
+            | "terminal.agent_set_mode"
+            | "terminal.agent_set_model"
+            | "terminal.agent_set_config"
+            | "terminal.agent_edit_queued"
+            | "terminal.agent_cancel_queued"
+            | "terminal.agent_steer_queued"
+            | "terminal.agent_cancel" => AGENT,
+            "changes.change_set"
+            | "changes.commit_files"
+            | "changes.file_diff"
+            | "changes.set_base"
+            | "changes.mark_read"
+            | "changes.inbox" => CHANGES,
+            "stack.get" | "stack.set_parent" | "pr.refresh" => STACK,
+            m if m.starts_with("layout.") => LAYOUT,
+            "adapter.list" | "adapter.upsert" | "adapter.delete" | "adapter.test" => ADAPTERS,
+            "theme.list" | "theme.upsert" | "theme.delete" | "settings.set_branch_prefix" => THEMES,
+            _ => return None,
+        })
+    }
+}
+
 /// Control envelopes are capped at 1 MiB.
 pub const MAX_CONTROL_ENVELOPE_BYTES: usize = 1024 * 1024;
 
@@ -74,3 +253,96 @@ pub const MIN_COLUMNS: u32 = 20;
 pub const MAX_COLUMNS: u32 = 500;
 pub const MIN_ROWS: u32 = 5;
 pub const MAX_ROWS: u32 = 200;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_channel_round_trips_through_its_name() {
+        for c in [Channel::Dev, Channel::Beta, Channel::Release] {
+            assert_eq!(Channel::from_str_or_dev(c.as_str()), c);
+        }
+    }
+
+    #[test]
+    fn an_unknown_channel_is_dev_not_release() {
+        // Defaulting the other way would let a hand-made build pass itself off
+        // as a release. scripts/version.sh makes the same choice for the same
+        // reason.
+        assert_eq!(Channel::from_str_or_dev(""), Channel::Dev);
+        assert_eq!(Channel::from_str_or_dev("nonsense"), Channel::Dev);
+        assert_eq!(Channel::from_str_or_dev("RELEASE"), Channel::Dev);
+    }
+
+    #[test]
+    fn the_stamped_channel_is_one_of_the_three() {
+        assert!(matches!(CHANNEL, Channel::Dev | Channel::Beta | Channel::Release));
+    }
+
+    #[test]
+    fn every_capability_a_method_names_is_one_this_build_advertises() {
+        // A method mapped to a capability absent from `ALL` would be
+        // permanently unreachable: the daemon refuses anything whose capability
+        // it does not advertise, so the typo would present as a feature that
+        // silently does not exist.
+        for method in [
+            "workspace.create",
+            "terminal.create",
+            "terminal.paste_file",
+            "terminal.agent_prompt",
+            "changes.file_diff",
+            "stack.get",
+            "layout.split",
+            "adapter.list",
+            "theme.list",
+        ] {
+            let cap = capability::for_method(method).expect("a known method");
+            assert!(capability::ALL.contains(&cap), "{method} names {cap}, which is not advertised");
+        }
+    }
+
+    #[test]
+    fn an_unknown_method_names_no_capability() {
+        // What makes "this machine is too old" distinguishable from "no such
+        // thing": a method nobody implements has no capability, and the daemon
+        // turns that into CAPABILITY_UNSUPPORTED rather than NOT_FOUND.
+        assert_eq!(capability::for_method("something.invented"), None);
+        assert_eq!(capability::for_method(""), None);
+    }
+
+    #[test]
+    fn the_floor_capabilities_are_always_present() {
+        // Every daemon that has ever existed does workspaces and terminals, so
+        // a client may assume them without asking. If either ever left this
+        // list, every shipped client would break at once.
+        assert!(capability::ALL.contains(&capability::WORKSPACES));
+        assert!(capability::ALL.contains(&capability::TERMINALS));
+    }
+
+    #[test]
+    fn capability_names_are_unique() {
+        let unique: std::collections::BTreeSet<_> = capability::ALL.iter().collect();
+        assert_eq!(unique.len(), capability::ALL.len(), "a duplicate name hides one of them");
+    }
+
+    #[test]
+    fn release_binaries_keep_their_bare_names() {
+        // Every release client already in the field resolves
+        // `~/.local/bin/farcoolerd`. A suffix here strands all of them at once,
+        // and an App Store build cannot be corrected for days.
+        assert_eq!(Channel::Release.daemon_binary_name(), "farcoolerd");
+        assert_eq!(Channel::Release.cli_binary_name(), "farcooler");
+    }
+
+    #[test]
+    fn each_channel_has_its_own_binary_name() {
+        for names in [
+            [Channel::Dev, Channel::Beta, Channel::Release].map(Channel::daemon_binary_name),
+            [Channel::Dev, Channel::Beta, Channel::Release].map(Channel::cli_binary_name),
+        ] {
+            let unique: std::collections::BTreeSet<_> = names.iter().collect();
+            assert_eq!(unique.len(), 3, "two channels cannot share one path: {names:?}");
+        }
+    }
+}

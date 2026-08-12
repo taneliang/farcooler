@@ -8,12 +8,41 @@ use std::path::PathBuf;
 
 use farcooler_core::{DomainError, Result};
 
-/// `~/Library/Application Support/Far Cooler` on macOS.
+/// `~/Library/Application Support/com.farcooler.FarCooler` on macOS, for a
+/// release build.
 pub fn runtime_dir() -> Result<PathBuf> {
+    runtime_dir_for(farcooler_protocol::CHANNEL)
+}
+
+/// Where a given channel's install lives.
+///
+/// This is the seam the whole channel design turns on. Everything else the
+/// daemon owns is a path under this one — the socket, the database, the
+/// install-id and therefore the tmux server (`tmux -L farcooler-<install-id>`),
+/// the managed worktrees, the pastes — so choosing a directory per channel
+/// separates all of it at once.
+///
+/// Three application names rather than one name with a channel subdirectory,
+/// so the three are siblings: nesting a beta inside the release directory
+/// would mean deleting a release install takes the beta's database with it.
+///
+/// Release's name is what it was before channels existed and must stay that
+/// way. An existing user's entire fleet lives under it.
+///
+/// `FARCOOLER_HOME` still overrides everything and is checked first: it is how
+/// tests and scratch daemons get an isolated home, and the channel is only
+/// consulted when nobody has named a directory outright.
+pub fn runtime_dir_for(channel: farcooler_protocol::Channel) -> Result<PathBuf> {
+    use farcooler_protocol::Channel;
     if let Ok(over) = std::env::var("FARCOOLER_HOME") {
         return Ok(PathBuf::from(over));
     }
-    let dirs = directories::ProjectDirs::from("com", "farcooler", "FarCooler")
+    let app = match channel {
+        Channel::Release => "FarCooler",
+        Channel::Beta => "FarCoolerBeta",
+        Channel::Dev => "FarCoolerDev",
+    };
+    let dirs = directories::ProjectDirs::from("com", "farcooler", app)
         .ok_or(DomainError::OperationFailed)?;
     Ok(dirs.data_dir().to_path_buf())
 }
@@ -111,6 +140,45 @@ pub fn load_or_create_install_id_in(dir: &std::path::Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use farcooler_protocol::Channel;
+
+    /// The isolation everything else rests on.
+    ///
+    /// These read no environment and touch no disk, so they are safe to run in
+    /// parallel with every other test in this crate — which matters, because
+    /// `FARCOOLER_HOME` is process-global and a test that set it would move the
+    /// ground under the ones running beside it.
+    #[test]
+    fn each_channel_gets_its_own_runtime_directory() {
+        let dev = runtime_dir_for(Channel::Dev).unwrap();
+        let beta = runtime_dir_for(Channel::Beta).unwrap();
+        let release = runtime_dir_for(Channel::Release).unwrap();
+        assert_ne!(dev, beta);
+        assert_ne!(beta, release);
+        assert_ne!(dev, release);
+    }
+
+    #[test]
+    fn a_channel_directory_is_a_sibling_never_a_child() {
+        // Nesting beta inside release would mean deleting a release install
+        // deletes the beta's database with it.
+        let beta = runtime_dir_for(Channel::Beta).unwrap();
+        let release = runtime_dir_for(Channel::Release).unwrap();
+        assert!(!beta.starts_with(&release), "{beta:?} must not sit inside {release:?}");
+        assert!(!release.starts_with(&beta), "{release:?} must not sit inside {beta:?}");
+    }
+
+    #[test]
+    fn release_keeps_the_directory_it_has_always_had() {
+        // An existing install must not move. If this ever changes, every
+        // workspace and terminal a user already has disappears on upgrade.
+        let release = runtime_dir_for(Channel::Release).unwrap();
+        let historic = directories::ProjectDirs::from("com", "farcooler", "FarCooler")
+            .unwrap()
+            .data_dir()
+            .to_path_buf();
+        assert_eq!(release, historic);
+    }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
         let p = std::env::temp_dir()

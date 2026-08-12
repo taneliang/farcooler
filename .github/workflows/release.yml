@@ -19,9 +19,31 @@ on:
   # Buildable without a tag, so the signing and notarisation path can be
   # exercised before it matters.
   workflow_dispatch:
+  # Called by promote.yml, which tags in a prior job and passes the tag it made.
+  #
+  # The tag has to be passed rather than read from HEAD: promotion puts two tags
+  # on one commit — beta and release are different bundle identifiers, so a
+  # release is a rebuild of the beta's source rather than a re-upload of its
+  # binary — and `git tag --points-at` returns both. See scripts/version.sh.
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag being built, which decides the channel
+        required: false
+        type: string
 
 permissions:
   contents: write
+
+env:
+  # The tag being built, for scripts/version.sh.
+  #
+  # Set once here rather than per job, because build-app.sh,
+  # generate-project.py and build.gradle.kts each ask that script
+  # independently. Empty for a push-triggered build, where the tag on HEAD is
+  # unambiguous; only promotion, which puts two tags on one commit, needs to
+  # say which one it means.
+  FARCOOLER_TAG: ${{ inputs.tag }}
 
 jobs:
   linux:
@@ -36,6 +58,8 @@ jobs:
             target: aarch64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -82,6 +106,7 @@ jobs:
           # The build stamp is a git describe away, and a shallow clone makes
           # `git rev-list --count` — the App Store build number — wrong.
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -160,6 +185,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios, aarch64-apple-ios-sim
@@ -226,10 +252,20 @@ jobs:
   publish:
     name: Publish the release
     needs: [linux, macos]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # `inputs.tag` first, and it is not optional politeness.
+    #
+    # In a reusable workflow the `github` context belongs to the CALLER, so when
+    # promote.yml dispatches this from main, `github.ref` is `refs/heads/main`
+    # and this job would silently skip — the build would succeed, the tag would
+    # exist, and no release would ever appear. Same trap for `prerelease` below,
+    # where `github.ref_name` would be `main` and every beta would publish as a
+    # full release.
+    if: startsWith(inputs.tag, 'v') || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -239,9 +275,12 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+          # Named explicitly, because a workflow_call run is not a tag push and
+          # the action would otherwise have no tag to attach to.
+          tag_name: ${{ inputs.tag || github.ref_name }}
           # A beta is marked as one, so it does not become the download anyone
           # lands on — and so `-beta.3` is not silently the "latest release".
-          prerelease: ${{ contains(github.ref_name, '-beta.') }}
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-beta.') }}
           body: |
             Every binary here was built from this one commit. The Mac app,
             the phone app, the CLI and the daemon check each other's build

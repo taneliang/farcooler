@@ -223,9 +223,28 @@ impl Handler for Rpc {
     async fn handle(&self, req: Request) -> Response {
         let request_id = req.request_id.clone();
         let outcome = match required_scope(&req.method) {
-            None => Err(DomainError::NotFound),
+            // A method this daemon does not implement.
+            //
+            // `CapabilityUnsupported`, not `NotFound`: to a newer client asking
+            // for a feature this build predates, "no such method" and "no such
+            // workspace" were the same code, so it could neither dim the
+            // control nor say anything a person could act on.
+            None => Err(DomainError::CapabilityUnsupported {
+                needed: farcooler_protocol::capability::for_method(&req.method).unwrap_or("a newer Far Cooler"),
+            }),
             Some(required) if !satisfies(self.scope, required) => Err(DomainError::ScopeDenied { needed: scope_name(required) }),
-            Some(_) => self.dispatch(req).await,
+            // The envelope's capability precondition, checked here beside scope
+            // and before any domain logic — the same rule the target id and
+            // expected version follow, and for the same reason.
+            //
+            // This is what catches a NEW FIELD on an existing payload. An older
+            // daemon drops one as an unknown proto3 field and does the old
+            // thing, so the client believes it asked for something it did not
+            // get. Naming the capability turns that silence into a refusal.
+            Some(_) => match self.unsupported(&req.required_capabilities) {
+                Some(needed) => Err(DomainError::CapabilityUnsupported { needed }),
+                None => self.dispatch(req).await,
+            },
         };
 
         match outcome {
@@ -251,6 +270,21 @@ impl Handler for Rpc {
 }
 
 impl Rpc {
+    /// The first capability this daemon does not have, if the request names one.
+    ///
+    /// Returns a `&'static str` from this build's own table rather than the
+    /// caller's string, so nothing a client sends is ever echoed back into an
+    /// error message.
+    fn unsupported(&self, required: &[String]) -> Option<&'static str> {
+        required.iter().find_map(|name| {
+            farcooler_protocol::capability::ALL
+                .iter()
+                .find(|known| *known == name)
+                .is_none()
+                .then_some("a newer Far Cooler")
+        })
+    }
+
     /// The envelope's target, which every single-resource mutation needs.
     fn target(req: &Request) -> Result<Uuid> {
         req.target_resource_id
@@ -425,7 +459,12 @@ impl Rpc {
                 farcooler_protocol::v1::DaemonVersion {
                     daemon_version: self.daemon_version.clone(),
                     protocol_versions: vec![farcooler_protocol::PROTOCOL_VERSION],
-                    capabilities: vec!["workspaces".into(), "terminals".into()],
+                    // From the one table, exactly as `ServerHello` is, so the
+                    // two cannot disagree about what this daemon can do.
+                    capabilities: farcooler_protocol::capability::ALL
+                        .iter()
+                        .map(|c| (*c).to_string())
+                        .collect(),
                 },
             )),
 

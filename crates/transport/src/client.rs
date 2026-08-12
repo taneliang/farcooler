@@ -180,6 +180,12 @@ pub fn request(method: &str) -> Request {
         expected_resource_version: None,
         expected_lease_generation: None,
         idempotency_key: None,
+        // Empty by default, which is the honest answer for every call that
+        // asks only for what has always existed. A caller filling in a field a
+        // newer daemon added names the capability it belongs to; see
+        // `Request.required_capabilities` in the proto for why that is on the
+        // envelope rather than checked at each call site.
+        required_capabilities: Vec::new(),
         payload: Some(farcooler_protocol::v1::request::Payload::Empty(
             farcooler_protocol::v1::Empty {},
         )),

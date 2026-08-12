@@ -114,6 +114,39 @@ import Testing
     #expect(event == .gap(.unparsed))
 }
 
+@Test func anUnknownToolStatusIsNotMistakenForStillRunning() throws {
+    // The gap an unknown VARIANT name does not cover: a variant this build
+    // knows, carrying an enum value it does not.
+    //
+    // This used to throw, and `AgentStream` caught it with `try?` inside a
+    // `compactMap` — so the whole tool call vanished from the transcript with
+    // nothing to mark its place. It must decode, and it must not land on
+    // `pending`, which the UI spins on: every status likely to be invented
+    // (cancelled, rejected, timed out) is terminal, so pending would leave a
+    // finished call spinning forever.
+    let json = #"{"ToolCall":{"id":"t1","title":"Read","kind":"read","status":"Cancelled","locations":[]}}"#
+    let event = try AgentEvent.decode(from: json)
+    guard case let .toolCall(_, _, _, status, _, _, _) = event else {
+        Issue.record("expected a tool call, got \(event)")
+        return
+    }
+    #expect(status == .unknown)
+    #expect(status != .pending, "an unreadable status must not read as still running")
+}
+
+@Test func anUnknownRoleStillShowsWhatWasSaid() throws {
+    // A role is not worth losing a message over: whatever it is called, it came
+    // from the agent's side of the conversation.
+    let json = #"{"Message":{"role":"Narrator","text":"hello"}}"#
+    let event = try AgentEvent.decode(from: json)
+    guard case let .message(role, text, _) = event else {
+        Issue.record("expected a message, got \(event)")
+        return
+    }
+    #expect(role == .agent)
+    #expect(text == "hello")
+}
+
 @Test func aRealSessionStartedFromTheDaemonDecodes() throws {
     // The exact bytes a live daemon emitted. A decoder that throws here is not
     // a test failure in the abstract: `AgentStream` drops undecodable events

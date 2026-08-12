@@ -29,6 +29,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonUnquotedLiteral
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
@@ -472,6 +473,13 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
             version = body["daemonVersion"]?.jsonPrimitive?.contentOrNull ?: "unknown",
             matches = body["buildsMatch"]?.jsonPrimitive?.booleanOrNull ?: true,
             platform = body["platform"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            // Absent from a daemon older than capabilities. `DaemonBuild.can`
+            // reads an empty set as the features that existed then, so an old
+            // machine keeps working rather than going dark.
+            capabilities = body["capabilities"]?.jsonArray
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                ?.toSet()
+                .orEmpty(),
         )
         // Read from the same call, which is already made once per connection.
         //

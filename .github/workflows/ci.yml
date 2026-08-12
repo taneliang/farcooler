@@ -31,6 +31,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Can a client already in the field still talk to this?
+  #
+  # Its own job rather than a step inside `rust`, because it answers a different
+  # question than "does this compile and pass". An App Store review takes days
+  # and a daemon update takes one command, so there is always an app in the
+  # field older than the machine it is talking to — and it decodes by tag
+  # number, with no way to learn that a meaning changed.
+  #
+  # Needs no toolchain and no checkout depth: the baseline is a committed file
+  # rather than something discovered from git history. See the script for why.
+  wire:
+    name: Wire compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The lint's own tests first. Before the first release there is no
+      # baseline to compare against, so without these every check in it would
+      # sit unexercised until exactly the moment it mattered.
+      - run: ./scripts/proto-lint.py --self-test
+      - run: ./scripts/proto-lint.py --channel beta
+      - run: ./scripts/proto-lint.py --channel release
+      # What version.sh answers decides where a daemon installs — its runtime
+      # directory, database, tmux server and binary name — so a wrong channel is
+      # not a cosmetic version string.
+      - run: ./scripts/version-test.sh
+
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

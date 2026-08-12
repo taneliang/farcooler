@@ -122,8 +122,17 @@ pub unsafe extern "C" fn farcooler_client_connect(
             Ok(destination) => match Session::connect_ssh(&destination).await {
                 Ok(open) => {
                     let version = open.daemon_version().to_string();
+                    // What that machine can do, so the app can dim what it
+                    // cannot serve rather than offering a control that fails.
+                    // Normalized here rather than in each app: iOS and Android
+                    // must not disagree about what a machine supports.
+                    let capabilities: Vec<String> = farcooler_protocol::capability::ALL
+                        .iter()
+                        .filter(|c| open.can(c))
+                        .map(|c| (*c).to_string())
+                        .collect();
                     *session.lock().await = Some(open);
-                    Ok(json!({ "daemon_version": version }))
+                    Ok(json!({ "daemon_version": version, "capabilities": capabilities }))
                 }
                 Err(e) => Err(e.to_string()),
             },
@@ -559,11 +568,24 @@ async fn dispatch(
         // that makes a fix you already shipped go on reproducing — so a client
         // that cannot see it is a client that cannot explain itself.
         "host" => {
+            // What this machine can do, by name — from the handshake, so it
+            // costs nothing here.
+            //
+            // Beside `buildsMatch` rather than replacing it: the two answer
+            // different questions. That one is "are these the same build", this
+            // is "what can that machine do", and only the second is something a
+            // client can act on when it is newer than the machine it reached.
+            let capabilities: Vec<&str> = farcooler_protocol::capability::ALL
+                .iter()
+                .copied()
+                .filter(|c| session.can(c))
+                .collect();
             let facts = session.host().await?;
             Ok(json!({
                 "daemonVersion": facts.daemon_version,
                 "clientVersion": farcooler_protocol::BUILD,
                 "buildsMatch": facts.daemon_version == farcooler_protocol::BUILD,
+                "capabilities": capabilities,
                 "platform": facts.platform,
                 "livePanes": facts.live_terminal_count,
                 "healthy": facts.self_health

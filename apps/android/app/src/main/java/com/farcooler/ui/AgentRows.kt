@@ -765,6 +765,9 @@ fun toolStatusColor(status: ToolStatus): Color = when (status) {
     ToolStatus.IN_PROGRESS -> MaterialTheme.colorScheme.onSurfaceVariant
     ToolStatus.COMPLETED -> Color(0xFF4CAF50)
     ToolStatus.FAILED -> MaterialTheme.colorScheme.error
+    // A status from a newer daemon. Neutral on purpose: it finished, and
+    // claiming either success or failure would be inventing a detail.
+    ToolStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 @Composable

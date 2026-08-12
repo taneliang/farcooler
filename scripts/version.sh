@@ -61,15 +61,51 @@ build() {
 #   clean tag v0.2.0-beta.3  → beta
 #   anything else            → dev  (untagged, or a dirty tree, which is not
 #                                    something anyone should be shipping)
+#
+# Takes an OPTIONAL tag, which is the tag being built. It is needed because
+# promotion puts two tags on one commit: beta and release have different bundle
+# identifiers, so they are genuinely different artifacts, and promoting means
+# rebuilding the beta's source at the release channel rather than re-uploading
+# its binary. Without the argument, `git tag --points-at HEAD` returns both and
+# `head -1` picks whichever sorts first — `v0.2.0` before `v0.2.0-beta.3` — so
+# after a promotion that commit would report `release` forever, and anyone
+# rebuilding the beta from it would get a binary that installs at the release
+# path and writes the release runtime directory.
+#
+# Not a flag someone remembers: the workflow created the tag one job earlier and
+# passes it through. With no argument the old behaviour stands, so a local build
+# is unaffected and still defaults to dev.
 channel() {
   if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
     echo dev
     return
   fi
-  case "$(git tag --points-at HEAD 2>/dev/null | grep '^v' | head -1)" in
+  # An argument, else `FARCOOLER_TAG`, else the tag on HEAD.
+  #
+  # The environment variable is how the promotion workflow reaches the build
+  # scripts. `build-app.sh`, `generate-project.py` and `build.gradle.kts` each
+  # ask this script independently, so threading an argument to all of them would
+  # mean four places to forget it — and the whole point is that a promoted
+  # commit must not be able to report the wrong channel.
+  #
+  # This is not the flag the comment above argues against. Nobody types it: the
+  # workflow created the tag one job earlier and passes what it made. Unset — a
+  # local build, always — the behaviour is exactly what it was.
+  #
+  # `|| true` because `grep` exits 1 when a commit carries no tags, which is the
+  # ordinary case for every dev build. Harmless inside the `case` this used to
+  # be, but fatal in an assignment under `set -e`: the script would abort and
+  # print nothing, so a caller reading an empty channel gets neither an answer
+  # nor an error.
+  tag="${1:-${FARCOOLER_TAG:-$(git tag --points-at HEAD 2>/dev/null | grep '^v' | head -1 || true)}}"
+  case "$tag" in
     "") echo dev ;;
     *-beta.*) echo beta ;;
-    *) echo release ;;
+    v*) echo release ;;
+    # Something that is not a version tag at all. Dev, for the same reason an
+    # unstamped bundle is: a name we cannot read must not be able to promote
+    # itself to release.
+    *) echo dev ;;
   esac
 }
 
@@ -79,10 +115,12 @@ channel() {
 # saying so is noise. A beta and a dev build must announce themselves, because
 # the whole point is that someone looking at a bug report can tell.
 display() {
-  case "$(channel)" in
+  case "$(channel "$1")" in
     release) marketing ;;
     beta)
-      n=$(git tag --points-at HEAD 2>/dev/null | grep '^v.*-beta\.' | head -1 | sed 's/.*-beta\.//')
+      # From the named tag when there is one, so a promoted commit still says
+      # which beta it was rather than reading the release tag beside it.
+      n=$(printf '%s' "${1:-$(git tag --points-at HEAD 2>/dev/null | grep '^v.*-beta\.' | head -1)}" | sed 's/.*-beta\.//')
       echo "$(marketing) (beta ${n:-?})"
       ;;
     *) echo "$(marketing) (dev $(git rev-parse --short HEAD 2>/dev/null || echo unknown))" ;;
@@ -92,10 +130,10 @@ display() {
 case "${1:-marketing}" in
   marketing) marketing ;;
   build) build ;;
-  channel) channel ;;
-  display) display ;;
+  channel) channel "${2:-}" ;;
+  display) display "${2:-}" ;;
   *)
-    echo "usage: version.sh [marketing|build|channel|display]" >&2
+    echo "usage: version.sh [marketing|build|channel [tag]|display [tag]]" >&2
     exit 1
     ;;
 esac

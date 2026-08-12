@@ -58,8 +58,15 @@ pub struct ReviewCache {
     /// Keyed by the cheap gate, so a quiet worktree costs two stats and no git
     /// at all. This is what makes "diff status across every worktree at a glance"
     /// affordable rather than a fleet-wide `git` loop on a timer.
-    shortstats: Mutex<HashMap<Uuid, ((u128, u128), (u32, u32, u32))>>,
+    shortstats: Mutex<HashMap<Uuid, CachedShortstat>>,
 }
+
+/// The gate the numbers were computed at, and the numbers.
+///
+/// Named rather than written inline: nested tuples that deep say nothing about
+/// which `u32` is which, and the gate half is a pair whose meaning lives on
+/// `cheap_gate` below.
+type CachedShortstat = ((u128, u128), (u32, u32, u32));
 
 /// mtimes of the two files that move whenever git does something structural.
 ///

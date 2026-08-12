@@ -79,6 +79,19 @@ async fn a_client_connects_and_learns_the_daemon_version() {
 }
 
 #[tokio::test]
+async fn a_client_learns_what_the_machine_can_do_before_asking_it_anything() {
+    // The mechanism a newer app uses to degrade against an older machine. It
+    // has to be answered by the handshake rather than by a call, because the
+    // app decides what to draw before it has made one.
+    let daemon = start().await;
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    assert!(session.can(farcooler_protocol::capability::WORKSPACES));
+    assert!(session.can(farcooler_protocol::capability::CHANGES));
+    assert!(!session.can("time-travel"), "a machine must not claim what it cannot do");
+}
+
+#[tokio::test]
 async fn the_fleet_shape_is_the_one_a_phone_decodes() {
     // These key names are the app's contract. Changing one breaks a client that
     // cannot be updated at the same moment, which is the whole hazard of having

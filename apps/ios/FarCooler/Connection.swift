@@ -427,7 +427,11 @@ final class Connection: ObservableObject {
         daemon = DaemonBuild(
             version: body["daemonVersion"] as? String ?? "unknown",
             matches: body["buildsMatch"] as? Bool ?? true,
-            platform: body["platform"] as? String ?? "")
+            platform: body["platform"] as? String ?? "",
+            // Absent from a daemon older than capabilities. `DaemonBuild.can`
+            // reads an empty set as the features that existed then, so an old
+            // machine keeps working rather than going dark.
+            capabilities: Set(body["capabilities"] as? [String] ?? []))
         // Read from the same call, which is already made once per connection.
         //
         // Defaulted to the daemon's own default rather than to no prefix: an

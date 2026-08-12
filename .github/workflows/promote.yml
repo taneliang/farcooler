@@ -1,0 +1,152 @@
+# Promoting a commit to beta, and a beta to release.
+#
+# Two buttons. Dev is every push to main and needs nothing here; beta and
+# release are deliberate acts, so they are `workflow_dispatch` rather than a
+# branch trigger. There are no channel branches — a tag names what a build is,
+# and main is the only line.
+#
+# ONE WORKFLOW, NOT TWO, and that is load-bearing: a tag pushed with the default
+# GITHUB_TOKEN does not trigger another workflow. GitHub suppresses those events
+# to prevent recursion, so a button that tagged and stopped would silently never
+# build anything. The build job `needs:` the tag job instead, which also means
+# no personal access token has to exist.
+#
+# The version itself is never an input. `[workspace.package] version` in
+# Cargo.toml is the only literal in the repository, and crates/protocol/build.rs
+# stamps FARCOOLER_BUILD from it — so a tag naming a version Cargo.toml
+# disagreed with would have the binary and the plist reporting different
+# releases to each other. Moving the version is an ordinary pull request.
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Which channel to promote to
+        required: true
+        type: choice
+        options: [beta, release]
+      confirm_version:
+        description: The version you believe you are shipping: e.g. 0.2.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Tag
+    runs-on: ubuntu-latest
+    # A GitHub environment with required reviewers pauses here with the inputs
+    # visible. The typed version above catches being wrong; this catches being
+    # fast. A tag cannot be taken back once a build from it reaches TestFlight —
+    # App Store Connect will not accept that version again.
+    environment: promote
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Every tag, because picking the next beta number means reading the
+          # ones that exist. A shallow clone would silently restart at 1 and
+          # collide with a tag someone already installed.
+          fetch-depth: 0
+
+      - name: Pick the tag
+        id: pick
+        run: |
+          set -euo pipefail
+          version="$(./scripts/version.sh)"
+
+          # The typed confirmation. Cheap, and the failure it prevents is
+          # permanent.
+          if [ "${{ inputs.confirm_version }}" != "$version" ]; then
+            echo "You typed '${{ inputs.confirm_version }}' but Cargo.toml says '$version'." >&2
+            echo "Move the version in an ordinary pull request first, or fix the typo." >&2
+            exit 1
+          fi
+
+          if [ "${{ inputs.channel }}" = "beta" ]; then
+            # Highest existing beta plus one, NOT a count: counting regenerates
+            # a number that already exists the moment any beta tag is deleted or
+            # made by hand.
+            highest="$(git tag --list "v$version-beta.*" \
+              | sed 's/.*-beta\.//' | sort -n | tail -1 || true)"
+            tag="v$version-beta.$(( ${highest:-0} + 1 ))"
+
+            # A rename must go forward. Going back is rejected at upload and
+            # unfixable afterwards, the same class of mistake version.sh already
+            # warns about for build numbers.
+            newest="$(git tag --list 'v*' | sed 's/^v//;s/-beta\..*//' \
+              | sort -V | tail -1 || true)"
+            if [ -n "$newest" ] && [ "$newest" != "$version" ]; then
+              lower="$(printf '%s\n%s\n' "$version" "$newest" | sort -V | head -1)"
+              if [ "$lower" = "$version" ]; then
+                echo "Cargo.toml says $version but $newest has already shipped." >&2
+                echo "A version can only go forward: App Store Connect will not" >&2
+                echo "accept a build numbered below one it already has." >&2
+                exit 1
+              fi
+            fi
+          else
+            tag="v$version"
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists. Nothing here force-moves a tag someone" >&2
+            echo "may already have installed." >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Tagging $tag"
+
+      - name: Create the tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.pick.outputs.tag }}" \
+            -m "Far Cooler ${{ steps.pick.outputs.tag }}"
+          git push origin "${{ steps.pick.outputs.tag }}"
+
+  build:
+    name: Build ${{ inputs.channel }}
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    with:
+      # The tag being built, so version.sh answers for THIS channel rather than
+      # for whichever tag sorts first on the commit. Promotion puts two tags on
+      # one commit — beta and release have different bundle identifiers and are
+      # therefore different artifacts — and without this a promoted commit
+      # reports `release` forever, including to anyone rebuilding the beta.
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit
+
+  baseline:
+    name: Record the wire baseline
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Commit the baseline this channel now owes compatibility to
+        run: |
+          set -euo pipefail
+          mkdir -p proto/baseline
+          cp proto/farcooler.proto "proto/baseline/${{ inputs.channel }}.proto"
+          if git diff --quiet; then
+            echo "baseline unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "proto/baseline/${{ inputs.channel }}.proto"
+          git commit -m "chore: ${{ inputs.channel }} wire baseline at ${{ needs.tag.outputs.tag }}
+
+          What this channel now owes compatibility to. Recorded by the promotion
+          that shipped it rather than derived from git history — see
+          scripts/proto-lint.py for why the file exists."
+          git push origin main

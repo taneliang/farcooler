@@ -609,6 +609,58 @@ pub async fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeInfo>> {
     Ok(found)
 }
 
+/// The marker naming which install owns a worktree, inside git's own admin
+/// directory.
+const OWNER_MARKER: &str = "farcooler-install-id";
+
+/// Git's admin directory for a worktree.
+///
+/// `<repo>/.git/worktrees/<name>` for a linked worktree, `<repo>/.git` for the
+/// main checkout. The right place for a marker: invisible to `git status`, so
+/// it never turns up in anyone's diff, and removed by `git worktree prune`
+/// along with the worktree it describes.
+///
+/// Not `git config --worktree`, which requires turning on
+/// `extensions.worktreeConfig` for the whole repository — a change with its own
+/// effects on how `core.worktree` resolves, and not ours to make to someone
+/// else's repo just to leave a note.
+async fn admin_dir(worktree: &Path) -> Result<PathBuf> {
+    let r = git(worktree, &["rev-parse", "--absolute-git-dir"]).await?;
+    if !r.ok {
+        return Err(DomainError::OperationFailed);
+    }
+    Ok(PathBuf::from(r.stdout.trim()))
+}
+
+/// Record which install owns a worktree.
+///
+/// Best effort by design. A marker that could not be written leaves the
+/// worktree looking unowned, which is exactly the behaviour that existed before
+/// ownership did — whereas failing workspace creation over a note would be a
+/// worse outcome than the hazard it guards.
+pub async fn mark_owner(worktree: &Path, install_id: &str) {
+    match admin_dir(worktree).await {
+        Ok(dir) => {
+            if let Err(e) = std::fs::write(dir.join(OWNER_MARKER), install_id) {
+                tracing::warn!(error = %e, "could not mark worktree ownership");
+            }
+        }
+        Err(e) => tracing::warn!(error = ?e, "could not locate the worktree admin dir"),
+    }
+}
+
+/// Which install owns a worktree, if any claims it.
+///
+/// `None` means unowned — a worktree someone made by hand — and unowned is
+/// adoptable, because picking those up is the whole point of adoption. Only a
+/// mark naming a DIFFERENT install is a refusal.
+pub async fn owner_of(worktree: &Path) -> Option<String> {
+    let dir = admin_dir(worktree).await.ok()?;
+    let s = std::fs::read_to_string(dir.join(OWNER_MARKER)).ok()?;
+    let s = s.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
 #[cfg(test)]
 mod worktree_tests {
     use super::*;

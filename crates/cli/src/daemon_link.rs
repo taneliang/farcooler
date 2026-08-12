@@ -56,6 +56,15 @@ impl Link {
         &self.client.server_hello().daemon_version
     }
 
+    /// What the daemon on the other end can do, by name.
+    ///
+    /// Also free, and for the same reason. The Mac app drives remote machines
+    /// through this CLI rather than through the FFI, so `host status --json`
+    /// is how it learns the same thing the phones learn from the handshake.
+    pub fn daemon_capabilities(&self) -> &[String] {
+        &self.client.server_hello().capabilities
+    }
+
     /// The transport underneath, for callers reusing shared request-building
     /// code from `farcooler_client::actions` instead of building requests
     /// inline.

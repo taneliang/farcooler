@@ -215,7 +215,37 @@ data class Repository(
 data class RepositoryList(val repositories: List<Repository> = emptyList())
 
 /** What the daemon on the other end is, asked once per connection. */
-data class DaemonBuild(val version: String, val matches: Boolean, val platform: String)
+/**
+ * What the daemon on the other end said about itself.
+ *
+ * [capabilities] is distinct from [matches], and they answer different
+ * questions. That one is "were these built from the same source"; this is "what
+ * can that machine do", which is the one an app acts on when it is newer than
+ * the machine it reached — Play review and `host install` do not tick together.
+ */
+data class DaemonBuild(
+    val version: String,
+    val matches: Boolean,
+    val platform: String,
+    val capabilities: Set<String> = emptySet(),
+) {
+    /**
+     * Whether this machine can do something, by name.
+     *
+     * A control whose capability is missing is shown DIMMED with a reason,
+     * never hidden: the same app showing different controls on two machines
+     * with nothing said about why reads as a bug.
+     *
+     * An empty set means a daemon old enough to predate the question, so it has
+     * exactly the feature set that existed then. Reading silence as "can do
+     * nothing" would blank the UI against every older machine, which is the
+     * opposite of the point. Matches the iOS reading exactly.
+     */
+    fun can(capability: String): Boolean {
+        if (capabilities.isEmpty()) return capability == "workspaces" || capability == "terminals"
+        return capabilities.contains(capability)
+    }
+}
 
 /**
  * The terminal a host lands on when its worktree list is skipped.

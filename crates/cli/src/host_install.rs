@@ -25,6 +25,41 @@ use tokio::process::Command;
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
+/// This build's daemon binary. See `Channel::daemon_binary_name`.
+fn daemon_name() -> &'static str {
+    farcooler_protocol::CHANNEL.daemon_binary_name()
+}
+
+/// This build's CLI binary.
+fn cli_name() -> &'static str {
+    farcooler_protocol::CHANNEL.cli_binary_name()
+}
+
+/// The systemd unit file name for this channel.
+///
+/// Channel-specific for the same reason the binary is: installing a beta must
+/// not replace the release daemon's supervision. It would, silently, and the
+/// symptom would be a machine that stops coming back after a reboot as the
+/// wrong channel.
+fn systemd_unit_name() -> &'static str {
+    use farcooler_protocol::Channel;
+    match farcooler_protocol::CHANNEL {
+        Channel::Release => "farcooler.service",
+        Channel::Beta => "farcooler-beta.service",
+        Channel::Dev => "farcooler-dev.service",
+    }
+}
+
+/// The launchd label for this channel. Same rule as the systemd unit.
+fn launchd_label() -> &'static str {
+    use farcooler_protocol::Channel;
+    match farcooler_protocol::CHANNEL {
+        Channel::Release => "com.farcooler.daemon.remote",
+        Channel::Beta => "com.farcooler.daemon.remote.beta",
+        Channel::Dev => "com.farcooler.daemon.remote.dev",
+    }
+}
+
 /// The launchd user agent, for a macOS host.
 ///
 /// `KeepAlive` with `SuccessfulExit=false` is launchd's spelling of systemd's
@@ -32,13 +67,19 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 /// comes back. `ThrottleInterval` is the same guard as `RestartSec` — launchd's
 /// default of 10s is already sane, but stating it keeps the two units
 /// comparable.
-const LAUNCH_AGENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+fn launch_agent() -> String {
+    LAUNCH_AGENT_TEMPLATE
+        .replace("__LABEL__", launchd_label())
+        .replace("__DAEMON__", daemon_name())
+}
+
+const LAUNCH_AGENT_TEMPLATE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.farcooler.daemon.remote</string>
+  <key>Label</key><string>__LABEL__</string>
   <key>ProgramArguments</key>
-  <array><string>__HOME__/.local/bin/farcoolerd</string></array>
+  <array><string>__HOME__/.local/bin/__DAEMON__</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key>
   <dict><key>SuccessfulExit</key><false/></dict>
@@ -53,8 +94,12 @@ const LAUNCH_AGENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 "#;
 
-/// The systemd user unit. Written to ~/.config/systemd/user/farcooler.service.
-const UNIT: &str = "\
+/// The systemd user unit. Written to `~/.config/systemd/user/<unit name>`.
+fn unit() -> String {
+    UNIT_TEMPLATE.replace("__DAEMON__", daemon_name())
+}
+
+const UNIT_TEMPLATE: &str = "\
 [Unit]
 Description=Far Cooler daemon
 Documentation=https://github.com/farcooler
@@ -62,7 +107,7 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/farcoolerd
+ExecStart=%h/.local/bin/__DAEMON__
 Restart=on-failure
 # systemd's default is 100ms, which turns a crash into a hot loop.
 RestartSec=5s
@@ -108,8 +153,8 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
         Some(p) => p.to_path_buf(),
         None => locate_dist(&slug),
     };
-    let daemon = dir.join("farcoolerd");
-    let cli = dir.join("farcooler");
+    let daemon = dir.join(daemon_name());
+    let cli = dir.join(cli_name());
     for path in [&daemon, &cli] {
         if !path.is_file() {
             // A packaged app has no `scripts/build-linux.sh` to point at — its
@@ -120,13 +165,18 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
             let hint = if has_dev_checkout() {
                 format!(
                     "Build them first:\n\n    ./scripts/build-linux.sh {arch}\n\n\
-                     or pass --from <dir> with `farcooler` and `farcoolerd` inside."
+                     or pass --from <dir> with `{cli}` and `{daemon}` inside.",
+                    cli = cli_name(),
+                    daemon = daemon_name()
                 )
             } else {
-                "This copy of Far Cooler was not built with a Linux install \
-                 bundled in.\nPass --from <dir> with `farcooler` and `farcoolerd` \
-                 inside, built for this host's architecture."
-                    .to_string()
+                format!(
+                    "This copy of Far Cooler was not built with a Linux install \
+                     bundled in.\nPass --from <dir> with `{cli}` and `{daemon}` \
+                     inside, built for this machine's architecture.",
+                    cli = cli_name(),
+                    daemon = daemon_name()
+                )
             };
             return Err(format!("No Linux binary at {}.\n{hint}", path.display()).into());
         }
@@ -140,7 +190,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
 
     remote_run(target, "mkdir -p ~/.local/bin").await?;
 
-    for (path, name) in [(&daemon, "farcoolerd"), (&cli, "farcooler")] {
+    for (path, name) in [(&daemon, daemon_name()), (&cli, cli_name())] {
         println!("==> Installing {name}");
         upload_verified(target, path, name).await?;
     }
@@ -188,7 +238,8 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
         Persistence::Systemd => {
             println!("==> Registering the systemd user service");
             remote_run(target, "mkdir -p ~/.config/systemd/user").await?;
-            remote_write(target, "~/.config/systemd/user/farcooler.service", UNIT).await?;
+            let unit_path = format!("~/.config/systemd/user/{}", systemd_unit_name());
+            remote_write(target, &unit_path, &unit()).await?;
 
             // Lingering needs no privilege for one's own account on most
             // distributions, and without it the daemon dies at logout.
@@ -213,8 +264,11 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
             // and the agents in it are not in the daemon's kill scope.
             remote_run(
                 target,
-                "systemctl --user daemon-reload && systemctl --user enable farcooler.service \
-                 && systemctl --user restart farcooler.service",
+                &format!(
+                    "systemctl --user daemon-reload && systemctl --user enable {unit} \
+                     && systemctl --user restart {unit}",
+                    unit = systemd_unit_name()
+                ),
             )
             .await?;
             Ok(Persistence::Systemd)
@@ -226,9 +280,9 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
             // `$HOME` is not expanded inside a plist, so the path is baked in
             // at write time from the host's own answer.
             let home = remote_capture(target, "echo $HOME").await?;
-            let plist = LAUNCH_AGENT.replace("__HOME__", home.trim());
-            remote_write(target, "~/Library/LaunchAgents/com.farcooler.daemon.remote.plist", &plist)
-                .await?;
+            let plist = launch_agent().replace("__HOME__", home.trim());
+            let plist_path = format!("~/Library/LaunchAgents/{}.plist", launchd_label());
+            remote_write(target, &plist_path, &plist).await?;
 
             // `bootstrap gui/$UID` needs a GUI session to bootstrap INTO, and
             // over ssh to a Mac at a login window there is not one. That is not
@@ -237,9 +291,12 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
             // on demand for anyone who connects.
             let loaded = remote_capture(
                 target,
-                "launchctl bootstrap gui/$(id -u) \
-                 ~/Library/LaunchAgents/com.farcooler.daemon.remote.plist 2>&1 \
-                 || echo FARCOOLER_BOOTSTRAP_FAILED",
+                &format!(
+                    "launchctl bootstrap gui/$(id -u) \
+                     ~/Library/LaunchAgents/{}.plist 2>&1 \
+                     || echo FARCOOLER_BOOTSTRAP_FAILED",
+                    launchd_label()
+                ),
             )
             .await?;
             if loaded.contains("FARCOOLER_BOOTSTRAP_FAILED") {
@@ -258,8 +315,7 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
             // are not launchd's to kill.
             remote_run(
                 target,
-                "launchctl kickstart -k gui/$(id -u)/com.farcooler.daemon.remote \
-                 || true",
+                &format!("launchctl kickstart -k gui/$(id -u)/{} || true", launchd_label()),
             )
             .await?;
             Ok(Persistence::Launchd)
@@ -289,7 +345,7 @@ fn locate_dist(slug: &str) -> PathBuf {
     if let Ok(exe) = std::env::current_exe().and_then(|exe| exe.canonicalize()) {
         if let Some(dir) = exe.parent() {
             let bundled = dir.join("dist").join(slug);
-            if bundled.join("farcoolerd").is_file() && bundled.join("farcooler").is_file() {
+            if bundled.join(daemon_name()).is_file() && bundled.join(cli_name()).is_file() {
                 return bundled;
             }
         }
@@ -314,18 +370,27 @@ fn has_dev_checkout() -> bool {
 /// prints `key=value` and cannot fail the whole command — a host missing
 /// `loginctl` must still report its architecture.
 pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
-    let script = "        echo \"os=$(uname -s)\"; \
+    // Asks about THIS channel's install, not about Far Cooler in general. A
+    // beta CLI probing a machine reports what the beta daemon is doing there;
+    // a release install on the same machine is a separate thing and answers
+    // separately.
+    let script = format!(
+        "        echo \"os=$(uname -s)\"; \
         echo \"arch=$(uname -m)\"; \
         echo \"kernel=$(uname -r)\"; \
         echo \"tmux=$(command -v tmux || echo none)\"; \
         echo \"systemd=$(systemctl --user show-environment >/dev/null 2>&1 && echo yes || echo no)\"; \
         echo \"launchd=$(command -v launchctl >/dev/null 2>&1 && echo yes || echo no)\"; \
-        echo \"daemon=$(~/.local/bin/farcoolerd --version 2>/dev/null || echo none)\"; \
-        echo \"cli=$(~/.local/bin/farcooler --version 2>/dev/null || echo none)\"; \
-        echo \"service=$(systemctl --user is-active farcooler.service 2>/dev/null || echo unknown)\"; \
-        echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"";
+        echo \"daemon=$(~/.local/bin/{daemon} --version 2>/dev/null || echo none)\"; \
+        echo \"cli=$(~/.local/bin/{cli} --version 2>/dev/null || echo none)\"; \
+        echo \"service=$(systemctl --user is-active {unit} 2>/dev/null || echo unknown)\"; \
+        echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"",
+        daemon = daemon_name(),
+        cli = cli_name(),
+        unit = systemd_unit_name()
+    );
 
-    let report = remote_capture(target, script).await?;
+    let report = remote_capture(target, &script).await?;
     let mut fields: std::collections::HashMap<&str, &str> = Default::default();
     for line in report.lines() {
         if let Some((key, value)) = line.split_once('=') {
@@ -504,12 +569,17 @@ impl Persistence {
 pub async fn status(target: &str) -> Fallible {
     let report = remote_capture(
         target,
-        "echo \"os=$(uname -s)\"; echo \"arch=$(uname -m)\"; \
-         echo \"tmux=$(command -v tmux || echo none)\"; \
-         echo \"daemon=$(~/.local/bin/farcoolerd --version 2>/dev/null || echo none)\"; \
-         echo \"cli=$(~/.local/bin/farcooler --version 2>/dev/null || echo none)\"; \
-         echo \"service=$(systemctl --user is-active farcooler.service 2>/dev/null || echo inactive)\"; \
-         echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"",
+        &format!(
+            "echo \"os=$(uname -s)\"; echo \"arch=$(uname -m)\"; \
+             echo \"tmux=$(command -v tmux || echo none)\"; \
+             echo \"daemon=$(~/.local/bin/{daemon} --version 2>/dev/null || echo none)\"; \
+             echo \"cli=$(~/.local/bin/{cli} --version 2>/dev/null || echo none)\"; \
+             echo \"service=$(systemctl --user is-active {unit} 2>/dev/null || echo inactive)\"; \
+             echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"",
+            daemon = daemon_name(),
+            cli = cli_name(),
+            unit = systemd_unit_name()
+        ),
     )
     .await?;
 
@@ -773,26 +843,46 @@ mod tests {
         // agent on a macOS host takes the tmux server and every agent in it
         // down with the job.
         assert!(
-            LAUNCH_AGENT.contains("<key>AbandonProcessGroup</key><true/>"),
+            launch_agent().contains("<key>AbandonProcessGroup</key><true/>"),
             "a restart would kill the tmux server and every agent in it"
         );
     }
 
     #[test]
     fn the_unit_starts_the_daemon_from_the_users_own_bin() {
+        let unit = unit();
         // %h so the unit is not tied to one username, and no absolute /home.
-        assert!(UNIT.contains("ExecStart=%h/.local/bin/farcoolerd"));
-        assert!(UNIT.contains("WantedBy=default.target"));
+        assert!(unit.contains(&format!("ExecStart=%h/.local/bin/{}", daemon_name())));
+        assert!(unit.contains("WantedBy=default.target"));
         // Restarting the supervisor must not take the supervised with it.
         // systemd's default cgroup kill would end the tmux server and every
         // agent in it, which is the one thing this design promises it will not
         // do — and without it an upgrade cannot restart the daemon at all.
         assert!(
-            UNIT.contains("KillMode=process"),
+            unit.contains("KillMode=process"),
             "a restart would kill the tmux server and every agent in it"
         );
         // A crash loop with systemd's 100ms default would hammer the machine.
-        assert!(UNIT.contains("RestartSec=5s"));
+        assert!(unit.contains("RestartSec=5s"));
+        // Every placeholder was filled. A stray __DAEMON__ would be written to
+        // the host verbatim and systemd would fail to start a binary of that
+        // name, which is a confusing way to find out.
+        assert!(!unit.contains("__"), "unsubstituted placeholder in the unit");
+    }
+
+    #[test]
+    fn a_channels_service_names_do_not_collide() {
+        // Installing a beta must not replace the release daemon's supervision.
+        // It would, silently, and the machine would come back from a reboot as
+        // whichever channel was installed last.
+        use farcooler_protocol::Channel;
+        assert_eq!(Channel::Release.daemon_binary_name(), "farcoolerd");
+        // The unit and label this build uses are consistent with its binary:
+        // all three are derived from the same CHANNEL, so a build cannot write
+        // one channel's unit pointing at another channel's binary.
+        assert!(unit().contains(daemon_name()));
+        assert!(launch_agent().contains(daemon_name()));
+        assert!(launch_agent().contains(launchd_label()));
     }
 
     #[test]
