@@ -138,7 +138,7 @@ async fn a_workspace_created_through_the_client_comes_back_in_the_fleet() {
 
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
     let workspace = session
-        .create_workspace(repository, "phone task", "feat/phone", "HEAD", "")
+        .create_workspace(repository, "phone task", "feat/phone", "HEAD", "", false)
         .await
         .expect("create_workspace");
     assert_eq!(workspace.task_name, "phone task");
@@ -178,7 +178,7 @@ async fn hiding_and_unhiding_round_trips_through_the_client() {
     let repositories = session.repositories().await.expect("repositories");
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
     let workspace = session
-        .create_workspace(repository, "reversible", "feat/rev", "HEAD", "")
+        .create_workspace(repository, "reversible", "feat/rev", "HEAD", "", false)
         .await
         .expect("create");
     let id = farcooler_client::session::uuid_of(&workspace.id);
@@ -223,7 +223,7 @@ async fn subscribing_to_a_terminal_with_no_agent_session_is_empty_not_an_error()
     let repositories = session.repositories().await.expect("repositories");
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
     let workspace = session
-        .create_workspace(repository, "agent test", "feat/agent-empty", "HEAD", "")
+        .create_workspace(repository, "agent test", "feat/agent-empty", "HEAD", "", false)
         .await
         .expect("create_workspace");
     let workspace_id = farcooler_client::session::uuid_of(&workspace.id);
@@ -274,7 +274,7 @@ async fn removing_a_clean_worktree_needs_no_typed_name() {
     let repositories = session.repositories().await.expect("repositories");
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
     let workspace = session
-        .create_workspace(repository, "clean removal", "feat/clean-removal", "HEAD", "")
+        .create_workspace(repository, "clean removal", "feat/clean-removal", "HEAD", "", false)
         .await
         .expect("create");
     let id = farcooler_client::session::uuid_of(&workspace.id);
@@ -306,7 +306,7 @@ async fn removing_a_dirty_worktree_needs_the_task_name_typed() {
     let repositories = session.repositories().await.expect("repositories");
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
     let workspace = session
-        .create_workspace(repository, "dirty removal", "feat/dirty-removal", "HEAD", "")
+        .create_workspace(repository, "dirty removal", "feat/dirty-removal", "HEAD", "", false)
         .await
         .expect("create");
     let id = farcooler_client::session::uuid_of(&workspace.id);
