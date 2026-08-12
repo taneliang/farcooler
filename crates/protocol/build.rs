@@ -55,6 +55,22 @@ fn main() -> Result<()> {
     // would let a build made outside the release path call itself a release.
     println!("cargo:rerun-if-changed=../../scripts/version.sh");
     println!("cargo:rerun-if-changed=../../.git/refs/tags");
+    // The environment `version.sh` reads, or the answer is cached forever.
+    //
+    // Cargo re-runs a build script when its declared inputs change, and an
+    // environment variable is only an input once it is declared one. Without
+    // these, `FARCOOLER_CHANNEL=stable cargo build` on a tree whose script and
+    // tags had not moved reused the channel from the FIRST build of that tree
+    // and said nothing — so the flag appeared to work, the binary was stamped
+    // `local`, and it quietly used a different runtime directory and a
+    // different database than the one it was built to replace.
+    //
+    // Which is the failure this feature is least able to afford: the whole
+    // point of a channel is that it decides which install a binary is, and a
+    // promotion build that silently keeps a stale answer is one that ships
+    // canary as stable or the reverse.
+    println!("cargo:rerun-if-env-changed=FARCOOLER_CHANNEL");
+    println!("cargo:rerun-if-env-changed=FARCOOLER_TAG");
     let channel = std::process::Command::new("../../scripts/version.sh")
         .arg("channel")
         .output()
