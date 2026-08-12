@@ -109,12 +109,44 @@ async fn run() -> Result<(), i32> {
     // `UnixListenerServer::bind` unlinks a stale socket, so a crashed daemon
     // cannot lock the user out forever. That is right for a dead socket and
     // wrong for a live one, so probe first: if something answers, this process
-    // is redundant and exits quietly. That is what makes two clients racing to
-    // auto-start the daemon harmless.
+    // is redundant and exits quietly.
     if tokio::net::UnixStream::connect(&socket).await.is_ok() {
         tracing::info!("a daemon is already listening; exiting");
         return Ok(());
     }
+
+    // And then take the lock, because the probe above is a check against a
+    // condition this process is about to change, with a great deal of work in
+    // between.
+    //
+    // That gap was wide — `Service::open` opens SQLite and inventories tmux,
+    // `backfill_pane_tags` walks every pane, and only then does the bind
+    // happen — so daemons started in the same moment all probed, all found
+    // nothing, all did the setup, and all bound. The last one unlinked the
+    // others' socket and won. The losers did not exit: they went on running
+    // forever, holding the database and sampling every pane once a second
+    // through a `Watcher` no client could reach.
+    //
+    // It is not a rare race. Sixty-three of these were found alive on one
+    // machine, in groups sharing a start time to the second, and they are the
+    // likeliest reason `capture-pane` on that machine had slowed from
+    // milliseconds to the better part of a second.
+    //
+    // An advisory `flock` closes it properly: the kernel hands it to exactly
+    // one process, and releases it when that process exits — including when it
+    // crashes, so there is no stale lock to clear and no pid file to disbelieve.
+    let lock_path = socket.with_extension("lock");
+    let _lock = match acquire_daemon_lock(&lock_path) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            tracing::info!("another daemon holds the lock for this runtime directory; exiting");
+            return Ok(());
+        }
+        Err(e) => {
+            eprintln!("cannot lock {}: {e}", lock_path.display());
+            return Err(1);
+        }
+    };
 
     let service = Arc::new(Service::open().await.map_err(|e| {
         eprintln!("cannot open the service: {e}");
@@ -344,4 +376,48 @@ impl Handler for RpcFactory {
     fn events(&self) -> Option<tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>> {
         Some(self.watcher.subscribe())
     }
+}
+
+/// The daemon's exclusive claim on one runtime directory.
+///
+/// The lock lives as long as this value does, which is the whole process — the
+/// kernel drops it when the file descriptor closes, so an ordinary exit, a
+/// panic and a `kill -9` all release it identically. That is why this is a
+/// `flock` and not a pid file: there is no stale state to detect, no pid to
+/// check for reuse, and nothing to clean up after a crash.
+struct DaemonLock {
+    /// Never read, and load-bearing anyway: the lock is the open descriptor.
+    ///
+    /// `#[allow(dead_code)]` rather than leaving the warning, because "field is
+    /// never read" is precisely the advice that would get this deleted — and
+    /// deleting it closes the file, releases the lock, and restores the bug
+    /// with nothing failing to say so.
+    #[allow(dead_code)]
+    file: std::fs::File,
+}
+
+/// Take the lock, or report that somebody else has it.
+///
+/// `Ok(None)` is not a failure — it is the answer "another daemon is already
+/// the owner here", which is the ordinary outcome whenever two clients race to
+/// auto-start one.
+fn acquire_daemon_lock(path: &std::path::Path) -> std::io::Result<Option<DaemonLock>> {
+    use std::os::unix::io::AsRawFd;
+
+    let file = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(path)?;
+
+    // SAFETY: `file` owns a valid descriptor for the duration of the call, and
+    // `flock` only ever reads it.
+    let taken = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
+    if !taken {
+        let error = std::io::Error::last_os_error();
+        // `EWOULDBLOCK` is somebody else holding it, which is an answer.
+        // Anything else — a read-only directory, a filesystem with no locking —
+        // is a real failure and must not be mistaken for a healthy duplicate.
+        if error.kind() != std::io::ErrorKind::WouldBlock {
+            return Err(error);
+        }
+        return Ok(None);
+    }
+    Ok(Some(DaemonLock { file }))
 }

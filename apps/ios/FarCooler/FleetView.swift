@@ -914,7 +914,16 @@ struct FleetList: View {
         if kind == .lost {
             Button("Dismiss") { onAction(.dismissLost, terminal) }.tint(.gray)
         }
-        Button("Restart") { onAction(.restart, terminal) }.tint(.blue)
+        // Nothing destructive for a terminal whose machine did not answer.
+        // Restart kills the pane and starts a new epoch: the right answer for a
+        // process that is gone, and the wrong one for a process that is fine
+        // behind a tmux server that was busy for a moment — which is exactly
+        // what `unknown` means. The daemon already refuses `dismiss` in this
+        // state; this keeps the phone from offering the more damaging of the
+        // two at all.
+        if kind != .unknown {
+            Button("Restart") { onAction(.restart, terminal) }.tint(.blue)
+        }
         if kind == .running || kind == .starting {
             Button("Stop", role: .destructive) { onAction(.stop, terminal) }
         }

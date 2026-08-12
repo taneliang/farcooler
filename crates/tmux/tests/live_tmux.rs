@@ -9,10 +9,53 @@ use farcooler_core::inventory::RuntimeInventory;
 use farcooler_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
-fn unique_server() -> TmuxServer {
+fn unique_server() -> Reaped {
     // A fresh socket per test: never the user's default server.
     let install = format!("test-{}", Uuid::now_v7().simple());
-    TmuxServer::new(&install, Uuid::now_v7())
+    Reaped(TmuxServer::new(&install, Uuid::now_v7()))
+}
+
+/// A server that dies with its test, however the test ends.
+///
+/// Every test here already calls `kill_server()` on its last line, and that
+/// only runs when a test REACHES its last line. A failed assertion panics
+/// straight past it, and the tmux server it left behind outlives the run
+/// permanently — nothing else knows its socket name, so nothing will ever
+/// reap it.
+///
+/// That is not a tidiness argument. On the development machine this was found
+/// on there were 362 live tmux servers and 2 454 sockets under `/tmp`, each
+/// holding a session, a pane and an interactive shell. tmux is single-threaded
+/// per server and they compete for the same CPU: `capture-pane` against the
+/// real fleet was timed at 50ms at rest and 740ms under that load. It got far
+/// enough to break this very file, where
+/// `an_exited_command_is_observed_as_dead_not_silently_gone` began failing on
+/// every run because the machine could no longer do in 400ms what it used to.
+///
+/// A leak whose symptom is your own test suite going red is worth a `Drop`.
+struct Reaped(TmuxServer);
+
+impl std::ops::Deref for Reaped {
+    type Target = TmuxServer;
+    fn deref(&self) -> &TmuxServer {
+        &self.0
+    }
+}
+
+impl Drop for Reaped {
+    fn drop(&mut self) {
+        // Synchronous, and deliberately not `kill_server().await`. `Drop`
+        // cannot await, and a task spawned here would need a runtime that is
+        // in the middle of being torn down to poll it. A blocking `kill-server`
+        // against a socket that is usually already gone costs a few
+        // milliseconds and always happens.
+        let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
+        let _ = std::process::Command::new(tmux)
+            .args(["-L", self.0.socket(), "kill-server"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
 }
 
 /// A fresh, isolated server, or `None` if there is no live tmux to test
@@ -22,12 +65,38 @@ fn unique_server() -> TmuxServer {
 /// given everywhere this suite runs. A missing tmux has to make the test a
 /// skip, never a failure, or CI images without tmux installed would be red
 /// for a reason that has nothing to do with the code under test.
-async fn live_server() -> Option<TmuxServer> {
+async fn live_server() -> Option<Reaped> {
     let has_tmux = tokio::process::Command::new("tmux").arg("-V").output().await.is_ok();
     if !has_tmux {
         return None;
     }
     Some(unique_server())
+}
+
+/// Wait for something to become true, rather than for a fixed number of
+/// milliseconds and a hope.
+///
+/// A flat sleep encodes an assumption about how fast the machine is, and that
+/// assumption decays: it holds on an idle laptop, and stops holding on the same
+/// laptop once something else is busy on it. The failure then looks like the
+/// code under test regressing, which is the most expensive kind of wrong.
+///
+/// The deadline is generous because it is only ever reached when the test is
+/// genuinely going to fail; the polling interval is what decides how long a
+/// passing test takes, and that is short.
+async fn until<F, Fut>(what: &str, mut condition: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        if condition().await {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("timed out waiting for {what}");
 }
 
 #[tokio::test]
@@ -97,7 +166,17 @@ async fn an_exited_command_is_observed_as_dead_not_silently_gone() {
 
     // Exits immediately with a distinctive code.
     srv.create_terminal_window(ws, t, "quick", "/tmp", "sh -c 'exit 42'").await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    // Waited for, not slept through. "Immediately" is the shell's word for it,
+    // not the scheduler's: `sh` still has to be exec'd, run and reaped, and how
+    // long that takes depends on what else the machine is doing. The assertions
+    // below are unchanged — only the waiting is.
+    until("the pane to report its exit", || async {
+        srv.list_tagged_panes().await.is_ok_and(|panes| {
+            panes.iter().any(|p| p.terminal_id == t && p.dead)
+        })
+    })
+    .await;
 
     let panes = srv.list_tagged_panes().await.unwrap();
     let p = panes

@@ -165,9 +165,39 @@ impl Runtime {
         // is deliberately not replayed; the client accumulates its own scrollback
         // from the live stream onward.
         //
-        // Re-read the pane geometry first so a resize that just happened has
-        // settled before the capture.
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        // Nothing is waited for before the capture. There used to be a flat
+        // 120ms sleep here, to let "a resize that just happened settle" — but
+        // no resize is ever in flight at this point, because every client
+        // AWAITS its own resize before it spawns this command at all (see
+        // `TerminalSurface.attach` on the Mac and `TerminalSession.open` on the
+        // phone), and tmux has reflowed the pane by the time that call returns.
+        // What the sleep actually waited for is the program's repaint after
+        // SIGWINCH, which is not needed either: tmux re-renders the capture at
+        // the pane's current size, and the program's own repaint arrives on the
+        // live pipe below and simply paints over it.
+        //
+        // It was pure latency, and it was the largest single component of it:
+        // every pane opened — every layout switch, every tab, every reconnect —
+        // sat blank for those 120ms before a byte could be sent.
+
+        // Asked for together, written in order.
+        //
+        // These are three separate `tmux` processes, and they used to be awaited
+        // one after another purely because that is the order their answers are
+        // written in. Nothing in the second depends on the first, so the wait
+        // was three process spawns and three connects end to end when it only
+        // ever needed to be one — and on a busy server, where each of those
+        // queues behind whatever the sampler is doing, three queues hurt three
+        // times as much as one.
+        //
+        // Only the READS overlap. The writes below stay strictly ordered,
+        // because the order is the whole meaning: modes, then clear, then
+        // contents, then cursor.
+        let (modes, screen, cursor) = tokio::join!(
+            self.tmux.pane_modes(&pane.pane_id),
+            self.tmux.capture_screen(&pane.pane_id),
+            self.tmux.cursor_position(&pane.pane_id),
+        );
 
         // The modes first, because a capture is contents and modes are not
         // contents. Whether the program wants the mouse, whether it is on the
@@ -181,11 +211,11 @@ impl Runtime {
         //
         // Emitted before the clear, because switching to the alternate screen
         // is what decides which screen the clear and the contents land on.
-        if let Ok(modes) = self.tmux.pane_modes(&pane.pane_id).await {
+        if let Ok(modes) = modes {
             let _ = stdout.write_all(modes.restore_sequence().as_bytes()).await;
         }
 
-        if let Ok(screen) = self.tmux.capture_screen(&pane.pane_id).await {
+        if let Ok(screen) = screen {
             // Home the cursor and clear, so the replay paints a clean screen.
             let _ = stdout.write_all(b"\x1b[H\x1b[2J").await;
 
@@ -205,11 +235,11 @@ impl Runtime {
             // appears one row too high, and the caret is left on a blank bottom
             // row. Both symptoms, one newline.
 
-            // A captured screen is text and carries no cursor, so ask tmux
-            // where it actually is. Without this the caret sits wherever the
-            // last replayed character ended, which is the bottom-left corner,
-            // not the prompt the user is typing into.
-            if let Ok((column, row)) = self.tmux.cursor_position(&pane.pane_id).await {
+            // A captured screen is text and carries no cursor, so tmux was
+            // asked where it actually is. Without this the caret sits wherever
+            // the last replayed character ended, which is the bottom-left
+            // corner, not the prompt the user is typing into.
+            if let Ok((column, row)) = cursor {
                 // The wire format is one-based.
                 let _ = stdout.write_all(format!("\x1b[{};{}H", row + 1, column + 1).as_bytes()).await;
             }

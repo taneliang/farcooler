@@ -764,6 +764,18 @@ enum TerminalState {
   TERMINAL_STATE_EXITED = 3;
   TERMINAL_STATE_ERROR = 4;
   TERMINAL_STATE_LOST = 5;
+  // We could not look, so we are not saying.
+  //
+  // Distinct from LOST, which is a finding: the live inventory was read and
+  // nothing in it proves this terminal is alive. UNKNOWN is the absence of a
+  // reading — tmux did not answer in time, usually because one pane's blocked
+  // write has the single-threaded server stalled. Reporting that as LOST says
+  // every terminal on the machine died, when what happened is that nobody got
+  // to ask them.
+  //
+  // Like LOST it never claims a terminal is running, so the derivation rule is
+  // unweakened. Unlike LOST it is not grounds for dismissing a terminal.
+  TERMINAL_STATE_UNKNOWN = 6;
 }
 
 message ExitStatus {

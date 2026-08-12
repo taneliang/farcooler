@@ -41,6 +41,55 @@ use serde_json::{Value, json};
 use crate::session::{Session, SessionError, uuid_of};
 use crate::ssh::{Destination, HostKeyPolicy};
 
+/// Run an entry point's body so that a panic cannot leave this crate.
+///
+/// A panic unwinding out of an `extern "C"` function aborts the process — that
+/// is the defined behaviour, not an accident — so without this, any panic
+/// anywhere under the boundary is `SIGABRT` in the host app with nothing in the
+/// report but the signal. The app is a phone in someone's hand; a recoverable
+/// fault must not be able to close it.
+///
+/// The fallback is each function's own "this did not happen" value: 0 for a
+/// ticket, false for a predicate, null for a pointer. Every one of those is a
+/// value the callers already handle, because they are the same values these
+/// functions return when they are simply asked for something impossible.
+///
+/// `AssertUnwindSafe` because the arguments are raw pointers and handles from
+/// C, which carry no `UnwindSafe` claim and could not: their safety contract is
+/// the module's, stated once at the top, and it is the caller's to keep.
+fn guarded<T>(fallback: T, body: impl FnOnce() -> T) -> T {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+        Ok(value) => value,
+        Err(payload) => {
+            let what = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "a panic with no message".to_string());
+            tracing::error!(panic = %what, "the client core panicked at the C boundary");
+            fallback
+        }
+    }
+}
+
+/// Take a lock without caring whether a previous holder panicked.
+///
+/// `Mutex::lock` returns `Err` once any thread has panicked while holding it,
+/// and the `.expect(…)` this replaces turned that into a panic of its own — one
+/// that then unwound through `extern "C"` and aborted the app. So a single
+/// recoverable fault in a spawned task, which tokio would otherwise absorb,
+/// permanently poisoned the queue and made every subsequent `poll` from Swift
+/// fatal.
+///
+/// Ignoring the poison is right here rather than merely convenient. What these
+/// locks hold is a queue of finished results, a ticket counter, and a map of
+/// running streams. None of them has an invariant that a panic elsewhere could
+/// have broken mid-update, and refusing to read them ever again is strictly
+/// worse than reading them.
+fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// A client handle: a runtime, a session, and a queue of finished work.
 pub struct ClientHandle {
     runtime: tokio::runtime::Runtime,
@@ -59,35 +108,39 @@ pub struct ClientHandle {
 /// Create a client. Free with `farcooler_client_free`.
 #[unsafe(no_mangle)]
 pub extern "C" fn farcooler_client_new() -> *mut c_void {
-    // A dedicated multi-threaded runtime: SSH keepalives have to keep running
-    // while a call is in flight, which a single-threaded runtime driven only
-    // during calls could not do.
-    let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-    else {
-        return std::ptr::null_mut();
-    };
+    guarded(std::ptr::null_mut(), || {
+        // A dedicated multi-threaded runtime: SSH keepalives have to keep running
+        // while a call is in flight, which a single-threaded runtime driven only
+        // during calls could not do.
+        let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+        else {
+            return std::ptr::null_mut();
+        };
 
-    let handle = Box::new(ClientHandle {
-        runtime,
-        session: Arc::new(tokio::sync::Mutex::new(None)),
-        finished: Arc::new(Mutex::new(VecDeque::new())),
-        next_ticket: Arc::new(Mutex::new(1)),
-        scratch: None,
-        streams: Arc::new(Mutex::new(std::collections::HashMap::new())),
-    });
-    Box::into_raw(handle) as *mut c_void
+        let handle = Box::new(ClientHandle {
+            runtime,
+            session: Arc::new(tokio::sync::Mutex::new(None)),
+            finished: Arc::new(Mutex::new(VecDeque::new())),
+            next_ticket: Arc::new(Mutex::new(1)),
+            scratch: None,
+            streams: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        });
+        Box::into_raw(handle) as *mut c_void
+    })
 }
 
 /// Destroy a client, ending any SSH session it holds. Safe with null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_free(handle: *mut c_void) {
-    if handle.is_null() {
-        return;
-    }
-    drop(unsafe { Box::from_raw(handle as *mut ClientHandle) });
+    guarded((), || {
+        if handle.is_null() {
+            return;
+        }
+        drop(unsafe { Box::from_raw(handle as *mut ClientHandle) });
+    })
 }
 
 /// Connect to a host.
@@ -110,38 +163,40 @@ pub unsafe extern "C" fn farcooler_client_connect(
     handle: *mut c_void,
     config: *const c_char,
 ) -> u64 {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
-    let Some(config) = (unsafe { read_str(config) }) else { return 0 };
+    guarded(0, || {
+        let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
+        let Some(config) = (unsafe { read_str(config) }) else { return 0 };
 
-    let ticket = h.take_ticket();
-    let session = Arc::clone(&h.session);
-    let finished = Arc::clone(&h.finished);
+        let ticket = h.take_ticket();
+        let session = Arc::clone(&h.session);
+        let finished = Arc::clone(&h.finished);
 
-    h.runtime.spawn(async move {
-        let outcome = match parse_destination(&config) {
-            Ok(destination) => match Session::connect_ssh(&destination).await {
-                Ok(open) => {
-                    let version = open.daemon_version().to_string();
-                    // What that machine can do, so the app can dim what it
-                    // cannot serve rather than offering a control that fails.
-                    // Normalized here rather than in each app: iOS and Android
-                    // must not disagree about what a machine supports.
-                    let capabilities: Vec<String> = farcooler_protocol::capability::ALL
-                        .iter()
-                        .filter(|c| open.can(c))
-                        .map(|c| (*c).to_string())
-                        .collect();
-                    *session.lock().await = Some(open);
-                    Ok(json!({ "daemon_version": version, "capabilities": capabilities }))
-                }
-                Err(e) => Err(e.to_string()),
-            },
-            Err(message) => Err(message),
-        };
-        push(&finished, ticket, outcome);
-    });
+        h.runtime.spawn(async move {
+            let outcome = match parse_destination(&config) {
+                Ok(destination) => match Session::connect_ssh(&destination).await {
+                    Ok(open) => {
+                        let version = open.daemon_version().to_string();
+                        // What that machine can do, so the app can dim what it
+                        // cannot serve rather than offering a control that fails.
+                        // Normalized here rather than in each app: iOS and Android
+                        // must not disagree about what a machine supports.
+                        let capabilities: Vec<String> = farcooler_protocol::capability::ALL
+                            .iter()
+                            .filter(|c| open.can(c))
+                            .map(|c| (*c).to_string())
+                            .collect();
+                        *session.lock().await = Some(open);
+                        Ok(json!({ "daemon_version": version, "capabilities": capabilities }))
+                    }
+                    Err(e) => Err(e.to_string()),
+                },
+                Err(message) => Err(message),
+            };
+            push(&finished, ticket, outcome);
+        });
 
-    ticket
+        ticket
+    })
 }
 
 /// Invoke a method. `args` is JSON; the shape depends on the method.
@@ -153,58 +208,60 @@ pub unsafe extern "C" fn farcooler_client_call(
     method: *const c_char,
     args: *const c_char,
 ) -> u64 {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
-    let Some(method) = (unsafe { read_str(method) }) else { return 0 };
-    let args = unsafe { read_str(args) }.unwrap_or_else(|| "{}".into());
+    guarded(0, || {
+        let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
+        let Some(method) = (unsafe { read_str(method) }) else { return 0 };
+        let args = unsafe { read_str(args) }.unwrap_or_else(|| "{}".into());
 
-    let ticket = h.take_ticket();
-    let session = Arc::clone(&h.session);
-    let finished = Arc::clone(&h.finished);
+        let ticket = h.take_ticket();
+        let session = Arc::clone(&h.session);
+        let finished = Arc::clone(&h.finished);
 
-    h.runtime.spawn(async move {
-        let parsed: Value = serde_json::from_str(&args).unwrap_or(json!({}));
-        let mut guard = session.lock().await;
-        let outcome = match guard.as_mut() {
-            None => Err(Lost::Already),
-            Some(session) => dispatch(session, &method, &parsed).await.map_err(Lost::Call),
-        };
+        h.runtime.spawn(async move {
+            let parsed: Value = serde_json::from_str(&args).unwrap_or(json!({}));
+            let mut guard = session.lock().await;
+            let outcome = match guard.as_mut() {
+                None => Err(Lost::Already),
+                Some(session) => dispatch(session, &method, &parsed).await.map_err(Lost::Call),
+            };
 
-        // A transport failure is not this request's problem; it is every
-        // future request's problem.
-        //
-        // Emptying the slot is what makes `farcooler_client_connected` an
-        // answer about now rather than about history: it reported whether a
-        // session had ever been put here, and nothing ever took one out, so a
-        // session whose ssh transport died an hour ago still read as
-        // connected. It is also what makes the next call fail in microseconds
-        // with "not connected" rather than spending another TCP timeout
-        // learning the same thing.
-        let lost = match &outcome {
-            Err(Lost::Call(e)) => e.is_disconnect(),
-            // An empty slot is reported as a drop too, and it has to be.
+            // A transport failure is not this request's problem; it is every
+            // future request's problem.
             //
-            // The first call to notice a dead link is whichever one the user
-            // happened to make — a keystroke, a resize — and it empties the
-            // slot on its way out. If this answered `false`, the poll that
-            // arrives a moment later would be told "not connected" with
-            // nothing to mark it as a disconnection, and a client whose only
-            // detector is that poll would sit at `connected` forever with
-            // every call failing. Saying so twice costs nothing: both clients
-            // ignore a drop reported while they are already reconnecting.
-            Err(Lost::Already) => true,
-            Ok(_) => false,
-        };
-        if lost {
-            *guard = None;
-        }
-        // Released before pushing, so a client that reconnects the instant it
-        // reads this answer is not queued behind this call's own lock.
-        drop(guard);
+            // Emptying the slot is what makes `farcooler_client_connected` an
+            // answer about now rather than about history: it reported whether a
+            // session had ever been put here, and nothing ever took one out, so a
+            // session whose ssh transport died an hour ago still read as
+            // connected. It is also what makes the next call fail in microseconds
+            // with "not connected" rather than spending another TCP timeout
+            // learning the same thing.
+            let lost = match &outcome {
+                Err(Lost::Call(e)) => e.is_disconnect(),
+                // An empty slot is reported as a drop too, and it has to be.
+                //
+                // The first call to notice a dead link is whichever one the user
+                // happened to make — a keystroke, a resize — and it empties the
+                // slot on its way out. If this answered `false`, the poll that
+                // arrives a moment later would be told "not connected" with
+                // nothing to mark it as a disconnection, and a client whose only
+                // detector is that poll would sit at `connected` forever with
+                // every call failing. Saying so twice costs nothing: both clients
+                // ignore a drop reported while they are already reconnecting.
+                Err(Lost::Already) => true,
+                Ok(_) => false,
+            };
+            if lost {
+                *guard = None;
+            }
+            // Released before pushing, so a client that reconnects the instant it
+            // reads this answer is not queued behind this call's own lock.
+            drop(guard);
 
-        push_call(&finished, ticket, outcome, lost);
-    });
+            push_call(&finished, ticket, outcome, lost);
+        });
 
-    ticket
+        ticket
+    })
 }
 
 /// Paste an image into a terminal.
@@ -232,57 +289,59 @@ pub unsafe extern "C" fn farcooler_client_paste_file(
     data: *const u8,
     len: usize,
 ) -> u64 {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
-    let Some(terminal) = (unsafe { read_str(terminal) }) else { return 0 };
-    let name = unsafe { read_str(name) }.unwrap_or_default();
-    let mime = unsafe { read_str(mime) }.unwrap_or_else(|| "application/octet-stream".into());
-    if data.is_null() || len == 0 {
-        return 0;
-    }
-    let image = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
-
-    let ticket = h.take_ticket();
-    let session = Arc::clone(&h.session);
-    let finished = Arc::clone(&h.finished);
-
-    h.runtime.spawn(async move {
-        let mut guard = session.lock().await;
-        let outcome = match (guard.as_mut(), terminal.parse::<uuid::Uuid>().ok()) {
-            (None, _) => Err(Lost::Already),
-            (Some(_), None) => {
-                Err(Lost::Call(SessionError::Protocol("that is not a terminal id".into())))
-            }
-            (Some(session), Some(id)) => {
-                let queue = Arc::clone(&finished);
-                session
-                    .paste_file(id, &name, &mime, &image, |sent, total| {
-                        queue.lock().expect("queue").push_back(
-                            json!({"ticket": ticket, "progress": {"sent": sent, "total": total}})
-                                .to_string(),
-                        );
-                    })
-                    .await
-                    .map(|path| json!({ "path": path }))
-                    .map_err(Lost::Call)
-            }
-        };
-
-        // Same rule as `farcooler_client_call`: a dead link is every future
-        // call's problem, not just this one's.
-        let lost = match &outcome {
-            Err(Lost::Call(e)) => e.is_disconnect(),
-            Err(Lost::Already) => true,
-            Ok(_) => false,
-        };
-        if lost {
-            *guard = None;
+    guarded(0, || {
+        let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
+        let Some(terminal) = (unsafe { read_str(terminal) }) else { return 0 };
+        let name = unsafe { read_str(name) }.unwrap_or_default();
+        let mime = unsafe { read_str(mime) }.unwrap_or_else(|| "application/octet-stream".into());
+        if data.is_null() || len == 0 {
+            return 0;
         }
-        drop(guard);
+        let image = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
 
-        push_call(&finished, ticket, outcome, lost);
-    });
+        let ticket = h.take_ticket();
+        let session = Arc::clone(&h.session);
+        let finished = Arc::clone(&h.finished);
 
-    ticket
+        h.runtime.spawn(async move {
+            let mut guard = session.lock().await;
+            let outcome = match (guard.as_mut(), terminal.parse::<uuid::Uuid>().ok()) {
+                (None, _) => Err(Lost::Already),
+                (Some(_), None) => {
+                    Err(Lost::Call(SessionError::Protocol("that is not a terminal id".into())))
+                }
+                (Some(session), Some(id)) => {
+                    let queue = Arc::clone(&finished);
+                    session
+                        .paste_file(id, &name, &mime, &image, |sent, total| {
+                            locked(&queue).push_back(
+                                json!({"ticket": ticket, "progress": {"sent": sent, "total": total}})
+                                    .to_string(),
+                            );
+                        })
+                        .await
+                        .map(|path| json!({ "path": path }))
+                        .map_err(Lost::Call)
+                }
+            };
+
+            // Same rule as `farcooler_client_call`: a dead link is every future
+            // call's problem, not just this one's.
+            let lost = match &outcome {
+                Err(Lost::Call(e)) => e.is_disconnect(),
+                Err(Lost::Already) => true,
+                Ok(_) => false,
+            };
+            if lost {
+                *guard = None;
+            }
+            drop(guard);
+
+            push_call(&finished, ticket, outcome, lost);
+        });
+
+        ticket
+    })
 }
 
 /// Why a call produced no answer, kept apart from its message just long enough
@@ -326,30 +385,32 @@ pub unsafe extern "C" fn farcooler_client_generate_key(
     out: *mut u8,
     capacity: usize,
 ) -> usize {
-    use russh::keys::ssh_key::{Algorithm, LineEnding, PrivateKey};
+    guarded(0, || {
+        use russh::keys::ssh_key::{Algorithm, LineEnding, PrivateKey};
 
-    let comment = unsafe { read_str(comment) }.unwrap_or_else(|| "farcooler".into());
+        let comment = unsafe { read_str(comment) }.unwrap_or_else(|| "farcooler".into());
 
-    let Ok(mut key) = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519) else {
-        return 0;
-    };
-    key.set_comment(comment.as_str());
+        let Ok(mut key) = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519) else {
+            return 0;
+        };
+        key.set_comment(comment.as_str());
 
-    let Ok(private) = key.to_openssh(LineEnding::LF) else { return 0 };
-    let Ok(public) = key.public_key().to_openssh() else { return 0 };
+        let Ok(private) = key.to_openssh(LineEnding::LF) else { return 0 };
+        let Ok(public) = key.public_key().to_openssh() else { return 0 };
 
-    let payload = json!({
-        "private_key": private.to_string(),
-        "public_key": public,
+        let payload = json!({
+            "private_key": private.to_string(),
+            "public_key": public,
+        })
+        .to_string();
+
+        let bytes = payload.as_bytes();
+        if out.is_null() || bytes.len() > capacity {
+            return bytes.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+        bytes.len()
     })
-    .to_string();
-
-    let bytes = payload.as_bytes();
-    if out.is_null() || bytes.len() > capacity {
-        return bytes.len();
-    }
-    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
-    bytes.len()
 }
 
 /// Start streaming a terminal's output. Chunks arrive through `poll`.
@@ -364,56 +425,58 @@ pub unsafe extern "C" fn farcooler_client_stream_start(
     handle: *mut c_void,
     terminal: *const c_char,
 ) -> bool {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return false };
-    let Some(terminal) = (unsafe { read_str(terminal) }) else { return false };
-    let Ok(id) = terminal.parse::<uuid::Uuid>() else { return false };
+    guarded(false, || {
+        let Some(h) = (unsafe { as_handle(handle) }) else { return false };
+        let Some(terminal) = (unsafe { read_str(terminal) }) else { return false };
+        let Ok(id) = terminal.parse::<uuid::Uuid>() else { return false };
 
-    let session = h.session.clone();
-    let finished = h.finished.clone();
-    let streams = h.streams.clone();
-    let key = terminal.clone();
+        let session = h.session.clone();
+        let finished = h.finished.clone();
+        let streams = h.streams.clone();
+        let key = terminal.clone();
 
-    let task = h.runtime.spawn(async move {
-        use tokio::io::AsyncReadExt;
+        let task = h.runtime.spawn(async move {
+            use tokio::io::AsyncReadExt;
 
-        let reader = {
-            let mut guard = session.lock().await;
-            let Some(session) = guard.as_mut() else { return };
-            match session.open_stream(id).await {
-                Ok(reader) => reader,
-                Err(e) => {
-                    push_line(
+            let reader = {
+                let mut guard = session.lock().await;
+                let Some(session) = guard.as_mut() else { return };
+                match session.open_stream(id).await {
+                    Ok(reader) => reader,
+                    Err(e) => {
+                        push_line(
+                            &finished,
+                            json!({ "stream": key, "error": e.to_string() }).to_string(),
+                        );
+                        return;
+                    }
+                }
+                // The lock is released here, deliberately: the stream reads for as
+                // long as the pane lives, and holding the session for that long
+                // would block every other call on this client forever.
+            };
+
+            let mut reader = reader;
+            let mut buf = vec![0u8; 16 * 1024];
+            loop {
+                match reader.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => push_line(
                         &finished,
-                        json!({ "stream": key, "error": e.to_string() }).to_string(),
-                    );
-                    return;
+                        json!({ "stream": key, "chunk": farcooler_core::base64::encode(&buf[..n]) }).to_string(),
+                    ),
+                    Err(_) => break,
                 }
             }
-            // The lock is released here, deliberately: the stream reads for as
-            // long as the pane lives, and holding the session for that long
-            // would block every other call on this client forever.
-        };
+            push_line(&finished, json!({ "stream": key, "ended": true }).to_string());
+        });
 
-        let mut reader = reader;
-        let mut buf = vec![0u8; 16 * 1024];
-        loop {
-            match reader.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => push_line(
-                    &finished,
-                    json!({ "stream": key, "chunk": farcooler_core::base64::encode(&buf[..n]) }).to_string(),
-                ),
-                Err(_) => break,
-            }
+        let mut running = locked(&streams);
+        if let Some(previous) = running.insert(terminal, task) {
+            previous.abort();
         }
-        push_line(&finished, json!({ "stream": key, "ended": true }).to_string());
-    });
-
-    let mut running = streams.lock().expect("streams");
-    if let Some(previous) = running.insert(terminal, task) {
-        previous.abort();
-    }
-    true
+        true
+    })
 }
 
 /// Stop streaming a terminal. Safe to call when nothing is running.
@@ -422,11 +485,13 @@ pub unsafe extern "C" fn farcooler_client_stream_stop(
     handle: *mut c_void,
     terminal: *const c_char,
 ) {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return };
-    let Some(terminal) = (unsafe { read_str(terminal) }) else { return };
-    if let Some(task) = h.streams.lock().expect("streams").remove(&terminal) {
-        task.abort();
-    }
+    guarded((), || {
+        let Some(h) = (unsafe { as_handle(handle) }) else { return };
+        let Some(terminal) = (unsafe { read_str(terminal) }) else { return };
+        if let Some(task) = locked(&h.streams).remove(&terminal) {
+            task.abort();
+        }
+    })
 }
 
 /// The public key belonging to a private key.
@@ -445,18 +510,20 @@ pub unsafe extern "C" fn farcooler_client_public_key(
     out: *mut u8,
     capacity: usize,
 ) -> usize {
-    use russh::keys::ssh_key::PrivateKey;
+    guarded(0, || {
+        use russh::keys::ssh_key::PrivateKey;
 
-    let Some(text) = (unsafe { read_str(private_key) }) else { return 0 };
-    let Ok(key) = text.parse::<PrivateKey>() else { return 0 };
-    let Ok(public) = key.public_key().to_openssh() else { return 0 };
+        let Some(text) = (unsafe { read_str(private_key) }) else { return 0 };
+        let Ok(key) = text.parse::<PrivateKey>() else { return 0 };
+        let Ok(public) = key.public_key().to_openssh() else { return 0 };
 
-    let bytes = public.as_bytes();
-    if out.is_null() || bytes.len() > capacity {
-        return bytes.len();
-    }
-    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
-    bytes.len()
+        let bytes = public.as_bytes();
+        if out.is_null() || bytes.len() > capacity {
+            return bytes.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+        bytes.len()
+    })
 }
 
 /// The themes compiled into this build, as JSON, with no session required.
@@ -472,28 +539,30 @@ pub unsafe extern "C" fn farcooler_client_public_key(
 /// contract `farcooler_client_generate_key` uses.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_builtin_themes(out: *mut u8, capacity: usize) -> usize {
-    let items: Vec<Value> = farcooler_core::theme::built_in()
-        .iter()
-        .map(|t| {
-            json!({
-                "name": t.name,
-                "dark": t.dark,
-                "background": t.background,
-                "foreground": t.foreground,
-                "cursor": t.cursor,
-                "ansi": t.ansi,
+    guarded(0, || {
+        let items: Vec<Value> = farcooler_core::theme::built_in()
+            .iter()
+            .map(|t| {
+                json!({
+                    "name": t.name,
+                    "dark": t.dark,
+                    "background": t.background,
+                    "foreground": t.foreground,
+                    "cursor": t.cursor,
+                    "ansi": t.ansi,
+                })
             })
-        })
-        .collect();
-    let payload =
-        json!({ "themes": items, "default": farcooler_core::theme::DEFAULT_THEME }).to_string();
+            .collect();
+        let payload =
+            json!({ "themes": items, "default": farcooler_core::theme::DEFAULT_THEME }).to_string();
 
-    let bytes = payload.as_bytes();
-    if out.is_null() || bytes.len() > capacity {
-        return bytes.len();
-    }
-    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
-    bytes.len()
+        let bytes = payload.as_bytes();
+        if out.is_null() || bytes.len() > capacity {
+            return bytes.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+        bytes.len()
+    })
 }
 
 /// Take the oldest finished result, or NULL if none is ready.
@@ -502,15 +571,17 @@ pub unsafe extern "C" fn farcooler_client_builtin_themes(out: *mut u8, capacity:
 /// call on it. Each result is returned exactly once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_poll(handle: *mut c_void) -> *const c_char {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return std::ptr::null() };
-    let next = h.finished.lock().expect("queue").pop_front();
-    match next {
-        Some(json) => {
-            h.scratch = std::ffi::CString::new(json).ok();
-            h.scratch.as_ref().map_or(std::ptr::null(), |s| s.as_ptr())
+    guarded(std::ptr::null(), || {
+        let Some(h) = (unsafe { as_handle(handle) }) else { return std::ptr::null() };
+        let next = locked(&h.finished).pop_front();
+        match next {
+            Some(json) => {
+                h.scratch = std::ffi::CString::new(json).ok();
+                h.scratch.as_ref().map_or(std::ptr::null(), |s| s.as_ptr())
+            }
+            None => std::ptr::null(),
         }
-        None => std::ptr::null(),
-    }
+    })
 }
 
 /// Whether there is a live session right now.
@@ -520,10 +591,12 @@ pub unsafe extern "C" fn farcooler_client_poll(handle: *mut c_void) -> *const c_
 /// than staying true until the handle is freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_connected(handle: *mut c_void) -> bool {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return false };
-    // try_lock rather than blocking: this is called from a UI thread, and a
-    // call in flight holds the session for as long as the host takes to answer.
-    h.session.try_lock().map(|guard| guard.is_some()).unwrap_or(true)
+    guarded(false, || {
+        let Some(h) = (unsafe { as_handle(handle) }) else { return false };
+        // try_lock rather than blocking: this is called from a UI thread, and a
+        // call in flight holds the session for as long as the host takes to answer.
+        h.session.try_lock().map(|guard| guard.is_some()).unwrap_or(true)
+    })
 }
 
 async fn dispatch(
@@ -1145,7 +1218,7 @@ fn parse_destination(config: &str) -> Result<Destination, String> {
 
 /// Queue a line that is not an answer to any request.
 fn push_line(queue: &Arc<Mutex<VecDeque<String>>>, line: String) {
-    queue.lock().expect("queue").push_back(line);
+    locked(&queue).push_back(line);
 }
 
 fn push(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value, String>) {
@@ -1153,7 +1226,7 @@ fn push(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value
         Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
         Err(message) => json!({ "ticket": ticket, "ok": false, "error": message }),
     };
-    queue.lock().expect("queue").push_back(payload.to_string());
+    locked(&queue).push_back(payload.to_string());
 }
 
 /// The same envelope, plus the one thing a client cannot work out from the
@@ -1179,12 +1252,12 @@ fn push_call(
             "disconnected": lost,
         }),
     };
-    queue.lock().expect("queue").push_back(payload.to_string());
+    locked(&queue).push_back(payload.to_string());
 }
 
 impl ClientHandle {
     fn take_ticket(&self) -> u64 {
-        let mut next = self.next_ticket.lock().expect("ticket");
+        let mut next = locked(&self.next_ticket);
         let ticket = *next;
         *next += 1;
         ticket
@@ -1208,6 +1281,46 @@ unsafe fn read_str(pointer: *const c_char) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A panic under the boundary must come back as a value, not a signal.
+    ///
+    /// Worth an actual panic rather than a reading of the code: `catch_unwind`
+    /// is a no-op under `panic = "abort"`, so a profile change could remove
+    /// this protection silently and nothing else would notice. This test would.
+    #[test]
+    fn a_panic_inside_an_entry_point_becomes_its_fallback() {
+        assert_eq!(guarded(0u64, || panic!("the core fell over")), 0);
+        assert!(!guarded(false, || -> bool { panic!("still no") }));
+        assert!(guarded(std::ptr::null::<c_char>(), || panic!("nor here")).is_null());
+    }
+
+    /// And it only does that when something actually panicked.
+    #[test]
+    fn an_entry_point_that_returns_normally_is_untouched() {
+        assert_eq!(guarded(0u64, || 42), 42);
+    }
+
+    /// One panic must not make every later call fatal.
+    ///
+    /// This is the cascade the guard alone does not fix: a thread that panics
+    /// while holding a `std::sync::Mutex` poisons it, and the `.expect(…)` this
+    /// replaced then panicked on every subsequent take — including inside
+    /// `farcooler_client_poll`, which Swift calls on a timer forever.
+    #[test]
+    fn a_poisoned_lock_is_still_readable() {
+        let queue: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+        locked(&queue).push_back("survived".into());
+
+        let poisoner = Arc::clone(&queue);
+        let _ = std::thread::spawn(move || {
+            let _held = poisoner.lock().unwrap();
+            panic!("poison it");
+        })
+        .join();
+        assert!(queue.lock().is_err(), "the lock really is poisoned");
+
+        assert_eq!(locked(&queue).pop_front().as_deref(), Some("survived"));
+    }
 
     #[test]
     fn a_call_on_a_handle_that_never_connected_reports_a_dropped_link() {

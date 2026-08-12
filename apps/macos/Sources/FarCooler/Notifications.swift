@@ -25,7 +25,32 @@ final class Notifier {
     /// people learn to ignore notifications.
     private var announced: [String: AgentActivity] = [:]
 
+    /// Whether this build can talk to the notification centre at all.
+    ///
+    /// `UNUserNotificationCenter.current()` does not fail politely for an
+    /// executable with no bundle identifier: it raises
+    /// `NSInternalInconsistencyException`, which is an Objective-C exception,
+    /// which Swift cannot catch. The process aborts.
+    ///
+    /// A `swift build` product is exactly such an executable, and running one
+    /// directly is what this project's own README documents — so the
+    /// documented way to run the app crashed it on launch, twice on the
+    /// developer's machine before anybody read the stack. Asked once and
+    /// cached, because the answer cannot change while the process lives.
+    ///
+    /// This is not a repair. An unbundled build genuinely cannot receive
+    /// notifications; what changes is that it now runs without them instead of
+    /// not running.
+    private static let canNotify: Bool = {
+        guard Bundle.main.bundleIdentifier != nil else {
+            NSLog("Far Cooler: launched without a bundle identifier, so notifications are off.")
+            return false
+        }
+        return true
+    }()
+
     func requestAuthorization() {
+        guard Self.canNotify else { return }
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
                 Task { @MainActor in
@@ -48,7 +73,11 @@ final class Notifier {
         guard activity.wantsAttention else { return }
         guard activity != announced[terminal.id] else { return }
         if activity == .done && !Preferences.shared.notifyOnDone { return }
-        guard authorized else { return }
+        // `authorized` can only have been set true by a request that ran, which
+        // `canNotify` already gates — but this is the other call into the
+        // notification centre, and gating it on its own means neither depends
+        // on the order they happen to be reached in.
+        guard Self.canNotify, authorized else { return }
 
         let content = UNMutableNotificationContent()
         switch activity {
@@ -78,6 +107,7 @@ final class Notifier {
     /// the announcement history of the terminal it replaced.
     func forget(_ terminalID: String) {
         announced.removeValue(forKey: terminalID)
+        guard Self.canNotify else { return }
         UNUserNotificationCenter.current()
             .removeDeliveredNotifications(withIdentifiers: [terminalID])
     }

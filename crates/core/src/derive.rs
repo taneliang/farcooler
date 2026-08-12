@@ -52,11 +52,26 @@ pub fn derive_terminal(record: &TerminalRecord, snapshot: &RuntimeSnapshot) -> D
             DerivedTerminal { state: TerminalState::Error, orphan_candidates: Vec::new() }
         }
         TerminalIntent::Running | TerminalIntent::Unspecified => {
-            // An unusable inventory is not proof of life. Everything expected to
-            // run derives `lost` rather than being guessed as alive.
+            // An unusable inventory is not proof of life — and it is not proof
+            // of death either, which is what this used to say.
+            //
+            // It derived `lost`, on the reasoning that anything unproven must
+            // not be shown as alive. The first half of that is right and is
+            // kept: `unknown` never claims a terminal is running, so no stale
+            // `running` can be produced here any more than before. The second
+            // half was a false negative asserted with confidence. `lost` is a
+            // FINDING — the inventory was read and nothing in it claims this
+            // terminal. When the read itself failed there is no finding, and
+            // reporting one says every terminal on the machine has died.
+            //
+            // Which is not hypothetical: tmux answers one request at a time per
+            // server, so a single pane whose program stopped reading its stdin
+            // blocks `send-keys`, blocks the server, times out every `list-panes`
+            // behind it, and turns the whole fleet red. See
+            // `TmuxServer::run`'s own note on the same mechanism.
             if !snapshot.inventory_healthy {
                 return DerivedTerminal {
-                    state: TerminalState::Lost,
+                    state: TerminalState::Unknown,
                     orphan_candidates: Vec::new(),
                 };
             }
@@ -140,9 +155,27 @@ pub fn derive_workspace(
         return WorkspaceState::Error;
     }
 
-    let any_live = terminals
-        .iter()
-        .any(|(_, d)| matches!(d.state, TerminalState::Running | TerminalState::Starting));
+    // `Unknown` counts as live here, which is a deliberate choice between three
+    // claims none of which is knowledge.
+    //
+    // While the inventory is unreadable every terminal derives `Unknown`, so
+    // this workspace has no evidence at all. `Error` would say it is broken,
+    // `Ready` would say nothing is running, and `Active` says what its records
+    // already intend and nothing has disproved. Only the last is recoverable
+    // without alarming anyone: a tmux server that answers a second later leaves
+    // the sidebar exactly where it was, instead of having flashed every
+    // workspace on the machine red and back.
+    //
+    // The honest signal is not thrown away, it is just carried somewhere it can
+    // be said properly — `runtime_healthy` on the wire, which the clients show
+    // as the machine being unreadable. A per-workspace state cannot express
+    // "ask the machine, not me".
+    let any_live = terminals.iter().any(|(_, d)| {
+        matches!(
+            d.state,
+            TerminalState::Running | TerminalState::Starting | TerminalState::Unknown
+        )
+    });
     if any_live { WorkspaceState::Active } else { WorkspaceState::Ready }
 }
 
@@ -260,7 +293,43 @@ mod tests {
     fn unusable_inventory_never_claims_life() {
         let r = record(TerminalIntent::Running, true);
         let s = RuntimeSnapshot::unavailable();
+        let state = derive_terminal(&r, &s).state;
+        assert_ne!(state, TerminalState::Running, "an unread inventory is not proof of life");
+        assert_ne!(state, TerminalState::Starting, "nor of anything else being underway");
+    }
+
+    /// The other half, and the reason `Unknown` exists at all.
+    ///
+    /// An unreadable inventory used to derive `Lost`, which is not a weaker
+    /// claim than `Running` — it is the opposite claim, made just as
+    /// confidently, on the strength of a read that never completed. One pane
+    /// with a blocked write stalls the tmux server, and every terminal on the
+    /// machine was reported dead.
+    #[test]
+    fn unusable_inventory_does_not_claim_death_either() {
+        let r = record(TerminalIntent::Running, true);
+        let s = RuntimeSnapshot::unavailable();
+        assert_eq!(derive_terminal(&r, &s).state, TerminalState::Unknown);
+    }
+
+    /// `Lost` stays reserved for a reading that was actually taken. A healthy
+    /// inventory with nothing claiming this terminal is a finding, and must not
+    /// be softened into `Unknown` by the change above.
+    #[test]
+    fn a_healthy_inventory_with_no_claimant_is_still_lost() {
+        let r = record(TerminalIntent::Running, true);
+        let s = RuntimeSnapshot::healthy(vec![]);
         assert_eq!(derive_terminal(&r, &s).state, TerminalState::Lost);
+    }
+
+    /// A machine that cannot be read must not turn every workspace on it red.
+    /// That flash — every row to Error and back — was the visible half of the
+    /// bug, and `Error` is a claim about the workspace that nothing observed.
+    #[test]
+    fn an_unreadable_machine_does_not_put_workspaces_in_error() {
+        let r = record(TerminalIntent::Running, true);
+        let d = derive_terminal(&r, &RuntimeSnapshot::unavailable());
+        assert_eq!(derive_workspace(false, false, false, &[(r, d)]), WorkspaceState::Active);
     }
 
     #[test]

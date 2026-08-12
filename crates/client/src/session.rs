@@ -1335,6 +1335,9 @@ fn terminal_label(s: TerminalState) -> &'static str {
         TerminalState::Exited => "exited",
         TerminalState::Error => "error",
         TerminalState::Lost => "LOST",
+        // The same word the CLI and both apps use. A phone showing a state the
+        // Mac calls something else is two products.
+        TerminalState::Unknown => "unknown",
     }
 }
 

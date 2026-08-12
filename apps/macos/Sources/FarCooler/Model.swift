@@ -340,6 +340,12 @@ struct Terminal: Decodable, Identifiable, Hashable {
         case .exited: return .exited
         case .error: return .failed
         case .lost: return .lost
+        // `StateKind.unknown` is both the daemon's `unknown` and anything this
+        // build does not recognize, and neither may fall through to `.running`
+        // — which is what `default` used to do. A state we cannot read being
+        // drawn as a healthy process is the one mistake the derivation rule is
+        // built to make impossible, and the app was quietly reintroducing it.
+        case .unknown: return .unreadable
         default: return .running
         }
     }
@@ -368,6 +374,18 @@ struct Terminal: Decodable, Identifiable, Hashable {
 /// nothing at all in a screenshot.
 enum Status: Equatable {
     case starting, running, idle, working, blocked, done, exited, failed, lost
+    /// The machine did not answer, so this row is not saying anything.
+    ///
+    /// Distinct from `lost`, which is a finding the daemon actually made. This
+    /// is the daemon reporting that it could not look: tmux answers one request
+    /// at a time per server, and a single pane whose program has stopped
+    /// reading its input can stall every read queued behind it.
+    ///
+    /// Shown rather than papered over with the last good value, because a row
+    /// that goes on claiming "Running" while nothing can be read is exactly the
+    /// failure this vocabulary exists to prevent. It is simply a different
+    /// claim from "this terminal died".
+    case unreadable
 
     var label: String {
         switch self {
@@ -380,10 +398,15 @@ enum Status: Equatable {
         case .exited: return "Exited"
         case .failed: return "Failed to start"
         case .lost: return "Lost"
+        case .unreadable: return "Not answering"
         }
     }
 
     /// Does this want the user to do something?
+    ///
+    /// `unreadable` deliberately does not. There is nothing to do about it, and
+    /// it resolves on its own far more often than not — counting it would put a
+    /// badge on the window every time a pane took a moment to answer.
     var wantsAttention: Bool {
         self == .blocked || self == .done || self == .lost || self == .failed
     }

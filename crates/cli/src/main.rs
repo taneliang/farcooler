@@ -2656,6 +2656,10 @@ fn terminal_label(s: TerminalState) -> &'static str {
         TerminalState::Exited => "exited",
         TerminalState::Error => "error",
         TerminalState::Lost => "LOST",
+        // Lower case, unlike LOST. LOST shouts because it is a finding that
+        // wants a decision from you; this is the machine being unreadable for a
+        // moment, and it usually resolves before anyone could act on it.
+        TerminalState::Unknown => "unknown",
     }
 }
 

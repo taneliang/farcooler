@@ -189,12 +189,29 @@ struct TerminalCanvas: NSViewRepresentable {
         // the old client painted a captured screen it could not reflow.
         view.onGeometry = { columns, rows in
             coord.pendingGeometry?.cancel()
+            // Whether this is the report that OPENS the stream, decided here
+            // rather than inside the task: two reports can arrive in the same
+            // layout pass, and both would read `coord.started` as false if they
+            // read it after their own first `await`.
+            let opening = !coord.started
             coord.pendingGeometry = Task { @MainActor in
-                // Debounced: a window drag fires this continuously, and each one
-                // is a round trip to the daemon.
-                try? await Task.sleep(for: .milliseconds(90))
-                guard !Task.isCancelled else { return }
+                // Debounced, but only once there is something to protect. A
+                // window drag fires this continuously and each one is a round
+                // trip to the daemon, so a settled size is worth waiting for —
+                // whereas the FIRST report is the one the stream is waiting on,
+                // and nothing is going to supersede it. Sleeping through it just
+                // held the pane blank for another 90ms on every mount, which is
+                // every layout switch and every reconnect.
+                if !opening {
+                    try? await Task.sleep(for: .milliseconds(90))
+                    guard !Task.isCancelled else { return }
+                }
                 await onResize(columns, rows)
+                // Re-checked after the resize, not only before it: `onResize` is
+                // a round trip, and a newer report can land while it is in
+                // flight. Without this the older size would go on to open the
+                // stream that the newer one is entitled to.
+                guard !Task.isCancelled else { return }
 
                 guard !coord.started, let binary else { return }
                 coord.started = true

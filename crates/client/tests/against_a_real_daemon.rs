@@ -36,7 +36,7 @@ fn daemon_binary() -> PathBuf {
 
 /// A daemon on a private socket with a private database.
 struct Daemon {
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
     socket: PathBuf,
     process: std::process::Child,
 }
@@ -45,6 +45,26 @@ impl Drop for Daemon {
     fn drop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
+
+        // And the tmux server that daemon started, which killing the daemon does
+        // not touch. It sits on a socket named after this runtime directory's
+        // install id, so the moment the `TempDir` is deleted nothing on the
+        // machine can work out what it was called: it stays up until the machine
+        // is restarted, holding a session, a pane and an interactive shell.
+        //
+        // The last of four fixtures with this hole. Same guard as
+        // `rpc_over_socket.rs`, `stdio_transport.rs` and the daemon's own
+        // `test_support.rs`.
+        let Ok(install) = std::fs::read_to_string(self.dir.path().join("install-id")) else {
+            return;
+        };
+        let socket = format!("farcooler-{}", install.trim());
+        let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
+        let _ = std::process::Command::new(tmux)
+            .args(["-L", &socket, "kill-server"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 }
 
@@ -68,7 +88,7 @@ async fn start() -> Daemon {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
-    Daemon { _dir: dir, socket, process }
+    Daemon { dir, socket, process }
 }
 
 #[tokio::test]

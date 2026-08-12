@@ -28,9 +28,22 @@ struct TerminalPane: View {
     let onSearchFiles: (String) async -> [String]
     let onAction: (TerminalAction) -> Void
 
+    /// Whether to draw a terminal here at all.
+    ///
+    /// `.unknown` counts, and that is the point of it. It means the daemon could
+    /// not read this machine's pane inventory on this tick — not that this pane
+    /// died — and the byte stream feeding this view is a channel of its own that
+    /// a failed `list-panes` does not touch.
+    ///
+    /// Treating it as not-live tore the surface down, killed a stream that was
+    /// working, and replaced a terminal somebody was reading with "no running
+    /// session", over a hiccup usually finished before the view could rebuild.
+    /// The row's own indicator still says "Not answering", so nothing here
+    /// pretends the state is known; it just does not throw the pane away over
+    /// it.
     private var isLive: Bool {
         let kind = StateKind.parse(terminal.state)
-        return kind == .running || kind == .starting
+        return kind == .running || kind == .starting || kind == .unknown
     }
 
     var body: some View {

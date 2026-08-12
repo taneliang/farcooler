@@ -74,6 +74,14 @@ struct TileView: View {
     @ObservedObject private var prefix = PrefixMode.shared
     @ObservedObject private var preferences = Preferences.shared
 
+    /// The view size the last viewport report was sent for.
+    ///
+    /// Only here to tell the two things that can invalidate a viewport apart: a
+    /// window being dragged, which arrives as a size changing on every frame and
+    /// is worth waiting out, and a layout switch, which arrives once and is not.
+    /// See the `.task(id:)` below.
+    @State private var lastViewportSize: CGSize = .zero
+
     private var group: PaneGroup? {
         groups.first { $0.isActive } ?? groups.first
     }
@@ -170,9 +178,21 @@ struct TileView: View {
                 // `.task(id:)` cancels the previous run for us, which is the whole
                 // debounce — a hand-rolled timer here would be one more thing to
                 // cancel on disappear and get wrong.
+                //
+                // Only a changed SIZE is debounced, though. The other half of
+                // `Viewport` is the arrangement tmux is currently in, and that
+                // changes on a layout switch — one event, with nothing behind it
+                // to coalesce. Waiting it out drew the incoming layout for a
+                // quarter of a second against the cell grid of the layout it
+                // replaced: every pane scaled from the wrong `group.columns`,
+                // then snapping once tmux was finally told. That is the
+                // wrong-size flash on every switch.
                 .task(id: Viewport(size: size, group: group, font: preferences.revision)) {
-                    try? await Task.sleep(for: .milliseconds(250))
-                    guard !Task.isCancelled else { return }
+                    if size != lastViewportSize {
+                        try? await Task.sleep(for: .milliseconds(250))
+                        guard !Task.isCancelled else { return }
+                    }
+                    lastViewportSize = size
                     await send(viewport: size, for: group)
                 }
             }
@@ -341,9 +361,14 @@ private struct TilePane: View {
     /// Read from the drag rather than held here. See `PaneDrag`.
     private var landing: TileDirection? { drag.landing(on: terminal.id) }
 
+    /// See `TerminalPane.isLive`, which this mirrors for the same reasons.
+    ///
+    /// It matters more here: a tiled layout holds several of these, so a single
+    /// unreadable tick tore down every pane in the window at once rather than
+    /// one.
     private var isLive: Bool {
         let kind = StateKind.parse(terminal.state)
-        return kind == .running || kind == .starting
+        return kind == .running || kind == .starting || kind == .unknown
     }
 
     var body: some View {

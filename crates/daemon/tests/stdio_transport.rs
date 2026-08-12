@@ -17,10 +17,44 @@ use farcooler_protocol::v1::{
 use farcooler_transport::{request, Client, ClientError};
 use tokio::process::{ChildStdin, ChildStdout, Command};
 
+/// A spawned daemon, and the tmux server it will have started.
+///
+/// `kill_on_drop` ends the daemon and nothing else. The daemon's private tmux
+/// server is a separate process, on a socket named after this runtime
+/// directory's install id — so the moment the directory is deleted, nothing on
+/// the machine can work out what that socket was called, and the server stays
+/// up until the machine is restarted. One per tmux-using test, every run.
+///
+/// They are not idle passengers. tmux is single-threaded per server, and the
+/// crowd that accumulated this way was measured slowing `capture-pane` against
+/// the real fleet from 50ms to 740ms.
+///
+/// The same guard `rpc_over_socket.rs`'s `Harness` already carries, for the same
+/// reason; this file never got one.
+struct DaemonChild {
+    child: tokio::process::Child,
+    home: std::path::PathBuf,
+}
+
+impl Drop for DaemonChild {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
+        // Read rather than recomputed: how an install id becomes a socket name
+        // is the daemon's rule, and a second copy of it here would be one to
+        // get quietly wrong.
+        let Ok(install) = std::fs::read_to_string(self.home.join("install-id")) else { return };
+        let socket = format!("farcooler-{}", install.trim());
+        let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
+        let _ = std::process::Command::new(tmux)
+            .args(["-L", &socket, "kill-server"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
 /// Spawn the daemon in stdio mode against a private runtime directory.
-async fn spawn(
-    dir: &std::path::Path,
-) -> (tokio::process::Child, Client<ChildStdout, ChildStdin>) {
+async fn spawn(dir: &std::path::Path) -> (DaemonChild, Client<ChildStdout, ChildStdin>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
         .arg("--stdio")
         .env("FARCOOLER_HOME", dir)
@@ -39,7 +73,7 @@ async fn spawn(
     let client = Client::over(stdout, stdin, "test-client", "0.0.0")
         .await
         .expect("handshake over stdio");
-    (child, client)
+    (DaemonChild { child, home: dir.to_path_buf() }, client)
 }
 
 #[tokio::test]

@@ -1321,6 +1321,14 @@ impl Service {
         let term = self.store.get_terminal(id)?;
         let derived = self.derive_one(&term);
 
+        // `Unknown` is refused by the check below too, and that is the whole
+        // point of it being its own state: a terminal must never be dismissed
+        // as lost because tmux was busy for a second. It is named separately
+        // only so the refusal points at the real obstacle — the machine, not
+        // the row.
+        if derived.state == TerminalState::Unknown {
+            return Err(DomainError::InvalidArgument { what: "this machine cannot be read yet" });
+        }
         if derived.state != TerminalState::Lost {
             return Err(DomainError::InvalidArgument { what: "terminal is not lost" });
         }

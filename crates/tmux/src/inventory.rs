@@ -37,15 +37,58 @@ impl LiveInventory {
         &self.server
     }
 
+    /// How long to wait before asking tmux a second time.
+    ///
+    /// Short, because this is not a backoff — nothing is overloaded. It is a
+    /// pause long enough for a single blocked write to have been given up on by
+    /// `TmuxServer::run`'s own deadline, so the retry is asking a server that is
+    /// listening again rather than re-joining the same queue.
+    const RETRY_PAUSE: std::time::Duration = std::time::Duration::from_millis(150);
+
     /// Re-inventory the private server and replace the view.
+    ///
+    /// Asked twice before giving up. tmux answers one request at a time per
+    /// server, so a pane whose program has stopped reading its stdin can block
+    /// a `send-keys` and stall every read queued behind it until the command
+    /// deadline fires. That is a lost race, not a broken server — but a single
+    /// failed attempt here marks the inventory unavailable, and an unavailable
+    /// inventory is every terminal on the machine reporting that it cannot be
+    /// accounted for.
+    ///
+    /// One retry costs nothing in the common case, where the first attempt
+    /// succeeds, and turns the great majority of those stalls into a hiccup
+    /// nobody sees. It does not fix the underlying serialization — see
+    /// `TmuxServer::run` — it stops one wedged pane from speaking for the whole
+    /// machine.
+    ///
+    /// Reads only. A retried write could be performed twice, and nothing here
+    /// needs one.
     pub async fn refresh(&self) -> RuntimeSnapshot {
+        let mut last = match self.server.list_tagged_panes().await {
+            Ok(panes) => {
+                let snapshot = RuntimeSnapshot::healthy(panes);
+                *self.view.write().expect("inventory lock") = snapshot.clone();
+                return snapshot;
+            }
+            Err(e) => e,
+        };
+
+        tracing::debug!(error = %last, "tmux inventory read failed, asking once more");
+        tokio::time::sleep(Self::RETRY_PAUSE).await;
+
         let snapshot = match self.server.list_tagged_panes().await {
             Ok(panes) => RuntimeSnapshot::healthy(panes),
             Err(e) => {
-                // If the private tmux server cannot be inventoried safely, the
-                // daemon serves durable state with every terminal derived as
-                // `lost` and shows a visible degraded state rather than guessing.
-                tracing::warn!(error = %e, "tmux inventory unavailable, deriving everything lost");
+                last = e;
+                // Twice in a row is no longer a lost race. The daemon serves
+                // durable state with every terminal derived as `unknown` — not
+                // `lost`, which would claim a finding this never made — and
+                // reports the runtime as unhealthy so clients can say which
+                // machine stopped answering.
+                tracing::warn!(
+                    error = %last,
+                    "tmux inventory unavailable after a retry, deriving everything unknown"
+                );
                 RuntimeSnapshot::unavailable()
             }
         };
