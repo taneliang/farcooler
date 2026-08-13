@@ -232,7 +232,7 @@ tester having to update. Canary and local freeze nothing.
 
 | Job | What it protects |
 | --- | --- |
-| `wire` | that a client already in the field can still talk to this — the proto lint, its own self-tests, and what `version.sh` answers |
+| `wire` | that a client already in the field can still talk to this — the proto lint, its own self-tests, what `version.sh` answers, and that the four channels stay four WorkOS projects |
 | `rust` (Linux + macOS) | clippy at -D warnings and tests, against a real tmux — a fake one would agree with whatever this code believed |
 | `swift` | the full `build-app.sh`, plus a check that the bundle's stamp matches the workspace |
 | `ios` | project generation then build, so a file added to AgentKit cannot compile locally and be missing from the app |
@@ -243,18 +243,62 @@ unlimited minutes on standard runners, macOS included. A private repo would burn
 its allowance on macOS runners in days — they bill at 10× Linux — and that is
 the point at which CircleCI's open-source plan would be worth the move.
 
-## Secrets
+## Setting a repository up
 
-None of these are in the repo, and none can be. They are set once in the GitHub
-repository settings, except the relay's, which live only in Cloudflare.
+Nothing below is in the repo, and none of it can be. It is set once in the
+GitHub repository settings, except the relay's own secrets, which live only in
+Cloudflare.
+
+### Secrets
 
 | Secret | Used by | Notes |
 | --- | --- | --- |
-| `WORKOS_CLIENT_ID` | app builds | Public by design — it names the app, not the bearer. Kept out of the repo only so a fork can point at its own WorkOS project. |
+| `LOCAL_WORKOS_CLIENT_ID`, `CANARY_WORKOS_CLIENT_ID`, `PREVIEW_WORKOS_CLIENT_ID`, `STABLE_WORKOS_CLIENT_ID` | every app build, through `scripts/workos-client-id.sh` | One project per channel, never shared — see below. Public by design: it names the app, not the bearer. |
 | `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGN_IDENTITY` | Mac release | Developer ID, base64 `.p12` |
-| `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | notarisation | app-specific password |
-| `APP_STORE_KEY_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_P8` | TestFlight | base64 `.p8` |
-| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | relay deploy | Plus a repository **variable** `RELAY_DEPLOY=true` — see below |
+| `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | notarisation, and the iOS archive's `DEVELOPMENT_TEAM` | app-specific password |
+| `APP_STORE_KEY_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_P8` | TestFlight, from both the canary and the release workflow | base64 `.p8` |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | relay deploy | Workers Scripts edit, plus D1 edit for the migrations |
+
+### Variables, which are the on switches
+
+Repository **variables**, not secrets, for the reason two sections down. Neither
+is set by default, so a fresh fork builds everything and ships nothing.
+
+| Variable | Set to | Without it |
+| --- | --- | --- |
+| `RELAY_DEPLOY` | `true` | the relay job skips, and every channel's relay stays where it is |
+| `CANARY_TESTFLIGHT` | `true` | the canary iOS job skips, and main reaches nobody's phone |
+
+### The `promote` environment
+
+`promote.yml` runs its tag job in a GitHub environment named `promote`, which
+does not exist until someone creates it. Give it required reviewers: it is the
+pause that shows you the channel and the version you typed before a tag exists.
+A tag cannot be taken back once a build from it reaches App Store Connect, which
+will not accept that version again.
+
+### Four WorkOS projects, one per channel
+
+The same partition as the bundle identifiers, the runtime directories and the
+relays, and it has to be, because `accounts.id` in the relay **is** the WorkOS
+user id. Two channels sharing a project are not two environments that look
+alike — they are the same accounts, and a preview build would be signing people
+into the stable environment's identities.
+
+Both halves have to agree per channel: the app's client id comes from the secret
+above, and the relay it talks to holds the same value as `WORKOS_CLIENT_ID` in
+its `[env.*]` block in `services/relay/wrangler.toml`.
+
+No build ever names one of those secrets directly. `scripts/workos-client-id.sh`
+derives which to read from `version.sh channel` — the same answer the bundle
+identifier comes from — so a build's identity and the project it authenticates
+against cannot disagree. **There is no fallback.** A repository holding only
+`STABLE_WORKOS_CLIENT_ID` builds a preview with no client id at all rather than
+with the stable one, and `scripts/workos-test.sh` exists to keep it that way.
+
+A missing id is a warning, not a failure: the app still builds and works, minus
+the sign-in button, which is what a fork gets. For a channel people install, the
+warning says so in the run summary — sign-in is what buys notifications.
 
 ### Why the gates use `vars` and `env`, never `secrets`
 

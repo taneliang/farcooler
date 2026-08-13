@@ -58,10 +58,22 @@ jobs:
       - name: Build the Rust xcframeworks
         run: ./scripts/build-ios-frameworks.sh
 
+      # The canary's own WorkOS project, through the same script the release
+      # builds use rather than a `secrets.CANARY_…` written here. The channel is
+      # already fixed to canary at the top of this file, so both spellings pick
+      # the same secret today — but one mechanism is what stops the next app
+      # build from being added with no client id at all, which is exactly how
+      # the iOS release job shipped without one.
+      - name: The WorkOS client id for this channel
+        env:
+          LOCAL_WORKOS_CLIENT_ID: ${{ secrets.LOCAL_WORKOS_CLIENT_ID }}
+          CANARY_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
+          PREVIEW_WORKOS_CLIENT_ID: ${{ secrets.PREVIEW_WORKOS_CLIENT_ID }}
+          STABLE_WORKOS_CLIENT_ID: ${{ secrets.STABLE_WORKOS_CLIENT_ID }}
+        run: ./scripts/workos-client-id.sh
+
       - name: Generate the Xcode project
         run: ./apps/ios/generate-project.py
-        env:
-          FARCOOLER_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
 
       # The canary's own bundle identifier — `com.farcooler.ios.canary`, which
       # generate-project.py derives from the channel — so it installs alongside
@@ -119,7 +131,13 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: The WorkOS client id for this channel
+        env:
+          LOCAL_WORKOS_CLIENT_ID: ${{ secrets.LOCAL_WORKOS_CLIENT_ID }}
+          CANARY_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
+          PREVIEW_WORKOS_CLIENT_ID: ${{ secrets.PREVIEW_WORKOS_CLIENT_ID }}
+          STABLE_WORKOS_CLIENT_ID: ${{ secrets.STABLE_WORKOS_CLIENT_ID }}
+        run: ./scripts/workos-client-id.sh
+
       - name: Build Far Cooler.app
         run: apps/macos/build-app.sh
-        env:
-          FARCOOLER_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}

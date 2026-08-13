@@ -50,7 +50,7 @@ binding = "METRICS"
 dataset = "farcooler_events"
 
 [vars]
-WORKOS_CLIENT_ID = "REPLACE"
+WORKOS_CLIENT_ID = "REPLACE_WITH_STABLE_WORKOS_CLIENT_ID"
 # Which channel this deployment IS.
 #
 # Only so the relay can check that APNS_TOPIC belongs to it. That secret must

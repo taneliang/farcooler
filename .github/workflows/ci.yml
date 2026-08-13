@@ -56,6 +56,11 @@ jobs:
       # directory, database, tmux server and binary name — so a wrong channel is
       # not a cosmetic version string.
       - run: ./scripts/version-test.sh
+      # The same answer decides which WorkOS project an app signs in against,
+      # and there the partition is invisible when it breaks: a preview build
+      # holding the stable client id looks entirely correct and is signing
+      # people into the stable environment's accounts.
+      - run: ./scripts/workos-test.sh
 
   rust:
     name: Rust (${{ matrix.os }})

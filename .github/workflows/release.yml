@@ -130,10 +130,20 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k actions "$keychain"
           rm certificate.p12
 
-      - name: Build Far Cooler.app
-        run: apps/macos/build-app.sh
+      - name: The WorkOS client id for this channel
         env:
-          FARCOOLER_WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+          LOCAL_WORKOS_CLIENT_ID: ${{ secrets.LOCAL_WORKOS_CLIENT_ID }}
+          CANARY_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
+          PREVIEW_WORKOS_CLIENT_ID: ${{ secrets.PREVIEW_WORKOS_CLIENT_ID }}
+          STABLE_WORKOS_CLIENT_ID: ${{ secrets.STABLE_WORKOS_CLIENT_ID }}
+        run: ./scripts/workos-client-id.sh
+
+      - name: Build Far Cooler.app
+        # FARCOOLER_WORKOS_CLIENT_ID reaches build-app.sh through GITHUB_ENV,
+        # set by the step above. Not written here, because a literal
+        # `secrets.WORKOS_CLIENT_ID` is how a preview build came to be stamped
+        # with the stable environment's client id.
+        run: apps/macos/build-app.sh
 
       - name: Sign and notarise
         if: env.HAS_SIGN_IDENTITY == 'true'
@@ -197,6 +207,19 @@ jobs:
       # --device, unlike CI's simulator-only build: this one is archived.
       - name: Build the Rust xcframeworks
         run: ./scripts/build-ios-frameworks.sh --device
+
+      # Before the project is generated, because generate-project.py bakes the
+      # client id into the target's build settings — a step that ran after it
+      # would set an environment variable nothing reads. This job shipped
+      # without one entirely until it was noticed, and the symptom was not a
+      # failed build: it was a TestFlight app with no sign-in button.
+      - name: The WorkOS client id for this channel
+        env:
+          LOCAL_WORKOS_CLIENT_ID: ${{ secrets.LOCAL_WORKOS_CLIENT_ID }}
+          CANARY_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
+          PREVIEW_WORKOS_CLIENT_ID: ${{ secrets.PREVIEW_WORKOS_CLIENT_ID }}
+          STABLE_WORKOS_CLIENT_ID: ${{ secrets.STABLE_WORKOS_CLIENT_ID }}
+        run: ./scripts/workos-client-id.sh
 
       - name: Generate the Xcode project
         run: apps/ios/generate-project.py
