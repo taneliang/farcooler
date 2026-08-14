@@ -47,8 +47,26 @@ final class TerminalInput {
         lock.lock()
         defer { lock.unlock() }
         guard let stdin else { return }
-        // A closed pipe throws rather than crashing the app.
-        try? stdin.write(contentsOf: data)
+        // A closed pipe throws rather than crashing the app — but ONLY because
+        // `Entry.ignoreSIGPIPE` runs first. Left at its default, writing here
+        // kills the whole app on a signal, before `write` returns anything for
+        // `try?` to catch. That is not a hypothetical: sleep drops the ssh
+        // connection behind a remote pane, the child exits, and the first
+        // keystroke after wake lands on a pipe with no reader.
+        do {
+            try stdin.write(contentsOf: data)
+        } catch {
+            // The child is gone and nothing further can reach it. Dropped
+            // rather than retried on every subsequent keystroke, and dropped
+            // WITHOUT terminating the process here — `stop()` is the teardown,
+            // and this is being called from the typing path.
+            //
+            // The pane is not stranded: `DaemonClient` bumps `linkGeneration`
+            // when a machine's link is replaced, which re-attaches the surface
+            // and starts a new input channel. What is lost is the keystroke
+            // that discovered the corpse.
+            self.stdin = nil
+        }
     }
 
     func stop() {

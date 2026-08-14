@@ -47,12 +47,24 @@ pub enum Status {
     /// its args, which for an npx adapter is where the real package name
     /// lives) and `preset` together.
     AdapterSilent { preset: String, command: String },
-    /// A native backend refused, in its own words.
+    /// A backend refused, in its own words.
     ///
-    /// Separate from the two above because the advice is different: the escape
-    /// hatch is a config edit, not an install. Version skew lands here, which
-    /// is the whole reason `BackendError::Incompatible` names both versions.
-    BackendFailed { preset: String, command: String, reason: String },
+    /// Separate from the one above because the advice is different: a backend
+    /// that refused said why, and the reason usually names the fix. Version
+    /// skew lands here, which is the whole reason `BackendError::Incompatible`
+    /// names both versions.
+    ///
+    /// `backend` is carried because the advice differs by protocol and the
+    /// message used to be written as if every failure were native. An ACP
+    /// adapter that could not start reported itself as "the native backend for
+    /// `claude`", advised setting `backend = "acp"` — which it already was —
+    /// and cost an investigation on the wrong side of the split.
+    BackendFailed {
+        preset: String,
+        command: String,
+        reason: String,
+        backend: farcooler_core::activity::AdapterBackend,
+    },
     Connected { session_id: String },
 }
 
@@ -66,13 +78,26 @@ pub fn status_line(status: &Status) -> String {
              Claude Code session, and neither answers nor exits. Check that the \
              daemon's environment has no CLAUDECODE variable set."
         ),
-        Status::BackendFailed { preset, command, reason } => format!(
+        Status::BackendFailed {
+            preset,
+            command,
+            reason,
+            backend: farcooler_core::activity::AdapterBackend::Native,
+        } => format!(
             "farcooler: the native backend for `{preset}` (`{command}`) could not start.\n\
              {reason}\n\
              Set `backend = \"acp\"` under `[adapters.{preset}]` in \
              ~/.config/farcooler/config.toml to use the ACP adapter instead, then run \
              `farcooler daemon ensure`.\n\
              Terminal mode needs no backend and is unaffected."
+        ),
+        Status::BackendFailed { preset, command, reason, .. } => format!(
+            "farcooler: the ACP adapter for `{preset}` (`{command}`) could not start.\n\
+             {reason}\n\
+             This daemon does not run in a shell, so a program installed by nvm, \
+             volta, Homebrew or pipx is only found through your login shell — check \
+             that running the command above in a terminal on this machine works.\n\
+             Terminal mode needs no adapter and is unaffected."
         ),
         Status::Connected { session_id } => {
             format!("farcooler: agent session {session_id} connected. Rendering natively.")
@@ -89,8 +114,6 @@ pub fn status_line(status: &Status) -> String {
 async fn start_backend(
     preset: &str,
     spec: farcooler_core::activity::AdapterSpec,
-    program: &str,
-    args: &[String],
     worktree: &std::path::Path,
     session: Option<String>,
 ) -> Result<
@@ -100,9 +123,33 @@ async fn start_backend(
     use farcooler_agent::dispatch::Backend;
     use farcooler_agent_core::backend::BackendError;
 
+    // Resolved for BOTH backends, because both spawn a program the user
+    // installed. The ACP branch used to spawn `spec.program` by name, and that
+    // is the entire reason switching a pane to chat mode did nothing on a
+    // machine whose daemon runs under systemd or launchd: `npx` is not on those
+    // `PATH`s, the spawn failed with `ENOENT` before any adapter existed, and
+    // the native branch beside it — which did resolve — worked. `resolve` also
+    // supplies the `PATH` the adapter needs to find the rest of its own
+    // install, which resolving the program alone does not.
+    //
+    // On a blocking pool, and not merely as politeness: resolution asks the
+    // user's login shell where things are, that shell reads a profile nobody
+    // here controls, and it has no timeout of its own. Blocking a runtime
+    // worker with it would also make the 90-second bound in `run` unable to
+    // fire — a future stuck inside a synchronous call never yields, so nothing
+    // can cancel it — and a profile that hangs would hang the pane forever
+    // with no message at all. `rpc.rs` runs the adapter Test the same way.
+    let launch = {
+        let spec = spec.clone();
+        tokio::task::spawn_blocking(move || farcooler_agent::dispatch::resolve(&spec))
+            .await
+            .map_err(|_| BackendError::Spawn)?
+            .map_err(BackendError::Refused)?
+    };
+
     match spec.backend {
         farcooler_core::activity::AdapterBackend::Acp => {
-            let conn = AcpConnection::spawn(program, args, worktree)
+            let conn = AcpConnection::spawn(&launch, worktree)
                 .await
                 .map_err(|_| BackendError::Spawn)?;
             let (agent, prelude) = AgentSession::start(conn, session)
@@ -119,16 +166,6 @@ async fn start_backend(
             ))
         }
         farcooler_core::activity::AdapterBackend::Native => {
-            // Resolved here for the reason `programs::find` exists: a
-            // Dock-launched daemon inherits launchd's PATH and finds nothing a
-            // package manager installed.
-            let resolved = farcooler_core::programs::find(program.trim())
-                .ok_or(BackendError::Spawn)?;
-            let launch = farcooler_agent_core::backend::Launch {
-                program: resolved,
-                args: args.to_vec(),
-                env: spec.env.clone(),
-            };
             // The preset chooses WHICH native protocol. "Native" is not one
             // wire: codex speaks app-server, claude speaks stream-json, and
             // they share nothing but this branch.
@@ -244,6 +281,9 @@ pub async fn run(
     // to say — `program` alone is `npx` for three of the four built-ins and
     // tells nobody which agent that was.
     let agent_label = preset.clone().unwrap_or_else(|| "this agent".to_string());
+    // Copied out before `spec` is handed to `start_backend`, because a failure
+    // has to be able to say which protocol it was speaking.
+    let backend = spec.backend;
     let command = std::iter::once(program.as_str())
         .chain(args.iter().map(String::as_str))
         .collect::<Vec<_>>()
@@ -273,7 +313,7 @@ pub async fn run(
     // use, and killing that would be worse than waiting.
     let started = tokio::time::timeout(
         std::time::Duration::from_secs(90),
-        start_backend(&agent_label, spec, &program, &args, &worktree, session),
+        start_backend(&agent_label, spec, &worktree, session),
     )
     .await;
 
@@ -291,6 +331,7 @@ pub async fn run(
                     preset: agent_label,
                     command,
                     reason: reason.to_string(),
+                    backend,
                 })
             );
             std::future::pending::<()>().await;
@@ -662,6 +703,36 @@ mod tests {
         assert!(claude.contains("claude"));
         assert!(codex.contains("codex"));
         assert_ne!(claude, codex, "two different agents must not read as the same failure");
+    }
+
+    #[test]
+    fn an_acp_adapter_that_fails_is_not_reported_as_a_native_backend() {
+        // Every built-in ships on ACP, so this was the message a real failure
+        // actually produced: it called itself "the native backend for
+        // `claude`" and advised setting `backend = "acp"`, which was already
+        // the setting. An investigation went to the wrong side of the split on
+        // the strength of it.
+        let acp = status_line(&Status::BackendFailed {
+            preset: "claude".into(),
+            command: "npx -y @agentclientprotocol/claude-agent-acp".into(),
+            reason: "could not start the agent".into(),
+            backend: farcooler_core::activity::AdapterBackend::Acp,
+        });
+        assert!(acp.contains("ACP adapter"), "{acp}");
+        assert!(!acp.contains("native"), "an ACP failure must not claim to be native: {acp}");
+        assert!(
+            !acp.contains("backend = \"acp\""),
+            "advising the setting it already has sends the user in a circle: {acp}"
+        );
+
+        let native = status_line(&Status::BackendFailed {
+            preset: "codex".into(),
+            command: "codex app-server".into(),
+            reason: "this agent speaks protocol 0.152.0".into(),
+            backend: farcooler_core::activity::AdapterBackend::Native,
+        });
+        assert!(native.contains("native backend"), "{native}");
+        assert!(native.contains("backend = \"acp\""), "the native escape hatch: {native}");
     }
 
     #[test]

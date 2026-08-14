@@ -32,7 +32,24 @@ pub fn resolve(spec: &AdapterSpec) -> Result<Launch, String> {
     // said the adapter could not start.
     let program = farcooler_core::programs::find(spec.program.trim())
         .ok_or_else(|| format!("could not find `{}` on this machine", spec.program.trim()))?;
-    Ok(Launch { program, args: spec.args.clone(), env: spec.env.clone() })
+    let mut env = spec.env.clone();
+    // Resolving the program is not enough on its own, and this is the half that
+    // was missing. `npx` is a `#!/usr/bin/env node` script: found at its real
+    // path out of `~/.nvm/…/bin` and then spawned with the daemon's own `PATH`,
+    // it cannot find `node` and dies — so the adapter never starts, on a
+    // machine where typing the same command works. That is not hypothetical on
+    // a Mac and it is not hypothetical on Linux either: a `systemd --user`
+    // daemon's `PATH` is `/usr/local/bin:/usr/bin:/bin:/usr/games:/snap/bin`,
+    // with no nvm, no volta and no `~/.local/bin`, and the tmux server it
+    // starts hands exactly that down to the shim.
+    //
+    // An adapter that sets its own `PATH` keeps it. Someone who wrote that line
+    // in their config meant it, and this would otherwise be a setting that
+    // silently does nothing.
+    env.entry("PATH".to_string()).or_insert_with(|| {
+        farcooler_core::programs::search_path().to_string_lossy().into_owned()
+    });
+    Ok(Launch { program, args: spec.args.clone(), env })
 }
 
 /// Prove an adapter can start and complete its own handshake.
@@ -200,6 +217,44 @@ mod tests {
         let failure = handshake("codex", &spec, std::time::Duration::from_secs(5)).expect_err("no program");
         assert!(failure.contains("could not find"), "{failure}");
         assert!(failure.contains("farcooler-no-such-program"), "names it: {failure}");
+    }
+
+    #[test]
+    fn a_resolved_adapter_is_given_a_path_that_can_find_the_rest_of_its_install() {
+        // The failure this exists for: `set-pane-mode agent` succeeds, the shim
+        // starts in the pane, and no adapter child is ever created — because
+        // `npx` was spawned with a daemon's `PATH` and could not find `node`.
+        // The pane goes quiet with nothing anywhere saying why.
+        let spec = AdapterSpec {
+            backend: AdapterBackend::Acp,
+            program: "sh".into(),
+            args: vec![],
+            env: Default::default(),
+        };
+        let launch = resolve(&spec).expect("sh exists on every unix");
+        let path = launch.env.get("PATH").expect("a resolved adapter carries a PATH");
+        let dirs: Vec<std::path::PathBuf> = std::env::split_paths(path).collect();
+        assert!(
+            dirs.contains(&launch.program.parent().expect("absolute").to_path_buf()),
+            "the adapter's own directory must be on the PATH it is spawned with: {path}"
+        );
+    }
+
+    #[test]
+    fn an_adapter_that_sets_its_own_path_keeps_it() {
+        // Otherwise this is a config line that silently does nothing, which is
+        // worse than not supporting it: the user reads their own file back and
+        // believes it.
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("PATH".to_string(), "/only/here".to_string());
+        let spec = AdapterSpec {
+            backend: AdapterBackend::Acp,
+            program: "sh".into(),
+            args: vec![],
+            env,
+        };
+        let launch = resolve(&spec).expect("sh exists on every unix");
+        assert_eq!(launch.env.get("PATH").map(String::as_str), Some("/only/here"));
     }
 
     #[test]

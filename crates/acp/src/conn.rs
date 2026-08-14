@@ -12,6 +12,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 
+use farcooler_agent_core::backend::Launch;
+
 use crate::wire::Rpc;
 
 #[derive(Debug, thiserror::Error)]
@@ -145,14 +147,22 @@ pub struct AcpConnection {
 }
 
 impl AcpConnection {
+    /// Start an adapter and hold both ends of its stdio.
+    ///
+    /// Takes a `Launch` rather than a program name, and that is the whole
+    /// point: the program has already been resolved to a path, and the `env`
+    /// carries the `PATH` it needs to find the rest of its own install. Spawned
+    /// by NAME instead, this found no `npx` at all under a daemon's `PATH` —
+    /// the ACP adapter simply never started, while the native path beside it
+    /// resolved correctly and worked.
     pub async fn spawn(
-        program: &str,
-        args: &[String],
+        launch: &Launch,
         worktree: impl Into<PathBuf>,
     ) -> Result<Self, AcpError> {
         let worktree = worktree.into();
-        let mut child = Command::new(program)
-            .args(args)
+        let mut child = Command::new(&launch.program)
+            .args(&launch.args)
+            .envs(launch.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .current_dir(&worktree)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -400,21 +410,25 @@ mod tests {
     use super::*;
 
     /// A fake adapter: reads one line, writes one JSON-RPC result.
-    fn fake_adapter() -> (String, Vec<String>) {
-        (
-            "/bin/sh".to_string(),
-            vec![
+    ///
+    /// `/bin/sh` by absolute path, because resolution is the caller's job — see
+    /// `Launch`.
+    fn fake_adapter() -> Launch {
+        Launch {
+            program: "/bin/sh".into(),
+            args: vec![
                 "-c".to_string(),
                 r#"read line; printf '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}\n'"#
                     .to_string(),
             ],
-        )
+            env: Default::default(),
+        }
     }
 
     #[tokio::test]
     async fn a_request_is_matched_to_its_response_by_id() {
-        let (program, args) = fake_adapter();
-        let mut conn = AcpConnection::spawn(&program, &args, std::env::temp_dir())
+        let launch = fake_adapter();
+        let mut conn = AcpConnection::spawn(&launch, std::env::temp_dir())
             .await
             .expect("spawn fake adapter");
         let result = conn
@@ -422,6 +436,31 @@ mod tests {
             .await
             .expect("a result comes back");
         assert_eq!(result["protocolVersion"], 1);
+    }
+
+    #[tokio::test]
+    async fn the_adapter_is_started_with_the_environment_it_was_launched_with() {
+        // The half of the fix that resolution alone does not cover. `npx` is a
+        // `#!/usr/bin/env node` script: found at its real path and then spawned
+        // with a daemon's own `PATH`, it cannot find `node`, and the adapter
+        // dies with nobody having done anything visibly wrong. Asserted by
+        // making the fake adapter report a variable back through the protocol,
+        // which is the only end of this a test can observe.
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("FARCOOLER_TEST_PATH".to_string(), "/proof".to_string());
+        let launch = Launch {
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".to_string(),
+                r#"read line; printf '{"jsonrpc":"2.0","id":1,"result":{"saw":"%s"}}\n' "$FARCOOLER_TEST_PATH""#
+                    .to_string(),
+            ],
+            env,
+        };
+        let mut conn =
+            AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
+        let result = conn.request("initialize", serde_json::json!({})).await.expect("a result");
+        assert_eq!(result["saw"], "/proof");
     }
 
     #[tokio::test]
@@ -438,9 +477,9 @@ mod tests {
         // The bug this asserts against threw away the entire transcript while
         // keeping the agent's questions: `session/update` carries no id, so a
         // queue that filtered on id kept only `fs/*` and permission requests.
-        let (program, args) = fake_adapter();
+        let launch = fake_adapter();
         let mut conn =
-            AcpConnection::spawn(&program, &args, std::env::temp_dir()).await.expect("spawn");
+            AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
         conn.queue(Rpc {
             method: Some("session/update".into()),
             params: Some(serde_json::json!({ "sessionId": "s" })),
@@ -458,9 +497,9 @@ mod tests {
         // ONLY place `stopReason` appears. Dropping it here means a turn never
         // reports its end, activity never returns to idle, Done never happens
         // and no notification is ever sent.
-        let (program, args) = fake_adapter();
+        let launch = fake_adapter();
         let mut conn =
-            AcpConnection::spawn(&program, &args, std::env::temp_dir()).await.expect("spawn");
+            AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
         conn.queue(Rpc {
             method: None,
             params: None,
@@ -479,9 +518,9 @@ mod tests {
     async fn a_response_is_never_mistaken_for_a_request_we_must_answer() {
         // Answering a response would send the agent a reply to something it
         // never asked, and leave whatever it IS waiting on unanswered.
-        let (program, args) = fake_adapter();
+        let launch = fake_adapter();
         let mut conn =
-            AcpConnection::spawn(&program, &args, std::env::temp_dir()).await.expect("spawn");
+            AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
         conn.queue(Rpc {
             method: None,
             params: None,
@@ -499,14 +538,17 @@ mod tests {
         // refusal the adapter stated plainly looked like a wedged agent with a
         // blank pane. Seen for real when `session/load` answered "Session not
         // found" for an id whose transcript did not exist yet.
-        let program = "/bin/sh".to_string();
-        let args = vec![
-            "-c".to_string(),
-            r#"read line; printf '{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Session not found"}}\n'"#
-                .to_string(),
-        ];
+        let launch = Launch {
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".to_string(),
+                r#"read line; printf '{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Session not found"}}\n'"#
+                    .to_string(),
+            ],
+            env: Default::default(),
+        };
         let mut conn =
-            AcpConnection::spawn(&program, &args, std::env::temp_dir()).await.expect("spawn");
+            AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
 
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -529,14 +571,17 @@ mod tests {
         // in `data.details`. A caller reading only `message` — which is what
         // this connection did before this test existed — would show the user
         // "Internal error" and throw away the one useful sentence.
-        let program = "/bin/sh".to_string();
-        let args = vec![
-            "-c".to_string(),
-            r#"read line; printf '{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Internal error","data":{"details":"no rollout found for thread id 00000000-0000-7000-8000-000000000000"}}}\n'"#
-                .to_string(),
-        ];
+        let launch = Launch {
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".to_string(),
+                r#"read line; printf '{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Internal error","data":{"details":"no rollout found for thread id 00000000-0000-7000-8000-000000000000"}}}\n'"#
+                    .to_string(),
+            ],
+            env: Default::default(),
+        };
         let mut conn =
-            AcpConnection::spawn(&program, &args, std::env::temp_dir()).await.expect("spawn");
+            AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
 
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(5),

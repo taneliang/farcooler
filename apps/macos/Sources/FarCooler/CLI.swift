@@ -84,9 +84,19 @@ enum CLI {
 
                 // Written and closed before reading stdout, because the child
                 // waits on EOF and we are about to wait on the child.
+                //
+                // The throwing spellings, not `write(_:)` and `closeFile()`.
+                // Those two report failure by raising an Objective-C exception,
+                // which Swift cannot catch — so an installer that exited early,
+                // leaving nothing on the other end of this pipe, would take the
+                // app down while we were writing its password to it. (The
+                // signal that used to do the same job is ignored process-wide;
+                // see `Entry.ignoreSIGPIPE`.) A child that is already gone is
+                // reported by `waitUntilExit` below, in its own words, which is
+                // what the caller is here for.
                 if let input, let stdin {
-                    input.fileHandleForWriting.write(Data(stdin.utf8))
-                    input.fileHandleForWriting.closeFile()
+                    try? input.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+                    try? input.fileHandleForWriting.close()
                 }
 
                 let stdout = out.fileHandleForReading.readDataToEndOfFile()

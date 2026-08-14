@@ -865,9 +865,12 @@ mod tests {
         // on this would treat it as "nothing happened yet" and loop forever
         // on a channel that can never produce again — a hang indistinguishable
         // from the agent being merely slow.
-        let program = "/bin/sh".to_string();
-        let args = vec!["-c".to_string(), "exit 0".to_string()];
-        let conn = AcpConnection::spawn(&program, &args, std::env::temp_dir())
+        let launch = farcooler_agent_core::backend::Launch {
+            program: "/bin/sh".into(),
+            args: vec!["-c".to_string(), "exit 0".to_string()],
+            env: Default::default(),
+        };
+        let conn = AcpConnection::spawn(&launch, std::env::temp_dir())
             .await
             .expect("spawn a fake adapter that exits immediately");
         let worktree = conn.worktree.clone();

@@ -31,7 +31,16 @@
 //!    the authoritative answer — it is the same program they would get by
 //!    typing the name in their terminal.
 //! 4. Known install prefixes, for when even the shell cannot answer.
+//!
+//! Finding the program is only half of it. A program found this way still has
+//! to RUN, and most of the ones this exists for cannot run without the same
+//! directories on their own `PATH`: `npx` is a `#!/usr/bin/env node` script, so
+//! an `npx` resolved out of `~/.nvm/…/bin` and then spawned with launchd's or
+//! systemd's `PATH` fails to find `node` and dies — with the program itself
+//! having resolved perfectly. So `search_path` hands the whole list to the
+//! child, and callers that spawn a user's program are expected to use it.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// Where package managers put things, for when the login shell cannot answer.
@@ -81,6 +90,56 @@ pub fn find(name: &str) -> Option<PathBuf> {
     cache.insert(name.to_string(), found.clone());
     found
 }
+
+/// The `PATH` to give a program *the user* installed, when spawning it.
+///
+/// Every directory `find` would look in, in the order it looks: what this
+/// process inherited, then what the login shell reports, then the known
+/// prefixes. Resolving the program and then handing the child a stripped `PATH`
+/// only moves the failure one process along — see the note at the top of this
+/// module — and moves it somewhere much harder to read, because the child dies
+/// with its own words rather than ours.
+///
+/// Unlike `find`, this always asks the login shell rather than stopping at the
+/// first answer: the point is the whole list, not the first hit. That is one
+/// shell spawn, cached for the life of the process, and it is paid on the path
+/// that starts an agent rather than on the path that resolves `tmux` in front
+/// of a keystroke.
+pub fn search_path() -> OsString {
+    static PATH: std::sync::OnceLock<OsString> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let mut dirs = inherited_path().unwrap_or_default();
+        dirs.extend(login_shell_path().unwrap_or_default());
+        dirs.extend(prefixes());
+        join_unique(dirs)
+    })
+    .clone()
+}
+
+/// `dirs` as a `PATH`, first occurrence winning and duplicates dropped.
+///
+/// Duplicates are the normal case, not an edge one: the inherited `PATH` and
+/// the login shell's overlap almost entirely, and `KNOWN_PREFIXES` repeats
+/// `/usr/bin` and `/bin` on top of both. Left in, a Linux daemon's `PATH` would
+/// arrive at the child three times over.
+///
+/// A directory whose name contains the separator cannot be expressed in a
+/// `PATH` at all, so it is dropped rather than allowed to fail the join and
+/// take every other directory with it.
+fn join_unique(dirs: Vec<PathBuf>) -> OsString {
+    let mut seen = std::collections::HashSet::new();
+    let kept = dirs
+        .into_iter()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .filter(|dir| !dir.to_string_lossy().contains(SEPARATOR))
+        .filter(|dir| seen.insert(dir.clone()));
+    std::env::join_paths(kept).unwrap_or_default()
+}
+
+#[cfg(unix)]
+const SEPARATOR: char = ':';
+#[cfg(not(unix))]
+const SEPARATOR: char = ';';
 
 type Cache = std::sync::Mutex<std::collections::HashMap<String, Option<PathBuf>>>;
 
@@ -271,6 +330,80 @@ mod tests {
         // Twice, so the cached path is returned rather than re-resolved into
         // something different.
         assert_eq!(find("sh"), Some(found));
+    }
+
+    #[test]
+    fn the_search_path_keeps_the_first_of_each_directory_and_drops_the_rest() {
+        // Duplicates are the normal case here, not an edge one: the inherited
+        // PATH and the login shell's overlap almost entirely, and the known
+        // prefixes repeat /usr/bin and /bin on top of both.
+        let joined = join_unique(vec![
+            PathBuf::from("/first"),
+            PathBuf::from("/second"),
+            PathBuf::from("/first"),
+        ]);
+        assert_eq!(joined.to_string_lossy(), "/first:/second");
+    }
+
+    #[test]
+    fn what_the_login_shell_knows_survives_a_daemons_stripped_path() {
+        // The failure, in the shape it actually had. A `systemd --user` daemon
+        // on a Linux machine has this PATH and no other; the tmux server it
+        // starts hands exactly that down, and the agent adapter spawned under
+        // it could not find the node its own shebang asks for. The login
+        // shell's answer is the whole difference between a working flip and a
+        // pane that goes quiet.
+        let systemd = ["/usr/local/bin", "/usr/bin", "/bin", "/usr/games", "/snap/bin"];
+        let login = ["/home/e/.nvm/versions/node/v20.12.2/bin", "/home/e/.local/bin", "/usr/bin"];
+        let joined = join_unique(
+            systemd.iter().chain(login.iter()).map(PathBuf::from).collect(),
+        );
+        let dirs: Vec<PathBuf> = std::env::split_paths(&joined).collect();
+        for dir in login {
+            assert!(dirs.contains(&PathBuf::from(dir)), "{dir} must survive");
+        }
+        assert_eq!(dirs.iter().filter(|d| d.as_os_str() == "/usr/bin").count(), 1);
+    }
+
+    #[test]
+    fn a_directory_that_cannot_be_written_in_a_path_does_not_take_the_others_with_it() {
+        // `join_paths` refuses the whole list when one entry contains the
+        // separator. Refusing it would hand the child an EMPTY PATH — strictly
+        // worse than the stripped one this exists to replace.
+        let joined = join_unique(vec![
+            PathBuf::from("/fine"),
+            PathBuf::from("/impossible:name"),
+            PathBuf::from("/also-fine"),
+        ]);
+        assert_eq!(joined.to_string_lossy(), "/fine:/also-fine");
+    }
+
+    #[test]
+    fn the_search_path_contains_everything_this_process_already_had() {
+        // The property a spawned adapter depends on. Anything narrower than
+        // "a superset of what we inherited" would be a regression for the
+        // developer run, where the inherited PATH is already the right answer.
+        let search: Vec<PathBuf> = std::env::split_paths(&search_path()).collect();
+        for dir in inherited_path().expect("this test process has a PATH") {
+            assert!(search.contains(&dir), "{} is missing from the search path", dir.display());
+        }
+    }
+
+    #[test]
+    fn the_search_path_can_find_the_programs_it_resolves() {
+        // The bug this module grew to cover: `npx` is a `#!/usr/bin/env node`
+        // script, so resolving it and then spawning it with a PATH that has no
+        // `node` fails in the CHILD, with the child's words rather than ours.
+        // Asserted against `sh`, which every unix has and `find` locates the
+        // same way.
+        let found = find("sh").expect("sh exists on every unix");
+        let parent = found.parent().expect("an absolute path has a parent");
+        let search: Vec<PathBuf> = std::env::split_paths(&search_path()).collect();
+        assert!(
+            search.contains(&parent.to_path_buf()),
+            "the search path must contain {}, where `find` says sh lives",
+            parent.display()
+        );
     }
 
     #[test]
