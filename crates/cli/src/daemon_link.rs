@@ -293,7 +293,7 @@ fn spawn_daemon() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Where `farcoolerd` is.
+/// Where this build's daemon is.
 ///
 /// Beside this executable first, because that is how both the app bundle and a
 /// cargo target directory lay them out, and it guarantees the daemon matches
@@ -303,15 +303,38 @@ fn daemon_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Ok(explicit) = std::env::var("FARCOOLERD_BIN") {
         return Ok(PathBuf::from(explicit));
     }
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let sibling = dir.join("farcoolerd");
-        if sibling.is_file() {
-            return Ok(sibling);
+    let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from));
+    Ok(resolve_daemon_binary(beside.as_deref()))
+}
+
+/// Pick the daemon out of a directory, or fall back to the bare name on PATH.
+///
+/// Split from `daemon_binary` so the choice can be tested without a real
+/// executable, because the choice is where this went wrong: it used to join
+/// `farcoolerd` flat, which meant a `farcooler-local` installed into
+/// `~/.local/bin` started the RELEASE daemon standing next to it — a local
+/// build writing into the stable database, which is the one outcome the
+/// channels exist to make impossible.
+///
+/// `daemon_binary_candidates` is what makes this safe in both directions: the
+/// channel's own name wins where both exist, and cargo's bare `farcoolerd`
+/// still resolves in a `target/` directory, which never renames anything.
+///
+/// The last resort stays a bare name for PATH to answer, and stays THIS
+/// channel's bare name — an install that separated the pair still put a
+/// channel-named binary on the path, and a spawn that fell through to
+/// `farcoolerd` would be reaching for a release install one more time.
+fn resolve_daemon_binary(beside: Option<&std::path::Path>) -> PathBuf {
+    let candidates = farcooler_protocol::CHANNEL.daemon_binary_candidates();
+    if let Some(dir) = beside {
+        for name in candidates {
+            let sibling = dir.join(name);
+            if sibling.is_file() {
+                return sibling;
+            }
         }
     }
-    Ok(PathBuf::from("farcoolerd"))
+    PathBuf::from(farcooler_protocol::CHANNEL.daemon_binary_name())
 }
 
 /// Poll until the daemon is listening.
@@ -363,4 +386,54 @@ pub fn expect_value(
     what: &str,
 ) -> Result<result::Value, Box<dyn std::error::Error>> {
     value.ok_or_else(|| format!("the daemon returned no {what}").into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use farcooler_protocol::{CHANNEL, Channel};
+
+    fn dir_holding(names: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for name in names {
+            std::fs::write(dir.path().join(name), b"").expect("write");
+        }
+        dir
+    }
+
+    /// The bug: `~/.local/bin` is where every channel installs, so a machine
+    /// running the release build and a local one has both daemons sitting side
+    /// by side. Joining `farcoolerd` flat meant the local CLI started the
+    /// release daemon, and nothing anywhere said so — the handshake succeeds,
+    /// because both sides really are Far Cooler.
+    #[test]
+    fn a_directory_with_two_channels_in_it_answers_with_ours() {
+        let dir = dir_holding(CHANNEL.daemon_binary_candidates());
+        assert_eq!(
+            resolve_daemon_binary(Some(dir.path())),
+            dir.path().join(CHANNEL.daemon_binary_name())
+        );
+    }
+
+    /// And the direction that must not break while fixing that one: cargo
+    /// writes `farcoolerd` into `target/<profile>` whatever channel stamped
+    /// it, so a checkout has to keep finding the daemon it just built.
+    #[test]
+    fn a_cargo_target_directory_still_answers() {
+        let dir = dir_holding(&["farcoolerd"]);
+        assert_eq!(resolve_daemon_binary(Some(dir.path())), dir.path().join("farcoolerd"));
+    }
+
+    #[test]
+    fn nothing_beside_us_falls_through_to_this_channels_name_on_path() {
+        let dir = dir_holding(&[]);
+        assert_eq!(
+            resolve_daemon_binary(Some(dir.path())),
+            PathBuf::from(CHANNEL.daemon_binary_name())
+        );
+        assert_eq!(resolve_daemon_binary(None), PathBuf::from(CHANNEL.daemon_binary_name()));
+        if CHANNEL != Channel::Stable {
+            assert_ne!(resolve_daemon_binary(None), PathBuf::from("farcoolerd"));
+        }
+    }
 }

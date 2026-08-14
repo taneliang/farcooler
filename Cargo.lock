@@ -904,6 +904,7 @@ dependencies = [
  "farcooler-transport",
  "libc",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

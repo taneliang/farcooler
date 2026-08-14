@@ -52,13 +52,20 @@ use crate::{agent_supervisor, git, paths, session_discovery};
 /// A sibling of the daemon rather than whatever is on `PATH`, so a daemon built
 /// from this workspace runs the CLI built from this workspace. `PATH` is the
 /// fallback for an install that separates them.
+///
+/// By candidate name, because the CLI beside a preview daemon in
+/// `~/.local/bin` is `farcooler-preview` and the bare `farcooler` there is the
+/// release install. Putting that one into the pane would run an agent against
+/// a different channel's daemon — a pane belonging to one fleet, talking to
+/// another's — and the bare name is still accepted second so that a cargo
+/// target directory, which renames nothing, keeps working.
 pub fn shim_binary(daemon_exe: Option<&std::path::Path>) -> String {
+    let candidates = farcooler_protocol::CHANNEL.cli_binary_candidates();
     daemon_exe
         .and_then(|p| p.parent())
-        .map(|dir| dir.join("farcooler"))
-        .filter(|p| p.exists())
+        .and_then(|dir| candidates.iter().map(|name| dir.join(name)).find(|p| p.exists()))
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "farcooler".to_string())
+        .unwrap_or_else(|| farcooler_protocol::CHANNEL.cli_binary_name().to_string())
 }
 
 /// Wrap a value so a shell treats it as exactly one word.
@@ -2231,10 +2238,32 @@ mod preset_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let daemon = dir.join("farcoolerd");
         std::fs::write(&daemon, "").unwrap();
-        // No sibling `farcooler`: naming a path that does not exist would fail
-        // in the pane with no explanation, so PATH is the better guess.
-        assert_eq!(shim_binary(Some(&daemon)), "farcooler");
-        assert_eq!(shim_binary(None), "farcooler");
+        // No sibling CLI: naming a path that does not exist would fail in the
+        // pane with no explanation, so PATH is the better guess.
+        let on_path = farcooler_protocol::CHANNEL.cli_binary_name();
+        assert_eq!(shim_binary(Some(&daemon)), on_path);
+        assert_eq!(shim_binary(None), on_path);
+    }
+
+    /// `~/.local/bin` holds every channel a machine has installed, so the CLI
+    /// beside the daemon is ambiguous by name alone. An agent pane opened by
+    /// the preview daemon that ran the release `farcooler` would attach to the
+    /// release daemon's fleet, and the pane would look fine while belonging to
+    /// the wrong side of the isolation.
+    #[test]
+    fn the_shim_is_this_channels_cli_when_several_are_installed() {
+        let dir = std::env::temp_dir().join(format!("farcooler-shim-ch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let daemon = dir.join(farcooler_protocol::CHANNEL.daemon_binary_name());
+        std::fs::write(&daemon, "").unwrap();
+        for name in farcooler_protocol::CHANNEL.cli_binary_candidates() {
+            std::fs::write(dir.join(name), "").unwrap();
+        }
+
+        assert_eq!(
+            shim_binary(Some(&daemon)),
+            dir.join(farcooler_protocol::CHANNEL.cli_binary_name()).display().to_string()
+        );
     }
 
     #[test]

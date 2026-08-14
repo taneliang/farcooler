@@ -291,7 +291,13 @@ struct SettingsView: View {
                 }
             }
 
-            Setting("Puts farcooler and farcoolerd on your PATH, so a terminal or an SSH session can find them.") {
+            // Named from the same place the symlinks are made, because on
+            // anything but a release build they are not called `farcooler` and
+            // `farcoolerd` — and a line promising those two names would be
+            // telling someone to type a command that will not be there.
+            Setting(
+                "Puts \(CommandLineTools.tools.map(\.link).joined(separator: " and ")) on your PATH, so a terminal or an SSH session can find them."
+            ) {
                 switch cliTools.state {
                 case .installed:
                     Toggle("Command-line tools", isOn: .constant(true))

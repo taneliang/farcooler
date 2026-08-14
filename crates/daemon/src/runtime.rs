@@ -489,11 +489,69 @@ impl Runtime {
 ///
 /// Same shape as `service::shim_binary`, and for the same reason: two binaries
 /// come out of this workspace and only one of them answers any given flag.
+///
+/// By candidate name rather than the bare literal, because the name on disk
+/// depends on the channel. A preview daemon that piped a pane into the release
+/// `farcoolerd` standing beside it in `~/.local/bin` would hand this pane's
+/// bytes to a daemon on the other side of the isolation — and the fanout
+/// socket it then bound would be one this daemon never looks at.
 pub fn fanout_binary() -> Option<std::path::PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    if exe.file_name().is_some_and(|n| n == "farcoolerd") {
-        return Some(exe);
+    fanout_binary_beside(&std::env::current_exe().ok()?)
+}
+
+/// The choice `fanout_binary` makes, given the executable it is made from, so
+/// it can be tested without one.
+fn fanout_binary_beside(exe: &std::path::Path) -> Option<std::path::PathBuf> {
+    let candidates = farcooler_protocol::CHANNEL.daemon_binary_candidates();
+    if exe.file_name().is_some_and(|n| candidates.iter().any(|c| n == *c)) {
+        return Some(exe.to_path_buf());
     }
-    let sibling = exe.parent()?.join("farcoolerd");
-    sibling.exists().then_some(sibling)
+    let dir = exe.parent()?;
+    candidates.iter().map(|name| dir.join(name)).find(|p| p.exists())
+}
+
+#[cfg(test)]
+mod fanout_binary_tests {
+    use super::fanout_binary_beside;
+    use farcooler_protocol::CHANNEL;
+
+    /// A `~/.local/bin` with two channels installed in it holds two daemons,
+    /// and the pane has to go to this one. The other one's fanout listens on a
+    /// socket this daemon never subscribes to, so the stream would time out
+    /// after a second and exit — which a client cannot tell apart from a pane
+    /// that finished.
+    #[test]
+    fn the_pane_goes_to_this_channels_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in CHANNEL.daemon_binary_candidates() {
+            std::fs::write(dir.path().join(name), b"").unwrap();
+        }
+        // Asked from the CLI, which is where this matters: the CLI opens a
+        // Runtime of its own for `terminal stream` and must not pipe the pane
+        // into itself.
+        let cli = dir.path().join(CHANNEL.cli_binary_name());
+        assert_eq!(
+            fanout_binary_beside(&cli),
+            Some(dir.path().join(CHANNEL.daemon_binary_name()))
+        );
+    }
+
+    /// Cargo renames nothing, so a checkout still finds what it just built.
+    #[test]
+    fn a_cargo_target_directory_still_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("farcoolerd"), b"").unwrap();
+        assert_eq!(
+            fanout_binary_beside(&dir.path().join("farcooler")),
+            Some(dir.path().join("farcoolerd"))
+        );
+    }
+
+    /// The daemon asking about itself answers with itself, without touching
+    /// the filesystem — `--fanout` is its own flag.
+    #[test]
+    fn the_daemon_is_its_own_fanout() {
+        let exe = std::path::Path::new("/nowhere").join(CHANNEL.daemon_binary_name());
+        assert_eq!(fanout_binary_beside(&exe), Some(exe));
+    }
 }

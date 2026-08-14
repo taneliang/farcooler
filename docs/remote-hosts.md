@@ -13,6 +13,11 @@ Two consequences worth understanding before anything else:
 - **Everything installs into your home directory.** No root, no package manager,
   no system service. A user who can SSH in can install Far Cooler; a user who
   cannot, cannot.
+- **Every name below carries the channel.** A release build installs and reaches
+  for `farcoolerd`; a canary one installs and reaches for `farcoolerd-canary`,
+  and likewise `-preview` and `-local`. So one host can run several channels at
+  once without them meeting, and a build only ever talks to the daemon it put
+  there. See [releasing.md](releasing.md).
 
 ## What a Linux host needs
 
@@ -120,7 +125,10 @@ log out of it.
 
 **"`farcoolerd --stdio` did not answer"** — the binary is not on the remote
 user's `PATH`. `~/.local/bin` is added by the login shell, so check that the
-host's shell profile includes it, or re-run `host install`.
+host's shell profile includes it, or re-run `host install`. The message names
+the binary this build actually asked for, so a canary client reports
+`farcoolerd-canary` — a release daemon being present on that host is not the
+same thing as this one being installed.
 
 **"runs protocol N; this client speaks M"** — the two sides are different
 versions. Re-run `host install` to bring the host up to date, or update the

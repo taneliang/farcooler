@@ -23,6 +23,8 @@ use std::time::Duration;
 use farcooler_transport::{Client, ClientError};
 use tokio::process::{Child, Command};
 
+use crate::host_install;
+
 type Reader = Box<dyn tokio::io::AsyncRead + Unpin + Send>;
 type Writer = Box<dyn tokio::io::AsyncWrite + Unpin + Send>;
 
@@ -79,15 +81,26 @@ fn ssh_args(target: &str) -> Vec<String> {
     ]
 }
 
+/// What to run on the far side to get a daemon speaking the protocol.
+///
+/// `host install` puts it in ~/.local/bin, but a non-login ssh command's PATH
+/// is whatever the remote shell config gives it — often not that. Naming it by
+/// tilde (expanded by the remote shell, not guessed here) finds it regardless
+/// of PATH.
+///
+/// The name carries this build's channel, and no fallback: this asks a machine
+/// for the daemon `host install` put there, which is exactly one name. Falling
+/// back to the bare `farcoolerd` would find the release daemon on any machine
+/// that has one and quietly join a preview client to it.
+fn daemon_command() -> String {
+    format!("~/.local/bin/{} --stdio", host_install::daemon_name())
+}
+
 /// Open a protocol connection to a remote daemon.
 pub async fn connect(target: &str) -> Result<RemoteLink, Box<dyn std::error::Error>> {
     let mut command = Command::new("ssh");
     command.args(ssh_args(target));
-    // `host install` puts it in ~/.local/bin, but a non-login ssh command's
-    // PATH is whatever the remote shell config gives it — often not that.
-    // Naming it by tilde (expanded by the remote shell, not guessed here)
-    // finds it regardless of PATH.
-    command.arg("~/.local/bin/farcoolerd --stdio");
+    command.arg(daemon_command());
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -134,16 +147,32 @@ async fn explain(target: &str, error: ClientError, child: &mut Child) -> String 
             "Could not reach {target} over ssh.\n\
              Check the host name, your ssh config, and that the machine is reachable."
         ),
-        ClientError::Closed | ClientError::NoHello => format!(
-            "Connected to {target}, but `farcoolerd --stdio` did not answer.\n\
-             Is Far Cooler installed there?  farcooler host install {target}"
-        ),
+        ClientError::Closed | ClientError::NoHello => not_installed(target),
         ClientError::VersionMismatch { daemon, client } => format!(
             "{target} runs protocol {daemon}; this client speaks {client}.\n\
-             Update the older side:  farcooler host install {target}"
+             Update the older side:  {cli} host install {target}",
+            cli = host_install::cli_name()
         ),
         other => format!("{target}: {other}"),
     }
+}
+
+/// Reached the machine, got nothing back from the daemon.
+///
+/// Names this channel's binaries rather than Far Cooler in general. A preview
+/// build that reported `farcoolerd` would send someone to check a binary it
+/// never asked for — and one that is very likely present and healthy, since a
+/// machine running the release build has it — so the report would read as
+/// nonsense. Naming the CLI in the fix has the same reason: a preview install
+/// is done by `farcooler-preview`, and the bare `farcooler` may not be on that
+/// person's machine at all.
+fn not_installed(target: &str) -> String {
+    format!(
+        "Connected to {target}, but `{daemon} --stdio` did not answer.\n\
+         Is Far Cooler installed there?  {cli} host install {target}",
+        daemon = host_install::daemon_name(),
+        cli = host_install::cli_name()
+    )
 }
 
 /// Whether ssh itself never reached `target`, as opposed to reaching it and
@@ -200,14 +229,23 @@ pub async fn exec(
         command.arg("-t");
     }
     command.args(ssh_args(target));
-    // Named by tilde, not bare: a non-login ssh exec's PATH often lacks
-    // ~/.local/bin, where `host install` puts the binary — same reason
-    // `connect` above does not exec a bare `farcoolerd` either.
-    command.arg(format!("~/.local/bin/farcooler {}", shell_join(args)));
+    command.arg(cli_command(args));
     command.kill_on_drop(true);
 
     let status = command.status().await.map_err(|e| format!("cannot run ssh: {e}"))?;
     Ok(status.code().unwrap_or(1))
+}
+
+/// What to run on the far side to reach the remote host's own CLI.
+///
+/// Named by tilde, not bare: a non-login ssh exec's PATH often lacks
+/// ~/.local/bin, where `host install` puts the binary — same reason
+/// `daemon_command` above does not exec a bare name either. And carrying this
+/// build's channel for the same reason again: the CLI on that machine is the
+/// one this CLI uploaded, and a channel that streamed through the release CLI
+/// would be reading a different daemon's terminals.
+fn cli_command(args: &[String]) -> String {
+    format!("~/.local/bin/{} {}", host_install::cli_name(), shell_join(args))
 }
 
 /// Quote arguments for the remote login shell.
@@ -232,6 +270,65 @@ fn shell_quote(arg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bug this file had: `host install` uploads `farcoolerd-local`, and
+    /// then every connection asked the machine for `farcoolerd`. On a machine
+    /// with nothing else installed that is a confusing "is Far Cooler
+    /// installed there?" against a machine where it plainly is. On a machine
+    /// that also runs the release build it is worse and silent — the local CLI
+    /// gets a working session with the stable daemon, and the two channels
+    /// that were supposed to never meet share a database.
+    #[test]
+    fn ssh_runs_this_channels_daemon_and_never_another() {
+        let command = daemon_command();
+        assert_eq!(
+            command,
+            format!("~/.local/bin/{} --stdio", farcooler_protocol::CHANNEL.daemon_binary_name())
+        );
+        if farcooler_protocol::CHANNEL != farcooler_protocol::Channel::Stable {
+            assert!(
+                !command.starts_with("~/.local/bin/farcoolerd "),
+                "a {} build reached for the stable daemon: {command}",
+                farcooler_protocol::CHANNEL.as_str()
+            );
+        }
+    }
+
+    /// Same rule for the live-byte path. It is a separate ssh invocation, so
+    /// it was a separate hardcoded name and would have gone on working against
+    /// the stable CLI after the control connection was fixed.
+    #[test]
+    fn a_streamed_command_runs_this_channels_cli() {
+        let command = cli_command(&["terminal".into(), "stream".into()]);
+        assert_eq!(
+            command,
+            format!(
+                "~/.local/bin/{} terminal stream",
+                farcooler_protocol::CHANNEL.cli_binary_name()
+            )
+        );
+        if farcooler_protocol::CHANNEL != farcooler_protocol::Channel::Stable {
+            assert!(!command.starts_with("~/.local/bin/farcooler "), "{command}");
+        }
+    }
+
+    /// The wording sends someone somewhere. A preview build reporting that
+    /// `farcoolerd` did not answer sends them to check a binary that is not
+    /// the one it asked for, and `farcooler host install` is a command they
+    /// may not have — the same reason `crates/client/src/session.rs` names its
+    /// own channel's daemon in the error it raises.
+    #[test]
+    fn a_missing_install_is_reported_against_the_binary_we_asked_for() {
+        let message = not_installed("box");
+        assert!(
+            message.contains(farcooler_protocol::CHANNEL.daemon_binary_name()),
+            "does not name the daemon it asked for: {message}"
+        );
+        assert!(
+            message.contains(farcooler_protocol::CHANNEL.cli_binary_name()),
+            "does not name the CLI that would fix it: {message}"
+        );
+    }
 
     #[test]
     fn plain_arguments_are_passed_through_unquoted() {

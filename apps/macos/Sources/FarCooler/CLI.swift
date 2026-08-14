@@ -17,6 +17,9 @@ enum CLI {
     static var binary: String? {
         var candidates: [String] = []
 
+        // Bare inside the bundle, because `build-app.sh` copies what cargo
+        // produced and cargo produces `farcooler` on every channel. There is
+        // only one CLI in here, so there is nothing to tell apart.
         if let bundled = Bundle.main.resourceURL?
             .appendingPathComponent("farcooler").path
         {
@@ -25,7 +28,13 @@ enum CLI {
         if let override = ProcessInfo.processInfo.environment["FARCOOLER_BIN"] {
             candidates.append(override)
         }
-        candidates += ["/usr/local/bin/farcooler", "\(NSHomeDirectory())/.local/bin/farcooler"]
+        // Channel-named outside it, because those directories are shared. A
+        // Mac with the release app installed has `/usr/local/bin/farcooler`,
+        // and a canary app falling through to it would run the release CLI
+        // against the release daemon — the app would look like it was working,
+        // on the wrong fleet, with nothing anywhere saying so.
+        let onPath = CommandLineTools.channelName(for: "farcooler")
+        candidates += ["/usr/local/bin/\(onPath)", "\(NSHomeDirectory())/.local/bin/\(onPath)"]
 
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }

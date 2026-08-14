@@ -26,12 +26,18 @@ use tokio::process::Command;
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
 /// This build's daemon binary. See `Channel::daemon_binary_name`.
-fn daemon_name() -> &'static str {
+///
+/// Crate-wide rather than private, because what this returns is the name that
+/// lands on the host — so every other module that reaches for that machine
+/// afterwards (`remote::connect`, `push --host`) has to spell it the same way
+/// or it will ask for a binary nobody installed. It was two spellings once,
+/// and the second one was `farcoolerd` on every channel.
+pub(crate) fn daemon_name() -> &'static str {
     farcooler_protocol::CHANNEL.daemon_binary_name()
 }
 
 /// This build's CLI binary.
-fn cli_name() -> &'static str {
+pub(crate) fn cli_name() -> &'static str {
     farcooler_protocol::CHANNEL.cli_binary_name()
 }
 
@@ -155,34 +161,35 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
         Some(p) => p.to_path_buf(),
         None => locate_dist(&slug),
     };
-    let daemon = dir.join(daemon_name());
-    let cli = dir.join(cli_name());
-    for path in [&daemon, &cli] {
-        if !path.is_file() {
-            // A packaged app has no `scripts/build-linux.sh` to point at — its
-            // copy is either bundled next to it already or it never will be,
-            // since the toolchain that builds one is a developer's, not a
-            // download's. Telling someone without a checkout to run a script
-            // they do not have sends them nowhere.
-            let hint = if has_dev_checkout() {
-                format!(
-                    "Build them first:\n\n    ./scripts/build-linux.sh {arch}\n\n\
-                     or pass --from <dir> with `{cli}` and `{daemon}` inside.",
-                    cli = cli_name(),
-                    daemon = daemon_name()
-                )
-            } else {
-                format!(
-                    "This copy of Far Cooler was not built with a Linux install \
-                     bundled in.\nPass --from <dir> with `{cli}` and `{daemon}` \
-                     inside, built for this machine's architecture.",
-                    cli = cli_name(),
-                    daemon = daemon_name()
-                )
-            };
-            return Err(format!("No Linux binary at {}.\n{hint}", path.display()).into());
-        }
-    }
+    // Found by candidate name, uploaded by channel name. `build-linux.sh`,
+    // `release.yml` and the macOS `build-app.sh` all copy what cargo produced,
+    // and cargo produces `farcoolerd` on every channel — so a lookup that
+    // insisted on `farcoolerd-canary` here would find nothing at all and tell
+    // a canary build to go build the file it is already standing on. The
+    // channel name only has to be true on the destination, which is the only
+    // place four of them share a directory.
+    let (Some(daemon), Some(cli)) = (
+        find_binary(&dir, farcooler_protocol::CHANNEL.daemon_binary_candidates()),
+        find_binary(&dir, farcooler_protocol::CHANNEL.cli_binary_candidates()),
+    ) else {
+        // A packaged app has no `scripts/build-linux.sh` to point at — its
+        // copy is either bundled next to it already or it never will be,
+        // since the toolchain that builds one is a developer's, not a
+        // download's. Telling someone without a checkout to run a script
+        // they do not have sends them nowhere.
+        let hint = if has_dev_checkout() {
+            format!(
+                "Build them first:\n\n    ./scripts/build-linux.sh {arch}\n\n\
+                 or pass --from <dir> with `farcooler` and `farcoolerd` inside."
+            )
+        } else {
+            "This copy of Far Cooler was not built with a Linux install \
+             bundled in.\nPass --from <dir> with `farcooler` and `farcoolerd` \
+             inside, built for this machine's architecture."
+                .to_string()
+        };
+        return Err(format!("No Linux binaries in {}.\n{hint}", dir.display()).into());
+    };
 
     println!(
         "    {} {arch}, tmux at {}",
@@ -347,12 +354,27 @@ fn locate_dist(slug: &str) -> PathBuf {
     if let Ok(exe) = std::env::current_exe().and_then(|exe| exe.canonicalize()) {
         if let Some(dir) = exe.parent() {
             let bundled = dir.join("dist").join(slug);
-            if bundled.join(daemon_name()).is_file() && bundled.join(cli_name()).is_file() {
+            let has = |candidates| find_binary(&bundled, candidates).is_some();
+            if has(farcooler_protocol::CHANNEL.daemon_binary_candidates())
+                && has(farcooler_protocol::CHANNEL.cli_binary_candidates())
+            {
                 return bundled;
             }
         }
     }
     PathBuf::from("dist").join(slug)
+}
+
+/// The first of these names that is a file in `dir`.
+///
+/// The one rule for reading a Far Cooler binary off a local disk, wherever it
+/// came from: a `dist/` a build script wrote, a `--from` pointing at somebody's
+/// `target/release`, or an install directory holding several channels at once.
+/// The channel's own name wins where there is a choice, and cargo's bare name
+/// is accepted after it, because nothing between `cargo build` and here ever
+/// renames the file.
+fn find_binary(dir: &Path, candidates: &[&str]) -> Option<PathBuf> {
+    candidates.iter().map(|name| dir.join(name)).find(|p| p.is_file())
 }
 
 /// Whether this is a checkout with `scripts/build-linux.sh` to point someone
@@ -901,6 +923,53 @@ mod tests {
         }
         assert!(!"6.8.0-45-generic".to_lowercase().contains("microsoft"));
         assert!(!"25.5.0".to_lowercase().contains("microsoft"));
+    }
+
+    /// The asymmetry that broke `host install` on every channel but stable:
+    /// what gets uploaded is named for the channel, but what gets READ never
+    /// is. `scripts/build-linux.sh`, `release.yml` and `apps/macos/build-app.sh`
+    /// all copy cargo's `farcooler`/`farcoolerd` straight out of `target/`, so
+    /// a canary build looking for `dist/x86_64-linux/farcoolerd-canary` found
+    /// an empty directory and reported "No Linux binary" against a tree that
+    /// had just built one.
+    #[test]
+    fn a_dist_directory_is_read_by_the_name_cargo_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("farcoolerd"), b"").unwrap();
+        std::fs::write(dir.path().join("farcooler"), b"").unwrap();
+
+        let channel = farcooler_protocol::CHANNEL;
+        assert_eq!(
+            find_binary(dir.path(), channel.daemon_binary_candidates()),
+            Some(dir.path().join("farcoolerd"))
+        );
+        assert_eq!(
+            find_binary(dir.path(), channel.cli_binary_candidates()),
+            Some(dir.path().join("farcooler"))
+        );
+    }
+
+    /// And where a directory does hold several channels — someone pointing
+    /// `--from` at a `~/.local/bin` they already installed into — the one this
+    /// build would upload is its own, not whichever name happens to sort first.
+    #[test]
+    fn a_directory_holding_several_channels_gives_up_ours() {
+        let dir = tempfile::tempdir().unwrap();
+        let channel = farcooler_protocol::CHANNEL;
+        for name in channel.daemon_binary_candidates() {
+            std::fs::write(dir.path().join(name), b"").unwrap();
+        }
+        assert_eq!(
+            find_binary(dir.path(), channel.daemon_binary_candidates()),
+            Some(dir.path().join(channel.daemon_binary_name()))
+        );
+    }
+
+    #[test]
+    fn an_empty_directory_finds_nothing_rather_than_guessing() {
+        let dir = tempfile::tempdir().unwrap();
+        let channel = farcooler_protocol::CHANNEL;
+        assert_eq!(find_binary(dir.path(), channel.daemon_binary_candidates()), None);
     }
 
     #[test]

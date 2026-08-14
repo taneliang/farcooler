@@ -656,6 +656,11 @@ async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
     use farcooler_daemon::service::shell_quote;
 
     if let Some(target) = host {
+        // This channel's CLI on that machine, not the bare name: it is the one
+        // this build uploaded, it keeps its pairing beside its own daemon's
+        // database, and asking for `farcooler` on a machine that also runs the
+        // release build would pair the wrong fleet to these devices.
+        let remote = |rest: &str| format!("~/.local/bin/{} push {rest}", host_install::cli_name());
         match &cmd {
             PushCmd::Pair { relay } => {
                 let relay = relay
@@ -668,16 +673,16 @@ async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
                 let token = read_token()?;
                 return host_install::remote_run_with_stdin(
                     target,
-                    &format!("~/.local/bin/farcooler push pair{relay}"),
+                    &remote(&format!("pair{relay}")),
                     &token,
                 )
                 .await;
             }
             PushCmd::Status => {
-                return host_install::remote_run(target, "~/.local/bin/farcooler push status").await;
+                return host_install::remote_run(target, &remote("status")).await;
             }
             PushCmd::Forget => {
-                return host_install::remote_run(target, "~/.local/bin/farcooler push forget").await;
+                return host_install::remote_run(target, &remote("forget")).await;
             }
         }
     }

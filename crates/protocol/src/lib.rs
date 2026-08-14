@@ -104,6 +104,46 @@ impl Channel {
         }
     }
 
+    /// The names this channel's daemon may go by on disk, most specific first.
+    ///
+    /// Two names, because two different things produce a Far Cooler binary and
+    /// only one of them renames. `host install` writes `daemon_binary_name()`
+    /// on the destination, which is what lets four channels share one
+    /// `~/.local/bin`. Cargo does not: `[[bin]] name = "farcoolerd"` is what
+    /// comes out of `target/` no matter which channel stamped it, and
+    /// `build-linux.sh`, `release.yml` and the macOS `build-app.sh` all copy
+    /// that name along unchanged. Anything asking "where is the daemon that
+    /// belongs to me" therefore has to accept both, or a checkout stops being
+    /// able to run what it just built the moment it is not stable.
+    ///
+    /// The order is the safety property, not a preference: a directory holding
+    /// both `farcoolerd` and `farcoolerd-preview` must answer a preview client
+    /// with the preview daemon. Checking the bare name first would quietly
+    /// hand it the stable one, which is the exact meeting these names exist to
+    /// prevent.
+    ///
+    /// Use this to FIND a binary. Use `daemon_binary_name` to NAME one — an
+    /// install has a single correct answer and no fallback.
+    pub fn daemon_binary_candidates(self) -> &'static [&'static str] {
+        match self {
+            Channel::Stable => &["farcoolerd"],
+            Channel::Preview => &["farcoolerd-preview", "farcoolerd"],
+            Channel::Canary => &["farcoolerd-canary", "farcoolerd"],
+            Channel::Local => &["farcoolerd-local", "farcoolerd"],
+        }
+    }
+
+    /// The names this channel's CLI may go by on disk. Same rule as the
+    /// daemon's.
+    pub fn cli_binary_candidates(self) -> &'static [&'static str] {
+        match self {
+            Channel::Stable => &["farcooler"],
+            Channel::Preview => &["farcooler-preview", "farcooler"],
+            Channel::Canary => &["farcooler-canary", "farcooler"],
+            Channel::Local => &["farcooler-local", "farcooler"],
+        }
+    }
+
     /// The same rule in a form a `const` can call.
     ///
     /// `match` on a `&str` is not permitted in a const context, so this matches
@@ -369,5 +409,41 @@ mod tests {
             let unique: std::collections::BTreeSet<_> = names.iter().collect();
             assert_eq!(unique.len(), ALL_CHANNELS.len(), "two channels cannot share one path: {names:?}");
         }
+    }
+
+    #[test]
+    fn a_lookup_prefers_this_channels_name_over_the_bare_one() {
+        // The order is the whole isolation property. A `~/.local/bin` holding
+        // both a stable install and a preview one holds two files, and a
+        // preview client that checked the bare name first would find the
+        // stable daemon sitting there and talk to it — which is precisely the
+        // meeting the channels exist to prevent.
+        for c in ALL_CHANNELS {
+            assert_eq!(c.daemon_binary_candidates().first(), Some(&c.daemon_binary_name()));
+            assert_eq!(c.cli_binary_candidates().first(), Some(&c.cli_binary_name()));
+        }
+    }
+
+    #[test]
+    fn every_channel_also_answers_to_the_name_cargo_gives_it() {
+        // `[[bin]] name = "farcoolerd"` is what a build produces whatever
+        // channel stamped it, and `build-linux.sh`, `release.yml` and
+        // `build-app.sh` all copy that name out of `target/` unchanged. A
+        // lookup that accepted only the channel name would mean a checkout
+        // stops being able to find what it just built the moment it is not
+        // stable.
+        for c in ALL_CHANNELS {
+            assert!(c.daemon_binary_candidates().contains(&"farcoolerd"), "{c:?}");
+            assert!(c.cli_binary_candidates().contains(&"farcooler"), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn stable_looks_for_exactly_one_name() {
+        // Its channel name and cargo's name are the same string, and a list
+        // that repeated it would make every caller do redundant work and
+        // every error message list a path twice.
+        assert_eq!(Channel::Stable.daemon_binary_candidates(), &["farcoolerd"]);
+        assert_eq!(Channel::Stable.cli_binary_candidates(), &["farcooler"]);
     }
 }
