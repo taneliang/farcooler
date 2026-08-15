@@ -27,7 +27,11 @@ on:
         type: choice
         options: [preview, stable]
       confirm_version:
-        description: The version you believe you are shipping: e.g. 0.2.0
+        # Quoted, and it has to be. A bare `: ` inside a plain scalar is not
+        # valid YAML, so this file failed to load AT ALL — no Promote button,
+        # no way to reach preview or stable, and the only sign was a workflow
+        # run with no jobs failing instantly on every unrelated push.
+        description: "The version you believe you are shipping, e.g. 0.2.0"
         required: true
         type: string
 
