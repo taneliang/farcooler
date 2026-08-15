@@ -105,12 +105,18 @@ jobs:
           echo "$APP_STORE_KEY_P8" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
 
-          # CODE_SIGN_STYLE and DEVELOPMENT_TEAM are overrides, not decoration.
-          # generate-project.py writes `CODE_SIGN_STYLE = Manual` into every
-          # target, which is what lets a checkout build with no account at all —
-          # and manual signing with no profile named cannot archive. release.yml
-          # passes exactly this pair for the same reason; this job did not, so it
-          # would have failed on signing the moment the frameworks built.
+          # Four overrides, and all four are load-bearing. generate-project.py
+          # writes `CODE_SIGN_STYLE = Manual`, `CODE_SIGN_IDENTITY = "-"` and
+          # `CODE_SIGNING_REQUIRED = NO` into every target, which is exactly
+          # right for a checkout with no Apple account: it builds, ad-hoc
+          # signed, and runs in a simulator.
+          #
+          # None of it can archive. Manual signing names no profile, and the
+          # ad-hoc identity is refused outright — "Ad Hoc code signing is not
+          # allowed with SDK 'iOS 26.5'", for the app and the Live Activity
+          # extension both. The identity is the one that bites second: setting
+          # only the style and the team leaves `-` in place and the archive
+          # fails the same way with a different message.
           xcodebuild -project FarCooler.xcodeproj -scheme FarCooler \
             -configuration Release -destination 'generic/platform=iOS' \
             -archivePath build/FarCooler.xcarchive archive \
@@ -119,7 +125,9 @@ jobs:
             -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8 \
             CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }}
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGNING_REQUIRED=YES
 
           xcodebuild -exportArchive \
             -archivePath build/FarCooler.xcarchive \
