@@ -1218,7 +1218,7 @@ fn parse_destination(config: &str) -> Result<Destination, String> {
 
 /// Queue a line that is not an answer to any request.
 fn push_line(queue: &Arc<Mutex<VecDeque<String>>>, line: String) {
-    locked(&queue).push_back(line);
+    locked(queue).push_back(line);
 }
 
 fn push(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value, String>) {
@@ -1226,7 +1226,7 @@ fn push(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value
         Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
         Err(message) => json!({ "ticket": ticket, "ok": false, "error": message }),
     };
-    locked(&queue).push_back(payload.to_string());
+    locked(queue).push_back(payload.to_string());
 }
 
 /// The same envelope, plus the one thing a client cannot work out from the
@@ -1252,7 +1252,7 @@ fn push_call(
             "disconnected": lost,
         }),
     };
-    locked(&queue).push_back(payload.to_string());
+    locked(queue).push_back(payload.to_string());
 }
 
 impl ClientHandle {
