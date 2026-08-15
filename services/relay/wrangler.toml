@@ -42,7 +42,7 @@ routes = [{ pattern = "relay.farcooler.com", custom_domain = true }]
 [[d1_databases]]
 binding = "DB"
 database_name = "farcooler"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "fe999c45-6f1f-4883-bf09-c1adc88b9e6a"
 
 # Counters, kept apart from the account data on purpose — see analytics.ts.
 [[analytics_engine_datasets]]
@@ -50,7 +50,7 @@ binding = "METRICS"
 dataset = "farcooler_events"
 
 [vars]
-WORKOS_CLIENT_ID = "REPLACE_WITH_STABLE_WORKOS_CLIENT_ID"
+WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
 # Which channel this deployment IS.
 #
 # Only so the relay can check that APNS_TOPIC belongs to it. That secret must
@@ -108,7 +108,7 @@ routes = [{ pattern = "relay-preview.farcooler.com", custom_domain = true }]
 [[env.preview.d1_databases]]
 binding = "DB"
 database_name = "farcooler-preview"
-database_id = "REPLACE_WITH_PREVIEW_D1_ID"
+database_id = "853ac487-4ce6-4b0e-8291-1e54c7233eb3"
 
 # Its own dataset, not a shared one with a channel column: an analytics query
 # that had to remember to filter is a query someone will forget to filter.
@@ -117,7 +117,7 @@ binding = "METRICS"
 dataset = "farcooler_events_preview"
 
 [env.preview.vars]
-WORKOS_CLIENT_ID = "REPLACE_WITH_PREVIEW_WORKOS_CLIENT_ID"
+WORKOS_CLIENT_ID = "client_01M03MXE27CHCZJJ0TMY7KCMAH"
 CHANNEL = "preview"
 
 # A separate namespace, so a burst against preview cannot spend the stable
@@ -142,14 +142,14 @@ routes = [{ pattern = "relay-canary.farcooler.com", custom_domain = true }]
 [[env.canary.d1_databases]]
 binding = "DB"
 database_name = "farcooler-canary"
-database_id = "REPLACE_WITH_CANARY_D1_ID"
+database_id = "9a02931a-1f29-4560-8da2-69af03674f6f"
 
 [[env.canary.analytics_engine_datasets]]
 binding = "METRICS"
 dataset = "farcooler_events_canary"
 
 [env.canary.vars]
-WORKOS_CLIENT_ID = "REPLACE_WITH_CANARY_WORKOS_CLIENT_ID"
+WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
 CHANNEL = "canary"
 
 [[env.canary.unsafe.bindings]]
@@ -176,14 +176,14 @@ routes = [{ pattern = "relay-local.farcooler.com", custom_domain = true }]
 [[env.local.d1_databases]]
 binding = "DB"
 database_name = "farcooler-local"
-database_id = "REPLACE_WITH_LOCAL_D1_ID"
+database_id = "797e5eb9-8e90-4464-9890-3e35494205fe"
 
 [[env.local.analytics_engine_datasets]]
 binding = "METRICS"
 dataset = "farcooler_events_local"
 
 [env.local.vars]
-WORKOS_CLIENT_ID = "REPLACE_WITH_LOCAL_WORKOS_CLIENT_ID"
+WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD"
 CHANNEL = "local"
 
 [[env.local.unsafe.bindings]]
