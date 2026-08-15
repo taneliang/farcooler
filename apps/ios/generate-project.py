@@ -81,6 +81,7 @@ AGENTKIT_SOURCES = [
     # The half of push registration that is not platform-specific. Both apps
     # had it verbatim; only the device label differs.
     "PushRegistration.swift",
+    "RelaySection.swift",
     "TokenStore.swift",
     "VersionSection.swift",
     "Transcript.swift",
@@ -389,7 +390,7 @@ ACTIVITY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCODE_SIGNING_REQUIRED = NO;
 \t\t\t\tSKIP_INSTALL = YES;"""
 
-UI_TEST_COMMON = """\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";
+UI_TEST_COMMON = f"""\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID}.uitests;
 \t\t\t\tGENERATE_INFOPLIST_FILE = YES;
 \t\t\t\tTEST_TARGET_NAME = FarCooler;
