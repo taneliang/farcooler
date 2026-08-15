@@ -52,11 +52,21 @@ jobs:
           # shallow clone makes it 1. scripts/version.sh refuses outright rather
           # than emitting a plausible wrong answer, so this is not optional.
           fetch-depth: 0
+      # The iOS targets are NOT installed by default, and their absence does not
+      # look like a missing target: cargo reports `can't find crate for std`,
+      # which reads as a broken toolchain. release.yml names them for the same
+      # reason; this job was archiving for the phone without them.
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
 
+      # `--device`, because this job ARCHIVES. The default is simulator-only —
+      # fast, and right for the CI job that merely compiles — but an archive
+      # built against simulator slices fails at the linker, and the error names
+      # a missing symbol rather than a missing architecture.
       - name: Build the Rust xcframeworks
-        run: ./scripts/build-ios-frameworks.sh
+        run: ./scripts/build-ios-frameworks.sh --device
 
       # The canary's own WorkOS project, through the same script the release
       # builds use rather than a `secrets.CANARY_…` written here. The channel is
@@ -95,13 +105,21 @@ jobs:
           echo "$APP_STORE_KEY_P8" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
 
+          # CODE_SIGN_STYLE and DEVELOPMENT_TEAM are overrides, not decoration.
+          # generate-project.py writes `CODE_SIGN_STYLE = Manual` into every
+          # target, which is what lets a checkout build with no account at all —
+          # and manual signing with no profile named cannot archive. release.yml
+          # passes exactly this pair for the same reason; this job did not, so it
+          # would have failed on signing the moment the frameworks built.
           xcodebuild -project FarCooler.xcodeproj -scheme FarCooler \
             -configuration Release -destination 'generic/platform=iOS' \
             -archivePath build/FarCooler.xcarchive archive \
             -allowProvisioningUpdates \
             -authenticationKeyID "$APP_STORE_KEY_ID" \
             -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8 \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }}
 
           xcodebuild -exportArchive \
             -archivePath build/FarCooler.xcarchive \
