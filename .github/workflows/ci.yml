@@ -119,6 +119,30 @@ jobs:
       # CI is not. Clippy, which finds real defects rather than disagreeing
       # about widths, runs at -D warnings.
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # A `changes` pane runs THIS CHANNEL'S CLI by name — `changes_host_command`
+      # asks `shim_binary`, which looks beside the daemon's own executable and
+      # otherwise falls back to the bare name for PATH to resolve. Under `cargo
+      # test` the "daemon executable" is the test binary in `target/debug/deps`,
+      # where no CLI has ever been placed, so the fallback is all there is.
+      #
+      # A developer machine has one installed, which is why
+      # `a_pane_split_with_the_changes_preset_is_a_changes_pane` passes there and
+      # nowhere else. A runner has none, the pane's command cannot start, and
+      # `remain-on-exit` leaves a dead rectangle the test correctly calls Exited.
+      #
+      # Named for the channel because that is what `shim_binary` asks for, and a
+      # clean untagged checkout is `local`. The other names are linked too, so
+      # this does not quietly stop working the day CI builds a different one.
+      - name: Put this channel's CLI where the daemon tests look for it
+        run: |
+          set -euo pipefail
+          cargo build --workspace --bins
+          for name in farcooler-local farcooler-preview farcooler-canary; do
+            ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"
+          done
+          echo "$PWD/target/debug" >> "$GITHUB_PATH"
+
       - run: cargo test --workspace
 
   swift:

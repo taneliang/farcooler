@@ -1333,7 +1333,11 @@ async fn a_pane_split_with_the_changes_preset_is_a_changes_pane() {
     assert_eq!(
         changes.state(),
         farcooler_protocol::v1::TerminalState::Running,
-        "something is holding the rectangle, or tmux would have collapsed it"
+        "something is holding the rectangle, or tmux would have collapsed it \
+         (running: {:?}, exit: {:?}) — a changes pane runs this channel's CLI by \
+         name, so a machine without it on PATH gets a pane that dies instantly",
+        changes.current_command,
+        changes.exit_status,
     );
 
     // And it is not a posture that can be switched off, in either direction:
