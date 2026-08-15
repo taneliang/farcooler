@@ -117,6 +117,15 @@ jobs:
           # extension both. The identity is the one that bites second: setting
           # only the style and the team leaves `-` in place and the archive
           # fails the same way with a different message.
+          #
+          # DEVELOPMENT, not Distribution, and that is not a typo. Automatic
+          # signing archives with a development identity and the EXPORT step is
+          # what re-signs for the App Store, using the method in
+          # ExportOptions.plist. Naming a distribution identity here instead
+          # produces "conflicting provisioning settings: automatically signed
+          # for development, but a conflicting code signing identity Apple
+          # Distribution has been manually specified" — Xcode asking for the
+          # value below in as many words.
           xcodebuild -project FarCooler.xcodeproj -scheme FarCooler \
             -configuration Release -destination 'generic/platform=iOS' \
             -archivePath build/FarCooler.xcarchive archive \
@@ -126,7 +135,7 @@ jobs:
             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8 \
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGN_IDENTITY="Apple Development" \
             CODE_SIGNING_REQUIRED=YES
 
           xcodebuild -exportArchive \
