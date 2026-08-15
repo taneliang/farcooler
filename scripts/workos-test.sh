@@ -52,40 +52,54 @@ scratch() {
 dir="$(scratch)"
 
 # All four present: each channel takes its own and nothing else.
-all_four() {
-  (cd "$dir" \
-    && LOCAL_WORKOS_CLIENT_ID=id-local \
-       CANARY_WORKOS_CLIENT_ID=id-canary \
-       PREVIEW_WORKOS_CLIENT_ID=id-preview \
-       STABLE_WORKOS_CLIENT_ID=id-stable \
-       "$@" ./scripts/workos-client-id.sh)
+# `env -u GITHUB_ENV`, and it is not decoration.
+#
+# The script has two output modes: under Actions it writes the id to $GITHUB_ENV
+# and prints a human line, and everywhere else it prints the id itself. A test
+# that merely does not SET GITHUB_ENV still inherits the runner's, so every one
+# of these cases took the Actions branch in CI and compared an id against "The
+# preview channel's WorkOS project". Green on a laptop, six failures on a
+# runner. Ambient environment is an input; the cases that care must name it.
+run() {
+  (cd "$dir" && env -u GITHUB_ENV \
+    LOCAL_WORKOS_CLIENT_ID=id-local \
+    CANARY_WORKOS_CLIENT_ID=id-canary \
+    PREVIEW_WORKOS_CLIENT_ID=id-preview \
+    STABLE_WORKOS_CLIENT_ID=id-stable \
+    "$@" ./scripts/workos-client-id.sh)
 }
 
-check "untagged is the local project" "id-local" "$(all_four env)"
-check "FARCOOLER_CHANNEL picks canary" "id-canary" "$(all_four env FARCOOLER_CHANNEL=canary)"
-check "a preview tag picks preview" "id-preview" "$(all_four env FARCOOLER_TAG=v0.2.0-preview.3)"
-check "a release tag picks stable" "id-stable" "$(all_four env FARCOOLER_TAG=v0.2.0)"
+check "untagged is the local project" "id-local" "$(run)"
+check "FARCOOLER_CHANNEL picks canary" "id-canary" "$(run FARCOOLER_CHANNEL=canary)"
+check "a preview tag picks preview" "id-preview" "$(run FARCOOLER_TAG=v0.2.0-preview.3)"
+check "a release tag picks stable" "id-stable" "$(run FARCOOLER_TAG=v0.2.0)"
+
+# The same, with nothing set. Separate from `run` because these cases are about
+# what happens when a secret is ABSENT, and `run` supplies all four.
+bare() {
+  (cd "$dir" && env -u GITHUB_ENV "$@" ./scripts/workos-client-id.sh)
+}
 
 # THE ONE THAT MATTERS. Only the stable secret exists — the state a repository
 # is in halfway through being set up — and a preview build must come out with
 # nothing rather than with the stable environment's identities.
-only_stable="$(cd "$dir" && STABLE_WORKOS_CLIENT_ID=id-stable FARCOOLER_TAG=v0.2.0-preview.3 ./scripts/workos-client-id.sh 2>/dev/null)"
+only_stable="$(bare STABLE_WORKOS_CLIENT_ID=id-stable FARCOOLER_TAG=v0.2.0-preview.3 2>/dev/null)"
 check "preview never falls back to stable" "" "$only_stable"
 
 # Absent is not fatal: a fork has none of these and still builds an app that
 # works, minus the sign-in button. Exercised for stable, the channel where the
 # temptation to fail hard is strongest.
 set +e
-(cd "$dir" && FARCOOLER_TAG=v0.2.0 ./scripts/workos-client-id.sh >/dev/null 2>&1)
+bare FARCOOLER_TAG=v0.2.0 >/dev/null 2>&1
 check "a missing secret does not fail the build" "0" "$?"
 set -e
 
 # But it says so, and only where someone will install the result. A local build
 # without one is the ordinary case and must stay quiet, or the warning becomes
 # something people learn to read past.
-noisy="$(cd "$dir" && FARCOOLER_TAG=v0.2.0 ./scripts/workos-client-id.sh 2>&1 >/dev/null | grep -c 'stable' || true)"
+noisy="$(bare FARCOOLER_TAG=v0.2.0 2>&1 >/dev/null | grep -c 'stable' || true)"
 check "a missing stable id warns" "1" "$noisy"
-quiet="$(cd "$dir" && ./scripts/workos-client-id.sh 2>&1 >/dev/null | wc -l | tr -d ' ')"
+quiet="$(bare 2>&1 >/dev/null | wc -l | tr -d ' ')"
 check "a missing local id is silent" "0" "$quiet"
 
 # Under Actions the id reaches later steps through GITHUB_ENV — build-app.sh and
@@ -95,6 +109,14 @@ env_file="$(mktemp)"
 (cd "$dir" && GITHUB_ENV="$env_file" PREVIEW_WORKOS_CLIENT_ID=id-preview \
   FARCOOLER_TAG=v0.2.0-preview.3 ./scripts/workos-client-id.sh >/dev/null)
 check "GITHUB_ENV carries the id" "FARCOOLER_WORKOS_CLIENT_ID=id-preview" "$(cat "$env_file")"
+
+# And under Actions the warning has to be an ANNOTATION on stdout rather than a
+# line on stderr, or it never reaches the run summary — which is the only place
+# anyone would see it. This is the branch the runner actually takes, and the one
+# that went unexercised while the suite was passing.
+annotation="$(cd "$dir" && GITHUB_ENV="$env_file" FARCOOLER_TAG=v0.2.0 \
+  ./scripts/workos-client-id.sh 2>/dev/null | grep -c '^::warning::' || true)"
+check "under Actions the warning is an annotation" "1" "$annotation"
 
 rm -rf "$dir" "$env_file"
 
