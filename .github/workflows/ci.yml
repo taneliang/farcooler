@@ -92,13 +92,24 @@ jobs:
             brew install tmux
           fi
 
-      # The other three built-in adapters are `npx` packages, which need only
-      # node and a network — both of which the runner already has. opencode's
-      # is a native subcommand on a binary, so unlike the others the binary
-      # itself has to be installed before crates/core/tests/adapters.rs can
-      # start it.
-      - name: Install opencode
-        run: npm install -g opencode-ai
+      # The ACP adapters are `npx` packages, which need only node and a network
+      # — both of which the runner already has. These three are spawned BY NAME
+      # instead, so the binary has to be on PATH before anything can hand shake
+      # with it: opencode for crates/core/tests/adapters.rs, and claude and
+      # codex for the two native-backend tests in crates/agent.
+      #
+      # Installing them is the contract rather than a convenience.
+      # `crates/agent/tests/backends.rs` says three times over that a missing
+      # program is a FAILURE and not a skip — "silently passing would mean the
+      # one test that can catch a broken adapter never runs where it matters" —
+      # so the runner has to be a machine where they exist. The alternative,
+      # teaching those tests to skip, would delete the only coverage the
+      # dispatch path has.
+      #
+      # The handshake needs the binary and nothing else: no key, no login. It
+      # answers in about five seconds for both.
+      - name: Install the agents the native backends spawn
+        run: npm install -g opencode-ai @anthropic-ai/claude-code @openai/codex
 
       # No `cargo fmt --check`, deliberately, and it is worth saying why rather
       # than leaving it looking forgotten. This workspace predates any
