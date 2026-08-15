@@ -13,10 +13,25 @@
          grants `TEAMID.*` and nothing else, so a bare group name matches
          nothing the profile allows and the device build fails to sign at all.
          The prefix expands to empty when there is no profile, which is what
-         keeps the ad-hoc simulator build signing exactly as before. -->
+         keeps the ad-hoc simulator build signing exactly as before.
+
+         `$(PRODUCT_BUNDLE_IDENTIFIER)` rather than a literal, so the group is
+         this channel's alone. It was `com.farcooler.ios` for every build, which
+         made the keychain the one thing four channels shared: canary and stable
+         installed side by side could read each other's device identity, and a
+         device key is precisely what the isolation everywhere else — runtime
+         directory, database, WorkOS environment, APNs topic, bundle id — exists
+         to keep apart.
+
+         Following PRODUCT_BUNDLE_IDENTIFIER rather than naming the channels
+         means there is no second list to keep in step with generate-project.py,
+         and it is why this migrates nothing: for stable that setting IS
+         `com.farcooler.ios`, so the group it expands to is byte-for-byte the
+         one every existing install already writes to. Only the three channels
+         that have never shipped move. -->
     <key>keychain-access-groups</key>
     <array>
-        <string>$(AppIdentifierPrefix)com.farcooler.ios</string>
+        <string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     </array>
 
     <!-- Remote notifications. `development` so a locally-signed build gets a
