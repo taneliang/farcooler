@@ -84,6 +84,26 @@
          scripts/version.sh. The whole reason it exists: a beta and a release
          that call themselves the same version make a bug report unanswerable —
          someone says "0.2.0" and there is no way to know which one they had. -->
+    <!-- Answered here so nobody has to answer it per build.
+         Without this key every upload lands in App Store Connect as "Missing
+         Compliance" and waits for a human to click through the export
+         questionnaire before any tester can install it — which would make the
+         canary channel, whose entire premise is that nobody presses anything,
+         a channel where somebody presses something every time.
+
+         `false` is the declaration that this app uses no NON-EXEMPT
+         encryption. What it actually uses is standard, publicly available
+         cryptography — TLS through the OS, and SSH through a Rust
+         implementation of the published protocol — for authenticating to and
+         reaching machines the person already owns. It implements no
+         cryptography of its own and does not exist to encrypt data for the
+         person using it.
+
+         THIS IS A LEGAL DECLARATION, not a build setting. Revisit it if Far
+         Cooler ever ships its own cipher, or ships encryption as a feature
+         rather than as the means of reaching a host. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>FarCoolerChannel</key>
     <string>$(FARCOOLER_CHANNEL)</string>
     <key>FarCoolerDisplayVersion</key>
