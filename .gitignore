@@ -33,3 +33,10 @@ apps/android/.gradle/
 apps/android/build/
 apps/android/app/build/
 apps/android/local.properties
+
+# Agent-session scratch, not source. `worktrees/` holds whole checkouts — 18 GB
+# of them at the time of writing — and `settings.local.json` is one machine's
+# preferences. A shared `.claude/settings.json` is deliberately still
+# committable, which is why this names the two rather than the directory.
+.claude/worktrees/
+.claude/settings.local.json
