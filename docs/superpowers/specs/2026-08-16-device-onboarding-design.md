@@ -67,11 +67,48 @@ it can only refuse an enrollment, never cause one.
 
 ### Two gates, and only one of them is the account
 
-**Both devices must be signed into the same account.** The new device signs in,
-registers its key, and the trusted device asks the relay whether the key it just
-scanned belongs to a device on this account. A compromised relay can deny that —
-which is a refusal, not an injection, because it cannot make anyone scan a QR
-code.
+**Both devices must be signed into the same account.** The new device signs in
+and registers its keys through `/v1/devices`, which is session-authenticated — so
+the relay holds `(device, account, key_a, key_b)` where the account came from a
+WorkOS session rather than from anything the device claimed. When the trusted
+device scans, it asks one question, **scoped to its own account**:
+
+```sql
+SELECT id, label FROM devices
+ WHERE key_a_fingerprint = ? AND account_id = <the caller's account, from its session>
+```
+
+**The fingerprint, not the key.** The relay's only use for a device key is this
+lookup, so it stores `SHA256:t7Xq…9Vd` — the same string a person reads on
+screen — and never the key itself. An ed25519 public key is 32 random bytes, so
+its hash is a one-way identifier: matchable, not reversible. That makes "never
+install a key the relay handed you" structural rather than a rule to remember,
+because the relay has no key to hand anyone. Key B never reaches the relay at
+all; the shell fingerprint shown in Settings comes from the machine's fence,
+which is ground truth.
+
+The scoping is what makes it sound. A lookup by key alone would return some
+device and leave the caller comparing account ids, which breaks the moment two
+accounts register the same public key. Scoped, that case cannot arise: the answer
+is "yes, on your account" or "no", and never whose it is otherwise — which also
+stops the route being a key-enumeration oracle.
+
+A phone signed into another account has no row on yours. A phone signed into
+nothing has no row at all, which is why sign-in comes before the code.
+
+**This gate is not relay-proof, and is not claimed to be.** A compromised relay
+can answer yes to anything. What it cannot do is make someone scan a QR code or
+produce a fingerprint, so the most it achieves is turning a refusal into a pass
+for a device already being held up to your camera — relay compromise plus
+physical presence, at which point the local gate below is what remains.
+
+**Offline is a refusal, not a bypass.** A trusted device that cannot reach the
+relay does not enroll.
+
+A WorkOS token in the QR would remove the relay from this check, and is
+deliberately not used: a JWT on a screen is a bearer token for the account, which
+is a worse version of the mistake draft three made. Everything in the QR stays
+public.
 
 **The confirmation demands local authentication.** Touch ID, Face ID, or the
 device passcode through `LocalAuthentication`, at the moment of the tap — not a
@@ -149,10 +186,11 @@ It generates its keys, then displays:
 | `key_a` | its Far Cooler public key |
 | `key_b` | its shell public key — Macs only, and only if shell access was chosen |
 | `name` | its device name |
-| `nonce` | 128 bits, so the same device rescanned twice is two distinct ceremonies |
 
 No secret. Everything here is public, and a photograph of it is worth nothing:
 enrolling these keys grants access to a device the photographer does not hold.
+There is no nonce, because enrolling a key twice is the same as enrolling it
+once — a replayed scan has nothing to replay.
 
 **2. A device you already trust scans it.** That device now holds the new
 device's keys, taken off a screen with no network in between, and checks with the
@@ -179,8 +217,11 @@ only a fingerprint stands between a stranger and them:
 
 **4. The trusted device shows a QR code back**, carrying the manifest: for each
 machine granted, its address, user, port, host key fingerprint and alias. A
-machine is about 120 bytes, so a handful fit in one code; beyond that it is an
-animated sequence, which the scanner reassembles by index.
+machine is about 120 bytes and a version-40 code holds roughly 1850, so **one
+static code, capped at fifteen machines.** Past that, grant some now and the rest
+from the new device later. No animated sequence, no reassembly, no partial-set
+handling — a cap that will almost never be reached beats machinery that always
+exists.
 
 This leg needs no signature and no encryption. It is pixels to a lens, with no
 network and no third party — the same channel as the first leg, pointed the
@@ -198,37 +239,51 @@ and succeeds. Nothing more has to be delivered.
 the manual path, and the app says so rather than inventing a weaker exchange for
 the case where the strong one does not fit.
 
-## Later grants
+## Later grants are self-service
 
 Giving an already-enrolled device access to a *new* machine happens months later,
-with the two devices nowhere near each other, so the camera is unavailable and
-the relay carries it. That is sound here for a reason the first enrollment could
-not use: **both devices are already enrolled, so each can learn the other's key
-from ground truth** — the fence of a machine they share.
+with nobody standing next to anybody, so the camera is unavailable.
 
-The granting device signs the manifest with its Key A and encrypts it to the
-target's Key A. The target verifies the signature against the signer's
-fingerprint as read from a machine's fence, never as reported by the relay. A
-compromised relay cannot forge a signature it cannot produce, and cannot
-substitute a key that ground truth does not confirm.
+An earlier draft had the relay carry a signed, encrypted manifest between the two
+devices, with signatures verified against the fence of a machine they share. It
+worked, and it was a subsystem — signing, encryption, a TTL, rate limits, and a
+verification story — built to move one thing: **a machine's address.**
 
-A device that shares no machine with the target cannot grant to it. The answer is
-the ceremony again, in person, and the app says exactly that.
+There is already a path that moves it with no relay at all. **A device asks a
+machine it already reaches to enroll it on the new one.** That machine has SSH to
+the new one — it is how the new one was installed — so it calls `client.enroll`
+there and returns the address, port, host key fingerprint and alias over the
+connection the asking device already holds. Every hop is authenticated, every
+host key is pinned, and nothing passes through anything that could forge it.
+
+The rule that follows, and the reason this stays simple:
+
+**A device learns a machine's address only from something it is already talking
+to.** The ceremony, or a machine it already reaches. Nothing else.
+
+So **later grants are self-service**: you add machines *from the device that
+wants them*. Settings › Devices on another device shows that device's grants
+read-only, and says to grant from there. That removes remote cross-device
+granting, which is the only case that ever needed the relay, and costs a habit
+nobody has formed yet — you ask for access on the device you are holding.
+
+If no machine you can reach also reaches the new one, the answer is the ceremony
+in person or the manual path, and the app says exactly that.
 
 ## What the relay stores
 
 | | |
 | --- | --- |
-| Devices | id, label, push token, **key_a public, key_b public**, created_at |
+| Devices | id, label, push token, **key_a fingerprint**, created_at |
 | Machines | id, label — the existing `daemons` rows |
-| Grant blobs | signed, encrypted, addressed to one device · 10-minute TTL |
-| Grants | **nothing** |
+| Keys | **none** |
+| Addresses | **none** |
+| Grants | **none** |
 
-Two public keys per device, typed, because a Mac has two and a fingerprint shown
-next to "shell access" must be the right one.
-
-The relay knows a machine exists and what you call it. It never learns how to
-reach one, and it is absent from first enrollment entirely.
+A fingerprint, not a key, and only Key A's — see above. The relay knows a machine
+exists and what you call it. It never learns how to reach one, holds nothing that
+could be installed anywhere, and is absent from enrollment except for one lookup
+whose worst possible answer is a refusal.
 
 A device row is created by the **trusted** device after enrollment. `/v1/devices`
 requires only an account session (`index.ts:224`), so a row the relay or a
@@ -236,9 +291,9 @@ session-holder fabricates proves nothing: a device whose key matches no fence
 entry and no completed ceremony is shown as **unverified** and cannot be granted
 anything.
 
-Rate limiting on grant blobs is per account, with numbers, and fails closed: ten
-per account per hour. The existing limiter covers only `/v1/auth/*`, is keyed by
-IP, and fails open when its binding is absent (`index.ts:62`).
+The account lookup is rate limited per account and fails closed. The existing
+limiter covers only `/v1/auth/*`, is keyed by IP, and fails open when its binding
+is absent (`index.ts:62`) — reasonable for sign-in, wrong here.
 
 ## Notifications
 
@@ -560,10 +615,9 @@ the client cannot know why sshd refused, it says so.
 **Names come from the fence.** The comment is `farcooler-<name>-<fp8>`, so a
 machine lists its own devices with no network at all.
 
-**Never let the relay choose which key to install.** Its stored public keys are
-for displaying fingerprints. Every enrollment sources the key from ground truth:
-a completed ceremony, or the fence of a machine that already holds it — and the
-fingerprint used for that lookup comes from local record, never from the relay.
+**The relay cannot choose which key to install**, because it holds no key — only
+a fingerprint. Every enrollment sources the key from ground truth: a completed
+ceremony, or the fence of a machine that already holds it.
 
 **An address that changes is redistributed over the protocol.** A daemon reports
 its own reachability on every authenticated connection, so a client that can
@@ -652,9 +706,10 @@ signed into the same account, and a fingerprint at the confirmation.
 
 | | |
 | --- | --- |
+| From the device that wants it | Ask a machine it already reaches to enroll it on the new one. That machine returns the address on the connection you already hold. |
 | From the machine itself | A Mac you are at: Settings › Devices → check the device. Local write. |
-| From another device | Any device holding `control` there, signed and verified against a shared machine's fence. |
-| No machine in common | Not possible remotely. Run the ceremony in person. |
+| For some other device, remotely | Not offered. Grant from that device — its Settings › Devices is read-only elsewhere and says so. |
+| No machine in common | The ceremony in person, or the manual path. |
 | Any time | Paste the key into `authorized_keys` yourself. |
 
 ## Threat model
@@ -664,7 +719,7 @@ signed into the same account, and a fingerprint at the confirmation.
 | Anonymous internet | Cannot begin. Nothing that authorizes an enrollment travels over the network. |
 | **Someone at your unlocked laptop** | **Refused at the confirmation**, which demands a fingerprint or passcode they do not have. An account check would not have helped: that laptop is signed in, and they would be using your session. |
 | A device that is not on your account | Refused before the confirmation, when the trusted device asks the relay whose key it just scanned. Also the answer to an honest mistake: a second account's phone would otherwise hold keys on your machines while appearing in a device list you cannot see. |
-| WorkOS account takeover | Cannot enroll anything — enrollment needs a QR scanned in person and a local authentication. Cannot forge a later grant, which needs a signature verified against a machine's fence. Can read the roster and machine labels, and can push notifications. |
+| WorkOS account takeover | Cannot enroll anything — enrollment needs a QR scanned in person and a local authentication, and later grants never cross the network. Can read the roster of device labels, machine labels and fingerprints, and can push notifications. |
 | Compromised relay or D1 | Absent from enrollment entirely. For later grants, cannot forge a signature or substitute a key ground truth does not confirm. Can withhold a blob, and learns device names, public keys and machine labels. |
 | Someone filming the QR exchange | **Nothing.** Two public keys and a list of addresses they cannot reach. There is no secret in either code. |
 | MITM between an enrolling device and a machine | Refused — the host key is pinned from a manifest that came through a camera. |
@@ -710,9 +765,12 @@ does not apply to SSO users, so it is not something to lean on.
   the app working and only Zed broken.
 - **The alias reaches the editor.** A workspace on a registered machine produces
   an `ssh://` URL naming the alias.
-- **Later grants.** A blob whose signature does not verify against a shared
-  machine's fence is refused; a blob for a device sharing no machine is never
-  produced.
+- **Later grants.** A device asking a machine it reaches to enroll it elsewhere
+  receives the address on that same connection and nothing through the relay; a
+  device with no machine in common is told to run the ceremony rather than
+  offered a remote path.
+- **The relay holds no key.** Its device rows carry a fingerprint, and every
+  enrollment path refuses a key that did not come from a ceremony or a fence.
 - **Scope.** A `read` client cannot enroll, cannot revoke, and cannot reach a
   `control` operation.
 - **Derivation.** A device whose line is deleted by hand reports *not
@@ -729,5 +787,8 @@ does not apply to SSO users, so it is not something to lean on.
   nobody noticed.
 - **A camera-less ceremony.** Every attempt so far has been broken by review, and
   the manual path already covers the case honestly.
+- **Granting another device access remotely.** Removed deliberately: it was the
+  only case that needed the relay to carry anything, and self-service covers it
+  at the cost of a habit nobody has formed.
 - **Bulk grant.** "Every machine" is one checkbox away and is deliberately not
   offered, because the default this document argues for is the opposite.
