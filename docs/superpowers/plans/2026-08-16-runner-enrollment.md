@@ -147,7 +147,13 @@ is a release-blocking failure. Refusing loses a feature."
 - Modify: `crates/daemon/src/fence.rs`
 
 **Interfaces:**
-- Produces: `pub fn render(received: &str, label: &str, client_id: &str, scope: Scope) -> Result<String, Rejected>` and `pub enum Rejected { MultiLine, Algorithm, Parse(String) }`.
+- Produces: `pub fn render(received: &str, label: &str, client_id: &str, scope: Scope) -> Result<String, Rejected>` and `pub enum Rejected { MultiLine, Algorithm, Unparseable }`.
+
+**No `String` payload**, from review. `Rejected` crosses the protocol and the
+FFI to a screen, and this app already renders error strings from this layer in
+Settings. A parser message built from attacker-supplied bytes must not be one of
+them, and plan 5's constraints forbid it. The parser's own message goes to the
+daemon log; the wire carries a code and the app owns the sentence.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -306,7 +312,15 @@ false. Rebuilding from key_data is what regenerates the comment."
 - Test: `crates/daemon/tests/the_fence_cannot_lose_your_access.rs`
 
 **Interfaces:**
-- Produces: `pub fn write(home: &Path, entries: &[String], foreign: &[String]) -> Result<(), FenceError>`, replacing the fence's contents and leaving every byte outside it identical.
+- Produces: `pub fn write(path: &Path, markers: Markers, entries: &[String], foreign: &[String]) -> Result<(), FenceError>`, replacing the fence's contents and leaving every byte outside it identical.
+
+**Generic over its path and markers, from review.** Plan 5 originally specified
+this same algorithm a second time in Swift for `~/.ssh/config`, with its own
+parallel tests. One implementation, one test suite: this writer takes the file
+and the fence markers, the daemon uses it for `authorized_keys`, and the Mac app
+reaches it through the FFI for `~/.ssh/config` — the pattern the repo already
+uses for `farcooler_client_generate_key`. A bug in a routine whose failure mode
+is losing SSH access should exist in one place, not two.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -361,6 +375,7 @@ what closes it, and openat2 would be neater but is Linux-only."
   - `client.enroll` → `EnrolledClient` at `Scope::HostAdmin`
   - `client.revoke` → `Operation` at `Scope::HostAdmin`
   - `message EnrolledClient { string client_id; string fingerprint; string label; Scope scope; string account; int64 enrolled_at; bool foreign; }`
+  - `host.get` gains `runner_id`, carrying **the existing `stable_host_id(install_id)`** from `crates/daemon/src/service.rs:378`. Do not invent a second identifier: `install-id` is already persistent, already lives in the runtime directory (`config.rs:10`), and is already per-`FARCOOLER_HOME`, so three engineers on one box have three. That is exactly the property the spec argued for when it ruled out the SSH host key, which all three would share. `RunnerEntry.id` in the ceremony plan consumes this and had no producer before review.
 
 - [ ] **Step 1: Add the messages to `proto/farcooler.proto`**
 

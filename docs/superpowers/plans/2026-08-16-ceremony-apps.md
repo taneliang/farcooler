@@ -237,9 +237,15 @@ Shell access — Zed, git and Terminal on that Mac reach them too.
 
 Generating is the default because it is **independently revocable**, not because it is safer. Choosing an existing key warns that removal takes the access that key has always had.
 
-- [ ] **Step 2: Write the `~/.ssh/config` block, with tests**
+- [ ] **Step 2: Write the `~/.ssh/config` block through the shared Rust writer**
 
-Four rules, each its own test in a new `apps/macos/Tests/`:
+**Not a second implementation in Swift, from review.** Plan 3's fenced writer is
+generic over its path and markers; call it through the FFI. The tests below live
+with that writer in Rust and cover both files at once, rather than a parallel
+Swift suite that will drift a missing `fsync` or a non-directory-relative rename
+into a corrupted `~/.ssh/config`.
+
+Four rules, each its own test beside plan 3's fence fixtures:
 
 - `the_block_lands_above_any_include` — `ssh_config` is **first**-match-wins, and `Include ~/.ssh/config.d/*` as a first line otherwise wins every keyword.
 - `an_existing_pattern_matching_the_alias_causes_a_suffix_and_a_message` — a runner labeled `github.com` must not take over git.
@@ -307,12 +313,24 @@ Then, on a second Mac enrolled through the ceremony: open a remote worktree in Z
 
 Per device, a checkbox per runner, from `client.list` on each reachable runner — derived on every look, never cached. Four states, and **Refused is not Not authorized**:
 
-| State | Shown as |
-| --- | --- |
-| Authorized | It connected. |
-| Not authorized | The runner's daemon says the fingerprint is not in its fence. |
-| Refused | sshd rejected the connection, with the reason as sshd gave it — usually generic, and said to be generic. |
-| Unknown | The runner did not answer. |
+| State | Shown as | Who can report it |
+| --- | --- | --- |
+| Authorized | It connected. | the device itself |
+| Not authorized | The runner's daemon says the fingerprint is not in its fence. | **only another device**, via `client.list` |
+| Refused | sshd rejected it. The reason is not knowable from here, and the copy says so. | the device itself |
+| Unknown | The runner did not answer. | the device itself |
+
+**The vantage point is load-bearing, from review.** A device that is not
+enrolled cannot ask the daemon anything — it gets `AuthRejected`
+(`crates/client/src/ssh.rs:40`) and cannot tell "my key isn't in the file" from
+`StrictModes`, a wrong Unix user, or fail2ban. So **"Not authorized" is
+unreachable from the unenrolled device's own perspective** and appears only in
+the Devices screen of a device that has access.
+
+The ungranted-runner copy in the spec therefore stops asserting the fence's
+contents. It says the connection was refused and offers the manual path; it does
+not claim to know why, because claiming to know why is how an app ends up
+telling someone to loosen an sshd setting that was never the problem.
 
 - [ ] **Step 2: Sign-out, as two operations**
 

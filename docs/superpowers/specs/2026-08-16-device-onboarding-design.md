@@ -424,7 +424,7 @@ this, "removed" would imply an eviction that did not happen.
 
 A key can prove who is holding it, or it can open a shell. Not both.
 
-`command="farcooler transport stdio --client CLIENT_ID --scope SCOPE"` is what
+`command="farcoolerd --stdio --client CLIENT_ID --scope SCOPE"` is what
 makes identity server-asserted: the id was written into `authorized_keys` by
 whoever enrolled the key, and the connecting device never sends it and cannot
 change it. But a forced command means sshd runs *that program and only that
@@ -445,7 +445,7 @@ taps Remove.
 
 | | Key A — Far Cooler | Key B — your shell |
 | --- | --- | --- |
-| Line | `restrict,command="farcooler transport stdio …"` | plain |
+| Line | `restrict,command="farcoolerd --stdio …"` | plain |
 | Used by | the app and the CLI, nothing else | Zed, git, Terminal |
 | Lives in | the channel's key directory, `0600` | `~/.ssh/`, yours |
 | Managed by | the app, invisibly | you, with the app's help |

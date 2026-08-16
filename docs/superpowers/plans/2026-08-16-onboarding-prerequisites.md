@@ -128,7 +128,13 @@ that turns it into a vulnerability."
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `verifySession(token: string, env: Env): Promise<Session | null>` where `Session` is `{ sub: string; authTime: number }`. Callers that previously received a bare `sub` string must be updated in this task. The onboarding plan's confirmation step reads `authTime`.
+- Produces: `verifySession` keeps its existing return shape and **gains** a field. It already returns an object, not a bare `sub` — `services/relay/src/index.ts:751` reads `session.userId` and `session.email`, and dropping either breaks the account upsert. So: `Promise<Session | null>` where `Session` is the existing `{ userId, email, ... }` **plus** `authTime: number`. Read the real type in `workos.ts` before editing; do not retype it from this plan.
+
+**Two corrections to what this task originally said.** There is no
+`verifySignature()` helper to call — signature verification is inline in
+`verifySession` at `workos.ts:35-46`, and the claim checks go after it. And
+`WORKOS_ISSUER` must be read from a real token per deployment rather than
+guessed; record where you read it from in the commit message.
 
 - [ ] **Step 1: Read the current verifier and its callers**
 
@@ -219,8 +225,12 @@ export async function verifySession(token: string, env: Env): Promise<Session | 
   if (!audienceMatches(claims.aud, env.WORKOS_CLIENT_ID)) return null
   if (typeof claims.sub !== 'string' || claims.sub.length === 0) return null
 
-  const authTime = typeof claims.auth_time === 'number' ? claims.auth_time : claims.iat
-  return { sub: claims.sub, authTime }
+  // No fallback to `iat`. This relay mints fresh access tokens from refresh
+  // tokens (`/v1/auth/refresh`), so a recent `iat` means a refresh happened,
+  // not that anyone proved who they were. Substituting it would manufacture
+  // the exact freshness the confirmation step is asking about.
+  if (typeof claims.auth_time !== 'number') return null
+  return { ...existing, authTime: claims.auth_time }
 }
 
 /// `aud` is a string or an array of them, per RFC 7519.
@@ -369,6 +379,18 @@ Expected: FAIL to compile — `ssh_args` takes one argument and `control_path` d
 /// revocation, because sshd reads authorized_keys at authentication and a
 /// surviving master never authenticates again — for ControlPersist seconds
 /// after the key was removed.
+///
+/// **Key A does not multiplex at all.** Review found that hashing the key PATH
+/// does not identify the KEY — replacing a key at the same account-scoped path
+/// reuses the old authenticated master. And `ControlPersist=120` means a master
+/// keeps opening channels for two minutes after revocation, which a server
+/// cannot end: `ssh -O exit` targets a client-owned socket the runner cannot
+/// reach. A prerequisite that promises prompt revocation and delivers a
+/// two-minute window is worse than one that does not promise it.
+///
+/// So: when an identity is named, pass `ControlMaster=no` and no `ControlPath`.
+/// The cost is a handshake per connection on the Key A path; the alternative is
+/// a revocation story that is not true.
 ///
 /// The identity is hashed rather than embedded: a socket path has a hard length
 /// limit on macOS and a key path does not.
@@ -611,6 +633,66 @@ Then at `main.rs:329`, replace the constant:
 
 Leave `main.rs:199` — the Unix socket path — as `Scope::HostAdmin`. Its comment already explains why, and it stays true.
 
+- [ ] **Step 3b: The handshake is not the enforcement — fix `RpcFactory`**
+
+**Without this the rest of the task is decorative, and its own test fails.**
+`crates/daemon/src/main.rs:366-368` builds a fresh `Rpc` per request with a
+literal:
+
+```rust
+let rpc =
+    Rpc::new(self.service.clone(), self.watcher.clone(), Scope::HostAdmin, self.stop.clone());
+```
+
+`HandshakeConfig.granted_scope` only changes what `ServerHello` *reports*. The
+scope table in `rpc.rs:62` is real and enforced, but nothing ever hands it
+anything below host admin. So a `read` session would be told it has `read` and
+then be permitted everything.
+
+`RpcFactory` must carry the connection's scope and pass it to `Rpc::new`. For
+this task that can be a field on `RpcFactory` set once per process, since a
+`--stdio` process serves exactly one session:
+
+```rust
+struct RpcFactory {
+    service: Arc<Service>,
+    watcher: Arc<Watcher>,
+    stop: Arc<tokio::sync::Notify>,
+    /// What this session may do. One process, one session, one scope.
+    ///
+    /// It used to be a `Scope::HostAdmin` literal inside `handle`, which meant
+    /// the handshake advertised a scope the handler never applied.
+    granted: Scope,
+}
+```
+
+**The client id is a separate, larger change and is NOT in this task.** Carrying
+a per-connection principal (`{client_id, scope}`) through the `Handler` trait is
+what writer leases, per-client idempotency, auditing and revoke-by-client need —
+see the open decision at the end of this plan, and `TODOS.md:48`.
+
+- [ ] **Step 3c: A malformed scope refuses; only an absent one defaults**
+
+An absent `--scope` means host_admin for backward compatibility, and that is
+defensible: a key with no forced command lets the device write the whole command
+line anyway. An **unrecognized** value is different — it is a typo in someone's
+`authorized_keys`, and silently promoting it to host admin turns a
+configuration mistake into privilege escalation.
+
+```rust
+    match args.get(i + 1).map(String::as_str) {
+        Some("read") => Scope::Read,
+        Some("control") => Scope::Control,
+        Some("host_admin") => Scope::HostAdmin,
+        // A present but unrecognized scope is a typo, not a policy. Refuse the
+        // session rather than guessing upward.
+        other => {
+            eprintln!("unknown scope {:?}", other.unwrap_or("<missing>"));
+            std::process::exit(1);
+        }
+    }
+```
+
 - [ ] **Step 4: Run the tests**
 
 ```bash
@@ -664,7 +746,19 @@ daemon -- still inherits host_admin. That is the next commit."
 
 **Interfaces:**
 - Consumes: Task 4's `requested_scope()` and `requested_client()`.
-- Produces: a one-line preamble on the Unix socket, `farcooler-session <scope> <client-or-dash>\n`, sent by every socket client before any frame. The socket server reads exactly one line, uses it for `HandshakeConfig`, and refuses the connection if it is absent or malformed.
+- Produces: a one-line preamble on the Unix socket, `farcooler-session <scope> <client-or-dash>\n`, sent **only by the stdio relay**. The socket server reads it if present and treats its absence as `host_admin`.
+
+**Two corrections from review.** The preamble is **optional**, not required:
+absence means `host_admin`, which is today's behavior and is already justified
+at `main.rs:199` — reaching this socket requires being the owning user, who
+holds host admin regardless. Requiring it would break every already-installed
+CLI on upgrade, and would do so *in front of* the version negotiation built to
+explain version mismatches, so the user would see a hang-up rather than a
+reason.
+
+And only the stdio relay needs to send it. `DaemonClient.swift` is not a socket
+client — it runs the CLI as a subprocess (`CLI.swift:59-67`). Editing "every
+socket client" was blast radius for nothing.
 
 - [ ] **Step 1: Find every Unix socket client**
 
@@ -751,15 +845,17 @@ In `serve_stdio_session`, before calling `relay_stdio`:
     }
 ```
 
-- [ ] **Step 5: Read the preamble in the socket server**
+- [ ] **Step 5: Read the preamble in the socket server, permissively**
 
-Where the socket server accepts a connection and builds `HandshakeConfig` (near `main.rs:189`), read exactly one line first and build the config from it. Refuse a connection whose preamble is absent or unparseable rather than assuming host admin — a client that cannot say who it is does not get the benefit of the doubt.
+Where the socket server accepts a connection and builds `HandshakeConfig` (near `main.rs:189`), peek for one line. If it is a well-formed preamble, use it. If it is absent, or the first bytes are a protocol frame rather than a preamble, fall back to `host_admin` and hand those bytes to the protocol unread — do not consume them.
 
-Check whether the accept loop is in `crates/daemon/src/main.rs` or inside `UnixListenerServer`; if the latter, the per-connection config becomes a closure rather than a constant, and that is the change to make.
+A malformed preamble that *is* a preamble (right prefix, wrong scope word) refuses, for the same reason a malformed `--scope` refuses in Task 4: that is a mistake, not a policy.
 
-- [ ] **Step 6: Send the preamble from every other socket client**
+Check whether the accept loop is in `crates/daemon/src/main.rs` or inside `UnixListenerServer`; if the latter, the per-connection config becomes a closure rather than a constant, and that is the change to make. This is also where `RpcFactory`'s `granted` field gets set per connection.
 
-Using the list from step 1. Each sends `farcooler-session host_admin -\n`, which is what they hold today. The Mac app is `DaemonClient.swift`; the CLI's local path is `daemon_link.rs`.
+- [ ] **Step 6: No other client changes**
+
+Nothing else sends a preamble. Absence already means what those clients hold today, so `DaemonClient.swift` and `daemon_link.rs` are untouched.
 
 - [ ] **Step 7: Run everything**
 
@@ -800,6 +896,39 @@ in the preamble gains nothing."
 ```
 
 ---
+
+## Open decision, carried out of the eng review
+
+**Where does the per-connection principal live?** Task 4 fixes scope enforcement
+with a field on `RpcFactory`, which works because a `--stdio` process serves one
+session. It does **not** carry the client id, so `requested_client()` currently
+has nowhere to land — and writer leases, per-client idempotency, auditing and
+`client.revoke` closing live sessions all need it.
+
+Three shapes, undecided:
+
+- **A** — `Handler` gains per-connection context `{client_id, scope}`. Fixes
+  both at one seam. Touches `crates/transport` and every implementer.
+  `TODOS.md:48` says this is protocol-wide and best done before a second scoped
+  enrollment, which is what these plans are.
+- **B** — scope now (Task 4 as written), identity later in the enrollment plan.
+  Ships `read` as a real boundary but leaves plan 3's revoke unable to find the
+  sessions it revokes.
+- **C** — bundle `TODOS.md:48`'s repository-scoped authorization at the same
+  time, since it touches the same wire field and method table. One migration
+  instead of two, roughly double the plan.
+
+**Plan 3 Task 5 cannot be completed until this is decided.** It is written
+against A.
+
+## Missing test, carried out of the eng review
+
+Every SSH assertion in this plan is an argument-vector unit test, and none of
+them proves the behavior that matters: that a live master authenticated with one
+key cannot service a connection asking for another, and that revocation closes
+every usable connection. `docs/farcooler-design.md:1345` already contemplates a
+loopback `sshd` in a scheduled lane. That is where this belongs, and until it
+exists the prerequisite should not be described as complete.
 
 ## After this plan
 

@@ -298,7 +298,20 @@ CREATE UNIQUE INDEX devices_account_fingerprint
   WHERE key_a_fingerprint IS NOT NULL;
 ```
 
-Existing rows default to `verified`: they predate this and were created by a flow that had no pending state.
+Existing rows default to `verified`: they predate this and were created by a flow that had no pending state. They carry a NULL fingerprint, so the lookup below never matches them until the app re-registers.
+
+**`ON CONFLICT … DO UPDATE SET` must gain the two new columns — CRITICAL.**
+`services/relay/src/index.ts:249-254` upserts on `(platform, push_token)` and
+names its updated columns explicitly. Adding columns in a migration does not add
+them there, so an updated app would re-register successfully and silently stay
+legacy: fingerprint NULL, invisible to every ceremony, with nothing on screen
+saying why. Review caught this; the regression test below is what keeps it
+caught.
+
+**Re-registration needs no manual step.** The push token is stable across app
+launches, so an updated app hits the conflict and updates its own row. A row
+that never re-registers shows in Devices as **unverified**, pointing at updating
+the app on that device rather than failing silently in a ceremony.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -308,6 +321,7 @@ Existing rows default to `verified`: they predate this and were created by a flo
 - `a_lookup_never_says_whose_a_key_is_otherwise` — assert the response has no account field on a miss.
 - `a_pending_device_is_not_found_by_lookup` — pending grants nothing.
 - `verify_promotes_only_from_pending`
+- **CRITICAL regression** — `an_existing_row_re_registering_gains_its_fingerprint_and_state`. Insert a row the way the old code did (no fingerprint, `verified`), re-register with the same `(platform, push_token)` and a signature, and assert the row now carries the fingerprint and the right state. Without the `DO UPDATE SET` fix above this fails, and in production it would fail silently.
 
 - [ ] **Step 3: Implement**
 
