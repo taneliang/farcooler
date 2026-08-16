@@ -93,6 +93,17 @@ jobs:
   macos:
     name: macOS app
     runs-on: macos-latest
+    # Serialised behind the Linux builds, which is a real cost paid for a real
+    # reason: the Mac app CARRIES them. `host_install.rs` looks for
+    # `Resources/dist/<arch>-linux` inside the bundle before anywhere else,
+    # because someone installing Far Cooler onto a remote host has the app and
+    # nothing else — no checkout, no Rust, no `scripts/build-linux.sh`.
+    #
+    # Without this the two jobs ran in parallel, `build-app.sh` found no
+    # `dist/`, and every release shipped an app that could not install to a
+    # Linux host. It said so in the log — "(none found …)" — and a passing
+    # green job is not where anyone reads that.
+    needs: linux
     # Hoisted to the job so the steps below can test them in an `if`. The
     # `secrets` context is not available to `if` at any level — `secrets.X != ''`
     # is always false — and the failure is silent: the signing steps skip and an
@@ -109,6 +120,30 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+
+      # The Linux binaries this app will carry, from the jobs that just built
+      # them. `build-app.sh` reads `dist/<arch>-linux/` at the repo root, which
+      # is exactly the layout the tarballs unpack into — they were packed with
+      # `-C dist` for this.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-*
+          merge-multiple: true
+          path: linux-tarballs
+
+      - name: Unpack the Linux binaries where build-app.sh looks for them
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for tarball in linux-tarballs/*.tar.gz; do
+            tar -xzf "$tarball" -C dist
+          done
+          # Loudly, because the alternative is an app that silently cannot
+          # install to a remote host — build-app.sh only warns, by design, so
+          # that a laptop without musl can still build the app.
+          for slug in x86_64-linux aarch64-linux; do
+            [ -x "dist/$slug/farcoolerd" ] || { echo "missing dist/$slug/farcoolerd" >&2; exit 1; }
+          done
 
       # Signing is conditional, not required. Without a Developer ID this still
       # produces a working ad-hoc-signed app — which is what a contributor gets,
@@ -176,15 +211,50 @@ jobs:
           xcrun stapler staple "$app"
           rm 'Far Cooler.zip'
 
-      - name: Package
+      # A disk image, because the app is what someone downloads and a .zip that
+      # unpacks into ~/Downloads is an app most people then run from there —
+      # where it is not quarantine-clean on the next update and not where its
+      # LaunchAgent expects to find it. A window with an Applications symlink
+      # says where it goes without saying anything.
+      #
+      # `ditto` rather than `cp -R` to stage it: a signed bundle carries
+      # extended attributes and symlinks that `cp` quietly flattens, and the
+      # signature does not survive that.
+      - name: Package the disk image
         run: |
-          ditto -c -k --keepParent 'apps/macos/build/Far Cooler.app' \
-            "Far Cooler-$(scripts/version.sh)-macos.zip"
+          set -euo pipefail
+          staging="$(mktemp -d)"
+          ditto 'apps/macos/build/Far Cooler.app' "$staging/Far Cooler.app"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname 'Far Cooler' -srcfolder "$staging" \
+            -ov -format UDZO "Far Cooler-$(scripts/version.sh)-macos.dmg"
+
+      # Notarised SEPARATELY from the app inside it, and both are notarised on
+      # purpose. Stapling only the image leaves the app that gets dragged out
+      # of it without a ticket of its own, so Gatekeeper has to phone home the
+      # first time it runs — which is exactly the moment someone is on a plane
+      # or a bad hotel network. The app was stapled above; this staples the
+      # container it arrives in.
+      - name: Notarise the disk image
+        if: env.HAS_SIGN_IDENTITY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          dmg="$(ls *.dmg)"
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: '*.zip'
+          path: '*.dmg'
 
   ios:
     name: iOS (TestFlight)
@@ -312,8 +382,14 @@ jobs:
             stamps, so mixing versions between them is a supported way to
             confuse yourself and nothing more.
 
-            Linux hosts: unpack the tarball into `dist/` and run
-            `farcooler host install <target>`, or let the Mac app do it.
+            The Mac app is the disk image: drag it to Applications. It carries
+            the Linux binaries for both architectures inside it, so installing
+            Far Cooler onto a machine you ssh to needs nothing else downloaded —
+            `farcooler host install <target>`, or the Install button.
+
+            The tarballs are the same binaries for anyone who would rather put
+            them on a host directly: unpack one into `dist/` and run
+            `farcooler host install <target>` from there.
 
             The apps report their channel — a beta says so in Settings and in
             what it tells the relay, so a bug report names which build it came
