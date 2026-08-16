@@ -255,8 +255,35 @@ Cloudflare.
 | --- | --- | --- |
 | `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGN_IDENTITY` | Mac release | Developer ID, base64 `.p12` |
 | `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | notarisation, and the iOS archive's `DEVELOPMENT_TEAM` | app-specific password |
-| `APP_STORE_KEY_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_P8` | TestFlight, from both the canary and the release workflow | base64 `.p8` |
-| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | relay deploy | Workers Scripts edit, plus D1 edit for the migrations |
+| `APP_STORE_KEY_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_P8` | TestFlight, from both the canary and the release workflow | base64 `.p8`, and the key must be **Admin** — see below |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | relay deploy | Four permissions, and the last two are the ones nobody expects — see below |
+
+### Two credentials that need more than the obvious permission
+
+**The App Store Connect key must be Admin, not App Manager.** App Manager is
+enough to upload a build, which is what it looks like the key is for, and enough
+for cloud signing to create a DEVELOPMENT certificate — so the archive succeeds
+and the log even says `Apple Development: Created via API`. The export then asks
+for distribution assets and gets `Cloud signing permission error` followed by
+`No profiles for 'com.farcooler.ios.canary' were found`, because creating a
+DISTRIBUTION certificate is Admin-only. A key's role cannot be changed after
+creation; generate a new one and replace all three secrets.
+
+**The Cloudflare token needs zone permissions as well as account ones.** Account
+→ Workers Scripts → Edit and Account → D1 → Edit get the script uploaded and the
+migrations applied, which is far enough to look like it works. Every relay
+declares `custom_domain = true`, and attaching that route is a ZONE call:
+without Zone → Workers Routes → Edit and Zone → Zone → Read, scoped to
+`farcooler.com`, the deploy fails on its last API call with
+`Authentication error [code: 10000]`. Unlike the Apple key, a Cloudflare token
+can be edited in place, so no secret has to change.
+
+**Analytics Engine has to be switched on for the account** before any relay can
+deploy, because every environment binds a dataset. It is not a wrangler setting
+and the error names no fix beyond a dashboard link: `You need to enable
+Analytics Engine ... [code: 10089]`. Creating one dataset in the dashboard
+provisions it; the datasets themselves are still created implicitly on first
+write, so there is nothing to keep in step with `wrangler.toml`.
 
 ### Variables, which are the on switches
 
