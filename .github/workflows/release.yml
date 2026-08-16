@@ -404,7 +404,13 @@ jobs:
           # step: only the signature and length it produces become job
           # outputs below, and neither is sensitive on its own — a signature
           # proves the key signed THIS file, it does not reveal the key.
-          signed="$("$SIGN_UPDATE" -s "$key" "$dmg")"
+          # The key arrives on STDIN, not as `-s`. Sparkle deprecated that flag
+          # and it is "no longer supported for newly generated keys" — ours are
+          # the current 32-byte seed format, so `-s` exits 1 after printing only
+          # a deprecation warning, which reads like a warning rather than the
+          # cause. `--ed-key-file -` is the documented replacement, and it keeps
+          # the key out of the process listing as a side benefit.
+          signed="$(printf '%s' "$key" | "$SIGN_UPDATE" --ed-key-file - "$dmg")"
           signature="$(printf '%s' "$signed" | grep -oE 'edSignature="[^"]*"' | cut -d'"' -f2)"
           length="$(printf '%s' "$signed" | grep -oE 'length="[^"]*"' | cut -d'"' -f2)"
           [ -n "$signature" ] && [ -n "$length" ] || {
