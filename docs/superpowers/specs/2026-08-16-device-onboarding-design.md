@@ -186,6 +186,7 @@ It generates its keys, then displays:
 | `key_a` | its Far Cooler public key |
 | `key_b` | its shell public key — Macs only, and only if shell access was chosen |
 | `name` | its device name |
+| `account` | which account it is joining — an opaque id, not a credential |
 
 No secret. Everything here is public, and a photograph of it is worth nothing:
 enrolling these keys grants access to a device the photographer does not hold.
@@ -541,10 +542,10 @@ the other.
 
 The confirmation defaults to **only the machine being granted from**:
 
-> ### Add "iPhone 17"?
+> ### Add "iPhone 17" to work@example.com?
 >
 > iPhone 17 will be able to run agents and commands on the machines you pick, as
-> you.
+> you. Only this account's machines are listed.
 >
 > **SHA256:t7Xq…9Vd** ⌄
 >
@@ -626,40 +627,101 @@ nothing can reach it keeps a stale block on every client, and the ceremony or th
 manual path is how it comes back — host key pinning means the failure is an
 outage rather than a takeover.
 
-## One key per account, and what signing out does not do
+## One device, several accounts
 
-A device's Key A belongs to a `(device, account)` pair, not to the device. It is
-stored under the account's identifier and never reused across accounts.
+A phone reaches a work laptop, a work VM, a personal Mac and a Linux box at home.
+Two of those belong to an employer and two do not, and no arrangement of one
+account per device serves that person.
 
-That is not about the lookup — the account-scoped query above already tolerates
-one fingerprint appearing under two accounts. It is about what a key *is*. A key
-enrolled on your machines outlives any session: signing out removes nothing from
-anyone's `authorized_keys`. So without per-account keys, a phone that signs out
-of one account and into another **keeps SSH access to the first account's
-machines**, carrying it silently into the second. The same person with a work and
-a personal account gets a confusing device list. A phone handed to someone else
-gets a stranger onto the previous owner's machines.
+So a device holds **as many accounts as you sign into**, and Key A belongs to a
+`(device, account)` pair rather than to the device. This is the same rule that
+the previous section arrived at from a different direction — and holding both
+accounts at once is what makes it useful rather than merely safe, because the
+alternative it replaces is signing out of one to use the other.
 
-Per account, the three cases go the way people expect:
+**A machine belongs to exactly one account.** Its daemon holds one pairing
+(`crates/daemon/src/push.rs`), so an account is a property of the machine, not of
+the connection. Moving a machine between accounts is re-pairing it, which is
+deliberate and visible. Everything else follows from that: an action is
+unambiguous because the machine it targets names the account, and no screen ever
+has to ask which one you meant.
+
+| | |
+| --- | --- |
+| The fleet | One list, machines from every account, each labeled with its own. Consistent with a product whose whole premise is that every machine is present at once. |
+| Devices | Per account. Work's Settings › Devices lists work devices; it has no idea the personal ones exist. |
+| The ceremony | Per account. The new device picks which account it is joining, and the QR names it. |
+| Sign-out | Per account, and takes only that account's key and grants with it. |
+| Notifications | Named by account, since two accounts can both reach the same phone. |
+
+The QR carries the account id — an opaque identifier, not a credential — so the
+trusted device knows which of its accounts to check against, and the confirmation
+sheet says which one it is adding to. A QR naming an account the scanning device
+does not hold is refused with the copy in step 2.
+
+What this does **not** do is put a boundary between the two accounts on the
+device itself. Both keys sit in the same Keychain, and a compromised phone
+compromises both. An employer wanting a real boundary needs a managed device, not
+a second account in a personal app, and the document does not pretend otherwise.
+
+### The shape this leaves for teams, and the thing it cannot do
+
+An account is a WorkOS account, and WorkOS's reason to exist is organizations,
+SSO and directory sync. So "work account" becoming a real team with several
+people, an admin and a bill is a change of plan rather than a change of
+architecture, and the per-account key model already gives each organization its
+own devices, its own ceremonies and its own revocations.
+
+One limitation should be written down now, because it is the first thing an
+administrator will ask for and this design deliberately cannot provide it:
+
+**There is no central view of who can reach what, and no central revocation.**
+Access lives in `~/.ssh/authorized_keys` on machines the relay cannot reach and
+holds no address for, and the relay stores fingerprints rather than keys. An
+admin can see which devices exist and can stop a person signing in; they cannot
+enumerate that person's grants, and they cannot remove a key from a machine they
+have no route to. Removing someone from the organization ends their sessions and
+their notifications, and leaves their key in the fence of every machine they were
+enrolled on until a device that reaches those machines removes it.
+
+That is the same property that makes the relay untrusted, stated from the other
+side. Selling centrally-administered access would mean the relay holding
+addresses and grants, and a machine-side agent that obeys it — a different
+product with a different threat model, and a decision to make on purpose rather
+than by drifting into it.
+
+## What signing out does not do
+
+Key A is stored under the account's identifier and never reused across accounts.
+
+A key enrolled on your machines outlives any session: **signing out removes
+nothing from anyone's `authorized_keys`.** Without per-account keys, a phone that
+signed out of one account and into another would keep SSH access to the first
+account's machines and carry it silently into the second — a confusing device
+list for one person with two accounts, and a stranger on the previous owner's
+machines when a phone changes hands.
 
 | | |
 | --- | --- |
 | Sign out, sign back into the same account | The same key is still there and still enrolled. Nothing breaks. |
-| Sign into a different account | A fresh key, enrolled nowhere. That account's ceremony starts clean. |
-| The old account's key | Dormant, unused, and still in the old machines' fences — which is exactly what the screen below is for. |
+| Sign into another account | A fresh key, enrolled nowhere. That account's ceremony starts clean. |
+| A signed-out account's key | Dormant, unused, and still in that account's machines' fences — which is what the screen below is for. |
 
-Regenerating on *every* sign-out would be the wrong reflex: an accidental sign-out
-would cost every machine and a trip to run the ceremony again.
+Regenerating on *every* sign-out would be the wrong reflex: an accidental
+sign-out would cost every machine and a trip to run the ceremony again.
 
 **Signing out says what it does not do**, and offers to do it, because at that
 moment the device still holds the access it is about to stop managing:
 
-> ### Sign out of Far Cooler?
+> ### Sign out of work@example.com?
 >
-> Signing out doesn't remove this iPhone's access to your machines. Its key stays
-> in `~/.ssh/authorized_keys` on **MacBook Pro** and **box** until it's removed.
+> Signing out doesn't remove this iPhone's access to that account's machines. Its
+> key stays in `~/.ssh/authorized_keys` on **work-mini** and **build-vm** until
+> it's removed.
 >
 > ☐ Also remove this iPhone's access to those machines
+>
+> Your other accounts on this iPhone aren't affected.
 >
 > **[ Sign Out ]**  [ Cancel ]
 
@@ -769,6 +831,7 @@ signed into the same account, and a fingerprint at the confirmation.
 | A `read` device | Genuinely confined by `restrict` plus a forced command — once prerequisite 1 makes the scope real. |
 | **A Mac's Key B, once enrolled** | **A shell, by design.** Key A keeps its Far Cooler sessions identifiable and revocable; Key B is not claimed to be contained, and removing it does not close an open shell. |
 | **A device that changes hands** | The new owner signs into their own account and gets a **fresh key enrolled nowhere** — keys are per account, so the previous owner's access is not inherited. The old key stays dormant on the device and in the old machines' fences until removed, which is what the sign-out screen offers and what "Remove Device" does from elsewhere. |
+| **One account's holder, reaching for another's machines on the same device** | Refused by the product: a ceremony lists only its own account's machines, and each account's device list is its own. **Not refused by the operating system** — both keys are in one Keychain, so a compromised device compromises both accounts. An employer needing a real boundary needs a managed device. |
 | Stolen unlocked trusted device | **Works.** It already holds access. Mitigated by biometry on the confirmation, fresh authentication, and revocation from any other device. |
 | **Cloned phone key** | **Works, and is currently undetectable.** The key is a software key; see above. The largest unmitigated risk in the design. |
 | Every device lost | Ordinary SSH plus `farcooler client revoke`. No account-recovery bypass, deliberately. |
@@ -817,6 +880,10 @@ does not apply to SSO users, so it is not something to lean on.
   key and every grant; signing into a different one produces a different
   fingerprint enrolled nowhere, and never offers the first account's machines.
   Two accounts on one device hold two keys that are never interchanged.
+- **Two accounts at once.** A device signed into both lists every machine from
+  both, labeled; each account's Settings › Devices lists only its own; a ceremony
+  for one account never offers the other's machines; and signing out of one
+  leaves the other's key and grants untouched.
 - **Scope.** A `read` client cannot enroll, cannot revoke, and cannot reach a
   `control` operation.
 - **Derivation.** A device whose line is deleted by hand reports *not
