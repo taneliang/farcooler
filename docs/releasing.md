@@ -106,6 +106,34 @@ the download someone lands on.
 An unstamped bundle reports `local`, deliberately: defaulting the other way
 would let a hand-made build pass itself off as a release.
 
+## A channel's app is its own app
+
+| | stable | canary |
+| --- | --- | --- |
+| macOS bundle id | `com.farcooler.FarCooler` | `com.farcooler.FarCooler.canary` |
+| macOS app | `Far Cooler.app` | `Far Cooler Canary.app` |
+| iOS home screen | Far Cooler | FC Canary |
+| login agent | `com.farcooler.daemon` | `com.farcooler.daemon.canary` |
+| icon | the bear | the bear, amber CANARY banner |
+
+All of it derives from `scripts/version.sh` — `app-suffix`, `app-name`,
+`app-name-short` — for the reason the CLI's name and the URL scheme do: a rule
+written once cannot disagree with itself. Stable keeps every bare name, because
+that is what existing installs answer to.
+
+The icons are drawn at build time by `scripts/icon-label.swift` from the one
+source asset, into `build/` directories only. A generated icon written into the
+repository would dirty the tree, and a dirty tree makes `version.sh channel`
+answer `local` — so the act of labeling a canary would make every later step
+build local instead, silently.
+
+**One-time migration.** A canary Mac app installed before this change carries
+the STABLE bundle identifier and is called `Far Cooler.app`. The next canary
+installs beside it as `Far Cooler Canary.app`, leaving the old one looking
+exactly like your stable app. Delete the old one — and if it ever registered the
+daemon, switch that off first, or a launchd job under the shared label outlives
+the app that created it.
+
 ## Cutting one
 
 Local and canary are automatic. Preview and stable are buttons — the **Promote**
@@ -234,7 +262,7 @@ tester having to update. Canary and local freeze nothing.
 | --- | --- |
 | `wire` | that a client already in the field can still talk to this — the proto lint, its own self-tests, what `version.sh` answers, and that the four channels stay four WorkOS projects |
 | `rust` (Linux + macOS) | clippy at -D warnings and tests, against a real tmux — a fake one would agree with whatever this code believed |
-| `swift` | the full `build-app.sh`, plus a check that the bundle's stamp matches the workspace |
+| `swift` | the full `build-app.sh`, a check that the bundle's stamp matches the workspace, and that each channel's icon renders (byte-identical for stable) |
 | `ios` | project generation then build, so a file added to AgentKit cannot compile locally and be missing from the app |
 | `relay` | typecheck, `vitest` inside workerd against a real D1, and a `wrangler deploy --dry-run` |
 

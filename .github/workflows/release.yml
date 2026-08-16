@@ -173,6 +173,22 @@ jobs:
           STABLE_WORKOS_CLIENT_ID: ${{ vars.STABLE_WORKOS_CLIENT_ID }}
         run: ./scripts/workos-client-id.sh
 
+      # Resolved ONCE, here, before the build step below runs `cargo build
+      # --release`. That build rewrites the tracked `Cargo.lock` whenever it and
+      # `Cargo.toml` have drifted — an ordinary version bump does exactly that —
+      # and `version.sh channel` answers `local` for a dirty tree. A step below
+      # that re-asked `version.sh app-name` after the build would then go looking
+      # for `Far Cooler Local.app` while the bundle on disk is named for the real
+      # channel, and fail on a missing path. Resolving it up front and passing it
+      # through `$GITHUB_ENV` means every step below agrees with the one that
+      # built the bundle.
+      - name: Resolve this channel's app name
+        run: |
+          set -euo pipefail
+          name="$(scripts/version.sh app-name)"
+          [ -n "$name" ] || { echo "version.sh app-name returned nothing; refusing to continue"; exit 1; }
+          echo "APP_NAME=$name" >> "$GITHUB_ENV"
+
       - name: Build Far Cooler.app
         # FARCOOLER_WORKOS_CLIENT_ID reaches build-app.sh through GITHUB_ENV,
         # set by the step above. Not written here, because a literal
@@ -188,7 +204,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          app='apps/macos/build/Far Cooler.app'
+          app="apps/macos/build/$APP_NAME.app"
           # --deep is deprecated and wrong for a bundle carrying its own
           # binaries: the CLI and daemon inside Resources are separate
           # executables and each needs its own signature and hardened runtime.
@@ -223,8 +239,9 @@ jobs:
       - name: Package the disk image
         run: |
           set -euo pipefail
+          app="apps/macos/build/$APP_NAME.app"
           staging="$(mktemp -d)"
-          ditto 'apps/macos/build/Far Cooler.app' "$staging/Far Cooler.app"
+          ditto "$app" "$staging/$(basename "$app")"
           ln -s /Applications "$staging/Applications"
           hdiutil create -volname 'Far Cooler' -srcfolder "$staging" \
             -ov -format UDZO "Far Cooler-$(scripts/version.sh)-macos.dmg"

@@ -70,6 +70,16 @@
     <string></string>
     <key>FarCoolerDisplayVersion</key>
     <string></string>
+    <!-- This channel's login-agent launchd label, stamped by build-app.sh from
+         the same AGENT_LABEL it uses to name the plist under
+         Contents/Library/LaunchAgents. ServiceRegistration.swift reads it back
+         rather than recomputing the suffix rule itself — one value, computed
+         once, instead of a second expression of the same rule that could drift
+         from it. Must exist here, even empty: build-app.sh's `stamp` helper
+         fails the build if the key is missing rather than shipping a bundle
+         that lies about itself. -->
+    <key>FarCoolerAgentLabel</key>
+    <string></string>
     <key>FarCoolerWorkOSClientID</key>
     <string></string>
 </dict>

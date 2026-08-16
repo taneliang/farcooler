@@ -167,14 +167,52 @@ scheme() {
   esac
 }
 
+# What a channel's app is CALLED, and what its identifier is suffixed with.
+#
+# Three answers rather than one, because three different things need naming: an
+# identifier (`com.farcooler.FarCooler.canary`), a name a person reads in the
+# Dock and the menu bar, and a shorter one for an iOS home screen, which
+# truncates a label at roughly twelve characters — `Far Cooler Canary` arrives
+# there as `Far Cooler C…`, which tells nobody anything.
+#
+# Here rather than in the build scripts for the same reason as `scheme`: three
+# mappings copied into build-app.sh and generate-project.py are three mappings
+# that drift.
+#
+# Stable is bare on all three. It is what every existing install already answers
+# to, and renaming it orphans people instead of updating them.
+app_suffix() {
+  case "$(channel "$1")" in
+    stable) echo "" ;;
+    *)      echo ".$(channel "$1")" ;;
+  esac
+}
+
+app_name() {
+  case "$(channel "$1")" in
+    stable) echo "Far Cooler" ;;
+    *)      echo "Far Cooler $(channel "$1" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')" ;;
+  esac
+}
+
+app_name_short() {
+  case "$(channel "$1")" in
+    stable) echo "Far Cooler" ;;
+    *)      echo "FC $(channel "$1" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')" ;;
+  esac
+}
+
 case "${1:-marketing}" in
   marketing) marketing ;;
   build) build ;;
   channel) channel "${2:-}" ;;
   display) display "${2:-}" ;;
   scheme) scheme "${2:-}" ;;
+  app-suffix) app_suffix "${2:-}" ;;
+  app-name) app_name "${2:-}" ;;
+  app-name-short) app_name_short "${2:-}" ;;
   *)
-    echo "usage: version.sh [marketing|build|channel [tag]|display [tag]|scheme [tag]]" >&2
+    echo "usage: version.sh [marketing|build|channel [tag]|display [tag]|scheme [tag]|app-suffix [tag]|app-name [tag]|app-name-short [tag]]" >&2
     exit 1
     ;;
 esac

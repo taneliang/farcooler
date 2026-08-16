@@ -12,8 +12,14 @@
     <string>6.0</string>
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
+    <!-- ACTIVITY_COMMON in generate-project.py deliberately does not share
+         TARGET_COMMON, and a literal here is exactly how this went hardcoded
+         to "Far Cooler" for every channel: a canary's Live Activity and its
+         Settings entry read "Far Cooler" while the app's own tile read "FC
+         Canary". FARCOOLER_APP_NAME carries the same `version.sh
+         app-name-short` value the app target uses. -->
     <key>CFBundleDisplayName</key>
-    <string>Far Cooler</string>
+    <string>$(FARCOOLER_APP_NAME)</string>
     <key>CFBundlePackageType</key>
     <string>XPC!</string>
     <!-- Deferred to build settings for the same reason the app's are: an

@@ -79,7 +79,7 @@ One source of truth stays one source of truth:
 bear.
 
 A new `scripts/icon-label.swift` reads it, draws a diagonal banner across the
-bottom-right corner — rotated 45°, filled in the channel's colour, the channel
+bottom-right corner — rotated 45°, filled in the channel's color, the channel
 name in the same near-black as the sunglasses — and writes a new PNG. Stable is
 passed through **byte-identical**: no banner, no re-encode.
 
@@ -87,8 +87,8 @@ Swift and CoreGraphics rather than ImageMagick, because every consumer of this
 script is already a macOS runner where Swift exists, and adding a `brew install`
 to a path that currently needs none is a cost with no return.
 
-Colours are per channel and are doing more work than the text: at 32 points —
-Cmd-Tab, the menu bar, a Finder list — the word is unreadable and the colour is
+Colors are per channel and are doing more work than the text: at 32 points —
+Cmd-Tab, the menu bar, a Finder list — the word is unreadable and the color is
 the entire signal. So they are named exactly, and chosen to stay apart from each
 other and from the cream backdrop:
 
@@ -106,14 +106,14 @@ arrangement is shaped around.
 `version.sh channel` answers `local` the moment the working tree is dirty. So
 writing a generated icon into a tracked path would mean that generating the
 canary icon makes the tree dirty, and every build step *after* that point
-believes it is building `local` — a canary-labelled app installed at local's
+believes it is building `local` — a canary-labeled app installed at local's
 identifier, with local's LaunchAgent, silently. The failure has no error
 message and looks like a build that worked.
 
 So output goes only where git already ignores:
 
 - iOS: the shared catalog is **copied** to
-  `apps/ios/build/Assets.xcassets/` and the labelled PNG replaces `AppIcon.png`
+  `apps/ios/build/Assets.xcassets/` and the labeled PNG replaces `AppIcon.png`
   inside the copy, so `Contents.json` and every other asset travel unchanged and
   the shared catalog is never written to. `generate-project.py` points the
   project at the copy.
@@ -167,7 +167,7 @@ channel has its own, and no two channels agree.
 **A new icon test**, in the shape of `workos-test.sh`: stable's output is
 byte-identical to the source; canary, preview and local each differ from the
 source and from each other; an unknown channel is refused rather than silently
-unlabelled.
+unlabeled.
 
 **A real build**, because plists are where assumptions go to die. Build the Mac
 app as canary locally and read back from the assembled bundle: its identifier,
@@ -184,7 +184,7 @@ The canary dmg published before this change installs as `Far Cooler.app` under
 the **stable** identifier. After this lands, the next canary installs beside it
 as `Far Cooler Canary.app`, and the old one remains — looking exactly like the
 stable app while being a canary build. So the release note for the first
-labelled canary has to say: delete the canary you already installed, and if it
+labeled canary has to say: delete the canary you already installed, and if it
 ever registered the daemon, switch that off before deleting, or a launchd job
 under the old shared label outlives the app that created it.
 

@@ -11,8 +11,11 @@ the unreadable mess that a hand-edited pbxproj becomes.
 
 import os
 import pathlib
+import shutil
 import subprocess
 import uuid
+
+from pathlib import Path
 
 SOURCES = [
     "FarCoolerApp.swift",
@@ -202,7 +205,7 @@ def file_refs():
     lines.append(
         f"\t\t{ids[ASSET_CATALOG]} /* {ASSET_CATALOG} */ = {{isa = PBXFileReference; "
         f"lastKnownFileType = folder.assetcatalog; name = {ASSET_CATALOG}; "
-        f"path = ../shared/{ASSET_CATALOG}; sourceTree = SOURCE_ROOT; }};"
+        f"path = build/{ASSET_CATALOG}; sourceTree = SOURCE_ROOT; }};"
     )
     lines.append(
         f"\t\t{P['product']} /* FarCooler.app */ = {{isa = PBXFileReference; "
@@ -331,6 +334,30 @@ WORKOS_CLIENT_ID = os.environ.get("FARCOOLER_WORKOS_CLIENT_ID", "")
 
 CHANNEL = version("channel")
 
+# The asset catalog this project will use, which is a COPY.
+#
+# The shared catalog is tracked, and writing a generated icon into a tracked
+# path dirties the tree — after which `version.sh channel` answers `local` and
+# every later step believes it is building local. So the catalog is copied to
+# build/ (already gitignored) and only AppIcon.png is replaced inside the copy;
+# Contents.json and every other asset travel unchanged.
+GENERATED_CATALOG = Path(__file__).parent / "build" / "Assets.xcassets"
+SHARED_CATALOG = Path(__file__).parent.parent / "shared" / "Assets.xcassets"
+if GENERATED_CATALOG.exists():
+    shutil.rmtree(GENERATED_CATALOG)
+GENERATED_CATALOG.parent.mkdir(parents=True, exist_ok=True)
+shutil.copytree(SHARED_CATALOG, GENERATED_CATALOG)
+subprocess.run(
+    [
+        "swift",
+        str(Path(__file__).parent.parent.parent / "scripts" / "icon-label.swift"),
+        CHANNEL,
+        str(SHARED_CATALOG / "AppIcon.appiconset" / "AppIcon.png"),
+        str(GENERATED_CATALOG / "AppIcon.appiconset" / "AppIcon.png"),
+    ],
+    check=True,
+)
+
 # One bundle identifier per channel, so all four install side by side and none
 # can see another's data — the same partition the daemon's runtime directory and
 # binary name follow.
@@ -348,6 +375,7 @@ BUNDLE_ID = "com.farcooler.ios" if CHANNEL == "stable" else f"com.farcooler.ios.
 TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tFARCOOLER_CHANNEL = {CHANNEL};
 \t\t\t\tFARCOOLER_URL_SCHEME = "{version("scheme")}";
+\t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
 \t\t\t\tFARCOOLER_DISPLAY_VERSION = "{version("display")}";
 \t\t\t\tFARCOOLER_WORKOS_CLIENT_ID = "{WORKOS_CLIENT_ID}";
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
@@ -373,6 +401,13 @@ TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 # is embedded in is refused at INSTALL time, not at build time, so the mismatch
 # only ever shows up on a device.
 #
+# FARCOOLER_APP_NAME is shared for the same reason: this NOT sharing
+# TARGET_COMMON is what let the Live Activity's Info.plist hardcode "Far
+# Cooler" and go unnoticed — a canary's widget and its Settings entry said "Far
+# Cooler" while the app's own Home Screen tile said "FC Canary". Same
+# `version.sh app-name-short` value the app target uses, so the two either say
+# the same channel or neither builds.
+#
 # SKIP_INSTALL is required of every embedded extension. Without it the .appex is
 # copied to the archive's root as well as into the app, and the upload is
 # rejected for containing a top-level product that is not an application.
@@ -382,6 +417,7 @@ TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 # fails to sign against the app's profile.
 ACTIVITY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
+\t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
 \t\t\t\tPRODUCT_NAME = FarCoolerActivity;
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID}.activity;
 \t\t\t\tINFOPLIST_FILE = FarCoolerActivity/Info.plist;

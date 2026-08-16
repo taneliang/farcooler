@@ -19,8 +19,11 @@
     <string>6.0</string>
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
+    <!-- Per channel, and SHORT: iOS truncates a home screen label at roughly
+         twelve characters, so `Far Cooler Canary` would arrive as
+         `Far Cooler C…`. See `version.sh app-name-short`. -->
     <key>CFBundleDisplayName</key>
-    <string>Far Cooler</string>
+    <string>$(FARCOOLER_APP_NAME)</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <!-- Both deferred to build settings, which `generate-project.py` fills in

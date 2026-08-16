@@ -159,6 +159,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      # Resolved ONCE, here, before the build step below runs `cargo build
+      # --release`. That build rewrites the tracked `Cargo.lock` whenever it and
+      # `Cargo.toml` have drifted — an ordinary version bump does exactly that —
+      # and `version.sh channel` answers `local` for a dirty tree. A step below
+      # that re-asked `version.sh app-name` after the build would then go looking
+      # for `Far Cooler Local.app` while the bundle on disk is named for the real
+      # channel, and fail on a missing path. Resolving it up front and passing it
+      # through `$GITHUB_ENV` means every step below agrees with the one that
+      # built the bundle.
+      - name: Resolve this channel's app name
+        run: |
+          set -euo pipefail
+          name="$(scripts/version.sh app-name)"
+          [ -n "$name" ] || { echo "version.sh app-name returned nothing; refusing to continue"; exit 1; }
+          echo "APP_NAME=$name" >> "$GITHUB_ENV"
+
       # The full bundle, not `swift build`. `build-app.sh` is the thing that has
       # gone wrong before — it once copied a stale Rust binary instead of
       # building one — so the assembly step is what CI should exercise.
@@ -167,9 +183,10 @@ jobs:
 
       - name: Check the bundle is stamped with this commit's version
         run: |
+          app="apps/macos/build/$APP_NAME.app"
           expected="$(scripts/version.sh)"
           actual="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-            'apps/macos/build/Far Cooler.app/Contents/Info.plist')"
+            "$app/Contents/Info.plist")"
           [ "$expected" = "$actual" ] || {
             echo "bundle says $actual, the workspace says $expected"; exit 1; }
 
@@ -181,7 +198,8 @@ jobs:
       # process exited 0. The regression it names would have sailed through.
       - name: Check the CLI and daemon agree
         run: |
-          resources='apps/macos/build/Far Cooler.app/Contents/Resources'
+          app="apps/macos/build/$APP_NAME.app"
+          resources="$app/Contents/Resources"
           cli="$("$resources/farcooler" --version | awk '{print $2}')"
           daemon="$("$resources/farcoolerd" --version | awk '{print $2}')"
           echo "cli $cli / daemon $daemon"
@@ -191,6 +209,14 @@ jobs:
             "$(scripts/version.sh)"+*) ;;
             *) echo "neither matches the workspace version $(scripts/version.sh)"; exit 1 ;;
           esac
+
+      # That four channels draw four labeled icons and stable draws none — a
+      # test nobody runs is not a test, and stable shipping a re-encoded (rather
+      # than byte-identical) copy of the one icon every channel shares would
+      # otherwise pass on nobody's machine but this one. Here, not in `wire`:
+      # icon-label.swift is AppKit, and AppKit does not exist on the Linux
+      # runner `wire` uses.
+      - run: ./scripts/icon-test.sh
 
       - name: Test AgentKit
         run: swift test --package-path apps/shared/AgentKit

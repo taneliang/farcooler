@@ -1,5 +1,6 @@
 import Foundation
 import ServiceManagement
+import AgentKit
 
 /// Registering the daemon to start at login.
 ///
@@ -30,7 +31,31 @@ final class ServiceRegistration: ObservableObject {
 
     @Published private(set) var state: State = .notRegistered
 
-    private let plistName = "com.farcooler.daemon.plist"
+    /// This channel's login agent, not the shared one.
+    ///
+    /// Each channel's bundle carries a plist named for itself — see
+    /// `build-app.sh` — because two apps registering one launchd label means the
+    /// second registration replaces the first, and which daemon starts at login
+    /// becomes a question of install order. `SMAppService` reports success for
+    /// both, so the collision is invisible from here.
+    ///
+    /// Read from `FarCoolerAgentLabel`, which `build-app.sh` stamps with the
+    /// exact same `AGENT_LABEL` it names the plist file after, rather than
+    /// recomputed here from the channel. The suffix rule — stable is bare,
+    /// everything else gets `.channel` — belongs to `version.sh app-suffix`
+    /// alone; a second `channel == "stable" ? … : …` here only agrees with it
+    /// by construction today, and a fifth channel or a change to how the suffix
+    /// composes would update one and silently leave the other, with
+    /// `SMAppService` reporting `.notFound` as the only symptom. A bundle
+    /// without the key — stable from before this existed, or not a real bundle
+    /// at all — falls back to the one bare constant every such bundle already
+    /// carries; `plistIsBundled` below is what tells that apart from "never
+    /// registered".
+    private let plistName: String = {
+        let label = Bundle.main.object(forInfoDictionaryKey: "FarCoolerAgentLabel") as? String
+        guard let label, !label.isEmpty else { return "com.farcooler.daemon.plist" }
+        return "\(label).plist"
+    }()
 
     private var service: SMAppService {
         SMAppService.agent(plistName: plistName)

@@ -11,7 +11,41 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 CONFIG="${1:-release}"
-APP="build/Far Cooler.app"
+
+# Every per-channel value this script needs, resolved ONCE, here, before
+# anything below can change what `version.sh` would answer.
+#
+# `cargo build --release`, run further down to bundle the CLI and daemon,
+# rewrites the tracked `Cargo.lock` whenever it and `Cargo.toml` have drifted —
+# a workspace version bump does exactly that — and `version.sh channel` answers
+# `local` for a dirty tree. A script that re-asked version.sh after that build
+# would name the bundle for one channel while its login agent and icon named it
+# for another: a canary run whose first lines saw a clean tree and whose last
+# lines did not would ship `Far Cooler Canary.app` carrying the LOCAL launchd
+# label and a grey LOCAL banner, ad-hoc signed and handed to someone as a
+# canary — the exact failure this whole channel-identity mechanism exists to
+# prevent, reintroduced by asking twice inside the script that implements it.
+# Resolving everything up front, before the tree can move, means there is only
+# ever one answer for a single run of this script to disagree with itself
+# about. Do not "simplify" this back to inline `$(../../scripts/version.sh …)`
+# calls scattered below — that is what put the bug here the first time.
+CHANNEL="$(../../scripts/version.sh channel)"
+[ -n "$CHANNEL" ] || { echo "version.sh channel returned nothing; refusing to build"; exit 1; }
+# Named for the channel, so a canary installs BESIDE the build someone depends
+# on rather than over it. Stable is still `Far Cooler.app`, which is what every
+# existing install is called.
+#
+# Checked before it becomes $APP: everything below — `rm -rf`, `mkdir -p`, the
+# LaunchAgent copy, the icon render, the Rust bundling — trusts this path, and
+# an empty name would silently turn it into `build/.app`.
+APP_NAME="$(../../scripts/version.sh app-name)"
+[ -n "$APP_NAME" ] || { echo "version.sh app-name returned nothing; refusing to build build/.app"; exit 1; }
+APP_SUFFIX="$(../../scripts/version.sh app-suffix)"
+VERSION="$(../../scripts/version.sh)"
+BUILD_NUMBER="$(../../scripts/version.sh build)"
+DISPLAY_VERSION="$(../../scripts/version.sh display)"
+SCHEME="$(../../scripts/version.sh scheme)"
+APP="build/$APP_NAME.app"
 
 # SwiftPM cannot build a Rust crate, and the app will not link without it.
 ./build-vt.sh >/dev/null
@@ -55,12 +89,19 @@ stamp() {
   return 0
 }
 
-VERSION="$(../../scripts/version.sh)"
-BUILD_NUMBER="$(../../scripts/version.sh build)"
 stamp CFBundleShortVersionString "$VERSION"
 stamp CFBundleVersion "$BUILD_NUMBER"
-stamp FarCoolerChannel "$(../../scripts/version.sh channel)"
-stamp FarCoolerDisplayVersion "$(../../scripts/version.sh display)"
+stamp FarCoolerChannel "$CHANNEL"
+stamp FarCoolerDisplayVersion "$DISPLAY_VERSION"
+
+# The identity that decides whether two channels are two apps or one.
+#
+# `UserDefaults` keys off the bundle identifier, so this partitions preferences
+# with no code — a canary starts from defaults rather than rewriting the
+# settings of the app someone works in.
+stamp CFBundleIdentifier "com.farcooler.FarCooler$APP_SUFFIX"
+stamp CFBundleName "$APP_NAME"
+stamp CFBundleDisplayName "$APP_NAME"
 
 # The URL scheme AuthKit comes back to, per channel.
 #
@@ -72,9 +113,9 @@ stamp FarCoolerDisplayVersion "$(../../scripts/version.sh display)"
 #
 # Nested, hence the index path: the plist holds one URL type with one scheme in
 # it. PlistBuddy's `Set` fails loudly if that shape ever changes, which is the
-# behaviour wanted — a silently unstamped scheme is an app that cannot receive
+# behavior wanted — a silently unstamped scheme is an app that cannot receive
 # its own callback.
-stamp CFBundleURLTypes:0:CFBundleURLSchemes:0 "$(../../scripts/version.sh scheme)"
+stamp CFBundleURLTypes:0:CFBundleURLSchemes:0 "$SCHEME"
 
 # The WorkOS client id, if this build has one.
 #
@@ -149,13 +190,39 @@ done
 
 # SMAppService looks for the agent plist at exactly this path inside the bundle.
 # Anywhere else and registration reports notFound.
-cp Resources/com.farcooler.daemon.plist "$APP/Contents/Library/LaunchAgents/"
+#
+# One launchd label per channel. Two apps registering `com.farcooler.daemon`
+# means the second registration replaces the first and which daemon starts at
+# login becomes a question of install order — silently, since SMAppService
+# reports success either way.
+AGENT_LABEL="com.farcooler.daemon$APP_SUFFIX"
+AGENT_PLIST="$APP/Contents/Library/LaunchAgents/$AGENT_LABEL.plist"
+cp Resources/com.farcooler.daemon.plist "$AGENT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :Label $AGENT_LABEL" "$AGENT_PLIST" >/dev/null
+echo "    login agent $AGENT_LABEL"
+
+# Stamped into the bundle so ServiceRegistration.swift can read the same value
+# back rather than recomputing the suffix rule itself — see the plist's own
+# comment and ServiceRegistration.swift for why a second copy of that rule is
+# the bug this avoids.
+stamp FarCoolerAgentLabel "$AGENT_LABEL"
 
 echo "==> Rendering icon"
+# The channel's banner, drawn onto a copy in build/ — never onto the source.
+#
+# Writing a generated icon into the tracked asset catalog would dirty the tree,
+# and `version.sh channel` answers `local` for a dirty tree: every step after
+# that point would believe it was building local, and a canary would install at
+# local's identifier with no error anywhere.
+LABELED="build/AppIcon-$CHANNEL.png"
+swift ../../scripts/icon-label.swift \
+  "$CHANNEL" \
+  ../shared/Assets.xcassets/AppIcon.appiconset/AppIcon.png \
+  "$LABELED"
 ICONSET="build/AppIcon.iconset"
 ICON="$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
-if swift Tools/make-icon.swift "$ICONSET" "$ICON" >/dev/null 2>&1; then
+if swift Tools/make-icon.swift "$ICONSET" "$ICON" "$LABELED" >/dev/null 2>&1; then
   rm -rf "$ICONSET"
 else
   echo "    (icon render failed, continuing without one)"

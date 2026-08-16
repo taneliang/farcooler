@@ -213,6 +213,22 @@ jobs:
           STABLE_WORKOS_CLIENT_ID: ${{ vars.STABLE_WORKOS_CLIENT_ID }}
         run: ./scripts/workos-client-id.sh
 
+      # Resolved ONCE, here, before the build step below runs `cargo build
+      # --release`. That build rewrites the tracked `Cargo.lock` whenever it and
+      # `Cargo.toml` have drifted — an ordinary version bump does exactly that —
+      # and `version.sh channel` answers `local` for a dirty tree. A step below
+      # that re-asked `version.sh app-name` after the build would then go looking
+      # for `Far Cooler Local.app` while the bundle on disk is named for the real
+      # channel, and fail on a missing path. Resolving it up front and passing it
+      # through `$GITHUB_ENV` means every step below agrees with the one that
+      # built the bundle.
+      - name: Resolve this channel's app name
+        run: |
+          set -euo pipefail
+          name="$(scripts/version.sh app-name)"
+          [ -n "$name" ] || { echo "version.sh app-name returned nothing; refusing to continue"; exit 1; }
+          echo "APP_NAME=$name" >> "$GITHUB_ENV"
+
       - name: Build Far Cooler.app
         run: apps/macos/build-app.sh
 
@@ -225,7 +241,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          app='apps/macos/build/Far Cooler.app'
+          app="apps/macos/build/$APP_NAME.app"
           # Each nested binary on its own, not `--deep`: the CLI and daemon in
           # Resources are separate executables and each needs its own signature
           # and hardened runtime. release.yml says the same at more length.
@@ -248,8 +264,9 @@ jobs:
       - name: Package the disk image
         run: |
           set -euo pipefail
+          app="apps/macos/build/$APP_NAME.app"
           staging="$(mktemp -d)"
-          ditto 'apps/macos/build/Far Cooler.app' "$staging/Far Cooler.app"
+          ditto "$app" "$staging/$(basename "$app")"
           ln -s /Applications "$staging/Applications"
           # Named with the build number as well as the version, because every
           # canary shares one marketing version and the build number is the

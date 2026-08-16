@@ -186,5 +186,43 @@ schemes="$(
 check "no two channels share a scheme" "4" "$schemes"
 rm -rf "$dir"
 
+# --- a channel's app is its own app ---------------------------------------
+#
+# One identifier suffix, one name for the Dock and menu bar, one short name for
+# a home screen that truncates at about twelve characters. Stable is bare on all
+# three, because that is what an existing install already answers to.
+dir="$(scratch)"
+check "stable takes no suffix" \
+  "" "$(cd "$dir" && FARCOOLER_CHANNEL=stable ./scripts/version.sh app-suffix)"
+check "canary's suffix is its own name" \
+  ".canary" "$(cd "$dir" && FARCOOLER_CHANNEL=canary ./scripts/version.sh app-suffix)"
+check "stable keeps the bare app name" \
+  "Far Cooler" "$(cd "$dir" && FARCOOLER_CHANNEL=stable ./scripts/version.sh app-name)"
+check "canary says so where a name is shown" \
+  "Far Cooler Canary" "$(cd "$dir" && FARCOOLER_CHANNEL=canary ./scripts/version.sh app-name)"
+check "preview says so too" \
+  "Far Cooler Preview" "$(cd "$dir" && FARCOOLER_CHANNEL=preview ./scripts/version.sh app-name)"
+check "the short name is short" \
+  "FC Canary" "$(cd "$dir" && FARCOOLER_CHANNEL=canary ./scripts/version.sh app-name-short)"
+check "stable's short name is still the real one" \
+  "Far Cooler" "$(cd "$dir" && FARCOOLER_CHANNEL=stable ./scripts/version.sh app-name-short)"
+
+# The reason app-name-short exists at all: iOS truncates a home screen label at
+# roughly twelve characters, and a name that truncates tells you nothing.
+for c in stable canary preview local; do
+  short="$(cd "$dir" && FARCOOLER_CHANNEL=$c ./scripts/version.sh app-name-short)"
+  check "$c's home screen label fits" "ok" \
+    "$([ "${#short}" -le 12 ] && echo ok || echo "too long: $short (${#short})")"
+done
+
+# And no two channels may answer the same thing, or two apps collide.
+suffixes="$(
+  for c in stable canary preview local; do
+    (cd "$dir" && FARCOOLER_CHANNEL=$c ./scripts/version.sh app-suffix)
+  done | sort -u | wc -l | tr -d ' '
+)"
+check "no two channels share a suffix" "4" "$suffixes"
+rm -rf "$dir"
+
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
