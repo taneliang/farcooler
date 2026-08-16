@@ -82,5 +82,24 @@
     <string></string>
     <key>FarCoolerWorkOSClientID</key>
     <string></string>
+    <!-- Sparkle. Stamped per channel by build-app.sh — see
+         docs/superpowers/specs/2026-08-16-sparkle-auto-update-design.md.
+
+         `SUFeedURL` is empty for local, and Updates.swift starts no updater
+         without one: a local build is the working tree of whoever built it.
+
+         `SUAutomaticallyUpdate` is false on every channel including canary.
+         This is a tool people work inside, and an app that replaces itself
+         unasked is a worse failure than an update noticed a day late. -->
+    <key>SUFeedURL</key>
+    <string></string>
+    <key>SUPublicEDKey</key>
+    <string></string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
 </dict>
 </plist>

@@ -55,6 +55,14 @@ struct FarCoolerCommands: Commands {
             Button("About Far Cooler") { AppCommand.about.post() }
         }
 
+        // Greyed out rather than absent on a feedless build — `local` and any
+        // hand-assembled bundle — so the item's presence never implies an
+        // update channel that isn't there.
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { Updates.shared.checkForUpdates() }
+                .disabled(!Updates.shared.isEnabled)
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("New Terminal") { AppCommand.newTerminal.post() }
                 .keyboardShortcut("t", modifiers: .command)

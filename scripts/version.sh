@@ -116,6 +116,11 @@ channel() {
   case "$tag" in
     "") echo local ;;
     *-preview.*) echo preview ;;
+    # `-beta.` predates the channel rename to canary/preview/stable/local — a
+    # hand-pushed `v0.2.0-beta.1` would otherwise fall through to the `v*` case
+    # below and resolve to stable. Local is the safe direction, the same
+    # reasoning the catch-all `*)` case below already relies on.
+    *-beta.*) echo local ;;
     v*) echo stable ;;
     # Something that is not a version tag at all. Local, for the same reason an
     # unstamped bundle is: a name we cannot read must not be able to promote
@@ -202,6 +207,19 @@ app_name_short() {
   esac
 }
 
+# Where this channel's app looks for a newer version of itself.
+#
+# Empty for local, and that emptiness is load-bearing: `build-app.sh` stamps no
+# feed, and `Updates.swift` starts no updater without one. A local build is
+# somebody's working tree, and replacing it with a build from CI is not an
+# update, it is losing work.
+feed_url() {
+  case "$(channel "$1")" in
+    local) echo "" ;;
+    *)     echo "https://updates.farcooler.com/$(channel "$1")/appcast.xml" ;;
+  esac
+}
+
 case "${1:-marketing}" in
   marketing) marketing ;;
   build) build ;;
@@ -211,8 +229,9 @@ case "${1:-marketing}" in
   app-suffix) app_suffix "${2:-}" ;;
   app-name) app_name "${2:-}" ;;
   app-name-short) app_name_short "${2:-}" ;;
+  feed-url) feed_url "${2:-}" ;;
   *)
-    echo "usage: version.sh [marketing|build|channel [tag]|display [tag]|scheme [tag]|app-suffix [tag]|app-name [tag]|app-name-short [tag]]" >&2
+    echo "usage: version.sh [marketing|build|channel [tag]|display [tag]|scheme [tag]|app-suffix [tag]|app-name [tag]|app-name-short [tag]|feed-url [tag]]" >&2
     exit 1
     ;;
 esac

@@ -1,0 +1,34 @@
+# Who is allowed to replace Far Cooler on someone's Mac.
+#
+# One EdDSA public key per channel, stamped into that channel's Info.plist as
+# `SUPublicEDKey` by build-app.sh. Sparkle refuses any update whose signature
+# does not verify against the key baked into the running app, so these lines are
+# the trust anchor for the whole update path.
+#
+# COMMITTED ON PURPOSE, unlike the WorkOS client id, which lives in repository
+# variables so a fork can point at its own project. That value is configuration.
+# This one decides whose code executes on other people's machines: kept in
+# repository settings it could be swapped by anyone who can edit them, silently,
+# with no diff anywhere. Here, changing it is a line in a commit that someone
+# reviews. A fork editing this file to sign with its own keys is the right cost —
+# a fork SHOULD have to say so out loud.
+#
+# The private halves never leave the Keychain they were generated in, except as
+# GitHub secrets — STABLE_SPARKLE_KEY, PREVIEW_SPARKLE_KEY, CANARY_SPARKLE_KEY —
+# which CI passes to `sign_update -s`. Generated with:
+#
+#   generate_keys --account farcooler-<channel>
+#
+# One pair per channel rather than one shared, for the reason the APNs topics and
+# the WorkOS environments are per channel: a canary key cannot sign a stable
+# update, so a build structurally cannot accept another channel's update even if
+# it were somehow pointed at the wrong feed.
+#
+# `local` has no key and no feed. A local build is the working tree of whoever
+# built it, and an updater offering to replace it with someone else's build is a
+# bug rather than a feature.
+#
+#   <channel> <public key>
+stable i+AqhWs/SKqHU1/zchkxXh8SSfMC/3IMzAMGFq9NLTE=
+preview 8zzBKbs6ZYzp2Zy8lJgATvFmxzP7ylyHvbXzaqfOOjI=
+canary smRRRWWUuaCI8HjhrzBifwUWypSNdkl7uOBDyjlj4j4=

@@ -45,6 +45,7 @@ VERSION="$(../../scripts/version.sh)"
 BUILD_NUMBER="$(../../scripts/version.sh build)"
 DISPLAY_VERSION="$(../../scripts/version.sh display)"
 SCHEME="$(../../scripts/version.sh scheme)"
+FEED_URL="$(../../scripts/version.sh feed-url)"
 APP="build/$APP_NAME.app"
 
 # SwiftPM cannot build a Rust crate, and the app will not link without it.
@@ -73,6 +74,23 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
 
 cp "$BIN" "$APP/Contents/MacOS/FarCooler"
+
+# Sparkle, copied in by hand because this script assembles the bundle by hand.
+#
+# Xcode would embed a framework for you; `swift build` produces a bare
+# executable and an artifact directory, so the framework has to be found, copied
+# and signed here. The macOS slice is selected explicitly: an XCFramework holds
+# several, and copying the wrong one produces a bundle that launches on nothing.
+#
+# `ditto` rather than `cp -R`: a framework is a bundle of symlinks and extended
+# attributes, and `cp` flattens both, which breaks the signature.
+echo "==> Embedding Sparkle"
+SPARKLE_SRC="$(find .build -path '*Sparkle.xcframework/macos-*/Sparkle.framework' -maxdepth 7 | head -1)"
+[ -n "$SPARKLE_SRC" ] || { echo "no Sparkle.framework in .build — did swift build run?"; exit 1; }
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$SPARKLE_SRC" "$APP/Contents/Frameworks/Sparkle.framework"
+echo "    embedded from $SPARKLE_SRC"
+
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 # The version is stamped into the BUNDLED plist, not the source one.
@@ -127,6 +145,21 @@ stamp CFBundleURLTypes:0:CFBundleURLSchemes:0 "$SCHEME"
 if [ -n "${FARCOOLER_WORKOS_CLIENT_ID:-}" ]; then
   stamp FarCoolerWorkOSClientID "$FARCOOLER_WORKOS_CLIENT_ID"
 fi
+
+# Which feed this build watches, and whose signature it will accept.
+#
+# The key is read from the committed table rather than written here: it is the
+# trust anchor for the whole update path, and a second copy is a second thing to
+# disagree. Local gets neither — an empty feed is how Updates.swift knows not to
+# start.
+stamp SUFeedURL "$FEED_URL"
+if [ -n "$FEED_URL" ]; then
+  SPARKLE_KEY="$(awk -v c="$CHANNEL" '$1 == c { print $2 }' sparkle-public-keys.txt)"
+  [ -n "$SPARKLE_KEY" ] || {
+    echo "no public key for $CHANNEL in sparkle-public-keys.txt"; exit 1; }
+  stamp SUPublicEDKey "$SPARKLE_KEY"
+fi
+
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # The app is the distribution unit: it carries the CLI it drives.

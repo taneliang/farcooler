@@ -61,6 +61,9 @@ jobs:
       # holding the stable client id looks entirely correct and is signing
       # people into the stable environment's accounts.
       - run: ./scripts/workos-test.sh
+      # Pure Python and needs no Mac, unlike icon-test.sh — which is why that
+      # one lives in the `swift` job below and this one lives here instead.
+      - run: ./scripts/appcast-test.sh
 
   rust:
     name: Rust (${{ matrix.os }})

@@ -242,6 +242,28 @@ jobs:
         run: |
           set -euo pipefail
           app="apps/macos/build/$APP_NAME.app"
+          # Inside-out, which is what codesign requires and what --deep gets
+          # wrong: every nested executable is signed before the thing containing
+          # it. Sparkle ships an updater app and XPC services inside its
+          # framework, and an unsigned one fails notarization with a message
+          # naming a path most people have never looked inside.
+          sparkle="$app/Contents/Frameworks/Sparkle.framework"
+          if [ -d "$sparkle" ]; then
+            find "$sparkle/Versions/B" \( -name '*.xpc' -o -name '*.app' \) -print0 |
+              while IFS= read -r -d '' nested; do
+                codesign --force --options runtime --timestamp \
+                  --sign "$MACOS_SIGN_IDENTITY" "$nested"
+              done
+            # Autoupdate is a bare Mach-O executable at the version root, not
+            # matched by either pattern above. Signing Versions/B does not
+            # reach it, and codesign refuses to sign a bundle whose nested
+            # code is not already signed.
+            codesign --force --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "$sparkle/Versions/B/Autoupdate"
+            codesign --force --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "$sparkle/Versions/B"
+          fi
+
           # Each nested binary on its own, not `--deep`: the CLI and daemon in
           # Resources are separate executables and each needs its own signature
           # and hardened runtime. release.yml says the same at more length.
@@ -291,6 +313,91 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait
           xcrun stapler staple "$dmg"
+
+      # R2 write needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID — secrets,
+      # invisible to `if:` (see relay.yml: `secrets.X != ''` compares '' to ''
+      # and is silently always false, so a gate written that way never fires
+      # rather than failing loudly). Gated the same way relay.yml gates its
+      # deploy instead: set the repository variable SPARKLE_PUBLISH to `true`
+      # once CANARY_SPARKLE_KEY and the R2-enabled Cloudflare token both exist.
+      - name: Set up Node.js for wrangler
+        if: vars.SPARKLE_PUBLISH == 'true' && env.HAS_SIGN_IDENTITY == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fetch Sparkle's signing tool
+        if: vars.SPARKLE_PUBLISH == 'true' && env.HAS_SIGN_IDENTITY == 'true'
+        env:
+          # apps/macos/Package.resolved already pins Package.swift's
+          # `from: "2.6.0"` dependency to this exact version, so sign_update's
+          # EdDSA output is byte-for-byte what the Sparkle build embedded in
+          # the app understands. Any 2.x release would sign compatibly — the
+          # format has not changed within Sparkle 2 — but matching the
+          # resolved version exactly leaves nothing here for a future bump to
+          # quietly drift out of.
+          SPARKLE_VERSION: "2.9.5"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          tar -xJf sparkle.tar.xz ./bin/sign_update
+          chmod +x ./bin/sign_update
+          echo "SIGN_UPDATE=$(pwd)/bin/sign_update" >> "$GITHUB_ENV"
+          rm sparkle.tar.xz
+
+      - name: Sign the dmg, upload it, and publish canary's appcast
+        if: vars.SPARKLE_PUBLISH == 'true' && env.HAS_SIGN_IDENTITY == 'true'
+        env:
+          CANARY_SPARKLE_KEY: ${{ secrets.CANARY_SPARKLE_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          dmg="$(ls *.dmg)"
+          build="$(scripts/version.sh build)"
+
+          # sign_update prints ONE line — sparkle:edSignature="…" length="…" —
+          # and the order is not a promise, so both are pulled out by name
+          # rather than by field position.
+          signed="$("$SIGN_UPDATE" -s "$CANARY_SPARKLE_KEY" "$dmg")"
+          signature="$(printf '%s' "$signed" | grep -oE 'edSignature="[^"]*"' | cut -d'"' -f2)"
+          length="$(printf '%s' "$signed" | grep -oE 'length="[^"]*"' | cut -d'"' -f2)"
+          [ -n "$signature" ] && [ -n "$length" ] || {
+            echo "could not parse sign_update's output: $signed" >&2
+            exit 1
+          }
+
+          # The build number, not one fixed name. Overwriting a single
+          # canary/Far Cooler.dmg would let a stale appcast — an edge cache, a
+          # client that polled an hour ago — go on naming the OLD version
+          # while the object underneath it holds the NEW build's bytes, so the
+          # signature that appcast carries stops matching what Sparkle just
+          # downloaded. Sparkle reports that as a signature verification
+          # failure, which is indistinguishable from tampering — exactly the
+          # error nobody should be trained to click past. A key that carries
+          # the build number turns the same situation into a 404 instead:
+          # "try again later," which is what it actually is.
+          key="canary/Far Cooler-$build.dmg"
+          npx --yes wrangler@4 r2 object put "farcooler-updates/$key" \
+            --file "$dmg" --content-type application/octet-stream --remote
+
+          url="https://updates.farcooler.com/canary/Far%20Cooler-$build.dmg"
+          notes="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+
+          ./scripts/appcast.py --channel canary \
+            --version "$(scripts/version.sh)" --build "$build" \
+            --url "$url" --length "$length" --signature "$signature" \
+            --notes "$notes" > appcast.xml
+
+          # Five minutes of caching, not the edge default: Cloudflare would
+          # otherwise keep serving a stale canary feed for hours, and "the
+          # update exists but nobody is offered it" is the hardest failure
+          # here to notice.
+          npx --yes wrangler@4 r2 object put "farcooler-updates/canary/appcast.xml" \
+            --file appcast.xml \
+            --content-type "application/xml; charset=utf-8" \
+            --cache-control 'max-age=300' --remote
 
       - uses: actions/upload-artifact@v4
         with:

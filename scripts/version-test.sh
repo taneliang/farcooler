@@ -72,6 +72,15 @@ git -C "$dir" tag -a v0.2.0 -m r
 check "a release tag is stable" "stable" "$(at "$dir" channel)"
 rm -rf "$dir"
 
+# --- a beta tag predates the channel rename and is local, not stable ------
+#
+# `v0.2.0-beta.1` would otherwise fall through to the `v*` case and resolve to
+# stable, signing with STABLE_SPARKLE_KEY and overwriting stable/appcast.xml.
+dir="$(scratch)"
+git -C "$dir" tag -a v0.2.0-beta.1 -m b
+check "a beta tag is local" "local" "$(at "$dir" channel)"
+rm -rf "$dir"
+
 # --- THE PROMOTION CASE ---------------------------------------------------
 #
 # Promoting a preview puts a stable tag on the same commit, because the two have
@@ -222,6 +231,30 @@ suffixes="$(
   done | sort -u | wc -l | tr -d ' '
 )"
 check "no two channels share a suffix" "4" "$suffixes"
+rm -rf "$dir"
+
+# --- the update feed is per channel, and local has none --------------------
+#
+# A local build is the working tree of whoever built it. An updater offering to
+# replace it with somebody else's build is a bug, so local gets no feed at all
+# and the app declines to start the updater without one.
+dir="$(scratch)"
+check "stable has its own feed" \
+  "https://updates.farcooler.com/stable/appcast.xml" \
+  "$(cd "$dir" && FARCOOLER_CHANNEL=stable ./scripts/version.sh feed-url)"
+check "canary has its own feed" \
+  "https://updates.farcooler.com/canary/appcast.xml" \
+  "$(cd "$dir" && FARCOOLER_CHANNEL=canary ./scripts/version.sh feed-url)"
+check "preview has its own feed" \
+  "https://updates.farcooler.com/preview/appcast.xml" \
+  "$(cd "$dir" && FARCOOLER_CHANNEL=preview ./scripts/version.sh feed-url)"
+check "local has no feed at all" "" "$(at "$dir" feed-url)"
+feeds="$(
+  for c in stable canary preview; do
+    (cd "$dir" && FARCOOLER_CHANNEL=$c ./scripts/version.sh feed-url)
+  done | sort -u | wc -l | tr -d ' '
+)"
+check "no two channels share a feed" "3" "$feeds"
 rm -rf "$dir"
 
 echo "$PASS passed, $FAIL failed"

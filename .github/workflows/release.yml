@@ -111,6 +111,13 @@ jobs:
     env:
       HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
       HAS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY != '' }}
+    # For `publish` below, which needs a Sparkle signature but must not need a
+    # Mac to get one: sign_update signs the dmg's BYTES, not its eventual
+    # download URL, so the job that already has the file signs it, and the
+    # signature — not the file, and never the key — travels as a job output.
+    outputs:
+      signature: ${{ steps.sign.outputs.signature }}
+      length: ${{ steps.sign.outputs.length }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -189,6 +196,24 @@ jobs:
           [ -n "$name" ] || { echo "version.sh app-name returned nothing; refusing to continue"; exit 1; }
           echo "APP_NAME=$name" >> "$GITHUB_ENV"
 
+      # Resolved ONCE, here, same reason as APP_NAME just above and the same
+      # trap this file already names at length: `cargo build --release`,
+      # inside "Build Far Cooler.app" below, rewrites the tracked Cargo.lock
+      # whenever it and Cargo.toml have drifted, and `version.sh channel`
+      # answers `local` for a dirty tree. "Sign the dmg for Sparkle" runs its
+      # OWN shell, well after that build, so asking `version.sh channel`
+      # again there would silently see the dirtied tree, fall through its
+      # `case`'s `*)` branch, and fail the whole release — after a full
+      # build/sign/notarize cycle has already been paid for. Resolved here,
+      # on the checkout's still-clean tree, and reused via $GITHUB_ENV.
+      - name: Resolve this channel's name
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          channel="$(scripts/version.sh channel "$tag")"
+          [ -n "$channel" ] || { echo "version.sh channel returned nothing; refusing to continue"; exit 1; }
+          echo "RELEASE_CHANNEL=$channel" >> "$GITHUB_ENV"
+
       - name: Build Far Cooler.app
         # FARCOOLER_WORKOS_CLIENT_ID reaches build-app.sh through GITHUB_ENV,
         # set by the step above. Not written here, because a literal
@@ -205,6 +230,28 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           app="apps/macos/build/$APP_NAME.app"
+          # Inside-out, which is what codesign requires and what --deep gets
+          # wrong: every nested executable is signed before the thing containing
+          # it. Sparkle ships an updater app and XPC services inside its
+          # framework, and an unsigned one fails notarization with a message
+          # naming a path most people have never looked inside.
+          sparkle="$app/Contents/Frameworks/Sparkle.framework"
+          if [ -d "$sparkle" ]; then
+            find "$sparkle/Versions/B" \( -name '*.xpc' -o -name '*.app' \) -print0 |
+              while IFS= read -r -d '' nested; do
+                codesign --force --options runtime --timestamp \
+                  --sign "$MACOS_SIGN_IDENTITY" "$nested"
+              done
+            # Autoupdate is a bare Mach-O executable at the version root, not
+            # matched by either pattern above. Signing Versions/B does not
+            # reach it, and codesign refuses to sign a bundle whose nested
+            # code is not already signed.
+            codesign --force --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "$sparkle/Versions/B/Autoupdate"
+            codesign --force --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "$sparkle/Versions/B"
+          fi
+
           # --deep is deprecated and wrong for a bundle carrying its own
           # binaries: the CLI and daemon inside Resources are separate
           # executables and each needs its own signature and hardened runtime.
@@ -267,6 +314,87 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait
           xcrun stapler staple "$dmg"
+
+      # R2 write (in `publish`, below) needs CLOUDFLARE_API_TOKEN and
+      # CLOUDFLARE_ACCOUNT_ID — secrets, invisible to `if:` (see relay.yml:
+      # `secrets.X != ''` compares '' to '' and is silently always false, so a
+      # gate written that way never fires rather than failing loudly). Gated
+      # the same way relay.yml gates its deploy instead: set the repository
+      # variable SPARKLE_PUBLISH to `true` once the *_SPARKLE_KEY secrets and
+      # the R2-enabled Cloudflare token all exist. Signing happens here rather
+      # than in `publish` purely because this job already holds the file —
+      # see the job-level comment on `outputs:` above.
+      - name: Fetch Sparkle's signing tool
+        if: vars.SPARKLE_PUBLISH == 'true' && env.HAS_SIGN_IDENTITY == 'true'
+        env:
+          # apps/macos/Package.resolved already pins Package.swift's
+          # `from: "2.6.0"` dependency to this exact version, so sign_update's
+          # EdDSA output is byte-for-byte what this Sparkle build understands.
+          # Any 2.x release would sign compatibly — the format has not
+          # changed within Sparkle 2 — but matching the resolved version
+          # exactly leaves nothing here for a future bump to quietly drift
+          # out of.
+          SPARKLE_VERSION: "2.9.5"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          tar -xJf sparkle.tar.xz ./bin/sign_update
+          chmod +x ./bin/sign_update
+          echo "SIGN_UPDATE=$(pwd)/bin/sign_update" >> "$GITHUB_ENV"
+          rm sparkle.tar.xz
+
+      - name: Sign the dmg for Sparkle
+        id: sign
+        if: vars.SPARKLE_PUBLISH == 'true' && env.HAS_SIGN_IDENTITY == 'true'
+        env:
+          STABLE_SPARKLE_KEY: ${{ secrets.STABLE_SPARKLE_KEY }}
+          PREVIEW_SPARKLE_KEY: ${{ secrets.PREVIEW_SPARKLE_KEY }}
+        run: |
+          set -euo pipefail
+
+          # $RELEASE_CHANNEL, resolved before "Build Far Cooler.app" ran its
+          # `cargo build --release` — not re-derived here. This step's shell
+          # starts fresh after that build, and by then Cargo.lock may already
+          # differ from what the checkout had, which is a dirty tree, which
+          # is what `version.sh channel` treats as `local` — silently, and
+          # only discovered here as this step's own failure. See the
+          # "Resolve this channel's name" step above.
+          case "$RELEASE_CHANNEL" in
+            stable)  key="$STABLE_SPARKLE_KEY" ;;
+            preview) key="$PREVIEW_SPARKLE_KEY" ;;
+            *)
+              # workflow_dispatch with no tag resolves RELEASE_CHANNEL to
+              # `local` — this file's header advertises being buildable
+              # without a tag so the signing and notarization path above can
+              # be exercised before it matters, and failing here would undo
+              # that after the expensive part already ran. Skip rather than
+              # fail: `publish` only runs for a `v*` tag and already refuses
+              # to publish with an empty Sparkle signature, so there is
+              # nothing unsafe about leaving this step's outputs unset.
+              echo "channel resolved to '$RELEASE_CHANNEL'; only stable and preview sign a release dmg — skipping"
+              exit 0
+              ;;
+          esac
+
+          dmg="$(ls *.dmg)"
+
+          # sign_update prints ONE line — sparkle:edSignature="…" length="…" —
+          # and the order is not a promise, so both are pulled out by name
+          # rather than by field position. The key itself never leaves this
+          # step: only the signature and length it produces become job
+          # outputs below, and neither is sensitive on its own — a signature
+          # proves the key signed THIS file, it does not reveal the key.
+          signed="$("$SIGN_UPDATE" -s "$key" "$dmg")"
+          signature="$(printf '%s' "$signed" | grep -oE 'edSignature="[^"]*"' | cut -d'"' -f2)"
+          length="$(printf '%s' "$signed" | grep -oE 'length="[^"]*"' | cut -d'"' -f2)"
+          [ -n "$signature" ] && [ -n "$length" ] || {
+            echo "could not parse sign_update's output: $signed" >&2
+            exit 1
+          }
+
+          echo "signature=$signature" >> "$GITHUB_OUTPUT"
+          echo "length=$length" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -370,29 +498,44 @@ jobs:
     # promote.yml dispatches this from main, `github.ref` is `refs/heads/main`
     # and this job would silently skip — the build would succeed, the tag would
     # exist, and no release would ever appear. Same trap for `prerelease` below,
-    # where `github.ref_name` would be `main` and every beta would publish as a
-    # full release.
+    # where `github.ref_name` would be `main` and every preview would publish as
+    # a full release.
     if: startsWith(inputs.tag, 'v') || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # Hoisted the same way the macos job hoists it, and for the same reason:
+    # `secrets` is not available to `if` here either. Publishing is gated on
+    # this in addition to `vars.SPARKLE_PUBLISH` below, so a rotated or
+    # expired MACOS_SIGN_IDENTITY stops the appcast update rather than
+    # publishing an ad-hoc-signed, un-notarized dmg with CI staying green.
+    env:
+      HAS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
+          # scripts/version.sh build (needed below, for the appcast's
+          # sparkle:version) is `git rev-list --count HEAD`, and the script
+          # refuses outright on a shallow clone rather than returning the
+          # wrong count — the same reason the macos and ios jobs above pass
+          # this.
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
       - uses: softprops/action-gh-release@v2
+        id: gh_release
         with:
           files: artifacts/*
           generate_release_notes: true
           # Named explicitly, because a workflow_call run is not a tag push and
           # the action would otherwise have no tag to attach to.
           tag_name: ${{ inputs.tag || github.ref_name }}
-          # A beta is marked as one, so it does not become the download anyone
-          # lands on — and so `-beta.3` is not silently the "latest release".
-          prerelease: ${{ contains(inputs.tag || github.ref_name, '-beta.') }}
+          # A preview is marked as one, so it does not become the download
+          # anyone lands on — and so `-preview.3` is not silently the "latest
+          # release".
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-preview.') }}
           body: |
             Every binary here was built from this one commit. The Mac app,
             the phone app, the CLI and the daemon check each other's build
@@ -408,6 +551,89 @@ jobs:
             them on a host directly: unpack one into `dist/` and run
             `farcooler host install <target>` from there.
 
-            The apps report their channel — a beta says so in Settings and in
+            The apps report their channel — a preview says so in Settings and in
             what it tells the relay, so a bug report names which build it came
             from rather than a version two different builds share.
+
+      # R2 write needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID — secrets,
+      # invisible to `if:` (see relay.yml: `secrets.X != ''` compares '' to ''
+      # and is silently always false, so a gate written that way never fires
+      # rather than failing loudly). Gated the same way relay.yml gates its
+      # deploy instead: set the repository variable SPARKLE_PUBLISH to `true`
+      # once the *_SPARKLE_KEY secrets (used by the macos job above, not here)
+      # and the R2-enabled Cloudflare token all exist.
+      #
+      # No sign_update here, and no Mac needed for this job: the macos job
+      # above already signed the dmg it built — sign_update signs BYTES, not a
+      # download URL, so nothing about the enclosure being a GitHub asset
+      # rather than an uploaded file requires re-signing on this side. Only
+      # the resulting signature and length cross the job boundary, as
+      # `needs.macos.outputs`.
+      - name: Set up Node.js for wrangler
+        if: vars.SPARKLE_PUBLISH == 'true' && env.HAS_SIGN_IDENTITY == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # After action-gh-release, deliberately: stable and preview point their
+      # enclosure at the release ASSET url rather than uploading a second copy
+      # of the dmg to R2 (Sparkle signs a file's bytes, not its location — see
+      # docs/superpowers/specs/2026-08-16-sparkle-auto-update-design.md), and
+      # that url does not exist until the release does.
+      - name: Publish this channel's appcast
+        if: vars.SPARKLE_PUBLISH == 'true' && env.HAS_SIGN_IDENTITY == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RELEASE_ASSETS: ${{ steps.gh_release.outputs.assets }}
+          SIGNATURE: ${{ needs.macos.outputs.signature }}
+          LENGTH: ${{ needs.macos.outputs.length }}
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+
+          # The same tag shape scripts/version.sh channel already parses — a
+          # `-preview.N` suffix means preview, a bare `v…` means stable —
+          # rather than re-deriving "which channel is this" a second way
+          # here. (The macos job asked the same question independently, to
+          # pick which *_SPARKLE_KEY to sign with; both jobs calling the one
+          # authoritative script is not the drift a second implementation
+          # would be.)
+          channel="$(scripts/version.sh channel "$tag")"
+          case "$channel" in
+            stable|preview) ;;
+            *)
+              echo "tag $tag resolved to channel '$channel'; only stable and preview publish an appcast" >&2
+              exit 1
+              ;;
+          esac
+
+          [ -n "$SIGNATURE" ] && [ -n "$LENGTH" ] || {
+            echo "the macos job produced no Sparkle signature for $channel — SPARKLE_PUBLISH was probably false when it ran. Refusing to publish an appcast with no signature." >&2
+            exit 1
+          }
+
+          # The exact object Sparkle will fetch: the GitHub release asset
+          # action-gh-release just created, read back from its own output
+          # rather than reconstructed by guessing at GitHub's URL encoding.
+          dmg_name="Far Cooler-$(scripts/version.sh)-macos.dmg"
+          url="$(printf '%s' "$RELEASE_ASSETS" | jq -r --arg name "$dmg_name" \
+            '.[] | select(.name == $name) | .browser_download_url')"
+          [ -n "$url" ] || {
+            echo "no release asset named $dmg_name among: $RELEASE_ASSETS" >&2
+            exit 1
+          }
+
+          notes="${{ github.server_url }}/${{ github.repository }}/releases/tag/$tag"
+          ./scripts/appcast.py --channel "$channel" \
+            --version "$(scripts/version.sh)" --build "$(scripts/version.sh build)" \
+            --url "$url" --length "$LENGTH" --signature "$SIGNATURE" \
+            --notes "$notes" > appcast.xml
+
+          # Five minutes, not the edge default: Cloudflare would otherwise
+          # keep serving a stale feed for hours, and "the update exists but
+          # nobody is offered it" is the hardest failure here to notice.
+          npx --yes wrangler@4 r2 object put "farcooler-updates/$channel/appcast.xml" \
+            --file appcast.xml \
+            --content-type "application/xml; charset=utf-8" \
+            --cache-control 'max-age=300' --remote

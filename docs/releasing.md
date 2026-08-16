@@ -187,6 +187,96 @@ Signing is conditional throughout. Without a Developer ID the Mac job still
 produces a working ad-hoc-signed app, which is what a contributor gets and what
 must keep working for them.
 
+## Updating a Mac that already has one
+
+Cutting a release gets a build onto GitHub. It does nothing for the Mac that
+installed last month — that Mac has to find out on its own, which is Sparkle,
+wired in per channel.
+
+**What a person sees.** Every shipping channel — stable, preview, canary —
+checks once a day (`SUScheduledCheckInterval` is `86400`) and asks before
+installing (`SUAutomaticallyUpdate` is false everywhere, canary included: Far
+Cooler is a tool people work inside, and a build that replaced itself unasked
+mid-session would be a worse failure than an update noticed a day late).
+"Check for Updates…" sits in the app menu right after "About Far Cooler," for
+checking on demand — greyed out rather than absent on a build with no feed, so
+its presence never implies an update channel that isn't there.
+
+**`local` never checks.** `version.sh feed-url` returns nothing for `local`,
+so `build-app.sh` stamps no `SUFeedURL`, and `Updates.swift` never constructs
+an `SPUStandardUpdaterController` without one — not merely disabled, never
+created. A local build is somebody's working tree; an updater offering to
+replace it with a build from CI would be losing work, not updating it.
+
+**Where the feed is.** `https://updates.farcooler.com/<channel>/appcast.xml`,
+from `version.sh feed-url`. `scripts/appcast.py` writes the XML Sparkle reads
+there; `scripts/appcast-test.sh` checks that its `sparkle:` attributes resolve
+to Sparkle's own namespace, not merely that the file parses; CI signs the
+enclosure with Sparkle's own `sign_update`.
+
+**Where the dmg is** differs by channel:
+
+| Channel | The enclosure points at |
+| --- | --- |
+| stable, preview | the GitHub release asset itself — its `browser_download_url`, read back from `action-gh-release`'s own output rather than reconstructed |
+| canary | an R2 object, keyed per build: `canary/Far Cooler-<build>.dmg` |
+
+Stable and preview need no second copy: a GitHub release asset is immutable
+once attached, and `sign_update` signs the dmg's *bytes*, not a URL, so the
+signature stays valid pointed straight at it.
+
+Canary has no release to point at — it ships from every push to `main` — so
+its dmg lives in the R2 bucket instead, and **keyed per build rather than
+overwritten at one fixed path**, which is the design a reader will otherwise
+"simplify" away. Overwriting `canary/Far Cooler.dmg` means a stale appcast — an
+edge cache, a client that polled an hour ago — still names the old version
+while the object underneath it now holds the new build's bytes, so the
+signature the appcast carries stops matching what Sparkle just downloaded.
+Sparkle reports that as a signature verification failure, indistinguishable
+from tampering — the one error nobody should be trained to click past. A key
+that carries the build number turns the same situation into a plain 404
+instead: try again later, which is what it actually is.
+
+Nothing prunes those objects from a workflow: `wrangler r2 object` can put,
+get and delete by key but cannot enumerate a bucket, so pruning from CI would
+mean guessing at old keys. Retention is a bucket rule instead — an R2 object
+lifecycle rule deletes everything under the `canary/Far Cooler-` prefix after
+14 days, no workflow code involved. That prefix must not reach
+`canary/appcast.xml`: the feed lives under `canary/` too, and deleting it
+would take down every canary install's update check with a silent 404 until
+the next push, rather than pruning an old dmg. At roughly twenty builds a day
+the dmgs bound storage around 3 GB, comfortably inside R2's free tier, and a
+stale appcast still inside that window resolves to a real, correctly signed,
+slightly older build rather than failing outright.
+
+**The keys are committed on one side only.** `apps/macos/sparkle-public-keys.txt`
+carries one EdDSA public key per shipping channel — `local` gets none, for the
+same reason it gets no feed — and `build-app.sh` stamps it into `SUPublicEDKey`
+straight from that file. It is committed on purpose, unlike the WorkOS client
+id: kept in a repository variable, a swapped key would be silent, with no diff
+anywhere; committed, changing whose code can replace someone else's Mac is a
+line in a commit somebody reviews. The private half of each pair never leaves
+the secret it was generated into (see `CANARY_SPARKLE_KEY`,
+`PREVIEW_SPARKLE_KEY`, `STABLE_SPARKLE_KEY` above), so a canary key
+structurally cannot sign a stable update, even pointed at the wrong feed by
+mistake.
+
+**A known gap, recorded rather than hidden.** `version.sh channel` has no
+`beta` case: its pattern match only carves `-preview.` out of everything else
+starting with `v`, so a hand-pushed `v0.2.0-beta.1` tag falls through to the
+plain `v*` case and resolves to `stable` — signed with `STABLE_SPARKLE_KEY`
+and published to the stable appcast. `promote.yml` only ever creates
+`-preview.` tags, so nothing reaches this today; it would only bite someone
+pushing a version tag by hand.
+
+**Setting one up**, beyond what Secrets and Variables above already cover
+(the `*_SPARKLE_KEY` secrets, `SPARKLE_PUBLISH`, the `farcooler-updates`
+bucket and its custom domain, the token's R2 permission): add a lifecycle rule
+on that bucket expiring objects under the `canary/Far Cooler-` prefix — the
+dmgs, not `canary/appcast.xml` — after 14 days. It is a bucket setting with no
+`wrangler` equivalent — there is nothing to script, only a dashboard toggle to
+remember.
+
 ## The relay: one per channel
 
 There are three, and each gets its code the way its channel does
@@ -260,7 +350,7 @@ tester having to update. Canary and local freeze nothing.
 
 | Job | What it protects |
 | --- | --- |
-| `wire` | that a client already in the field can still talk to this — the proto lint, its own self-tests, what `version.sh` answers, and that the four channels stay four WorkOS projects |
+| `wire` | that a client already in the field can still talk to this — the proto lint, its own self-tests, what `version.sh` answers, that the four channels stay four WorkOS projects, and that `appcast.py` emits a feed Sparkle can actually read |
 | `rust` (Linux + macOS) | clippy at -D warnings and tests, against a real tmux — a fake one would agree with whatever this code believed |
 | `swift` | the full `build-app.sh`, a check that the bundle's stamp matches the workspace, and that each channel's icon renders (byte-identical for stable) |
 | `ios` | project generation then build, so a file added to AgentKit cannot compile locally and be missing from the app |
@@ -284,7 +374,8 @@ Cloudflare.
 | `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGN_IDENTITY` | Mac release | Developer ID, base64 `.p12` |
 | `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | notarisation, and the iOS archive's `DEVELOPMENT_TEAM` | app-specific password |
 | `APP_STORE_KEY_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_P8` | TestFlight, from both the canary and the release workflow | base64 `.p8`, and the key must be **Admin** — see below |
-| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | relay deploy | Four permissions, and the last two are the ones nobody expects — see below |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | relay deploy, and the Sparkle appcast publish | Four permissions for the relay, plus **R2 Object Read & Write** for the appcast — the last two relay permissions are the ones nobody expects, see below |
+| `CANARY_SPARKLE_KEY`, `PREVIEW_SPARKLE_KEY`, `STABLE_SPARKLE_KEY` | `sign_update`, in canary.yml and release.yml's `macos` job | base64 EdDSA private key, one per channel, from Sparkle's `generate_keys -x`. The matching public half is committed at `apps/macos/sparkle-public-keys.txt` — a fork can only sign its own updates, never impersonate another channel's |
 
 ### Two credentials that need more than the obvious permission
 
@@ -313,6 +404,15 @@ Analytics Engine ... [code: 10089]`. Creating one dataset in the dashboard
 provisions it; the datasets themselves are still created implicitly on first
 write, so there is nothing to keep in step with `wrangler.toml`.
 
+**The R2 bucket for the appcast must be named `farcooler-updates`.** Neither
+workflow reads that name from anywhere — it is a literal in the `wrangler r2
+object put` call in both canary.yml and release.yml — so a bucket created
+under any other name fails every upload with `The specified bucket does not
+exist`, which says nothing about the name being wrong. Give it
+`updates.farcooler.com` as a custom domain: that is the URL `SUFeedURL` and
+`scripts/appcast.py`'s `--url` both expect, and it is a property of the
+bucket, not of the token.
+
 ### Variables, which are the on switches
 
 Repository **variables**, not secrets, for the reason two sections down. Neither
@@ -322,6 +422,7 @@ is set by default, so a fresh fork builds everything and ships nothing.
 | --- | --- | --- |
 | `RELAY_DEPLOY` | `true` | the relay job skips, and every channel's relay stays where it is |
 | `CANARY_TESTFLIGHT` | `true` | the canary iOS job skips, and main reaches nobody's phone |
+| `SPARKLE_PUBLISH` | `true` | the signing and appcast-publish steps skip in both canary.yml and release.yml — a dmg still builds and (for stable/preview) still reaches the GitHub release, but no channel's app is ever told a newer build exists |
 | `LOCAL_`/`CANARY_`/`PREVIEW_`/`STABLE_WORKOS_CLIENT_ID` | that channel's `client_…` | the app for that channel builds without a sign-in button, and warns |
 
 The client ids are variables rather than secrets deliberately. One NAMES the app
