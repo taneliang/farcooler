@@ -69,17 +69,23 @@ jobs:
         run: ./scripts/build-ios-frameworks.sh --device
 
       # The canary's own WorkOS project, through the same script the release
-      # builds use rather than a `secrets.CANARY_…` written here. The channel is
+      # builds use rather than a `vars.CANARY_…` written here. The channel is
       # already fixed to canary at the top of this file, so both spellings pick
-      # the same secret today — but one mechanism is what stops the next app
+      # the same value today — but one mechanism is what stops the next app
       # build from being added with no client id at all, which is exactly how
       # the iOS release job shipped without one.
+      #
+      # `vars`, not `secrets`, because a client id NAMES the app rather than
+      # authenticating as it — it is already committed in wrangler.toml. Making
+      # it a secret would be worse than pointless: GitHub masks a secret in the
+      # log, so a wrong client id would print as *** and read exactly like a
+      # right one, on the one axis whose failures are already invisible.
       - name: The WorkOS client id for this channel
         env:
-          LOCAL_WORKOS_CLIENT_ID: ${{ secrets.LOCAL_WORKOS_CLIENT_ID }}
-          CANARY_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
-          PREVIEW_WORKOS_CLIENT_ID: ${{ secrets.PREVIEW_WORKOS_CLIENT_ID }}
-          STABLE_WORKOS_CLIENT_ID: ${{ secrets.STABLE_WORKOS_CLIENT_ID }}
+          LOCAL_WORKOS_CLIENT_ID: ${{ vars.LOCAL_WORKOS_CLIENT_ID }}
+          CANARY_WORKOS_CLIENT_ID: ${{ vars.CANARY_WORKOS_CLIENT_ID }}
+          PREVIEW_WORKOS_CLIENT_ID: ${{ vars.PREVIEW_WORKOS_CLIENT_ID }}
+          STABLE_WORKOS_CLIENT_ID: ${{ vars.STABLE_WORKOS_CLIENT_ID }}
         run: ./scripts/workos-client-id.sh
 
       - name: Generate the Xcode project
@@ -168,10 +174,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: The WorkOS client id for this channel
         env:
-          LOCAL_WORKOS_CLIENT_ID: ${{ secrets.LOCAL_WORKOS_CLIENT_ID }}
-          CANARY_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
-          PREVIEW_WORKOS_CLIENT_ID: ${{ secrets.PREVIEW_WORKOS_CLIENT_ID }}
-          STABLE_WORKOS_CLIENT_ID: ${{ secrets.STABLE_WORKOS_CLIENT_ID }}
+          LOCAL_WORKOS_CLIENT_ID: ${{ vars.LOCAL_WORKOS_CLIENT_ID }}
+          CANARY_WORKOS_CLIENT_ID: ${{ vars.CANARY_WORKOS_CLIENT_ID }}
+          PREVIEW_WORKOS_CLIENT_ID: ${{ vars.PREVIEW_WORKOS_CLIENT_ID }}
+          STABLE_WORKOS_CLIENT_ID: ${{ vars.STABLE_WORKOS_CLIENT_ID }}
         run: ./scripts/workos-client-id.sh
 
       - name: Build Far Cooler.app

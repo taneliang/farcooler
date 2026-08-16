@@ -253,7 +253,6 @@ Cloudflare.
 
 | Secret | Used by | Notes |
 | --- | --- | --- |
-| `LOCAL_WORKOS_CLIENT_ID`, `CANARY_WORKOS_CLIENT_ID`, `PREVIEW_WORKOS_CLIENT_ID`, `STABLE_WORKOS_CLIENT_ID` | every app build, through `scripts/workos-client-id.sh` | One project per channel, never shared — see below. Public by design: it names the app, not the bearer. |
 | `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGN_IDENTITY` | Mac release | Developer ID, base64 `.p12` |
 | `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | notarisation, and the iOS archive's `DEVELOPMENT_TEAM` | app-specific password |
 | `APP_STORE_KEY_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_P8` | TestFlight, from both the canary and the release workflow | base64 `.p8` |
@@ -268,6 +267,13 @@ is set by default, so a fresh fork builds everything and ships nothing.
 | --- | --- | --- |
 | `RELAY_DEPLOY` | `true` | the relay job skips, and every channel's relay stays where it is |
 | `CANARY_TESTFLIGHT` | `true` | the canary iOS job skips, and main reaches nobody's phone |
+| `LOCAL_`/`CANARY_`/`PREVIEW_`/`STABLE_WORKOS_CLIENT_ID` | that channel's `client_…` | the app for that channel builds without a sign-in button, and warns |
+
+The client ids are variables rather than secrets deliberately. One NAMES the app
+rather than authenticating as it — the same value is committed in
+`services/relay/wrangler.toml`, because the relay needs it too. Made a secret it
+would be masked in the log, so a wrong one would print as `***` and read exactly
+like a right one, on the axis whose failures are already the hardest to see.
 
 ### The `promote` environment
 

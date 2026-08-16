@@ -132,10 +132,10 @@ jobs:
 
       - name: The WorkOS client id for this channel
         env:
-          LOCAL_WORKOS_CLIENT_ID: ${{ secrets.LOCAL_WORKOS_CLIENT_ID }}
-          CANARY_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
-          PREVIEW_WORKOS_CLIENT_ID: ${{ secrets.PREVIEW_WORKOS_CLIENT_ID }}
-          STABLE_WORKOS_CLIENT_ID: ${{ secrets.STABLE_WORKOS_CLIENT_ID }}
+          LOCAL_WORKOS_CLIENT_ID: ${{ vars.LOCAL_WORKOS_CLIENT_ID }}
+          CANARY_WORKOS_CLIENT_ID: ${{ vars.CANARY_WORKOS_CLIENT_ID }}
+          PREVIEW_WORKOS_CLIENT_ID: ${{ vars.PREVIEW_WORKOS_CLIENT_ID }}
+          STABLE_WORKOS_CLIENT_ID: ${{ vars.STABLE_WORKOS_CLIENT_ID }}
         run: ./scripts/workos-client-id.sh
 
       - name: Build Far Cooler.app
@@ -215,10 +215,10 @@ jobs:
       # failed build: it was a TestFlight app with no sign-in button.
       - name: The WorkOS client id for this channel
         env:
-          LOCAL_WORKOS_CLIENT_ID: ${{ secrets.LOCAL_WORKOS_CLIENT_ID }}
-          CANARY_WORKOS_CLIENT_ID: ${{ secrets.CANARY_WORKOS_CLIENT_ID }}
-          PREVIEW_WORKOS_CLIENT_ID: ${{ secrets.PREVIEW_WORKOS_CLIENT_ID }}
-          STABLE_WORKOS_CLIENT_ID: ${{ secrets.STABLE_WORKOS_CLIENT_ID }}
+          LOCAL_WORKOS_CLIENT_ID: ${{ vars.LOCAL_WORKOS_CLIENT_ID }}
+          CANARY_WORKOS_CLIENT_ID: ${{ vars.CANARY_WORKOS_CLIENT_ID }}
+          PREVIEW_WORKOS_CLIENT_ID: ${{ vars.PREVIEW_WORKOS_CLIENT_ID }}
+          STABLE_WORKOS_CLIENT_ID: ${{ vars.STABLE_WORKOS_CLIENT_ID }}
         run: ./scripts/workos-client-id.sh
 
       - name: Generate the Xcode project
