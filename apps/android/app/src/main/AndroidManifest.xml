@@ -43,7 +43,13 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="farcooler" android:host="auth" />
+                <!-- Per channel, from `version.sh scheme` through
+                     build.gradle.kts. Two installed apps claiming one scheme
+                     is resolved by Android rather than by either of them, so a
+                     canary and a stable sharing `farcooler://` can deliver a
+                     sign-in to the wrong app — where the code fails, having
+                     been issued against a different WorkOS environment. -->
+                <data android:scheme="${authScheme}" android:host="auth" />
             </intent-filter>
         </activity>
 

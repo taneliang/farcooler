@@ -432,8 +432,13 @@ class Account(context: Context) {
                 // which defaults the same way and for the same reason.
                 else -> "https://relay-local.farcooler.com"
             }
-        private const val SCHEME = "farcooler"
-        private const val REDIRECT_URI = "farcooler://auth"
+        // The scheme this build actually registered, from the same value the
+        // manifest's intent filter was written with — see build.gradle.kts.
+        // Per channel, because Android picks between two apps claiming one
+        // scheme and a sign-in delivered to the wrong channel fails there: the
+        // code was issued against a different WorkOS environment.
+        private val SCHEME = BuildConfig.AUTH_SCHEME
+        private val REDIRECT_URI = "${BuildConfig.AUTH_SCHEME}://auth"
 
         private const val KEY_RELAY = "account.relay"
         private const val KEY_CLIENT_ID = "account.clientID"

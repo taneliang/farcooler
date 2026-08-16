@@ -160,5 +160,31 @@ check "a dirty tree is local even when CI names a channel" \
   "local" "$(cd "$dir" && FARCOOLER_CHANNEL=stable ./scripts/version.sh channel)"
 rm -rf "$dir"
 
+# --- the URL scheme is per channel, and stable keeps the bare one ---------
+#
+# Four apps claiming `farcooler://` is a collision the OS resolves however it
+# likes: a canary sign-in delivered to a stable install fails there, because the
+# code was issued against a different WorkOS environment. Stable keeps the bare
+# scheme because that is what is already registered with WorkOS and already on
+# people's phones.
+dir="$(scratch)"
+check "stable keeps the bare scheme" \
+  "farcooler" "$(cd "$dir" && FARCOOLER_CHANNEL=stable ./scripts/version.sh scheme)"
+check "canary has its own" \
+  "farcooler-canary" "$(cd "$dir" && FARCOOLER_CHANNEL=canary ./scripts/version.sh scheme)"
+git -C "$dir" tag -a v0.2.0-preview.1 -m preview
+check "a preview tag yields the preview scheme" \
+  "farcooler-preview" "$(at "$dir" scheme)"
+git -C "$dir" tag -d v0.2.0-preview.1 >/dev/null
+check "an untagged commit is the local scheme" "farcooler-local" "$(at "$dir" scheme)"
+# The whole point: no two channels answer the same thing.
+schemes="$(
+  for c in stable canary preview local; do
+    (cd "$dir" && FARCOOLER_CHANNEL=$c ./scripts/version.sh scheme)
+  done | sort -u | wc -l | tr -d ' '
+)"
+check "no two channels share a scheme" "4" "$schemes"
+rm -rf "$dir"
+
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

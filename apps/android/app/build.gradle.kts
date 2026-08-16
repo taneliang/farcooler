@@ -46,6 +46,14 @@ fun versionScript(vararg args: String): String {
 val marketingVersion = versionScript().ifEmpty { "0.0.0" }
 val buildNumber = versionScript("build").toIntOrNull() ?: 1
 val releaseChannel = versionScript("channel").ifEmpty { "local" }
+
+/// The URL scheme AuthKit comes back to, asked for rather than derived here.
+///
+/// The stable-keeps-the-bare-name rule lives in `scripts/version.sh` alongside
+/// the same rule for bundle identifiers, and a second copy in Kotlin is a
+/// second copy to disagree. Falls back to the bare scheme only when the script
+/// cannot be run at all, which is the same fallback every other value here has.
+val authScheme = versionScript("scheme").ifEmpty { "farcooler" }
 val displayVersion = versionScript("display").ifEmpty { marketingVersion }
 
 // The terminal's typeface, staged rather than copied into this app.
@@ -104,6 +112,13 @@ android {
         // devices screen can say which of your machines is behind.
         buildConfigField("String", "CHANNEL", "\"$releaseChannel\"")
         buildConfigField("String", "MARKETING_VERSION", "\"$marketingVersion\"")
+
+        // Both, and they must agree: the manifest placeholder decides which
+        // scheme this app REGISTERS with Android, and the BuildConfig field
+        // decides which one it asks WorkOS to redirect to. One without the
+        // other is a sign-in that leaves and never comes back.
+        buildConfigField("String", "AUTH_SCHEME", "\"$authScheme\"")
+        manifestPlaceholders["authScheme"] = authScheme
 
         // The AuthKit client id. Public by design — it names the app, not the
         // bearer — and overridable so a fork can point at its own WorkOS

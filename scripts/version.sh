@@ -144,13 +144,37 @@ display() {
   esac
 }
 
+# The URL scheme this channel's app registers, and therefore the one WorkOS
+# sends a sign-in back to.
+#
+# Every channel used to answer `farcooler`, which is a collision rather than a
+# shared name: iOS hands a `farcooler://` callback to whichever app claimed it,
+# so with canary and stable both installed, signing into one could deliver the
+# code to the other — where it fails, because the code was issued against a
+# different WorkOS environment and belongs to a different account namespace.
+#
+# Stable keeps the bare scheme for the same reason it keeps the bare bundle
+# identifier: it is what already-registered redirect URIs say, and renaming it
+# would sign out everyone who has the app.
+#
+# Here rather than in each build script because four of them need the answer —
+# generate-project.py, build-app.sh, build.gradle.kts and the tests — and a
+# mapping written four times is a mapping that disagrees with itself.
+scheme() {
+  case "$(channel "$1")" in
+    stable) echo farcooler ;;
+    *)      echo "farcooler-$(channel "$1")" ;;
+  esac
+}
+
 case "${1:-marketing}" in
   marketing) marketing ;;
   build) build ;;
   channel) channel "${2:-}" ;;
   display) display "${2:-}" ;;
+  scheme) scheme "${2:-}" ;;
   *)
-    echo "usage: version.sh [marketing|build|channel [tag]|display [tag]]" >&2
+    echo "usage: version.sh [marketing|build|channel [tag]|display [tag]|scheme [tag]]" >&2
     exit 1
     ;;
 esac

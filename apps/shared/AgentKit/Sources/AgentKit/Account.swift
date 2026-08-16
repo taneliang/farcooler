@@ -400,8 +400,24 @@ public final class Account: NSObject, ObservableObject {
         return Date(timeIntervalSince1970: exp)
     }
 
-    private static let scheme = "farcooler"
-    private static let redirectURI = "farcooler://auth"
+    /// The scheme this build registered, read back from its own bundle.
+    ///
+    /// Not a constant, and not the channel mapped a second time here: the
+    /// Info.plist is what the OS actually routes on, so asking it is the only
+    /// way this cannot disagree with where a callback will arrive. The mapping
+    /// itself lives in `scripts/version.sh`, and the plists are stamped from
+    /// it — see there for why one shared scheme across channels is a collision
+    /// rather than a shared name.
+    ///
+    /// The fallback cannot be reached by a real build, and would not matter if
+    /// it were: an app that registered no scheme cannot receive a callback at
+    /// all, so what it asks WorkOS to redirect to changes nothing.
+    private static let scheme: String = {
+        let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]]
+        return (types?.first?["CFBundleURLSchemes"] as? [String])?.first ?? "farcooler"
+    }()
+
+    private static var redirectURI: String { "\(scheme)://auth" }
 
     /// Nil rather than zeros if the system has no randomness for us.
     ///

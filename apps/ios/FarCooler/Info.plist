@@ -91,7 +91,14 @@
     <!-- Where AuthKit comes back to. A custom scheme rather than a universal
          link because sign-in must work before an account exists and therefore
          before any server association could be verified; PKCE is what makes a
-         scheme any app can claim safe to use — see AgentKit's Account. -->
+         scheme any app can claim safe to use — see AgentKit's Account.
+
+         Per channel, from `version.sh scheme`, because a scheme two installed
+         apps both claim is decided by iOS rather than by either of them. With
+         canary and stable on one phone, signing into canary could deliver the
+         code to stable — where it fails, since it was issued against a
+         different WorkOS environment. Stable keeps the bare `farcooler`, so
+         nothing already registered has to change. -->
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -99,7 +106,7 @@
             <string>com.farcooler.auth</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>farcooler</string>
+                <string>$(FARCOOLER_URL_SCHEME)</string>
             </array>
         </dict>
     </array>

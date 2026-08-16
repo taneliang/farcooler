@@ -62,6 +62,20 @@ stamp CFBundleVersion "$BUILD_NUMBER"
 stamp FarCoolerChannel "$(../../scripts/version.sh channel)"
 stamp FarCoolerDisplayVersion "$(../../scripts/version.sh display)"
 
+# The URL scheme AuthKit comes back to, per channel.
+#
+# A scheme that two installed apps both claim is resolved by the OS rather than
+# by either of them, so a canary and a stable sharing `farcooler://` means a
+# sign-in can be delivered to the wrong app — and the code fails there, because
+# it was issued against a different WorkOS environment. Stable still answers
+# `farcooler`, so nothing already registered has to change.
+#
+# Nested, hence the index path: the plist holds one URL type with one scheme in
+# it. PlistBuddy's `Set` fails loudly if that shape ever changes, which is the
+# behaviour wanted — a silently unstamped scheme is an app that cannot receive
+# its own callback.
+stamp CFBundleURLTypes:0:CFBundleURLSchemes:0 "$(../../scripts/version.sh scheme)"
+
 # The WorkOS client id, if this build has one.
 #
 # Public — it names the app to WorkOS rather than authenticating as anything —

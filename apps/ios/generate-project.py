@@ -347,6 +347,7 @@ BUNDLE_ID = "com.farcooler.ios" if CHANNEL == "stable" else f"com.farcooler.ios.
 
 TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tFARCOOLER_CHANNEL = {CHANNEL};
+\t\t\t\tFARCOOLER_URL_SCHEME = "{version("scheme")}";
 \t\t\t\tFARCOOLER_DISPLAY_VERSION = "{version("display")}";
 \t\t\t\tFARCOOLER_WORKOS_CLIENT_ID = "{WORKOS_CLIENT_ID}";
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
