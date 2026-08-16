@@ -339,7 +339,18 @@ impl Runtime {
     /// that one is alive than any amount of asking tmux, which would happily
     /// report a pipe into a process that has since died.
     async fn attach_to_fanout(&self, pane_id: &str) -> Result<tokio::net::UnixStream> {
-        if let Some(socket) = crate::fanout::subscribe(pane_id).await {
+        // Which install is asking. The tmux socket is already named for it —
+        // `farcooler-<install id>` — so this is the identity we already hold
+        // rather than a second answer to the same question, which could
+        // disagree with the first.
+        //
+        // It is load-bearing. Without it, two daemons on one machine share a
+        // fanout socket per pane NUMBER, and every tmux server numbers from
+        // `%0`: the second daemon connects to the first one's fanout, never
+        // starts a pipe of its own, and reads a stranger's pane. See
+        // `fanout::socket_path`.
+        let install = self.tmux.socket().to_string();
+        if let Some(socket) = crate::fanout::subscribe(&install, pane_id).await {
             return Ok(socket);
         }
 
@@ -356,8 +367,17 @@ impl Runtime {
         // connect, and after a second of trying the stream gave up and exited —
         // which a client cannot tell apart from a pane that finished. The
         // socket name strips `%` on both sides, so the number is the whole id.
-        let command =
-            format!("'{}' --fanout '{}'", exe.display(), pane_id.trim_start_matches('%'));
+        //
+        // The install goes with it for the same reason the pane number does:
+        // the fanout has to bind the socket this daemon will look for, and only
+        // this daemon knows which install it is. An id is hex, so tmux has
+        // nothing in it to expand.
+        let command = format!(
+            "'{}' --fanout '{}' --install '{}'",
+            exe.display(),
+            pane_id.trim_start_matches('%'),
+            install,
+        );
         self.tmux.pipe_pane_start(pane_id, &command).await?;
 
         // Retried rather than slept through: the fanout has a process to spawn
@@ -365,7 +385,7 @@ impl Runtime {
         // takes belongs to the machine, not to a number chosen here.
         for _ in 0..100 {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            if let Some(socket) = crate::fanout::subscribe(pane_id).await {
+            if let Some(socket) = crate::fanout::subscribe(&install, pane_id).await {
                 return Ok(socket);
             }
         }

@@ -55,24 +55,52 @@ const BACKLOG: usize = 1024;
 /// Named for the pane rather than the terminal, because the pipe belongs to
 /// the pane: a terminal that gets restarted is a new pane, and its watchers
 /// must not be handed the old one's bytes.
-pub fn socket_path(pane_id: &str) -> PathBuf {
+///
+/// And named for the INSTALL as well as the pane, because a pane number is
+/// only unique within one tmux server. Every server numbers its panes from
+/// `%0`, so two daemons on one machine — a stable install beside a canary, or
+/// a local build beside either — both had a `%0`, and by number alone both
+/// resolved to one socket here. The second daemon did not fail: it connected,
+/// to the first one's fanout, and so never started a pipe of its own. It then
+/// read a stranger's pane forever. What a person saw was a terminal whose
+/// typing never appeared until something else forced a redraw.
+///
+/// The install is passed in rather than resolved here, and that is the point.
+/// The subscriber is the daemon; the server is a process tmux spawns from the
+/// pipe command. If each worked its own path out and they ever disagreed —
+/// a different `FARCOOLER_HOME`, a different channel — they would never meet,
+/// which is a quieter version of the same bug. One side decides and tells the
+/// other.
+pub fn socket_path(install: &str, pane_id: &str) -> PathBuf {
     // Stripped, so `%17` and `17` name the same socket. That is not cosmetic:
     // tmux expands `%` when it runs the pipe command, so the fanout is started
     // with the bare number while the watcher subscribing to it holds the whole
     // id. Both have to arrive at the same path or they never meet.
     let name = pane_id.trim_start_matches('%');
-    std::env::temp_dir().join(format!("farcooler-pane-{name}.sock"))
+    // Short, and in the temp directory rather than beside the daemon's other
+    // state: a unix socket address is 104 bytes on macOS, and the runtime
+    // directory's own path spends most of that before a filename is added.
+    //
+    // The TAIL of the id, not the head. An install id is a v7 uuid, whose
+    // leading 48 bits are a millisecond timestamp — two installs created on one
+    // machine minutes apart share their first eight characters, which is
+    // exactly the case this whole function exists to separate. Observed:
+    // `01a00ce67d5e…` and `01a00ce67e61…`. The tail is the random half.
+    let install = install.trim_start_matches("farcooler-");
+    let install: String =
+        install.chars().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect();
+    std::env::temp_dir().join(format!("farcooler-pane-{install}-{name}.sock"))
 }
 
 /// Connect to a pane's fanout, if one is running.
-pub async fn subscribe(pane_id: &str) -> Option<UnixStream> {
-    UnixStream::connect(socket_path(pane_id)).await.ok()
+pub async fn subscribe(install: &str, pane_id: &str) -> Option<UnixStream> {
+    UnixStream::connect(socket_path(install, pane_id)).await.ok()
 }
 
 /// Read this process's stdin — which tmux has connected to a pane — and give
 /// every byte to every watcher.
-pub async fn serve(pane_id: &str) -> std::io::Result<()> {
-    let path = socket_path(pane_id);
+pub async fn serve(install: &str, pane_id: &str) -> std::io::Result<()> {
+    let path = socket_path(install, pane_id);
     // Last binder wins. Two watchers can race into starting a fanout each; the
     // second `pipe-pane` replaces the first, so the first process is about to
     // lose its stdin and exit anyway. Refusing to bind here would leave the
@@ -171,6 +199,53 @@ async fn feed(mut socket: UnixStream, mut rx: tokio::sync::broadcast::Receiver<b
 mod tests {
     use super::*;
 
+    /// Two daemons on one machine must not share a pane's fanout.
+    ///
+    /// Every tmux server numbers its panes from `%0`, so a second install's
+    /// first pane has the same number as the first install's. Named by number
+    /// alone, both resolved to one socket in the shared temp directory — and
+    /// the loser did not fail. It CONNECTED, to the other daemon's fanout, so
+    /// it never started a pipe of its own and sat reading a stranger's pane
+    /// forever. Typing showed nothing until something forced a redraw.
+    ///
+    /// The module's own note that "a stale socket file is harmless" is still
+    /// true and was never the problem: this socket's owner was alive.
+    #[test]
+    fn two_installs_do_not_share_a_pane_socket() {
+        let one = socket_path("01a00995", "%0");
+        let two = socket_path("01a00cb1", "%0");
+        assert_ne!(one, two, "two installs collided on pane 0");
+    }
+
+    /// Two installs made minutes apart must still separate.
+    ///
+    /// These are real ids from two daemons started seconds apart. An install id
+    /// is a v7 uuid and its leading 48 bits are a millisecond timestamp, so
+    /// they agree for the first NINE characters. A short prefix of the id looks
+    /// like it identifies an install and does not — the first version of this
+    /// fix used one, and both daemons landed on the same socket again.
+    #[test]
+    fn installs_created_moments_apart_still_separate() {
+        let one = socket_path("01a00ce67d5e7c0191bea16539c08d62", "%0");
+        let two = socket_path("01a00ce67e617a8090a5f0300313b7f3", "%0");
+        assert_ne!(one, two, "a timestamp prefix is not an identity");
+    }
+
+    /// A unix socket address is 104 bytes on macOS, and the whole reason this
+    /// socket lives in the temp directory rather than beside the daemon's other
+    /// state is that the runtime directory's path is long enough to threaten
+    /// that. Adding the install to the NAME keeps it short; moving it into the
+    /// runtime directory would not have.
+    #[test]
+    fn the_socket_path_stays_short_enough_to_bind() {
+        let path = socket_path("01a00995fd2f7f238b65ac553bd23298", "%999");
+        assert!(
+            path.as_os_str().len() < 100,
+            "{} is too long to bind as a unix socket",
+            path.display()
+        );
+    }
+
     /// The whole point: two watchers, the same bytes.
     #[tokio::test]
     async fn every_watcher_gets_every_byte() {
@@ -234,15 +309,15 @@ mod tests {
     /// The socket is named for the pane, so two panes cannot collide.
     #[test]
     fn each_pane_gets_its_own_socket() {
-        assert_ne!(socket_path("%1"), socket_path("%2"));
-        assert!(socket_path("%17").to_string_lossy().contains("17"));
+        assert_ne!(socket_path("01a00995", "%1"), socket_path("01a00995", "%2"));
+        assert!(socket_path("01a00995", "%17").to_string_lossy().contains("17"));
     }
 
     /// The watcher holds `%17` and the fanout is started with `17`, because
     /// tmux ate the `%` on the way. They have to meet at one path.
     #[test]
     fn a_pane_id_and_its_number_name_the_same_socket() {
-        assert_eq!(socket_path("%17"), socket_path("17"));
-        assert_eq!(socket_path("%0"), socket_path("0"));
+        assert_eq!(socket_path("01a00995", "%17"), socket_path("01a00995", "17"));
+        assert_eq!(socket_path("01a00995", "%0"), socket_path("01a00995", "0"));
     }
 }

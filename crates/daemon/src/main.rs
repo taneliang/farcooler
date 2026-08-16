@@ -93,7 +93,23 @@ async fn run() -> Result<(), i32> {
             eprintln!("--fanout needs a pane id");
             return Err(2);
         };
-        return farcooler_daemon::fanout::serve(pane).await.map_err(|e| {
+        // Which install's pane this is. A pane number is unique only within one
+        // tmux server, so two daemons on this machine both have a `%0`; without
+        // this they share one socket and the second silently reads the first
+        // one's pane. See `fanout::socket_path`.
+        //
+        // Told to us rather than worked out here, because this process is
+        // spawned by tmux and the daemon that started the pipe is the one that
+        // knows. Defaulted rather than required so a pipe command written by an
+        // older daemon still serves its pane instead of dying: that pane's
+        // watcher is looking for the old name too, and both go away with it.
+        let install = args
+            .iter()
+            .position(|a| a == "--install")
+            .and_then(|i| args.get(i + 1))
+            .map(String::as_str)
+            .unwrap_or("");
+        return farcooler_daemon::fanout::serve(install, pane).await.map_err(|e| {
             eprintln!("cannot serve that pane: {e}");
             1
         });
