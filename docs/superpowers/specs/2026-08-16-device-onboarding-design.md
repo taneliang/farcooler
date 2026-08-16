@@ -197,10 +197,10 @@ device's keys, taken off a screen with no network in between, and checks with th
 relay that they belong to a device on this account.
 
 Freshness is judged by the **scanner's** clock, from when it scanned — never
-from a timestamp inside the code, which the displaying device controls. A stale
-screenshot presented later is rejected because the scanner has not seen it
-within its own window, and `nonce` makes a replayed one a different ceremony
-rather than a repeat of the same one.
+from a timestamp inside the code, which the displaying device controls. The
+window bounds how long a confirmation may sit unanswered, not how old the
+photograph was: a screenshot carries only public keys, so presenting one later
+gets someone an enrollment of a device they still do not hold.
 
 A key on another account, or on no account, stops here — before the confirmation
 sheet appears, so there is never a moment where the machines are on screen and
@@ -720,7 +720,7 @@ signed into the same account, and a fingerprint at the confirmation.
 | **Someone at your unlocked laptop** | **Refused at the confirmation**, which demands a fingerprint or passcode they do not have. An account check would not have helped: that laptop is signed in, and they would be using your session. |
 | A device that is not on your account | Refused before the confirmation, when the trusted device asks the relay whose key it just scanned. Also the answer to an honest mistake: a second account's phone would otherwise hold keys on your machines while appearing in a device list you cannot see. |
 | WorkOS account takeover | Cannot enroll anything — enrollment needs a QR scanned in person and a local authentication, and later grants never cross the network. Can read the roster of device labels, machine labels and fingerprints, and can push notifications. |
-| Compromised relay or D1 | Absent from enrollment entirely. For later grants, cannot forge a signature or substitute a key ground truth does not confirm. Can withhold a blob, and learns device names, public keys and machine labels. |
+| Compromised relay or D1 | Carries no key, no address and no grant. Its one role is the account lookup, where a false *yes* still needs a QR held to your camera and a fingerprint, and a false *no* is a refusal. Learns device labels, machine labels and fingerprints, and can push notifications. |
 | Someone filming the QR exchange | **Nothing.** Two public keys and a list of addresses they cannot reach. There is no secret in either code. |
 | MITM between an enrolling device and a machine | Refused — the host key is pinned from a manifest that came through a camera. |
 | Hostile key bytes | Rebuilt from key data alone, Ed25519 only, CR/LF refused before parsing. |
