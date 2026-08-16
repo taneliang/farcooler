@@ -607,19 +607,25 @@ The confirmation defaults to **only the machine being granted from**:
 > ### Add "iPhone 17" to work@example.com?
 >
 > iPhone 17 will be able to run agents and commands on the machines you pick, as
-> you. Only this account's machines are listed.
+> you. Each grant is recorded under **work@example.com**.
 >
 > **SHA256:t7Xq…9Vd** ⌄
 >
 > ☑︎ MacBook Pro · this Mac
-> ☐ box
-> ☐ work-mini · needs a device that already reaches it
+> ☐ build-vm
+> ☐ box · your personal machine
 >
 > Far Cooler adds this key to `~/.ssh/authorized_keys` on each machine you pick,
 > and changes nothing else. You can add or remove machines later in
 > Settings › Devices.
 >
 > **[ Add Device ]**  [ Cancel ]
+
+A machine you reached through a different account is listed and labeled, not
+hidden. Putting a work phone on your personal Mac is a real thing people want,
+and hiding the row would not prevent it — you could run the ceremony from the
+other account instead. What the design owes you there is that the row says so and
+the fence records it.
 
 Adding a **Mac** shows the same list with the Key B choice above it:
 
@@ -744,7 +750,7 @@ deliberately defers, and which this document does not smuggle in by implication.
 | --- | --- |
 | The fleet | One list of the machines this device holds grants on, whichever account granted each. A machine reached through two accounts appears once, because it is one machine. |
 | Devices | Per account. Work's Settings › Devices lists work devices; it has no idea the personal ones exist. |
-| The ceremony | Per account. The new device picks which account it is joining, and the QR names it. |
+| The ceremony | The new device picks which of its accounts it is joining and the QR names it. The scanning device offers every machine it can enroll on, each row naming the account that will own the grant — so putting a work phone on your personal Mac is possible, explicit, and recorded. |
 | Sign-out | Per account, and takes only that account's key and grants with it. |
 | Notifications | Named by account, since two accounts can both reach the same phone. |
 
@@ -950,7 +956,8 @@ signed into the same account, and a fingerprint at the confirmation.
 | **A Mac's Key B, once enrolled** | **A shell, by design.** Key A keeps its Far Cooler sessions identifiable and revocable; Key B is not claimed to be contained, and removing it does not close an open shell. |
 | **A device that changes hands** | The new owner's account gets a **fresh key enrolled nowhere**, so the app never offers the previous owner's machines. But the old key is **still on the phone and still extractable** on a rooted device or by a modified build — an app declining to use a key is not revocation. "Remove This Account From This Device" deletes the key material and is the operation that actually helps; a plain sign-out does not. |
 | **A deleted WorkOS account** | **Revokes nothing.** Every enrolled key stays valid and every live session continues, and the person can no longer sign in to invoke removal. Deleting an account must therefore walk the grants first, exactly as removing a device does, and say what it could not reach. |
-| **One account's holder, reaching for another's machines on the same device** | Refused by the product: a ceremony lists only its own account's machines, and each account's device list is its own. **Not refused by the operating system** — both keys are in one Keychain, so a compromised device compromises both accounts. An employer needing a real boundary needs a managed device. |
+| **Granting one account's device access to a machine you reached through another** | **Allowed, and shown.** It is your machine and your choice — a work phone on your personal Mac is a thing people legitimately want. The ceremony lists every machine the scanning device can enroll on, each row naming the account that will own the grant, and the fence entry records it. Refusing would be a rule you could walk around by running the ceremony from the other account anyway. |
+| **Two accounts on one device** | Not a boundary. Both keys sit in one Keychain, so a compromised device compromises both, and nothing inside a machine is partitioned by account either. Accounts organize access; containment needs a managed device and separate machines. |
 | Stolen unlocked trusted device | **Works.** It already holds access. Mitigated by biometry on the confirmation, fresh authentication, and revocation from any other device. |
 | **Cloned phone key** | **Works, and is currently undetectable.** The key is a software key; see above. The largest unmitigated risk in the design. |
 | Every device lost | Ordinary SSH plus `farcooler client revoke`. No account-recovery bypass, deliberately. |
