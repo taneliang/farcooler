@@ -701,33 +701,48 @@ the previous section arrived at from a different direction — and holding both
 accounts at once is what makes it useful rather than merely safe, because the
 alternative it replaces is signing out of one to use the other.
 
-**A machine belongs to exactly one account — as a product rule, not as something
-sshd enforces.** Its daemon holds one pairing (`crates/daemon/src/push.rs`), so
-one account is where its notifications go and which fleet it appears in. But
-`authorized_keys` will accept a key from anywhere: the fence entry carries a
-client id and a scope, not an authenticated account, and a hand-written line
-carries whatever someone typed. So the rule holds because Far Cooler enrolls one
-account's keys, not because a second account's key would be rejected at the door.
+**An account is a property of a grant, not of a machine.** An earlier draft said
+a machine belongs to exactly one account, reasoning from the daemon holding one
+pairing. That conflated two different things, and a Mac is where the conflation
+breaks: a Mac runs `farcoolerd`, so it is a machine, *and* it reaches other
+machines, so it is a device — and a device may hold several accounts. Asking
+which single account owns it has no good answer.
 
-Two consequences worth writing down:
-
-**The fence entry carries the account**, alongside the client id and scope, so
-the daemon can say which entries it believes are its own account's and report
-anything else as foreign — visible in `farcooler client list` rather than
-invisible.
-
-**Re-pairing a machine to another account quarantines the first account's
-entries**, and closes their live sessions, before the new pairing takes effect.
-Without that, re-pairing `box` from work to personal leaves work's keys and open
-sessions in place while `box` vanishes from work's fleet and stops notifying it —
-retained access that nobody can see from either side.
-
-With those, an action is unambiguous because the machine it targets names the
-account, and no screen has to ask which one you meant.
+So the three facts are independent:
 
 | | |
 | --- | --- |
-| The fleet | One list, machines from every account, each labeled with its own. Consistent with a product whose whole premise is that every machine is present at once. |
+| **A grant** | Belongs to one `(device, machine)` pair and carries the granting device's account, which the fence entry records alongside the client id and scope. A machine's fence may hold keys from several accounts; `authorized_keys` neither knows nor cares. |
+| **A pairing** | `(machine, account)`, and a machine may have several or none. It decides where that machine's notifications go and which account rosters list it. `crates/daemon/src/push.rs` holds one today and becomes a list. |
+| **A device's accounts** | However many you sign into, each with its own Key A. |
+
+**Unpairing an account offers to remove that account's grants**, the same
+honesty sign-out gets: a machine that stops notifying work while work's keys stay
+in its fence is retained access nobody can see from either side.
+
+### An account is not a boundary inside a machine
+
+This is the limit worth being blunt about, because it is where a work-and-personal
+split does not do what the words suggest.
+
+A daemon owns one Unix user's workspaces, terminals and repositories, in one
+namespace. **Any device with `control` sees all of them**, whichever account
+granted it. Enroll a work phone on your personal Mac and it lists your personal
+workspaces; there is no per-account view, and a `read` device sees the same list
+it simply cannot type into.
+
+So the separation accounts give you is **between machines, not within one.** Work
+machines and personal machines stay apart because they are different machines with
+different fences. One machine reached by two accounts is one machine, and its
+contents are shared by everything that can reach it.
+
+Making that a real boundary would need separate operating-system principals per
+account, with sandboxed terminal workers — which `farcooler-design.md:899`
+deliberately defers, and which this document does not smuggle in by implication.
+
+| | |
+| --- | --- |
+| The fleet | One list of the machines this device holds grants on, whichever account granted each. A machine reached through two accounts appears once, because it is one machine. |
 | Devices | Per account. Work's Settings › Devices lists work devices; it has no idea the personal ones exist. |
 | The ceremony | Per account. The new device picks which account it is joining, and the QR names it. |
 | Sign-out | Per account, and takes only that account's key and grants with it. |
@@ -738,10 +753,16 @@ trusted device knows which of its accounts to check against, and the confirmatio
 sheet says which one it is adding to. A QR naming an account the scanning device
 does not hold is refused with the copy in step 2.
 
+And a Mac is both at once with no tension: signed into work and personal as a
+*device*, paired to either or both as a *machine*, and those are separate
+settings that never have to agree.
+
 What this does **not** do is put a boundary between the two accounts on the
 device itself. Both keys sit in the same Keychain, and a compromised phone
-compromises both. An employer wanting a real boundary needs a managed device, not
-a second account in a personal app, and the document does not pretend otherwise.
+compromises both. Together with the section above — no boundary inside a machine
+either — the honest summary is that **accounts organize access; they do not
+contain it.** An employer wanting containment needs a managed device and separate
+machines, not a second account in a personal app.
 
 ### The shape this leaves for teams, and the thing it cannot do
 
@@ -979,9 +1000,9 @@ does not apply to SSO users, so it is not something to lean on.
 - **Nothing is transitive.** There is no protocol path by which a device holding
   `control` on one machine obtains a key on another, at any scope, including
   `host_admin`. The test is the absence of the RPC, asserted rather than assumed.
-- **Account lifecycle.** Re-pairing a machine quarantines the previous account's
-  fence entries and closes their sessions before the new pairing takes effect; a
-  foreign-account entry appears in `client list` as foreign rather than silently;
+- **Account lifecycle.** A machine pairs to two accounts and notifies both, and
+  unpairing one offers to remove that account's grants and closes their sessions;
+  a fence entry records the granting account and `client list` shows it;
   "Remove This Account From This Device" deletes the key material and a plain
   sign-out does not; a revocation blocked by an offline machine leaves a
   tombstone that survives sign-out and retries.
