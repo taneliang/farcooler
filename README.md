@@ -48,6 +48,28 @@ The macOS app:
 cd apps/macos && swift build
 ```
 
+## Tests
+
+```sh
+cargo test --workspace
+```
+
+That never runs the agents. Far Cooler recognizes claude, codex and
+cursor-agent by furniture they draw on screen, and that furniture changes with
+no changelog — so there is a second suite that drives the real binaries and
+checks the rules still hold:
+
+```sh
+cargo test -p farcooler-core --test live_agents -- --ignored --nocapture
+```
+
+Run it after touching `activity.rs` or `title.rs`, and periodically to catch a
+third-party release. It costs a few cents and a few minutes, needs the CLIs
+already signed in, and SKIPS rather than fails when one is missing. A check that
+fails writes the captured screen to `target/live-agents/` — that file is both
+the bug report and the fix, since it belongs in `crates/core/captures/` once the
+rules are corrected.
+
 ## Quick start
 
 ```sh
