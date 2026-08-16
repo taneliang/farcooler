@@ -184,3 +184,28 @@ write to a third party rather than read from one.
 **Depends on / blocked by:** Stage 6 (PR state, read-only) must exist first.
 
 **Where the full reasoning lives:** the Review design doc, Open Questions.
+
+---
+## Schedule the live agent suite, once someone wants it unattended
+
+**Status:** Deferred, trigger-based
+**Surfaced by:** Stage 1 of the agent-activity work, 2026-08-16
+
+**What:** Run `cargo test -p farcooler-core --test live_agents -- --ignored` on a
+schedule, rather than only when a person or an agent asks for it.
+
+**Why it is not done:** The suite itself exists — see the Tests section of the README —
+and it is deliberately on-demand. Everything that made it worth writing is in the test
+file: which binary is the real one rather than a wrapper, how each trust gate is
+dismissed, the cheapest model per agent, and why assertions are on furniture rather than
+on model output. What is genuinely deferred is only the scheduling.
+
+**Trigger:** Wanting to learn about a third-party release without anyone running
+anything — most likely once several people depend on this, or once a drift has gone
+unnoticed long enough to matter.
+
+**Cons:** It costs a few cents per run and needs the CLIs signed in, so it belongs on a
+machine with real logins rather than in CI, and a scheduler that fires while nobody is
+watching needs somewhere to report a failure that someone actually reads.
+
+**Depends on / blocked by:** Nothing.
