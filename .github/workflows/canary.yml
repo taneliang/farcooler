@@ -156,22 +156,55 @@ jobs:
           xcrun altool --upload-app -f build/export/FarCooler.ipa -t ios \
             --apiKey "$APP_STORE_KEY_ID" --apiIssuer "$APP_STORE_ISSUER_ID"
 
-  # The Mac app is built but NOT published anywhere.
+  # The Mac app, as a disk image you can actually install.
   #
-  # It has no TestFlight — a Developer ID app is distributed directly — and
-  # attaching a canary build to a GitHub release would put it beside the stable
-  # download, which is the one place it must never appear. Building it here
-  # still earns its keep: `build-app.sh` is the step that has gone wrong before,
-  # and a canary that compiles is the evidence the next promotion will too.
+  # It has no TestFlight — a Developer ID app is distributed directly — and it is
+  # still NOT attached to a GitHub release, because a canary sitting beside the
+  # stable download is the one place it must never appear. A workflow artifact
+  # instead: it hangs off the run rather than the repository's front page,
+  # expires on its own, and is exactly as findable as a canary should be.
+  #
+  # Signed and notarised like a release, and that is the whole point rather than
+  # a nicety. An ad-hoc-signed dmg is refused by Gatekeeper, so an unsigned
+  # canary would mean stripping quarantine attributes by hand on every build —
+  # which is how a channel meant to be installed constantly stops being
+  # installed at all. The cost is a notarisation round trip on every push to
+  # main; if that gets tiresome, `if: github.event_name == 'workflow_dispatch'`
+  # on the signing steps buys back the time and leaves a button for when you
+  # want an installable one.
   macos:
-    name: macOS (build only)
+    name: macOS (signed disk image)
     runs-on: macos-latest
+    # Hoisted so the steps can test them in an `if`: the `secrets` context is
+    # not available there, and `secrets.X != ''` is always false — silently, so
+    # the signing steps would skip and an unopenable dmg would ship looking
+    # exactly like a good one. Same trap release.yml documents at length.
+    env:
+      HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
+      HAS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+
+      - name: Import the signing certificate
+        if: env.HAS_CERTIFICATE == 'true'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          trap 'rm -f certificate.p12' EXIT
+          keychain=build.keychain
+          security create-keychain -p actions "$keychain"
+          security default-keychain -s "$keychain"
+          security unlock-keychain -p actions "$keychain"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
+          security import certificate.p12 -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$keychain"
+
       - name: The WorkOS client id for this channel
         env:
           LOCAL_WORKOS_CLIENT_ID: ${{ vars.LOCAL_WORKOS_CLIENT_ID }}
@@ -182,3 +215,67 @@ jobs:
 
       - name: Build Far Cooler.app
         run: apps/macos/build-app.sh
+
+      - name: Sign and notarise
+        if: env.HAS_SIGN_IDENTITY == 'true'
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          app='apps/macos/build/Far Cooler.app'
+          # Each nested binary on its own, not `--deep`: the CLI and daemon in
+          # Resources are separate executables and each needs its own signature
+          # and hardened runtime. release.yml says the same at more length.
+          for binary in "$app/Contents/Resources/farcooler" "$app/Contents/Resources/farcoolerd"; do
+            codesign --force --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "$binary"
+          done
+          codesign --force --options runtime --timestamp \
+            --sign "$MACOS_SIGN_IDENTITY" "$app"
+
+          ditto -c -k --keepParent "$app" 'Far Cooler.zip'
+          xcrun notarytool submit 'Far Cooler.zip' \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$app"
+          rm 'Far Cooler.zip'
+
+      - name: Package the disk image
+        run: |
+          set -euo pipefail
+          staging="$(mktemp -d)"
+          ditto 'apps/macos/build/Far Cooler.app' "$staging/Far Cooler.app"
+          ln -s /Applications "$staging/Applications"
+          # Named with the build number as well as the version, because every
+          # canary shares one marketing version and the build number is the
+          # commit count — so the filename says which commit you are holding,
+          # which is the whole question a canary bug report has to answer.
+          hdiutil create -volname 'Far Cooler Canary' -srcfolder "$staging" \
+            -ov -format UDZO \
+            "Far Cooler-$(scripts/version.sh)-canary-$(scripts/version.sh build).dmg"
+
+      - name: Notarise the disk image
+        if: env.HAS_SIGN_IDENTITY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          dmg="$(ls *.dmg)"
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canary-macos
+          path: '*.dmg'
