@@ -23,6 +23,16 @@ let package = Package(
         // gives: a Developer ID app has no App Store to update it. The FIRST remote
         // dependency this package has ever had — everything else here is a path
         // dependency or a system library.
+        //
+        // Which is why `Package.resolved` is now tracked, and why that file is
+        // more load-bearing than it looks. It pins the resolution so a fresh
+        // checkout cannot quietly take a newer Sparkle — but it is also
+        // GENERATED, and a `swift build` that rewrites it (a different toolchain,
+        // a changed format) DIRTIES THE TREE. A dirty tree makes
+        // `scripts/version.sh channel` answer `local`, which is how a canary
+        // silently becomes a local build. Every caller resolves its per-channel
+        // values before building for exactly this reason; if you ever see a
+        // build report the wrong channel, `git status` on this file first.
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
     ],
     targets: [

@@ -357,6 +357,25 @@ jobs:
           dmg="$(ls *.dmg)"
           build="$(scripts/version.sh build)"
 
+          # Refuse to sign with a key the shipped apps do not trust.
+          #
+          # The two halves travel by completely different routes: the public one
+          # is committed and stamped into the bundle at build time, the private
+          # one was exported from a Keychain by hand and reached CI as a secret.
+          # Nothing compared them until here. A mismatched pair fails NOWHERE in
+          # CI — it signs, publishes and serves perfectly — and is refused by
+          # every client, because a signature that does not verify is
+          # indistinguishable from a forged one. The failure would appear only on
+          # other people's machines.
+          expected="$(awk '$1 == "canary" { print $2 }' apps/macos/sparkle-public-keys.txt)"
+          actual="$(printf '%s' "$CANARY_SPARKLE_KEY" | swift scripts/sparkle-public-key.swift)"
+          [ "$expected" = "$actual" ] || {
+            echo "CANARY_SPARKLE_KEY is not the pair of the committed canary public key." >&2
+            echo "  apps ship trusting: $expected" >&2
+            echo "  this key would sign as: $actual" >&2
+            exit 1
+          }
+
           # sign_update prints ONE line — sparkle:edSignature="…" length="…" —
           # and the order is not a promise, so both are pulled out by name
           # rather than by field position.

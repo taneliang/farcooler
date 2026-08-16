@@ -221,6 +221,14 @@ jobs:
       # runner `wire` uses.
       - run: ./scripts/icon-test.sh
 
+      # That we can derive a Sparkle public key from its private half, checked
+      # against RFC 8032's published vectors rather than against a pair we made
+      # up. The release workflows use that derivation to refuse to sign with a
+      # key the shipped apps do not trust — a mismatch that fails nowhere in CI
+      # and is rejected on every client instead. Here rather than in `wire` for
+      # the same reason as the icon test: CryptoKit is macOS-only.
+      - run: ./scripts/sparkle-key-test.sh
+
       - name: Test AgentKit
         run: swift test --package-path apps/shared/AgentKit
 

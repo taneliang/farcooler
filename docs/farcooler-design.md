@@ -237,16 +237,19 @@ The first slice may ship separate `farcoolerd` and `farcooler` executables from 
 
 ### Mac packaging and daemon lifecycle
 
-The Mac-first slice targets macOS 13 or later and ships one native `Far Cooler.app` containing the Swift client, Rust daemon, Rust CLI, LaunchAgent property list, protobuf descriptors, and the terminal core static library:
+The Mac-first slice targets macOS 13 or later and ships one native app bundle containing the Swift client, Rust daemon, Rust CLI, LaunchAgent property list, protobuf descriptors, the terminal core static library, and Sparkle:
 
 ```text
-Far Cooler.app/
+Far Cooler.app/                       # stable; other channels append their name
 └── Contents/
-    ├── MacOS/Far Cooler
+    ├── MacOS/FarCooler
+    ├── Frameworks/Sparkle.framework
     ├── Resources/farcoolerd
     ├── Resources/farcooler
     └── Library/LaunchAgents/com.farcooler.daemon.plist
 ```
+
+**The names above are stable's.** Every channel is its own app: `Far Cooler Canary.app` carries the bundle identifier `com.farcooler.FarCooler.canary` and the login agent `com.farcooler.daemon.canary`, so a canary installs beside the build someone depends on rather than over it. Stable keeps every bare name because that is what existing installs answer to. All of it derives from `scripts/version.sh` — see `docs/releasing.md`.
 
 - The default daemon is an unprivileged per-user LaunchAgent registered through `SMAppService.agent(plistName:)`. Its plist uses `BundleProgram` to address the daemon inside the app bundle. Far Cooler never writes a legacy plist into `~/Library/LaunchAgents`.
 - A Mac intended as an always-on host can opt into **unattended mode**, which registers a system LaunchDaemon through `SMAppService.daemon(plistName:)` from `Contents/Library/LaunchDaemons/` instead of the LaunchAgent. Registration is privileged and prompts for administrator authorization once; execution is not. The plist sets `UserName` and `GroupName` to the enrolling user, so the daemon still runs as that unprivileged user and never as root, preserving the one-principal model. Only one of the two registrations is active at a time, and switching between them is an explicit, reversible action that stops the old one first.
