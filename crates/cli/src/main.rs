@@ -1497,26 +1497,7 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                             "is_main_checkout": w.is_main_checkout,
                             "terminals": terminals.iter()
                                 .filter(|t| t.workspace_id == w.id)
-                                .map(|t| serde_json::json!({
-                                    "id": uuid_of(&t.id).to_string(),
-                                    "short": short_bytes(&t.id),
-                                    "title": t.title,
-                                    "preset": label(t),
-                                    "state": terminal_label(t.state()),
-                                    "activity": activity_label(t.activity),
-                                    "activitySince": activity_since(t),
-                                    "epoch": t.epoch,
-                                    // The Mac app decodes THIS, not the JSON
-                                    // `crates/client` builds for iOS. Leaving
-                                    // these out here left `isAgentPane` false
-                                    // forever, so an agent pane silently drew
-                                    // a terminal and chat mode looked missing.
-                                    "paneMode": pane_mode_label(t.pane_mode),
-                                    "chatCapable": t.chat_capable,
-                                    "agentSessionId": t.agent_session_id,
-                                    "agentMode": t.agent_mode,
-                                    "availableAgentModes": t.available_agent_modes,
-                                }))
+                                .map(workspace_list_terminal_json)
                                 .collect::<Vec<_>>(),
                         })
                     })
@@ -2606,6 +2587,66 @@ fn activity_since(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
     t.activity_changed_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
 }
 
+/// When the current turn started, as Unix milliseconds.
+///
+/// Same conversion as `activity_since`, on a different clock: `turn_started_at`
+/// is held across a permission prompt and cleared when the turn ends, so it
+/// answers "how long has this been running" rather than "how long has it been
+/// in this particular state". A client that shows only `activity_since` for a
+/// Working row is answering the wrong question — see the Mac's
+/// `Terminal.turnDuration`, which exists because a single clock already did
+/// this once.
+fn turn_started_at(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
+    t.turn_started_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
+}
+
+/// One terminal, projected for a client — the shape `WorkspaceCmd::List` and
+/// `terminal_event_json` both need and must agree on.
+///
+/// Pulled out for the exact reason `terminal_event_json` was: this was
+/// inline in `workspace()`'s `json!` closure until the exit code, the turn
+/// clock and the blocked question were all found missing from it in the same
+/// afternoon — the THIRD time this file has built a terminal's client-facing
+/// JSON by hand and left a field out, after `chatCapable` and then
+/// `exitCode`/`exitSignal` on the event side. This is the one the Mac app's
+/// `refresh()` actually calls (`workspace list --json`) — `crates/client`
+/// builds a separate projection for iOS, and it is not what this app reads,
+/// however alike the two look.
+fn workspace_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Value {
+    serde_json::json!({
+        "id": uuid_of(&t.id).to_string(),
+        "short": short_bytes(&t.id),
+        "title": t.title,
+        "preset": label(t),
+        "state": terminal_label(t.state()),
+        "activity": activity_label(t.activity),
+        "activitySince": activity_since(t),
+        // How it ENDED, which is the difference between a shell you closed
+        // and a build that broke — see `crates/core::activity::exit_wants_attention`.
+        "exitCode": t.exit_status.as_ref().and_then(|e| e.code),
+        "exitSignal": t.exit_status.as_ref().and_then(|e| e.signal),
+        // The other clock, held across a permission prompt rather than reset
+        // by one. Sent beside `activitySince` because they answer different
+        // questions and a client that only had one of them was answering the
+        // wrong one for half of its rows.
+        "turnStartedAt": turn_started_at(t),
+        // What the agent is asking, when it is blocked and legible. Without
+        // this a row can say "Needs you" and never say what for.
+        "blockedQuestion": t.blocked_question,
+        "epoch": t.epoch,
+        // The Mac app decodes THIS, not the JSON
+        // `crates/client` builds for iOS. Leaving
+        // these out here left `isAgentPane` false
+        // forever, so an agent pane silently drew
+        // a terminal and chat mode looked missing.
+        "paneMode": pane_mode_label(t.pane_mode),
+        "chatCapable": t.chat_capable,
+        "agentSessionId": t.agent_session_id,
+        "agentMode": t.agent_mode,
+        "availableAgentModes": t.available_agent_modes,
+    })
+}
+
 /// The JSON line `events` pushes for a `TerminalChanged` message.
 ///
 /// A free function rather than an inline object literal in the event loop:
@@ -2617,7 +2658,13 @@ fn activity_since(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
 /// forever, because the app is push-only and never re-fetches a terminal it
 /// already knows. `⌃B a` then refused, on the exact agent this branch
 /// shipped an adapter for. Pulling the object out where a test can call it
-/// directly is what keeps the next field from going missing the same way.
+/// directly is what keeps the next field from going missing the same way —
+/// which it did not, twice more: `exitCode`/`exitSignal` were missing here
+/// AND, it turned out, `list --json` had never had them either; `turnStartedAt`
+/// and `blockedQuestion` were missing from both at once. Three strikes in one
+/// function is why `workspace_list_terminal_json` above now exists as a named,
+/// tested thing instead of a second hand-built object this one could drift
+/// from again.
 fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Value {
     serde_json::json!({
         "kind": "terminal",
@@ -2629,6 +2676,20 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         "state": terminal_label(t.state()),
         "activity": activity_label(t.activity),
         "activitySince": activity_since(t),
+        // Watched for the same reason `chatCapable` below is: a live push that
+        // moves a terminal to `exited` without this leaves the client unable
+        // to tell a shell you closed from a build that broke until something
+        // else forces a full re-read — which is exactly the bug this
+        // function's own history is a list of.
+        "exitCode": t.exit_status.as_ref().and_then(|e| e.code),
+        "exitSignal": t.exit_status.as_ref().and_then(|e| e.signal),
+        // Watched for the identical reason, one tick later: a row that just
+        // went Blocked over this event has a question to show NOW, not after
+        // whatever next forces a full refresh — and the turn clock is exactly
+        // what tells "Working 12m" apart from "Working 2s" the moment a
+        // permission prompt resolves.
+        "turnStartedAt": turn_started_at(t),
+        "blockedQuestion": t.blocked_question,
         // Watched as well as listed. A pane mode that only arrived on a full
         // refresh would mean toggling to chat did nothing until something
         // else happened to reload the fleet.
@@ -2762,5 +2823,139 @@ mod tests {
         let t = farcooler_protocol::v1::Terminal { chat_capable: false, ..Default::default() };
         let json = terminal_event_json(&t);
         assert_eq!(json["chatCapable"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn a_terminal_changed_event_carries_the_exit_status() {
+        // The same regression as `chatCapable`, one field later: a live push
+        // that moves a terminal to `exited` is exactly the moment a client
+        // needs to tell a clean exit from a failed one apart, and this
+        // function had already left one field out of this same object before.
+        let t = farcooler_protocol::v1::Terminal {
+            exit_status: Some(farcooler_protocol::v1::ExitStatus { code: Some(101), signal: None }),
+            ..Default::default()
+        };
+        let json = terminal_event_json(&t);
+        assert_eq!(json["exitCode"], serde_json::json!(101));
+        assert_eq!(json["exitSignal"], serde_json::json!(null));
+    }
+
+    #[test]
+    fn a_terminal_changed_event_carries_the_turn_clock_and_the_question() {
+        // The regression this exists to catch: a row that just went Blocked
+        // over this exact event is the one moment "Needs you" and the
+        // question under it both need to be true at once, and this function
+        // had already left two other fields out of this same object twice
+        // before.
+        let t = farcooler_protocol::v1::Terminal {
+            turn_started_at: Some(prost_types::Timestamp { seconds: 1_700_000_000, nanos: 0 }),
+            blocked_question: Some("Overwrite config.toml?".to_string()),
+            ..Default::default()
+        };
+        let json = terminal_event_json(&t);
+        assert_eq!(json["turnStartedAt"], serde_json::json!(1_700_000_000_000_i64));
+        assert_eq!(json["blockedQuestion"], serde_json::json!("Overwrite config.toml?"));
+    }
+
+    /// The other terminal-to-JSON function in this file, and the one the Mac
+    /// app's `refresh()` actually calls (`workspace list --json`) — see the
+    /// function's own doc comment for why that distinction matters. Every
+    /// field this stage of the branch added is checked here, because this is
+    /// the function where three of them turned out to be missing at once.
+    #[test]
+    fn the_full_list_carries_every_field_this_branch_added() {
+        let t = farcooler_protocol::v1::Terminal {
+            exit_status: Some(farcooler_protocol::v1::ExitStatus { code: Some(101), signal: None }),
+            turn_started_at: Some(prost_types::Timestamp { seconds: 1_700_000_000, nanos: 0 }),
+            blocked_question: Some("Overwrite config.toml?".to_string()),
+            chat_capable: true,
+            ..Default::default()
+        };
+        let json = workspace_list_terminal_json(&t);
+        assert_eq!(json["exitCode"], serde_json::json!(101));
+        assert_eq!(json["exitSignal"], serde_json::json!(null));
+        assert_eq!(json["turnStartedAt"], serde_json::json!(1_700_000_000_000_i64));
+        assert_eq!(json["blockedQuestion"], serde_json::json!("Overwrite config.toml?"));
+        // Not new this round, but this is the function `chatCapable` was
+        // already known to be present in — kept as a canary so a future
+        // refactor of this function trips a test rather than a support ticket.
+        assert_eq!(json["chatCapable"], serde_json::json!(true));
+    }
+
+    /// Keys the EVENT projection carries that the list one has no business
+    /// carrying: an event has to say what kind of thing changed and which
+    /// workspace it is in, because it arrives on its own with no surrounding
+    /// document. A list entry is already inside both.
+    const EVENT_ONLY: &[&str] = &["kind", "workspace"];
+
+    /// Keys the LIST projection carries that the event one deliberately does
+    /// not. `epoch` is write-conflict bookkeeping for a client about to send a
+    /// command, not something a row renders, and it was left off the event path
+    /// on purpose.
+    const LIST_ONLY: &[&str] = &["epoch"];
+
+    /// The two projections of a `Terminal` must not drift apart again.
+    ///
+    /// This is the test that would have caught this branch's own worst bug, and
+    /// the two before it. Three times a field was added to one of these
+    /// functions and not the other — `chatCapable`, then
+    /// `exitCode`/`exitSignal`, then `turnStartedAt`/`blockedQuestion`, that
+    /// last pair missing from BOTH — and every suite stayed green while every
+    /// headline feature of this branch was invisible on the shipped Mac app.
+    ///
+    /// Field-by-field assertions cannot catch that: they test the fields
+    /// somebody remembered. This walks the KEY SETS, so a field added to one
+    /// projection and forgotten in the other fails here with no test change at
+    /// all. The only way past it is to name the new key in `EVENT_ONLY` or
+    /// `LIST_ONLY` above, which is a deliberate act with a comment attached.
+    #[test]
+    fn the_two_terminal_projections_agree_on_every_field() {
+        // Fully populated, because a projection that reads an absent optional
+        // still emits its key — but a reader comparing the two by hand would
+        // rather see real values in the failure message.
+        let t = farcooler_protocol::v1::Terminal {
+            exit_status: Some(farcooler_protocol::v1::ExitStatus { code: Some(101), signal: None }),
+            turn_started_at: Some(prost_types::Timestamp { seconds: 1_700_000_000, nanos: 0 }),
+            blocked_question: Some("Overwrite config.toml?".to_string()),
+            chat_capable: true,
+            ..Default::default()
+        };
+
+        let keys = |value: &serde_json::Value, except: &[&str]| -> std::collections::BTreeSet<String> {
+            value
+                .as_object()
+                .expect("a terminal projects to an object")
+                .keys()
+                .filter(|k| !except.contains(&k.as_str()))
+                .cloned()
+                .collect()
+        };
+        let event = keys(&terminal_event_json(&t), EVENT_ONLY);
+        let list = keys(&workspace_list_terminal_json(&t), LIST_ONLY);
+
+        assert_eq!(
+            event, list,
+            "the two terminal projections disagree.\n\
+             only in the event JSON: {:?}\n\
+             only in `workspace list --json`: {:?}\n\
+             Add the field to both, or name it in EVENT_ONLY/LIST_ONLY with a reason.",
+            event.difference(&list).collect::<Vec<_>>(),
+            list.difference(&event).collect::<Vec<_>>(),
+        );
+
+        // Not vacuous by construction either: an empty set equals an empty set,
+        // so the branch's own fields are named here to prove the sets are real.
+        for field in ["exitCode", "exitSignal", "turnStartedAt", "blockedQuestion", "chatCapable"] {
+            assert!(event.contains(field), "{field} is in neither projection");
+        }
+    }
+
+    #[test]
+    fn a_terminal_with_no_turn_or_question_sends_neither_as_present() {
+        // The ordinary case — idle, or working outside a permission prompt —
+        // must not invent a clock or a question that is not there.
+        let t = farcooler_protocol::v1::Terminal::default();
+        assert_eq!(workspace_list_terminal_json(&t)["turnStartedAt"], serde_json::json!(null));
+        assert_eq!(workspace_list_terminal_json(&t)["blockedQuestion"], serde_json::json!(null));
     }
 }

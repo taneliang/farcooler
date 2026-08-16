@@ -207,6 +207,7 @@ mod tests {
             pane_active: true,
             zoomed: false,
             tty: String::new(),
+            title: String::new(),
         }
     }
 

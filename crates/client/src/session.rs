@@ -292,6 +292,12 @@ impl Session {
                             "state": terminal_label(t.state()),
                             "activity": activity_label(t.activity),
                                     "activitySince": activity_since(t),
+                            // How it ENDED, which is the difference between a
+                            // shell you closed and a build that broke.
+                            "exitCode": t.exit_status.as_ref().and_then(|e| e.code),
+                            "exitSignal": t.exit_status.as_ref().and_then(|e| e.signal),
+                            "turnStartedAt": turn_started_at(t),
+                            "blockedQuestion": t.blocked_question.clone(),
                             "epoch": t.epoch,
                             "paneMode": pane_mode_label(t.pane_mode),
                             // Without this the phone's terminal/chat switch
@@ -1299,6 +1305,15 @@ fn activity_label(a: i32) -> &'static str {
 /// which would restart at every reconnect and lie after a laptop sleeps.
 fn activity_since(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
     t.activity_changed_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
+}
+
+/// When the current turn started, as Unix milliseconds.
+///
+/// Distinct from `activity_since`: this is held across a permission prompt and
+/// cleared when the turn ends, so it answers "how long has this been running"
+/// rather than "how long has it been in this particular state".
+fn turn_started_at(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
+    t.turn_started_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
 }
 
 /// The pane mode, as a word rather than a number.

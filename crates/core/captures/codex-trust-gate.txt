@@ -1,0 +1,40 @@
+> You are in /private/tmp/claude-502/-Users-e-liang-Dev-overnight/9dd767ba-acbf-4124-87b3-c7d8662f60e7/scratchpad/bare
+
+  Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt
+  injection. Trusting the directory allows project-local config, hooks, and exec policies to load.
+
+› 1. Yes, continue
+  2. No, quit
+
+  Press enter to continue
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

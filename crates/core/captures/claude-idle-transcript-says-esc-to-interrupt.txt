@@ -1,0 +1,40 @@
+
+
+❯ Write a haiku about tmux to haiku.txt, then tell me what the phrase 'esc to interrupt' means in a terminal UI
+
+⏺ Write(haiku.txt)
+  ⎿  Wrote 3 lines to haiku.txt
+      1 Panes split like rice fields—
+      2 detach, and the session breathes
+      3 alone in the dark.
+
+⏺ Written to haiku.txt:
+
+  Panes split like rice fields—
+  detach, and the session breathes
+  alone in the dark.
+
+  "esc to interrupt" is a hint line a terminal UI shows while it's busy doing something — running a command, streaming a
+  response, waiting on the network. It tells you that pressing the Escape key will stop that in-progress work and hand
+  control back to you, without quitting the program itself.
+
+  A few things worth knowing about it:
+
+  - Interrupt ≠ quit. Esc cancels the current operation; the app stays running and you get your prompt back. That's the
+  distinction from Ctrl-C in a plain shell, which typically sends SIGINT and often kills the whole process. Full-screen
+  TUIs grab Esc precisely because it can mean "cancel this one thing" rather than "kill everything."
+  - It's a mode indicator. The line usually only appears while something is interruptible. Its presence is itself
+  information: work is in flight, and you have an escape hatch. When it disappears, the app is idle.
+  - Partial results usually survive. Interrupting normally leaves whatever already completed — output printed, tokens
+  streamed, files written — intact. It stops future work, not past work.
+  - Where the convention comes from: vi/vim popularized Esc as "leave whatever mode you're in," and readline/ncurses
+  apps inherited the idea. Terminals transmit Esc as \x1b, the same byte that starts every ANSI escape sequence, so apps
+  have to disambiguate a lone Esc from the start of an arrow-key sequence — that's why some UIs feel slightly laggy on
+  Esc, or ask you to press it twice.
+
+✻ Sautéed for 14s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ cat haiku.txt
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← 3 agents

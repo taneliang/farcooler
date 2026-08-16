@@ -146,7 +146,7 @@ impl TmuxServer {
         // Geometry comes along for the ride: it is the same query, and asking
         // tmux where a pane is costs nothing next to computing it twice.
         let fmt = format!(
-            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}\t#{{pane_current_command}}\t#{{pane_left}}\t#{{pane_top}}\t#{{window_active}}\t#{{pane_active}}\t#{{window_zoomed_flag}}\t#{{pane_tty}}",
+            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}\t#{{pane_current_command}}\t#{{pane_left}}\t#{{pane_top}}\t#{{window_active}}\t#{{pane_active}}\t#{{window_zoomed_flag}}\t#{{pane_tty}}\t#{{pane_title}}",
             tags::DAEMON_ID,
             tags::WORKSPACE_ID,
             tags::TERMINAL_ID,
@@ -409,6 +409,10 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
         // together with `pane_active`: the zoomed pane is the active one.
         zoomed: flag(15) && flag(14),
         tty: f.get(16).map(|v| v.trim().to_string()).unwrap_or_default(),
+        // Appended last on purpose. A title is user-controlled text and may
+        // contain a tab; putting it at the end means such a title costs its own
+        // value and not every field after it.
+        title: f.get(17).map(|v| v.trim().to_string()).unwrap_or_default(),
     })
 }
 
@@ -665,6 +669,28 @@ mod tests {
     #[test]
     fn non_uuid_tag_is_ignored() {
         assert!(parse_pane_line("%1\t@1\t80\t24\tnot-a-uuid\tx\ty\t1\t\t").is_none());
+    }
+
+    #[test]
+    fn a_pane_line_carries_the_title() {
+        let d = uuid::Uuid::nil();
+        let line = format!(
+            "%1\t@0\t80\t24\t{d}\t{d}\t{d}\t1\t\t\tclaude\t0\t0\t1\t1\t0\t/dev/ttys001\t◐ Write a haiku"
+        );
+        let p = parse_pane_line(&line).expect("a well-formed line parses");
+        assert_eq!(p.title, "◐ Write a haiku");
+        assert_eq!(p.tty, "/dev/ttys001");
+    }
+
+    /// A build that predates the title field must still parse.
+    #[test]
+    fn a_line_without_a_title_still_parses() {
+        let d = uuid::Uuid::nil();
+        let line = format!(
+            "%1\t@0\t80\t24\t{d}\t{d}\t{d}\t1\t\t\tclaude\t0\t0\t1\t1\t0\t/dev/ttys001"
+        );
+        let p = parse_pane_line(&line).expect("a short line parses");
+        assert_eq!(p.title, "");
     }
 }
 

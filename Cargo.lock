@@ -903,6 +903,7 @@ dependencies = [
  "farcooler-protocol",
  "farcooler-transport",
  "libc",
+ "prost-types",
  "serde_json",
  "tempfile",
  "tokio",

@@ -1,0 +1,40 @@
+
+╭─── Claude Code v2.1.233 ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                        │
+│                Welcome back E-Liang!               │ Ask Claude to create a new app or clone a repository            │
+│                                                    │ ─────────────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ What's new                                                      │
+│                      ▝▜█████▛▘                     │ Added GitLab merge request URL support to the `--worktree` fla… │
+│                        ▘▘ ▝▝                       │ Added an opt-in `forward_user_identity` apps gateway setting o… │
+│   Opus 5 (1M context) with high… · Claude Max ·    │ Added opt-in memory cgroup support for Bash tool commands on L… │
+│   o.o@elt.sg's Organization                        │ /release-notes for more                                         │
+│                /…/scratchpad/probe                 │                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                       ● high · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← 3 agents

@@ -338,7 +338,7 @@ private struct SwitcherTile: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if let duration = entry.terminal?.statusDuration {
+                if let duration = entry.terminal?.displayDuration {
                     Text(duration)
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)

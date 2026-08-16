@@ -497,6 +497,24 @@ final class DaemonClient: ObservableObject {
             // forever, since this app is push-only and never re-fetches a
             // terminal it already knows.
             fleet.workspaces[w].terminals[t].chatCapable = event.chatCapable
+            // Same reason as `chatCapable` above, one field later: without
+            // this, a terminal pushed into `exited` here reads as a clean
+            // exit — `Status` sees a `nil` exit code, which is deliberately
+            // never a failure — until some later full refresh happens to
+            // backfill it. A failed build must not wait on that to be seen.
+            fleet.workspaces[w].terminals[t].exitCode = event.exitCode
+            fleet.workspaces[w].terminals[t].exitSignal = event.exitSignal
+            // The daemon has always sent this; it was never applied here,
+            // which is the same omission a third time — a live-pushed
+            // Working or Blocked row kept showing whatever `statusDuration`
+            // last got from a full refresh instead of what just changed.
+            fleet.workspaces[w].terminals[t].activitySince = event.activitySince
+            // Same reason as `exitCode` above, one tick later: the moment a
+            // row goes Blocked over this event is exactly the moment it
+            // needs the turn clock and the question to be current, not
+            // whatever a later refresh happens to backfill.
+            fleet.workspaces[w].terminals[t].turnStartedAt = event.turnStartedAt
+            fleet.workspaces[w].terminals[t].blockedQuestion = event.blockedQuestion
 
             let terminal = fleet.workspaces[w].terminals[t]
             Notifier.shared.report(terminal: terminal, workspace: fleet.workspaces[w].task)

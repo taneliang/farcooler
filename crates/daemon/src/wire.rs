@@ -170,6 +170,8 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // what `Done` is made of. A converter that guessed would erase it.
         activity: wire::AgentActivity::Unspecified as i32,
         activity_changed_at: None,
+        turn_started_at: None,
+        blocked_question: None,
         current_command: String::new(),
         pane_mode: pane_mode(t.pane_mode),
         agent_session_id: t.agent_session_id.clone(),

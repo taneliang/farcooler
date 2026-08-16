@@ -3,12 +3,12 @@ import AppKit
 import Foundation
 import UserNotifications
 
-/// Telling you when an agent needs you.
+/// Telling you when something needs you.
 ///
-/// Only two things are ever notified about: an agent that is BLOCKED waiting on
-/// you, and one that is DONE. Working agents are the normal case, and a product
-/// that buzzes for the normal case is one people turn off — after which it
-/// cannot tell them the thing that mattered.
+/// An agent that is BLOCKED waiting on you, one that is DONE, and a plain
+/// command that ran and came back badly. Working agents and a clean exit are
+/// both the normal case, and a product that buzzes for the normal case is one
+/// people turn off — after which it cannot tell them the thing that mattered.
 ///
 /// The daemon decides what those states are, so this works identically for an
 /// agent on this Mac and one on a machine across the world. That is also what
@@ -24,6 +24,12 @@ final class Notifier {
     /// current state, and being told twice that the same agent finished is how
     /// people learn to ignore notifications.
     private var announced: [String: AgentActivity] = [:]
+    /// Terminals a failed exit has already been announced for.
+    ///
+    /// Kept apart from `announced`: a failed command has no agent to be
+    /// blocked or done, so `Status.failedRun` needs its own dedup rather than
+    /// borrowing a dictionary keyed on the wrong enum for this case.
+    private var announcedFailure: Set<String> = []
 
     /// Whether this build can talk to the notification centre at all.
     ///
@@ -66,6 +72,8 @@ final class Notifier {
 
     /// Announce a change, if it is worth announcing.
     func report(terminal: Terminal, workspace: String) {
+        reportFailedExit(terminal: terminal, workspace: workspace)
+
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
 
@@ -103,10 +111,57 @@ final class Notifier {
                 trigger: nil))
     }
 
+    /// Announce a command that ran and came back badly, if that hasn't
+    /// already happened for this terminal.
+    ///
+    /// This is the notification `wants_attention` used to leave out: a `cargo
+    /// build` that exited 101 at 3am reached the sidebar dot and nothing
+    /// else. Split out from `report` rather than folded into its switch
+    /// because `.failedRun` is a `Status`, not an `AgentActivity` — a failed
+    /// command has no agent to be blocked or done — so it needs its own guard
+    /// and its own dedup, not a case squeezed into an enum it doesn't belong
+    /// to.
+    private func reportFailedExit(terminal: Terminal, workspace: String) {
+        guard terminal.status == .failedRun else {
+            // Cleared rather than left set, so a terminal that is rerun after
+            // a failure — same pane, same id, `exit` and the command run
+            // again — can fail a second time and be announced a second time,
+            // instead of staying silenced because it once failed.
+            announcedFailure.remove(terminal.id)
+            return
+        }
+        guard Preferences.shared.notifyOnAttention else { return }
+        guard !announcedFailure.contains(terminal.id) else { return }
+        announcedFailure.insert(terminal.id)
+        guard Self.canNotify, authorized else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "\(terminal.title) failed"
+        // The code or the signal, whichever the command actually left behind
+        // — never both, since a signal means there is no exit code to show.
+        if let signal = terminal.exitSignal {
+            content.body = "\(workspace) — stopped by signal \(signal)"
+        } else if let code = terminal.exitCode {
+            content.body = "\(workspace) — exit code \(code)"
+        } else {
+            content.body = workspace
+        }
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+        content.threadIdentifier = terminal.id
+
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: "\(terminal.id)-failedRun",
+                content: content,
+                trigger: nil))
+    }
+
     /// Forget a terminal that no longer exists, so a reused id cannot inherit
     /// the announcement history of the terminal it replaced.
     func forget(_ terminalID: String) {
         announced.removeValue(forKey: terminalID)
+        announcedFailure.remove(terminalID)
         guard Self.canNotify else { return }
         UNUserNotificationCenter.current()
             .removeDeliveredNotifications(withIdentifiers: [terminalID])

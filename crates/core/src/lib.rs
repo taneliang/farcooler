@@ -11,11 +11,14 @@ pub mod derive;
 pub mod error;
 pub mod inventory;
 pub mod names;
+pub mod ports;
 pub mod preconditions;
 pub mod programs;
+pub mod redact;
 pub mod replay;
 pub mod shell;
 pub mod theme;
+pub mod title;
 pub mod validate;
 
 pub use error::{DomainError, Result};

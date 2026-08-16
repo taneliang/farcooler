@@ -30,6 +30,24 @@ struct TerminalEvent: Sendable, Decodable {
     // full re-read — so `⌃B a` refused an agent this branch shipped an
     // adapter for. See `DaemonClient.apply(_:)`.
     var chatCapable: Bool?
+    // Pushed for the same reason, one field later: without these, the moment
+    // a live event moves a terminal to `exited` is exactly the moment its
+    // `Status` cannot yet tell a shell you closed from a build that broke —
+    // both read as a clean exit until a full refresh happens to backfill
+    // them. See `DaemonClient.apply(_:)`.
+    var exitCode: Int?
+    var exitSignal: Int?
+    // The daemon has sent this on every terminal event all along; it was
+    // simply never decoded here, which is the same bug in a third place —
+    // `statusDuration` for a live-pushed Working or Blocked row was reading
+    // whatever it last got from a full refresh, not what just changed.
+    var activitySince: Double?
+    // Pushed for the identical reason `exitCode` is: the moment a live event
+    // moves a row to Blocked is exactly the moment it needs a turn clock and
+    // a question to show, not after whatever next forces a full refresh. See
+    // `DaemonClient.apply(_:)`.
+    var turnStartedAt: Double?
+    var blockedQuestion: String?
 }
 
 /// A workspace's tiling, pushed whole.

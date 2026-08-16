@@ -612,7 +612,7 @@ struct TerminalRow: View {
     /// The status, and only when it is not the boring case.
     private var meta: String? {
         guard status.wantsAttention || status == .working else { return nil }
-        return terminal.statusDuration.map { "\(status.label) \($0)" } ?? status.label
+        return terminal.displayDuration.map { "\(status.label) \($0)" } ?? status.label
     }
 
     var body: some View {
@@ -639,6 +639,24 @@ struct TerminalRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .layoutPriority(1)
+            }
+
+            // What the agent is actually asking, beside the status that says it
+            // is asking something. Same register as the duration — 11pt, one
+            // line — and demoted a step in color, so the row reads status first
+            // and detail second.
+            //
+            // The lowest layout priority in the row, deliberately: this is the
+            // one part that can be cut short. "Needs you 2m" has to survive a
+            // narrow sidebar; the question is a bonus when there's room for it,
+            // and it truncates rather than squeezing the terminal's name out.
+            if let question = terminal.openQuestion {
+                Text(question)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(-1)
             }
 
             Spacer(minLength: 0)
@@ -882,7 +900,7 @@ struct WorkspaceDetail: View {
 
                 Spacer()
 
-                Text(t.statusDuration.map { "\(t.status.label) \($0)" } ?? t.status.label)
+                Text(t.displayDuration.map { "\(t.status.label) \($0)" } ?? t.status.label)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 

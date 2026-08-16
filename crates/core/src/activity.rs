@@ -96,6 +96,17 @@ pub struct AgentRules {
     /// Actively doing something.
     pub working: Vec<String>,
 
+    /// How many lines from the bottom `blocked` and `working` may look at.
+    ///
+    /// The fix for an agent that read `Working` for thirty-three hours because
+    /// it had been asked to explain the phrase `esc to interrupt`. Signatures
+    /// are furniture, furniture is drawn at the bottom, and the conversation
+    /// scrolls above it — so the conversation is simply not in scope.
+    ///
+    /// A field rather than a constant so an agent added by config can widen it.
+    /// Every built-in takes `DEFAULT_FOOTER_LINES`.
+    pub footer_lines: usize,
+
     /// How to host this agent as a native chat, when Far Cooler can.
     ///
     /// `None` means recognized-but-terminal-only, which is a real and honest
@@ -226,6 +237,7 @@ impl Registry {
                         "(y/N)",
                     ]),
                     working: s(&["esc to interrupt", "Thinking…"]),
+                    footer_lines: DEFAULT_FOOTER_LINES,
                     adapter: npx("@agentclientprotocol/claude-agent-acp"),
                 },
                 AgentRules {
@@ -236,13 +248,22 @@ impl Registry {
                     blocked: s(&[
                         // Codex draws every choice as a numbered list under a `›` marker.
                         "\u{203a} 1.",
+                        // The approval prompt, spelled as codex spells it. The
+                        // table had `Press enter to continue`, which is the
+                        // TRUST gate's wording — so on an approval prompt only
+                        // the `›` marker was ever matching.
+                        "Press enter to confirm",
+                        "Would you like to run the following command?",
+                        // The trust gate, which really does say "continue".
                         "Press enter to continue",
+                        "Do you trust the contents of this directory?",
                         "Allow command",
                         "Do you want to",
                         "[y/n]",
                         "(y/N)",
                     ]),
                     working: s(&["esc to interrupt", "Working ("]),
+                    footer_lines: DEFAULT_FOOTER_LINES,
                     // NOT `@zed-industries/codex-acp`: npm reports it deprecated
                     // and replaced by this one, and it stalled at 0.16.0 against
                     // this package's 1.1.9. The same rename that caught the
@@ -318,6 +339,7 @@ impl Registry {
                     // and gone the moment it finishes (captures/opencode-working2.txt
                     // has it, captures/opencode-idle2.txt right after does not).
                     working: s(&["esc interrupt"]),
+                    footer_lines: DEFAULT_FOOTER_LINES,
                     // Native ACP subcommand, so no npm package to be renamed
                     // or deprecated out from under it — unlike every other
                     // adapter in this table.
@@ -335,24 +357,29 @@ impl Registry {
                     // agent. Kept for installs that expose a real name; screen
                     // identity is what finds it here.
                     commands: s(&["cursor-agent"]),
-                    // "Press any key to sign in" is now confirmed: it is the exact
-                    // screen this install draws (captures/cursor-idle.txt). Pressing
-                    // that key starts an OAuth sign-in flow, which this task was told
-                    // not to attempt, so this install still could not get past it.
-                    // "Cursor Agent" and "cursor-agent" remain UNVERIFIED — that
-                    // sign-in screen renders its banner as block-graphic ASCII art,
-                    // not literal text, so neither string actually appears in the
-                    // one real cursor-agent screen reachable this session. They are
-                    // left in place rather than removed on no evidence either way,
-                    // but should be checked against a signed-in cursor-agent.
-                    identity: s(&["Cursor Agent", "cursor-agent", "Press any key to sign in"]),
-                    // UNVERIFIED. This install still could not get past its
-                    // sign-in screen (see above), so unlike opencode's and the two
-                    // above claude/codex sets, these were not read off a running
-                    // agent. They follow the same shapes and should be checked
-                    // against a signed-in cursor-agent before being trusted.
-                    blocked: s(&["Do you want to", "Allow?", "[y/n]", "(y/N)", "\u{203a} 1."]),
-                    working: s(&["esc to interrupt", "Generating"]),
+                    // Read off cursor-agent 2026.08.11, not guessed. The entry
+                    // this replaces was written against a sign-in screen that
+                    // could never be got past, and matched nothing real.
+                    identity: s(&["Cursor Agent", "→ Add a follow-up", "cursor-agent"]),
+                    blocked: s(&[
+                        "Run this command?",
+                        "Not in allowlist:",
+                        "Skip & tell the agent what to do instead",
+                        "Run Everything (shift+tab)",
+                        // The trust gate. First screen of a new workspace, and
+                        // everything is behind it.
+                        "Trust this workspace",
+                        "Do you trust the contents of this directory?",
+                    ]),
+                    // `ctrl+c to stop` and nothing else.
+                    //
+                    // The spinner line `⠞ Working` was drawn in one observed run
+                    // and absent from another that was working just as hard, so
+                    // it is drawn for some turns and not others. A signature
+                    // that is sometimes there is worse than none: it makes the
+                    // absence of the string mean nothing at all.
+                    working: s(&["ctrl+c to stop"]),
+                    footer_lines: DEFAULT_FOOTER_LINES,
                     // Best-effort, and knowingly so. `cursor-agent-acp` is
                     // third-party, sits at 0.1.1 and was last published in
                     // September 2025; there is no first-party alternative and
@@ -441,11 +468,6 @@ impl Registry {
         if command.contains(' ') {
             return command.trim().to_string();
         }
-        // A command line with arguments is already the label: `pnpm dev` says more
-        // than `pnpm`, and taking a basename would cut it back to one word.
-        if command.trim().contains(' ') {
-            return command.trim().to_string();
-        }
         let name = command.rsplit('/').next().unwrap_or(command).trim();
         // A process whose name is a version number tells a user nothing. Better to
         // say "shell" than to label a row `2.1.220`.
@@ -454,6 +476,46 @@ impl Registry {
             "shell".to_string()
         } else {
             name.to_string()
+        }
+    }
+
+    /// What to call this pane, from the best source that has an answer.
+    ///
+    /// `describe` answers "what is running here", which is a different and
+    /// smaller question — it is still used wherever that is what is wanted.
+    /// This one answers "what is this pane FOR", and the sources disagree about
+    /// how well they can:
+    ///
+    /// 1. the agent's own summary of the work, from its OSC title
+    /// 2. what the agent is, when its title says nothing useful
+    /// 3. the command, and what it is serving
+    ///
+    /// A name the USER typed outranks all of these and cannot be touched from
+    /// here, structurally: what this returns is sent as a terminal's
+    /// `current_command`, and a user's name is its `title`. They are separate
+    /// protocol fields with separate writers, so no precedence question between
+    /// them ever arises — there is nothing here that could overwrite one.
+    ///
+    /// The title arrives unexamined from whatever runs in the pane. `title::parse`
+    /// is where it stops being arbitrary bytes; nothing here re-admits them.
+    pub fn describe_pane(
+        &self,
+        command: &str,
+        screen: &str,
+        title: &str,
+        purpose: Option<&str>,
+        hostname: &str,
+    ) -> String {
+        let parsed = crate::title::parse(title, command, hostname);
+        if let Some(name) = parsed.name {
+            return name;
+        }
+        let described = self.describe(command, screen);
+        match purpose {
+            // Only for a pane that is not an agent. An agent serving a port is
+            // serving it incidentally, and the row is about the work.
+            Some(p) if self.identify(command, screen).is_none() => format!("{described} · {p}"),
+            _ => described,
         }
     }
 
@@ -503,6 +565,7 @@ impl Registry {
                     identity: cfg.identity,
                     blocked: cfg.blocked,
                     working: cfg.working,
+                    footer_lines: DEFAULT_FOOTER_LINES,
                     adapter: Some(spec),
                 }),
             }
@@ -510,24 +573,12 @@ impl Registry {
     }
 }
 
-/// Strip escape sequences and collapse whitespace.
+/// Strip escape sequences, keeping every other byte — newlines included.
 ///
-/// This is not defensive tidying; without it nothing matches. Claude Code
-/// colors every WORD separately, so a line that reads
-///
-/// ```text
-/// ❯ 1. Yes, I trust this folder
-/// ```
-///
-/// arrives as `ESC[38;5;153m❯ESC[39m ESC[38;5;246m1.ESC[39m ESC[38;5;153mYes,…`
-/// and the substring "1. Yes" appears nowhere in it. tmux is asked for a plain
-/// capture, so in practice the input is already clean — but a rule table whose
-/// correctness depends on a flag at a distant call site is one that breaks
-/// silently, so the matching does its own stripping too.
-///
-/// Whitespace is collapsed because a terminal pads with spaces to the column
-/// width, and a signature spanning a wrap would otherwise never match.
-pub fn plain_text(screen: &str) -> String {
+/// Split out of `plain_text` because the footer needs line structure and
+/// `plain_text` deliberately destroys it. The escape handling is the same
+/// and lives in one place, so a future OSC quirk is fixed once.
+pub fn strip_ansi(screen: &str) -> String {
     let mut out = String::with_capacity(screen.len());
     let mut chars = screen.chars().peekable();
 
@@ -562,11 +613,72 @@ pub fn plain_text(screen: &str) -> String {
             _ => {}
         }
     }
-
-    // One pass, so a signature written with single spaces matches a screen
-    // padded with many.
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    out
 }
+
+/// Strip escape sequences and collapse whitespace.
+///
+/// This is not defensive tidying; without it nothing matches. Claude Code
+/// colors every WORD separately, so a line that reads
+///
+/// ```text
+/// ❯ 1. Yes, I trust this folder
+/// ```
+///
+/// arrives as `ESC[38;5;153m❯ESC[39m ESC[38;5;246m1.ESC[39m ESC[38;5;153mYes,…`
+/// and the substring "1. Yes" appears nowhere in it. tmux is asked for a plain
+/// capture, so in practice the input is already clean — but a rule table whose
+/// correctness depends on a flag at a distant call site is one that breaks
+/// silently, so the matching does its own stripping too.
+///
+/// Whitespace is collapsed because a terminal pads with spaces to the column
+/// width, and a signature spanning a wrap would otherwise never match.
+pub fn plain_text(screen: &str) -> String {
+    strip_ansi(screen).split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// How much of a pane's bottom is furniture rather than conversation.
+///
+/// Measured, not chosen. Across claude, codex and cursor every signature that
+/// decides a state sits at depth 6 or less, and the nearest transcript false
+/// positive is at 18 — see `captures/` and the design document. Eight leaves
+/// ten lines of margin without reaching into anything anyone said.
+pub const DEFAULT_FOOTER_LINES: usize = 8;
+
+/// The bottom `lines` lines of a pane, as separate lines.
+///
+/// Trailing blank lines are dropped first: a pane is padded to its full height,
+/// so counting from the literal end would spend the whole window on empty rows.
+/// Interior blanks are kept, because they are part of the block being read.
+pub fn footer_lines(screen: &str, lines: usize) -> Vec<String> {
+    let stripped = strip_ansi(screen);
+    let mut all: Vec<&str> = stripped.lines().collect();
+    while all.last().is_some_and(|l| l.trim().is_empty()) {
+        all.pop();
+    }
+    let start = all.len().saturating_sub(lines);
+    all[start..]
+        .iter()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect()
+}
+
+/// The bottom `lines` lines as one string, for substring matching.
+///
+/// Joined with a space rather than a newline so a signature that wrapped across
+/// two rows still matches — the same tolerance `plain_text` has always had, and
+/// the reason the rules can be written as plain phrases.
+pub fn footer_text(screen: &str, lines: usize) -> String {
+    footer_lines(screen, lines).join(" ")
+}
+
+/// How far up an agent's own prompt block can reach.
+///
+/// Wider than the decision window because codex puts its question at depth 11
+/// while every state signature sits at 6 or less. Safe only in this direction:
+/// extraction runs when the state is ALREADY Blocked, and what it returns never
+/// feeds back into deciding that.
+pub const QUESTION_LINES: usize = 12;
 
 impl Registry {
     /// Classify a rendered screen.
@@ -576,28 +688,66 @@ impl Registry {
         let Some(rules) = self.identify(command, screen) else {
             return AgentActivity::None;
         };
-        let screen = &plain_text(screen);
+        // Identity is asked of the WHOLE screen and state only of the footer.
+        //
+        // Not an inconsistency. Identity strings are furniture an agent always
+        // draws, and one appearing in a transcript promotes nothing on its own
+        // — the banner is at the top, which is exactly where the footer window
+        // cannot see. State is the opposite: `esc to interrupt` is a phrase a
+        // person can type and an agent can explain, so it only means anything
+        // where the agent draws its own status.
+        let footer = footer_text(screen, rules.footer_lines);
 
         // Blocked first. An agent asking permission still shows its working
         // furniture, so checking working first would hide every question.
-        if rules
-            .blocked
-            .iter()
-            .any(|needle| screen.contains(needle.as_str()))
-        {
+        if rules.blocked.iter().any(|needle| footer.contains(needle.as_str())) {
             return AgentActivity::Blocked;
         }
-        if rules
-            .working
-            .iter()
-            .any(|needle| screen.contains(needle.as_str()))
-        {
+        if rules.working.iter().any(|needle| footer.contains(needle.as_str())) {
             return AgentActivity::Working;
         }
         // Identified, not asking, not busy: it is sitting there. Requiring positive
         // idle furniture left an agent whose footer changed between versions stuck
         // on `unknown` forever — never reaching `done`, never notifying.
         AgentActivity::Idle
+    }
+
+    /// What this agent is asking, when it is asking something.
+    ///
+    /// A row that says "Needs you" makes a person go and look. A row that says
+    /// what is being asked lets them decide from where they are — which on a
+    /// lock screen is most of the value.
+    ///
+    /// All three agents draw the same shape: a line ending in `?`, and often a
+    /// `$`-prefixed command naming the subject. So the question is the last
+    /// line ending in `?`, and the subject is the nearest `$` line above it.
+    ///
+    /// Always optional. A wording that changes leaves this `None` and the row
+    /// reads "Needs you" exactly as it does today. Nothing regresses when an
+    /// agent is redecorated; it just stops elaborating.
+    pub fn blocked_question(&self, command: &str, screen: &str) -> Option<String> {
+        if self.classify(command, screen) != AgentActivity::Blocked {
+            return None;
+        }
+        let lines = footer_lines(screen, QUESTION_LINES);
+        let asked = lines.iter().rposition(|l| l.trim_end().ends_with('?'))?;
+        let question = lines[asked].trim().to_string();
+
+        // "Run this command?" is not worth showing without the command. The
+        // subject may sit above the question (codex, cursor) or below it, so
+        // both sides of the prompt block are searched, nearest first.
+        let subject = lines[..asked]
+            .iter()
+            .rev()
+            .chain(lines[asked + 1..].iter())
+            .find(|l| l.trim_start().starts_with("$ "))
+            .map(|l| l.trim().trim_start_matches("$ ").trim().to_string());
+
+        let joined = match subject {
+            Some(s) if !s.is_empty() => format!("{question} {s}"),
+            _ => question,
+        };
+        Some(crate::redact::redact(&joined))
     }
 }
 
@@ -642,6 +792,20 @@ pub fn seen(current: AgentActivity) -> AgentActivity {
 /// Activity cannot disagree about what is worth interrupting someone for.
 pub fn wants_attention(activity: AgentActivity) -> bool {
     matches!(activity, AgentActivity::Blocked | AgentActivity::Done)
+}
+
+/// Whether how a command ENDED is worth interrupting someone for.
+///
+/// The companion to `wants_attention`, which asks the same question about an
+/// agent. A fleet is not only agents: a `cargo build` that exits 101 overnight
+/// is exactly as worth knowing about as an agent waiting on a question, and it
+/// was silent because nothing asked.
+///
+/// Deliberately not a new `TerminalState`. The exit code is already stored and
+/// already on the wire, so this is a reading of what is there rather than
+/// another state for every client to learn.
+pub fn exit_wants_attention(exit_code: Option<i32>, exit_signal: Option<i32>) -> bool {
+    exit_signal.is_some() || matches!(exit_code, Some(code) if code != 0)
 }
 
 #[cfg(test)]
@@ -764,7 +928,7 @@ mod tests {
         assert!(r.rules_for_command("node").is_none());
         assert_eq!(r.describe("node", ""), "node");
         // It is found by what it draws instead.
-        assert!(r.identify("node", "Press any key to sign in...").is_some());
+        assert!(r.identify("node", "Cursor Agent").is_some());
     }
 
     #[test]
@@ -826,6 +990,29 @@ Do you want to allow this command?
         assert_eq!(advance(Done, Blocked), Blocked);
     }
 
+    /// Re-observing the same activity changes nothing.
+    ///
+    /// Pinned because another crate rests on it and nothing else does: the
+    /// daemon suppresses a notification on a terminal's FIRST sighting by
+    /// seeding the fold with what it just observed and relying on
+    /// `advance(x, x) == x` to report no movement. If any pair here ever
+    /// stopped being a fixed point, every agent already blocked when the daemon
+    /// started would buzz a phone at startup — and the suppression is implicit,
+    /// so nothing in that crate would fail.
+    ///
+    /// Every variant, discovered rather than listed, so a seventh added to the
+    /// proto is covered the day it appears instead of the day someone
+    /// remembers this test.
+    #[test]
+    fn re_observing_the_same_activity_is_a_fixed_point() {
+        let all: Vec<AgentActivity> =
+            (0..).map_while(|i| AgentActivity::try_from(i).ok()).collect();
+        assert_eq!(all.len(), 7, "the proto's variants changed: {all:?}");
+        for a in all {
+            assert_eq!(advance(a, a), a, "{a:?} is not a fixed point");
+        }
+    }
+
     #[test]
     fn seeing_it_is_what_ends_done() {
         assert_eq!(seen(Done), Idle);
@@ -844,6 +1031,31 @@ Do you want to allow this command?
         assert!(!wants_attention(Working));
         assert!(!wants_attention(Idle));
         assert!(!wants_attention(None));
+    }
+
+    /// A build that failed while you were asleep should say so.
+    ///
+    /// `wants_attention` covered agents only, so a `cargo build` that exited 101 at
+    /// 3am was silent and you found out in the morning. For a design whose whole
+    /// point is overseeing work away from the machine, that is a hole in the one
+    /// direction that costs real time.
+    #[test]
+    fn a_command_that_failed_wants_you() {
+        assert!(exit_wants_attention(Some(101), Option::None));
+        assert!(exit_wants_attention(Some(1), Option::None));
+        // Killed by a signal is a failure too.
+        assert!(exit_wants_attention(Option::None, Some(9)));
+    }
+
+    /// A clean exit is not news.
+    ///
+    /// A shell you closed, or a dev server you stopped on purpose, must stay quiet
+    /// — something that buzzes for the ordinary case gets turned off, and then it
+    /// cannot tell you the thing that mattered.
+    #[test]
+    fn a_command_that_succeeded_says_nothing() {
+        assert!(!exit_wants_attention(Some(0), Option::None));
+        assert!(!exit_wants_attention(Option::None, Option::None));
     }
 
     #[test]
@@ -1070,4 +1282,298 @@ Do you want to allow this command?
         }
     }
 
+    /// The bug this whole change exists for, frozen.
+    ///
+    /// A finished Claude pane whose transcript explains what `esc to interrupt`
+    /// means. Matching the whole screen calls it Working forever: `Done` never
+    /// fires, no notification arrives, and the timer counts from whenever that
+    /// text first appeared. Measured depths: the live footer at 1, the transcript
+    /// at 24 and 38.
+    #[test]
+    fn a_finished_agent_is_not_working_because_it_said_the_words() {
+        let screen = include_str!("../captures/claude-idle-transcript-says-esc-to-interrupt.txt");
+        let r = Registry::built_in();
+        assert_eq!(r.classify("claude", screen), AgentActivity::Idle);
+    }
+
+    #[test]
+    fn the_footer_is_the_last_lines_with_trailing_blanks_dropped() {
+        let screen = "alpha\nbravo\ncharlie\ndelta\n\n\n";
+        assert_eq!(footer_lines(screen, 2), vec!["charlie".to_string(), "delta".to_string()]);
+        assert_eq!(footer_text(screen, 2), "charlie delta");
+        // Asking for more lines than exist is the whole screen, not a panic.
+        assert_eq!(footer_lines(screen, 99).len(), 4);
+    }
+
+    #[test]
+    fn the_footer_strips_escapes_the_way_the_whole_screen_does() {
+        let screen = "\u{1b}[38;5;153mfirst\u{1b}[39m\n\u{1b}[1mesc to interrupt\u{1b}[0m\n";
+        assert_eq!(footer_text(screen, 1), "esc to interrupt");
+    }
+
+    /// No classification may depend on text above the footer window.
+    ///
+    /// The bug was born by adding a signature to a whole-screen match. This asserts
+    /// the shape of the fix rather than one instance of it: bury every signature in
+    /// the table under a thousand lines of transcript and nothing may move.
+    #[test]
+    fn nothing_above_the_footer_can_change_a_verdict() {
+        let r = Registry::built_in();
+        let every_signature: String = r
+            .all()
+            .iter()
+            .flat_map(|rules| rules.blocked.iter().chain(rules.working.iter()))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for (command, capture) in [
+            ("claude", include_str!("../captures/claude-working.txt")),
+            ("claude", include_str!("../captures/claude-blocked.txt")),
+            ("claude", include_str!("../captures/claude-idle-fresh.txt")),
+            ("codex", include_str!("../captures/codex-working.txt")),
+            ("codex", include_str!("../captures/codex-blocked.txt")),
+        ] {
+            let clean = r.classify(command, capture);
+            let noise = "filler line\n".repeat(1000);
+            let poisoned = format!("{noise}{every_signature}\n{capture}");
+            assert_eq!(
+                r.classify(command, &poisoned),
+                clean,
+                "{command}: a transcript above the footer changed the verdict"
+            );
+        }
+    }
+
+    /// Cursor's real furniture, read off the shipped binary.
+    ///
+    /// The table shipped with `Do you want to`, `Allow?` and `> 1.`, none of which
+    /// cursor-agent has ever drawn — the entry was written against a sign-in screen
+    /// nobody could get past, and its own comments said so.
+    #[test]
+    fn cursor_is_classified_from_its_real_screens() {
+        let r = Registry::built_in();
+        let working = include_str!("../captures/cursor-working.txt");
+        let blocked = include_str!("../captures/cursor-blocked.txt");
+        let idle = include_str!("../captures/cursor-idle.txt");
+        let trust = include_str!("../captures/cursor-trust-gate.txt");
+
+        assert_eq!(r.classify("cursor-agent", working), AgentActivity::Working);
+        assert_eq!(r.classify("cursor-agent", blocked), AgentActivity::Blocked);
+        assert_eq!(r.classify("cursor-agent", idle), AgentActivity::Idle);
+        // The first screen a new workspace shows, and it blocks everything behind
+        // it, so a pane sitting on it is precisely a pane that needs you.
+        assert_eq!(r.classify("cursor-agent", trust), AgentActivity::Blocked);
+    }
+
+    /// cursor-agent runs as plain `node`, so identity has to carry it.
+    #[test]
+    fn cursor_is_found_without_a_usable_process_name() {
+        let r = Registry::built_in();
+        let working = include_str!("../captures/cursor-working.txt");
+        assert_eq!(r.identify("node", working).map(|x| x.preset.as_str()), Some("cursor"));
+    }
+
+    #[test]
+    fn codex_is_classified_from_its_real_screens() {
+        let r = Registry::built_in();
+        assert_eq!(
+            r.classify("codex", include_str!("../captures/codex-working.txt")),
+            AgentActivity::Working
+        );
+        assert_eq!(
+            r.classify("codex", include_str!("../captures/codex-blocked.txt")),
+            AgentActivity::Blocked
+        );
+        assert_eq!(
+            r.classify("codex", include_str!("../captures/codex-idle-after-turn.txt")),
+            AgentActivity::Idle
+        );
+        assert_eq!(
+            r.classify("codex", include_str!("../captures/codex-trust-gate.txt")),
+            AgentActivity::Blocked
+        );
+    }
+
+    /// The approval prompt says "confirm", not "continue".
+    ///
+    /// `Press enter to continue` was in the table and matched nothing on it; only
+    /// `> 1.` was ever firing. The string it was written for is on the trust gate,
+    /// which is a different screen.
+    #[test]
+    fn codex_approval_and_trust_are_spelled_as_codex_spells_them() {
+        let r = Registry::built_in();
+        let codex = r.all().iter().find(|x| x.preset == "codex").expect("codex is built in");
+        assert!(codex.blocked.iter().any(|s| s == "Press enter to confirm"));
+        assert!(codex.blocked.iter().any(|s| s == "Press enter to continue"));
+    }
+
+    #[test]
+    fn claude_is_classified_from_its_real_screens() {
+        let r = Registry::built_in();
+        assert_eq!(
+            r.classify("claude", include_str!("../captures/claude-working.txt")),
+            AgentActivity::Working
+        );
+        assert_eq!(
+            r.classify("claude", include_str!("../captures/claude-blocked.txt")),
+            AgentActivity::Blocked
+        );
+        assert_eq!(
+            r.classify("claude", include_str!("../captures/claude-idle-fresh.txt")),
+            AgentActivity::Idle
+        );
+        assert_eq!(
+            r.classify("claude", include_str!("../captures/claude-trust-gate.txt")),
+            AgentActivity::Blocked
+        );
+    }
+
+    /// What the agent is asking, so a row can say more than "Needs you".
+    ///
+    /// Extraction reads a WIDER window than classification: codex puts its
+    /// question at depth 11, where every state signature sits at 6 or less. That
+    /// is safe only because extraction runs after the state is already Blocked and
+    /// never feeds back into deciding it.
+    #[test]
+    fn the_question_is_read_from_the_blocked_screen() {
+        let r = Registry::built_in();
+
+        let claude = r
+            .blocked_question("claude", include_str!("../captures/claude-blocked.txt"))
+            .expect("claude asks a question on its blocked screen");
+        assert!(claude.contains("Do you want to create haiku.txt?"), "{claude}");
+
+        let codex = r
+            .blocked_question("codex", include_str!("../captures/codex-blocked.txt"))
+            .expect("codex asks a question on its blocked screen");
+        assert!(codex.contains("Would you like to run"), "{codex}");
+        // The subject matters as much as the question: "run WHAT".
+        assert!(codex.contains("echo banana"), "{codex}");
+
+        let cursor = r
+            .blocked_question("cursor-agent", include_str!("../captures/cursor-blocked.txt"))
+            .expect("cursor asks a question on its blocked screen");
+        assert!(cursor.contains("Run this command?"), "{cursor}");
+    }
+
+    #[test]
+    fn a_pane_that_is_not_blocked_has_no_question() {
+        // `Option::None` spelled out: this module's `use AgentActivity::*` also
+        // brings in `AgentActivity::None`, and a bare `None` here would resolve
+        // to that instead.
+        let r = Registry::built_in();
+        assert_eq!(
+            r.blocked_question("claude", include_str!("../captures/claude-working.txt")),
+            Option::None
+        );
+        assert_eq!(
+            r.blocked_question("claude", include_str!("../captures/claude-idle-fresh.txt")),
+            Option::None
+        );
+        // Not an agent at all.
+        assert_eq!(r.blocked_question("zsh", "$ "), Option::None);
+    }
+
+    /// A command in a question is still a command, and a command is where the
+    /// tokens are. Redaction runs before the string can reach a wire.
+    #[test]
+    fn a_question_carrying_a_secret_is_redacted() {
+        let r = Registry::built_in();
+        let screen = "Cursor Agent\n\
+                      Run this command?\n\
+                      $ curl -H \"Authorization: Bearer sk-live-abc123def456\" https://api.example.com\n\
+                      → Run (once) (y)\n\
+                      Skip & tell the agent what to do instead\n";
+        let q = r.blocked_question("cursor-agent", screen).expect("blocked");
+        assert!(!q.contains("sk-live-abc123def456"), "{q}");
+    }
+
+    /// The precedence, in one place.
+    ///
+    /// An agent's own summary of its work beats anything Far Cooler can derive,
+    /// and a bare command beats nothing at all.
+    #[test]
+    fn a_pane_is_named_by_the_best_source_that_has_an_answer() {
+        let r = Registry::built_in();
+        let working = include_str!("../captures/claude-working.txt");
+
+        // The agent's own summary wins.
+        assert_eq!(
+            r.describe_pane("claude", working, "◐ Write tmux haiku and explain escape key behavior", Option::None, "Mac"),
+            "Write tmux haiku and explain escape key behavior"
+        );
+
+        // No usable title: fall back to what the agent is.
+        assert_eq!(r.describe_pane("claude", working, "✳ Claude Code", Option::None, "Mac"), "claude");
+
+        // Not an agent: the command, and what it serves.
+        assert_eq!(
+            r.describe_pane("python http.server", "", "Mac", Some("web :8099"), "Mac"),
+            "python http.server · web :8099"
+        );
+        // A command with nothing to serve is just the command.
+        assert_eq!(r.describe_pane("vim module.rs", "", "Mac", Option::None, "Mac"), "vim module.rs");
+    }
+
+    /// Codex's title is the directory, which the workspace row already says.
+    #[test]
+    fn codex_is_not_named_after_its_directory() {
+        let r = Registry::built_in();
+        let working = include_str!("../captures/codex-working.txt");
+        assert_eq!(r.describe_pane("codex", working, "⠋ bare", Option::None, "Mac"), "codex");
+    }
+
+    /// A title is written by whatever runs in the pane and nothing sanitizes it
+    /// on the way here, so a name is never allowed to carry an escape sequence
+    /// or a control character into a row.
+    #[test]
+    fn a_hostile_title_cannot_smuggle_control_characters_into_a_name() {
+        let r = Registry::built_in();
+        let working = include_str!("../captures/claude-working.txt");
+        let name = r.describe_pane(
+            "claude",
+            working,
+            "◐ Write \u{1b}[31ma haiku\u{1b}[0m\u{7}\nand\u{0} explain it",
+            Option::None,
+            "Mac",
+        );
+        assert_eq!(name, "Write a haiku and explain it");
+    }
+
+    /// Nor a credential.
+    ///
+    /// What this returns is broadcast as `current_command` and is the LABEL
+    /// that titles a push notification, so a shell that sets its terminal title
+    /// to the running command line — which zsh, bash and fish all do — put the
+    /// password in `psql postgres://admin:hunter2@…` straight onto a lock
+    /// screen. Asserted here as well as in `title`, because this is the path
+    /// that reaches the wire and the two could be wired apart again.
+    #[test]
+    fn a_hostile_title_cannot_smuggle_a_credential_into_a_name() {
+        let r = Registry::built_in();
+        for (title, secret) in [
+            ("psql postgres://admin:hunter2@prod-db:5432/app", "hunter2"),
+            (
+                "curl -H \"Authorization: Bearer sk-live-9f8a7b6c5d4e3f\" https://api.x/v1",
+                "sk-live-9f8a7b6c5d4e3f",
+            ),
+            ("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIKEY deploy.sh", "wJalrXUtnFEMIKEY"),
+        ] {
+            let name = r.describe_pane("zsh", "", title, Option::None, "Mac");
+            assert!(!name.contains(secret), "{title} -> {name}");
+        }
+
+        // And the summaries this whole path exists to show are untouched.
+        let working = include_str!("../captures/claude-working.txt");
+        for summary in [
+            "Write tmux haiku and explain escape key behavior",
+            "Fix the bug in /src/main.rs",
+        ] {
+            assert_eq!(
+                r.describe_pane("claude", working, &format!("◐ {summary}"), Option::None, "Mac"),
+                summary
+            );
+        }
+    }
 }

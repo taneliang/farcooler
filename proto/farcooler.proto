@@ -701,6 +701,25 @@ message Terminal {
   // looking. A client that guessed would offer the switch for a Codex pane,
   // which has no adapter — and the pane would come back as a different agent.
   bool chat_capable = 22;
+
+  // When the USER'S REQUEST started, as distinct from when the label last
+  // changed.
+  //
+  // `activity_changed_at` restarts whenever the classifier changes its mind, so
+  // approving a permission prompt walks Working -> Blocked -> Working and turns
+  // "working 12m" into "working 2s". This one is set when an idle agent starts
+  // working and is HELD across Blocked, because saying yes to a tool call does
+  // not begin a new turn. Cleared when the turn ends.
+  //
+  // Both are sent because they answer different questions: how long this task
+  // has been running, and how long it has been stuck.
+  optional google.protobuf.Timestamp turn_started_at = 23;
+
+  // What the agent is asking, when it is blocked and legible.
+  //
+  // Credential-shaped text is stripped before this is set: it is put in front
+  // of people on lock screens, and a shell command is where tokens live.
+  optional string blocked_question = 24;
 }
 
 // What a pane is hosting.

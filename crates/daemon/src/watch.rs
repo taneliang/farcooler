@@ -93,11 +93,22 @@ struct Notice {
 /// and two matches on it in two files is the pair that drifts: the live card
 /// would say one thing and the notification under it another, for the same
 /// agent, in the same second.
-fn notification(activity: AgentActivity, label: &str) -> Option<Notice> {
+///
+/// `question` is what the agent is actually asking, when the screen was legible
+/// enough to say. It is the whole point of a lock screen card: "claude needs
+/// you / Do you want to create haiku.txt?" is something a person can answer
+/// from the phone in their hand, and "claude needs you / Waiting for your
+/// answer" is something they have to walk to a Mac to even read. The generic
+/// line stays for when there is no question — a trust gate, or a prompt that
+/// wrapped — because a card that says nothing is still better than no card.
+fn notification(activity: AgentActivity, label: &str, question: Option<&str>) -> Option<Notice> {
     match activity {
         AgentActivity::Blocked => Some(Notice {
             title: format!("{label} needs you"),
-            subtitle: "Waiting for your answer".to_string(),
+            subtitle: match question {
+                Some(q) if !q.trim().is_empty() => q.to_string(),
+                _ => "Waiting for your answer".to_string(),
+            },
             status: "blocked",
         }),
         AgentActivity::Done => Some(Notice {
@@ -107,6 +118,25 @@ fn notification(activity: AgentActivity, label: &str) -> Option<Notice> {
         }),
         _ => None,
     }
+}
+
+/// What to tell the relay when a command ends badly.
+///
+/// Reuses `"done"` rather than inventing a third status: the relay's whole
+/// vocabulary is `"blocked"` (raise a live card) or `"done"` (dismiss one and
+/// deliver a banner), and a failed run is not something to hold a live card
+/// open for — it is a turn that is OVER, just over badly. The wording is what
+/// tells a failure apart from a success; the status only tells the relay
+/// whether to keep a card on the lock screen.
+fn exit_notice(label: &str, exit_code: Option<i32>, exit_signal: Option<i32>) -> Notice {
+    let subtitle = match (exit_code, exit_signal) {
+        (_, Some(signal)) => format!("Stopped by signal {signal}"),
+        (Some(code), _) => format!("Exit code {code}"),
+        // Reached only if this is ever called outside `exited_into_failure`'s
+        // guard, which already requires one of the two above.
+        (None, None) => String::new(),
+    };
+    Notice { title: format!("{label} failed"), subtitle, status: "done" }
 }
 
 /// The supervisor's activity, reduced to a raw OBSERVATION.
@@ -157,10 +187,48 @@ pub struct Watcher {
     worktree_marks: std::sync::Mutex<HashMap<Uuid, std::time::SystemTime>>,
 }
 
+/// One terminal as this tick found it, before anything is made of it.
+///
+/// The host-wide reads — `ps`, `lsof`, the fleet, the pane inventory — happen
+/// once and are joined here, so the classification pass below can run per
+/// terminal without going back to the machine for anything but that terminal's
+/// screen. It was a tuple until it needed a title and a purpose; seven
+/// positional fields is not something a reader can hold.
+struct Sampled {
+    id: Uuid,
+    /// What is running in the pane, arguments and all.
+    command: String,
+    /// The pane's OSC title, as written by whatever runs there. Untrusted, and
+    /// sanitized where it is read — see `farcooler_core::title::parse`.
+    title: String,
+    /// What the pane serves, if it holds a listening socket.
+    purpose: Option<String>,
+    state: TerminalState,
+    pane_mode: farcooler_store::models::PaneMode,
+    preset: String,
+    /// How the command ended, when it has. Threaded through from the terminal
+    /// record rather than re-read at the push site: the record is behind the
+    /// same store read every other field here already came from, and a second
+    /// read taken later in the tick could see a different terminal than the
+    /// one this pass is otherwise describing.
+    exit_code: Option<i32>,
+    exit_signal: Option<i32>,
+}
+
 #[derive(Debug, Clone)]
 struct Observed {
     activity: AgentActivity,
-    changed_at: i64,
+    /// When the CURRENT state began. Reset on every state change.
+    ///
+    /// This is `changed_at` under its real name. It answers "how long has this
+    /// been stuck", which is the question that matters while Blocked.
+    state_since: i64,
+    /// When the user's request started, or `None` between turns.
+    ///
+    /// Held across Blocked: approving a tool call does not begin a new turn,
+    /// and a clock that restarted on every approval reported a quarter-hour job
+    /// as two seconds old.
+    turn_started_at: Option<i64>,
     /// The terminal's process state when last announced.
     ///
     /// Watched as well as activity, and that omission was a real bug: a
@@ -176,6 +244,218 @@ struct Observed {
     /// Decided here because deciding it needs the screen, and the screen is
     /// already being read on this pass. A client cannot answer it at all.
     chat_capable: bool,
+    /// What the agent is asking, while it is asking.
+    blocked_question: Option<String>,
+    /// A candidate state and how many times running it has been seen.
+    ///
+    /// Hysteresis. A `capture-pane` taken while the footer is being rewritten
+    /// can miss it, and one such sample used to be enough to fire a Done and
+    /// the notification behind it.
+    pending: Option<(AgentActivity, u8)>,
+    /// The pane title as last sampled, and how many samples running it has been
+    /// byte-identical. See `promoted_by_title`.
+    title: String,
+    title_repeats: u8,
+}
+
+/// Agreeing samples needed before a state change is published.
+///
+/// Two, which costs one sampling interval of latency on every transition except
+/// the one that must never be delayed. See `observe`.
+const CONFIRMATIONS: u8 = 2;
+
+/// Samples a title may repeat before its claim to be working stops being believed.
+///
+/// A real spinner ANIMATES — codex cycles fourteen braille frames and claude four
+/// quadrant circles, both several times a second — so two samples a second apart
+/// differ. A frozen frame is byte-identical every tick, and that is what a title
+/// looks like once the agent has stopped writing one: it crashed, or the user
+/// turned `terminal_title` off mid-session, which `core::title` notes is a config
+/// key and therefore something a user can do at any moment.
+///
+/// Five, which is five seconds at `SAMPLE_INTERVAL`. The number is chosen by
+/// which way the risk runs, not by taste: failing to promote falls back to the
+/// screen, which is usually right, and costs at most a few seconds of a row
+/// reading Idle while it works. Believing a frozen frame forever means the folded
+/// activity never returns to Idle, `activity::advance` never produces `Done`, and
+/// no notification is ever sent for that pane again — the exact bug this change
+/// exists to remove, re-entering through the title instead of the screen.
+const STALE_TITLE_SAMPLES: u8 = 5;
+
+/// What the title says about activity, where the screen had nothing to say.
+///
+/// One-directional, and that direction is the whole point. A footer drawing
+/// `esc to interrupt` is the agent stating its own status, so a screen that
+/// reported Working or Blocked is never overruled by a title frame that
+/// disagrees — that frame is stale far more often than the footer is wrong.
+/// Only `Idle`, which `classify` returns for a recognized agent whose footer
+/// matched nothing, is open to being resolved by the title.
+///
+/// Pulled out of `sample()`'s loop body for the same reason `should_announce`
+/// was: a test that has to re-implement the loop's condition to check it will
+/// eventually be checking something the loop no longer does.
+fn promoted_by_title(
+    activity: AgentActivity,
+    title: &str,
+    command: &str,
+    hostname: &str,
+    title_repeats: u8,
+) -> AgentActivity {
+    if activity != AgentActivity::Idle || title_repeats >= STALE_TITLE_SAMPLES {
+        return activity;
+    }
+    match farcooler_core::title::parse(title, command, hostname).status {
+        farcooler_core::title::TitleStatus::Working => AgentActivity::Working,
+        // NotWorking included: a resting glyph agrees with Idle, and a title
+        // that claims to be blocked is not evidence of a question anyone can
+        // answer — `blocked_question` needs a screen for that.
+        _ => activity,
+    }
+}
+
+impl Observed {
+    /// A terminal seen for the first time.
+    fn begin(activity: AgentActivity, now: i64) -> Self {
+        Observed {
+            activity,
+            state_since: now,
+            turn_started_at: (activity == AgentActivity::Working).then_some(now),
+            state: TerminalState::Running,
+            command: String::new(),
+            chat_capable: false,
+            blocked_question: None,
+            pending: None,
+            title: String::new(),
+            title_repeats: 0,
+        }
+    }
+
+    /// Fold this tick's title in, returning how long it has been unchanged.
+    ///
+    /// Zero means it just moved. Called on every sample, whether or not anything
+    /// is announced, because the answer is about the title's liveness and not
+    /// about the row.
+    fn saw_title(&mut self, title: &str) -> u8 {
+        if self.title == title {
+            // Saturating, because the only question asked of this is whether it
+            // has passed a small bound, and a wrapping counter would answer it
+            // wrong once every 256 seconds.
+            self.title_repeats = self.title_repeats.saturating_add(1);
+        } else {
+            self.title.clear();
+            self.title.push_str(title);
+            self.title_repeats = 0;
+        }
+        self.title_repeats
+    }
+
+    /// Move to `next`, keeping whichever clocks should survive it.
+    fn advance_to(mut self, next: AgentActivity, now: i64) -> Self {
+        // Not `use AgentActivity::*` here: the enum has its own `None` variant
+        // (a plain shell), which would shadow `Option::None` in every arm below
+        // and turn `self.turn_started_at`'s type into a compile error rather
+        // than the value this comment used to describe.
+        self.turn_started_at = match next {
+            // A turn in progress. Blocked is part of it, not the end of it.
+            AgentActivity::Working | AgentActivity::Blocked => self.turn_started_at.or(Some(now)),
+            // Anything else has ended the turn, so there is no clock to run.
+            //
+            // This includes `Unspecified` and `Unknown` — a failed
+            // `capture-pane` or a screen that matched nothing recognized — which
+            // is deliberate rather than an oversight: those mean "could not
+            // tell", and the row is already reporting degraded when they land.
+            // Holding the turn clock open across a state we cannot read would
+            // require inventing a promise ("this is still the same turn") the
+            // daemon has no evidence for, which is worse than the clock
+            // restarting on the next real observation.
+            _ => None,
+        };
+        self.activity = next;
+        self.state_since = now;
+        self.pending = None;
+        self
+    }
+
+    /// Fold one sample in, returning the new activity if it should be published.
+    ///
+    /// `None` means nothing changed, or something changed and has not been seen
+    /// enough times to be believed yet.
+    fn observe(&mut self, sample: AgentActivity, now: i64) -> Option<AgentActivity> {
+        let next = activity::advance(self.activity, sample);
+        if next == self.activity {
+            self.pending = None;
+            return None;
+        }
+
+        // Blocked publishes on its first sighting, always.
+        //
+        // The asymmetry is deliberate and is the whole shape of the trade: a
+        // question shown a second late costs nothing, and a question never
+        // shown is the failure this feature exists to prevent. Every other
+        // transition can afford to be sure.
+        if next != AgentActivity::Blocked {
+            let seen = match self.pending {
+                Some((p, n)) if p == next => n + 1,
+                _ => 1,
+            };
+            if seen < CONFIRMATIONS {
+                self.pending = Some((next, seen));
+                return None;
+            }
+        }
+
+        *self = self.clone().advance_to(next, now);
+        Some(next)
+    }
+
+    /// Whether this observation is worth telling clients about.
+    ///
+    /// Four things can make a terminal newsworthy, and the fourth is easy to
+    /// miss: an agent can replace its question without any of the other three
+    /// moving — activity stays Blocked, the pane state stays Running, the
+    /// command is unchanged — and a row that keeps answering the PREVIOUS
+    /// question is worse than one that says only "Needs you". Pulled out of
+    /// `sample()`'s loop body so a unit test can call the exact function the
+    /// loop calls, rather than a copy of it that can drift out of sync with
+    /// what the loop actually does.
+    fn should_announce(
+        &self,
+        activity_moved: bool,
+        state: TerminalState,
+        command: &str,
+        blocked_question: &Option<String>,
+    ) -> bool {
+        activity_moved
+            || self.state != state
+            || self.command != command
+            || self.blocked_question != *blocked_question
+    }
+}
+
+/// Whether THIS tick is the moment a command just failed, and worth a push.
+///
+/// A command failing is a state transition (Running -> Exited with a bad
+/// code, or a signal), not an activity one, so it never reaches
+/// `push_if_paired` through `activity_moved`. Split out for the same reason
+/// `should_announce` and `promoted_by_title` are: the loop's condition has to
+/// stay the exact thing a test exercises, not a copy of it that can drift.
+///
+/// `just_appeared` excludes the first sighting of an already-dead terminal —
+/// restarting the daemon must not re-announce every failed build in the
+/// fleet's history, the same reason a freshly begun `Observed` never fires an
+/// activity push either. `previous_state != Exited` is what makes this fire
+/// once: the tick that actually crosses into Exited, not every tick after.
+fn exited_into_failure(
+    just_appeared: bool,
+    previous_state: TerminalState,
+    state: TerminalState,
+    exit_code: Option<i32>,
+    exit_signal: Option<i32>,
+) -> bool {
+    !just_appeared
+        && previous_state != TerminalState::Exited
+        && state == TerminalState::Exited
+        && activity::exit_wants_attention(exit_code, exit_signal)
 }
 
 impl Watcher {
@@ -197,25 +477,55 @@ impl Watcher {
         })
     }
 
-    /// Push a state change to the owner's devices, if this machine is paired.
+    /// Push an agent's state change to the owner's devices, if paired.
     ///
     /// Blocked and done only. A working agent is the normal case, and something
     /// that buzzes for the normal case is something people turn off — after
-    /// which it cannot tell them the thing that mattered.
+    /// which it cannot tell them the thing that mattered. See `push_notice` for
+    /// why sending is detached rather than awaited here.
+    fn push_if_paired(
+        &self,
+        terminal: Uuid,
+        activity: AgentActivity,
+        label: &str,
+        question: Option<&str>,
+    ) {
+        let Some(notice) = notification(activity, label, question) else { return };
+        self.push_notice(terminal, label, notice);
+    }
+
+    /// Push a failed exit to the owner's devices, if this machine is paired.
+    ///
+    /// The other reason `push_if_paired` exists, for a command rather than an
+    /// agent: see `exited_into_failure` for exactly when this fires. Kept as
+    /// its own entry point rather than folded into `push_if_paired` because
+    /// the two are answering different questions about the terminal — one an
+    /// `AgentActivity`, the other an exit code — and a single function taking
+    /// both would have to explain which one wins when a caller supplied both.
+    fn push_failed_exit(
+        &self,
+        terminal: Uuid,
+        label: &str,
+        exit_code: Option<i32>,
+        exit_signal: Option<i32>,
+    ) {
+        self.push_notice(terminal, label, exit_notice(label, exit_code, exit_signal));
+    }
+
+    /// Send one notice to the relay, detached from the sampling loop.
     ///
     /// Deliberately NOT async, and this is the whole point of the function.
-    /// It is called from inside the sampling loop while the watcher's state
-    /// mutex is held, so awaiting an HTTP round trip here would stall the loop
-    /// — and, worse, every client asking `activity()` or `mark_seen()`, which
-    /// take the same lock — for as long as the relay took to answer. Ten agents
-    /// finishing at once against an unreachable relay is a fleet frozen for a
-    /// minute and a half. Spawning detaches it: the loop moves on immediately
-    /// and the notification arrives, or does not, on its own time.
+    /// The sampling loop calls it after the watcher's state mutex is already
+    /// dropped, but an HTTP round trip is still not something the loop can
+    /// afford to wait on: it would delay the NEXT terminal in the same pass,
+    /// and a relay that is slow or unreachable would stack that delay across
+    /// every agent finishing in the same tick. Spawning detaches it: the loop
+    /// moves on immediately and the notification arrives, or does not, on its
+    /// own time.
     ///
     /// Reading the pairing file happens in the spawned task for the same
     /// reason. It is blocking I/O, and it does not belong under a lock either.
-    fn push_if_paired(&self, terminal: Uuid, activity: AgentActivity, label: &str) {
-        let Some(notice) = notification(activity, label) else { return };
+    fn push_notice(&self, terminal: Uuid, label: &str, notice: Notice) {
         // Owned, because the spawned task outlives this call by design and the
         // label is borrowed from the sampling loop's stack. The sentences are
         // already owned — the label is the one the phone needs on its own, for
@@ -244,12 +554,17 @@ impl Watcher {
         self.events.subscribe()
     }
 
-    /// What the watcher last decided about a terminal.
-    pub async fn activity(&self, terminal: Uuid) -> (AgentActivity, Option<i64>) {
+    /// What the watcher last decided, with both clocks.
+    pub async fn activity(&self, terminal: Uuid) -> (AgentActivity, Option<i64>, Option<i64>) {
         match self.state.lock().await.get(&terminal) {
-            Some(observed) => (observed.activity, Some(observed.changed_at)),
-            None => (AgentActivity::Unspecified, None),
+            Some(o) => (o.activity, Some(o.state_since), o.turn_started_at),
+            None => (AgentActivity::Unspecified, None, None),
         }
+    }
+
+    /// What the agent is asking, if it is.
+    pub async fn blocked_question(&self, terminal: Uuid) -> Option<String> {
+        self.state.lock().await.get(&terminal).and_then(|o| o.blocked_question.clone())
     }
 
     /// What is running in a terminal, as the pane reports it.
@@ -275,7 +590,7 @@ impl Watcher {
             return;
         }
         observed.activity = next;
-        observed.changed_at = now_millis();
+        observed.state_since = now_millis();
         let snapshot = observed.clone();
         drop(state);
         self.announce(terminal, snapshot).await;
@@ -462,6 +777,25 @@ impl Watcher {
         // loop, and a fleet of thirty panes must not mean thirty processes a
         // second.
         let foreground = crate::foreground::read().await;
+        // One `lsof` for the whole machine, on the same cadence and for the
+        // same reason as the one `ps`.
+        //
+        // Off the executor, because it is a blocking `Command::output` on a
+        // process that can take tens of milliseconds — `foreground::read` gets
+        // the same treatment from `tokio::process` and cannot be copied here,
+        // since `farcooler-core` has no async runtime and must not gain one for
+        // this.
+        let ports = tokio::task::spawn_blocking(farcooler_core::ports::listening_ports)
+            .await
+            .unwrap_or_default();
+        // By GROUP, not by process. `lsof` names the process holding the socket,
+        // which for every wrapped dev server — `pnpm dev`, `npm run dev`, a
+        // shell script — is a child of the one the pane is showing.
+        let ports = foreground.ports_by_group(&ports);
+        // Once per tick, not once per pane: every pane compares against the
+        // same answer, and a machine that renamed itself mid-tick would
+        // otherwise name two rows by two different rules.
+        let hostname = crate::hostname();
         // Bound once per tick rather than looked up per pane: the registry
         // lives on `Service` for the same reason `root` does — re-reading the
         // config file's location on every pane would let it disagree with
@@ -509,19 +843,30 @@ impl Watcher {
                 // process group of the pane's tty has the argv that distinguishes
                 // one pane from another.
                 let pane = panes.panes.iter().find(|p| p.terminal_id == id);
-                let command = pane
-                    .and_then(|p| {
-                        foreground.get(p.tty.trim_start_matches("/dev/")).cloned()
-                    })
+                let running = pane.and_then(|p| foreground.pane(p.tty.trim_start_matches("/dev/")));
+                let command = running
+                    .map(|r| r.command.clone())
                     .or_else(|| pane.map(|p| p.command.clone()))
                     .unwrap_or_default();
-                live.push((
+                let title = pane.map(|p| p.title.clone()).unwrap_or_default();
+                // A pane's ports are its foreground process GROUP's, found
+                // through the tty they share. `ps` already gave us that group on
+                // this tick, so this is a map lookup rather than a second walk
+                // of the process table.
+                let purpose = running
+                    .and_then(|r| ports.get(&r.pgid))
+                    .and_then(|open| farcooler_core::ports::purpose(open));
+                live.push(Sampled {
                     id,
                     command,
-                    terminal.state(),
-                    terminal.terminal.pane_mode,
-                    terminal.terminal.command_preset.clone(),
-                ));
+                    title,
+                    purpose,
+                    state: terminal.state(),
+                    pane_mode: terminal.terminal.pane_mode,
+                    preset: terminal.terminal.command_preset.clone(),
+                    exit_code: terminal.terminal.exit_code,
+                    exit_signal: terminal.terminal.exit_signal,
+                });
             }
         }
 
@@ -542,19 +887,56 @@ impl Watcher {
         // inherit the activity of the process it replaced.
         {
             let mut state = self.state.lock().await;
-            let ids: std::collections::HashSet<Uuid> =
-                live.iter().map(|(id, ..)| *id).collect();
+            let ids: std::collections::HashSet<Uuid> = live.iter().map(|s| s.id).collect();
             state.retain(|id, _| ids.contains(id));
         }
 
-        for (id, command, terminal_state, pane_mode, preset) in live {
+        for Sampled {
+            id,
+            command,
+            title,
+            purpose,
+            state: terminal_state,
+            pane_mode,
+            preset,
+            exit_code,
+            exit_signal,
+        } in live
+        {
             // The screen is read for any live terminal, not only one whose
             // process name we recognize. That is the point: Claude Code renames
             // itself to its version, so a pane reporting `2.1.220` is an agent
             // that process matching alone would never find.
+            // Only set in the screen-reading arm below: it is the only one
+            // that has a screen to read a question off of.
+            let mut question: Option<String> = None;
+            // Folded in before anything is decided, and on every tick rather
+            // than only on the ones that announce: this counts how long the
+            // title has been FROZEN, which is a fact about the pane and not
+            // about the row. A terminal seen for the first time has no history
+            // and starts at zero, which is the trusting end of the scale.
+            let title_repeats = {
+                let mut state = self.state.lock().await;
+                state.get_mut(&id).map(|entry| entry.saw_title(&title)).unwrap_or(0)
+            };
             let (label, observed, chat_capable) = if !matches!(terminal_state, TerminalState::Running)
             {
-                (registry.describe(&command, ""), AgentActivity::None, false)
+                // A finished agent KEEPS its summary, which is the point of
+                // reading titles at all: coming back to a machine, the useful
+                // thing about a pane that has stopped is what it did, not that
+                // it was claude.
+                //
+                // Safe because a dead pane cannot claim to be busy. `remain-on-exit`
+                // leaves the last title in place, the spinner glyph is stripped
+                // before the name is taken, this arm hardcodes `None` against a
+                // non-Running state so the row's status never says otherwise,
+                // and an agent that cleared its title on the way out falls
+                // through to `describe` exactly as before.
+                (
+                    registry.describe_pane(&command, "", &title, purpose.as_deref(), &hostname),
+                    AgentActivity::None,
+                    false,
+                )
             } else if pane_mode == farcooler_store::models::PaneMode::Changes {
                 // No screen read, because there is nothing on it to read. A
                 // changes pane runs a process that prints one line and waits;
@@ -594,18 +976,34 @@ impl Watcher {
                 // version, so a pane reporting `2.1.220` is an agent that
                 // process matching alone would never find.
                 match runtime.screen(id).await {
-                    Ok((screen, _, _)) => (
-                        registry.describe(&command, &screen),
-                        registry.classify(&command, &screen),
-                        // Recognized AND hostable. Codex is recognized here and
-                        // has no adapter, so offering it a chat would hand the
-                        // user a Claude session in its place.
-                        registry
-                            .identify(&command, &screen)
-                            .is_some_and(|rules| registry.chat_capable(&rules.preset)),
-                    ),
+                    Ok((screen, _, _)) => {
+                        // The title is the agent's own account of itself, so it
+                        // resolves a screen that had no opinion — while the
+                        // title is still alive. See `promoted_by_title`.
+                        let activity = promoted_by_title(
+                            registry.classify(&command, &screen),
+                            &title,
+                            &command,
+                            &hostname,
+                            title_repeats,
+                        );
+                        // Only while blocked, and derived here rather than on a
+                        // client for the same reason activity is: a phone has
+                        // no screen to read.
+                        question = registry.blocked_question(&command, &screen);
+                        (
+                            registry.describe_pane(&command, &screen, &title, purpose.as_deref(), &hostname),
+                            activity,
+                            // Recognized AND hostable. Codex is recognized here
+                            // and has no adapter, so offering it a chat would
+                            // hand the user a Claude session in its place.
+                            registry
+                                .identify(&command, &screen)
+                                .is_some_and(|rules| registry.chat_capable(&rules.preset)),
+                        )
+                    }
                     Err(_) => (
-                        registry.describe(&command, ""),
+                        registry.describe_pane(&command, "", &title, purpose.as_deref(), &hostname),
                         AgentActivity::Unspecified,
                         false,
                     ),
@@ -615,65 +1013,64 @@ impl Watcher {
             // inspect, so working out what an agent is called has to happen on
             // the host — the same reason its activity does.
             let command = label;
+            let blocked_question = question;
 
             let mut state = self.state.lock().await;
-            let previous = state.get(&id).cloned();
-            let next_activity = match &previous {
-                Some(p) => activity::advance(p.activity, observed),
-                None => observed,
-            };
+            let now = now_millis();
+            // Read before `entry()` inserts one: a terminal seen for the first
+            // time has no real history, and `Observed::begin` gives it `state:
+            // Running` regardless of what was actually sampled — so without
+            // this, a daemon restarted onto an already-dead terminal would read
+            // as a Running-to-Exited transition on the very first tick.
+            let just_appeared = !state.contains_key(&id);
+            let entry = state.entry(id).or_insert_with(|| Observed::begin(observed, now));
+            let previous_state = entry.state;
 
-            // Announce on ANY of the three changing. State was the one that
-            // used to be missed, and it is the one that removes a dead terminal
-            // from a client's list.
-            let changed = match &previous {
-                None => true,
-                Some(p) => {
-                    p.activity != next_activity
-                        || p.state != terminal_state
-                        || p.command != command
-                }
-            };
+            let activity_moved = entry.observe(observed, now);
+            let changed = entry.should_announce(
+                activity_moved.is_some(),
+                terminal_state,
+                &command,
+                &blocked_question,
+            );
             if !changed {
                 continue;
             }
 
+            entry.state = terminal_state;
+            entry.command = command.clone();
+            entry.chat_capable = chat_capable;
+            entry.blocked_question = blocked_question;
+            let record = entry.clone();
+            drop(state);
+
             // Worth telling the owner about, and only on the transition.
             //
-            // The same two states the Mac announces locally, decided in the
-            // same place for the same reason: the daemon is what knows, and a
-            // phone that is asleep cannot be told any other way. Sent from
-            // here rather than from a client, because every client is asleep
-            // in the case this exists for.
-            //
-            // Only on a transition FROM a known previous state. The first
-            // sighting of a terminal is not news — otherwise restarting the
-            // daemon would buzz once for every idle agent on the machine.
-            if let Some(before) = &previous {
-                if before.activity != next_activity {
-                    self.push_if_paired(id, next_activity, &command);
-                }
+            // No second check needed here: `observe` returns `Some` only when
+            // it just published a real activity change, so `Some` already
+            // means the activity moved — a terminal whose command or question
+            // changed reports `None` and never reaches this arm, which is what
+            // keeps a `cd` from buzzing a phone.
+            if let Some(next) = activity_moved {
+                // From `record`, not from the local `blocked_question`, which
+                // was moved into the entry above. Same value, and taking it off
+                // the record is what keeps the card and the row quoting one
+                // question rather than two reads of it.
+                self.push_if_paired(id, next, &command, record.blocked_question.as_deref());
             }
-
-            let record = Observed {
-                activity: next_activity,
-                // The clock only moves when the ACTIVITY moved. A process that
-                // exits should not reset "blocked for 12 minutes" to zero.
-                changed_at: match &previous {
-                    Some(p) if p.activity == next_activity => p.changed_at,
-                    _ => now_millis(),
-                },
-                state: terminal_state,
-                command: command.clone(),
-                chat_capable,
-            };
-            state.insert(id, record.clone());
-            drop(state);
+            // A command failing is a STATE transition, not an activity one —
+            // `activity_moved` never fires for it, so without this a `cargo
+            // build` that exited 101 overnight reached the sidebar and never
+            // the phone. See `exited_into_failure` for the exact rule.
+            if exited_into_failure(just_appeared, previous_state, terminal_state, exit_code, exit_signal)
+            {
+                self.push_failed_exit(id, &command, exit_code, exit_signal);
+            }
 
             tracing::info!(
                 terminal = %id,
                 state = ?terminal_state,
-                activity = ?next_activity,
+                activity = ?record.activity,
                 command = %command,
                 "terminal changed"
             );
@@ -713,7 +1110,9 @@ impl Watcher {
 
             let mut message = wire::terminal_with_agent_state(view, self.service.agents());
             message.activity = observed.activity as i32;
-            message.activity_changed_at = Some(wire::timestamp(observed.changed_at));
+            message.activity_changed_at = Some(wire::timestamp(observed.state_since));
+            message.turn_started_at = observed.turn_started_at.map(wire::timestamp);
+            message.blocked_question = observed.blocked_question.clone();
             message.current_command = observed.command.clone();
             message.chat_capable = observed.chat_capable;
 
@@ -764,6 +1163,227 @@ fn now_millis() -> i64 {
 mod tests {
     use super::*;
 
+    /// The clock a person actually reads.
+    ///
+    /// Approving a permission prompt walks Working -> Blocked -> Working. The turn
+    /// clock must not notice: the task has been running the whole time, and
+    /// restarting it at every approval is what made "working 12m" read as
+    /// "working 2s" for a job that had been going for a quarter of an hour.
+    #[test]
+    fn the_turn_clock_survives_a_permission_prompt() {
+        let mut o = Observed::begin(AgentActivity::Working, 1_000);
+        assert_eq!(o.turn_started_at, Some(1_000));
+
+        o = o.advance_to(AgentActivity::Blocked, 5_000);
+        assert_eq!(o.turn_started_at, Some(1_000), "the turn did not restart");
+        assert_eq!(o.state_since, 5_000, "but the state clock did");
+
+        o = o.advance_to(AgentActivity::Working, 9_000);
+        assert_eq!(o.turn_started_at, Some(1_000), "still the same turn");
+        assert_eq!(o.state_since, 9_000);
+    }
+
+    #[test]
+    fn the_turn_clock_clears_when_the_work_ends() {
+        let o = Observed::begin(AgentActivity::Working, 1_000).advance_to(AgentActivity::Done, 7_000);
+        assert_eq!(o.turn_started_at, None, "a finished turn has no running clock");
+        assert_eq!(o.state_since, 7_000);
+    }
+
+    #[test]
+    fn a_new_turn_starts_a_new_clock() {
+        let o = Observed::begin(AgentActivity::Working, 1_000)
+            .advance_to(AgentActivity::Done, 7_000)
+            .advance_to(AgentActivity::Working, 9_000);
+        assert_eq!(o.turn_started_at, Some(9_000));
+    }
+
+    /// One bad sample between two good ones publishes nothing.
+    ///
+    /// A capture taken mid-redraw can miss a footer that is being rewritten. Before
+    /// hysteresis that was enough to fire a spurious Done, with the notification
+    /// that goes with it.
+    #[test]
+    fn a_single_odd_sample_does_not_move_the_state() {
+        let mut o = Observed::begin(AgentActivity::Working, 1_000);
+        let first = o.observe(AgentActivity::Idle, 2_000);
+        assert!(first.is_none(), "one sighting is not a state change");
+        assert_eq!(o.activity, AgentActivity::Working);
+
+        let second = o.observe(AgentActivity::Working, 3_000);
+        assert!(second.is_none(), "and the anomaly is forgotten");
+        assert_eq!(o.activity, AgentActivity::Working);
+    }
+
+    #[test]
+    fn two_agreeing_samples_do_move_it() {
+        let mut o = Observed::begin(AgentActivity::Working, 1_000);
+        assert!(o.observe(AgentActivity::Idle, 2_000).is_none());
+        let moved = o.observe(AgentActivity::Idle, 3_000).expect("two agreeing samples publish");
+        assert_eq!(moved, AgentActivity::Done, "Working -> Idle is what Done is made of");
+    }
+
+    /// Blocked is exempt, and must be.
+    ///
+    /// A question that arrives a second late is fine. A question that never
+    /// arrives is the failure that makes the whole feature pointless, so a first
+    /// sighting of Blocked publishes immediately.
+    #[test]
+    fn a_question_is_never_made_to_wait() {
+        let mut o = Observed::begin(AgentActivity::Working, 1_000);
+        let moved = o.observe(AgentActivity::Blocked, 2_000).expect("blocked publishes at once");
+        assert_eq!(moved, AgentActivity::Blocked);
+    }
+
+    /// Calls the exact function `sample()` calls, term by term.
+    ///
+    /// Not a copy of the expression: `should_announce` is the same function
+    /// the loop uses to decide, so deleting a term from it breaks this test
+    /// rather than leaving it vacuously green. That distinction matters
+    /// because it is exactly what went wrong the first time — a hand-copied
+    /// closure asserted against the fourth term without ever calling the real
+    /// gate, and a review had to point out that the closure would keep
+    /// passing even with the term deleted from production.
+    ///
+    /// The fourth term is the one worth a name: an agent can replace its
+    /// question — including replacing it with silence — without activity,
+    /// pane state, or command moving at all. Two permission prompts back to
+    /// back, faster than the 1 Hz sample, are exactly this case. A row that
+    /// keeps answering the PREVIOUS question is worse than one that only says
+    /// "Needs you" — this string is headed for a lock screen.
+    #[test]
+    fn each_of_the_four_terms_alone_opens_the_announce_gate() {
+        let mut entry = Observed::begin(AgentActivity::Blocked, 1_000);
+        entry.state = TerminalState::Running;
+        entry.command = "claude".to_string();
+        entry.blocked_question = Some("proceed?".to_string());
+
+        let state = entry.state;
+        let command = entry.command.clone();
+        let question = entry.blocked_question.clone();
+
+        assert!(
+            !entry.should_announce(false, state, &command, &question),
+            "nothing changed, so there is nothing to announce"
+        );
+        assert!(entry.should_announce(true, state, &command, &question), "activity moved");
+        assert!(
+            entry.should_announce(false, TerminalState::Exited, &command, &question),
+            "pane state changed"
+        );
+        assert!(entry.should_announce(false, state, "bash", &question), "command changed");
+        assert!(
+            entry.should_announce(false, state, &command, &Some("a different question?".to_string())),
+            "the question changed to another question — the regression this test exists to catch"
+        );
+        assert!(
+            entry.should_announce(false, state, &command, &None),
+            "the question vanished — that is news too, not just a new one arriving"
+        );
+    }
+
+    /// A spinner that is still spinning is believed.
+    ///
+    /// Not a copy of the loop's condition: `promoted_by_title` is the function
+    /// `sample()` calls, for the same reason `should_announce` is.
+    #[test]
+    fn a_live_spinner_resolves_a_screen_that_had_no_opinion() {
+        // Codex advances its braille frame several times a second, so a sample
+        // a second later reads a different title and the repeat count stays 0.
+        let mut entry = Observed::begin(AgentActivity::Idle, 1_000);
+        for frame in ["⠋ bare", "⠙ bare", "⠹ bare", "⠸ bare", "⠼ bare", "⠴ bare", "⠦ bare"] {
+            let repeats = entry.saw_title(frame);
+            assert_eq!(repeats, 0, "an animating title is never stale: {frame}");
+            assert_eq!(
+                promoted_by_title(AgentActivity::Idle, frame, "codex", "Mac", repeats),
+                AgentActivity::Working,
+                "{frame}"
+            );
+        }
+    }
+
+    /// A spinner that has stopped is not.
+    ///
+    /// The failure this guards is silent and permanent: a title frozen on a
+    /// spinner frame — the agent crashed, or the user turned `terminal_title`
+    /// off mid-session — would hold the folded activity at Working forever,
+    /// `advance` would never produce Done, and that pane would never notify
+    /// anyone again.
+    #[test]
+    fn a_frozen_spinner_stops_being_believed() {
+        let mut entry = Observed::begin(AgentActivity::Idle, 1_000);
+        let frozen = "◐ Write tmux haiku";
+        let mut promoted = Vec::new();
+        for _ in 0..10 {
+            let repeats = entry.saw_title(frozen);
+            promoted.push(promoted_by_title(AgentActivity::Idle, frozen, "claude", "Mac", repeats));
+        }
+
+        assert_eq!(
+            promoted.iter().filter(|a| **a == AgentActivity::Working).count(),
+            STALE_TITLE_SAMPLES as usize,
+            "believed for the bound and not one sample longer: {promoted:?}"
+        );
+        assert_eq!(
+            promoted.last(),
+            Some(&AgentActivity::Idle),
+            "and the screen has the last word once the title has stopped moving"
+        );
+
+        // A title that moves again is alive again — a resumed agent is not
+        // punished for the pause.
+        let repeats = entry.saw_title("◑ Write tmux haiku");
+        assert_eq!(repeats, 0);
+        assert_eq!(
+            promoted_by_title(AgentActivity::Idle, "◑ Write tmux haiku", "claude", "Mac", repeats),
+            AgentActivity::Working
+        );
+    }
+
+    /// The promotion runs one way only.
+    #[test]
+    fn a_title_never_overrules_a_screen_that_had_an_opinion() {
+        // A resting glyph against a screen that read the footer: the footer
+        // wins. Getting this backwards is the flapping the whole change removes.
+        for screen_said in [
+            AgentActivity::Working,
+            AgentActivity::Blocked,
+            AgentActivity::Done,
+            AgentActivity::None,
+            AgentActivity::Unspecified,
+        ] {
+            for title in ["✳ Claude Code", "◐ Write tmux haiku", "[ ! ] Action Required | bare", ""] {
+                assert_eq!(
+                    promoted_by_title(screen_said, title, "claude", "Mac", 0),
+                    screen_said,
+                    "{screen_said:?} / {title}"
+                );
+            }
+        }
+    }
+
+    /// Idle plus a title with nothing to say stays Idle.
+    #[test]
+    fn only_a_spinner_promotes() {
+        for title in [
+            // A resting glyph: the agent says it is not working.
+            "✳ Write tmux haiku",
+            // Codex admitting it is blocked, which is not working either.
+            "[ ! ] Action Required | bare",
+            // No glyph at all.
+            "Echo Banana",
+            // Furniture.
+            "Mac",
+            "",
+        ] {
+            assert_eq!(
+                promoted_by_title(AgentActivity::Idle, title, "claude", "Mac", 0),
+                AgentActivity::Idle,
+                "{title}"
+            );
+        }
+    }
+
     fn tagged_pane(daemon: Uuid, terminal: Uuid) -> farcooler_core::inventory::TaggedPane {
         farcooler_core::inventory::TaggedPane {
             daemon_id: daemon,
@@ -783,6 +1403,7 @@ mod tests {
             dead: false,
             dead_status: None,
             command: "fish".into(),
+            title: String::new(),
         }
     }
 
@@ -807,14 +1428,18 @@ mod tests {
         // Working is the NORMAL case. Something that buzzes for the normal case
         // is something people turn off, after which it cannot tell them the
         // thing that mattered — so this is the rule the whole feature rests on.
-        assert!(notification(AgentActivity::Working, "claude").is_none());
-        assert!(notification(AgentActivity::Idle, "claude").is_none());
-        assert!(notification(AgentActivity::Unspecified, "claude").is_none());
+        let asking = Some("Do you want to create haiku.txt?");
+        assert!(notification(AgentActivity::Working, "claude", None).is_none());
+        assert!(notification(AgentActivity::Idle, "claude", None).is_none());
+        assert!(notification(AgentActivity::Unspecified, "claude", None).is_none());
+        // Not even with a question in hand: a question is what a card SAYS, not
+        // what decides there is one.
+        assert!(notification(AgentActivity::Working, "claude", asking).is_none());
     }
 
     #[test]
     fn a_blocked_agent_says_what_it_wants() {
-        let notice = notification(AgentActivity::Blocked, "claude").expect("blocked");
+        let notice = notification(AgentActivity::Blocked, "claude", None).expect("blocked");
         assert_eq!(notice.title, "claude needs you");
         assert_eq!(notice.subtitle, "Waiting for your answer");
         // What raises the live card. The relay is deliberately not in the
@@ -824,15 +1449,91 @@ mod tests {
         assert_eq!(notice.status, "blocked");
     }
 
+    /// The question is the payload, and the lock screen is where it matters.
+    ///
+    /// Derived on the host, redacted, and carried on four paths — and until it
+    /// reached this subtitle, a phone could only say that SOMETHING was being
+    /// asked. Answering from the lock screen needs the question on it.
+    #[test]
+    fn a_blocked_agent_puts_its_question_on_the_card() {
+        let notice =
+            notification(AgentActivity::Blocked, "claude", Some("Do you want to create haiku.txt?"))
+                .expect("blocked");
+        assert_eq!(notice.title, "claude needs you");
+        assert_eq!(notice.subtitle, "Do you want to create haiku.txt?");
+        assert_eq!(notice.status, "blocked");
+
+        // A screen too garbled to yield one falls back rather than showing a
+        // blank second line — see `registry.blocked_question`, which returns
+        // None for a trust gate whose '?' is mid-line.
+        for absent in [None, Some(""), Some("   ")] {
+            let notice = notification(AgentActivity::Blocked, "claude", absent).expect("blocked");
+            assert_eq!(notice.subtitle, "Waiting for your answer", "{absent:?}");
+        }
+    }
+
     #[test]
     fn a_finished_agent_needs_no_second_line() {
-        let notice = notification(AgentActivity::Done, "claude").expect("done");
+        let notice = notification(AgentActivity::Done, "claude", None).expect("done");
         assert_eq!(notice.title, "claude finished");
         assert!(notice.subtitle.is_empty());
         // And what takes the card back down. An empty subtitle is fine; an
         // empty status would leave a live card up on the lock screen until the
         // system expired it hours later.
         assert_eq!(notice.status, "done");
+
+        // A question left over from the prompt this agent has just finished
+        // answering must not ride along: "claude finished / Do you want to
+        // create haiku.txt?" reads as a question still open.
+        let notice =
+            notification(AgentActivity::Done, "claude", Some("Do you want to create haiku.txt?"))
+                .expect("done");
+        assert!(notice.subtitle.is_empty(), "{}", notice.subtitle);
+    }
+
+    #[test]
+    fn a_failed_exit_names_the_code() {
+        let notice = exit_notice("cargo build", Some(101), None);
+        assert_eq!(notice.title, "cargo build failed");
+        assert_eq!(notice.subtitle, "Exit code 101");
+        // Not "blocked": nothing is waiting on an answer, so there is no live
+        // card to raise. Reusing "done" is what keeps the relay's vocabulary at
+        // two words instead of a third it was never taught.
+        assert_eq!(notice.status, "done");
+    }
+
+    #[test]
+    fn a_signal_names_the_signal_not_the_code() {
+        // A process killed by a signal has no exit code at all, so the
+        // sentence has to come from the signal or say nothing useful.
+        let notice = exit_notice("cargo build", None, Some(9));
+        assert_eq!(notice.subtitle, "Stopped by signal 9");
+    }
+
+    /// The rule that decides whether a state transition reaches a phone.
+    ///
+    /// Five cases, matching exactly what the brief asked this to cover: a
+    /// failure pushes, a signal pushes, a clean exit does not, a repeat tick on
+    /// an already-exited terminal does not, and neither does the first sighting
+    /// of a terminal that was already dead when the daemon found it.
+    #[test]
+    fn a_command_failing_pushes_exactly_once() {
+        use TerminalState::{Exited, Running};
+
+        // A non-zero exit, crossing into Exited for the first time: pushes.
+        assert!(exited_into_failure(false, Running, Exited, Some(101), None));
+        // A signal, same transition: pushes.
+        assert!(exited_into_failure(false, Running, Exited, None, Some(9)));
+        // A clean exit must never push — this is the rule that keeps the
+        // feature switched on rather than muted for closing an ordinary shell.
+        assert!(!exited_into_failure(false, Running, Exited, Some(0), None));
+        // Already Exited last tick: this is not the transition, it is the
+        // pane having been dead for a while, and must not push again.
+        assert!(!exited_into_failure(false, Exited, Exited, Some(101), None));
+        // A terminal that was already dead the first time this daemon ever saw
+        // it: restarting the daemon must not buzz for every failed build in
+        // the fleet's history.
+        assert!(!exited_into_failure(true, Running, Exited, Some(101), None));
     }
 
     /// The gate that keeps this off the hot path.

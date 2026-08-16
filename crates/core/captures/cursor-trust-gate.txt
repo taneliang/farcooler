@@ -1,0 +1,40 @@
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │                                                                                                                  │
+  │  ⚠ Workspace Trust Required                                                                                      │
+  │                                                                                                                  │
+  │  Cursor Agent can execute code and access files in this directory.                                               │
+  │                                                                                                                  │
+  │  Do you trust the contents of this directory?                                                                    │
+  │                                                                                                                  │
+  │    /private/tmp/claude-502/-Users-e-liang-Dev-overnight/9dd767ba-acbf-4124-87b3-c7d8662f60e7/scratchpad/bare2    │
+  │                                                                                                                  │
+  │                                                                                                                  │
+  │  ▶ [a] Trust this workspace                                                                                      │
+  │    [q] Quit                                                                                                      │
+  │                                                                                                                  │
+  │  Use arrow keys to navigate, Enter to select, or press the key shown                                             │
+  │                                                                                                                  │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

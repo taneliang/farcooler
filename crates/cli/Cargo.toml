@@ -31,3 +31,6 @@ serde_json.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+# Test-only: building a `Timestamp` to check `turnStartedAt`'s conversion
+# without duplicating prost's own struct shape by hand.
+prost-types.workspace = true

@@ -1,0 +1,40 @@
+
+╭─── Claude Code v2.1.233 ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                        │
+│                Welcome back E-Liang!               │ Ask Claude to create a new app or clone a repository            │
+│                                                    │ ─────────────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ What's new                                                      │
+│                      ▝▜█████▛▘                     │ Added GitLab merge request URL support to the `--worktree` fla… │
+│                        ▘▘ ▝▝                       │ Added an opt-in `forward_user_identity` apps gateway setting o… │
+│   Opus 5 (1M context) with high… · Claude Max ·    │ Added opt-in memory cgroup support for Bash tool commands on L… │
+│   o.o@elt.sg's Organization                        │ /release-notes for more                                         │
+│                /…/scratchpad/probe                 │                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ Write a haiku about tmux to haiku.txt, then tell me what the phrase 'esc to interrupt' means in a terminal UI
+
+⏺ Write(haiku.txt)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file
+ haiku.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 Panes split like rice fields—
+  2 detach, and the session breathes
+  3 alone in the dark.
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create haiku.txt?
+ ❯ 1. Yes
+   2. Yes, allow all edits during this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend
+
+
+
+
+
+
+
+

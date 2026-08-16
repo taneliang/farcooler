@@ -1485,9 +1485,11 @@ impl Rpc {
         view: &crate::service::TerminalView,
     ) -> farcooler_protocol::v1::Terminal {
         let mut message = wire::terminal_with_agent_state(view, self.service.agents());
-        let (activity, changed_at) = self.watcher.activity(view.terminal.id).await;
+        let (activity, state_since, turn_started_at) = self.watcher.activity(view.terminal.id).await;
         message.activity = activity as i32;
-        message.activity_changed_at = changed_at.map(wire::timestamp);
+        message.activity_changed_at = state_since.map(wire::timestamp);
+        message.turn_started_at = turn_started_at.map(wire::timestamp);
+        message.blocked_question = self.watcher.blocked_question(view.terminal.id).await;
         if let Some(command) = self.watcher.command(view.terminal.id).await {
             message.current_command = command;
         }

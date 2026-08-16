@@ -191,6 +191,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Timed on the host rather than by the client, so "working for 4m" does
     /// not restart at every reconnect or lie after a laptop sleeps.
     var activitySince: Double?
+    /// How the command ended. Absent while it is still running, and absent from
+    /// older daemons — which is why a missing value is never read as a failure.
+    var exitCode: Int?
+    var exitSignal: Int?
+    /// Unix milliseconds when the current TURN started, from the daemon.
+    var turnStartedAt: Double?
+    /// What the agent is asking, when it is blocked.
+    var blockedQuestion: String?
     var epoch: Int
     /// What this terminal's pane is hosting. Absent on older daemons, which is
     /// why it is optional rather than defaulted to something that would look
@@ -337,7 +345,15 @@ struct Terminal: Decodable, Identifiable, Hashable {
             case .done: return .done
             }
         case .starting: return .starting
-        case .exited: return .exited
+        case .exited:
+            // A non-zero code or a signal is a failure worth seeing; a clean
+            // exit is not. An ABSENT code is not a failure either — an older
+            // daemon sends none, and reading that as broken would mark every
+            // finished terminal on the machine.
+            if exitSignal != nil || (exitCode.map { $0 != 0 } ?? false) {
+                return .failedRun
+            }
+            return .exited
         case .error: return .failed
         case .lost: return .lost
         // `StateKind.unknown` is both the daemon's `unknown` and anything this
@@ -359,11 +375,53 @@ struct Terminal: Decodable, Identifiable, Hashable {
         guard status == .blocked || status == .working, let since = activitySince else {
             return nil
         }
-        let seconds = Date().timeIntervalSince1970 - since / 1000
+        return Self.brief(secondsSince: since)
+    }
+
+    /// How long the whole turn has been running.
+    ///
+    /// Distinct from `statusDuration`, and the one a person means by "how long
+    /// has this been going". It does not restart when a permission prompt is
+    /// approved, because saying yes to a tool call does not begin a new turn.
+    var turnDuration: String? {
+        guard let since = turnStartedAt else { return nil }
+        return Self.brief(secondsSince: since)
+    }
+
+    private static func brief(secondsSince millis: Double) -> String? {
+        let seconds = Date().timeIntervalSince1970 - millis / 1000
         guard seconds >= 5 else { return nil }
         if seconds < 60 { return "\(Int(seconds))s" }
         if seconds < 3600 { return "\(Int(seconds / 60))m" }
         return "\(Int(seconds / 3600))h"
+    }
+
+    /// The one duration worth putting beside the status label.
+    ///
+    /// "Working 12m" answers a different question from "Needs you 2m", and
+    /// conflating them is the bug the two clocks exist to fix: `Working` is
+    /// only ever mid-turn, so the turn clock is the honest answer to "how
+    /// long has this been going"; `Blocked` wants the state clock, because a
+    /// permission prompt held for twenty minutes is the thing to notice, not
+    /// how long the turn around it has run.
+    var displayDuration: String? {
+        status == .working ? turnDuration : statusDuration
+    }
+
+    /// What the agent is asking, when asking is what it's doing.
+    ///
+    /// The daemon derives this from the pane, redacts it, and carries it on
+    /// every read path — and a row that only says "Needs you" makes you open
+    /// the pane to find out what for, which is the trip this whole feature
+    /// exists to save.
+    ///
+    /// Gated on the status rather than shown whenever the field is set: the
+    /// question stays on the record after the prompt is answered, and "Working
+    /// — Do you want to create haiku.txt?" reads as a question still open.
+    var openQuestion: String? {
+        guard status == .blocked else { return nil }
+        let asked = blockedQuestion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return asked.isEmpty ? nil : asked
     }
 }
 
@@ -374,6 +432,12 @@ struct Terminal: Decodable, Identifiable, Hashable {
 /// nothing at all in a screenshot.
 enum Status: Equatable {
     case starting, running, idle, working, blocked, done, exited, failed, lost
+    /// The command ended badly.
+    ///
+    /// Distinct from `exited`, which is a shell you closed or a server you
+    /// stopped and is not news. A build that failed overnight is the reason to
+    /// look at the fleet at all.
+    case failedRun
     /// The machine did not answer, so this row is not saying anything.
     ///
     /// Distinct from `lost`, which is a finding the daemon actually made. This
@@ -396,6 +460,7 @@ enum Status: Equatable {
         case .blocked: return "Needs you"
         case .done: return "Done"
         case .exited: return "Exited"
+        case .failedRun: return "Failed"
         case .failed: return "Failed to start"
         case .lost: return "Lost"
         case .unreadable: return "Not answering"
@@ -409,6 +474,7 @@ enum Status: Equatable {
     /// badge on the window every time a pane took a moment to answer.
     var wantsAttention: Bool {
         self == .blocked || self == .done || self == .lost || self == .failed
+            || self == .failedRun
     }
 
     /// Should it move?

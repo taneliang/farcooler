@@ -61,6 +61,12 @@ pub struct TaggedPane {
     /// terminal was launched as says nothing about what is running in it now,
     /// and only the live process does.
     pub command: String,
+    /// The pane's OSC title, as its program set it.
+    ///
+    /// Empty for most programs. The three coding agents all set one, and it
+    /// carries both what they are doing and what they are doing it to — see
+    /// `crate::title`.
+    pub title: String,
 }
 
 impl TaggedPane {
