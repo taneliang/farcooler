@@ -83,10 +83,17 @@ there, because that laptop is already signed in and the passer-by would be using
 *your* session. What stops them is being asked for a fingerprint they do not
 have.
 
-The account gate covers a different case — a device that is not yours cannot be
-enrolled even if the first gate is somehow passed — and it costs the ceremony its
-ability to run offline, which is a trade worth making explicitly rather than by
-omission.
+The account gate covers two other things. A device that is not yours cannot be
+enrolled even if the first gate is somehow passed. And — the reason that would
+justify it on its own — **a device enrolled from another account makes the device
+list wrong.** It would hold keys on your machines while appearing in someone
+else's Settings › Devices, so your list would not show it, "Remove Device" could
+not reach it, and the one screen that is supposed to answer "what can reach my
+machines" would be quietly incomplete. Someone with a work account and a personal
+account would produce that by accident, not by attack.
+
+The cost is that the ceremony no longer runs offline, which is a trade worth
+making explicitly rather than by omission.
 
 ## Blocking prerequisites
 
@@ -129,7 +136,12 @@ fresh-authentication requirement below depends on.
 
 ## The ceremony
 
-**1. The new device shows a QR code.** It generates its keys, then displays:
+**1. The new device signs in, then shows a QR code.** Sign-in comes first and is
+not optional: the device registers its keys against the account, which is what
+makes step 2's check answerable at all. A device that is not signed in has no QR
+code to show.
+
+It generates its keys, then displays:
 
 | Field | |
 | --- | --- |
@@ -151,6 +163,17 @@ from a timestamp inside the code, which the displaying device controls. A stale
 screenshot presented later is rejected because the scanner has not seen it
 within its own window, and `nonce` makes a replayed one a different ceremony
 rather than a repeat of the same one.
+
+A key on another account, or on no account, stops here — before the confirmation
+sheet appears, so there is never a moment where the machines are on screen and
+only a fingerprint stands between a stranger and them:
+
+> ### That device is signed into a different account
+>
+> Far Cooler can only add devices signed into **o.o@elt.sg**. Sign in to that
+> account on the new device, then show its code again.
+>
+> **[ Done ]**
 
 **3. The confirmation sheet**, then enrollment on each chosen machine.
 
@@ -640,7 +663,7 @@ signed into the same account, and a fingerprint at the confirmation.
 | --- | --- |
 | Anonymous internet | Cannot begin. Nothing that authorizes an enrollment travels over the network. |
 | **Someone at your unlocked laptop** | **Refused at the confirmation**, which demands a fingerprint or passcode they do not have. An account check would not have helped: that laptop is signed in, and they would be using your session. |
-| A device that is not on your account | Refused before the confirmation, when the trusted device asks the relay whose key it just scanned. |
+| A device that is not on your account | Refused before the confirmation, when the trusted device asks the relay whose key it just scanned. Also the answer to an honest mistake: a second account's phone would otherwise hold keys on your machines while appearing in a device list you cannot see. |
 | WorkOS account takeover | Cannot enroll anything — enrollment needs a QR scanned in person and a local authentication. Cannot forge a later grant, which needs a signature verified against a machine's fence. Can read the roster and machine labels, and can push notifications. |
 | Compromised relay or D1 | Absent from enrollment entirely. For later grants, cannot forge a signature or substitute a key ground truth does not confirm. Can withhold a blob, and learns device names, public keys and machine labels. |
 | Someone filming the QR exchange | **Nothing.** Two public keys and a list of addresses they cannot reach. There is no secret in either code. |
