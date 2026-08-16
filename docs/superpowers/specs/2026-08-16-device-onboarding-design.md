@@ -707,24 +707,38 @@ the previous section arrived at from a different direction — and holding both
 accounts at once is what makes it useful rather than merely safe, because the
 alternative it replaces is signing out of one to use the other.
 
-**An account is a property of a grant, not of a machine.** An earlier draft said
-a machine belongs to exactly one account, reasoning from the daemon holding one
-pairing. That conflated two different things, and a Mac is where the conflation
-breaks: a Mac runs `farcoolerd`, so it is a machine, *and* it reaches other
-machines, so it is a device — and a device may hold several accounts. Asking
-which single account owns it has no good answer.
+**A machine has one pairing, and a pairing is not ownership.** Two earlier drafts
+got this wrong in opposite directions — first by saying a machine *belongs* to
+one account and letting that constrain grants, then by giving a machine several
+pairings to fix the Mac case. The second is worse: two pairings mean two `daemons`
+rows for one physical machine, a roster that holds no address or host key to
+dedupe them with, and a fence carrying two of the same device's keys with no rule
+about which one it should connect with. Duplication in the fleet and ambiguity at
+the door, bought for nothing.
 
-So the three facts are independent:
+The fix is precision, not plurality. Three separate facts:
 
 | | |
 | --- | --- |
-| **A grant** | Belongs to one `(device, machine)` pair and carries the granting device's account, which the fence entry records alongside the client id and scope. A machine's fence may hold keys from several accounts; `authorized_keys` neither knows nor cares. |
-| **A pairing** | `(machine, account)`, and a machine may have several or none. It decides where that machine's notifications go and which account rosters list it. `crates/daemon/src/push.rs` holds one today and becomes a list. |
+| **A pairing** | One per machine, as `crates/daemon/src/push.rs` already has it. It decides one thing: where that machine's notifications go, and therefore which account's roster lists it. |
+| **A grant** | One per `(device, machine)` — never one per account per machine. It records which account it was made under, in the fence entry beside the client id and scope. |
 | **A device's accounts** | However many you sign into, each with its own Key A. |
 
-**Unpairing an account offers to remove that account's grants**, the same
-honesty sign-out gets: a machine that stops notifying work while work's keys stay
-in its fence is retained access nobody can see from either side.
+So a Mac paired to your personal account is "a personal machine" **for
+notifications only**. Your work phone can still hold a grant on it, still see its
+workspaces, and still drive it. What it does not get is a push from that Mac, and
+that Mac does not appear in work's roster of machines-you-could-ask-for.
+
+**The fleet has no duplicates because it is not built from the roster.** A device
+lists the machines it holds grants on, from its own local record, and one machine
+is one entry however many accounts are involved. Terminals cannot double either:
+they arrive from the daemon over one connection, and a daemon has no notion of
+account at all.
+
+**A device already holding a grant on a machine is not granted a second one.**
+The ceremony says so — *"iPhone 17 already has access to box, under
+personal@…"* — rather than adding a parallel key that nothing knows how to
+choose between.
 
 ### An account is not a boundary inside a machine
 
@@ -748,7 +762,7 @@ deliberately defers, and which this document does not smuggle in by implication.
 
 | | |
 | --- | --- |
-| The fleet | One list of the machines this device holds grants on, whichever account granted each. A machine reached through two accounts appears once, because it is one machine. |
+| The fleet | One list of the machines this device holds grants on, from its own local record rather than any account's roster — so a machine appears exactly once, and cannot appear twice however many accounts are in play. |
 | Devices | Per account. Work's Settings › Devices lists work devices; it has no idea the personal ones exist. |
 | The ceremony | The new device picks which of its accounts it is joining and the QR names it. The scanning device offers every machine it can enroll on, each row naming the account that will own the grant — so putting a work phone on your personal Mac is possible, explicit, and recorded. |
 | Sign-out | Per account, and takes only that account's key and grants with it. |
@@ -760,8 +774,9 @@ sheet says which one it is adding to. A QR naming an account the scanning device
 does not hold is refused with the copy in step 2.
 
 And a Mac is both at once with no tension: signed into work and personal as a
-*device*, paired to either or both as a *machine*, and those are separate
-settings that never have to agree.
+*device*, paired to one account as a *machine* so its notifications have one
+destination, and those two settings never have to agree. Pairing it to personal
+does not stop a work phone holding a grant on it.
 
 What this does **not** do is put a boundary between the two accounts on the
 device itself. Both keys sit in the same Keychain, and a compromised phone
@@ -1007,9 +1022,12 @@ does not apply to SSO users, so it is not something to lean on.
 - **Nothing is transitive.** There is no protocol path by which a device holding
   `control` on one machine obtains a key on another, at any scope, including
   `host_admin`. The test is the absence of the RPC, asserted rather than assumed.
-- **Account lifecycle.** A machine pairs to two accounts and notifies both, and
-  unpairing one offers to remove that account's grants and closes their sessions;
-  a fence entry records the granting account and `client list` shows it;
+- **No duplicates, no second grant.** A device signed into two accounts, holding
+  a grant on a machine paired to one of them, sees that machine exactly once and
+  its terminals exactly once; a ceremony offering a machine the device already
+  has access to reports the existing grant and its account rather than enrolling
+  a second key. A fence entry records the granting account and `client list`
+  shows it;
   "Remove This Account From This Device" deletes the key material and a plain
   sign-out does not; a revocation blocked by an offline machine leaves a
   tombstone that survives sign-out and retries.
