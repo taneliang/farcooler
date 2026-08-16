@@ -626,6 +626,47 @@ nothing can reach it keeps a stale block on every client, and the ceremony or th
 manual path is how it comes back — host key pinning means the failure is an
 outage rather than a takeover.
 
+## One key per account, and what signing out does not do
+
+A device's Key A belongs to a `(device, account)` pair, not to the device. It is
+stored under the account's identifier and never reused across accounts.
+
+That is not about the lookup — the account-scoped query above already tolerates
+one fingerprint appearing under two accounts. It is about what a key *is*. A key
+enrolled on your machines outlives any session: signing out removes nothing from
+anyone's `authorized_keys`. So without per-account keys, a phone that signs out
+of one account and into another **keeps SSH access to the first account's
+machines**, carrying it silently into the second. The same person with a work and
+a personal account gets a confusing device list. A phone handed to someone else
+gets a stranger onto the previous owner's machines.
+
+Per account, the three cases go the way people expect:
+
+| | |
+| --- | --- |
+| Sign out, sign back into the same account | The same key is still there and still enrolled. Nothing breaks. |
+| Sign into a different account | A fresh key, enrolled nowhere. That account's ceremony starts clean. |
+| The old account's key | Dormant, unused, and still in the old machines' fences — which is exactly what the screen below is for. |
+
+Regenerating on *every* sign-out would be the wrong reflex: an accidental sign-out
+would cost every machine and a trip to run the ceremony again.
+
+**Signing out says what it does not do**, and offers to do it, because at that
+moment the device still holds the access it is about to stop managing:
+
+> ### Sign out of Far Cooler?
+>
+> Signing out doesn't remove this iPhone's access to your machines. Its key stays
+> in `~/.ssh/authorized_keys` on **MacBook Pro** and **box** until it's removed.
+>
+> ☐ Also remove this iPhone's access to those machines
+>
+> **[ Sign Out ]**  [ Cancel ]
+
+Unchecked by default, because most sign-outs are temporary. Checked, it revokes
+itself from each machine it can still reach and names the ones it cannot, the
+same as "Remove Device" from elsewhere.
+
 ## Where a phone's key lives
 
 An earlier draft said a phone's key is generated "in the Secure Enclave or the
@@ -727,6 +768,7 @@ signed into the same account, and a fingerprint at the confirmation.
 | A compromised `control` device | **Full host-user authority, by design.** It can enroll its own keys and install persistence that survives revocation. Removal lists what it enrolled; the documented recovery is revoke, then audit. |
 | A `read` device | Genuinely confined by `restrict` plus a forced command — once prerequisite 1 makes the scope real. |
 | **A Mac's Key B, once enrolled** | **A shell, by design.** Key A keeps its Far Cooler sessions identifiable and revocable; Key B is not claimed to be contained, and removing it does not close an open shell. |
+| **A device that changes hands** | The new owner signs into their own account and gets a **fresh key enrolled nowhere** — keys are per account, so the previous owner's access is not inherited. The old key stays dormant on the device and in the old machines' fences until removed, which is what the sign-out screen offers and what "Remove Device" does from elsewhere. |
 | Stolen unlocked trusted device | **Works.** It already holds access. Mitigated by biometry on the confirmation, fresh authentication, and revocation from any other device. |
 | **Cloned phone key** | **Works, and is currently undetectable.** The key is a software key; see above. The largest unmitigated risk in the design. |
 | Every device lost | Ordinary SSH plus `farcooler client revoke`. No account-recovery bypass, deliberately. |
@@ -771,6 +813,10 @@ does not apply to SSO users, so it is not something to lean on.
   offered a remote path.
 - **The relay holds no key.** Its device rows carry a fingerprint, and every
   enrollment path refuses a key that did not come from a ceremony or a fence.
+- **Keys are per account.** Signing out and back into the same account keeps the
+  key and every grant; signing into a different one produces a different
+  fingerprint enrolled nowhere, and never offers the first account's machines.
+  Two accounts on one device hold two keys that are never interchanged.
 - **Scope.** A `read` client cannot enroll, cannot revoke, and cannot reach a
   `control` operation.
 - **Derivation.** A device whose line is deleted by hand reports *not
