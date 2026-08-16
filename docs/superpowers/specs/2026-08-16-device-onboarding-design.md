@@ -58,12 +58,23 @@ false. A `control` device drives a terminal, and a terminal can append to
 
 ## The rule that makes this safe
 
-**Nothing that authorizes an enrollment travels over the network.**
+**Access is granted in person, once, by a human who already holds it.**
 
 Both legs of the ceremony are screen-to-camera. The trusted device enrolls over
 access it already holds. The relay carries no key, no manifest and no
-authorization — it answers exactly one question, below, and a wrong answer from
-it can only refuse an enrollment, never cause one.
+authorization — it answers exactly one question, below.
+
+There is **one** way to gain access to a machine, and adding a device and adding
+a machine to an existing device are the same act. Nothing is transitive: holding
+a key on one machine never becomes a key on another, however reachable it is from
+there. An earlier draft let a device ask a machine it reached to enroll it
+somewhere new, which was convenient and quietly made the per-machine boundary
+decorative — the property that lets one account hold a work machine and a
+personal phone without either reaching the other.
+
+The cost is stated rather than hidden: **adding a server to an existing phone
+means being next to a device that already reaches it.** For a remote fleet that
+is the common case, not the rare one, and the manual path is always there.
 
 ### Two gates, and only one of them is the account
 
@@ -96,11 +107,25 @@ stops the route being a key-enumeration oracle.
 A phone signed into another account has no row on yours. A phone signed into
 nothing has no row at all, which is why sign-in comes before the code.
 
-**This gate is not relay-proof, and is not claimed to be.** A compromised relay
-can answer yes to anything. What it cannot do is make someone scan a QR code or
-produce a fingerprint, so the most it achieves is turning a refusal into a pass
-for a device already being held up to your camera — relay compromise plus
-physical presence, at which point the local gate below is what remains.
+**Registration proves possession.** The device signs its own device id with Key A
+when it registers, and the relay verifies against the key it is being asked to
+record. Without that, a session-holder could register any fingerprint they had
+seen anywhere, and this gate would check membership of a registry rather than
+that the device in front of you holds the key it is showing.
+
+**A row is `pending` until a ceremony completes.** The new device creates it —
+it is the only party that can prove possession — and the trusted device promotes
+it to `verified` after enrolling. A `pending` row grants nothing, appears in the
+device list as unverified, and expires. Two earlier passages of this document
+disagreed about which side created the row; this is the resolution.
+
+**This gate is not relay-proof.** A compromised relay can answer *yes* to
+anything, so it can turn a refusal into a pass for a QR code being held up to
+your camera — which makes relay compromise plus physical substitution an
+enrollment, not merely a nuisance. What it cannot do is produce a fingerprint at
+the confirmation, which is the gate that remains. An earlier draft of this
+section claimed a wrong relay answer "can only refuse"; that was false and
+contradicted a later paragraph of this same document.
 
 **Offline is a refusal, not a bypass.** A trusted device that cannot reach the
 relay does not enroll.
@@ -187,11 +212,21 @@ It generates its keys, then displays:
 | `key_b` | its shell public key — Macs only, and only if shell access was chosen |
 | `name` | its device name |
 | `account` | which account it is joining — an opaque id, not a credential |
+| `channel` | stable, preview, canary or local |
+| `ceremony` | 128 random bits, which the reply must echo |
 
-No secret. Everything here is public, and a photograph of it is worth nothing:
-enrolling these keys grants access to a device the photographer does not hold.
-There is no nonce, because enrolling a key twice is the same as enrolling it
-once — a replayed scan has nothing to replay.
+No secret. Everything here is public, and a photograph of it is worth nothing on
+its own: enrolling these keys grants access to a device the photographer does not
+hold.
+
+`ceremony` is not a secret either — it is a correlator. A draft of this document
+removed it, reasoning that enrolling a key twice is the same as enrolling it
+once. That is true of this leg and false of the reply, which had nothing left
+tying it to the request: two devices being onboarded in one room could scan each
+other's manifests, and yesterday's manifest was as acceptable as today's.
+
+`channel` is here because the four deployments must not accept each other's
+ceremonies, and an earlier draft bound the account but not the channel.
 
 **2. A device you already trust scans it.** That device now holds the new
 device's keys, taken off a screen with no network in between, and checks with the
@@ -218,11 +253,30 @@ only a fingerprint stands between a stranger and them:
 
 **4. The trusted device shows a QR code back**, carrying the manifest: for each
 machine granted, its address, user, port, host key fingerprint and alias. A
-machine is about 120 bytes and a version-40 code holds roughly 1850, so **one
-static code, capped at fifteen machines.** Past that, grant some now and the rest
-from the new device later. No animated sequence, no reassembly, no partial-set
-handling — a cap that will almost never be reached beats machinery that always
-exists.
+machine is about 120 bytes, so **one static code with a cap**, and no animated
+sequence, no reassembly, no partial-set handling. The cap is whatever the encoder
+reports as fitting at the chosen error-correction level after the header below,
+measured rather than assumed — roughly fifteen machines, but a stated byte budget
+is the mechanism and a machine count is the consequence. Past the cap, grant the
+rest by running the ceremony again.
+
+The reply repeats `ceremony`, `account`, `channel` and the **fingerprint of the
+Key A it is answering**, so it can be consumed only by the device that asked, for
+the ceremony it asked in. A new device refuses a reply that does not match the
+code it is still showing, and refuses a second reply once it has taken one.
+
+**What this leg is, precisely.** It is not authenticated. Coming off a screen
+identifies no signer — an earlier draft said otherwise and was wrong. What the
+echoed `ceremony` gives is *correlation*: it defeats crossing two ceremonies in
+one room, replaying an old manifest, and anyone who did not see the first code.
+The residual risk is someone who filmed the first QR, is physically present, and
+presents a forged reply before the real one appears. That is narrow, it requires
+being in the room at the moment, and it is in the threat model rather than argued
+away.
+
+**And the reply is worth photographing**, unlike the first: it carries usernames,
+private addresses, ports, aliases and host fingerprints — your fleet topology.
+Not access, but not nothing.
 
 This leg needs no signature and no encryption. It is pixels to a lens, with no
 network and no third party — the same channel as the first leg, pointed the
@@ -240,42 +294,43 @@ and succeeds. Nothing more has to be delivered.
 the manual path, and the app says so rather than inventing a weaker exchange for
 the case where the strong one does not fit.
 
-## Later grants are self-service
+## There are no remote grants
 
-Giving an already-enrolled device access to a *new* machine happens months later,
-with nobody standing next to anybody, so the camera is unavailable.
+Giving an already-enrolled device access to a *new* machine is **the same
+ceremony**, run again. The phone shows its code, a device that already reaches the
+new machine scans it, and the reply carries that machine. Nothing about the flow
+distinguishes a device's first machine from its fifth.
 
-An earlier draft had the relay carry a signed, encrypted manifest between the two
-devices, with signatures verified against the fence of a machine they share. It
-worked, and it was a subsystem — signing, encryption, a TTL, rate limits, and a
-verification story — built to move one thing: **a machine's address.**
+Two earlier drafts tried to avoid that, and both were worse.
 
-There is already a path that moves it with no relay at all. **A device asks a
-machine it already reaches to enroll it on the new one.** That machine has SSH to
-the new one — it is how the new one was installed — so it calls `client.enroll`
-there and returns the address, port, host key fingerprint and alias over the
-connection the asking device already holds. Every hop is authenticated, every
-host key is pinned, and nothing passes through anything that could forge it.
+**A relay-carried signed grant** was a whole subsystem — signing, encryption, a
+TTL, rate limits and a verification story — built to move one thing, a machine's
+address, through a party trusted with neither.
 
-The rule that follows, and the reason this stays simple:
+**A device asking a machine it reaches to enroll it elsewhere** was simpler and
+quietly broke the property this document exists to protect. Grant a phone access
+to `box` alone; because `box` can reach `work-mini`, the phone obtains a durable
+key on `work-mini` — one that survives `box` revoking it. A grant on one machine
+became a grant on everything reachable from it, which makes the per-machine
+boundary decorative, and that boundary is the reason one account can hold a work
+machine and a personal phone.
 
-**A device learns a machine's address only from something it is already talking
-to.** The ceremony, or a machine it already reaches. Nothing else.
+It also had no way to prove an account to the far machine, and left a compromised
+intermediary choosing which address and host key the asking device would trust.
 
-So **later grants are self-service**: you add machines *from the device that
-wants them*. Settings › Devices on another device shows that device's grants
-read-only, and says to grant from there. That removes remote cross-device
-granting, which is the only case that ever needed the relay, and costs a habit
-nobody has formed yet — you ask for access on the device you are holding.
+So: **nothing is transitive, and every grant is a human, in person, exercising
+authority they already hold.** That is the least surprising rule available, and
+being unsurprising is most of what makes a security model trustworthy.
 
-If no machine you can reach also reaches the new one, the answer is the ceremony
-in person or the manual path, and the app says exactly that.
+Settings › Devices elsewhere shows a device's grants read-only and says where to
+grant from. The manual path — paste the key, type the address — is always
+available and is the answer when nobody can be in the same room.
 
 ## What the relay stores
 
 | | |
 | --- | --- |
-| Devices | id, label, push token, **key_a fingerprint**, created_at |
+| Devices | id, label, push token, **key_a fingerprint**, `pending`/`verified`, created_at |
 | Machines | id, label — the existing `daemons` rows |
 | Keys | **none** |
 | Addresses | **none** |
@@ -286,11 +341,11 @@ exists and what you call it. It never learns how to reach one, holds nothing tha
 could be installed anywhere, and is absent from enrollment except for one lookup
 whose worst possible answer is a refusal.
 
-A device row is created by the **trusted** device after enrollment. `/v1/devices`
-requires only an account session (`index.ts:224`), so a row the relay or a
-session-holder fabricates proves nothing: a device whose key matches no fence
-entry and no completed ceremony is shown as **unverified** and cannot be granted
-anything.
+A device row is created `pending` by the **new** device, which is the only party
+that can prove possession of the key, and promoted to `verified` by the trusted
+device after enrollment. `/v1/devices` requires only an account session
+(`index.ts:224`), so a `pending` row proves nothing on its own: it grants
+nothing, shows in the device list as unverified, and expires.
 
 The account lookup is rate limited per account and fails closed. The existing
 limiter covers only `/v1/auth/*`, is keyed by IP, and fails open when its binding
@@ -380,11 +435,18 @@ hostile.
 One Key A per device, not per machine — the same key is enrolled on every machine
 that device reaches, exactly as a phone's is.
 
-It lives at `<channel runtime dir>/keys/device`, a fixed name under the
-channel's own directory. Not a path built from a machine label: a label is
+It lives at `<channel config dir>/keys/<account id>` — one key per account, since
+Key A belongs to a `(device, account)` pair, and a single fixed `keys/device`
+would have the second account overwrite the first. The account id is the relay's
+opaque identifier, validated as such; never a machine label, since a label is
 mutable and user-supplied, so `../`, `/` and collisions all become key files in
-the wrong place or orphaned on rename. Channel-scoped because stable, preview,
-canary and local must not share a key any more than they share a daemon.
+the wrong place or orphaned on rename.
+
+**A config directory, not a runtime one.** A runtime directory is cleared on
+reboot or logout on some platforms, which would delete a private key whose public
+half is still enrolled on every machine — a device that silently stops being able
+to reach anything and cannot revoke itself either. Channel-scoped for the same
+reason the daemon is: stable, preview, canary and local share nothing.
 
 The directory is created `0700`, the key `0600`, both opened with
 descriptor-relative calls and `O_NOFOLLOW`, and the key with `O_EXCL` so an
@@ -639,12 +701,29 @@ the previous section arrived at from a different direction — and holding both
 accounts at once is what makes it useful rather than merely safe, because the
 alternative it replaces is signing out of one to use the other.
 
-**A machine belongs to exactly one account.** Its daemon holds one pairing
-(`crates/daemon/src/push.rs`), so an account is a property of the machine, not of
-the connection. Moving a machine between accounts is re-pairing it, which is
-deliberate and visible. Everything else follows from that: an action is
-unambiguous because the machine it targets names the account, and no screen ever
-has to ask which one you meant.
+**A machine belongs to exactly one account — as a product rule, not as something
+sshd enforces.** Its daemon holds one pairing (`crates/daemon/src/push.rs`), so
+one account is where its notifications go and which fleet it appears in. But
+`authorized_keys` will accept a key from anywhere: the fence entry carries a
+client id and a scope, not an authenticated account, and a hand-written line
+carries whatever someone typed. So the rule holds because Far Cooler enrolls one
+account's keys, not because a second account's key would be rejected at the door.
+
+Two consequences worth writing down:
+
+**The fence entry carries the account**, alongside the client id and scope, so
+the daemon can say which entries it believes are its own account's and report
+anything else as foreign — visible in `farcooler client list` rather than
+invisible.
+
+**Re-pairing a machine to another account quarantines the first account's
+entries**, and closes their live sessions, before the new pairing takes effect.
+Without that, re-pairing `box` from work to personal leaves work's keys and open
+sessions in place while `box` vanishes from work's fleet and stops notifying it —
+retained access that nobody can see from either side.
+
+With those, an action is unambiguous because the machine it targets names the
+account, and no screen has to ask which one you meant.
 
 | | |
 | --- | --- |
@@ -723,11 +802,28 @@ moment the device still holds the access it is about to stop managing:
 >
 > Your other accounts on this iPhone aren't affected.
 >
-> **[ Sign Out ]**  [ Cancel ]
+> **[ Sign Out ]**  [ Remove This Account From This Device ]  [ Cancel ]
 
 Unchecked by default, because most sign-outs are temporary. Checked, it revokes
-itself from each machine it can still reach and names the ones it cannot, the
-same as "Remove Device" from elsewhere.
+itself from each machine it can still reach and names the ones it cannot.
+
+**Two operations, because one cannot serve both.** *Sign Out* is temporary and
+keeps the key, so signing back in costs nothing. *Remove This Account From This
+Device* revokes the grants **and deletes the key material** — the operation for a
+phone you are selling, where leaving an unused private key on the device is the
+whole problem. An earlier draft had only the checkbox, which optimized for the
+accidental sign-out and left ownership transfer with no correct answer.
+
+**A revocation that cannot finish leaves a tombstone.** Checked sign-out against
+an offline machine has to keep the old key, the machine's identity and the
+pending removal on disk, and retry — otherwise the act of signing out discards
+the only thing capable of finishing the job. The tombstone survives sign-out and
+is cleared when the machine confirms.
+
+**Deleting the account at WorkOS revokes nothing**, so account deletion walks the
+grants the same way and names what it could not reach. Afterwards there is no
+sign-in left to try again with, which is why it has to happen before rather than
+after.
 
 ## Where a phone's key lives
 
@@ -809,11 +905,10 @@ signed into the same account, and a fingerprint at the confirmation.
 
 | | |
 | --- | --- |
-| From the device that wants it | Ask a machine it already reaches to enroll it on the new one. That machine returns the address on the connection you already hold. |
-| From the machine itself | A Mac you are at: Settings › Devices → check the device. Local write. |
-| For some other device, remotely | Not offered. Grant from that device — its Settings › Devices is read-only elsewhere and says so. |
-| No machine in common | The ceremony in person, or the manual path. |
-| Any time | Paste the key into `authorized_keys` yourself. |
+| In person | The same ceremony, run again. A device that already reaches the new machine scans the phone's code; the reply carries that machine. |
+| From the machine itself | A Mac you are at, granting a device standing next to you: the same ceremony, with that Mac as the scanner. Local write, no SSH. |
+| Remotely | **Not offered, at all.** Nothing is transitive, and no device can obtain a key on a machine because something it reaches can get there. |
+| Nobody can be in the same room | Paste the key into `authorized_keys` and type the address. The manual path is the remote path. |
 
 ## Threat model
 
@@ -824,13 +919,16 @@ signed into the same account, and a fingerprint at the confirmation.
 | A device that is not on your account | Refused before the confirmation, when the trusted device asks the relay whose key it just scanned. Also the answer to an honest mistake: a second account's phone would otherwise hold keys on your machines while appearing in a device list you cannot see. |
 | WorkOS account takeover | Cannot enroll anything — enrollment needs a QR scanned in person and a local authentication, and later grants never cross the network. Can read the roster of device labels, machine labels and fingerprints, and can push notifications. |
 | Compromised relay or D1 | Carries no key, no address and no grant. Its one role is the account lookup, where a false *yes* still needs a QR held to your camera and a fingerprint, and a false *no* is a refusal. Learns device labels, machine labels and fingerprints, and can push notifications. |
-| Someone filming the QR exchange | **Nothing.** Two public keys and a list of addresses they cannot reach. There is no secret in either code. |
+| Someone filming the **first** QR | Two public keys and an account id. No access — enrolling those keys grants a device they do not hold. |
+| Someone filming the **second** QR | **Your fleet topology**: usernames, private addresses, ports, aliases and host fingerprints. Not access, and not nothing. |
+| Someone who filmed the first QR **and is in the room** | **Can present a forged reply before the real one.** The new device would pin their host key and connect to their server. The echoed `ceremony` id defeats everyone else — a crossed ceremony, an old manifest, anyone who was not watching — but not this. Narrow, physical, and the residual risk of the design. |
 | MITM between an enrolling device and a machine | Refused — the host key is pinned from a manifest that came through a camera. |
 | Hostile key bytes | Rebuilt from key data alone, Ed25519 only, CR/LF refused before parsing. |
 | A compromised `control` device | **Full host-user authority, by design.** It can enroll its own keys and install persistence that survives revocation. Removal lists what it enrolled; the documented recovery is revoke, then audit. |
 | A `read` device | Genuinely confined by `restrict` plus a forced command — once prerequisite 1 makes the scope real. |
 | **A Mac's Key B, once enrolled** | **A shell, by design.** Key A keeps its Far Cooler sessions identifiable and revocable; Key B is not claimed to be contained, and removing it does not close an open shell. |
-| **A device that changes hands** | The new owner signs into their own account and gets a **fresh key enrolled nowhere** — keys are per account, so the previous owner's access is not inherited. The old key stays dormant on the device and in the old machines' fences until removed, which is what the sign-out screen offers and what "Remove Device" does from elsewhere. |
+| **A device that changes hands** | The new owner's account gets a **fresh key enrolled nowhere**, so the app never offers the previous owner's machines. But the old key is **still on the phone and still extractable** on a rooted device or by a modified build — an app declining to use a key is not revocation. "Remove This Account From This Device" deletes the key material and is the operation that actually helps; a plain sign-out does not. |
+| **A deleted WorkOS account** | **Revokes nothing.** Every enrolled key stays valid and every live session continues, and the person can no longer sign in to invoke removal. Deleting an account must therefore walk the grants first, exactly as removing a device does, and say what it could not reach. |
 | **One account's holder, reaching for another's machines on the same device** | Refused by the product: a ceremony lists only its own account's machines, and each account's device list is its own. **Not refused by the operating system** — both keys are in one Keychain, so a compromised device compromises both accounts. An employer needing a real boundary needs a managed device. |
 | Stolen unlocked trusted device | **Works.** It already holds access. Mitigated by biometry on the confirmation, fresh authentication, and revocation from any other device. |
 | **Cloned phone key** | **Works, and is currently undetectable.** The key is a software key; see above. The largest unmitigated risk in the design. |
@@ -842,9 +940,17 @@ does not apply to SSO users, so it is not something to lean on.
 ## Testing
 
 - **The ceremony.** A QR scanned outside the scanner's own freshness window is
-  refused regardless of any timestamp inside it; the same code scanned twice
-  produces two ceremonies, not one repeated; a manifest larger than one code
-  reassembles by index and refuses a partial set.
+  refused regardless of any timestamp inside it. A manifest is refused when it
+  echoes a different `ceremony`, account, channel or target fingerprint; a second
+  manifest for a ceremony already answered is refused; a manifest produced for a
+  device in the same room is refused by the device that did not ask for it. The
+  encoder reports its own capacity and the manifest is capped by measured bytes,
+  never by an assumed machine count — and there is no reassembly path to test,
+  because there is no multi-code manifest. (An earlier draft's test list demanded
+  indexed reassembly the ceremony had already deleted.)
+- **Proof of possession.** A registration whose signature does not verify against
+  the fingerprint it is registering is refused; a `pending` row grants nothing and
+  expires; only a completed ceremony promotes one to `verified`.
 - **Both gates.** A key belonging to no device on the account is refused before
   the confirmation appears; a failed or cancelled `LocalAuthentication` enrolls
   nothing; a relay that denies the account check produces a refusal and never a
@@ -870,10 +976,15 @@ does not apply to SSO users, so it is not something to lean on.
   the app working and only Zed broken.
 - **The alias reaches the editor.** A workspace on a registered machine produces
   an `ssh://` URL naming the alias.
-- **Later grants.** A device asking a machine it reaches to enroll it elsewhere
-  receives the address on that same connection and nothing through the relay; a
-  device with no machine in common is told to run the ceremony rather than
-  offered a remote path.
+- **Nothing is transitive.** There is no protocol path by which a device holding
+  `control` on one machine obtains a key on another, at any scope, including
+  `host_admin`. The test is the absence of the RPC, asserted rather than assumed.
+- **Account lifecycle.** Re-pairing a machine quarantines the previous account's
+  fence entries and closes their sessions before the new pairing takes effect; a
+  foreign-account entry appears in `client list` as foreign rather than silently;
+  "Remove This Account From This Device" deletes the key material and a plain
+  sign-out does not; a revocation blocked by an offline machine leaves a
+  tombstone that survives sign-out and retries.
 - **The relay holds no key.** Its device rows carry a fingerprint, and every
   enrollment path refuses a key that did not come from a ceremony or a fence.
 - **Keys are per account.** Signing out and back into the same account keeps the
@@ -900,8 +1011,10 @@ does not apply to SSO users, so it is not something to lean on.
   nobody noticed.
 - **A camera-less ceremony.** Every attempt so far has been broken by review, and
   the manual path already covers the case honestly.
-- **Granting another device access remotely.** Removed deliberately: it was the
-  only case that needed the relay to carry anything, and self-service covers it
-  at the cost of a habit nobody has formed.
+- **Remote granting of any kind.** Removed deliberately, twice: once as a
+  relay-carried signed grant, and once as a device asking a machine it reached to
+  enroll it elsewhere. The second was simpler and made the per-machine boundary
+  decorative, which is a worse trade than a trip to the same room. The manual
+  path is the remote path.
 - **Bulk grant.** "Every machine" is one checkbox away and is deliberately not
   offered, because the default this document argues for is the opposite.
