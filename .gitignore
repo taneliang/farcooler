@@ -40,3 +40,6 @@ apps/android/local.properties
 # committable, which is why this names the two rather than the directory.
 .claude/worktrees/
 .claude/settings.local.json
+
+# Mockups from the brainstorming companion. Working material, not source.
+.superpowers/
