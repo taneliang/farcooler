@@ -49,6 +49,33 @@
         <key>UIApplicationSupportsMultipleScenes</key>
         <false/>
     </dict>
+    <!-- Stated, because App Store Connect refuses a bundle that leaves it
+         unsaid: "Invalid bundle. No orientations were specified" (90474), at
+         UPLOAD — after a twenty-minute build, an archive and an export have all
+         succeeded.
+
+         Two keys because the answer differs by device. TARGETED_DEVICE_FAMILY
+         is "1,2", and an iPad app has to accept all four or it cannot be a
+         multitasking citizen — a terminal in a Split View beside a browser is
+         a real way to use this. iPhone omits upside-down, which is the platform
+         convention and what the OS does anyway on a device with a notch.
+
+         A terminal has a strong opinion about width, but that belongs to the
+         layout rather than to a refusal to rotate: a landscape phone is where
+         someone reads a wide diff. -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
     <!-- The whole reason this file exists instead of a generated one. Each
          name is the .ttf's filename as bundled at the app's root — not its
          PostScript name, not its family name — which is what CoreText scans
