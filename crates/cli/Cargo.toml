@@ -17,6 +17,7 @@ farcooler-codex.workspace = true
 farcooler-claude.workspace = true
 farcooler-client.workspace = true
 farcooler-core.workspace = true
+farcooler-fence.workspace = true
 farcooler-protocol.workspace = true
 farcooler-daemon.workspace = true
 farcooler-transport.workspace = true

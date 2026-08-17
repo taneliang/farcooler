@@ -450,7 +450,7 @@ const A_MAC_S_SHELL_KEY: &str =
 /// A key somebody added to their own `authorized_keys` by hand, inside the
 /// block. Far Cooler carries it through every write and reports it as foreign.
 ///
-/// The marker text is duplicated from `crates/daemon/src/fence.rs` rather than
+/// The marker text is duplicated from `crates/fence/src/lib.rs` rather than
 /// imported: this crate does not depend on the daemon, and a test that reached
 /// for the constant would be asserting that the constant equals itself. What
 /// matters is that a file written with THESE bytes is one the daemon reads.
@@ -531,10 +531,11 @@ async fn a_device_enrolled_through_the_client_lands_in_the_runner_s_own_file() {
 /// alias — is inert if this line is restricted, and a passing unit test about
 /// JSON shapes would not notice.
 ///
-/// Two calls, one client id, and SEQUENTIAL. The daemon reads the fence outside
-/// the writer's lock, so two enrollments landing together can lose one of the
-/// keys — every Mac caller has to do it in this order for that reason, and this
-/// test does it in this order for the same one.
+/// Two calls, one client id, in order. Order is what this test is about — Key B
+/// is only meaningful once Key A exists — and no longer a concurrency
+/// requirement: `fence::update` holds the lock across the read, and
+/// `rpc_over_socket.rs`'s `a_macs_two_enrollments_may_land_at_the_same_moment`
+/// covers the concurrent case directly.
 #[tokio::test]
 async fn a_mac_enrolls_twice_and_gets_a_line_with_a_shell_behind_it() {
     let (daemon, authorized_keys) = start_with_a_scratch_home().await;
@@ -549,7 +550,7 @@ async fn a_mac_enrolls_twice_and_gets_a_line_with_a_shell_behind_it() {
     assert_eq!(a["client"]["shellAccess"], false);
     assert_eq!(a["client"]["scope"], "control");
 
-    // Key B: plain, host_admin, same client id. Never concurrently with the above.
+    // Key B: plain, host_admin, same client id.
     let b = session
         .enroll_client(A_MAC_S_SHELL_KEY, "MacBook Air", "mac-9", "host_admin", true)
         .await

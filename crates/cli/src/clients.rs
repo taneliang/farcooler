@@ -8,7 +8,7 @@
 //! already set up — and a phone has no `ssh` at all.
 //!
 //! **This module owns no rule about what may be written into `authorized_keys`.**
-//! The daemon owns all of them, over `crates/daemon/src/fence.rs`, and that is
+//! The daemon owns all of them, over `crates/fence/src/lib.rs`, and that is
 //! why `--shell-access --scope control` is sent rather than refused here: a rule
 //! copied into a second place is a rule that drifts from the file that decides.
 //! The one judgement made here is the scope WORD, and even that is made with the
@@ -27,8 +27,9 @@ pub enum ClientCmd {
     ///
     /// One call writes ONE line. A Mac is TWO calls under one client id — the
     /// restricted line Far Cooler drives, then `--shell-access` for the plain one
-    /// Zed, git and Terminal need — and they must be sequential, because the
-    /// daemon reads the file outside its writer's lock and two at once lose a key.
+    /// Zed, git and Terminal need. They no longer have to be sequential:
+    /// `fence::update` holds the lock across the read, so two landing together
+    /// cannot lose each other's key.
     Enroll {
         /// One OpenSSH public key line, as the device generated it. Nothing of it
         /// survives into the file except the key material, re-encoded.
@@ -191,7 +192,7 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
 /// unscoped line already means to sshd and therefore what a default here would
 /// hand out by accident.
 fn parse_scope(word: &str) -> Result<pb::Scope, Box<dyn std::error::Error>> {
-    farcooler_daemon::fence::scope_from_word(word).ok_or_else(|| {
+    farcooler_fence::scope_from_word(word).ok_or_else(|| {
         format!("unknown scope \"{word}\"; a device is enrolled at read, control or host_admin")
             .into()
     })

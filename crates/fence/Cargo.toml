@@ -1,0 +1,43 @@
+[package]
+name = "farcooler-fence"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "farcooler_fence"
+path = "src/lib.rs"
+
+# Deliberately tiny, and that is the point of the crate existing.
+#
+# The fenced writer is needed by the daemon (for `~/.ssh/authorized_keys`) and by
+# the client (for `~/.ssh/config`). It used to live in `crates/daemon`, so
+# `crates/client` depended on the crate that serves it — a dependency pointing
+# the wrong way, target-gated to macOS and Linux so that phones did not compile
+# bundled SQLite, an HTTPS stack and every agent adapter for a call they cannot
+# make.
+#
+# With nothing here but the protocol's `Scope` and the syscalls, that gate is not
+# needed at all: this compiles for `aarch64-apple-ios` and `aarch64-linux-android`
+# as readily as for the desktop, pulling in only `libc`, `bitflags` and `errno`.
+# The reason there is ONE implementation rather than two is unchanged and worth
+# restating: `write` opens every path component relative to a held descriptor with
+# `O_NOFOLLOW`, verifies each with `fstat`, takes an advisory lock, fsyncs the file
+# AND its directory before renaming, and leaves a checksummed backup. A second
+# implementation would drift a missing fsync into a corrupted `~/.ssh/config`,
+# which breaks Zed, git and plain `ssh` at once.
+#
+# Every version and feature set below is copied from `crates/daemon`, which these
+# moved out of. A different `ssh-key` here would compile a SECOND copy of the
+# crate whose `PublicKey` is a different type from the daemon's, and the error
+# lands at the call site rather than here.
+[dependencies]
+farcooler-protocol.workspace = true
+rustix = { version = "1", features = ["fs", "process"] }
+sha2 = "0.10"
+ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

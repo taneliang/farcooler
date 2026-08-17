@@ -34,36 +34,29 @@ async-trait = "0.1"
 # picking our own means one source of randomness, and one thing to audit.
 rand = "0.10"
 
-# The fenced writer for `~/.ssh/config`, which lives in the daemon because
-# `~/.ssh/authorized_keys` needed it first.
+# The fenced writer for `~/.ssh/config`, and NOT target-gated.
 #
-# A dependency pointing the wrong way — a client crate reaching into the crate
-# that serves it — and it is here rather than reimplemented for one reason:
+# This used to be a dependency on `farcooler-daemon` — a client crate reaching
+# into the crate that serves it — gated to macOS and Linux so that phones did not
+# compile bundled SQLite, an HTTPS stack, the terminal multiplexer and every agent
+# adapter into the iOS static archive and the Android `.so` for a call they cannot
+# make. Extracting `fence` removed the gate rather than moving it: this crate is
+# the protocol's `Scope` and some syscalls, and it builds for
+# `aarch64-apple-ios` and `aarch64-linux-android` as readily as for a desktop.
+#
+# One implementation rather than two, for the reason that has not changed:
 # `fence::write` opens every path component relative to a held descriptor with
 # `O_NOFOLLOW`, verifies each with `fstat`, takes an advisory lock, fsyncs the
 # file AND its directory before renaming, and leaves a checksummed backup. A
 # second implementation would drift a missing fsync into a corrupted
-# `~/.ssh/config`, which breaks Zed, git and plain `ssh` at once. There is no
-# cycle: nothing the daemon depends on depends on this crate.
+# `~/.ssh/config`, which breaks Zed, git and plain `ssh` at once.
 #
-# **The right shape is `fence` in a crate of its own**, which both this and the
-# daemon depend on. That is a change to `crates/daemon`, so it is a follow-up
-# rather than a thing to do on the way past — and until it happens, this edge is
-# the honest cost of having one writer.
-#
-# Target-gated to the platforms that have an `~/.ssh` for an editor to read.
-# Unconditional, it would compile bundled SQLite, an HTTPS stack, the terminal
-# multiplexer and every agent adapter into the iOS static archive and the Android
-# `.so` — measured at 85 seconds of new compilation per slice — for a call a
-# phone cannot make. The entry point itself is NOT gated: see `ffi.rs`, because a
-# symbol that exists on some targets is a link error waiting for whoever shares
-# that Swift file next.
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-farcooler-daemon.workspace = true
+# The `~/.ssh/config` entry point is still `cfg`-gated in `ffi.rs`, now for the
+# only honest reason left: a phone has no `~/.ssh` for an editor to read.
+farcooler-fence.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
-# The tests drive the real daemon binary, not a stub. Also the source of the
-# fence markers the `~/.ssh/config` tests assert on: spelling them again in a
-# test would let the two sides drift and still pass.
+# The tests drive the real daemon binary, not a stub — this is a dev-dependency
+# only, so it does not put the daemon back on any shipping build's graph.
 farcooler-daemon.workspace = true

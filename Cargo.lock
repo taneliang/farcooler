@@ -900,6 +900,7 @@ dependencies = [
  "farcooler-codex",
  "farcooler-core",
  "farcooler-daemon",
+ "farcooler-fence",
  "farcooler-protocol",
  "farcooler-transport",
  "libc",
@@ -920,6 +921,7 @@ dependencies = [
  "bytes",
  "farcooler-core",
  "farcooler-daemon",
+ "farcooler-fence",
  "farcooler-protocol",
  "farcooler-transport",
  "rand",
@@ -967,6 +969,7 @@ dependencies = [
  "directories",
  "farcooler-agent",
  "farcooler-core",
+ "farcooler-fence",
  "farcooler-protocol",
  "farcooler-review",
  "farcooler-store",
@@ -987,6 +990,18 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "farcooler-fence"
+version = "0.1.0"
+dependencies = [
+ "farcooler-protocol",
+ "rustix",
+ "sha2 0.10.9",
+ "ssh-key",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

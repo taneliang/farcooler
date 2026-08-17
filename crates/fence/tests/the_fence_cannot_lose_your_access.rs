@@ -4,13 +4,16 @@
 //! have been using for years, with keys in it that have nothing to do with this
 //! program, and the failure mode of getting a write wrong is not a broken
 //! feature — it is being locked out of your own runner, which
-//! `docs/farcooler-design.md:1017` calls release-blocking. So the writer is
+//! `docs/farcooler-design.md:1030` calls release-blocking. So the writer is
 //! tested for what it must never do, not for what it does.
+//!
+//! (The line number was `:1017` here and in `fence.rs` for a while, which is the
+//! paragraph about device keypairs. The sentence this file exists for is on 1030.)
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use farcooler_daemon::fence::{self, AUTHORIZED_KEYS, FenceError};
+use farcooler_fence::{self as fence, AUTHORIZED_KEYS, FenceError};
 use farcooler_protocol::v1::Scope;
 
 /// A synthetic but structurally valid ed25519 key.
@@ -38,6 +41,11 @@ fn entry(key: &str, client_id: &str) -> String {
 
 fn read(path: &Path) -> String {
     std::fs::read_to_string(path).expect("read back")
+}
+
+/// A line back out of an entry, the way every caller of `update` rebuilds one.
+fn line(entry: &fence::Entry) -> String {
+    entry.line.clone()
 }
 
 /// Everything that is not ours comes back byte for byte.
@@ -198,6 +206,190 @@ fn two_concurrent_writes_do_not_interleave() {
         "the two writes interleaved: {ids:?} in {after:?}"
     );
     assert!(after.starts_with("ssh-rsa AAAAtheirs me@laptop\n"), "their key was lost: {after:?}");
+}
+
+/// Two enrollments in the same instant, and BOTH keys are still there.
+///
+/// This is the property `two_concurrent_writes_do_not_interleave` above does
+/// NOT have, and the difference is the whole reason `update` exists. That test
+/// proves the file is never a mixture of two writes. A lost update is not a
+/// mixture: the loser's write is complete, well formed, and missing a key,
+/// because it rebuilt the block from a snapshot taken before the winner's write
+/// landed. The symptom is a device Settings says is enrolled and that cannot
+/// connect — and onboarding a Mac is two enrollments of one client id, which is
+/// the easiest way in the product to arrive here.
+///
+/// **The sleep inside the closure is what gives this test teeth.** Under
+/// `update` it runs while the lock is held, so the second caller waits and then
+/// reads a file that already has the first key in it. Move the read back
+/// outside the lock and the same sleep makes both callers decide from the same
+/// empty snapshot, deterministically, and one key is gone. A test that only
+/// raced two threads would pass either way on most runs.
+#[test]
+fn two_concurrent_enrollments_both_survive() {
+    let (_home, path) = a_runner();
+    std::fs::write(&path, "ssh-rsa AAAAtheirs me@laptop\n").expect("write");
+
+    // Released only when both threads are in position, so neither can finish
+    // before the other has started and pass by accident.
+    let together = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let enroll = |key: &'static str, client_id: &'static str| {
+        let (path, together) = (path.clone(), together.clone());
+        std::thread::spawn(move || {
+            together.wait();
+            fence::update(&path, AUTHORIZED_KEYS, fence::Placement::Last, |current| {
+                // Exactly what `enrollment::enroll` does: keep what is there,
+                // add one line. Our lines and theirs are told apart the same
+                // way, so a foreign line inside the block is carried through.
+                let (mut ours, foreign): (Vec<String>, Vec<String>) = (
+                    current.iter().filter(|e| !e.client_id.is_empty()).map(line).collect(),
+                    current.iter().filter(|e| e.client_id.is_empty()).map(line).collect(),
+                );
+                ours.push(entry(key, client_id));
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                Ok::<_, FenceError>((fence::Change::Write { entries: ours, foreign }, ()))
+            })
+        })
+    };
+    let left = enroll(KEY, "aaa");
+    let right = enroll(OTHER_KEY, "bbb");
+    left.join().expect("join").expect("the first enrollment");
+    right.join().expect("join").expect("the second enrollment");
+
+    let after = read(&path);
+    let ids: Vec<String> =
+        fence::parse(&after).expect("parse").into_iter().map(|e| e.client_id).collect();
+    assert!(
+        ids.contains(&"aaa".to_string()) && ids.contains(&"bbb".to_string()),
+        "an enrollment was lost, which is a device that cannot connect: {ids:?} in {after:?}"
+    );
+    assert_eq!(ids.len(), 2, "one enrollment wrote a line twice: {ids:?}");
+    assert!(after.starts_with("ssh-rsa AAAAtheirs me@laptop\n"), "their key was lost: {after:?}");
+}
+
+/// A caller that decides nothing needs doing leaves the file untouched.
+///
+/// `client.enroll` on a device that is already enrolled answers and writes
+/// nothing, and it reaches that decision from inside the lock now. "Nothing"
+/// has to mean nothing: no rewrite, and no backup either, because a backup
+/// written on a no-op would overwrite the one copy of the file as it was before
+/// the last real change.
+#[test]
+fn a_change_that_leaves_the_file_alone_writes_nothing_at_all() {
+    let (_home, path) = a_runner();
+    let before = format!(
+        "ssh-rsa AAAAtheirs me@laptop\n{}\n{}\n{}\n",
+        fence::BEGIN,
+        entry(KEY, "c1"),
+        fence::END,
+    );
+    std::fs::write(&path, &before).expect("write");
+
+    let seen: usize = fence::update(&path, AUTHORIZED_KEYS, fence::Placement::Last, |current| {
+        Ok::<_, FenceError>((fence::Change::Leave, current.len()))
+    })
+    .expect("update");
+
+    assert_eq!(seen, 1, "the closure was handed the wrong block");
+    assert_eq!(read(&path), before, "a no-op rewrote the file");
+    assert!(
+        !path.with_file_name("authorized_keys.farcooler-backup").exists(),
+        "a no-op left a backup, which would shadow the last real one"
+    );
+}
+
+/// `update` writes through the same path a `write` does, backup and all.
+///
+/// Not a duplicate of the tests above: those call `write`, and the enrollment
+/// path calls `update`. The refusals and the durability are worth exactly what
+/// the function somebody's keys actually go through has, so the shared path is
+/// asserted at the door that is used rather than inferred from the source.
+#[test]
+fn an_update_preserves_what_is_not_ours_and_leaves_a_backup() {
+    let (_home, path) = a_runner();
+    let before = format!(
+        "ssh-rsa AAAAtheirs me@laptop\n{}\nssh-ed25519 {OTHER_KEY} added-by-hand\n{}\n# trailing\n",
+        fence::BEGIN,
+        fence::END,
+    );
+    std::fs::write(&path, &before).expect("write");
+
+    fence::update(&path, AUTHORIZED_KEYS, fence::Placement::Last, |current| {
+        // The hand-added line inside the block comes back as foreign, and it
+        // goes back in: dropping it would delete somebody's key.
+        assert_eq!(current.len(), 1, "the block was not handed over as it reads");
+        assert!(current[0].client_id.is_empty(), "a hand-added line was claimed as ours");
+        let foreign: Vec<String> = current.iter().map(line).collect();
+        Ok::<_, FenceError>((
+            fence::Change::Write { entries: vec![entry(KEY, "c1")], foreign },
+            (),
+        ))
+    })
+    .expect("update");
+
+    let after = read(&path);
+    assert!(after.starts_with("ssh-rsa AAAAtheirs me@laptop\n"), "their key moved: {after:?}");
+    assert!(after.ends_with("# trailing\n"), "the bytes below the fence changed: {after:?}");
+    assert!(after.contains("added-by-hand"), "a hand-added line inside the block was deleted");
+    assert_eq!(fence::parse(&after).expect("parse").len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(path.with_file_name("authorized_keys.farcooler-backup"))
+            .expect("backup"),
+        before,
+        "the file as it was is not recoverable"
+    );
+    assert!(
+        path.with_file_name("authorized_keys.farcooler-backup.sha256").exists(),
+        "a backup nobody can tell is intact is not evidence"
+    );
+}
+
+/// A symlinked `.ssh` is refused by `update` too, and for the same reason.
+///
+/// Asserted at this door as well as at `write`'s, because this is the one the
+/// enrollment path goes through: a second directory-opening path that skipped
+/// the anchoring would redirect somebody's keys into a directory an attacker
+/// can read, and nothing about the resulting write would look wrong.
+#[test]
+fn an_update_through_a_symlinked_ssh_directory_refuses() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let elsewhere = home.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).expect("mkdir");
+    std::os::unix::fs::symlink(&elsewhere, home.path().join(".ssh")).expect("symlink");
+    let path = home.path().join(".ssh").join("authorized_keys");
+
+    let refused = fence::update(&path, AUTHORIZED_KEYS, fence::Placement::Last, |_| {
+        Ok::<_, FenceError>((
+            fence::Change::Write { entries: vec![entry(KEY, "c1")], foreign: Vec::new() },
+            (),
+        ))
+    });
+
+    assert!(refused.is_err(), "a symlinked .ssh was written through");
+    assert_eq!(std::fs::read_dir(&elsewhere).expect("read_dir").count(), 0, "it left something");
+}
+
+/// A file whose fence cannot be understood is refused before anyone decides.
+///
+/// The caller is never handed a block parsed out of damage, because there is no
+/// honest block to hand it: guessing where an unterminated one ends is how a
+/// rewrite deletes lines Far Cooler did not write. So the closure is not called
+/// at all, and the file is not touched.
+#[test]
+fn a_damaged_fence_is_refused_before_the_caller_is_asked_to_decide() {
+    let (_home, path) = a_runner();
+    let before = format!("{}\n{}\nssh-rsa AAAAtheirs me@laptop\n", fence::BEGIN, entry(KEY, "c1"));
+    std::fs::write(&path, &before).expect("write");
+
+    let mut asked = false;
+    let refused = fence::update(&path, AUTHORIZED_KEYS, fence::Placement::Last, |_| {
+        asked = true;
+        Ok::<_, FenceError>((fence::Change::Write { entries: Vec::new(), foreign: Vec::new() }, ()))
+    });
+
+    assert!(matches!(refused, Err(FenceError::Damaged(_))), "damage was accepted: {refused:?}");
+    assert!(!asked, "a caller was asked to rewrite a block that could not be read");
+    assert_eq!(read(&path), before, "a damaged file was modified anyway");
 }
 
 /// A fence written into a file that had none, next to what was already there.

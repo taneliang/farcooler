@@ -1288,7 +1288,7 @@ async fn theme(runner: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
             .map(|a| a.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect())
             .unwrap_or_default();
         if ansi.len() != 16 {
-            return Err("a theme needs exactly sixteen ANSI colours".into());
+            return Err("a theme needs exactly sixteen ANSI colors".into());
         }
         let wire_theme = farcooler_protocol::v1::Theme {
             name: payload["name"].as_str().unwrap_or_default().to_string(),

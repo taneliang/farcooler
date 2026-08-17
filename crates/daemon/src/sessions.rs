@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use farcooler_protocol::v1::Scope;
 use farcooler_transport::{Peer, SessionPreamble};
 
-use crate::fence::scope_from_word;
+use farcooler_fence::scope_from_word;
 
 /// What one connection is, as this runner's `authorized_keys` describes it.
 ///

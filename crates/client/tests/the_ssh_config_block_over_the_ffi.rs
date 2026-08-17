@@ -27,7 +27,7 @@ use farcooler_client::ffi::farcooler_client_ssh_config_write;
 // client and the daemon stopped agreeing about what Far Cooler's block looks
 // like — which is the one change that turns an existing fence into "a file with
 // no fence" and enrolls a second block beneath the first.
-use farcooler_daemon::fence::{BEGIN, END};
+use farcooler_fence::{BEGIN, END};
 use serde_json::Value;
 
 /// A home directory with a real `.ssh` in it, and the `config` inside it.

@@ -6,26 +6,19 @@ import Foundation
 /// shell command appending a line: that file is the one whose corruption costs
 /// somebody SSH access to their own machine, so the write is
 /// descriptor-anchored, `O_NOFOLLOW`, locked, atomic, `fsync`ed twice and
-/// backed up — `crates/daemon/src/enrollment.rs` over `crates/daemon/src/fence.rs`.
+/// backed up — `crates/daemon/src/enrollment.rs` over `crates/fence/src/lib.rs`.
 /// The app's part is to ask.
 ///
-/// ## THE ONE THING STILL MISSING: `farcooler client`
+/// ## Two surfaces, on purpose
 ///
-/// The daemon serves `client.enroll`, `client.list` and `client.revoke`, and the
-/// client core's `farcooler_client_call` dispatch in `crates/client/src/ffi.rs`
-/// now has an arm for all three — so a PHONE can reach them. **The CLI still has
-/// no `client` subcommand**, so every command this file builds is not a command,
-/// and a Mac's enrollment fails on every runner with a usage error. Checked
-/// against `crates/cli/src/main.rs`'s `Command` enum, which has `root`, `repo`,
-/// `theme`, `settings`, `adapter`, `workspace`, `terminal`, `changes`,
-/// `worktree`, `layout`, `push` and `runner`, and no `client`.
+/// The daemon serves `client.enroll`, `client.list` and `client.revoke`. A phone
+/// reaches them through `farcooler_client_call` in `crates/client/src/ffi.rs`; a
+/// Mac reaches them through `farcooler client` (`crates/cli/src/clients.rs`).
+/// Each route is right for its side and wrong for the other: the CLI runs real
+/// `ssh`, so it inherits the agent, the passphrase prompt, `ProxyJump` and
+/// everything else a person has already set up — and a phone has no `ssh` at all.
 ///
-/// The CLI is the right route for a Mac and the wrong one for a phone, for the
-/// same reason each: the CLI runs real `ssh`, so it gets the agent, the
-/// passphrase prompt, `ProxyJump` and everything else a person has already set
-/// up — and a phone has no `ssh` at all. So both surfaces are wanted, and this
-/// enum is the Mac's half, ready for the subcommand. What it needs to accept,
-/// exactly:
+/// What this file builds, exactly:
 ///
 /// ```
 /// farcooler --json --runner you@box client enroll --key <public key> \
@@ -39,14 +32,16 @@ import Foundation
 /// `ClientEnroll.shell_access`; the daemon refuses it with any scope but
 /// `host_admin`, and that refusal is the daemon's, not this app's.
 ///
-/// Until the subcommand exists this reports what it could not do, in a sentence,
-/// and the ceremony still shows the reply — because the reply is what the new
-/// device needs, and a runner that was asleep is already an ordinary outcome the
-/// manifest carries as `pending`.
+/// A runner that could not be written to is reported in a sentence and the
+/// ceremony still shows the reply — because the reply is what the new device
+/// needs, and a runner that was asleep is an ordinary outcome the manifest
+/// already carries as `pending`.
 ///
 /// ## A Mac is TWO enrollments
 ///
-/// Key A's line is `restrict,command="farcoolerd --stdio …"`. Key B's line is
+/// Key A's line is `restrict,command="~/.local/bin/farcoolerd… --stdio …"`, the
+/// channel's own daemon named by path rather than left to a login shell's
+/// `PATH`. Key B's line is
 /// plain, and that is the whole point of it: a forced command means sshd runs
 /// that program and only that program, so a Key B carrying one could not open a
 /// shell and Zed would still be locked out.
@@ -93,21 +88,14 @@ enum Enrollment {
             }
 
             guard let keyB else { continue }
-            // **SEQUENTIAL, AND THIS MUST STAY SEQUENTIAL.** Not a style
-            // preference and not something to fold into a `withTaskGroup` or a
-            // parallel map later: `crates/daemon/src/enrollment.rs` does its
-            // read-modify-write with the READ OUTSIDE the writer's lock, so two
-            // enrollments landing in the same instant each rebuild the fence from
-            // a snapshot taken before the other's write and the loser's key is
-            // silently gone. Every other caller is a person driving one ceremony,
-            // which is what bounds that window — a Mac firing both of its keys at
-            // one runner at once is the single easiest way in the product to hit
-            // it, and the symptom is a Mac that enrolled "successfully" and has no
-            // shell access, or worse, no Far Cooler access.
-            //
-            // The fix belongs in the writer, not here. Closing it means giving a
-            // routine whose failure mode is losing SSH access a new shape, which
-            // is not a change to make in passing.
+            // Sequential here only because the transcript should read in order.
+            // It used to have to be: the daemon read the fence OUTSIDE its
+            // writer's lock, so a Mac firing both of its keys at one runner could
+            // have the loser's key silently dropped. That is closed —
+            // `fence::update` now holds the lock across the read, the decision and
+            // the write, and `rpc_over_socket.rs`'s
+            // `a_macs_two_enrollments_may_land_at_the_same_moment` fires exactly
+            // this pair concurrently and asserts both lines survive.
             let b = await write(
                 key: keyB, label: label, clientID: clientID, scope: "host_admin", shell: true,
                 to: runner)

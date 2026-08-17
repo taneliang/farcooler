@@ -909,7 +909,7 @@ pub unsafe extern "C" fn farcooler_client_ssh_config_write(
 /// The write itself, on the platforms that have an `~/.ssh` to fence.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn ssh_config_write(path: &str, entries_json: &str) -> String {
-    use farcooler_daemon::fence::{self, FenceError, Markers, Placement};
+    use farcooler_fence::{self as fence, FenceError, Markers, Placement};
 
     let Ok(entries) = serde_json::from_str::<Vec<String>>(entries_json) else {
         // A caller that sent an object, or an array of numbers, has a bug — and
@@ -1167,7 +1167,7 @@ async fn dispatch(
             let ansi = numbers("ansi");
             if ansi.len() != 16 {
                 return Err(SessionError::Protocol(
-                    "a theme needs exactly sixteen ANSI colours".into(),
+                    "a theme needs exactly sixteen ANSI colors".into(),
                 ));
             }
             let themes = session

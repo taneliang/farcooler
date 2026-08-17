@@ -164,7 +164,7 @@ struct SshConfigTests {
     // scratch path, never `~/.ssh/config`: a suite that rewrote the config of
     // whoever ran it would be worse than no suite. What is NOT here is the byte
     // mechanics — the lock, the two `fsync`s, the checksummed backup — which
-    // belong to `crates/daemon/src/fence.rs` and are tested beside the
+    // belong to `crates/fence/src/lib.rs` and are tested beside the
     // `authorized_keys` fixtures. What is here is the boundary: that Swift reaches
     // that writer at all, and that each word it can answer becomes the right
     // sentence.

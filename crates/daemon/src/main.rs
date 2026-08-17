@@ -17,8 +17,8 @@ use std::sync::Arc;
 // because that module WRITES the `--scope` word this one reads back off the
 // command line sshd forced. Two spellings of the same vocabulary would mean an
 // enrollment that grants nothing, and it would say so only on the runner.
+use farcooler_fence::{scope_from_word, scope_word};
 use farcooler_daemon::{
-    fence::{scope_from_word, scope_word},
     paths,
     rpc::RpcFactory,
     service::Service,

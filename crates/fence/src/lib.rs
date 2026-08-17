@@ -1,14 +1,25 @@
-//! The fenced block in `~/.ssh/authorized_keys`, and every read and write of it.
+//! A fenced block in somebody else's dotfile, and every read and write of it.
 //!
-//! Nothing else in the tree touches that file. It is the one file Far Cooler
-//! edits that a person may already depend on for their own reasons, and the
-//! failure mode is not a lost feature — it is losing SSH access to your own
-//! runner, which `docs/farcooler-design.md` calls out as release-blocking.
+//! Two files use this and nothing else in the tree touches either: the daemon
+//! writes `~/.ssh/authorized_keys`, and the client writes `~/.ssh/config` so Zed,
+//! git and plain `ssh` can reach a runner. Both are files a person may already
+//! depend on for their own reasons, and the failure mode is not a lost feature —
+//! it is losing SSH access to your own runner, which `docs/farcooler-design.md`
+//! calls out as release-blocking.
 //!
 //! So the rules here are narrow on purpose: only the lines between the two
 //! markers are ours, a file whose fence cannot be understood is refused rather
 //! than repaired, and a line inside the fence that we did not write is carried
 //! through untouched rather than dropped.
+//!
+//! **This is a crate of its own so that both callers can have it.** It used to
+//! live in `crates/daemon`, which made `crates/client` depend on the crate that
+//! serves it — an edge pointing the wrong way, and one that had to be
+//! target-gated so phones did not compile bundled SQLite and an HTTPS stack for a
+//! call they cannot make. Everything here is the protocol's `Scope` and some
+//! syscalls, so it builds for iOS and Android as readily as for a desktop and the
+//! gate is gone rather than moved. Two implementations were never an option: a
+//! second one would drift a missing `fsync` into a corrupted `~/.ssh/config`.
 
 use std::io::{Read as _, Write as _};
 use std::os::fd::OwnedFd;
@@ -288,8 +299,8 @@ fn shell_client_id(comment: &str) -> Option<&str> {
 ///
 /// sshd ends the options field at the first whitespace OUTSIDE a quoted string,
 /// and that distinction is not academic here: our own forced command is
-/// `restrict,command="farcoolerd --stdio --client c1 --scope read"`, four
-/// spaces of which are inside the quotes. `ssh_key`'s own `authorized_keys`
+/// `restrict,command="~/.local/bin/farcoolerd --stdio --client c1 --scope read"`,
+/// five spaces of which are inside the quotes. `ssh_key`'s own `authorized_keys`
 /// parser splits at the first space instead, which cuts that command in half
 /// and then reads `--stdio` as an algorithm name — which is why this does not
 /// use it.
@@ -407,6 +418,39 @@ pub enum Grant {
     Shell,
 }
 
+/// The program a Key A line makes sshd run, and how it is spelled.
+///
+/// `~/.local/bin/<channel daemon>`, not a bare `farcoolerd`, and both halves of
+/// that matter.
+///
+/// **The path, because a forced command has no useful PATH.** sshd runs it
+/// through the account's login shell, so what resolves a bare name is whatever
+/// that user's shell startup files happen to leave behind — and
+/// `runner install` puts the daemon in `~/.local/bin`, which plenty of shell
+/// configs never add. A bare name therefore produces the worst failure this
+/// feature has: the device enrolls, sshd accepts its key, the forced command
+/// fails to resolve, and the client sees only a handshake that never arrives.
+/// Nothing in the fence, in `client.list`, or in any log says why. The tilde is
+/// expanded by that same login shell, which is why this needs no absolute path
+/// baked into a file that outlives the process writing it.
+///
+/// **The channel, because `~/.local/bin` is shared.** A Mac with stable and
+/// canary installed has both daemons in there under different names — that is
+/// exactly what `Channel::daemon_binary_name` exists for. A canary daemon that
+/// enrolled a device against a bare `farcoolerd` would point it at the STABLE
+/// install's database, tmux server and runtime directory, with neither side able
+/// to notice.
+///
+/// This is the same rule, and the same spelling, as `remote::daemon_command` in
+/// `crates/cli` and the `~/.local/bin` symlinks the Mac app writes in
+/// `CommandLineTools.swift`. It has been got wrong before: see the comment on
+/// `runner_install::daemon_name`, which records that it was two spellings once
+/// and the second one was `farcoolerd` on every channel. A third copy of the
+/// rule is a third chance to drift, so all three read the channel.
+fn forced_program() -> String {
+    format!("~/.local/bin/{} --stdio", farcooler_protocol::CHANNEL.daemon_binary_name())
+}
+
 /// Turn a received public key into the one line this runner will enroll.
 ///
 /// Never write bytes that came off the wire. `authorized_keys` is line-oriented
@@ -489,7 +533,8 @@ pub fn render(
     })?;
     let line = match grant {
         Grant::FarCooler => format!(
-            "restrict,command=\"farcoolerd --stdio --client {client_id} --scope {}\" {body}",
+            "restrict,command=\"{} --client {client_id} --scope {}\" {body}",
+            forced_program(),
             scope_word(scope)
         ),
         // No options field at all, which is the entire difference: sshd gives
@@ -599,6 +644,14 @@ pub fn read(path: &Path, markers: Markers<'_>) -> Result<Vec<Entry>, FenceError>
 /// The lock is advisory and only against another Far Cooler writer. A person
 /// editing this file in an editor at the same moment is not something any of
 /// this can prevent, which is part of why the backup exists.
+///
+/// **The lock is taken in here, which is why a caller that needs to READ the
+/// block before deciding what to write must use `update` instead.** Calling
+/// `read` and then this leaves the read outside the lock, and two such callers
+/// landing together each rebuild the block from a snapshot taken before the
+/// other's write — a lost update, which for this file is a device that cannot
+/// log in. This entry point is for callers that compose the whole block from
+/// scratch and have nothing to read first.
 pub fn write(
     path: &Path,
     markers: Markers<'_>,
@@ -611,24 +664,126 @@ pub fn write(
     let _lock = hold_lock(&directory, name)?;
 
     let current = read_at(&directory, name)?;
+    write_locked(&directory, name, current.as_ref(), markers, entries, foreign, placement)
+}
+
+/// What a caller wants done with the block `update` just handed it.
+///
+/// A closed choice of two rather than "an empty set means leave it alone",
+/// because for this file those are different things: an empty set is a file with
+/// nothing enrolled in it, which `write` renders as no block at all, and that is
+/// a real request `revoke` makes when it removes the last device. `Leave` is
+/// "nothing to do", which must not rewrite the file at all — see
+/// `Change::Leave`.
+#[derive(Debug)]
+pub enum Change {
+    /// Replace the block with these lines: ours first, then the ones we did not
+    /// write. Both empty removes the block, exactly as in `write`.
+    Write { entries: Vec<String>, foreign: Vec<String> },
+    /// Leave every byte of the file as it is.
+    ///
+    /// Not a rewrite of what was read, which would look the same and is not: it
+    /// would take a fresh backup, overwriting the one copy of the file from
+    /// before the last real change, and it would spend an fsync on a file that
+    /// did not need one. `client.enroll` on a device that is already enrolled
+    /// answers without writing, and this is how it says so from inside the lock.
+    Leave,
+}
+
+/// Read the block, decide what it should be, and write it — under one lock.
+///
+/// **This exists because `write` alone could not close a lost update, and the
+/// hole was real rather than theoretical.** `write` takes the advisory lock
+/// internally, so a caller doing read-modify-write through `read` and then
+/// `write` did its reading OUTSIDE the lock: two enrollments landing in the same
+/// instant each rebuilt the block from a snapshot taken before the other's write
+/// landed, and the loser's key was silently gone. Neither write was malformed
+/// and neither failed — the file was simply short one line, which for this file
+/// is a device that Settings says is enrolled and that cannot connect. Onboarding
+/// a Mac is two enrollments of one client id, which made it the easiest way in
+/// the product to hit. `enrollment.rs` carried the hazard as a doc comment and
+/// `apps/macos/Sources/FarCooler/Ceremony/Enrollment.swift` carried it as a rule
+/// about call order — and a rule enforced by a comment is not enforced, which is
+/// why the fix is here and not there. That Swift comment is stale now: those two
+/// calls may overlap.
+///
+/// The closure is called exactly once, with the block as the file reads it right
+/// now, and whatever it answers is written before the lock is released. Its own
+/// error type comes back untouched — `revoke` refuses a client id that is not
+/// there, and that refusal is a decision it makes from inside the lock — which
+/// is why `E` is generic and only has to be able to carry a `FenceError`.
+///
+/// A damaged fence refuses BEFORE the closure is called. There is no honest
+/// block to hand over: guessing where an unterminated one ends is how a rewrite
+/// deletes lines Far Cooler did not write.
+///
+/// Everything `write` refuses, this refuses, and by the same code — the
+/// descriptor-anchored open, the ownership and mode checks, the backup, the
+/// temp-file-and-rename. `write` remains for callers that compose the whole
+/// block from scratch and have nothing to read first: `~/.ssh/config` through the
+/// FFI is one, where nothing inside the fence is distinguishable as somebody
+/// else's and so there is nothing to preserve.
+pub fn update<T, E>(
+    path: &Path,
+    markers: Markers<'_>,
+    placement: Placement,
+    decide: impl FnOnce(&[Entry]) -> Result<(Change, T), E>,
+) -> Result<T, E>
+where
+    E: From<FenceError>,
+{
+    let name = path.file_name().ok_or(FenceError::Missing)?;
+    let directory = open_fence_dir(path.parent().ok_or(FenceError::Missing)?)?;
+    let _lock = hold_lock(&directory, name)?;
+
+    // Inside the lock, and that is the entire point of this function. Moving
+    // these three lines above `hold_lock` restores the old shape, and
+    // `two_concurrent_enrollments_both_survive` fails when they are.
+    let current = read_at(&directory, name)?;
     let text = current.as_ref().map(|(text, _)| text.as_str()).unwrap_or_default();
-    let mode = current.as_ref().map(|(_, mode)| *mode).unwrap_or(0o600);
+    let entries = parse_within(text, markers)?;
+
+    let (change, answer) = decide(&entries)?;
+    if let Change::Write { entries, foreign } = change {
+        write_locked(&directory, name, current.as_ref(), markers, &entries, &foreign, placement)?;
+    }
+    Ok(answer)
+}
+
+/// The write itself, with the lock already held and the file already read.
+///
+/// Split out so `write` and `update` cannot drift: one of them reads for itself
+/// and the other reads for its caller, and everything after that — the read-back
+/// check, the durable backup, the temp file, the two fsyncs, the rename relative
+/// to the directory descriptor — is the same or it is a second write path that
+/// gets to be wrong on its own.
+fn write_locked(
+    directory: &OwnedFd,
+    name: &std::ffi::OsStr,
+    current: Option<&(String, RawMode)>,
+    markers: Markers<'_>,
+    entries: &[String],
+    foreign: &[String],
+    placement: Placement,
+) -> Result<(), FenceError> {
+    let text = current.map(|(text, _)| text.as_str()).unwrap_or_default();
+    let mode = current.map(|(_, mode)| *mode).unwrap_or(0o600);
     let rebuilt = rebuilt(text, markers, entries, foreign, placement)?;
 
     // The backup is durable BEFORE the rename, so that a machine that loses
     // power in the middle of this has either the original file or the original
     // file and a copy of it — never a half-written new one and no way back.
-    if let Some((text, _)) = &current {
-        back_up(&directory, name, text)?;
+    if let Some((text, _)) = current {
+        back_up(directory, name, text)?;
     }
 
     let temp = suffixed(name, ".farcooler-new");
     // A leftover temp from an interrupted write must not be inherited: `O_EXCL`
     // is what makes the create fail rather than reuse somebody's file, and the
     // unlink is what makes the retry succeed.
-    ignoring_absent(rustix::fs::unlinkat(&directory, temp.as_os_str(), AtFlags::empty()))?;
+    ignoring_absent(rustix::fs::unlinkat(directory, temp.as_os_str(), AtFlags::empty()))?;
     let file = rustix::fs::openat(
-        &directory,
+        directory,
         temp.as_os_str(),
         OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW,
         Mode::from_raw_mode(mode),
@@ -642,10 +797,10 @@ pub fn write(
     file.sync_all()?;
     drop(file);
 
-    rustix::fs::renameat(&directory, temp.as_os_str(), &directory, name).map_err(io)?;
+    rustix::fs::renameat(directory, temp.as_os_str(), directory, name).map_err(io)?;
     // And the rename itself has to be durable, or a crash leaves the directory
     // entry pointing at neither file.
-    rustix::fs::fsync(&directory).map_err(io)?;
+    rustix::fs::fsync(directory).map_err(io)?;
     Ok(())
 }
 
@@ -1074,6 +1229,41 @@ mod tests {
         assert!(line.starts_with("restrict,command=\""), "not restricted: {line}");
         assert!(line.contains("--client c1"), "no client id: {line}");
         assert!(line.contains("--scope read"), "no scope: {line}");
+    }
+
+    /// The forced command names a path, and a channel's own daemon.
+    ///
+    /// This assertion exists because its absence let the bug in: `render` shipped
+    /// a bare `farcoolerd` while every other place that reaches for a daemon —
+    /// `remote::daemon_command`, `runner_install::daemon_name`, the Mac app's
+    /// `~/.local/bin` symlinks — deliberately did not, and no test noticed the
+    /// disagreement. `runner_install::daemon_name`'s own comment records that it
+    /// was two spellings once. This is the third.
+    ///
+    /// Both halves are checked because they fail differently and independently. A
+    /// missing path is a device that enrolls and then cannot connect on any
+    /// runner whose login shell does not put `~/.local/bin` on PATH. A missing
+    /// channel is worse for being silent: the device connects, to the wrong
+    /// install's database and tmux server.
+    ///
+    /// Asserted against `Channel::daemon_binary_name` rather than a literal, so
+    /// this cannot pass by agreeing with a stale copy of the rule.
+    #[test]
+    fn the_forced_command_names_this_channels_daemon_by_path() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        let line = render(&key, "iPhone", "c1", Scope::Read, Grant::FarCooler).expect("render");
+        let expected = farcooler_protocol::CHANNEL.daemon_binary_name();
+        assert!(
+            line.contains(&format!("command=\"~/.local/bin/{expected} --stdio")),
+            "the forced command does not name {expected} by path: {line}"
+        );
+        // And not the bare name, which is the exact shape of the defect: a
+        // `contains` on the path alone would still pass if the line somehow
+        // carried both.
+        assert!(
+            !line.contains("command=\"farcoolerd"),
+            "the forced command still leans on PATH: {line}"
+        );
     }
 
     /// The client id is inside the quotes, so it can close them.

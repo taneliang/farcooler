@@ -6,7 +6,7 @@ import Foundation
 ///
 /// **This file composes the block and decides the aliases. It does not write
 /// the bytes.** The write goes through the same routine that owns
-/// `~/.ssh/authorized_keys` — `crates/daemon/src/fence.rs`, which is generic
+/// `~/.ssh/authorized_keys` — `crates/fence/src/lib.rs`, which is generic
 /// over its path and its markers for exactly this reason. That routine opens
 /// every path component relative to a held directory descriptor with
 /// `O_NOFOLLOW`, verifies each with `fstat`, takes an advisory lock, writes a
@@ -27,7 +27,7 @@ enum SshConfig {
             .appendingPathComponent("config")
     }
 
-    /// The fence, spelled exactly as `crates/daemon/src/fence.rs` spells it.
+    /// The fence, spelled exactly as `crates/fence/src/lib.rs` spells it.
     ///
     /// A copy of a constant, which is a thing to be uncomfortable about — so it
     /// is here, named, rather than inline in three places. It exists because

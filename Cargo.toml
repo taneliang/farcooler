@@ -11,6 +11,7 @@ members = [
     "crates/store",
     "crates/tmux",
     "crates/transport",
+    "crates/fence",
     "crates/vt",
     "crates/review",
     "crates/client",
@@ -36,6 +37,7 @@ farcooler-agent = { path = "crates/agent" }
 farcooler-store = { path = "crates/store" }
 farcooler-tmux = { path = "crates/tmux" }
 farcooler-transport = { path = "crates/transport" }
+farcooler-fence = { path = "crates/fence" }
 farcooler-review = { path = "crates/review" }
 farcooler-client = { path = "crates/client" }
 farcooler-daemon = { path = "crates/daemon" }

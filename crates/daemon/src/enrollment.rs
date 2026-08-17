@@ -12,16 +12,19 @@
 //! phone has access when sshd says otherwise, and the file is the one of the
 //! two that decides.
 //!
-//! Every call here runs the file work on the blocking pool. `fence::write`
+//! Every call here runs the file work on the blocking pool. `fence::update`
 //! takes an advisory lock, `fsync`s twice and can sleep in a bounded retry, and
-//! a runtime worker is not the thread to do that on.
+//! a runtime worker is not the thread to do that on. It also holds that lock
+//! across the decision it hands back here, which is what makes two enrollments
+//! landing together safe — see `fence::update` — and one more reason none of this
+//! belongs on a runtime worker.
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{
     ClientEnroll, ClientEnrollResult, ClientList, ClientRevoke, Scope,
 };
 
-use crate::fence::{self, Entry, FenceError, Rejected};
+use farcooler_fence::{self as fence, Entry, FenceError, Rejected};
 use crate::service::Service;
 use crate::wire;
 
@@ -37,6 +40,12 @@ pub async fn list(svc: &Service) -> Result<ClientList> {
 /// line the app and the CLI use, and once for Key B, the plain line Zed, git and
 /// Terminal use — with the same client id both times, which is what ties them
 /// together for `list` and `revoke`. See `fence::Grant`.
+///
+/// **Those two calls may land in either order, or in the same instant.** The
+/// whole read-modify-write happens inside `fence::update`'s lock hold, so neither
+/// can rebuild the block from a snapshot that predates the other. It used to be
+/// the caller's job not to overlap them — a rule stated in a comment here and
+/// obeyed in a comment in `apps/macos`, which is not a rule that is enforced.
 pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrollResult> {
     let path = svc.authorized_keys().to_path_buf();
     // Which SHAPE, and nothing else about the bytes: `fence::render` builds both
@@ -65,49 +74,70 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
 
     let now = now_millis();
     blocking(move || {
-        let entries = read(&path)?;
-        // Either identity already being present is "already enrolled".
-        //
-        // The FINGERPRINT, whatever shape either line has, because a key already
-        // in the file can already log in — including as a foreign line somebody
-        // added by hand, where sshd matches their unrestricted line first and
-        // ours would be dead weight granting nothing while the device got a
-        // shell. **One key, one line, for the same reason:** sshd takes the
-        // first line whose key matches, so the same key written both plain and
-        // restricted would make "does this device get a shell" a question about
-        // line order in a text file. A Mac's two keys are two different keys.
-        //
-        // The CLIENT ID only within the same shape, because two lines naming one
-        // device in one shape leave the daemon unable to say which of them a
-        // session arrived on and every audit answer after that is a guess —
-        // while two lines naming one device in DIFFERENT shapes is exactly what
-        // a Mac is, and refusing that (as an earlier version of this check did)
-        // is refusing the second key it needs.
-        if let Some(existing) = entries.iter().find(|e| {
-            (!e.fingerprint.is_empty() && e.fingerprint == mine.fingerprint)
-                || (!e.client_id.is_empty()
-                    && e.client_id == mine.client_id
-                    && e.shell_access == mine.shell_access)
-        }) {
-            // The grant it HAS, not the one that was asked for, and nothing is
-            // written. Answering with the requested scope would tell a person
-            // their phone is read-only while the file still says control, and
-            // rewriting the line to match would let a second ceremony silently
-            // widen an existing device's access.
-            return Ok(ClientEnrollResult {
-                client: Some(wire::enrolled_client(existing, 0)),
-                already_enrolled: true,
-            });
-        }
+        // Read and write under ONE lock hold. Two enrollments landing in the same
+        // instant used to each rebuild the block from a snapshot taken before the
+        // other's write, and the loser's key was silently gone — a device
+        // Settings says is enrolled and that cannot connect. A Mac is two
+        // enrollments of one client id, so the window was reachable from the
+        // product's ordinary path, not only in theory. See `fence::update`.
+        fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
+            let entries = attributed(entries);
+            // Either identity already being present is "already enrolled".
+            //
+            // The FINGERPRINT, whatever shape either line has, because a key
+            // already in the file can already log in — including as a foreign
+            // line somebody added by hand, where sshd matches their unrestricted
+            // line first and ours would be dead weight granting nothing while the
+            // device got a shell. **One key, one line, for the same reason:** sshd
+            // takes the first line whose key matches, so the same key written both
+            // plain and restricted would make "does this device get a shell" a
+            // question about line order in a text file. A Mac's two keys are two
+            // different keys.
+            //
+            // The CLIENT ID only within the same shape, because two lines naming
+            // one device in one shape leave the daemon unable to say which of them
+            // a session arrived on and every audit answer after that is a guess —
+            // while two lines naming one device in DIFFERENT shapes is exactly
+            // what a Mac is, and refusing that (as an earlier version of this
+            // check did) is refusing the second key it needs.
+            //
+            // Under the lock now, so a device that raced past this check a
+            // microsecond ago is a device this check can see.
+            if let Some(existing) = entries.iter().find(|e| {
+                (!e.fingerprint.is_empty() && e.fingerprint == mine.fingerprint)
+                    || (!e.client_id.is_empty()
+                        && e.client_id == mine.client_id
+                        && e.shell_access == mine.shell_access)
+            }) {
+                // The grant it HAS, not the one that was asked for, and nothing is
+                // written — `Change::Leave` rather than a rewrite of what was just
+                // read, which would take a fresh backup over the one copy of the
+                // file from before the last real change. Answering with the
+                // requested scope would tell a person their phone is read-only
+                // while the file still says control, and rewriting the line to
+                // match would let a second ceremony silently widen an existing
+                // device's access.
+                return Ok((
+                    fence::Change::Leave,
+                    ClientEnrollResult {
+                        client: Some(wire::enrolled_client(existing, 0)),
+                        already_enrolled: true,
+                    },
+                ));
+            }
 
-        let (mut ours, foreign) = sorted(&entries);
-        ours.push(line);
-        fence::write(&path, fence::AUTHORIZED_KEYS, &ours, &foreign, fence::Placement::Last)?;
-        Ok(ClientEnrollResult {
-            // The only moment this runner can honestly stamp a time: the file
-            // records none, so every later read of this entry reports 0.
-            client: Some(wire::enrolled_client(&mine, now)),
-            already_enrolled: false,
+            let (mut ours, foreign) = sorted(&entries);
+            ours.push(line);
+            Ok((
+                fence::Change::Write { entries: ours, foreign },
+                ClientEnrollResult {
+                    // The only moment this runner can honestly stamp a time: the
+                    // file records none, so every later read of this entry
+                    // reports 0.
+                    client: Some(wire::enrolled_client(&mine, now)),
+                    already_enrolled: false,
+                },
+            ))
         })
     })
     .await
@@ -159,20 +189,31 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
     }
     let closing = client_id.clone();
     let remaining = blocking(move || {
-        let entries = read(&path)?;
-        // NOT_FOUND rather than a cheerful success. "Revoked" from a runner that
-        // revoked nothing is the one answer a person must never be given about
-        // a device they are trying to cut off.
-        if !entries.iter().any(|e| e.client_id == client_id) {
-            return Err(DomainError::NotFound.into());
-        }
-        let remaining: Vec<Entry> =
-            entries.into_iter().filter(|e| e.client_id != client_id).collect();
-        let (ours, foreign) = sorted(&remaining);
-        fence::write(&path, fence::AUTHORIZED_KEYS, &ours, &foreign, fence::Placement::Last)?;
+        // Read and write under one lock hold, so that a revocation cannot rebuild
+        // the block from a snapshot taken before a concurrent enrollment landed
+        // and put the enrolled key back. See `fence::update`.
+        fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
+            let entries = attributed(entries);
+            // NOT_FOUND rather than a cheerful success. "Revoked" from a runner
+            // that revoked nothing is the one answer a person must never be given
+            // about a device they are trying to cut off. Decided in here, and
+            // `Refusal` is what carries it out — the file is not touched.
+            if !entries.iter().any(|e| e.client_id == client_id) {
+                return Err(Refusal(DomainError::NotFound));
+            }
+            let remaining: Vec<Entry> =
+                entries.into_iter().filter(|e| e.client_id != client_id).collect();
+            let (ours, foreign) = sorted(&remaining);
+            Ok((fence::Change::Write { entries: ours, foreign }, ()))
+        })?;
         // Read back rather than answering with what was just computed, the same
         // way a settings write does: what the file now says is the only claim
         // worth making about who may log in.
+        //
+        // Outside the lock on purpose, and not the hazard the lock is there for:
+        // this is a report, not a decision. Nothing is rebuilt from it, so an
+        // enrollment that lands between the write and this read shows up in the
+        // answer — which is the file being the authority, not a lost update.
         Ok(listing(&read(&path)?))
     })
     .await?;
@@ -192,26 +233,30 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
     Ok(remaining)
 }
 
-/// This runner's fence, with each line attributed to the account whose file it
-/// was read from.
+/// This runner's fence, for the calls that only report it.
 ///
-/// The attribution is done HERE because `fence::parse` cannot do it: nothing in
-/// an `authorized_keys` line names the account it grants — the file's location
-/// is what does — so the caller that opened the file is the only one that knows.
-///
-/// Read-modify-write, and the read is not inside the writer's lock: two
-/// enrollments landing in the same instant can each rebuild the block from a
-/// snapshot taken before the other's write, and the loser's key is lost. Bounded
-/// by `client.enroll` being a `host_admin` ceremony a person drives, and the
-/// pre-write backup is what recovers it. Closing it properly means the writer
-/// growing a read-modify-write shape, which is a change to a routine whose
-/// failure mode is losing SSH access and not one to make in passing.
+/// `list`, and `revoke`'s read-back — never the read half of a read-modify-write.
+/// That one goes through `fence::update`, which does its reading inside the
+/// writer's lock: reading here and writing afterwards is what used to let two
+/// enrollments in the same instant each rebuild the block from a snapshot taken
+/// before the other's write, losing the loser's key and with it a device's access.
 fn read(path: &std::path::Path) -> std::result::Result<Vec<Entry>, FenceError> {
+    Ok(attributed(&fence::read(path, fence::AUTHORIZED_KEYS)?))
+}
+
+/// Each line marked with the account whose file it was read from.
+///
+/// Done HERE because `fence` cannot do it: nothing in an `authorized_keys` line
+/// names the account it grants — the file's location is what does — so the caller
+/// that opened the file is the only one that knows. Which is also why the entries
+/// `fence::update` hands a closure arrive without it, and every closure that
+/// reports one puts it on first.
+fn attributed(entries: &[Entry]) -> Vec<Entry> {
     let account = local_account();
-    Ok(fence::read(path, fence::AUTHORIZED_KEYS)?
-        .into_iter()
-        .map(|entry| Entry { account: account.clone(), ..entry })
-        .collect())
+    entries
+        .iter()
+        .map(|entry| Entry { account: account.clone(), ..entry.clone() })
+        .collect()
 }
 
 fn listing(entries: &[Entry]) -> ClientList {

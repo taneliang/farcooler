@@ -112,7 +112,7 @@ pub fn host(
 ///
 /// No scope redaction and no path token: there is no path in it, and which
 /// devices may log in is exactly the shape-of-the-fleet fact `read` exists for.
-pub fn enrolled_client(entry: &crate::fence::Entry, enrolled_at: i64) -> wire::EnrolledClient {
+pub fn enrolled_client(entry: &farcooler_fence::Entry, enrolled_at: i64) -> wire::EnrolledClient {
     wire::EnrolledClient {
         client_id: entry.client_id.clone(),
         fingerprint: entry.fingerprint.clone(),

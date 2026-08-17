@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 farcooler-agent.workspace = true
 farcooler-core.workspace = true
+farcooler-fence.workspace = true
 farcooler-review.workspace = true
 sha2 = "0.10"
 # Recursive filesystem watching for the three session-log roots. Not already

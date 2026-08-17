@@ -2051,6 +2051,45 @@ async fn enrolling_a_mac_writes_two_lines_under_one_id_and_lists_them_apart() {
 }
 
 #[tokio::test]
+async fn a_macs_two_enrollments_may_land_at_the_same_moment() {
+    // The Mac app used to be required to make these two calls one after the
+    // other, and the requirement was written down in a comment rather than
+    // enforced anywhere: `enrollment` read the fence, then asked `fence::write`
+    // to take the lock, so two enrollments in the same instant each rebuilt the
+    // block from a snapshot taken before the other's write and one key was
+    // silently dropped — a Mac the app says is enrolled that has no shell, or no
+    // Far Cooler access at all. `fence::update` holds the lock across the read
+    // now, and this is that promise at the door a device actually knocks on.
+    //
+    // Two connections, because one client's calls are answered in order and
+    // would prove nothing about two arriving together.
+    let h = start(Scope::HostAdmin).await;
+    let (mut a, mut b) = (connect(&h).await, connect(&h).await);
+
+    let (first, second) = tokio::join!(
+        a.call(enrollment(KEY, "MacBook Air", "mac-1", Scope::Control)),
+        b.call(shell_enrollment(OTHER_KEY, "MacBook Air", "mac-1")),
+    );
+    first.expect("key A");
+    second.expect("key B");
+
+    // The file is the authority, so the file is what is asserted — both lines,
+    // one id, and the plain one still plain.
+    let written = std::fs::read_to_string(&h.authorized_keys).expect("the file was written");
+    assert!(
+        written.lines().any(|line| line.contains("--client mac-1")),
+        "the restricted line was lost to the other enrollment: {written}"
+    );
+    assert!(
+        written.lines().any(|line| line.starts_with("ssh-ed25519 ") && line.ends_with(".mac-1")),
+        "the shell line was lost to the other enrollment: {written}"
+    );
+    let listed = enrolled(&mut a).await;
+    assert_eq!(listed.len(), 2, "an enrollment was lost: {listed:?}");
+    assert_eq!(listed.iter().filter(|c| c.shell_access).count(), 1, "{listed:?}");
+}
+
+#[tokio::test]
 async fn one_key_is_one_line_whichever_shape_came_first() {
     // The decided answer to "what if the same key is enrolled plain and then
     // restricted": it is already enrolled, and nothing is written.
@@ -2100,8 +2139,8 @@ async fn client_list_reports_a_foreign_line_as_foreign() {
         &h.authorized_keys,
         format!(
             "{}\n{OTHER_KEY}\n{}\n",
-            farcooler_daemon::fence::BEGIN,
-            farcooler_daemon::fence::END
+            farcooler_fence::BEGIN,
+            farcooler_fence::END
         ),
     )
     .unwrap();

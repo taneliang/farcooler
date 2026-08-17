@@ -81,7 +81,7 @@ let package = Package(
         // than only Zed. Neither is visible by looking.
         //
         // The byte MECHANICS are deliberately not here — the lock, the two
-        // `fsync`s, the checksummed backup belong to `crates/daemon/src/fence.rs`
+        // `fsync`s, the checksummed backup belong to `crates/fence/src/lib.rs`
         // and are tested in Rust beside the `authorized_keys` fixtures, so that
         // one routine has one test suite. What IS here about the write is the
         // boundary: that Swift reaches that routine at all, that the block lands

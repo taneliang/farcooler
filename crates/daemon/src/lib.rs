@@ -3,7 +3,6 @@ pub mod agent_supervisor;
 pub mod change_set;
 pub mod enrollment;
 pub mod fanout;
-pub mod fence;
 pub mod file_diff;
 pub mod foreground;
 pub mod git;
