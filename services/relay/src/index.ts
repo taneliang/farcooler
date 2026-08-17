@@ -109,7 +109,7 @@ export default {
 
 // MARK: - Signing in
 
-/// Trade an authorisation code for a session.
+/// Trade an authorization code for a session.
 ///
 /// PKCE, so the code is worthless to anything that did not start the sign-in:
 /// the app invented a verifier, sent only its hash to WorkOS, and proves
@@ -146,7 +146,7 @@ async function refreshSession(request: Request, env: Env): Promise<Response> {
 /// Clearing tokens locally left the refresh token valid upstream until natural
 /// expiry, so anyone who had lifted it kept minting sessions after the user
 /// believed they had signed out. Unauthenticated on purpose: possession of the
-/// refresh token IS the authorisation, and requiring a valid access token would
+/// refresh token IS the authorization, and requiring a valid access token would
 /// mean the one case that most needs to work — a session already going wrong —
 /// is the one that cannot.
 async function logout(request: Request, env: Env): Promise<Response> {
@@ -767,7 +767,7 @@ interface Device {
 async function notify(request: Request, env: Env): Promise<Response> {
   const header = request.headers.get('authorization') ?? ''
   const token = header.startsWith('Bearer ') ? header.slice(7) : ''
-  if (!token) return json({ error: 'unauthorised' }, 401)
+  if (!token) return json({ error: 'unauthorized' }, 401)
 
   // Expiry checked in the WHERE clause, not after: a token that has run out is
   // a token that does not exist. NULL means a pairing issued before expiries
@@ -782,7 +782,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
   )
     .bind(await sha256(token), Date.now())
     .first<{ id: string; account_id: string; label: string }>()
-  if (!daemon) return json({ error: 'unauthorised' }, 401)
+  if (!daemon) return json({ error: 'unauthorized' }, 401)
 
   const body = await request.json<Notification>()
   if (!body.title) return json({ error: 'title' }, 400)
@@ -985,10 +985,10 @@ async function deliverActivity(
 /// The signed-in account, or the response to send instead.
 async function requireAccount(request: Request, env: Env): Promise<string | Response> {
   const header = request.headers.get('authorization') ?? ''
-  if (!header.startsWith('Bearer ')) return json({ error: 'unauthorised' }, 401)
+  if (!header.startsWith('Bearer ')) return json({ error: 'unauthorized' }, 401)
 
   const session = await verifySession(header.slice(7), env)
-  if (!session) return json({ error: 'unauthorised' }, 401)
+  if (!session) return json({ error: 'unauthorized' }, 401)
 
   // First sight of an account creates it. There is no signup step to get wrong
   // and no window where someone is authenticated but has nowhere to be stored.

@@ -58,7 +58,7 @@ struct ThemeEditorView: View {
                 Text("Bright")
             } footer: {
                 Text(
-                    "Colours above these sixteen are arithmetic every terminal agrees on, so no "
+                    "Colors above these sixteen are arithmetic every terminal agrees on, so no "
                     + "theme sets them.")
             }
         }

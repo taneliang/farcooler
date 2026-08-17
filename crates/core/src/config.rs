@@ -196,7 +196,7 @@ pub fn themes_from(path: &Path) -> Vec<crate::theme::Theme> {
                 // One theme at a time, never the file. The same rule adapters
                 // follow: a typo in one table must not cost the user every
                 // other table in it.
-                tracing::warn!(theme = %name, "ignoring a theme with unreadable colours");
+                tracing::warn!(theme = %name, "ignoring a theme with unreadable colors");
                 None
             }
         })

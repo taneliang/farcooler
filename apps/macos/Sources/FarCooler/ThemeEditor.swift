@@ -64,7 +64,7 @@ struct ThemeEditor: View {
                     Text("Bright")
                 } footer: {
                     Text(
-                        "Colours above these sixteen are arithmetic every terminal agrees on, so "
+                        "Colors above these sixteen are arithmetic every terminal agrees on, so "
                         + "no theme sets them.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

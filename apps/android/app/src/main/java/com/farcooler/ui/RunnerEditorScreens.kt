@@ -140,7 +140,7 @@ fun ThemeEditorScreen(theme: Theme, onCancel: () -> Unit, onSave: (Theme) -> Uni
                     ) { draft = it }
                 }
                 Text(
-                    "Colours above these sixteen are arithmetic every terminal agrees on, so no " +
+                    "Colors above these sixteen are arithmetic every terminal agrees on, so no " +
                         "theme sets them.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

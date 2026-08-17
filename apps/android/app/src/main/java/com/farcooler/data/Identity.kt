@@ -128,10 +128,10 @@ object Identity {
             // the Keystore key is gone — a factory reset restoring preferences
             // from a backup, or the user removing their screen lock on some
             // devices — and the only honest recovery is to forget it and
-            // generate a new identity, which the host will then refuse until
-            // this device is authorised again. Saying so is what stops that
+            // generate a new identity, which the runner will then refuse until
+            // this device is authorized again. Saying so is what stops that
             // reading as a mysterious rejection.
-            lastError = "The stored SSH key could not be read; this device needs authorising again."
+            lastError = "The stored SSH key could not be read; this device needs authorizing again."
             preferences.edit().remove(CIPHERTEXT).remove(IV).apply()
             null
         }
