@@ -21,6 +21,10 @@ farcooler-transport.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 uuid.workspace = true
+# Derived, for the two ceremony payloads. Hand-written encoders for a struct
+# that must round-trip byte-for-byte between three platforms is a second place
+# for the field names to be wrong.
+serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 thiserror.workspace = true

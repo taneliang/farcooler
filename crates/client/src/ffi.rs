@@ -526,6 +526,229 @@ pub unsafe extern "C" fn farcooler_client_public_key(
     })
 }
 
+// MARK: - The enrollment ceremony
+//
+// Four moments, four entry points, and every rule that decides whether a scan
+// is acceptable is behind them in `crate::ceremony` rather than in three apps.
+// The apps get a camera and a screen: they encode the string they are handed
+// into a QR code, and they show the sentence that belongs to a returned code.
+//
+// **A refusal is a code, never a sentence.** Every one of these answers either
+// the payload it was asked for or `{"error":"wrong_ceremony"}` — a stable
+// machine-readable word from `CeremonyError::code`. A Rust error string must
+// never reach a screen: the apps own the copy, they localize it, and this repo
+// already renders error strings from these layers in Settings, which is how a
+// `serde_json` parse message would end up in front of a person.
+//
+// Same buffer contract as `farcooler_client_generate_key` throughout: JSON into
+// a caller-supplied buffer, returning the number of bytes needed. If that
+// exceeds `capacity`, nothing is written; call again with a larger buffer.
+
+/// Build the code a new device shows. Leg one, the displaying side.
+///
+/// `key_b` may be NULL — a phone has one key, because there is no Zed on a
+/// phone. The channel and the ceremony id are this crate's to set, not a
+/// caller's: a device that could be told which channel it is could be told
+/// wrong, and a ceremony id a caller chose is a ceremony id a caller can repeat.
+///
+/// Writes the offer as JSON. **That string is both what goes in the QR code and
+/// what the device keeps** to pass back as `expecting` when the reply arrives,
+/// so what it shows and what it remembers cannot drift apart.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_ceremony_offer(
+    name: *const c_char,
+    account: *const c_char,
+    key_a: *const c_char,
+    key_b: *const c_char,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    guarded(0, || {
+        let name = unsafe { read_str(name) }.unwrap_or_default();
+        let account = unsafe { read_str(account) }.unwrap_or_default();
+        let Some(key_a) = (unsafe { read_str(key_a) }) else {
+            return spill(&refusal(&crate::ceremony::CeremonyError::Malformed("no key".into())), out, capacity);
+        };
+        let key_b = unsafe { read_str(key_b) };
+
+        let offer = crate::ceremony::offer(&name, &account, &key_a, key_b.as_deref());
+        spill(&crate::ceremony::encode_offer(&offer), out, capacity)
+    })
+}
+
+/// Read a scanned offer. Leg one, the scanning side.
+///
+/// `held_ms` is how long ago **this** device scanned, by its own clock — which
+/// is the only clock that counts. A code carries no timestamp for the same
+/// reason a lock carries no key: the displaying device would control it, so a
+/// code claiming to be a second old would be believed forever.
+///
+/// Called at the moment of the confirmation rather than only at the scan, so
+/// that a sheet left open past the window refuses instead of enrolling.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_ceremony_scan(
+    encoded: *const c_char,
+    held_ms: u64,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    guarded(0, || {
+        use crate::ceremony::{CeremonyError, decode_offer, encode_offer, still_fresh};
+
+        let Some(encoded) = (unsafe { read_str(encoded) }) else {
+            return spill(&refusal(&CeremonyError::Malformed("nothing scanned".into())), out, capacity);
+        };
+
+        let answer = still_fresh(std::time::Duration::from_millis(held_ms))
+            .and_then(|()| decode_offer(&encoded))
+            .map(|offer| encode_offer(&offer));
+        spill(&answer.unwrap_or_else(|e| refusal(&e)), out, capacity)
+    })
+}
+
+/// Build the reply. Leg two, the trusted device's side.
+///
+/// `offer_json` is what `farcooler_client_ceremony_scan` returned, and it is
+/// decoded again rather than trusted: a reply must not be built for a code this
+/// build would have refused.
+///
+/// `runners_json` is a JSON array of runner records — id, label, alias, address,
+/// user, port, host_key, pending. `budget_bytes` is what the app's own QR
+/// encoder reports as fitting at the error-correction level it chose; 0 means
+/// the conservative default. Over budget is `{"error":"too_large"}`, and the
+/// answer is to grant the rest by running the ceremony again — never a second
+/// code to reassemble.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_ceremony_reply(
+    offer_json: *const c_char,
+    runners_json: *const c_char,
+    budget_bytes: usize,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    guarded(0, || {
+        use crate::ceremony::{
+            BUDGET, CeremonyError, RunnerEntry, decode_offer, encode_manifest, manifest,
+            manifest_fits,
+        };
+
+        let malformed =
+            |what: &str| refusal(&CeremonyError::Malformed(what.to_string()));
+
+        let Some(offer_json) = (unsafe { read_str(offer_json) }) else {
+            return spill(&malformed("no offer"), out, capacity);
+        };
+        let runners_json = unsafe { read_str(runners_json) }.unwrap_or_else(|| "[]".into());
+
+        let offer = match decode_offer(&offer_json) {
+            Ok(offer) => offer,
+            Err(e) => return spill(&refusal(&e), out, capacity),
+        };
+        let Ok(runners) = serde_json::from_str::<Vec<RunnerEntry>>(&runners_json) else {
+            return spill(&malformed("runners"), out, capacity);
+        };
+
+        let reply = manifest(&offer, runners);
+        let budget = if budget_bytes == 0 { BUDGET } else { budget_bytes };
+        if !manifest_fits(&reply, budget) {
+            return spill(&refusal(&CeremonyError::TooLarge), out, capacity);
+        }
+        spill(&encode_manifest(&reply), out, capacity)
+    })
+}
+
+/// Take a scanned reply, or refuse it. Leg two, the new device's side.
+///
+/// `expecting_json` is the offer this device is still showing — the same string
+/// `farcooler_client_ceremony_offer` returned. `already_taken` is the device's
+/// own record that this ceremony has answered once already; `held_ms` is its own
+/// elapsed time since it scanned.
+///
+/// Freshness is enforced here rather than left beside this call, because a rule
+/// an app can forget to invoke is a rule that ships unenforced on whichever
+/// platform forgets it.
+///
+/// Writes the manifest, or `{"error":"wrong_ceremony"}`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_ceremony_accept(
+    encoded: *const c_char,
+    expecting_json: *const c_char,
+    already_taken: bool,
+    held_ms: u64,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    guarded(0, || {
+        use crate::ceremony::{
+            CeremonyError, accept_manifest, decode_offer, encode_manifest, still_fresh,
+        };
+
+        let malformed =
+            |what: &str| refusal(&CeremonyError::Malformed(what.to_string()));
+
+        let Some(encoded) = (unsafe { read_str(encoded) }) else {
+            return spill(&malformed("nothing scanned"), out, capacity);
+        };
+        let Some(expecting_json) = (unsafe { read_str(expecting_json) }) else {
+            return spill(&malformed("no offer to answer"), out, capacity);
+        };
+
+        let answer = decode_offer(&expecting_json)
+            .and_then(|expecting| {
+                // The order matters: a second reply is refused before anything
+                // else is considered, and a stale one before the payload is
+                // read, so neither depends on the scan being well-formed.
+                if already_taken {
+                    return Err(CeremonyError::AlreadyTaken);
+                }
+                still_fresh(std::time::Duration::from_millis(held_ms))?;
+                accept_manifest(&encoded, &expecting, already_taken)
+            })
+            .map(|m| encode_manifest(&m));
+        spill(&answer.unwrap_or_else(|e| refusal(&e)), out, capacity)
+    })
+}
+
+/// A refusal as the apps see it: a word they map to their own copy.
+///
+/// `version` and `channel` carry their value beside the code because the app's
+/// sentence needs it — "made by a newer Far Cooler" is a different screen from
+/// "update this device", and "that code belongs to Canary" names the channel.
+/// Nothing else carries a detail: a `serde_json` message would be a Rust error
+/// string one `Text(error)` away from a screen.
+fn refusal(error: &crate::ceremony::CeremonyError) -> String {
+    use crate::ceremony::CeremonyError;
+
+    let mut payload = json!({ "error": error.code() });
+    match error {
+        CeremonyError::Version(v) => payload["version"] = json!(v),
+        CeremonyError::Channel(c) => payload["channel"] = json!(c),
+        // Logged rather than returned, so the detail is available to whoever is
+        // debugging and to nobody who is reading a screen.
+        CeremonyError::Malformed(why) => tracing::debug!(why = %why, "a scanned code was refused"),
+        _ => {}
+    }
+    payload.to_string()
+}
+
+/// The buffer contract, once: write if it fits, and always report the size.
+///
+/// The same shape `farcooler_client_generate_key` has used since the first
+/// release — a caller sizes a buffer, calls, and calls again if it was short.
+/// Nothing is written on a short buffer, because a truncated JSON payload is
+/// worse than none: it parses as nothing and looks like a corrupt scan.
+///
+/// `out` is under the module's contract, stated once at the top: null, or valid
+/// for `capacity` bytes for the duration of the call.
+fn spill(payload: &str, out: *mut u8, capacity: usize) -> usize {
+    let bytes = payload.as_bytes();
+    if out.is_null() || bytes.len() > capacity {
+        return bytes.len();
+    }
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+    bytes.len()
+}
+
 /// The themes compiled into this build, as JSON, with no session required.
 ///
 /// Session-free on purpose. A phone that has never reached a runner still needs

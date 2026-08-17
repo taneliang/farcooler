@@ -330,9 +330,27 @@ Verify the ed25519 signature with WebCrypto (`crypto.subtle.importKey` with `Ed2
 The lookup query is exactly:
 
 ```sql
-SELECT id, label FROM devices
- WHERE key_a_fingerprint = ?1 AND account_id = ?2 AND state = 'verified'
+SELECT id, label, state FROM devices
+ WHERE key_a_fingerprint = ?1 AND account_id = ?2
 ```
+
+**There is deliberately no `state` predicate**, and an earlier draft of this plan
+had one — which made the lookup unable to match the very device being onboarded.
+The row is `pending` until a ceremony completes, and the trusted device does this
+lookup *before* enrolling and promoting, so filtering on `verified` answers
+`found: false` for every legitimate onboarding. Promotion cannot move earlier
+either: it requires a completed ceremony, which requires this lookup.
+
+The predicate was the wrong half. This query answers **"is this key on my
+account?"**, which is the gate, and it is satisfied the moment a device holding
+that account's session proved possession. **"Has a ceremony completed?"** is a
+different question — it governs the device list and eligibility for a later
+grant — so `state` is *reported*, not filtered on. Anyone re-adding the filter as
+hardening breaks every onboarding.
+
+Scoping stays in the query rather than being compared afterwards, so two accounts
+registering one fingerprint cannot confuse it, and a miss must carry no
+information about whose a key is otherwise.
 
 - [ ] **Step 4: Run and commit**
 

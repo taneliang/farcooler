@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import worker from '../src/index'
+import { fingerprintOf, parseEd25519 } from '../src/keys'
 import { topicMismatch } from '../src/push'
 import { verifySession } from '../src/workos'
 
@@ -455,6 +456,8 @@ describe('the signed-in routes', () => {
     const paths = [
       '/v1/devices',
       '/v1/devices/activity',
+      '/v1/devices/lookup',
+      '/v1/devices/verify',
       '/v1/daemons',
       '/v1/account',
       '/v1/devices/revoke',
@@ -781,6 +784,407 @@ describe('/v1/notify and Live Activities', () => {
     await post('/v1/notify', { title: 'hi', status: 'blocked' }, 'mine')
 
     expect(pushes(calls).length).toBe(1)
+  })
+})
+
+// MARK: - Proving possession of a key
+
+/// The two strings a registration carries to prove it holds Key A.
+///
+/// A real Ed25519 key, signed with `crypto.subtle`, because the thing under
+/// test is a signature the relay refuses — and a stubbed verifier would agree
+/// with whatever the route already believed.
+async function deviceKey() {
+  const pair = (await crypto.subtle.generateKey('Ed25519', true, [
+    'sign',
+    'verify',
+  ])) as CryptoKeyPair
+  const raw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey))
+  return {
+    keyA: `ssh-ed25519 ${base64(sshBlob(raw))} test@example`,
+    async sign(message: string): Promise<string> {
+      const signature = await crypto.subtle.sign(
+        'Ed25519',
+        pair.privateKey,
+        new TextEncoder().encode(message),
+      )
+      return base64(new Uint8Array(signature))
+    },
+  }
+}
+
+/// The SSH wire encoding of an ed25519 public key: two length-prefixed strings,
+/// the algorithm name and the 32 bytes. This is what the fingerprint is over,
+/// which is why the test builds it rather than hashing the key alone.
+function sshBlob(raw: Uint8Array): Uint8Array {
+  const name = new TextEncoder().encode('ssh-ed25519')
+  const out = new Uint8Array(4 + name.length + 4 + raw.length)
+  new DataView(out.buffer).setUint32(0, name.length)
+  out.set(name, 4)
+  new DataView(out.buffer).setUint32(4 + name.length, raw.length)
+  out.set(raw, 8 + name.length)
+  return out
+}
+
+function base64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+}
+
+/// The three fields an updated app sends to prove it holds a key: a fresh one
+/// every call, so no two devices in a test share a fingerprint by accident.
+async function proof(deviceId: string) {
+  const key = await deviceKey()
+  return { deviceId, keyA: key.keyA, signature: await key.sign(deviceId) }
+}
+
+/// Register the way an updated app does: a key, and a signature over the device
+/// id it is registering under.
+async function registerProven(account: string, fields: Record<string, unknown> = {}) {
+  const deviceId = crypto.randomUUID()
+  const response = await register(account, { ...(await proof(deviceId)), ...fields })
+  return { response, deviceId }
+}
+
+/// What the relay decided to store for a device, read back from D1 rather than
+/// from the route's own answer.
+async function deviceRow(pushToken = 'device-token') {
+  return await env.DB.prepare(
+    `SELECT id, account_id, label, key_a_fingerprint, state FROM devices WHERE push_token = ?`,
+  )
+    .bind(pushToken)
+    .first<{
+      id: string
+      account_id: string
+      label: string
+      key_a_fingerprint: string | null
+      state: string
+    }>()
+}
+
+/// Promote a device the way a trusted one does once it has enrolled it.
+async function promote(account: string, fingerprint: string) {
+  return await post('/v1/devices/verify', { fingerprint }, await sessionFor(account))
+}
+
+describe('proof of possession at registration', () => {
+  it('records the fingerprint of the key that signed, and nothing about the key', async () => {
+    watchFetch()
+    const { response } = await registerProven('user_1')
+    expect(response.status).toBe(200)
+
+    const row = await deviceRow()
+    expect(row?.key_a_fingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]{43}$/)
+    // A row created by the new device is pending: it proves possession of a
+    // key, which is not the same as a ceremony having enrolled it.
+    expect(row?.state).toBe('pending')
+
+    // The relay stores a fingerprint, never a key. If the key itself ever
+    // appeared in a column, "never install a key the relay handed you" would go
+    // back to being a rule someone has to remember.
+    const everything = JSON.stringify(await env.DB.prepare(`SELECT * FROM devices`).first())
+    expect(everything).not.toContain('AAAAC3Nza')
+  })
+
+  it('fingerprints a key the way ssh-keygen does', async () => {
+    // A golden, from a real `ssh-keygen -lf`. This string is compared by eye
+    // against what the other device shows and by string against what the Rust
+    // client computes, so a fingerprint the relay invented for itself would
+    // agree with nothing outside this file — and the one place it is used is a
+    // comparison.
+    const line =
+      'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOoMTzNWaYOZBhg2HY8PVwkmuwqMQOqfrM9xATpdIMEm test@example'
+    expect(await fingerprintOf(parseEd25519(line)!)).toBe(
+      'SHA256:yjZGaYPt6bVurNagcMgxNBH8z8ldaacgkwyQoKhR430',
+    )
+    // The algorithm inside the blob, not the label in front of it. Text anyone
+    // can write is not what a verifier goes by.
+    expect(parseEd25519(line.replace('ssh-ed25519 ', 'ssh-rsa '))).toBe(null)
+    expect(parseEd25519('ssh-ed25519 not-base64')).toBe(null)
+    expect(parseEd25519('')).toBe(null)
+  })
+
+  it('refuses a registration whose own fingerprint disagrees with its key', async () => {
+    // Both screens show this string at the confirmation. A client computing it
+    // differently from the relay would put two strings in front of a person who
+    // is being asked to check that they match, and that is worth failing at
+    // registration rather than discovering half way through a ceremony.
+    watchFetch()
+    const key = await deviceKey()
+    const response = await register('user_1', {
+      deviceId: 'device-1',
+      keyA: key.keyA,
+      signature: await key.sign('device-1'),
+      fingerprint: 'SHA256:not-what-that-key-hashes-to',
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'fingerprint' })
+    expect(await deviceRow()).toBe(null)
+  })
+
+  it('refuses a registration that shows a key but no signature', async () => {
+    watchFetch()
+    const key = await deviceKey()
+    const response = await register('user_1', { deviceId: 'device-1', keyA: key.keyA })
+    expect(response.status).toBe(400)
+    expect(await deviceRow()).toBe(null)
+  })
+
+  it('refuses a registration whose signature does not verify', async () => {
+    // The point of the whole task. Without this a session-holder registers any
+    // fingerprint they have seen anywhere — off a screen, out of a QR — and the
+    // account gate checks membership of a registry rather than that the device
+    // in front of you holds the key it is showing.
+    watchFetch()
+    const mine = await deviceKey()
+    const theirs = await deviceKey()
+    const response = await register('user_1', {
+      deviceId: 'device-1',
+      keyA: theirs.keyA,
+      signature: await mine.sign('device-1'),
+    })
+    expect(response.status).toBe(400)
+    expect(await deviceRow()).toBe(null)
+  })
+
+  it('refuses a signature over something other than the device id it sent', async () => {
+    watchFetch()
+    const key = await deviceKey()
+    const response = await register('user_1', {
+      deviceId: 'device-1',
+      keyA: key.keyA,
+      signature: await key.sign('device-2'),
+    })
+    expect(response.status).toBe(400)
+  })
+
+  it('refuses a key that is not an ed25519 one', async () => {
+    watchFetch()
+    const key = await deviceKey()
+    const response = await register('user_1', {
+      deviceId: 'device-1',
+      keyA: key.keyA.replace('ssh-ed25519', 'ssh-rsa'),
+      signature: await key.sign('device-1'),
+    })
+    expect(response.status).toBe(400)
+  })
+
+  it('still registers a build that has never heard of keys', async () => {
+    // Every shipped app is one of these. Refusing them would take push down for
+    // everyone already installed on the day this deploys, and the design's own
+    // answer for a device that never re-registers is that it shows as
+    // unverified — which requires it to still be able to register at all.
+    watchFetch()
+    expect((await register('user_1')).status).toBe(200)
+    const row = await deviceRow()
+    expect(row?.key_a_fingerprint).toBe(null)
+    expect(row?.state).toBe('verified')
+  })
+
+  it('gives an existing row its fingerprint and state when it re-registers', async () => {
+    // CRITICAL, and the reason this task has a regression test at all. The
+    // upsert names its updated columns explicitly, so a migration that adds
+    // columns does not add them here: without the fix, an updated app
+    // re-registers with a 200 and stays legacy forever — fingerprint NULL,
+    // invisible to every ceremony, with nothing on any screen saying why.
+    //
+    // The state stays `verified`. This row predates the ceremony and was created
+    // by the flow that was the old trust model; demoting every already-installed
+    // device to pending would leave a fleet where nothing is verified and
+    // nothing can promote anything, because promotion needs a trusted device.
+    watchFetch()
+    await env.DB.prepare(`INSERT INTO accounts (id, created_at) VALUES (?, ?)`)
+      .bind('user_1', Date.now())
+      .run()
+    await env.DB.prepare(
+      `INSERT INTO devices (id, account_id, platform, push_token, label, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+      .bind('legacy-row', 'user_1', 'apns', 'device-token', 'iPhone', Date.now())
+      .run()
+
+    const { response } = await registerProven('user_1', { label: 'iPhone' })
+    expect(response.status).toBe(200)
+
+    const row = await deviceRow()
+    expect(row?.id).toBe('legacy-row')
+    expect(row?.key_a_fingerprint).toMatch(/^SHA256:/)
+    expect(row?.state).toBe('verified')
+  })
+
+  it('drops back to pending when a different key arrives on the same device', async () => {
+    // Possession of the new key is proven; a ceremony for it is not. The row
+    // keeping `verified` would mean a key nobody ever enrolled inheriting the
+    // standing of the one it replaced.
+    watchFetch()
+    await registerProven('user_1')
+    await promote('user_1', (await deviceRow())!.key_a_fingerprint!)
+    expect((await deviceRow())?.state).toBe('verified')
+
+    await registerProven('user_1')
+    expect((await deviceRow())?.state).toBe('pending')
+  })
+
+  it('tells the devices screen which rows are unverified', async () => {
+    // The design's answer for a device that never re-registers, and for one
+    // half way through a ceremony, is that it appears as unverified rather than
+    // failing silently later. The app cannot say that unless the relay says it.
+    watchFetch()
+    await registerProven('user_1')
+    const body = await (await post('/v1/account', {}, await sessionFor('user_1'))).json<any>()
+    expect(body.devices[0].state).toBe('pending')
+  })
+
+  it('lets the same key move to a device whose push token changed', async () => {
+    // A reinstall, or Apple reissuing a token. One row per key per account is a
+    // unique index, so without this the insert violates it and registration
+    // fails with a 500 — every time, for good, on the one path that has to keep
+    // working for push to work at all.
+    watchFetch()
+    await registerProven('user_1')
+    const key = await deviceKey()
+    const response = await register('user_1', {
+      pushToken: 'a-fresh-token',
+      deviceId: 'device-2',
+      keyA: key.keyA,
+      signature: await key.sign('device-2'),
+    })
+    expect(response.status).toBe(200)
+    expect((await deviceRow('a-fresh-token'))?.key_a_fingerprint).toMatch(/^SHA256:/)
+  })
+})
+
+// MARK: - The one question the relay answers about a key
+
+describe('/v1/devices/lookup', () => {
+  it('finds only this account and never says whose a key is otherwise', async () => {
+    // Scoped in the query rather than compared afterwards. A lookup by key alone
+    // would return some device and leave the caller checking account ids, which
+    // breaks the moment two accounts register the same public key — and turns
+    // the route into a key-enumeration oracle for everyone else's devices.
+    watchFetch()
+    const key = await deviceKey()
+    for (const [account, token] of [
+      ['user_1', 'phone-1'],
+      ['user_2', 'phone-2'],
+    ]) {
+      await register(account, {
+        pushToken: token,
+        label: `${account}'s phone`,
+        deviceId: account,
+        keyA: key.keyA,
+        signature: await key.sign(account),
+      })
+    }
+    const fingerprint = (await deviceRow('phone-1'))!.key_a_fingerprint!
+    await promote('user_1', fingerprint)
+    await promote('user_2', fingerprint)
+
+    const mine = await (await post('/v1/devices/lookup', { fingerprint }, await sessionFor('user_1'))).json<any>()
+    expect(mine.found).toBe(true)
+    expect(mine.label).toBe("user_1's phone")
+
+    const theirs = await (await post('/v1/devices/lookup', { fingerprint }, await sessionFor('user_2'))).json<any>()
+    expect(theirs.label).toBe("user_2's phone")
+
+    // A miss is a miss. No account, no id, no label, nothing that would tell a
+    // stranger the key exists somewhere else.
+    const nobody = await (await post('/v1/devices/lookup', { fingerprint }, await sessionFor('user_3'))).json<any>()
+    expect(nobody).toEqual({ found: false })
+  })
+
+  it('finds a device whose ceremony has not completed, and says so', async () => {
+    // The contract that makes onboarding possible at all. The row is `pending`
+    // until a ceremony completes, and the trusted device cannot complete one
+    // until this lookup has answered — so a lookup that required `verified`
+    // would be waiting on its own result and every onboarding would end at "that
+    // device is signed into a different account".
+    //
+    // The gate is account membership, which a registration that proved
+    // possession under this account's session has already satisfied. The state
+    // rides along so the caller can say a ceremony has not finished without
+    // asking a second time.
+    watchFetch()
+    await registerProven('user_1', { label: 'New iPhone' })
+    const fingerprint = (await deviceRow())!.key_a_fingerprint!
+    const session = await sessionFor('user_1')
+
+    const pending = await (
+      await post('/v1/devices/lookup', { fingerprint }, session)
+    ).json<any>()
+    expect(pending).toEqual({ found: true, label: 'New iPhone', state: 'pending' })
+
+    await promote('user_1', fingerprint)
+    const verified = await (
+      await post('/v1/devices/lookup', { fingerprint }, session)
+    ).json<any>()
+    expect(verified).toEqual({ found: true, label: 'New iPhone', state: 'verified' })
+  })
+
+  it('does not find a row on another account whatever its state', async () => {
+    // The account is the gate, and it is the only thing the state's arrival
+    // must not soften. Pending or verified, someone else's device is not yours
+    // — and a miss says nothing that would separate a key registered on another
+    // account from a key registered nowhere.
+    watchFetch()
+    await register('user_2', { pushToken: 'their-phone', label: "Their phone", ...(await proof('their-device')) })
+    const fingerprint = (await deviceRow('their-phone'))!.key_a_fingerprint!
+    const session = await sessionFor('user_1')
+
+    expect(await (await post('/v1/devices/lookup', { fingerprint }, session)).json()).toEqual({
+      found: false,
+    })
+
+    await promote('user_2', fingerprint)
+    const answer = await (await post('/v1/devices/lookup', { fingerprint }, session)).json<any>()
+    expect(answer).toEqual({ found: false })
+    // Said again as a property rather than a shape, because this is the one
+    // that must survive every later change to the response.
+    expect(JSON.stringify(answer)).not.toContain('user_2')
+    expect(JSON.stringify(answer)).not.toContain('Their phone')
+    expect(answer.state).toBeUndefined()
+  })
+
+  it('needs a fingerprint, and a session', async () => {
+    watchFetch()
+    expect((await post('/v1/devices/lookup', {})).status).toBe(401)
+    expect((await post('/v1/devices/lookup', {}, await sessionFor('user_1'))).status).toBe(400)
+  })
+})
+
+describe('/v1/devices/verify', () => {
+  it('promotes only from pending, and only on this account', async () => {
+    watchFetch()
+    await registerProven('user_1')
+    const fingerprint = (await deviceRow())!.key_a_fingerprint!
+
+    // Another account cannot promote a row it does not own, and is not told
+    // that there was one.
+    expect(await (await promote('user_2', fingerprint)).json()).toEqual({ ok: false })
+    expect((await deviceRow())?.state).toBe('pending')
+
+    expect(await (await promote('user_1', fingerprint)).json()).toEqual({ ok: true })
+    expect((await deviceRow())?.state).toBe('verified')
+
+    // Already verified is not a promotion. Answering `ok` a second time would
+    // make "a ceremony completed just now" indistinguishable from "this key was
+    // already here", which is the one thing the caller is asking.
+    expect(await (await promote('user_1', fingerprint)).json()).toEqual({ ok: false })
+  })
+
+  it('will not promote a pending row that has gone stale', async () => {
+    // A pending row expires. It is created before a ceremony and promoted at the
+    // end of one, so anything older than that is not a ceremony finishing — it
+    // is a row nobody came back for, and a promotion for it would be a
+    // registration from any earlier time being completed by a later session.
+    watchFetch()
+    await registerProven('user_1')
+    const fingerprint = (await deviceRow())!.key_a_fingerprint!
+    await env.DB.prepare(`UPDATE devices SET updated_at = ? WHERE key_a_fingerprint = ?`)
+      .bind(Date.now() - 25 * 60 * 60 * 1000, fingerprint)
+      .run()
+
+    expect(await (await promote('user_1', fingerprint)).json()).toEqual({ ok: false })
+    expect((await deviceRow())?.state).toBe('pending')
   })
 })
 

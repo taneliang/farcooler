@@ -45,6 +45,11 @@ export type EventName =
   // registering a device or pairing a machine, and that is still a user.
   | 'signed_in'
   | 'device_registered'
+  // A ceremony that actually finished, which is the only thing that promotes a
+  // device to verified. Counted apart from `device_registered` because the gap
+  // between the two is the funnel that matters for onboarding: a registration
+  // is a device that showed a code, and this is one somebody scanned.
+  | 'device_verified'
   | 'daemon_paired'
   | 'notification_sent'
   | 'notification_failed'

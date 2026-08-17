@@ -9,6 +9,7 @@
 //! between platforms in one place, and give the platforms a narrow boundary.
 
 pub mod actions;
+pub mod ceremony;
 pub mod ffi;
 pub mod session;
 pub mod ssh;

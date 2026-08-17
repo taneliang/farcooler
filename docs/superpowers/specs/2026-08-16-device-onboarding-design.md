@@ -294,7 +294,10 @@ runner granted, its address, user, port, host key fingerprint and alias. A
 runner is about 120 bytes, so **one static code with a cap**, and no animated
 sequence, no reassembly, no partial-set handling. The cap is whatever the encoder
 reports as fitting at the chosen error-correction level after the header below,
-measured rather than assumed — roughly fifteen runners, but a stated byte budget
+measured rather than assumed. Roughly **nine** runners at a 1,800-byte budget:
+a record carrying a Tailscale address serializes to about 190 bytes, not the 120
+an earlier draft guessed, so "fifteen" was optimistic. That the number moved is
+the argument for the mechanism — a stated byte budget
 is the mechanism and a runner count is the consequence. Past the cap, grant the
 rest by running the ceremony again.
 

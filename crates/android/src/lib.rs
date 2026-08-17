@@ -275,6 +275,134 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePublicKey(
     }
 }
 
+// MARK: - The enrollment ceremony
+//
+// Four moments, four shims, and no rule of any kind on this side. Whether a
+// scan is acceptable is decided in `farcooler_client::ceremony`, which is the
+// point of putting it in Rust: Kotlin gets the same refusals Swift gets, in the
+// same words, without either of them re-deciding anything.
+//
+// Each returns a JSON string — the payload asked for, or `{"error":"…"}` with a
+// stable machine-readable code the Kotlin side maps to copy. Null means the
+// call could not be made at all, which is the shape every helper here already
+// uses for "nothing to report".
+
+/// Ask a ceremony entry point for its size, then for its bytes.
+///
+/// The two-call dance stays on this side of the boundary rather than crossing
+/// into Kotlin: a Java string carries its own length, so a caller with a fixed
+/// buffer — the reason the C ABI works that way — does not exist over here. And
+/// asked rather than guessed, because a manifest's size is a fleet's size.
+fn ceremony_json(env: &mut JNIEnv, call: impl Fn(*mut u8, usize) -> usize) -> jstring {
+    let needed = call(std::ptr::null_mut(), 0);
+    if needed == 0 {
+        return std::ptr::null_mut();
+    }
+    let mut buffer = vec![0u8; needed];
+    let written = call(buffer.as_mut_ptr(), buffer.len());
+    if written == 0 || written > buffer.len() {
+        return std::ptr::null_mut();
+    }
+    match std::str::from_utf8(&buffer[..written]) {
+        Ok(text) => jstring_of(env, text),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// The code a new device shows. `keyB` may be null — a phone has one key.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
+    mut env: JNIEnv,
+    _class: JClass,
+    name: JString,
+    account: JString,
+    key_a: JString,
+    key_b: JString,
+) -> jstring {
+    let name = c_string(&mut env, &name);
+    let account = c_string(&mut env, &account);
+    let key_a = c_string(&mut env, &key_a);
+    let key_b = c_string(&mut env, &key_b);
+    let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+
+    ceremony_json(&mut env, |out, capacity| unsafe {
+        client::farcooler_client_ceremony_offer(
+            pointer(&name),
+            pointer(&account),
+            pointer(&key_a),
+            pointer(&key_b),
+            out,
+            capacity,
+        )
+    })
+}
+
+/// A scanned offer, refused if this device has held the scan too long.
+///
+/// `heldMs` is measured by the Android side's own clock — `SystemClock`, not a
+/// field in the code, which the device displaying it controls.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyScan(
+    mut env: JNIEnv,
+    _class: JClass,
+    encoded: JString,
+    held_ms: jlong,
+) -> jstring {
+    let encoded = c_string(&mut env, &encoded);
+    let pointer = encoded.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    ceremony_json(&mut env, |out, capacity| unsafe {
+        client::farcooler_client_ceremony_scan(pointer, held_ms.max(0) as u64, out, capacity)
+    })
+}
+
+/// The reply a trusted device shows back, capped by measured bytes.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyReply(
+    mut env: JNIEnv,
+    _class: JClass,
+    offer_json: JString,
+    runners_json: JString,
+    budget_bytes: jint,
+) -> jstring {
+    let offer = c_string(&mut env, &offer_json);
+    let runners = c_string(&mut env, &runners_json);
+    let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    ceremony_json(&mut env, |out, capacity| unsafe {
+        client::farcooler_client_ceremony_reply(
+            pointer(&offer),
+            pointer(&runners),
+            budget_bytes.max(0) as usize,
+            out,
+            capacity,
+        )
+    })
+}
+
+/// A scanned reply, taken or refused.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyAccept(
+    mut env: JNIEnv,
+    _class: JClass,
+    encoded: JString,
+    expecting_json: JString,
+    already_taken: jboolean,
+    held_ms: jlong,
+) -> jstring {
+    let encoded = c_string(&mut env, &encoded);
+    let expecting = c_string(&mut env, &expecting_json);
+    let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    ceremony_json(&mut env, |out, capacity| unsafe {
+        client::farcooler_client_ceremony_accept(
+            pointer(&encoded),
+            pointer(&expecting),
+            already_taken != 0,
+            held_ms.max(0) as u64,
+            out,
+            capacity,
+        )
+    })
+}
+
 /// The themes compiled into this build, as JSON.
 ///
 /// Session-free, like the key helpers above: a phone that has never reached a

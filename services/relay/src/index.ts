@@ -12,6 +12,7 @@
 /// app bundle anyone can unzip — is not a secret.
 
 import { record, type Metrics } from './analytics'
+import { fingerprintOf, parseEd25519, verifyEd25519 } from './keys'
 import { verifySession } from './workos'
 import {
   isEnvironment,
@@ -80,6 +81,10 @@ export default {
           return await registerDevice(request, env)
         case '/v1/devices/activity':
           return await registerActivity(request, env)
+        case '/v1/devices/lookup':
+          return await lookupDevice(request, env)
+        case '/v1/devices/verify':
+          return await verifyDevice(request, env)
         case '/v1/account':
           return await listAccount(request, env)
         case '/v1/devices/revoke':
@@ -227,35 +232,80 @@ async function workosToken(env: Env, fields: Record<string, string>): Promise<Re
 /// Google reissue tokens freely — the same phone coming back with a new token
 /// is one device, and a row per token would fan a notification out to a pile of
 /// dead addresses.
+///
+/// And, since the onboarding ceremony, where a device says which key it holds —
+/// proved rather than claimed. See `provenFingerprint`.
 async function registerDevice(request: Request, env: Env): Promise<Response> {
   const account = await requireAccount(request, env)
   if (account instanceof Response) return account
 
-  const body = await request.json<{
-    platform: string
-    pushToken: string
-    label?: string
-    version?: string
-    environment?: unknown
-    liveActivityStartToken?: unknown
-  }>()
+  const body = await request.json<Registration>()
   if (body.platform !== 'apns' && body.platform !== 'fcm') return json({ error: 'platform' }, 400)
   if (!body.pushToken) return json({ error: 'pushToken' }, 400)
 
   const environment = readEnvironment(body.environment)
   if (environment instanceof Response) return environment
 
-  // `version`, `environment` and the push-to-start token are all optional and
-  // all COALESCEd: an App Store build from before a column existed still
-  // registers, and — this is the part that bit `version` first — re-registering
-  // from that older build must not erase what a newer one reported. `label` is
-  // assigned rather than coalesced because every build has always sent it, so
-  // an absent one is a rename to the default and not an old client.
+  const proven = await provenFingerprint(body)
+  if (proven instanceof Response) return proven
+
+  // The same key arriving on a different push token: a reinstall, or Apple
+  // reissuing one. There is one row per key per account and it is a unique
+  // index, so without moving the key off the old row the insert below violates
+  // it — and this is the call push depends on, so it would fail on every
+  // launch, permanently, on the one path that has to keep working.
+  //
+  // The old row stays in the device list, holding a token nothing answers on,
+  // and loses the key because the key is not there any more. Its standing goes
+  // with the key: a ceremony verified THIS key, and whoever is registering has
+  // just proved they still hold it, which is more than the row being replaced
+  // can say.
+  let inherited: string | null = null
+  if (proven) {
+    const previous = await env.DB.prepare(
+      `SELECT id, state FROM devices
+        WHERE account_id = ?1 AND key_a_fingerprint = ?2
+          AND NOT (platform = ?3 AND push_token = ?4)`,
+    )
+      .bind(account, proven, body.platform, body.pushToken)
+      .first<{ id: string; state: string }>()
+    if (previous) {
+      inherited = previous.state
+      await env.DB.prepare(`UPDATE devices SET key_a_fingerprint = NULL WHERE id = ?`)
+        .bind(previous.id)
+        .run()
+    }
+  }
+
+  // `version`, `environment`, the push-to-start token and now the fingerprint
+  // are all optional and all COALESCEd: an App Store build from before a column
+  // existed still registers, and — this is the part that bit `version` first —
+  // re-registering from that older build must not erase what a newer one
+  // reported. `label` is assigned rather than coalesced because every build has
+  // always sent it, so an absent one is a rename to the default and not an old
+  // client.
+  //
+  // Every column added by a migration has to be named HERE as well. The upsert
+  // lists what it updates, so a new column that is not in this list is written
+  // on insert and never again: an updated app would re-register with a 200 and
+  // stay legacy forever — fingerprint NULL, invisible to every ceremony, with
+  // nothing on any screen saying why. That is what the regression test in
+  // `test/relay.test.ts` is for.
+  //
+  // `state` is a CASE rather than an assignment because three cases are three
+  // different answers. A client that sent no key changes nothing. A row that
+  // predates fingerprints keeps what it had, because it was created by the flow
+  // that WAS the trust model before this — demoting every installed device
+  // would leave a fleet where nothing is verified and nothing can promote
+  // anything, since promotion needs a device that already is. And a DIFFERENT
+  // key on the same device goes back to pending: possession is proven, a
+  // ceremony is not, and inheriting `verified` would let a key nobody enrolled
+  // take the standing of the one it replaced.
   await env.DB.prepare(
     `INSERT INTO devices
        (id, account_id, platform, push_token, label, version, environment,
-        live_activity_start_token, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        live_activity_start_token, key_a_fingerprint, state, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (platform, push_token)
      DO UPDATE SET account_id = excluded.account_id,
                    label = excluded.label,
@@ -263,6 +313,15 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
                    environment = COALESCE(excluded.environment, devices.environment),
                    live_activity_start_token = COALESCE(
                      excluded.live_activity_start_token, devices.live_activity_start_token),
+                   key_a_fingerprint = COALESCE(
+                     excluded.key_a_fingerprint, devices.key_a_fingerprint),
+                   state = CASE
+                             WHEN excluded.key_a_fingerprint IS NULL THEN devices.state
+                             WHEN devices.key_a_fingerprint IS NULL THEN devices.state
+                             WHEN devices.key_a_fingerprint = excluded.key_a_fingerprint
+                               THEN devices.state
+                             ELSE 'pending'
+                           END,
                    updated_at = excluded.updated_at`,
   )
     .bind(
@@ -276,6 +335,12 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
       typeof body.liveActivityStartToken === 'string' && body.liveActivityStartToken
         ? body.liveActivityStartToken
         : null,
+      proven,
+      // A new row is `pending`: it proves possession of a key, which is not a
+      // ceremony having enrolled it. `verified` for a registration with no key
+      // at all, matching the column's default — such a row carries no
+      // fingerprint, so it matches no lookup and the state grants it nothing.
+      inherited ?? (proven ? 'pending' : 'verified'),
       Date.now(),
     )
     .run()
@@ -285,6 +350,176 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
   })
   return json({ ok: true })
 }
+
+/// What an app sends to register. Everything but the platform and the token is
+/// optional, and stays optional: a build shipped before a field existed sends
+/// none of it and gets exactly the behavior it always got.
+interface Registration {
+  platform: string
+  pushToken: string
+  label?: string
+  version?: string
+  environment?: unknown
+  /// The device's own install identifier, which is what it signs. Not stored:
+  /// the row's id is generated here.
+  deviceId?: unknown
+  /// Key A's public half, as an `ssh-ed25519 AAAA…` line.
+  keyA?: unknown
+  /// What the device believes its own fingerprint is, checked rather than used.
+  fingerprint?: unknown
+  /// A raw ed25519 signature over `deviceId`, base64.
+  signature?: unknown
+  liveActivityStartToken?: unknown
+}
+
+/// The fingerprint this registration PROVED it holds, or the response to send
+/// instead.
+///
+/// Registration used to record whatever fingerprint a session-holder sent, and
+/// the account gate would then be checking membership of a registry rather than
+/// that the device in front of you holds the key it is showing — a fingerprint
+/// is public, off a screen or out of a QR code, so anyone who had seen one could
+/// register it. A signature closes that: the fingerprint stored is derived FROM
+/// the key that verified, so what is recorded and what was proved cannot
+/// disagree.
+///
+/// `null`, not an error, when the request carries no key material at all. That
+/// is every app already in the App Store, and refusing them would take push
+/// down for everyone installed on the day this deploys — while buying nothing,
+/// because a row with no fingerprint matches no lookup and so claims nothing
+/// about any key. What must never happen is a fingerprint recorded WITHOUT a
+/// signature, and that is what this refuses.
+///
+/// The signature is over the device id the request names rather than over the
+/// row's id, because the row's id is generated here and a new device has never
+/// been told it — there would be nothing for it to sign. What the signature
+/// establishes is possession, and possession is what the gate needs.
+///
+/// A `fingerprint` in the body is compared against the derived one rather than
+/// trusted. It is the string the device puts on its own screen for a person to
+/// compare at the confirmation, so a client computing it differently from this
+/// relay would leave two screens showing two strings that can never match — and
+/// that is worth failing at registration rather than discovering mid-ceremony.
+async function provenFingerprint(body: Registration): Promise<string | null | Response> {
+  const offered = body.keyA !== undefined || body.signature !== undefined
+  if (!offered && body.fingerprint === undefined) return null
+
+  if (
+    typeof body.keyA !== 'string' ||
+    typeof body.signature !== 'string' ||
+    typeof body.deviceId !== 'string' ||
+    !body.keyA ||
+    !body.signature ||
+    !body.deviceId
+  ) {
+    return json({ error: 'signature' }, 400)
+  }
+
+  const key = parseEd25519(body.keyA)
+  if (!key) return json({ error: 'keyA' }, 400)
+  if (!(await verifyEd25519(key, body.signature, body.deviceId))) {
+    return json({ error: 'signature' }, 400)
+  }
+
+  const fingerprint = await fingerprintOf(key)
+  if (typeof body.fingerprint === 'string' && body.fingerprint !== fingerprint) {
+    return json({ error: 'fingerprint' }, 400)
+  }
+  return fingerprint
+}
+
+/// Does this account have a device holding this key?
+///
+/// The one question the relay answers about a key, and it answers no other. The
+/// account is bound IN the query rather than compared after it: a lookup by key
+/// alone would return some device and leave the caller checking account ids,
+/// which breaks the moment two accounts have registered the same public key —
+/// and it would make this route a key-enumeration oracle for everyone else's
+/// devices. Scoped, the answer is "yes, on your account" or "no", and never
+/// whose a key is otherwise.
+///
+/// THERE IS NO STATE PREDICATE HERE, and adding one as a hardening would break
+/// every onboarding there is. The gate is account membership, and it is
+/// satisfied the moment a device holding that account's session proved
+/// possession of the key. Whether a ceremony has COMPLETED is a different
+/// question — it governs how the device list draws the row and whether a later
+/// grant may name it, not whether this ceremony may proceed. The two cannot be
+/// one predicate: a row is `pending` until a ceremony completes, a ceremony
+/// cannot complete until the trusted device has looked the key up, and a lookup
+/// that required `verified` would be waiting on its own result. So the state is
+/// reported rather than filtered, and the caller can say "this device has not
+/// completed a ceremony" without asking again.
+///
+/// This gate is not relay-proof and is not claimed to be: a compromised relay
+/// can answer yes to anything. What it cannot do is produce a fingerprint at the
+/// confirmation, which is the gate that remains.
+async function lookupDevice(request: Request, env: Env): Promise<Response> {
+  const account = await requireAccount(request, env)
+  if (account instanceof Response) return account
+
+  const body = await request.json<{ fingerprint?: unknown }>()
+  if (typeof body.fingerprint !== 'string' || !body.fingerprint) {
+    return json({ error: 'fingerprint' }, 400)
+  }
+
+  const device = await env.DB.prepare(
+    `SELECT id, label, state FROM devices
+     WHERE key_a_fingerprint = ?1 AND account_id = ?2`,
+  )
+    .bind(body.fingerprint, account)
+    .first<{ id: string; label: string; state: string }>()
+
+  // Nothing but `false` on a miss. Not the state, not a reason, not a count:
+  // each of those is a way of asking the relay about a key that is not yours,
+  // and a key on another account has to be indistinguishable from a key on no
+  // account at all.
+  if (!device) return json({ found: false })
+  return json({ found: true, label: device.label, state: device.state })
+}
+
+/// A ceremony finished: the device holding this key is one of ours.
+///
+/// Called by the TRUSTED device once it has actually enrolled the new one, which
+/// is why this is the promotion and registration is not. The new device is the
+/// only party that can prove possession, and a trusted device is the only party
+/// that can say a ceremony happened; neither half is enough alone, and that is
+/// the whole point of there being two states.
+///
+/// Only from `pending`, and only within this account. `ok` reports whether a row
+/// actually moved — answering true regardless would make "a ceremony completed
+/// just now" indistinguishable from "this key was already here", which is the
+/// one thing the caller is asking.
+async function verifyDevice(request: Request, env: Env): Promise<Response> {
+  const account = await requireAccount(request, env)
+  if (account instanceof Response) return account
+
+  const body = await request.json<{ fingerprint?: unknown }>()
+  if (typeof body.fingerprint !== 'string' || !body.fingerprint) {
+    return json({ error: 'fingerprint' }, 400)
+  }
+
+  const result = await env.DB.prepare(
+    `UPDATE devices SET state = 'verified'
+     WHERE key_a_fingerprint = ?1 AND account_id = ?2 AND state = 'pending'
+       AND updated_at > ?3`,
+  )
+    .bind(body.fingerprint, account, Date.now() - PENDING_LIFETIME_MS)
+    .run()
+
+  const promoted = (result.meta?.changes ?? 0) > 0
+  if (promoted) await record(env.METRICS, env.ANALYTICS_SALT, 'device_verified', account)
+  return json({ ok: promoted })
+}
+
+/// How long a registration may wait for the ceremony that completes it.
+///
+/// A pending row is created moments before a ceremony and promoted at the end of
+/// one, so a day is already generous. Past it, a promotion would be a
+/// registration from some earlier time being completed by a later session, which
+/// is not what anyone in the room is doing. The row is not deleted: it is a
+/// device somebody registered, it shows in the list as unverified, and the app
+/// re-registering renews it.
+const PENDING_LIFETIME_MS = 24 * 60 * 60 * 1000
 
 /// Remember how to reach the Live Activity currently running for a terminal.
 ///
@@ -370,8 +605,13 @@ async function listAccount(request: Request, env: Env): Promise<Response> {
     .bind(account)
     .first<{ email: string | null }>()
 
+  // `state`, because a row that is not verified has to be visible as such. A
+  // device half way through a ceremony, or one whose app has not been updated
+  // since fingerprints existed, is invisible to the account lookup — and the
+  // design's answer for both is that the list says so, pointing at the device,
+  // rather than a ceremony failing later with nothing on screen explaining it.
   const devices = await env.DB.prepare(
-    `SELECT id, platform, label, version, updated_at FROM devices
+    `SELECT id, platform, label, version, state, updated_at FROM devices
      WHERE account_id = ? ORDER BY updated_at DESC`,
   )
     .bind(account)
@@ -380,6 +620,7 @@ async function listAccount(request: Request, env: Env): Promise<Response> {
       platform: string
       label: string
       version: string | null
+      state: string
       updated_at: number
     }>()
 
@@ -404,6 +645,7 @@ async function listAccount(request: Request, env: Env): Promise<Response> {
       platform: d.platform,
       label: d.label,
       version: d.version,
+      state: d.state,
       updatedAt: d.updated_at,
     })),
     machines: (daemons.results ?? []).map(d => ({

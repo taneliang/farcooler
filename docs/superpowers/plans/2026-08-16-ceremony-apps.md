@@ -6,6 +6,38 @@
 
 **Architecture:** Every rule that decides whether a scan is acceptable already lives in `crates/client/src/ceremony.rs` behind the FFI. These apps display QR codes, capture them, and render decisions — they do not make any. Each platform's work is the same four screens, plus two Mac-only pieces: Key B and `~/.ssh/config`.
 
+**The FFI is four entry points, not two.** An earlier draft of this plan named
+only `ceremony_offer` and `ceremony_accept`, which left the *trusted* device
+unable to decode a scanned offer or build a reply — so the manifest would have
+been JSON-encoded by hand in Swift and again in Kotlin, which is precisely the
+duplication the Rust core exists to prevent. The real surface, all following
+`farcooler_client_generate_key`'s buffer contract (JSON into a caller buffer,
+returns bytes needed, writes nothing when short, NULL asks for the size):
+
+```c
+size_t farcooler_client_ceremony_offer(const char *name, const char *account,
+                                       const char *key_a, const char *key_b,
+                                       uint8_t *out, size_t capacity);
+size_t farcooler_client_ceremony_scan(const char *encoded, uint64_t held_ms,
+                                      uint8_t *out, size_t capacity);
+size_t farcooler_client_ceremony_reply(const char *offer_json, const char *runners_json,
+                                       size_t budget_bytes, uint8_t *out, size_t capacity);
+size_t farcooler_client_ceremony_accept(const char *encoded, const char *expecting_json,
+                                        bool already_taken, uint64_t held_ms,
+                                        uint8_t *out, size_t capacity);
+```
+
+`held_ms` is the app's own measurement of how long it has held the code, and
+both scanning entry points require it — there is deliberately no way to decode a
+code without submitting to the freshness check. Refusals cross as stable codes:
+`version`, `channel`, `malformed`, `wrong_ceremony`, `wrong_account`,
+`wrong_target`, `stale`, `already_taken`, `too_large`.
+
+**Android already has its JNI shims.** `crates/android/src/lib.rs` gained
+`nativeCeremonyOffer/Scan/Reply/Accept`, because Kotlin cannot call the C ABI and
+neither plan had scheduled that work — Android would otherwise have been blocked
+on a Rust change nobody owned.
+
 **Tech Stack:** SwiftUI with AVFoundation and CoreImage (iOS, macOS), Compose with CameraX and ML Kit barcode scanning (Android), LocalAuthentication and BiometricPrompt.
 
 **Spec:** [`docs/superpowers/specs/2026-08-16-device-onboarding-design.md`](../specs/2026-08-16-device-onboarding-design.md) — "The ceremony", "Grants are per runner", "A Mac needs two keys", "What signing out does not do", "Remote Login".
