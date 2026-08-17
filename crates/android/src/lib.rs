@@ -275,6 +275,71 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePublicKey(
     }
 }
 
+/// The `SHA256:…` fingerprint of a public key, as the confirmation screen shows
+/// it.
+///
+/// One line rather than JSON, like `nativePublicKey` above it, and null when the
+/// text is not a public key. Kotlin used to reach this by building a reply to its
+/// own offer with no runners in it and reading `target`; the string is the same
+/// one, from the same computation, asked for directly.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeFingerprint(
+    mut env: JNIEnv,
+    _class: JClass,
+    public_key: JString,
+) -> jstring {
+    let Some(public_key) = c_string(&mut env, &public_key) else {
+        return std::ptr::null_mut();
+    };
+    // 128 bytes for a string that is 50: a fingerprint is `SHA256:` and 43
+    // characters of base64 today, and the hash algorithm is the sort of thing
+    // that changes once a decade without anyone revisiting a constant.
+    let mut buffer = vec![0u8; 128];
+    let written = unsafe {
+        client::farcooler_client_fingerprint(
+            public_key.as_ptr(),
+            buffer.as_mut_ptr(),
+            buffer.len(),
+        )
+    };
+    if written == 0 || written > buffer.len() {
+        return std::ptr::null_mut();
+    }
+    match std::str::from_utf8(&buffer[..written]) {
+        Ok(text) => jstring_of(&mut env, text),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// The client id a device is enrolled under, derived from its own key.
+///
+/// One line, null when the text is not a public key, exactly like
+/// `nativeFingerprint` above. Kotlin must not derive this itself: the daemon's
+/// "already enrolled" check compares client ids, so a format invented per
+/// platform means the same device enrolls twice under two names and the daemon
+/// can no longer say which session arrived on which key.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeClientId(
+    mut env: JNIEnv,
+    _class: JClass,
+    public_key: JString,
+) -> jstring {
+    let Some(public_key) = c_string(&mut env, &public_key) else {
+        return std::ptr::null_mut();
+    };
+    let mut buffer = vec![0u8; 128];
+    let written = unsafe {
+        client::farcooler_client_client_id(public_key.as_ptr(), buffer.as_mut_ptr(), buffer.len())
+    };
+    if written == 0 || written > buffer.len() {
+        return std::ptr::null_mut();
+    }
+    match std::str::from_utf8(&buffer[..written]) {
+        Ok(text) => jstring_of(&mut env, text),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 // MARK: - The enrollment ceremony
 //
 // Four moments, four shims, and no rule of any kind on this side. Whether a
@@ -337,7 +402,13 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
     })
 }
 
-/// A scanned offer, refused if this device has held the scan too long.
+/// A scanned offer, refused if it belongs to another account or if this device
+/// has held the scan too long.
+///
+/// `expectingAccount` is the account signed in here; an offer naming another one
+/// comes back `{"error":"wrong_account"}`. Passed in rather than compared in
+/// Kotlin afterwards, which is the whole reason the argument exists: the rule
+/// lived in Swift, so Android did not have it at all.
 ///
 /// `heldMs` is measured by the Android side's own clock — `SystemClock`, not a
 /// field in the code, which the device displaying it controls.
@@ -346,12 +417,20 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyScan(
     mut env: JNIEnv,
     _class: JClass,
     encoded: JString,
+    expecting_account: JString,
     held_ms: jlong,
 ) -> jstring {
     let encoded = c_string(&mut env, &encoded);
-    let pointer = encoded.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    let account = c_string(&mut env, &expecting_account);
+    let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
     ceremony_json(&mut env, |out, capacity| unsafe {
-        client::farcooler_client_ceremony_scan(pointer, held_ms.max(0) as u64, out, capacity)
+        client::farcooler_client_ceremony_scan(
+            pointer(&encoded),
+            pointer(&account),
+            held_ms.max(0) as u64,
+            out,
+            capacity,
+        )
     })
 }
 
@@ -402,6 +481,23 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyAccept
         )
     })
 }
+
+// MARK: - Enrolling, once the ceremony has been agreed
+//
+// There is deliberately no shim here for `client.list`, `client.enroll` or
+// `client.revoke`, and their absence is not the gap it looks like: all three are
+// methods on `farcooler_client_call`, so Kotlin reaches them through
+// `nativeCall` with a method name and a JSON argument object, exactly as it
+// reaches `fleet` and `terminal.write`.
+//
+// A shim per method would be a second way to call a method, and the one thing
+// this file must not grow is a second style — the C ABI's own call table is
+// where a method belongs, because that is the table macOS and iOS read too. The
+// shapes are in `crates/client/include/farcooler_client.h`, beside every other
+// method's.
+//
+// What DOES need a shim is anything with its own C entry point: the four
+// ceremony moments above, `nativeFingerprint`, and the key helpers.
 
 /// The themes compiled into this build, as JSON.
 ///

@@ -33,6 +33,17 @@ sealed interface Route {
 
     data object Authorize : Route
 
+    /**
+     * This device showing a code, to be added by one that is already trusted.
+     *
+     * The short road out of [Authorize], which stays: pasting a key is what
+     * works with no trusted device to scan with.
+     */
+    data object Join : Route
+
+    /** The other side of the ceremony: granting runners to a device being added. */
+    data object AddDevice : Route
+
     /** Everything this account has registered, and how to revoke it. */
     data object Devices : Route
 

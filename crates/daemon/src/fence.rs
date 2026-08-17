@@ -446,6 +446,7 @@ pub fn write(
     markers: Markers<'_>,
     entries: &[String],
     foreign: &[String],
+    placement: Placement,
 ) -> Result<(), FenceError> {
     let name = path.file_name().ok_or(FenceError::Missing)?;
     let directory = open_fence_dir(path.parent().ok_or(FenceError::Missing)?)?;
@@ -454,7 +455,7 @@ pub fn write(
     let current = read_at(&directory, name)?;
     let text = current.as_ref().map(|(text, _)| text.as_str()).unwrap_or_default();
     let mode = current.as_ref().map(|(_, mode)| *mode).unwrap_or(0o600);
-    let rebuilt = rebuilt(text, markers, entries, foreign)?;
+    let rebuilt = rebuilt(text, markers, entries, foreign, placement)?;
 
     // The backup is durable BEFORE the rename, so that a machine that loses
     // power in the middle of this has either the original file or the original
@@ -675,11 +676,31 @@ fn create(directory: &OwnedFd, name: &std::ffi::OsStr) -> Result<OwnedFd, FenceE
 /// outside the fence are handed back with the bytes that ended them, so a file
 /// with CRLF endings does not quietly become a file with LF endings on the
 /// first enrollment.
+/// Where a fence goes in a file that does not have one yet.
+///
+/// `authorized_keys` does not care: sshd reads every line and the order of
+/// entries carries no meaning, so a new block at the end is fine and keeps the
+/// diff at the bottom where a person expects it.
+///
+/// `~/.ssh/config` cares completely. It is **first**-match-wins per keyword, so
+/// an `Include ~/.ssh/config.d/*` or a `Host *` above our block silently wins
+/// every `IdentityFile`, `User` and `HostName` we wrote — and appending is the
+/// one placement that reliably does nothing at all. That file needs `First`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// After everything already in the file. The default, and right for
+    /// `authorized_keys`.
+    Last,
+    /// Before everything already in the file, including any `Include`.
+    First,
+}
+
 fn rebuilt(
     current: &str,
     markers: Markers<'_>,
     entries: &[String],
     foreign: &[String],
+    placement: Placement,
 ) -> Result<String, FenceError> {
     for line in entries.iter().chain(foreign) {
         // A caller cannot be allowed to write a marker or a newline into the
@@ -696,8 +717,14 @@ fn rebuilt(
 
     let lines: Vec<&str> = current.split_inclusive('\n').collect();
     let (before, after) = match fence_span(&lines, markers)? {
+        // An existing fence is rewritten where it already is. Moving someone's
+        // block because a placement rule says so would be a surprise, and for
+        // `~/.ssh/config` it would also silently change which keywords win.
         Some((begin, end)) => (lines[..begin].concat(), lines[end + 1..].concat()),
-        None => (current.to_string(), String::new()),
+        None => match placement {
+            Placement::Last => (current.to_string(), String::new()),
+            Placement::First => (String::new(), current.to_string()),
+        },
     };
 
     let mut rebuilt = before;

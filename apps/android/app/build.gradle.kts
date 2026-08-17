@@ -256,6 +256,38 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
 
+    // The enrollment ceremony needs a camera and a QR encoder, and neither is
+    // free on this platform. Both halves are a decision:
+    //
+    // CameraX, because Android has no system QR scanner to hand a result back
+    // from — unlike iOS, where `AVCaptureMetadataOutput` does the whole job.
+    // Measured, not guessed: about 4.6 MB of AARs once Gradle resolves it, since
+    // 1.6.x routes `camera-camera2` through `camera-camera2-pipe` (1.5 MB) and
+    // `camera-view` brings `camera-video` and `viewfinder-core` with it. There is
+    // no cheaper road to a preview that gets rotation and scaling right on every
+    // OEM's camera2 implementation, and hand-rolling one over `SurfaceView` is
+    // exactly where camera bugs live.
+    //
+    // ZXing's `core` for BOTH directions — 600 KB, no native code, no model file.
+    // The plan named ML Kit for scanning, and ML Kit's BUNDLED barcode model is
+    // another 3-4 MB of model and native code ON TOP of the same CameraX, plus
+    // `play-services-basement`. What it buys is a decoder that is better in poor
+    // light and at an angle, which is worth paying for when reading a crumpled
+    // label and is not the case here: this code is drawn black-on-white on a lit
+    // screen and held about 15 cm from the lens, at medium error correction for
+    // exactly that reason. And ZXing has to be here regardless, because Android
+    // has no `CIQRCodeGenerator` and the device being added has to DRAW the first
+    // code. One library, both legs.
+    //
+    // Nothing here is a biometric library: `android.hardware.biometrics
+    // .BiometricPrompt` is the platform's own, and `minSdk = 37` means the
+    // back-compat `androidx.biometric` wrapper would be dependency weight for
+    // API levels this app does not build for.
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.zxing.core)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.junit)

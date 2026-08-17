@@ -238,6 +238,12 @@ struct SettingsView: View {
             EditorsSettings()
                 .tabItem { Label("Editors", systemImage: "chevron.left.forwardslash.chevron.right") }
                 .tag("editors")
+            // Devices next to Runners, because the two are one subject read from
+            // opposite ends: a runner is a machine that runs things, a device is
+            // a thing that may ask it to.
+            DevicesSettings()
+                .tabItem { Label("Devices", systemImage: "iphone.gen3") }
+                .tag("devices")
             account.tabItem { Label("Account", systemImage: "person.crop.circle") }.tag("account")
             startup.tabItem { Label("Startup", systemImage: "bolt") }.tag("startup")
         }

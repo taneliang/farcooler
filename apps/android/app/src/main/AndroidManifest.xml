@@ -10,6 +10,21 @@
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        For reading the code on a device being added, and asked for when the
+        scan screen opens rather than at launch: the reason only makes sense
+        while someone is holding two devices, and a camera prompt at first run
+        is a prompt with nothing to explain it. `ScanScreen` states the why in
+        the same breath as the request.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!--
+        Not required: a device with no camera can still be added by pasting its
+        key, and `AuthorizeScreen` is that path. Declaring the feature as
+        required would keep the app off such a device entirely.
+    -->
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
     <application
         android:name=".FarCoolerApp"
         android:allowBackup="false"

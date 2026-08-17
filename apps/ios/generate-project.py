@@ -48,6 +48,21 @@ SOURCES = [
     "BranchAndStack.swift",
 ]
 
+# The enrollment ceremony, in `Far Cooler/Ceremony/`.
+#
+# A directory of its own rather than five more names in SOURCES, because
+# SOURCES is basenames the generator assumes sit directly in `FarCooler/` —
+# the same reason `Fonts/` has `fontsGroup`. `ceremonyGroup` below supplies
+# the directory part, and these files are compiled into the app target exactly
+# like every other source.
+CEREMONY_SOURCES = [
+    "CodeImage.swift",
+    "CodeScanner.swift",
+    "CeremonyStore.swift",
+    "AddDeviceView.swift",
+    "JoinView.swift",
+]
+
 # `AgentKit`'s own sources, compiled directly into this target rather than
 # vended as a real module the way `apps/macos/Package.swift` vends it via
 # SwiftPM — iOS has no SwiftPM project here, only this generated one. So
@@ -126,7 +141,8 @@ ASSET_CATALOG = "Assets.xcassets"
 
 KEYS = [
     "project", "target", "mainGroup", "productsGroup", "sourcesGroup",
-    "frameworksGroup", "fontsGroup", "agentKitGroup", "product", "sourcesPhase",
+    "frameworksGroup", "fontsGroup", "ceremonyGroup", "agentKitGroup", "product",
+    "sourcesPhase",
     "frameworksPhase", "resourcesPhase", "buildConfigList", "targetConfigList",
     "debug", "release", "targetDebug", "targetRelease",
     # The widget extension: its own target, product, group, sources phase and
@@ -154,13 +170,13 @@ def oid(seed):
 
 ids = {
     name: oid(name)
-    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + UI_TEST_SOURCES + FRAMEWORKS + FONTS
-    + [ASSET_CATALOG]
+    for name in SOURCES + CEREMONY_SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES
+    + UI_TEST_SOURCES + FRAMEWORKS + FONTS + [ASSET_CATALOG]
 }
 build_ids = {
     name: oid("build/" + name)
-    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + UI_TEST_SOURCES + FRAMEWORKS + FONTS
-    + [ASSET_CATALOG]
+    for name in SOURCES + CEREMONY_SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES
+    + UI_TEST_SOURCES + FRAMEWORKS + FONTS + [ASSET_CATALOG]
 }
 
 # A PBXBuildFile is "this file, compiled into THIS target", so a file two targets
@@ -186,7 +202,8 @@ EMBED_BUILD_ID = oid("build/embed-activity")
 
 def file_refs():
     lines = []
-    for name in SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES + UI_TEST_SOURCES:
+    for name in SOURCES + CEREMONY_SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES \
+            + UI_TEST_SOURCES:
         lines.append(
             f"\t\t{ids[name]} /* {name} */ = {{isa = PBXFileReference; "
             f"lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = \"<group>\"; }};"
@@ -229,7 +246,7 @@ def file_refs():
 
 def build_files():
     lines = []
-    for name in SOURCES + AGENTKIT_SOURCES:
+    for name in SOURCES + CEREMONY_SOURCES + AGENTKIT_SOURCES:
         lines.append(
             f"\t\t{build_ids[name]} /* {name} in Sources */ = {{isa = PBXBuildFile; "
             f"fileRef = {ids[name]}; }};"
@@ -267,7 +284,8 @@ def build_files():
 
 
 source_list = "\n".join(
-    f"\t\t\t\t{build_ids[n]} /* {n} in Sources */," for n in SOURCES + AGENTKIT_SOURCES
+    f"\t\t\t\t{build_ids[n]} /* {n} in Sources */,"
+    for n in SOURCES + CEREMONY_SOURCES + AGENTKIT_SOURCES
 )
 framework_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Frameworks */," for n in FRAMEWORKS)
 resource_list = "\n".join(
@@ -276,6 +294,7 @@ resource_list = "\n".join(
 source_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in SOURCES)
 framework_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FRAMEWORKS)
 font_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FONTS)
+ceremony_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in CEREMONY_SOURCES)
 agentkit_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in AGENTKIT_SOURCES)
 activity_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in ACTIVITY_SOURCES)
 activity_source_list = "\n".join(
@@ -488,6 +507,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tisa = PBXGroup;
 \t\t\tchildren = (
 {source_children}
+\t\t\t\t{P['ceremonyGroup']} /* Ceremony */,
 \t\t\t\t{P['fontsGroup']} /* Fonts */,
 \t\t\t);
 \t\t\tpath = FarCooler;
@@ -507,6 +527,14 @@ PBXPROJ = f"""// !$*UTF8*$!
 {ui_test_children}
 \t\t\t);
 \t\t\tpath = FarCoolerUITests;
+\t\t\tsourceTree = "<group>";
+\t\t}};
+\t\t{P['ceremonyGroup']} /* Ceremony */ = {{
+\t\t\tisa = PBXGroup;
+\t\t\tchildren = (
+{ceremony_children}
+\t\t\t);
+\t\t\tpath = Ceremony;
 \t\t\tsourceTree = "<group>";
 \t\t}};
 \t\t{P['fontsGroup']} /* Fonts */ = {{

@@ -130,6 +130,10 @@ struct SettingsView: View {
     /// Optional so the settings screen still opens from the onboarding screen,
     /// where there is no host to have a daemon on.
     var connection: Connection?
+    /// The runners this device knows, which is what a ceremony grants from.
+    /// Optional for the same reason: not every caller has one to hand over, and
+    /// adding a device is only offered where there is something to add it to.
+    var runners: RunnerStore?
 
     @AppStorage(TerminalSettings.fontKey) private var fontChoice: TerminalFontChoice = .iosevka
     @ObservedObject private var themes = Themes.shared
@@ -149,9 +153,23 @@ struct SettingsView: View {
     var body: some View {
         Form {
             AccountSection()
+            // "Settings › Devices", which the confirmation screen names as
+            // where a grant can be changed later. It has to be called that and
+            // it has to be here, or that sentence sends someone looking for a
+            // screen that does not exist.
             if Account.shared.isSignedIn {
                 Section {
+                    if let runners {
+                        NavigationLink("Add a Device") { AddDeviceView(runners: runners) }
+                    }
                     NavigationLink("Devices and runners") { AccountDevicesView() }
+                } header: {
+                    Text("Devices")
+                } footer: {
+                    Text(
+                        "Adding a device shows a code for it to scan, and grants only the "
+                        + "runners you pick."
+                    )
                 }
             }
 

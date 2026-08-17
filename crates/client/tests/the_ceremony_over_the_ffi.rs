@@ -11,7 +11,7 @@ use std::ffi::CString;
 
 use farcooler_client::ffi::{
     farcooler_client_ceremony_accept, farcooler_client_ceremony_offer,
-    farcooler_client_ceremony_reply, farcooler_client_ceremony_scan,
+    farcooler_client_ceremony_reply, farcooler_client_ceremony_scan, farcooler_client_fingerprint,
 };
 use serde_json::Value;
 
@@ -61,6 +61,22 @@ fn a_reply(offer_json: &str) -> String {
     })
 }
 
+/// Scan an offer the way the trusted device does: on behalf of the account
+/// that is signed in on it.
+fn scan(encoded: &str, expecting_account: &str, held_ms: u64) -> Value {
+    let encoded = CString::new(encoded).unwrap();
+    let account = CString::new(expecting_account).unwrap();
+    json(|out, capacity| unsafe {
+        farcooler_client_ceremony_scan(
+            encoded.as_ptr(),
+            account.as_ptr(),
+            held_ms,
+            out,
+            capacity,
+        )
+    })
+}
+
 fn accept(reply: &str, expecting: &str, already_taken: bool, held_ms: u64) -> Value {
     let reply = CString::new(reply).unwrap();
     let expecting = CString::new(expecting).unwrap();
@@ -88,10 +104,7 @@ fn both_legs_round_trip_through_the_c_boundary() {
     assert!(shown["key_b"].is_null(), "a phone has one key");
 
     // The trusted device reads it, then answers it.
-    let scanned = CString::new(offer.clone()).unwrap();
-    let read = json(|out, capacity| unsafe {
-        farcooler_client_ceremony_scan(scanned.as_ptr(), 1_000, out, capacity)
-    });
+    let read = scan(&offer, "acct_1", 1_000);
     assert_eq!(read["ceremony"], shown["ceremony"]);
 
     let reply = a_reply(&offer);
@@ -168,11 +181,54 @@ fn each_refusal_has_the_code_the_apps_switch_on() {
 /// screen — a confirmation sheet left open all afternoon is not a scan.
 #[test]
 fn a_scan_held_past_the_window_is_refused_before_the_confirmation() {
-    let offer = CString::new(an_offer("iPhone", "acct_1", KEY_A)).unwrap();
-    let refused = json(|out, capacity| unsafe {
-        farcooler_client_ceremony_scan(offer.as_ptr(), 10 * 60 * 1_000, out, capacity)
-    });
-    assert_eq!(refused["error"], "stale");
+    let offer = an_offer("iPhone", "acct_1", KEY_A);
+    assert_eq!(scan(&offer, "acct_1", 10 * 60 * 1_000)["error"], "stale");
+}
+
+/// The offer leg binds the account too, and it is Rust that binds it.
+///
+/// This rule was implemented in Swift, because the scan entry point was never
+/// told which account was asking — so the one security rule that decides
+/// whether a stranger's device may be enrolled into your fleet lived in one of
+/// three apps, and the other two simply did not have it. The reply leg has
+/// always checked this in `accept_manifest`; this is the same rule on the leg
+/// where it actually stops something.
+#[test]
+fn an_offer_from_another_account_is_refused_on_the_offer_leg() {
+    let theirs = an_offer("someone else's iPhone", "acct_2", KEY_B);
+    let refused = scan(&theirs, "acct_1", 1_000);
+    assert_eq!(refused["error"], "wrong_account");
+    assert!(refused.get("key_a").is_none(), "a refusal carries no keys to enroll");
+
+    // And the same code, scanned by the account it names, is read.
+    let read = scan(&theirs, "acct_2", 1_000);
+    assert_eq!(read["key_a"], KEY_B);
+}
+
+/// A device that names no account is answered by one that names none either,
+/// and by nothing else.
+///
+/// Strict equality rather than "empty means skip the check": an exemption is a
+/// rule an app can turn off by passing NULL, which is how the rule came to be
+/// missing in the first place.
+#[test]
+fn an_account_that_is_not_named_matches_only_an_offer_that_names_none() {
+    let anonymous = an_offer("iPhone", "", KEY_A);
+    assert_eq!(scan(&anonymous, "", 1_000)["key_a"], KEY_A);
+    assert_eq!(scan(&anonymous, "acct_1", 1_000)["error"], "wrong_account");
+
+    let named = an_offer("iPhone", "acct_1", KEY_A);
+    assert_eq!(scan(&named, "", 1_000)["error"], "wrong_account");
+}
+
+/// The order the refusals come in, on the leg a person is standing in front of.
+///
+/// Freshness first: a sheet left open all afternoon is not a scan, whoever it
+/// belongs to, and it must not be the account check that decides that.
+#[test]
+fn a_stale_scan_is_refused_before_the_account_is_considered() {
+    let theirs = an_offer("iPad", "acct_2", KEY_B);
+    assert_eq!(scan(&theirs, "acct_1", 10 * 60 * 1_000)["error"], "stale");
 }
 
 /// The cap is measured bytes against the budget the app's own encoder reported.
@@ -252,6 +308,55 @@ fn a_mac_offers_its_shell_key_too() {
     assert_eq!(offer["key_b"], KEY_B);
 }
 
+/// The fingerprint on the confirmation screen is the one the reply is addressed
+/// to — the same string, from the same computation.
+///
+/// It has to be an entry point of its own. Without one the app got its
+/// `SHA256:…` by building a throwaway reply to its own offer with no runners in
+/// it and reading `target` out — which works, and means the screen showing a
+/// human which device they are about to trust depends on a side effect of the
+/// leg-two builder. Two ways to compute one fingerprint is two fingerprints the
+/// day one of them changes.
+#[test]
+fn the_fingerprint_entry_point_agrees_with_the_target_a_reply_is_addressed_to() {
+    let key = CString::new(KEY_A).unwrap();
+    let shown = text(|out, capacity| unsafe {
+        farcooler_client_fingerprint(key.as_ptr(), out, capacity)
+    });
+    assert!(shown.starts_with("SHA256:"), "{shown} is not what a person reads on screen");
+
+    let offer = an_offer("iPhone", "acct_1", KEY_A);
+    let reply: Value = serde_json::from_str(&a_reply(&offer)).expect("json");
+    assert_eq!(reply["target"], shown, "the screen and the reply name different devices");
+}
+
+/// Something that is not a public key has no fingerprint, and gets no guess.
+#[test]
+fn a_fingerprint_of_something_that_is_not_a_key_is_nothing() {
+    let junk = CString::new("not a key").unwrap();
+    let mut buffer = vec![0u8; 256];
+    let n =
+        unsafe { farcooler_client_fingerprint(junk.as_ptr(), buffer.as_mut_ptr(), buffer.len()) };
+    assert_eq!(n, 0, "an unreadable key must not produce a fingerprint");
+    assert_eq!(unsafe { farcooler_client_fingerprint(std::ptr::null(), std::ptr::null_mut(), 0) }, 0);
+}
+
+/// The buffer contract again, on the newest entry point: NULL asks the size,
+/// and a short buffer is written nothing.
+#[test]
+fn the_fingerprint_follows_the_same_buffer_contract() {
+    let key = CString::new(KEY_A).unwrap();
+    let needed =
+        unsafe { farcooler_client_fingerprint(key.as_ptr(), std::ptr::null_mut(), 0) };
+    assert!(needed > "SHA256:".len());
+
+    let mut tiny = [0u8; 8];
+    let again =
+        unsafe { farcooler_client_fingerprint(key.as_ptr(), tiny.as_mut_ptr(), tiny.len()) };
+    assert_eq!(again, needed);
+    assert_eq!(tiny, [0; 8], "a truncated fingerprint is a different fingerprint");
+}
+
 /// A UI bug must not take down the app, here as everywhere else at this
 /// boundary.
 #[test]
@@ -271,6 +376,7 @@ fn null_arguments_are_survivable() {
         assert_eq!(refused["error"], "malformed");
 
         let n = farcooler_client_ceremony_scan(
+            std::ptr::null(),
             std::ptr::null(),
             0,
             buffer.as_mut_ptr(),

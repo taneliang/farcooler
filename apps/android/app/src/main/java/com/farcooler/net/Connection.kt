@@ -625,6 +625,43 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
      * Hiding never touches git and is never refused for a running terminal — it
      * is a view preference, not a lifecycle step.
      */
+    /**
+     * Put a device's key into this runner's `~/.ssh/authorized_keys`.
+     *
+     * **The daemon owns the write**, and that is the whole reason this is one
+     * call: that file is the one whose corruption costs somebody SSH access to
+     * their own machine, so the write is descriptor-anchored, `O_NOFOLLOW`,
+     * locked, atomic and `fsync`ed twice in `crates/daemon/src/enrollment.rs`.
+     * Nothing in this app appends a line to anything.
+     *
+     * `scope` is `control` per the design — `read` is a narrowing done afterwards
+     * in Settings › Devices. There is deliberately no argument for the options or
+     * the forced command: `ClientEnroll` has no field for either, and the absence
+     * of a way to ask for an unrestricted line is the guard rail.
+     *
+     * False means the line is not there, and this says nothing about why: from
+     * here a runner asleep, a daemon not installed, a damaged fence and a client
+     * core with no arm for this method all look identical, and a caller that
+     * guessed would be guessing.
+     */
+    suspend fun enroll(publicKey: String, label: String, clientId: String): Boolean {
+        // Answered at all is answered yes. `already_enrolled` comes back in that
+        // result and is not a failure: it is the ordinary outcome of granting a
+        // runner the device can already reach, and the key is in the file either
+        // way, which is what was asked.
+        return attempt {
+            core.call(
+                "client.enroll",
+                args(
+                    "publicKey" to publicKey,
+                    "label" to label,
+                    "clientId" to clientId,
+                    "scope" to "control",
+                ),
+            )
+        }.isSuccess
+    }
+
     // ---- runner settings ----
     //
     // Editing what the connected runner's config.toml holds. Every write

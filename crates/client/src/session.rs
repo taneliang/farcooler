@@ -1078,6 +1078,87 @@ impl Session {
         }
     }
 
+    // ---- device enrollment ----
+    //
+    // Which devices may log in to this runner. The daemon owns every rule about
+    // what may be written into `authorized_keys` and this owns none of them; the
+    // one judgement here is the scope WORD, because the wire carries an enum and
+    // neither Swift nor Kotlin has it.
+    //
+    // Answers are JSON rather than the wire messages, the same way `stack` and
+    // `changes_inbox` are: these come straight back out through the FFI, and a
+    // shape assembled in two places is two shapes the day one of them changes.
+
+    /// Every line in this runner's fence, ours and otherwise.
+    ///
+    /// Foreign lines are included and marked, because a person looking at who
+    /// may log in to their runner needs to see the key somebody added by hand as
+    /// much as the ones Far Cooler wrote.
+    pub async fn enrolled_clients(&mut self) -> Result<serde_json::Value, SessionError> {
+        match self.value("client.list", None, None).await? {
+            result::Value::ClientList(l) => Ok(enrolled_json(&l.items)),
+            other => Err(wrong("client_list", &other)),
+        }
+    }
+
+    /// Add a device's key to this runner's fence.
+    ///
+    /// `scope` is a word — `read`, `control` or `host_admin` — and an unknown one
+    /// is refused here rather than sent. Refused rather than defaulted for the
+    /// reason the daemon refuses an unspecified scope: a key with no scope at all
+    /// already means host_admin to sshd, so rounding a misspelling up would turn
+    /// a typo into the whole runner.
+    pub async fn enroll_client(
+        &mut self,
+        public_key: &str,
+        label: &str,
+        client_id: &str,
+        scope: &str,
+    ) -> Result<serde_json::Value, SessionError> {
+        let Some(scope) = scope_from_word(scope) else {
+            return Err(SessionError::Protocol(
+                "a device is enrolled at read, control or host_admin".into(),
+            ));
+        };
+        let payload =
+            request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
+                public_key: public_key.to_string(),
+                label: label.to_string(),
+                client_id: client_id.to_string(),
+                scope: scope as i32,
+            });
+        match self.value("client.enroll", None, Some(payload)).await? {
+            result::Value::ClientEnroll(r) => Ok(json!({
+                "client": r.client.as_ref().map(enrolled_client_json),
+                // Its own field rather than an error, because it is the ordinary
+                // outcome of enrolling a Mac on itself and of a ceremony offered
+                // a runner the device can already reach. The `client` beside it
+                // is then the grant it HAS, not the one that was asked for.
+                "alreadyEnrolled": r.already_enrolled,
+            })),
+            other => Err(wrong("client_enroll", &other)),
+        }
+    }
+
+    /// Remove a device's line and close the sessions it was holding.
+    ///
+    /// Answers with what is left, which the daemon reads back out of the file
+    /// after writing it: what `authorized_keys` now says is the only claim worth
+    /// making about who may log in.
+    pub async fn revoke_client(
+        &mut self,
+        client_id: &str,
+    ) -> Result<serde_json::Value, SessionError> {
+        let payload =
+            request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
+                client_id: client_id.to_string(),
+            });
+        match self.value("client.revoke", None, Some(payload)).await? {
+            result::Value::ClientList(l) => Ok(enrolled_json(&l.items)),
+            other => Err(wrong("client_list", &other)),
+        }
+    }
+
     /// Remove a repository root. The paired `add` already exists above.
     pub async fn remove_repository_root(&mut self, root: Uuid) -> Result<(), SessionError> {
         self.value("repository_root.remove", Some(root), None).await?;
@@ -1374,6 +1455,75 @@ fn workspace_label(s: WorkspaceState) -> &'static str {
     }
 }
 
+/// Enrolled devices, in the shape three apps decode.
+fn enrolled_json(items: &[farcooler_protocol::v1::EnrolledClient]) -> serde_json::Value {
+    json!({ "clients": items.iter().map(enrolled_client_json).collect::<Vec<_>>() })
+}
+
+/// One device that may log in to a runner.
+///
+/// Every field of the wire message is carried, and `scope` is a word rather than
+/// the enum's number: neither Swift nor Kotlin has the generated enum, so a
+/// number here would be two mapping tables in two languages and the second one
+/// would be wrong. Same reasoning as `origin` on an adapter.
+fn enrolled_client_json(
+    client: &farcooler_protocol::v1::EnrolledClient,
+) -> serde_json::Value {
+    json!({
+        "clientId": client.client_id,
+        "fingerprint": client.fingerprint,
+        "label": client.label,
+        "scope": scope_label(client.scope),
+        // Which local account's `authorized_keys` this line was read from.
+        // Nothing in the line names it — the file's location does — so this is
+        // the daemon's answer and cannot be derived here.
+        "account": client.account,
+        // 0 for unknown, which is the ordinary answer: `authorized_keys` records
+        // no time, so only the reply to an enrollment that just happened has one.
+        "enrolledAt": client.enrolled_at,
+        // Far Cooler did not write this line. It is reported so a person can see
+        // it is there, and it is never touched.
+        "foreign": client.foreign,
+    })
+}
+
+/// A scope as the word `authorized_keys` spells it.
+///
+/// `unspecified` is reported as itself rather than rounded to anything, and that
+/// is the honest answer twice over: it is what a foreign line grants, and what a
+/// line of ours whose scope word this build does not have grants — which is
+/// nothing, because the daemon serving it refuses the word too. The daemon's own
+/// writer rounds an absent scope UP to host_admin when it renders a line, and
+/// that asymmetry is deliberate: writing without a restriction is what an
+/// unscoped line already means to sshd, whereas READING one as host_admin would
+/// tell a person a device has access it does not have.
+fn scope_label(scope: i32) -> &'static str {
+    use farcooler_protocol::v1::Scope;
+    match Scope::try_from(scope) {
+        Ok(Scope::Read) => "read",
+        Ok(Scope::Control) => "control",
+        Ok(Scope::HostAdmin) => "host_admin",
+        _ => "unspecified",
+    }
+}
+
+/// The same words going the other way, for an enrollment request.
+///
+/// `None` is a word this build does not have, and the caller refuses rather than
+/// resolving it — the same rule `fence::scope_from_word` applies on the daemon
+/// side, and for the same reason: rounding a typo up is privilege escalation by
+/// misspelling. `unspecified` is deliberately not a word a caller may pass; it
+/// is a state a line can be in, not a grant anybody can ask for.
+fn scope_from_word(word: &str) -> Option<farcooler_protocol::v1::Scope> {
+    use farcooler_protocol::v1::Scope;
+    match word {
+        "read" => Some(Scope::Read),
+        "control" => Some(Scope::Control),
+        "host_admin" => Some(Scope::HostAdmin),
+        _ => None,
+    }
+}
+
 fn terminal_label(s: TerminalState) -> &'static str {
     match s {
         TerminalState::Unspecified => "?",
@@ -1407,6 +1557,52 @@ mod tests {
         let error = wrong("terminal", &result::Value::Workspace(Workspace::default()));
         let message = error.to_string();
         assert!(message.contains("terminal") && message.contains("workspace"));
+    }
+
+    /// A scope crosses as a word, and the two directions agree.
+    ///
+    /// They have to: the word this sends is the word the daemon writes into the
+    /// forced command, and the word it reads back out is the one this labels. A
+    /// pair that disagreed would enroll a device at one scope and then report
+    /// another.
+    #[test]
+    fn a_scope_is_the_same_word_in_both_directions() {
+        for word in ["read", "control", "host_admin"] {
+            let scope = scope_from_word(word).expect("a scope this build has");
+            assert_eq!(scope_label(scope as i32), word);
+        }
+    }
+
+    /// A word nobody has is refused, never rounded up.
+    ///
+    /// `unspecified` included: it is a state a line can be found in, not a grant
+    /// a caller may ask for, and the daemon refuses it too — an unscoped line
+    /// already means host_admin to sshd, so accepting the word would turn a
+    /// forgotten field into the whole runner.
+    #[test]
+    fn a_scope_word_this_build_does_not_have_is_refused() {
+        for word in ["admin", "", "READ", "unspecified", "host-admin"] {
+            assert!(scope_from_word(word).is_none(), "{word} was accepted");
+        }
+    }
+
+    /// A foreign line reports what it is: no device, no grant.
+    #[test]
+    fn a_line_far_cooler_did_not_write_grants_nothing_and_names_nobody() {
+        let hand_written = farcooler_protocol::v1::EnrolledClient {
+            client_id: String::new(),
+            fingerprint: "SHA256:whatever".into(),
+            label: "me@laptop".into(),
+            scope: farcooler_protocol::v1::Scope::Unspecified as i32,
+            account: "you".into(),
+            enrolled_at: 0,
+            foreign: true,
+        };
+        let json = enrolled_client_json(&hand_written);
+        assert_eq!(json["foreign"], true);
+        assert_eq!(json["clientId"], "");
+        assert_eq!(json["scope"], "unspecified", "reading an unscoped line as admin would lie");
+        assert_eq!(json["enrolledAt"], 0);
     }
 
     #[test]

@@ -45,6 +45,12 @@ final class Runners: ObservableObject {
 
     func remove(_ target: String) {
         all.removeAll { $0.target == trimmed(target) }
+        // The `~/.ssh/config` alias goes with it, or an editor opened on some
+        // future runner with the same target string is handed a name Far Cooler
+        // no longer maintains a block for. The block itself is a separate
+        // operation with its own copy — removing a runner from this list is not
+        // removing this Mac's shell access to it.
+        SshConfigAliases.forget(trimmed(target))
         save()
     }
 

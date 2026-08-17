@@ -142,13 +142,14 @@ fun OnboardingScreen(
 /**
  * Shows the public key to install on a runner.
  *
- * Deliberately the whole of enrolment. There is no pairing code and no account:
- * a runner authorizes this device exactly the way it authorizes any other SSH
- * client, and revokes it by deleting one line.
+ * The manual path, and it stays. There is a ceremony now — two codes and a
+ * camera, through [JoinScreen] — but this is what works when there is no trusted
+ * device to scan with, and it is what is left the day every device is lost. Its
+ * wording is unchanged apart from "runner".
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AuthorizeScreen(onBack: () -> Unit) {
+fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val publicKey = remember { Identity.publicKey ?: "could not generate a key" }
@@ -173,6 +174,17 @@ fun AuthorizeScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            // Above the key, because it is the shorter road: someone holding a
+            // device that already has runners never needs to paste anything.
+            Button(onClick = onJoin, modifier = Modifier.fillMaxWidth()) {
+                Text("Add this device with a code")
+            }
+            Text(
+                "Show a code to a device you’ve already added, and it picks which runners this " +
+                    "one may reach. Or add the key by hand:",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text("Add this device's public key to the runner:")
             Mono(publicKey)
             Button(
@@ -271,6 +283,20 @@ fun SettingsScreen(
                         Text("Sign out")
                     }
                 }
+
+                // "Settings › Devices", which the confirmation screen names as
+                // where a grant can be changed later. It has to be here, or that
+                // sentence sends someone looking for a screen that does not
+                // exist.
+                HorizontalDivider()
+                SectionTitle("Devices")
+                Button(onClick = { model.navigate(Route.AddDevice) }) { Text("Add a device") }
+                Text(
+                    "Adding a device shows a code for it to scan, and grants only the runners " +
+                        "you pick.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             } else {
                 Text(
                     "Sign in so a runner you own can notify this phone while the app is " +

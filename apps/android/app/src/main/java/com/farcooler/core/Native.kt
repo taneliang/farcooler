@@ -66,6 +66,83 @@ internal object NativeClient {
 
     external fun nativePublicKey(privateKey: String): String?
 
+    /**
+     * The SHA256 fingerprint of an OpenSSH public key, as a person reads it.
+     *
+     * Not computed here. Far Cooler implements no cryptography of its own, and
+     * this particular string has to be the one a reply is addressed to —
+     * `ceremony_reply` writes the same value into `target`, and a second way to
+     * derive it is a second answer the day one of them changes.
+     */
+    external fun nativeFingerprint(publicKey: String): String?
+
+    /**
+     * The client id this device is enrolled under, derived from its own key.
+     *
+     * Not derived here, and that matters: the daemon's "already enrolled" check
+     * compares client ids, so a format invented per platform means one device
+     * enrols twice under two names and the daemon can no longer say which
+     * session arrived on which key.
+     */
+    external fun nativeClientId(publicKey: String): String?
+
+    // MARK: - The enrollment ceremony
+    //
+    // Four moments, and every rule about whether a scan is acceptable is behind
+    // them in `crates/client/src/ceremony.rs`. Each answers the payload it was
+    // asked for, or `{"error":"stale"}` — a stable word this app owns the
+    // sentence for. Kotlin decides nothing.
+    //
+    // **These declarations are checked by nothing.** JNI binds by name and never
+    // compares an argument list, so a shim whose Rust signature does not match
+    // one of these is a crash at the first call rather than a build failure —
+    // there is no compiler on either side of this line that can see both. Two of
+    // them are newer than the shims that shipped in `156937d`:
+    // `nativeCeremonyScan` takes the account, because the account rule moved into
+    // `ceremony::accept_offer` where it belongs, and `nativeFingerprint` and
+    // `nativeClientId` are new.
+    // Both need `crates/android` rebuilt through
+    // `scripts/build-android-libs.sh`; a stale `libfarcooler_jni.so` in
+    // `app/src/main/jniLibs` will not do.
+
+    /** The code a new device shows. [keyB] is null on a phone: no Zed, no key B. */
+    external fun nativeCeremonyOffer(
+        name: String,
+        account: String,
+        keyA: String,
+        keyB: String?,
+    ): String?
+
+    /**
+     * Read a code, on behalf of the account doing the reading.
+     *
+     * [expectingAccount] is passed so RUST refuses a stranger's device, with
+     * `wrong_account`, rather than three apps each comparing two strings and
+     * one of them forgetting to. [heldMs] is this device's own elapsed time,
+     * which is the only clock that counts — a code carries no timestamp,
+     * because the device showing it would control that number.
+     */
+    external fun nativeCeremonyScan(
+        encoded: String,
+        expectingAccount: String,
+        heldMs: Long,
+    ): String?
+
+    /** The reply a trusted device shows back, capped by measured bytes. */
+    external fun nativeCeremonyReply(
+        offerJson: String,
+        runnersJson: String,
+        budgetBytes: Int,
+    ): String?
+
+    /** A scanned reply, taken or refused. */
+    external fun nativeCeremonyAccept(
+        encoded: String,
+        expectingJson: String,
+        alreadyTaken: Boolean,
+        heldMs: Long,
+    ): String?
+
     /** The themes compiled in, as JSON. No session needed. */
     external fun nativeBuiltinThemes(): String?
 }

@@ -83,7 +83,7 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
 
         let (mut ours, foreign) = sorted(&entries);
         ours.push(line);
-        fence::write(&path, fence::AUTHORIZED_KEYS, &ours, &foreign)?;
+        fence::write(&path, fence::AUTHORIZED_KEYS, &ours, &foreign, fence::Placement::Last)?;
         Ok(ClientEnrollResult {
             // The only moment this runner can honestly stamp a time: the file
             // records none, so every later read of this entry reports 0.
@@ -138,7 +138,7 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
         let remaining: Vec<Entry> =
             entries.into_iter().filter(|e| e.client_id != client_id).collect();
         let (ours, foreign) = sorted(&remaining);
-        fence::write(&path, fence::AUTHORIZED_KEYS, &ours, &foreign)?;
+        fence::write(&path, fence::AUTHORIZED_KEYS, &ours, &foreign, fence::Placement::Last)?;
         // Read back rather than answering with what was just computed, the same
         // way a settings write does: what the file now says is the only claim
         // worth making about who may log in.

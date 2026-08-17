@@ -12,6 +12,18 @@ cd "$(dirname "$0")"
 
 CONFIG="${1:-release}"
 
+# The same floor Package.swift declares, and the same one build-vt.sh exports.
+#
+# It has to be set for BOTH cargo invocations this script makes, not just the
+# library one. The client core compiles C — BoringSSL, by way of russh — and the
+# CLI depends on that crate, so a second cargo run with a different value
+# recompiles every C object and the next library build recompiles them back.
+# Setting it once here means one answer for the whole script.
+#
+# The durable home for this is a `[env]` table in the workspace's
+# `.cargo/config.toml`, so a bare `cargo build` from the repo root agrees too.
+export MACOSX_DEPLOYMENT_TARGET=26.0
+
 # Every per-channel value this script needs, resolved ONCE, here, before
 # anything below can change what `version.sh` would answer.
 #

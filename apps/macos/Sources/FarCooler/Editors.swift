@@ -304,7 +304,21 @@ extension Editor {
     /// launch will answer — an item is enabled exactly when this returns
     /// something — and so it can be tested without starting an editor.
     func command(path: String, host: String) -> [String]? {
-        let remoteTarget = host.trimmingCharacters(in: .whitespaces)
+        // The `~/.ssh/config` alias when Far Cooler wrote one for this runner.
+        //
+        // This is what the block in that file is FOR. Zed's template is
+        // `ssh://{host}{path}`, and given `you@box.tail-1234.ts.net` ssh matches
+        // no `Host` entry — so the `IdentityFile` Far Cooler wrote is never
+        // offered and the open fails with a key error, with a perfectly good
+        // block sitting in the file doing nothing. Given `box` it matches.
+        //
+        // Substituted here rather than at every call site so the menu's
+        // enablement, the tooltip and the launch cannot disagree about which
+        // string they mean. A runner Far Cooler wrote no block for is unchanged:
+        // `editorTarget` hands back exactly what it was given.
+        let remoteTarget = SshConfigAliases
+            .editorTarget(for: host.trimmingCharacters(in: .whitespaces))
+            .trimmingCharacters(in: .whitespaces)
         let template = remoteTarget.isEmpty ? local : remote
         guard let template, !template.isEmpty else { return nil }
 

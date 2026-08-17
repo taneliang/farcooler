@@ -43,6 +43,15 @@
 	<false/>
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
+    <!-- Shown in the system prompt the first time Far Cooler opens the camera,
+         which is when somebody is adding a device. One line, saying what and
+         why and naming nothing else: a prompt whose reason is vague is a prompt
+         people deny, and a denied camera can only be undone in System Settings.
+
+         Required to ask at all. Without this key the process is killed the
+         moment it touches AVCaptureDevice, with a crash log and no prompt. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Far Cooler uses the camera to scan the code on a device you're adding.</string>
     <!-- Where AuthKit comes back to. A custom scheme rather than a universal
          link because sign-in must work before an account exists and therefore
          before any server association could be verified; PKCE is what makes a

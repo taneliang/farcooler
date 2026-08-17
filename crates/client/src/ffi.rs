@@ -526,6 +526,73 @@ pub unsafe extern "C" fn farcooler_client_public_key(
     })
 }
 
+/// The `SHA256:…` fingerprint of a public key, as a person reads it on screen.
+///
+/// Its own entry point because the confirmation screen shows this string and had
+/// no way to ask for it: the app got one by building a throwaway reply to its own
+/// offer with no runners in it and reading `target` out of the JSON. That works,
+/// and it means the sentence telling a human which device they are about to trust
+/// is a side effect of the leg-two manifest builder.
+///
+/// The computation is `crate::ceremony`'s — the same one `manifest` addresses a
+/// reply with, which is `ssh-key`'s and not this project's. Two ways to compute
+/// one fingerprint is two fingerprints the day one of them changes, and the
+/// screen would be the one that is wrong.
+///
+/// Returns the number of bytes needed, exactly as
+/// `farcooler_client_public_key` beside it does, and 0 when the text is not a
+/// public key — a device with no readable key has no fingerprint, and a guess
+/// would be a string a person compares against a screen.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_fingerprint(
+    public_key: *const c_char,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    guarded(0, || {
+        let Some(text) = (unsafe { read_str(public_key) }) else { return 0 };
+        let Some(fingerprint) = crate::ceremony::fingerprint(&text) else { return 0 };
+
+        let bytes = fingerprint.as_bytes();
+        if out.is_null() || bytes.len() > capacity {
+            return bytes.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+        bytes.len()
+    })
+}
+
+/// The client id to enroll a device under, derived from its own key.
+///
+/// Nothing in the ceremony carries a client id, so without this each app invents
+/// one and three apps invent three formats. The daemon's fingerprint check keeps
+/// that from being a correctness bug, but its "already enrolled" arm compares
+/// client ids — and that comparison only works if every app spells the same
+/// device the same way. So the format lives here, once, beside the fingerprint
+/// the confirmation screen shows.
+///
+/// Same contract as `farcooler_client_fingerprint`: raw text, bytes needed
+/// returned, nothing written when short, NULL asks the size, 0 when the text is
+/// not a public key.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_client_id(
+    public_key: *const c_char,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    guarded(0, || {
+        let Some(text) = (unsafe { read_str(public_key) }) else { return 0 };
+        let Some(id) = crate::ceremony::client_id(&text) else { return 0 };
+
+        let bytes = id.as_bytes();
+        if out.is_null() || bytes.len() > capacity {
+            return bytes.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+        bytes.len()
+    })
+}
+
 // MARK: - The enrollment ceremony
 //
 // Four moments, four entry points, and every rule that decides whether a scan
@@ -578,6 +645,14 @@ pub unsafe extern "C" fn farcooler_client_ceremony_offer(
 
 /// Read a scanned offer. Leg one, the scanning side.
 ///
+/// `expecting_account` is the account signed in on **this** device, and an offer
+/// that names another one is `{"error":"wrong_account"}`. It is an argument
+/// rather than something the app checks afterwards because this call had no way
+/// to know who was asking, so the rule was written in Swift — one copy of a
+/// security rule, in one of three apps. NULL is the empty account, which matches
+/// only an offer that names none: an account that may be omitted is a check an
+/// app can switch off.
+///
 /// `held_ms` is how long ago **this** device scanned, by its own clock — which
 /// is the only clock that counts. A code carries no timestamp for the same
 /// reason a lock carries no key: the displaying device would control it, so a
@@ -588,19 +663,25 @@ pub unsafe extern "C" fn farcooler_client_ceremony_offer(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_ceremony_scan(
     encoded: *const c_char,
+    expecting_account: *const c_char,
     held_ms: u64,
     out: *mut u8,
     capacity: usize,
 ) -> usize {
     guarded(0, || {
-        use crate::ceremony::{CeremonyError, decode_offer, encode_offer, still_fresh};
+        use crate::ceremony::{CeremonyError, accept_offer, encode_offer, still_fresh};
 
         let Some(encoded) = (unsafe { read_str(encoded) }) else {
             return spill(&refusal(&CeremonyError::Malformed("nothing scanned".into())), out, capacity);
         };
+        let account = unsafe { read_str(expecting_account) }.unwrap_or_default();
 
+        // Freshness first, and before the account: a sheet left open all
+        // afternoon is not a scan whoever it belongs to, and a person who is
+        // shown "that is another account's device" for a code that was simply
+        // held too long is sent looking for a problem they do not have.
         let answer = still_fresh(std::time::Duration::from_millis(held_ms))
-            .and_then(|()| decode_offer(&encoded))
+            .and_then(|()| accept_offer(&encoded, &account))
             .map(|offer| encode_offer(&offer));
         spill(&answer.unwrap_or_else(|e| refusal(&e)), out, capacity)
     })
@@ -971,6 +1052,64 @@ async fn dispatch(
                 "failure": outcome.failure,
             }))
         }
+
+        // MARK: - Device enrollment
+        //
+        // The end of the ceremony, and the only part of it that changes
+        // anything: `crates/client/src/ceremony.rs` decides whether a scan is
+        // acceptable, and these three write the result into the file sshd reads.
+        //
+        // Unrouted until now, which made the whole feature unreachable from
+        // every app — the daemon served all three, the protocol gave them a
+        // capability and a scope, and nothing here had an arm, so the
+        // confirmation sheet's promise was false and no key was ever written.
+        // `tests/every_method_is_routed.rs` is the guard against a repeat.
+        //
+        // A runner too old to serve these advertises no `enrollment`
+        // capability, which `farcooler_client_connect` already reports, so an
+        // app dims the screen rather than discovering it at the last step.
+        "client.list" => session.enrolled_clients().await,
+
+        // The keys are camelCase, like every other multi-word argument in this
+        // table — `knownRevision`, `fromSeq`, `baseRef`, `requestId`. They are
+        // checked for presence by name rather than defaulted to empty, because
+        // an app that sent `public_key` would otherwise be told its key does not
+        // parse: a true statement about the empty string, and the wrong place to
+        // start looking.
+        "client.enroll" => {
+            let required = |key: &str| -> Result<String, SessionError> {
+                match text(key) {
+                    value if value.is_empty() => {
+                        Err(SessionError::Protocol(format!("{method} needs a {key}")))
+                    }
+                    value => Ok(value),
+                }
+            };
+            session
+                .enroll_client(
+                    &required("publicKey")?,
+                    // The only optional one: a device with no name still enrolls,
+                    // and the daemon's comment for a blank label is `device`.
+                    &text("label"),
+                    &required("clientId")?,
+                    &required("scope")?,
+                )
+                .await
+        }
+
+        // Removes the line AND closes what the line let in, in that order, on
+        // the runner. Answers with what is left rather than with `{}`: a device
+        // list is exactly what the screen that just revoked something redraws.
+        //
+        // An empty client id is refused here as well as by the daemon. A foreign
+        // line has no client id, so a blank one that matched them all would
+        // delete keys Far Cooler never wrote.
+        "client.revoke" => match text("clientId") {
+            id if id.is_empty() => {
+                Err(SessionError::Protocol(format!("{method} needs a clientId")))
+            }
+            id => session.revoke_client(&id).await,
+        },
 
         "repositories" => {
             let items = session.repositories().await?;
@@ -1779,5 +1918,35 @@ mod identity_tests {
             unsafe { super::farcooler_client_public_key(junk.as_ptr(), out.as_mut_ptr(), out.len()) },
             0
         );
+        assert_eq!(
+            unsafe { super::farcooler_client_fingerprint(junk.as_ptr(), out.as_mut_ptr(), out.len()) },
+            0,
+            "a fingerprint of something that will not parse is nothing, not a guess"
+        );
+    }
+
+    /// The fingerprint a device shows belongs to the key it generated.
+    ///
+    /// The whole point of the entry point: the string on the confirmation screen
+    /// and the key in the offer have to be the same identity, and the only way
+    /// to be sure is to derive one from the other.
+    #[test]
+    fn the_fingerprint_is_of_the_key_this_device_holds() {
+        let mut buf = vec![0u8; 4096];
+        let n = unsafe {
+            super::farcooler_client_generate_key(std::ptr::null(), buf.as_mut_ptr(), buf.len())
+        };
+        let pair: serde_json::Value = serde_json::from_slice(&buf[..n]).unwrap();
+        let public = CString::new(pair["public_key"].as_str().unwrap()).unwrap();
+
+        let mut out = vec![0u8; 128];
+        let n = unsafe {
+            super::farcooler_client_fingerprint(public.as_ptr(), out.as_mut_ptr(), out.len())
+        };
+        let shown = String::from_utf8_lossy(&out[..n]).into_owned();
+        assert!(shown.starts_with("SHA256:"), "{shown}");
+        // Base64 of 32 bytes, unpadded, behind the prefix — a person compares
+        // this against another screen character by character.
+        assert_eq!(shown.len(), "SHA256:".len() + 43, "{shown}");
     }
 }

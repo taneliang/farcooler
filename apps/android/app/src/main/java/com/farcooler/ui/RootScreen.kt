@@ -56,8 +56,17 @@ fun RootScreen(model: AppModel) {
             showBack = route !is Route.Onboarding || hosts.isNotEmpty(),
             onBack = { model.back() },
         )
-        if (route is Route.Authorize) {
-            AuthorizeScreen(onBack = { model.back() })
+        // Drawn over onboarding, because both are reachable with no runners at
+        // all — being granted some is exactly what the ceremony is for.
+        when (route) {
+            is Route.Authorize -> AuthorizeScreen(
+                onJoin = { model.navigate(Route.Join) },
+                onBack = { model.back() },
+            )
+
+            is Route.Join -> JoinScreen(model, onBack = { model.back() })
+
+            else -> Unit
         }
         return
     }
@@ -98,7 +107,22 @@ fun RootScreen(model: AppModel) {
 
         is Route.Authorize -> {
             BackHandler { model.back() }
-            AuthorizeScreen(onBack = { model.back() })
+            AuthorizeScreen(
+                onJoin = { model.navigate(Route.Join) },
+                onBack = { model.back() },
+            )
+            return
+        }
+
+        is Route.Join -> {
+            BackHandler { model.back() }
+            JoinScreen(model, onBack = { model.back() })
+            return
+        }
+
+        is Route.AddDevice -> {
+            BackHandler { model.back() }
+            AddDeviceScreen(model, onBack = { model.back() })
             return
         }
 

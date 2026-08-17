@@ -1,0 +1,18 @@
+// The Far Cooler client core, as seen by Swift.
+//
+// The Mac reaches runners by running `ssh`, so it never needed this library —
+// until the enrollment ceremony, where every rule about whether a scan is
+// acceptable lives in `crates/client/src/ceremony.rs` and the three apps get a
+// camera and a screen with no say in it. Linking it here is what lets the Mac
+// share those rules rather than carry a third copy of them in Swift.
+//
+// The header is referenced WHERE IT LIVES rather than copied here, unlike
+// CFarCoolerVT's. A copy is a second file that can be stale, and the failure
+// mode of a stale ceremony header is a Swift call into a signature Rust no
+// longer has. crates/client/include is the single source of truth and this
+// points straight at it; the path is relative to this module map, which is the
+// one location clang always knows.
+module CFarCoolerClient {
+    header "../../../../crates/client/include/farcooler_client.h"
+    export *
+}

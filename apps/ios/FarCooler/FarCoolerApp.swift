@@ -170,7 +170,7 @@ struct HostOnboardingView: View {
                 // order ends onboarding on a failure screen.
                 VStack(spacing: 18) {
                     NavigationLink {
-                        AuthorizeView()
+                        AuthorizeView(runners: hosts)
                     } label: {
                         Text("Authorize This Device").frame(maxWidth: .infinity)
                     }
@@ -197,7 +197,7 @@ struct HostOnboardingView: View {
                 HostEditorView { hosts.add($0) }
             }
             .sheet(isPresented: $showSettings) {
-                NavigationStack { SettingsView() }
+                NavigationStack { SettingsView(runners: hosts) }
             }
         }
     }
@@ -205,15 +205,41 @@ struct HostOnboardingView: View {
 
 /// Shows the public key to install on a host.
 ///
-/// Deliberately the whole of enrollment. There is no pairing code and no
-/// account: a host authorizes this device exactly the way it authorizes any
-/// other SSH client, and revokes it by deleting one line.
+/// The manual path, and it stays. There is a ceremony now — two codes and a
+/// camera, through `JoinView` — but this is what works when there is no trusted
+/// device to scan with, and it is what is left the day every device is lost. Its
+/// wording is unchanged apart from "runner".
 struct AuthorizeView: View {
+    /// Where a granted runner would be written. Nil where the caller has no
+    /// store to hand over, which is also where the ceremony has nowhere to put
+    /// its answer — so the route to it only appears with one.
+    var runners: RunnerStore?
+
     private var publicKey: String { Identity.publicKey ?? "could not generate a key" }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if let runners {
+                    // Above the key, because it is the shorter road: someone
+                    // holding a device that already has runners never needs to
+                    // paste anything.
+                    NavigationLink {
+                        JoinView(runners: runners)
+                    } label: {
+                        Text("Add This Device With a Code").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    Text(
+                        "Show a code to a device you’ve already added, and it picks which "
+                        + "runners this one may reach. Or add the key by hand:"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+
                 Text("Add this device’s public key to the runner:")
                     .font(.callout)
 

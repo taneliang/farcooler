@@ -225,6 +225,30 @@ pub fn decode_offer(s: &str) -> Result<Offer, CeremonyError> {
     Ok(offer)
 }
 
+/// Read a scanned first code on behalf of the account that is asking, refusing
+/// one that belongs to somebody else.
+///
+/// The account check is HERE rather than beside the call for the reason every
+/// other rule in this module is here: it was implemented in Swift, because
+/// `decode_offer` was never told who was scanning — so the rule that decides
+/// whether a stranger's device may be granted your fleet existed in one app and
+/// not in the other two. `accept_manifest` has always enforced the same rule on
+/// the reply leg; this is that rule on the leg where it stops something, since
+/// the reply leg is what a device does to itself.
+///
+/// Strict equality, with no exemption for an empty `expecting_account`: an
+/// account that may be omitted is a check an app can switch off by passing
+/// nothing, which is how it came to be missing in the first place. A device that
+/// names no account is answered by one that names none either, and by nothing
+/// else.
+pub fn accept_offer(encoded: &str, expecting_account: &str) -> Result<Offer, CeremonyError> {
+    let offer = decode_offer(encoded)?;
+    if offer.account != expecting_account {
+        return Err(CeremonyError::WrongAccount);
+    }
+    Ok(offer)
+}
+
 /// Build the reply for a scanned offer.
 ///
 /// `target` is the fingerprint of the offer's Key A rather than the key itself:
@@ -319,10 +343,40 @@ pub fn accept_manifest(
 /// cryptography of its own: this is `ssh-key`, which is what the daemon's fence
 /// and the host-key check already use, so one string format is produced in one
 /// place.
-fn fingerprint(public_key: &str) -> Option<String> {
+///
+/// `pub` because the confirmation screen shows this string, and it must be the
+/// same one `manifest` addresses a reply to. The app used to get it by building
+/// a throwaway reply with no runners in it and reading `target` out; an entry
+/// point of its own is not a new computation, it is this one, reached directly.
+pub fn fingerprint(public_key: &str) -> Option<String> {
     ssh_key::PublicKey::from_openssh(public_key)
         .ok()
         .map(|k| k.fingerprint(ssh_key::HashAlg::Sha256).to_string())
+}
+
+/// The client id a device is enrolled under, derived from its own key.
+///
+/// Here, once, because nothing in the ceremony carries one — so without this
+/// each app would invent its own format, and three apps would invent it three
+/// ways. The daemon's fingerprint check keeps that from being a correctness bug,
+/// but its "this device is already enrolled" arm compares client ids, and that
+/// comparison only works if every app spells the same device the same way.
+///
+/// Derived from the key rather than random so it is stable: a device that
+/// re-runs a ceremony against a runner it is already on must land on the id
+/// already in that runner's fence, or it enrolls a second line naming one
+/// device and the daemon can no longer say which session arrived on which key.
+///
+/// The fingerprint's own base64 is not safe here — it can contain `/` and `+`,
+/// and this string goes inside a forced command in `authorized_keys`. Hex of the
+/// leading bytes is, and `fence::render` refuses anything that would close the
+/// quote regardless.
+pub fn client_id(public_key: &str) -> Option<String> {
+    let key = ssh_key::PublicKey::from_openssh(public_key).ok()?;
+    let printed = key.fingerprint(ssh_key::HashAlg::Sha256);
+    let hex: String =
+        printed.as_bytes().iter().take(6).map(|b| format!("{b:02x}")).collect();
+    Some(format!("farcooler-{hex}"))
 }
 
 fn parse(s: &str) -> Result<serde_json::Value, CeremonyError> {
@@ -464,6 +518,50 @@ mod tests {
         assert!(matches!(decode_offer("{}"), Err(CeremonyError::Malformed(_))));
     }
 
+    /// The account is bound on the offer leg, by Rust.
+    ///
+    /// This is the leg where the check stops something. The reply leg's copy in
+    /// `accept_manifest` protects a device from a manifest meant for another
+    /// account; this one is what stops a trusted device from granting your fleet
+    /// to a stranger's phone held up in front of its camera.
+    #[test]
+    fn an_offer_for_another_account_is_refused_when_it_is_scanned() {
+        let theirs = encode_offer(&offer("someone else's iPhone", "acct_2", KEY_A, None));
+        assert!(matches!(accept_offer(&theirs, "acct_1"), Err(CeremonyError::WrongAccount)));
+        assert_eq!(accept_offer(&theirs, "acct_2").expect("the account it names").account, "acct_2");
+    }
+
+    /// No exemption for an account nobody named.
+    ///
+    /// An empty `expecting_account` that skipped the check would be a rule an
+    /// app can switch off by passing nothing — which is precisely how this rule
+    /// came to live in Swift instead of here.
+    #[test]
+    fn an_empty_account_matches_only_an_offer_that_names_none() {
+        let anonymous = encode_offer(&offer("iPhone", "", KEY_A, None));
+        assert!(accept_offer(&anonymous, "").is_ok());
+        assert!(matches!(accept_offer(&anonymous, "acct_1"), Err(CeremonyError::WrongAccount)));
+
+        let named = encode_offer(&offer("iPhone", "acct_1", KEY_A, None));
+        assert!(matches!(accept_offer(&named, ""), Err(CeremonyError::WrongAccount)));
+    }
+
+    /// Version and channel still come first: a code this build must not act on
+    /// is refused before anything about it is compared to anything.
+    #[test]
+    fn a_code_this_build_cannot_read_is_refused_before_the_account() {
+        let mut wrong_channel = offer("iPhone", "acct_2", KEY_A, None);
+        wrong_channel.channel = "a-channel-we-are-not".into();
+        assert!(matches!(
+            accept_offer(&encode_offer(&wrong_channel), "acct_1"),
+            Err(CeremonyError::Channel(_))
+        ));
+        assert!(matches!(
+            accept_offer(r#"{"v":99,"account":"acct_2"}"#, "acct_1"),
+            Err(CeremonyError::Version(99))
+        ));
+    }
+
     // MARK: - The reply
 
     /// A reply for another ceremony is not this ceremony's reply.
@@ -508,6 +606,44 @@ mod tests {
             accept_manifest(&encode_manifest(&m), &neighbour, false),
             Err(CeremonyError::WrongTarget)
         ));
+    }
+
+    /// One key, one client id, every time and on every platform.
+    ///
+    /// The daemon's "this device is already enrolled" arm compares client ids,
+    /// so an id derived differently per app means the same device enrolls twice
+    /// under two names and the daemon can no longer say which session arrived
+    /// on which key. Derived from the key rather than random for the same
+    /// reason: re-running a ceremony must land on the id already in the fence.
+    #[test]
+    fn a_key_always_derives_the_same_client_id() {
+        let once = client_id(KEY_A).expect("an id for a real key");
+        let again = client_id(KEY_A).expect("an id for a real key");
+        assert_eq!(once, again);
+        assert_ne!(once, client_id(KEY_B).expect("an id for the other key"));
+    }
+
+    /// The id cannot close the forced command's quote.
+    ///
+    /// It is interpolated inside `command="…"` in `authorized_keys`, so a `"`
+    /// in it would end the command and let what follows become its own approved
+    /// line — the same hole as a smuggled newline. `fence::render` refuses such
+    /// an id anyway; this makes sure the one we generate never needs refusing.
+    #[test]
+    fn a_derived_client_id_is_safe_inside_a_forced_command() {
+        let id = client_id(KEY_A).expect("an id");
+        assert!(
+            id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+            "an id that needs escaping: {id}"
+        );
+        assert!(id.starts_with("farcooler-"), "an id nobody will recognize: {id}");
+    }
+
+    /// Nonsense has no id, rather than an id nobody can trace to a key.
+    #[test]
+    fn text_that_is_not_a_key_has_no_client_id() {
+        assert!(client_id("not a key").is_none());
+        assert!(client_id("").is_none());
     }
 
     /// One reply per ceremony, so a forged one cannot follow a real one.

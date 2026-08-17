@@ -139,6 +139,18 @@
          THIS IS A LEGAL DECLARATION, not a build setting. Revisit it if Far
          Cooler ever ships its own cipher, or ships encryption as a feature
          rather than as the means of reaching a host. -->
+    <!-- Shown in the system's permission prompt, on the screen that scans a
+         code and nowhere else. It says what and why in one line and names
+         nothing else — the ask happens when the scanner opens rather than at
+         launch, which is what makes one sentence enough. -->
+    <key>NSCameraUsageDescription</key>
+    <string>Far Cooler uses the camera to scan the code on a device you’re adding.</string>
+    <!-- Face ID is refused outright without this key: LocalAuthentication fails
+         the evaluation rather than prompting, and a failed evaluation enrolls
+         nothing — so the gate on the confirmation tap would silently become a
+         passcode-only gate on some devices and a dead end on others. -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>Far Cooler asks for Face ID before adding a device to your runners.</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>FarCoolerChannel</key>

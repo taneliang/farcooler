@@ -94,6 +94,49 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   terminal.dismiss_lost  {terminal}
  *   terminal.resize        {terminal, columns, rows}
  *
+ * Which devices may log in to that runner — the end of the enrollment ceremony,
+ * and the only part of it that changes anything. Every one of these reads or
+ * writes the runner's own ~/.ssh/authorized_keys, which is the authority on who
+ * may log in; nothing is cached anywhere else.
+ *
+ *   client.list    {}
+ *                  -> {"clients": [{"clientId": "phone-7",
+ *                                   "fingerprint": "SHA256:...",
+ *                                   "label": "farcooler-Ada-s-iPhone-tKvE1n0y",
+ *                                   "scope": "read",
+ *                                   "account": "you",
+ *                                   "enrolledAt": 0,
+ *                                   "foreign": false}]}
+ *   client.enroll  {publicKey, label, clientId, scope}
+ *                  -> {"client": { ...as above... }, "alreadyEnrolled": false}
+ *   client.revoke  {clientId}
+ *                  -> {"clients": [ ...what is left... ]}
+ *
+ * The argument keys are camelCase, like every other multi-word key in this
+ * table. `publicKey`, `clientId` and `scope` are required, and a missing one is
+ * an error that names it — an app that sent `public_key` would otherwise be told
+ * its key does not parse, which is true of the empty string and the wrong place
+ * to start looking. `label` is optional: a device with no name still enrolls.
+ *
+ * `scope` is one of "read", "control", "host_admin" — a word, because neither
+ * Swift nor Kotlin has the wire enum. Anything else is refused rather than
+ * defaulted: a key with no scope already means host_admin to sshd, so rounding a
+ * typo up would turn a misspelling into the whole runner. A line Far Cooler did
+ * not write comes back `"foreign": true` with an empty `clientId` and a scope of
+ * "unspecified" — it is reported so a person can see it is there, and it is never
+ * touched.
+ *
+ * `alreadyEnrolled` is not an error. It is the ordinary outcome of enrolling a
+ * Mac on itself and of a ceremony offered a runner the device can already reach,
+ * and the `client` beside it is then the grant that WAS there rather than the one
+ * you asked for. `enrolledAt` is 0 for every device but one just enrolled:
+ * authorized_keys records no time, and the file is the authority.
+ *
+ * `client.enroll` and `client.revoke` need host_admin on the connection; a
+ * runner too old to serve any of the three advertises no "enrollment"
+ * capability, which farcooler_client_connect already reports — dim the screen
+ * from that rather than discovering it at the last step.
+ *
  * Ids are UUID strings. An unknown method is an error rather than a no-op, so a
  * typo in a client is visible instead of silent.
  *
@@ -147,6 +190,36 @@ size_t farcooler_client_generate_key(const char *comment, uint8_t *out, size_t c
  * `capacity`. Returns 0 if the private key could not be read.
  */
 size_t farcooler_client_public_key(const char *private_key, uint8_t *out, size_t capacity);
+
+/**
+ * The SHA256 fingerprint of a public key, as a person reads it on screen:
+ * `SHA256:tKvE1n0y…`, exactly what `ssh-keygen -lf` prints and what the
+ * confirmation screen shows.
+ *
+ * Raw text, NOT JSON — the same contract farcooler_client_public_key above it
+ * uses, because this is the same kind of thing: one derived line, or nothing.
+ * Returns the bytes needed, writes nothing when that exceeds `capacity`, and
+ * NULL asks for the size. 64 is ample. Returns 0 when the text is not a public
+ * key; a device with no readable key has no fingerprint, and a guess would be a
+ * string a person compares against another screen.
+ *
+ * The confirmation screen used to get this by calling
+ * farcooler_client_ceremony_reply with its own offer and no runners, then
+ * reading `target` out of the manifest. Both come from one computation in
+ * `ceremony.rs`, so they cannot disagree — but the sentence telling a human
+ * which device they are about to trust should not be a side effect of the
+ * leg-two builder.
+ */
+size_t farcooler_client_fingerprint(const char *public_key, uint8_t *out, size_t capacity);
+
+// The client id to enroll a device under, derived from its own key.
+//
+// Nothing in the ceremony carries one, so without this each app invents its own
+// format and the daemon's "already enrolled" check — which compares client ids —
+// stops working across platforms. Raw text, same contract as the fingerprint
+// above: bytes needed returned, nothing written when short, NULL asks the size,
+// 0 when the text is not a public key.
+size_t farcooler_client_client_id(const char *public_key, uint8_t *out, size_t capacity);
 
 /*
  * ============================================================================
@@ -208,13 +281,25 @@ size_t farcooler_client_ceremony_offer(const char *name, const char *account,
 /*
  * Leg one, the scanning side: read a scanned offer.
  *
+ * `expecting_account` is the account signed in on THIS device. An offer naming
+ * another one answers {"error":"wrong_account"} — the rule that stops a trusted
+ * device granting your fleet to a stranger's phone held up in front of its
+ * camera. It is an argument because this call had no way to know who was asking,
+ * so the rule was written in Swift instead: one copy, in one of three apps.
+ *
+ * NULL is the empty account, and matches only an offer that names none. There is
+ * deliberately no "skip the check" value: an account that may be omitted is a
+ * security rule an app can switch off by passing nothing.
+ *
  * `held_ms` is how long ago THIS device scanned, by its own clock, which is the
  * only clock that counts — a timestamp inside a code is controlled by the
  * device displaying it. Call this again at the moment of the confirmation, not
- * only at the scan, so a sheet left open past the window refuses.
+ * only at the scan, so a sheet left open past the window refuses. Freshness is
+ * judged before the account, so a code held too long says "stale" rather than
+ * sending someone to look for an account problem they do not have.
  */
-size_t farcooler_client_ceremony_scan(const char *encoded, uint64_t held_ms,
-                                      uint8_t *out, size_t capacity);
+size_t farcooler_client_ceremony_scan(const char *encoded, const char *expecting_account,
+                                      uint64_t held_ms, uint8_t *out, size_t capacity);
 
 /*
  * Leg two, the trusted device's side: build the reply.

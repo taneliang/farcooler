@@ -41,10 +41,20 @@ let package = Package(
         // serves Mac, iOS and Android, and each platform writes only a
         // renderer. See crates/vt.
         .systemLibrary(name: "CFarCoolerVT", path: "Sources/CFarCoolerVT"),
+        // The client core, for the enrollment ceremony and nothing else.
+        //
+        // The Mac reaches runners by running `ssh`, which is why this library
+        // was a phone's concern until now. What changed is that every rule
+        // deciding whether a scanned code is acceptable lives in
+        // crates/client/src/ceremony.rs, and a Mac that could not call it would
+        // be a third implementation of those rules — which is the duplication
+        // the Rust core exists to prevent.
+        .systemLibrary(name: "CFarCoolerClient", path: "Sources/CFarCoolerClient"),
         .executableTarget(
             name: "Far Cooler",
             dependencies: [
                 "CFarCoolerVT",
+                "CFarCoolerClient",
                 .product(name: "AgentKit", package: "AgentKit"),
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
@@ -52,6 +62,7 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags(["-L\(rustLibDir)"]),
                 .linkedLibrary("farcooler_vt"),
+                .linkedLibrary("farcooler_client"),
                 // Where the framework will live once build-app.sh assembles the
                 // bundle. SwiftPM links against its own artifact directory and has
                 // no reason to know about a bundle it did not create, so without
@@ -59,6 +70,23 @@ let package = Package(
                 // loaded: @rpath/Sparkle.framework/Versions/B/Sparkle".
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
             ]
+        ),
+        // The rules with teeth, and only those.
+        //
+        // This package has never had a test target, and most of it does not
+        // want one: a SwiftUI view is verified by looking at it. What is here
+        // is the `~/.ssh/config` alias logic, whose failure modes are a runner
+        // taking over `github.com` for every push on this Mac, and Key A
+        // landing in a file whose deletion would then break Far Cooler rather
+        // than only Zed. Neither is visible by looking.
+        //
+        // The byte-level write is deliberately NOT here — it belongs to
+        // `crates/daemon/src/fence.rs` and is tested in Rust, beside the
+        // `authorized_keys` fixtures, so that one routine has one test suite.
+        .testTarget(
+            name: "CeremonyTests",
+            dependencies: ["Far Cooler"],
+            path: "Tests/CeremonyTests"
         ),
     ]
 )

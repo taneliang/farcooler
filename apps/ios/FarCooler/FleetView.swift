@@ -340,7 +340,7 @@ struct FleetView: View {
             // unreachable from the only screen that ever sends you looking for
             // it.
             NavigationLink {
-                AuthorizeView()
+                AuthorizeView(runners: store)
             } label: {
                 Text("Authorize This Device").frame(maxWidth: .infinity)
             }
@@ -633,10 +633,10 @@ struct HostSwitcherBar: View {
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
-                SettingsView(connection: connection)
+                SettingsView(connection: connection, runners: hosts)
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
-                            NavigationLink("Authorize") { AuthorizeView() }
+                            NavigationLink("Authorize") { AuthorizeView(runners: hosts) }
                         }
                     }
             }
