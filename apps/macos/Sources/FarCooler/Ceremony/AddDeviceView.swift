@@ -277,8 +277,15 @@ struct AddDeviceView: View {
         // looking for the offer then would find none and enroll an empty key.
         guard case .confirming(let confirmation) = store.phase else { return }
         let keyA = confirmation.offer.key_a
-        // One id per enrollment, and it is what the forced command will carry —
-        // so it is what closing this device's sessions later will name. Made
+        // Nil for a phone, and nil for a Mac that chose not to have shell access
+        // — the choice was made on that Mac, before it showed its code, and its
+        // absence from the offer IS the choice. Read from the offer rather than
+        // from `confirmation.shell`, which is what the screen shows about the
+        // choice; this is the key material the runner will be handed.
+        let keyB = confirmation.offer.key_b
+        // ONE id for both keys, and it is what the forced command will carry —
+        // so it is what closing this device's sessions later will name, and what
+        // makes `client revoke` take both of a Mac's lines in one write. Made
         // here because nothing else has made one: the ceremony correlates by
         // its own id, which is a different thing with a different lifetime.
         let clientID = UUID().uuidString
@@ -290,10 +297,13 @@ struct AddDeviceView: View {
                 reason: "Confirm adding \(name) to your runners"
             ) { granted in
                 await Enrollment.enroll(
-                    key: keyA, label: name, clientID: clientID,
-                    // `control`, per the design: `read` is a narrowing set
-                    // afterwards in Settings › Devices, and only for phones —
-                    // a shell key cannot be held to a scope at all.
+                    keyA: keyA, keyB: keyB, label: name, clientID: clientID,
+                    // `control`, per the design, and it applies to Key A only:
+                    // `read` is a narrowing set afterwards in Settings › Devices,
+                    // and only for phones. Key B's scope is host_admin and is not
+                    // passed from here, because a plain line cannot be held to a
+                    // scope at all — `Enrollment` owns that, so no screen can
+                    // accidentally ask for a shell at `read`.
                     scope: "control", on: granted)
             }
         }

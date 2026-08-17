@@ -12,8 +12,10 @@ import SwiftUI
 /// runner's own answer to `client.list`, read on every look — no record here
 /// can disagree with `~/.ssh/authorized_keys`, because the file is the one of
 /// the two that decides. That list is not on screen yet: the daemon serves the
-/// method and neither the CLI nor the client core's dispatch offers a route to
-/// it, which is the gap `Enrollment` names.
+/// method and the client core's dispatch now routes it, but the CLI — which is
+/// how a Mac reaches a runner — still has no `client` subcommand, which is the
+/// gap `Enrollment` names. When the rows arrive, a Mac is TWO of them: one line
+/// per key, told apart by `shellAccess`, removed together.
 struct DevicesSettings: View {
     @ObservedObject private var account = Account.shared
     @State private var adding = false

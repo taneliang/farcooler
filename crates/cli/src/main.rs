@@ -27,6 +27,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 mod changes;
+mod clients;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use farcooler_daemon::runtime::Runtime;
 use farcooler_protocol::v1::{
@@ -143,6 +144,15 @@ enum Command {
     // it is in every runbook already written.
     #[command(subcommand, name = "runner", alias = "host")]
     RunnerCmd(RunnerCmd),
+    /// Which devices may log in to a runner: list, enroll, revoke.
+    ///
+    /// The end of the enrollment ceremony and the only part of it that changes
+    /// anything. Every one of these reads or writes the runner's own
+    /// `~/.ssh/authorized_keys`, which is the authority on who may log in —
+    /// nothing is cached anywhere else, so this and Settings › Devices cannot
+    /// come to disagree about who has access.
+    #[command(subcommand)]
+    Client(clients::ClientCmd),
     /// Host a headless coding agent in this pane. Started by the daemon.
     ///
     /// Not a command a user types. It is the process a pane runs in agent pane
@@ -758,6 +768,7 @@ async fn run() -> Fallible {
         Command::Attach { workspace } => attach(runner, &workspace).await,
         Command::Events => events(runner).await,
         Command::Push(c) => push(runner, c).await,
+        Command::Client(c) => clients::client(runner, c, cli.json).await,
         Command::RunnerCmd(RunnerCmd::Install { target, from }) => {
             runner_install::install(&target, from.as_deref()).await
         }
@@ -2532,7 +2543,7 @@ pub(crate) fn short_bytes(bytes: &[u8]) -> String {
     short(uuid_of(bytes))
 }
 
-fn truncate(s: &str, n: usize) -> String {
+pub(crate) fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
     } else {

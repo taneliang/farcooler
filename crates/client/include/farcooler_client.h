@@ -106,8 +106,9 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                   "scope": "read",
  *                                   "account": "you",
  *                                   "enrolledAt": 0,
- *                                   "foreign": false}]}
- *   client.enroll  {publicKey, label, clientId, scope}
+ *                                   "foreign": false,
+ *                                   "shellAccess": false}]}
+ *   client.enroll  {publicKey, label, clientId, scope, shellAccess}
  *                  -> {"client": { ...as above... }, "alreadyEnrolled": false}
  *   client.revoke  {clientId}
  *                  -> {"clients": [ ...what is left... ]}
@@ -117,6 +118,28 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  * an error that names it — an app that sent `public_key` would otherwise be told
  * its key does not parse, which is true of the empty string and the wrong place
  * to start looking. `label` is optional: a device with no name still enrolls.
+ *
+ * `shellAccess` is optional and false by default, which is the RESTRICTED line:
+ * `restrict,command="farcoolerd --stdio …"`, the shape this call has always
+ * written. True asks for a PLAIN line instead — Key B, the ordinary SSH key that
+ * Zed, git and Terminal use, which needs a shell behind it and so cannot carry a
+ * forced command. It must be sent with `"scope": "host_admin"`; the runner
+ * refuses the pair otherwise, because a request asking for a shell while saying
+ * "read" does not agree with itself.
+ *
+ * A Mac therefore enrolls TWICE, with the same `clientId` and one call each way —
+ * and the two calls must be SEQUENTIAL, not concurrent: the runner rebuilds the
+ * block from a snapshot read outside the writer's lock, so two enrollments
+ * landing together can lose one of the keys. A phone enrolls once, with this
+ * false: there is no Zed on a phone. The same key in both shapes is refused
+ * outright — sshd takes the first line that matches a key, so that would make
+ * "does this device get a shell" a question about line order in a text file.
+ *
+ * `shellAccess` comes back on every listed line, and it is what tells a Mac's two
+ * rows apart in a devices screen: both lines carry that Mac's one client id, so
+ * without it "Far Cooler access" and "shell access" are the same object. Never
+ * true for a `"foreign": true` line. `client.revoke` removes EVERY line under an
+ * id, which for a Mac is both keys in one write.
  *
  * `scope` is one of "read", "control", "host_admin" — a word, because neither
  * Swift nor Kotlin has the wire enum. Anything else is refused rather than
@@ -360,6 +383,66 @@ bool farcooler_client_stream_start(void *handle, const char *terminal);
 
 /** Stop streaming. Safe when nothing is running for that terminal. */
 void farcooler_client_stream_stop(void *handle, const char *terminal);
+
+/*
+ * Rewrite Far Cooler's fenced block in ~/.ssh/config.
+ *
+ * The end of enrollment on a desktop, and what makes the keys useful to anything
+ * but Far Cooler: Zed, git, `scp` and every `ssh` anybody types reach a runner
+ * through this file, or they do not reach it at all.
+ *
+ * `entries_json` is a JSON array of the lines that become the block, in order:
+ *
+ *     ["Host box", "  HostName box.tail-1234.ts.net", "  User you",
+ *      "  Port 22", "  IdentityFile ~/.ssh/farcooler-macbook-air",
+ *      "  IdentitiesOnly yes"]
+ *
+ * No newlines, no marker lines, no blank entries — each is refused, because one
+ * entry in must never be two lines out. An empty array removes the block: a
+ * machine with nothing enrolled should not carry two comment lines forever.
+ *
+ * Composing the block and choosing the aliases is the APP's — including checking
+ * an alias against everything ssh already reads, which is what stops a runner
+ * labeled `github.com` taking over every push. What is shared is the write.
+ *
+ * The block goes FIRST in the file, above any `Include` — ssh_config is
+ * first-match-wins per keyword, so a block below an `Include ~/.ssh/config.d/*`
+ * or a `Host *` is silently overridden and appending is the one placement that
+ * reliably does nothing. An EXISTING block is rewritten where it already is,
+ * because moving somebody's block would change which keywords win.
+ *
+ * Answers {"ok":true}, or a stable word — never a Rust error string:
+ *
+ *     damaged   the two marker lines are not one opening and one closing pair.
+ *               Nothing was changed. This refuses rather than repairing: the way
+ *               out is a person looking at the file, and a wrong guess about
+ *               where the block ends rewrites lines Far Cooler did not write.
+ *     missing   the directory that file lives in does not exist. A missing
+ *               `.ssh` is NOT this — it is created at 0700, the mode sshd's
+ *               StrictModes wants — so this means a path from a home directory
+ *               that is not there. iOS and Android answer this always: there is
+ *               no ~/.ssh on a phone, and no shell client to read one.
+ *     io        the write did not happen. An entry carrying a newline or a
+ *               marker, a file that is not UTF-8 or not a regular file, a
+ *               directory another user can write, or a real I/O failure. Say
+ *               that nothing was changed, not that a disk failed.
+ *
+ * The buffer contract is farcooler_client_generate_key's, with one addition this
+ * call needs and the pure ones do not: WHEN IT CANNOT ANSWER IT DOES NOT WRITE
+ * THE FILE EITHER. Passing NULL, or a capacity below the size it asks for,
+ * touches nothing — so the "call, discover you were short, call again" dance
+ * cannot perform the write twice. That matters because each write leaves a
+ * checksummed backup beside the file, and a second write's backup would be a
+ * copy of the first write's output rather than of the file you had. 64 bytes is
+ * ample; the size asked for is a fixed maximum rather than the length of the
+ * answer you are about to get.
+ *
+ * 0 means the library itself fell over — a panic caught at the boundary, which
+ * would otherwise abort the app. Treat it as a refusal with no word: nothing was
+ * written, and there is nothing in the buffer to parse.
+ */
+size_t farcooler_client_ssh_config_write(const char *path, const char *entries_json,
+                                         uint8_t *out, size_t capacity);
 
 /*
  * Paste a file into a terminal.

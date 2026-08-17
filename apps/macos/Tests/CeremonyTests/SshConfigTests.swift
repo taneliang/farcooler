@@ -158,6 +158,155 @@ struct SshConfigTests {
         #expect(SshConfig.tildeCollapsed(URL(fileURLWithPath: "/etc/ssh/key")) == "/etc/ssh/key")
     }
 
+    // MARK: - The write
+
+    // Six tests over the one thing this file used to refuse to do. They aim at a
+    // scratch path, never `~/.ssh/config`: a suite that rewrote the config of
+    // whoever ran it would be worse than no suite. What is NOT here is the byte
+    // mechanics — the lock, the two `fsync`s, the checksummed backup — which
+    // belong to `crates/daemon/src/fence.rs` and are tested beside the
+    // `authorized_keys` fixtures. What is here is the boundary: that Swift reaches
+    // that writer at all, and that each word it can answer becomes the right
+    // sentence.
+
+    /// **The block goes above an `Include`, or the whole feature is inert.**
+    ///
+    /// `ssh_config` is first-match-wins per keyword. A block appended below an
+    /// `Include ~/.ssh/config.d/*` or a `Host *` never gets its `IdentityFile`
+    /// offered — ssh tries the wrong key and Zed reports an authentication
+    /// failure for a runner that enrolled perfectly. This is the test that says
+    /// `Placement::First` is actually what crossed the FFI.
+    @Test func theBlockLandsAboveEverythingSshAlreadyReads() throws {
+        let config = try scratchConfig(
+            """
+            Include ~/.ssh/config.d/*
+            Host *
+              ServerAliveInterval 30
+            """)
+        let identity = ShellKey.directory.appendingPathComponent("farcooler-macbook-air")
+        let lines = SshConfig.block(
+            for: runner(id: "r1", label: "box"), alias: "box", identity: identity)
+
+        try SshConfig.write(lines, identity: identity, into: config)
+
+        let written = try String(contentsOf: config, encoding: .utf8)
+        let begin = try #require(written.range(of: SshConfig.beginMarker))
+        let include = try #require(written.range(of: "Include ~/.ssh/config.d/*"))
+        #expect(begin.lowerBound < include.lowerBound, "a block below an Include wins nothing")
+        #expect(written.contains("  IdentityFile ~/.ssh/farcooler-macbook-air"))
+        #expect(written.contains(SshConfig.endMarker))
+        #expect(written.contains("ServerAliveInterval 30"), "everything outside the fence survives")
+    }
+
+    /// A second write replaces the block rather than stacking another one, and
+    /// leaves what is outside it alone. This is the ordinary case — every
+    /// enrollment rewrites the whole block.
+    @Test func writingTwiceLeavesOneBlock() throws {
+        let config = try scratchConfig("Host work-mini\n  HostName 10.0.0.9\n")
+        let identity = ShellKey.directory.appendingPathComponent("farcooler-macbook-air")
+
+        try SshConfig.write(["Host box", "  HostName box.tail-1234.ts.net"], identity: identity,
+            into: config)
+        try SshConfig.write(["Host mini", "  HostName mini.tail-1234.ts.net"], identity: identity,
+            into: config)
+
+        let written = try String(contentsOf: config, encoding: .utf8)
+        #expect(written.components(separatedBy: SshConfig.beginMarker).count - 1 == 1)
+        #expect(written.contains("Host mini"))
+        #expect(!written.contains("Host box"), "the block is composed whole every time")
+        #expect(written.contains("Host work-mini"), "a person's own entry is not ours to touch")
+    }
+
+    /// Nothing enrolled means no block, not two comment lines left behind
+    /// forever. A Mac that revoked everything should look untouched.
+    @Test func anEmptyBlockIsRemovedRatherThanLeftEmpty() throws {
+        let config = try scratchConfig("Host work-mini\n  HostName 10.0.0.9\n")
+        let identity = ShellKey.directory.appendingPathComponent("farcooler-macbook-air")
+
+        try SshConfig.write(["Host box"], identity: identity, into: config)
+        try SshConfig.write([], identity: identity, into: config)
+
+        let written = try String(contentsOf: config, encoding: .utf8)
+        #expect(!written.contains(SshConfig.beginMarker))
+        #expect(written.contains("Host work-mini"))
+    }
+
+    /// A fence somebody edited by hand is refused, not repaired — and the file is
+    /// left exactly as it was. Guessing where the block ends rewrites lines Far
+    /// Cooler did not write, in the file that decides whether ssh works at all.
+    @Test func aDamagedFenceRefusesAndChangesNothing() throws {
+        let broken = """
+        \(SshConfig.beginMarker)
+        Host box
+        \(SshConfig.beginMarker)
+        Host mini
+        \(SshConfig.endMarker)
+        """
+        let config = try scratchConfig(broken)
+
+        #expect(throws: SshConfigError.damaged) {
+            try SshConfig.write(["Host new"], identity: ShellKey.directory, into: config)
+        }
+        #expect(try String(contentsOf: config, encoding: .utf8) == broken)
+        // And the sentence a person reads is this app's, never a Rust error's.
+        // `FenceError::Damaged` carries "3 opening and 1 closing markers", which
+        // is a log line.
+        let sentence = try #require(SshConfigError.damaged.errorDescription)
+        #expect(sentence.contains("~/.ssh/config") && sentence.contains("Nothing was changed"))
+        #expect(!sentence.contains("marker") || !sentence.contains("closing"))
+    }
+
+    /// A path with no home directory under it answers `missing`, and this app
+    /// turns that word into a sentence. The word crossing the FFI is the contract;
+    /// the sentence is ours.
+    ///
+    /// TWO levels missing, not one, and that is the actual contract rather than a
+    /// quirk of this test: the writer CREATES the last directory component at
+    /// 0700, because a runner where nobody has ever used SSH has no `.ssh` yet and
+    /// 0700 is the mode sshd's `StrictModes` insists on. So `missing` means the
+    /// directory above that one is gone — a home directory that is not there.
+    @Test func aPathWithNoHomeDirectoryUnderItSaysSoInThisAppsWords() throws {
+        let nowhere = try temporaryDirectory()
+            .appendingPathComponent("no-such-home")
+            .appendingPathComponent(".ssh")
+            .appendingPathComponent("config")
+
+        #expect(throws: SshConfigError.missing) {
+            try SshConfig.write(["Host box"], identity: ShellKey.directory, into: nowhere)
+        }
+        // Every failure sentence says the same two things, because they are the
+        // two a person needs: nothing changed, and the keys are still enrolled.
+        for error: SshConfigError in [.missing, .io, .writerUnavailable] {
+            let sentence = try #require(error.errorDescription)
+            #expect(sentence.contains("~/.ssh/config"))
+            #expect(sentence.contains("keys were enrolled"), "\(error): \(sentence)")
+        }
+    }
+
+    /// Key A is refused before a byte is written, not after.
+    ///
+    /// The check is on the composed line rather than trusted from the call site,
+    /// and it has to run first: a file already rewritten is not somewhere to
+    /// discover that the two keys got mixed up.
+    @Test func keyAIsRefusedBeforeTheFileIsTouched() throws {
+        let original = "Host work-mini\n  HostName 10.0.0.9\n"
+        let config = try scratchConfig(original)
+        let keyA = DeviceKey.directory.appendingPathComponent("user_01ABC")
+
+        #expect(throws: SshConfigError.keyAInConfig) {
+            try SshConfig.write(
+                ["Host box", "  IdentityFile \(SshConfig.tildeCollapsed(keyA))"],
+                identity: keyA, into: config)
+        }
+        #expect(try String(contentsOf: config, encoding: .utf8) == original)
+    }
+
+    private func scratchConfig(_ contents: String) throws -> URL {
+        let config = try temporaryDirectory().appendingPathComponent("config")
+        try contents.write(to: config, atomically: true, encoding: .utf8)
+        return config
+    }
+
     private func temporaryDirectory() throws -> URL {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("farcooler-ssh-config-\(UUID().uuidString)")

@@ -406,6 +406,13 @@ and a terminal appends to authorized_keys, which the design says out
 loud rather than claiming an enforcement it does not have."
 ```
 
+**Superseded.** That guard did not survive Key B: a Mac's shell key must be a
+plain line, so `client.enroll` now renders either shape and the rule became "no
+field carries bytes" instead. Two layers of `host_admin` guard the plain shape,
+and the line's own comment carries `farcooler-shell-<label>-<fp8>.<client_id>` so
+it stays managed, listable and revocable. See the spec's "What `control` really
+means" for why the original guard could only ever have stopped a mistake.
+
 ---
 
 ### Task 5: Revocation closes live sessions

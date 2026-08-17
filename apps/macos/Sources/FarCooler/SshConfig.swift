@@ -1,3 +1,4 @@
+import CFarCoolerClient
 import Foundation
 
 /// Far Cooler's fenced block in `~/.ssh/config`, so that Zed, git and Terminal
@@ -15,8 +16,9 @@ import Foundation
 /// plain `ssh` at once — so there is one implementation, in Rust, and it is
 /// tested there.
 ///
-/// See ``SshConfig/write(_:identity:)`` for the one FFI entry point this still
-/// needs and does not have.
+/// The entry point is `farcooler_client_ssh_config_write`, declared in
+/// `crates/client/include/farcooler_client.h`. See
+/// ``SshConfig/write(_:identity:into:)``.
 enum SshConfig {
     /// The file this writes into.
     static var path: URL {
@@ -241,40 +243,89 @@ enum SshConfig {
     /// Cooler's. That property is the entire reason there are two keys, and
     /// ``assertNotKeyA(_:)`` is what keeps it true here.
     ///
-    /// ## The entry point this needs, and does not have
+    /// ## The entry point, and why it takes a placement
     ///
-    /// `fence::write(path, markers, entries, foreign)` is reachable from
-    /// nothing but Rust today, and it also cannot place a NEW block at the top
-    /// of a file — `fence::rebuilt` appends when it finds no existing fence,
-    /// which for `~/.ssh/config` is the one placement that does not work.
-    /// `ssh_config` is FIRST-match-wins, so an `Include ~/.ssh/config.d/*` or a
-    /// `Host *` above this block silently wins every keyword in it.
+    /// `fence::write(path, markers, entries, foreign, placement)` does the
+    /// bytes, and `farcooler_client_ssh_config_write` is the one way Swift
+    /// reaches it. The fifth argument is the one this file cares about: a fence
+    /// writer that only appended would be useless here, because `ssh_config` is
+    /// FIRST-match-wins and a block below an `Include ~/.ssh/config.d/*` or a
+    /// `Host *` loses every keyword in it — the `IdentityFile` just written is
+    /// never offered, ssh tries the wrong key, and Zed reports an
+    /// authentication failure for a runner that enrolled perfectly. The FFI
+    /// passes `Placement::First` and does not take it from here: it is not a
+    /// per-call decision, it is what this file IS. An existing block is still
+    /// rewritten where it already sits, because moving somebody's block would
+    /// change which keywords win.
     ///
-    /// So what is wanted is one entry point, in `crates/client/src/ffi.rs`,
-    /// over a `fence::write` that has learned where to put a new block:
+    /// `entries` is the whole block, every time. There is no merge and no
+    /// foreign-line rescue inside this fence, unlike `authorized_keys`: nothing
+    /// distinguishes a line we wrote from a line somebody added here, so
+    /// preserving what is not ours would mean preserving everything and the
+    /// block could never lose a runner. An empty array removes the block.
     ///
-    /// ```c
-    /// /* Rewrite Far Cooler's fenced block in ~/.ssh/config.
-    ///  *
-    ///  * `entries_json` is a JSON array of lines — no newlines, no marker
-    ///  * lines, no blanks — which become the block in order, at the TOP of the
-    ///  * file for a file that has no fence yet, and in place for one that has.
-    ///  * An empty array removes the block.
-    ///  *
-    ///  * Answers {"ok":true} or {"error":"damaged"|"missing"|"io"}: a word,
-    ///  * never a Rust error string, exactly as the ceremony calls do.
-    ///  */
-    /// size_t farcooler_client_ssh_config_write(const char *path,
-    ///                                          const char *entries_json,
-    ///                                          uint8_t *out, size_t capacity);
-    /// ```
+    /// `path` is a parameter with a default rather than a constant read inside,
+    /// so a test can prove this against a scratch file. A test that could only
+    /// aim at `~/.ssh/config` would be a test that rewrites the config of
+    /// whoever runs the suite — which is the one file in this repo where that is
+    /// unacceptable — so the untested alternative would be no test at all.
     ///
-    /// Until that lands this refuses rather than writing the file a second way.
-    /// The six tests the plan names live beside plan 3's fence fixtures, in
-    /// Rust, where they cover both files at once.
-    static func write(_ entries: [String], identity: URL) throws {
+    /// The FFI answers a WORD and this owns the sentence. Nothing a person reads
+    /// here comes from Rust: `FenceError::Damaged` carries "3 opening and 1
+    /// closing markers", which is a log line, not copy.
+    static func write(_ entries: [String], identity: URL, into path: URL = SshConfig.path) throws {
         for line in entries { try assertNotKeyA(line) }
-        throw SshConfigError.writerUnavailable
+
+        // `[String]` through `JSONEncoder` cannot realistically fail, and if it
+        // did there would be nothing to tell a person about it — so it lands on
+        // the same case as a library that fell over, which is what it would be.
+        guard let data = try? JSONEncoder().encode(entries),
+            let entriesJSON = String(data: data, encoding: .utf8)
+        else { throw SshConfigError.writerUnavailable }
+
+        let answer = path.path.withCString { path in
+            entriesJSON.withCString { entries in
+                // 64 bytes, as the header says: the answer is a fixed maximum
+                // rather than the length of what comes back. Sized ONCE and never
+                // retried on a short buffer — every other call in this app does
+                // the "call, discover you were short, call again" dance, and this
+                // is the one where a second call would make the backup beside
+                // `~/.ssh/config` a copy of the first call's output instead of a
+                // copy of the file the person had.
+                var buffer = [UInt8](repeating: 0, count: 64)
+                let needed = buffer.withUnsafeMutableBufferPointer {
+                    farcooler_client_ssh_config_write(path, entries, $0.baseAddress, $0.count)
+                }
+                guard needed > 0, needed <= buffer.count else { return String?.none }
+                return String(decoding: buffer[0..<needed], as: UTF8.self)
+            }
+        }
+
+        // 0, or a size larger than a 64-byte answer can be, means the library
+        // itself fell over — a panic caught at the boundary. Nothing was written
+        // and there is nothing in the buffer to read.
+        guard let answer,
+            let parsed = try? JSONDecoder().decode(Answer.self, from: Data(answer.utf8))
+        else { throw SshConfigError.writerUnavailable }
+
+        if parsed.ok == true { return }
+        switch parsed.error {
+        case "damaged": throw SshConfigError.damaged
+        case "missing": throw SshConfigError.missing
+        // Including a word this build has never heard of. A newer library that
+        // grew a fourth refusal must not read as a success here: the honest thing
+        // to say about a word we cannot interpret is that the write did not
+        // happen, which is what every one of these words means.
+        default: throw SshConfigError.io
+        }
+    }
+
+    /// `{"ok":true}` or `{"error":"damaged"|"missing"|"io"}`, and nothing else
+    /// ever crosses — see the header. Both optional because exactly one is
+    /// present.
+    private struct Answer: Decodable {
+        var ok: Bool?
+        var error: String?
     }
 
     /// Key A must never appear in `~/.ssh/config`.
@@ -332,12 +383,33 @@ enum SshConfigAliases {
     }
 }
 
+/// Why `~/.ssh/config` was not updated, in this app's words.
+///
+/// One case per WORD the FFI can answer, plus the two this side decides. Rust
+/// answers a word and this owns the sentence — a `FenceError` carries a message
+/// built for a log, and Settings is not a log.
+///
+/// Every sentence here says the same two things, because they are the two a
+/// person needs: nothing was changed, and the keys are still enrolled. Enrolling
+/// and writing this file are separate steps and only the second one failed, so
+/// copy that implied the whole ceremony was lost would send somebody to redo an
+/// enrollment that worked.
 enum SshConfigError: LocalizedError, Equatable {
-    /// The shared Rust writer is not reachable from Swift yet. See
-    /// ``SshConfig/write(_:identity:)``.
+    /// The library itself fell over — a panic caught at the FFI boundary, or an
+    /// answer this build could not parse. See ``SshConfig/write(_:identity:into:)``.
     case writerUnavailable
     case keyAInConfig
     case damaged
+    /// The folder `~/.ssh/config` lives in is not there. Not a missing `.ssh`:
+    /// the writer creates that at 0700, which is the mode sshd's `StrictModes`
+    /// wants — so this is a home directory that has gone.
+    case missing
+    /// The write did not happen. An entry carrying a newline or a marker, a file
+    /// that is not UTF-8 or not a regular file, a `.ssh` another user can write,
+    /// or a real I/O failure. **Never says a disk failed** — the writer cannot
+    /// tell those apart and a sentence that guessed would send somebody looking
+    /// at hardware.
+    case io
 
     var errorDescription: String? {
         switch self {
@@ -351,6 +423,12 @@ enum SshConfigError: LocalizedError, Equatable {
             // out is a person looking at it. Never a suggestion to delete it.
             return "Far Cooler's block in ~/.ssh/config isn't the shape it wrote. "
                 + "Nothing was changed. Open the file and check the two Far Cooler comment lines."
+        case .missing:
+            return "Far Cooler couldn't find the folder ~/.ssh/config belongs in. "
+                + "The keys were enrolled; Zed and git won't find the runners until it's there."
+        case .io:
+            return "Far Cooler couldn't write ~/.ssh/config on this Mac. Nothing was changed. "
+                + "The keys were enrolled; Zed and git won't find the runners until it can."
         }
     }
 }

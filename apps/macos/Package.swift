@@ -80,9 +80,16 @@ let package = Package(
         // landing in a file whose deletion would then break Far Cooler rather
         // than only Zed. Neither is visible by looking.
         //
-        // The byte-level write is deliberately NOT here — it belongs to
-        // `crates/daemon/src/fence.rs` and is tested in Rust, beside the
-        // `authorized_keys` fixtures, so that one routine has one test suite.
+        // The byte MECHANICS are deliberately not here — the lock, the two
+        // `fsync`s, the checksummed backup belong to `crates/daemon/src/fence.rs`
+        // and are tested in Rust beside the `authorized_keys` fixtures, so that
+        // one routine has one test suite. What IS here about the write is the
+        // boundary: that Swift reaches that routine at all, that the block lands
+        // above an `Include` rather than below it, and that each word the FFI can
+        // answer becomes the right sentence. Those tests aim at a scratch path,
+        // never `~/.ssh/config` — a suite that rewrote the config of whoever ran
+        // it would be worse than no suite, which is why `SshConfig.write` takes
+        // its path as a defaulted parameter.
         .testTarget(
             name: "CeremonyTests",
             dependencies: ["Far Cooler"],

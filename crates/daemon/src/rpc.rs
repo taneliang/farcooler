@@ -802,14 +802,26 @@ impl Rpc {
                 let Some(request::Payload::ClientEnroll(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                // Who granted access to whom, in this runner's log.
+                // Who granted access to whom, in this runner's log, and WHICH OF
+                // THE TWO KEYS.
                 //
                 // The audit entry the spec asks for is on the wire in
                 // `EnrolledClient`; this is the other half of it, and it is the
                 // half that says which device performed the ceremony rather
                 // than merely which one was enrolled. Both are device ids, both
                 // are already written in `authorized_keys` in plain text.
-                tracing::info!(by = self.who(), client = %p.client_id, "enrolling a device");
+                //
+                // The shape is here because a plain line is a shell on this
+                // account, and a `host_admin` client could always have got one
+                // by driving a terminal — see `fence::Grant`. What this call
+                // adds over that route is that the runner records it and
+                // manages the line, so the record has to say what was granted.
+                tracing::info!(
+                    by = self.who(),
+                    client = %p.client_id,
+                    shell = p.shell_access,
+                    "enrolling a device"
+                );
                 Ok(result::Value::ClientEnroll(crate::enrollment::enroll(svc, &p).await?))
             }
 

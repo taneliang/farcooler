@@ -32,8 +32,17 @@ pub async fn list(svc: &Service) -> Result<ClientList> {
 }
 
 /// Add a device's key, or report the grant it already has.
+///
+/// One call writes ONE line. A Mac calls twice — once for Key A, the restricted
+/// line the app and the CLI use, and once for Key B, the plain line Zed, git and
+/// Terminal use — with the same client id both times, which is what ties them
+/// together for `list` and `revoke`. See `fence::Grant`.
 pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrollResult> {
     let path = svc.authorized_keys().to_path_buf();
+    // Which SHAPE, and nothing else about the bytes: `fence::render` builds both
+    // from the same decoded key material, so this chooses between two lines this
+    // daemon writes rather than between writing and being written to.
+    let grant = if request.shell_access { fence::Grant::Shell } else { fence::Grant::FarCooler };
     // Rendered before the file is opened, so a request that could never produce
     // a line does not create a `.ssh` directory or a backup on its way to being
     // refused.
@@ -42,6 +51,7 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
         &request.label,
         &request.client_id,
         Scope::try_from(request.scope).unwrap_or(Scope::Unspecified),
+        grant,
     )
     .map_err(refused)?;
     // Read the line just rendered with the parser that will read it back out of
@@ -58,17 +68,26 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
         let entries = read(&path)?;
         // Either identity already being present is "already enrolled".
         //
-        // The FINGERPRINT, because a key already in the file can already log
-        // in — including as a foreign line somebody added by hand, where sshd
-        // matches their unrestricted line first and ours would be dead weight
-        // granting nothing while the device got a shell.
+        // The FINGERPRINT, whatever shape either line has, because a key already
+        // in the file can already log in — including as a foreign line somebody
+        // added by hand, where sshd matches their unrestricted line first and
+        // ours would be dead weight granting nothing while the device got a
+        // shell. **One key, one line, for the same reason:** sshd takes the
+        // first line whose key matches, so the same key written both plain and
+        // restricted would make "does this device get a shell" a question about
+        // line order in a text file. A Mac's two keys are two different keys.
         //
-        // The CLIENT ID, because two lines naming one device leave the daemon
-        // unable to say which of them a session arrived on, and every audit
-        // answer after that is a guess.
+        // The CLIENT ID only within the same shape, because two lines naming one
+        // device in one shape leave the daemon unable to say which of them a
+        // session arrived on and every audit answer after that is a guess —
+        // while two lines naming one device in DIFFERENT shapes is exactly what
+        // a Mac is, and refusing that (as an earlier version of this check did)
+        // is refusing the second key it needs.
         if let Some(existing) = entries.iter().find(|e| {
             (!e.fingerprint.is_empty() && e.fingerprint == mine.fingerprint)
-                || (!e.client_id.is_empty() && e.client_id == mine.client_id)
+                || (!e.client_id.is_empty()
+                    && e.client_id == mine.client_id
+                    && e.shell_access == mine.shell_access)
         }) {
             // The grant it HAS, not the one that was asked for, and nothing is
             // written. Answering with the requested scope would tell a person
@@ -94,8 +113,20 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
     .await
 }
 
-/// Remove a device's line, close the sessions it was holding, and answer with
+/// Remove a device's lines, close the sessions it was holding, and answer with
 /// what is left.
+///
+/// **Every line under that client id**, which for a Mac is both of its keys —
+/// the restricted one and the plain one Zed, git and Terminal use — in one write.
+/// That is the whole reason a plain line carries the id in its comment: two
+/// calls could half fail and leave a device that is gone from the app and still
+/// holds a shell. It is also why the removal copy says the Mac loses SSH access
+/// to this runner entirely rather than only its access to Far Cooler.
+///
+/// The plain line's removal contains NOTHING that is already running. Nothing
+/// arrives on it that this daemon can see, so there is no session of ours to
+/// close, and a shell that is already open stays open — and can put both lines
+/// back. That is stated rather than hidden: revoke, then audit the runner.
 ///
 /// **In that order, and the order is the point.** sshd reads `authorized_keys`
 /// at authentication and never again, so deleting the line stops the next login
@@ -232,7 +263,9 @@ fn refused(rejected: Rejected) -> DomainError {
             Rejected::MultiLine | Rejected::Unparseable => "public_key",
             Rejected::Algorithm => "public_key algorithm",
             Rejected::ClientId => "client_id",
-            Rejected::Unscoped => "scope",
+            // For `ShellScope` the field that disagrees with `shell_access` is
+            // `scope`, and naming it is what says which of the two to change.
+            Rejected::Unscoped | Rejected::ShellScope => "scope",
         },
     }
 }
@@ -305,6 +338,7 @@ mod tests {
             label: "farcooler-phone-aaaaaaaa".into(),
             account: None,
             line: line.into(),
+            shell_access: false,
         }
     }
 
@@ -319,6 +353,7 @@ mod tests {
             Rejected::Unparseable,
             Rejected::ClientId,
             Rejected::Unscoped,
+            Rejected::ShellScope,
         ] {
             let DomainError::InvalidArgument { what } = refused(rejected) else {
                 panic!("{rejected:?} did not map to an invalid argument");
@@ -337,11 +372,34 @@ mod tests {
         // find again.
         let key = "ssh-ed25519 \
                    AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA x";
-        let line = fence::render(key, "iPhone", "c1", Scope::Control).expect("render");
+        let line = fence::render(key, "iPhone", "c1", Scope::Control, fence::Grant::FarCooler)
+            .expect("render");
         let entry = read_back(&line).expect("read back");
         assert_eq!(entry.client_id, "c1");
         assert_eq!(entry.scope, Scope::Control);
+        assert!(!entry.shell_access);
         assert!(entry.fingerprint.starts_with("SHA256:"));
+    }
+
+    /// Key B is MANAGED, which is the whole reason it is enrolled here at all.
+    ///
+    /// A plain line looks exactly like a key somebody added by hand, and those
+    /// are carried through verbatim and never revoked. If this stopped holding,
+    /// `client.list` would report a Mac's shell key as a stranger's and
+    /// `client.revoke` would leave it behind — which is the shell key getting
+    /// added by hand and belonging to nobody, the thing this replaces.
+    #[test]
+    fn a_plain_line_of_ours_is_managed_rather_than_mistaken_for_a_strangers() {
+        let key = "ssh-ed25519 \
+                   AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA x";
+        let line = fence::render(key, "MacBook Air", "mac-1", Scope::HostAdmin, fence::Grant::Shell)
+            .expect("render");
+        let entry = read_back(&line).expect("read back");
+        assert_eq!(entry.client_id, "mac-1");
+        assert!(entry.shell_access);
+        let (ours, foreign) = sorted(&[entry]);
+        assert_eq!(ours, vec![line]);
+        assert!(foreign.is_empty(), "a plain line of ours was treated as a stranger's");
     }
 
     #[test]

@@ -1707,8 +1707,12 @@ message ChangesInbox {
 // enrollment deleted a key somebody added by hand, so they are carried through
 // and reported — see `foreign`.
 message EnrolledClient {
-  // The device, as the forced command on the line names it. Empty for a
-  // foreign line: nothing names a device there.
+  // The device, as the forced command on the line names it — or, when
+  // `shell_access` is set, as the comment Far Cooler wrote there does. Empty for
+  // a foreign line: nothing names a device there.
+  //
+  // A Mac has TWO lines under one client id, one of each kind. That is the
+  // point: they are the same device, and revoking it removes both.
   string client_id = 1;
   // `SHA256:…`, as `ssh-keygen -lf` prints it. Empty only when the line held no
   // key this build could parse at all.
@@ -1716,9 +1720,10 @@ message EnrolledClient {
   // The key's comment, which for Far Cooler's own lines is the name it chose.
   string label = 3;
   // What this device may do, as the forced command says. UNSPECIFIED for a
-  // foreign line, and for one of ours whose scope word this build does not
-  // have — which grants nothing, because the daemon serving it refuses the word
-  // too.
+  // foreign line, for one of ours whose scope word this build does not have —
+  // which grants nothing, because the daemon serving it refuses the word too —
+  // and for a `shell_access` line, which carries no scope and hands out no Far
+  // Cooler grant at all.
   Scope scope = 4;
   // Which local account's `authorized_keys` this line was read from.
   //
@@ -1732,22 +1737,40 @@ message EnrolledClient {
   // Far Cooler did not write this line. It is inside the fence and is left
   // exactly as it was found; it is reported so a person can see it is there.
   bool foreign = 7;
+  // This is the device's PLAIN line — Key B, the key Zed, git and Terminal use.
+  //
+  // Far Cooler wrote it and manages it: it is inside the fence, this call
+  // reports it, and `client.revoke` removes it. Never true for a foreign line,
+  // which Far Cooler did not write and never touches.
+  //
+  // A client shows the two as separate rows — "Far Cooler access" and "shell
+  // access" — because they are removed together and mean different things: this
+  // one is an ordinary SSH key with a shell behind it, so removing it takes the
+  // device's ssh, git and Zed access to this runner away entirely, not only its
+  // access to Far Cooler.
+  bool shell_access = 8;
 }
 
 message ClientList { repeated EnrolledClient items = 1; }
 
 // Add a device's key to this runner's fence.
 //
-// There is deliberately NO field here for options, a forced command, or a key
-// to be written as it arrived. Every line this writes is
-// `restrict,command="farcoolerd --stdio --client <id> --scope <scope>"` with the
-// key rebuilt from its own key data, and the absence of a way to ask for
-// anything else is the guard rail — a flag that could be refused is a flag that
-// can be un-refused by one line in a dispatch arm.
+// There is deliberately NO field here for options, a forced command, or a key to
+// be written as it arrived. A request chooses between two SHAPES the daemon
+// renders — see `shell_access` — and carries no bytes that reach the file except
+// the key material, re-encoded. That is the guard rail, and it is the half of it
+// worth keeping: a field that carried options could be refused, and a flag that
+// can be refused can be un-refused by one line in a dispatch arm.
 //
-// That guard rail is against a MISTAKE, not a security boundary, and the design
-// says so out loud: a device holding `control` drives a terminal, and a terminal
-// can append to `authorized_keys` by itself.
+// **An earlier version of this message refused a plain line altogether**, on a
+// rule stated as "only a shell can grant a shell". That rule was never a
+// security boundary and the design says so out loud: a device holding `control`
+// drives a terminal, and a terminal can append to `authorized_keys` by itself.
+// It was a guard rail against a MISTAKE — and a guard rail that also blocked the
+// key Zed, git and Terminal need was blocking most of the value of onboarding a
+// Mac, while the shell key got added by hand or by a script and then belonged to
+// nobody. See "What `control` really means" and "A Mac needs two keys" in
+// `docs/superpowers/specs/2026-08-16-device-onboarding-design.md`.
 message ClientEnroll {
   // One OpenSSH public key line, ed25519, as the device generated it. Nothing
   // of it survives into the file except the key material, re-encoded.
@@ -1756,11 +1779,39 @@ message ClientEnroll {
   // suffixed with the fingerprint, never used verbatim.
   string label = 2;
   // The device this line will name. Refused if it would not survive being
-  // written into a forced command.
+  // written into a forced command, or into the comment of a plain line.
+  //
+  // A Mac sends the SAME id for both of its keys. Two lines under one id is the
+  // intended shape here — one restricted, one plain — and it is what lets one
+  // `client.revoke` remove both.
   string client_id = 3;
   // Refused when UNSPECIFIED. An unscoped line already means host_admin to
   // sshd, so guessing would turn a field somebody forgot into the whole runner.
+  //
+  // Must be HOST_ADMIN when `shell_access` is set: a plain line is a shell on
+  // that account, which is every power the account has, so a request asking for
+  // one while saying `read` or `control` does not agree with itself. Nothing is
+  // written into a plain line from this field — there is nowhere to put it — it
+  // is the request saying what it knows it is asking for.
   Scope scope = 4;
+  // Write a PLAIN, unrestricted line instead of a restricted one: Key B.
+  //
+  // A forced command is what makes a device's identity server-asserted, and it
+  // is also what leaves sshd with no shell to offer — so
+  // `apps/macos/Sources/FarCooler/Editors.swift` opening a worktree as
+  // `ssh://{host}{path}` gets the daemon where Zed wanted a shell. A Mac
+  // therefore enrolls twice, once with this false and once with it true. A phone
+  // enrolls once, with it false: there is no Zed on a phone.
+  //
+  // The line is still rendered by the daemon, from the key's own key data, with
+  // a comment the daemon chose — ed25519 only, CR/LF refused, the received
+  // comment discarded. It goes inside the fence like any other, so it is
+  // MANAGED: `client.list` reports it with `shell_access` set and
+  // `client.revoke` removes it along with the device's restricted line.
+  //
+  // Default false, which is the restricted line — so a client built before this
+  // field existed asks for exactly what it always asked for.
+  bool shell_access = 5;
 }
 
 message ClientEnrollResult {
@@ -1775,12 +1826,29 @@ message ClientEnrollResult {
   // offered a runner the device can already reach. A failure would send a
   // person looking for a problem that does not exist; a second line for one key
   // would leave the daemon unable to say which of them a session used.
+  //
+  // A key already present as the OTHER shape reports this too, and `client`'s
+  // `shell_access` is how a caller sees which shape it got. One key means one
+  // line: sshd matches a key against the file and takes the first line that
+  // matches, so the same key written both plain and restricted would make "does
+  // this device get a shell" a question about line order in a text file. A Mac's
+  // two keys are two different keys, which is why it has two.
   bool already_enrolled = 2;
 }
 
-// Remove a device's line from this runner's fence.
+// Remove a device's lines from this runner's fence.
 //
-// By client id, which is what the forced command carries. A line Far Cooler did
-// not write has no client id and so cannot be named here — deliberately: this
-// call must not be able to delete a key somebody added by hand.
+// By client id, which is what the forced command carries — and what Far Cooler
+// writes into the comment of a plain line, for exactly this reason. A line Far
+// Cooler did not write has no client id and so cannot be named here —
+// deliberately: this call must not be able to delete a key somebody added by
+// hand.
+//
+// **EVERY line under that id goes**, which for a Mac is both of its keys, in one
+// write. That is what makes the removal copy true: the Mac loses SSH access to
+// this runner entirely, not only its access to Far Cooler. Two calls could half
+// fail and leave a device that is gone from the app and still holds a shell.
+//
+// It does not close a shell that is already open — nothing on a runner can, and
+// that shell can put both lines back. See `enrollment::revoke`.
 message ClientRevoke { string client_id = 1; }

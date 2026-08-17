@@ -121,6 +121,9 @@ pub fn enrolled_client(entry: &crate::fence::Entry, enrolled_at: i64) -> wire::E
         account: entry.account.clone().unwrap_or_default(),
         enrolled_at,
         foreign: entry.client_id.is_empty(),
+        // Never both: a foreign line is one Far Cooler did not write, and this
+        // says Far Cooler wrote a plain one on purpose and manages it.
+        shell_access: entry.shell_access,
     }
 }
 

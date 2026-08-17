@@ -1108,12 +1108,22 @@ impl Session {
     /// reason the daemon refuses an unspecified scope: a key with no scope at all
     /// already means host_admin to sshd, so rounding a misspelling up would turn
     /// a typo into the whole runner.
+    ///
+    /// `shell_access` chooses the SHAPE of the line: false is the restricted Key
+    /// A line with its forced command, true is the plain Key B line that Zed, git
+    /// and Terminal need a shell behind. A Mac calls this twice, once each way,
+    /// with the same `client_id` — which is what lets one `revoke_client` remove
+    /// both. The pairing rule (`shell_access` demands `host_admin`) is NOT
+    /// re-checked here: the daemon owns every rule about what may be written into
+    /// `authorized_keys`, and a copy of that rule in three client languages is
+    /// three places for it to drift from the file's authority.
     pub async fn enroll_client(
         &mut self,
         public_key: &str,
         label: &str,
         client_id: &str,
         scope: &str,
+        shell_access: bool,
     ) -> Result<serde_json::Value, SessionError> {
         let Some(scope) = scope_from_word(scope) else {
             return Err(SessionError::Protocol(
@@ -1126,6 +1136,13 @@ impl Session {
                 label: label.to_string(),
                 client_id: client_id.to_string(),
                 scope: scope as i32,
+                // False is the restricted line and the proto's default, so a
+                // caller that omits the argument at the FFI asks for exactly what
+                // this call always asked for. True is the plain line, and the
+                // daemon refuses it unless the scope beside it is host_admin — a
+                // request asking for a shell while saying `read` does not agree
+                // with itself, and the daemon is the one that says so.
+                shell_access,
             });
         match self.value("client.enroll", None, Some(payload)).await? {
             result::Value::ClientEnroll(r) => Ok(json!({
@@ -1484,6 +1501,17 @@ fn enrolled_client_json(
         // Far Cooler did not write this line. It is reported so a person can see
         // it is there, and it is never touched.
         "foreign": client.foreign,
+        // This is the device's PLAIN line — Key B, the one Zed, git and Terminal
+        // use — and it is the ONLY thing that tells the two rows of a Mac apart.
+        // Both lines carry the same client id and both are ours; without this a
+        // Key B row and a Key A row are the same JSON object, Settings › Devices
+        // draws one of them twice, and the removal copy's promise ("removing this
+        // takes that Mac's ssh, git and Zed access away, not only its Far Cooler
+        // access") is attached to whichever row happened to sort first.
+        //
+        // Never true for a foreign line: a plain line of OURS is one this program
+        // rendered and manages, and a stranger's key is left as it was found.
+        "shellAccess": client.shell_access,
     })
 }
 
@@ -1597,12 +1625,53 @@ mod tests {
             account: "you".into(),
             enrolled_at: 0,
             foreign: true,
+            // Never true for a line Far Cooler did not write: a plain line of
+            // OURS is one this program rendered and manages, and a stranger's
+            // key is left exactly as it was found.
+            shell_access: false,
         };
         let json = enrolled_client_json(&hand_written);
         assert_eq!(json["foreign"], true);
         assert_eq!(json["clientId"], "");
         assert_eq!(json["scope"], "unspecified", "reading an unscoped line as admin would lie");
         assert_eq!(json["enrolledAt"], 0);
+        assert_eq!(json["shellAccess"], false);
+    }
+
+    /// The two lines of one Mac are distinguishable in the JSON three apps decode.
+    ///
+    /// The point of the field. Both lines carry the same client id and both are
+    /// ours, so `shellAccess` is the only thing separating "Far Cooler access"
+    /// from "shell access" on screen — and the copy under the second row promises
+    /// that removing it takes ssh, git and Zed away. A row that could not tell
+    /// which it was would make that promise about the wrong key.
+    #[test]
+    fn a_mac_s_two_lines_are_told_apart_by_the_field_the_rows_need() {
+        let plain = farcooler_protocol::v1::EnrolledClient {
+            client_id: "mac-9".into(),
+            fingerprint: "SHA256:b".into(),
+            label: "farcooler-shell-macbook-air-1a2b3c4d".into(),
+            // A plain line carries no forced command, so it carries no scope
+            // word either — there is nowhere in the line to put one.
+            scope: farcooler_protocol::v1::Scope::Unspecified as i32,
+            account: "you".into(),
+            enrolled_at: 0,
+            foreign: false,
+            shell_access: true,
+        };
+        let restricted = farcooler_protocol::v1::EnrolledClient {
+            fingerprint: "SHA256:a".into(),
+            label: "farcooler-macbook-air-1a2b3c4d".into(),
+            scope: farcooler_protocol::v1::Scope::Control as i32,
+            shell_access: false,
+            ..plain.clone()
+        };
+        let plain = enrolled_client_json(&plain);
+        let restricted = enrolled_client_json(&restricted);
+        assert_eq!(plain["clientId"], restricted["clientId"], "one device, two lines");
+        assert_eq!(plain["shellAccess"], true);
+        assert_eq!(restricted["shellAccess"], false);
+        assert_eq!(plain["foreign"], false, "a plain line of ours is managed, not a stranger's");
     }
 
     #[test]

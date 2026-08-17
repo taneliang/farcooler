@@ -422,9 +422,39 @@ So the honest statement, which `:897` already makes:
   no shell exists to escape through — and it is a boundary enforced by sshd,
   which is why prerequisite 1 matters.
 
-`client.enroll` still refuses to write plain lines, and still refuses a scope
-above the caller's own. That is a guard rail against a mistake, and the document
-calls it one.
+**So `client.enroll` writes plain lines after all**, and the earlier draft of
+this section was wrong to forbid them. It said the refusal was "a guard rail
+against a mistake" — which was true, and is exactly why it could not survive
+contact with Key B. A Mac's shell key *must* be a plain line; that is the whole
+point of it. Keeping the guard would have meant either no Zed and git access, or
+a Mac appending to `authorized_keys` over its own ssh with no fence, no backup,
+no atomic write and nothing for `client.list` to report — which is the "add but
+never manage" shape this document already rejected once.
+
+What replaced it is not a weaker rule but a different one: **no field carries
+bytes.** A request selects between two shapes the runner renders, and both go
+through the same parse-and-re-serialize path — Ed25519 only, CR/LF refused,
+comment regenerated from key data. Two layers of `host_admin` guard the plain
+shape: the caller's scope, and the request's own scope, because
+`scope: control` beside a shell key is a UI passing through the value it uses
+for Key A, and the coherent reading of that is a mistake rather than a request
+for three quarters of a shell.
+
+Its own line makes it managed. A plain line has exactly one writable field, so
+the comment carries both facts — `farcooler-shell-<label>-<fp8>.<client_id>`.
+The prefix is what distinguishes a Key B from a key somebody added by hand, which
+revoke must never touch; the client id is what lets one `client.revoke` remove
+both of a Mac's lines in a single write, which is what makes the shipped copy
+true.
+
+And one key is one line, whichever shape came first. sshd matches a key against
+the file and takes the **first** match, so a key written both plain and
+restricted would make "does this device get a shell" a question about line order
+in a text file — and make the daemon's identity assertion depend on the same.
+
+The sentence about refusing "a scope above the caller's own" is gone because it
+was vacuous: the call requires `host_admin`, which is the ceiling, so there was
+never a scope above the caller's to refuse.
 
 **Removing a device therefore offers to remove what it enrolled.** The audit log
 names every key each device added, so removal lists the descendants. Without

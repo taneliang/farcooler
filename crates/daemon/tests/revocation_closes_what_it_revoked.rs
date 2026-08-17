@@ -132,6 +132,10 @@ async fn enroll(admin: &mut SocketClient, key: &str, label: &str, client_id: &st
         label: label.into(),
         client_id: client_id.into(),
         scope: Scope::Control as i32,
+        // Key A, the restricted line. A plain line is the other half of a Mac
+        // and there is nothing to close on one: sshd runs a shell rather than
+        // this daemon, so no session of ours ever arrives on it.
+        shell_access: false,
     }));
     admin.call(req).await.expect("client.enroll");
 }

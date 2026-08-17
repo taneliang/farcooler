@@ -1768,15 +1768,17 @@ const OTHER_KEY: &str =
 
 /// The enrollment request, written out field by field on purpose.
 ///
-/// Exhaustive — no `..Default::default()`. Adding a field to `ClientEnroll`
-/// stops this compiling, which is the point: the one field nobody may add is a
-/// way to ask for an unrestricted line, and the review that catches it should
-/// be the build failing rather than somebody noticing.
-fn enrollment(
+/// Exhaustive — no `..Default::default()`, and the one literal every helper here
+/// goes through. Adding a field to `ClientEnroll` stops this compiling, which is
+/// the point: no field may ever carry BYTES for the file — options, a forced
+/// command, or a key to be written as it arrived — and the review that catches it
+/// should be the build failing rather than somebody noticing.
+fn enrollment_of(
     public_key: &str,
     label: &str,
     client_id: &str,
     scope: Scope,
+    shell_access: bool,
 ) -> farcooler_protocol::v1::Request {
     let mut req = request("client.enroll");
     req.payload = Some(request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
@@ -1784,8 +1786,28 @@ fn enrollment(
         label: label.into(),
         client_id: client_id.into(),
         scope: scope as i32,
+        shell_access,
     }));
     req
+}
+
+/// Key A: the restricted line, which is what a phone gets and all it gets.
+fn enrollment(
+    public_key: &str,
+    label: &str,
+    client_id: &str,
+    scope: Scope,
+) -> farcooler_protocol::v1::Request {
+    enrollment_of(public_key, label, client_id, scope, false)
+}
+
+/// Key B: the plain line Zed, git and Terminal use, at the only scope it has.
+fn shell_enrollment(
+    public_key: &str,
+    label: &str,
+    client_id: &str,
+) -> farcooler_protocol::v1::Request {
+    enrollment_of(public_key, label, client_id, Scope::HostAdmin, true)
 }
 
 async fn enrolled(
@@ -1797,15 +1819,21 @@ async fn enrolled(
 }
 
 #[test]
-fn the_enrollment_request_cannot_ask_for_an_unrestricted_line() {
+fn the_enrollment_request_cannot_ask_for_a_line_far_cooler_did_not_render() {
     // An assertion about the SHAPE of the API, not about a flag being rejected.
     //
-    // A refused flag is still a flag: it can be un-refused by one line in a
-    // dispatch arm, and the design says out loud that writing only restricted
-    // lines is a guard rail against a mistake rather than a security boundary.
-    // The way to keep a guard rail is to leave nothing to ask with, so this
-    // enumerates the whole request surface and insists no field means options,
-    // a command, or a key to be written as it arrived.
+    // This test used to say the request could not ask for an unrestricted line
+    // at all. **It can now** — `shell_access` asks for one — because a Mac needs
+    // an ordinary SSH key for Zed, git and Terminal, and the rule it was
+    // enforcing ("only a shell can grant a shell") was never a boundary: a
+    // `control` device drives a terminal and a terminal appends to
+    // `authorized_keys` by itself.
+    //
+    // What survives is the part that was doing real work. A request selects
+    // between two SHAPES this daemon renders; it never carries bytes that reach
+    // the file. A field that carried options, a forced command, or a key to be
+    // written as it arrived could be refused today and un-refused by one line in
+    // a dispatch arm tomorrow, so there must be nothing to ask with.
     //
     // prost derives `Debug` over every field of a message, so the printed form
     // IS the field list — a new field shows up here without this test being
@@ -1817,9 +1845,10 @@ fn the_enrollment_request_cannot_ask_for_an_unrestricted_line() {
             label: "iPhone".into(),
             client_id: "c1".into(),
             scope: Scope::Control as i32,
+            shell_access: false,
         }
     );
-    for forbidden in ["restrict", "unrestricted", "plain", "raw", "options", "command", "force"] {
+    for forbidden in ["restrict", "unrestricted", "raw", "options", "command", "force", "line"] {
         assert!(
             !printed.contains(forbidden),
             "ClientEnroll grew a way to ask for a line Far Cooler did not render: {printed}"
@@ -1923,6 +1952,142 @@ async fn enrolling_twice_reports_already_present_rather_than_failing() {
     assert_eq!(listed.len(), 1, "a second line was written for one key: {listed:?}");
 }
 
+// ---------------------------------------------------------------------------
+// Key B: the plain line
+//
+// A Mac needs two keys. `ClientEnroll::shell_access` asks for the second one —
+// an ordinary SSH key, no forced command — because Zed opens a worktree as
+// `ssh://{host}{path}` and a forced command leaves sshd no shell to give it.
+// These assert the two things that make that safe to offer: the caller is a
+// `host_admin` one saying so, and the line lands INSIDE the fence, where it is
+// listed and revoked like any other.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn neither_a_read_nor_a_control_client_can_ask_for_a_shell_key() {
+    // `control` is shell-equivalent by another route — it drives a terminal, and
+    // a terminal appends to `authorized_keys` — so this gate is not what stops a
+    // determined control client from getting a shell. It is what stops one from
+    // getting a MANAGED shell key without the runner recording who asked, and it
+    // keeps `client.enroll` at one scope rather than two.
+    for scope in [Scope::Read, Scope::Control] {
+        let h = start(scope).await;
+        let mut client = connect(&h).await;
+        match client.call(shell_enrollment(KEY, "MacBook Air", "mac-1")).await {
+            Err(ClientError::Daemon { code, retryable, .. }) => {
+                assert_eq!(code, ErrorCode::ScopeDenied as i32, "at {scope:?}");
+                assert!(!retryable, "retrying a scope denial can never succeed");
+            }
+            other => panic!("expected a scope denial at {scope:?}, got {other:?}"),
+        }
+        assert!(!h.authorized_keys.exists(), "a refused enrollment created the file");
+    }
+}
+
+#[tokio::test]
+async fn a_shell_key_asked_for_below_host_admin_is_refused_even_from_an_admin() {
+    // The request has to agree with itself. A plain line is a shell on this
+    // account, which is every power the account has, so `scope: control` beside
+    // `shell_access: true` is a caller passing through the scope it uses for
+    // Key A — and the coherent reading of that is a mistake, not a request for
+    // three quarters of a shell.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    for scope in [Scope::Read, Scope::Control, Scope::Unspecified] {
+        let request = enrollment_of(KEY, "MacBook Air", "mac-1", scope, true);
+        match client.call(request).await {
+            Err(ClientError::Daemon { code, message, .. }) => {
+                assert_eq!(code, ErrorCode::InvalidArgument as i32, "at {scope:?}");
+                // The field to change, and never the parser's own words.
+                assert!(message.contains("scope"), "which field? {message}");
+            }
+            other => panic!("expected INVALID_ARGUMENT at {scope:?}, got {other:?}"),
+        }
+    }
+    assert!(!h.authorized_keys.exists(), "a refused enrollment created the file");
+}
+
+#[tokio::test]
+async fn enrolling_a_mac_writes_two_lines_under_one_id_and_lists_them_apart() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    // The same device, twice, with the same id — which is the shape a Mac has.
+    client.call(enrollment(KEY, "MacBook Air", "mac-1", Scope::Control)).await.expect("key A");
+    let result = client.call(shell_enrollment(OTHER_KEY, "MacBook Air", "mac-1")).await.expect("B");
+    let Some(result::Value::ClientEnroll(outcome)) = result.value else { panic!("wrong result") };
+    assert!(!outcome.already_enrolled, "the same id in the other shape read as a duplicate");
+    let key_b = outcome.client.expect("an enrollment describes what it enrolled");
+    assert!(key_b.shell_access, "the plain line was not reported as shell access");
+    assert_eq!(key_b.client_id, "mac-1", "the plain line lost the device it belongs to");
+    // No scope, because it grants none of this daemon's: nothing arrives on it.
+    assert_eq!(key_b.scope, Scope::Unspecified as i32);
+
+    // What LANDED. The plain line is the whole point, so it is asserted byte for
+    // byte in the ways that matter: no options field at all, and a comment this
+    // runner chose rather than the one the device sent.
+    let written = std::fs::read_to_string(&h.authorized_keys).expect("the file was written");
+    let plain = written
+        .lines()
+        .find(|line| line.starts_with("ssh-ed25519 "))
+        .expect("a plain line reached the file");
+    assert!(!plain.contains("restrict"), "the shell key was restricted: {plain}");
+    assert!(!plain.contains("command="), "the shell key carried a forced command: {plain}");
+    assert!(plain.contains("farcooler-shell-"), "nothing says we wrote it: {plain}");
+    assert!(plain.ends_with(".mac-1"), "the device is not named on it: {plain}");
+    assert!(!plain.ends_with(" laptop"), "their comment survived: {plain}");
+    assert!(
+        written.lines().any(|line| line.starts_with("restrict,command=\"")),
+        "the restricted line went missing: {written}"
+    );
+
+    // Two rows for one Mac, which an app shows as "Far Cooler access" and
+    // "shell access". Neither is foreign: Far Cooler wrote both.
+    let listed = enrolled(&mut client).await;
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    assert!(listed.iter().all(|c| c.client_id == "mac-1" && !c.foreign));
+    assert_eq!(listed.iter().filter(|c| c.shell_access).count(), 1, "{listed:?}");
+}
+
+#[tokio::test]
+async fn one_key_is_one_line_whichever_shape_came_first() {
+    // The decided answer to "what if the same key is enrolled plain and then
+    // restricted": it is already enrolled, and nothing is written.
+    //
+    // Not a symmetry for its own sake. sshd matches a key against the file and
+    // takes the FIRST line that matches, so one key in both shapes makes "does
+    // this device get a shell" a question about line order in a text file — and
+    // makes Far Cooler's own identity assertion depend on the same. A Mac's two
+    // keys are two different keys, which is why it has two.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    client.call(shell_enrollment(KEY, "MacBook Air", "mac-1")).await.expect("plain first");
+    let result = client
+        .call(enrollment(KEY, "MacBook Air", "mac-1", Scope::Control))
+        .await
+        .expect("an already-enrolled key is a report, not a failure");
+    let Some(result::Value::ClientEnroll(again)) = result.value else { panic!("wrong result") };
+    assert!(again.already_enrolled, "one key was about to become two lines");
+    // The grant it HAS, and `shell_access` is how a caller sees which shape that
+    // is — the same reason the reply carries the scope it has rather than the one
+    // that was asked for.
+    assert!(again.client.expect("a report names the grant").shell_access);
+
+    // And the other way round, with the other key.
+    client
+        .call(enrollment(OTHER_KEY, "work-mini", "mini-1", Scope::Control))
+        .await
+        .expect("restricted first");
+    let result = client.call(shell_enrollment(OTHER_KEY, "work-mini", "mini-1")).await.expect("b");
+    let Some(result::Value::ClientEnroll(again)) = result.value else { panic!("wrong result") };
+    assert!(again.already_enrolled, "one key was about to become two lines");
+    assert!(!again.client.expect("a report names the grant").shell_access);
+
+    assert_eq!(enrolled(&mut client).await.len(), 2, "one key became two lines");
+}
+
 #[tokio::test]
 async fn client_list_reports_a_foreign_line_as_foreign() {
     // A line somebody added inside the fence by hand. Dropping it would mean
@@ -1945,6 +2110,11 @@ async fn client_list_reports_a_foreign_line_as_foreign() {
     assert_eq!(listed.len(), 1);
     assert!(listed[0].foreign, "a hand-added line was reported as ours");
     assert!(listed[0].client_id.is_empty(), "a foreign line claimed a client id");
+    // A plain line somebody added by hand looks exactly like a Key B of ours
+    // apart from its comment, and the comment is what has to be believed here:
+    // reporting this one as `shell_access` would put it inside the set
+    // `client.revoke` deletes.
+    assert!(!listed[0].shell_access, "a hand-added plain line was claimed as managed");
     assert!(listed[0].fingerprint.starts_with("SHA256:"), "reported by fingerprint at least");
 
     // And it survives an enrollment beside it.
@@ -1977,6 +2147,47 @@ async fn revoking_removes_the_line_and_leaves_everything_else() {
     let written = std::fs::read_to_string(&h.authorized_keys).unwrap();
     assert!(written.starts_with(OTHER_KEY), "somebody else's key went with it: {written}");
     assert!(!written.contains("--client c1"), "the line survived revocation: {written}");
+}
+
+#[tokio::test]
+async fn revoking_a_mac_removes_both_of_its_keys_and_nothing_else() {
+    // What makes the removal copy true: "Removing this Mac also removes the key
+    // it shares with Terminal and git. That Mac will lose SSH access to box
+    // entirely, not only to Far Cooler." One call, one write, both lines — two
+    // calls could half fail and leave a device that is gone from the app and
+    // still holds a shell.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    // A stranger's key above the fence: the ordinary case, and the one where a
+    // botched rewrite costs somebody their own access.
+    std::fs::create_dir_all(h.authorized_keys.parent().unwrap()).unwrap();
+    std::fs::write(&h.authorized_keys, format!("{OTHER_KEY}\n")).unwrap();
+
+    let mac_a = "ssh-ed25519 \
+                 AAAAC3NzaC1lZDI1NTE5AAAAICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIi mac-a";
+    let mac_b = "ssh-ed25519 \
+                 AAAAC3NzaC1lZDI1NTE5AAAAIDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz mac-b";
+    client.call(enrollment(mac_a, "MacBook Air", "mac-1", Scope::Control)).await.expect("key A");
+    client.call(shell_enrollment(mac_b, "MacBook Air", "mac-1")).await.expect("key B");
+    // A second device, so this cannot pass by removing everything in the block.
+    client.call(enrollment(KEY, "iPhone", "phone-1", Scope::Read)).await.expect("the phone");
+    assert_eq!(enrolled(&mut client).await.len(), 3);
+
+    let mut revoke = request("client.revoke");
+    revoke.payload = Some(request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
+        client_id: "mac-1".into(),
+    }));
+    let result = client.call(revoke).await.expect("client.revoke");
+    let Some(result::Value::ClientList(remaining)) = result.value else { panic!("wrong result") };
+    let items = remaining.items;
+    assert_eq!(items.len(), 1, "the Mac's two lines were not both removed: {items:?}");
+    assert_eq!(items[0].client_id, "phone-1", "the wrong device went");
+
+    let written = std::fs::read_to_string(&h.authorized_keys).unwrap();
+    assert!(written.starts_with(OTHER_KEY), "somebody else's key went with it: {written}");
+    assert!(!written.contains("--client mac-1"), "the restricted line survived: {written}");
+    assert!(!written.contains(".mac-1"), "the shell key survived: {written}");
+    assert!(written.contains("--client phone-1"), "the phone lost its access: {written}");
 }
 
 #[tokio::test]

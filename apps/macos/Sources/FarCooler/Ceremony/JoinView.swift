@@ -261,14 +261,24 @@ struct JoinView: View {
         let resolution = SshConfig.aliases(
             for: granted, avoiding: SshConfig.patternsInUse())
         var lines: [String] = []
+        var chosen: [(alias: String, target: String)] = []
         for runner in granted {
             guard let alias = resolution.aliases[runner.id] else { continue }
             lines += SshConfig.block(for: runner, alias: alias, identity: identity)
-            SshConfigAliases.remember(alias, for: target(for: runner))
+            chosen.append((alias, target(for: runner)))
         }
 
         do {
             try SshConfig.write(lines, identity: identity)
+            // Remembered only AFTER the file took the block, and this ordering has
+            // teeth now that the write can actually fail. `SshConfigAliases` is
+            // what `Editors.swift` substitutes into `ssh://{host}{path}`, so an
+            // alias remembered for a block that was never written hands Zed
+            // `ssh://box/path` for a `Host box` that does not exist — and ssh
+            // fails to resolve a hostname instead of falling back to
+            // `you@box.tail-1234.ts.net`, which would have worked. A failed write
+            // has to leave the editor menu exactly as it was.
+            for entry in chosen { SshConfigAliases.remember(entry.alias, for: entry.target) }
             configNote = resolution.message
         } catch {
             configNote = (error as? LocalizedError)?.errorDescription

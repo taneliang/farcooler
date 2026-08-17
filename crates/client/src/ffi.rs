@@ -830,6 +830,159 @@ fn spill(payload: &str, out: *mut u8, capacity: usize) -> usize {
     bytes.len()
 }
 
+// MARK: - Far Cooler's block in ~/.ssh/config
+//
+// The end of enrollment on a Mac, and the part that makes the keys useful to
+// anything but Far Cooler: Zed, git, `scp` and every `ssh` anybody types find a
+// runner through `~/.ssh/config`, or they do not find it at all.
+//
+// The bytes are written by `farcooler_daemon::fence` — the same routine that
+// owns `~/.ssh/authorized_keys`, generic over its path and its markers for
+// exactly this reason. It is reached through here rather than reimplemented in
+// Swift because a second implementation would drift a missing `fsync` into a
+// corrupted `~/.ssh/config`, and that one file breaks Zed, git and plain `ssh`
+// simultaneously. See `crates/client/Cargo.toml` for what that dependency costs
+// and what the right shape is.
+//
+// There is deliberately **no JNI shim** for this. Android has no `~/.ssh`, no
+// shell client that would read one, and no Zed to open a remote folder in — a
+// wrapper here would be a Kotlin binding nothing on that platform could ever
+// call. iOS is the same. The entry point still EXISTS on those targets, because
+// a symbol present on some platforms and absent on others is a link error
+// waiting for whoever next shares a Swift file between them; on a phone it
+// answers `missing`, which is the truth about a home directory with no `.ssh` in
+// it.
+
+/// The buffer every answer here fits in.
+///
+/// A constant rather than a measurement, and that is the point. Every other
+/// entry point in this file is a pure function, so the usual dance — call, learn
+/// you were short, call again — costs a caller nothing. This one rewrites
+/// `~/.ssh/config`, and calling it twice would make the second write's backup a
+/// copy of the FIRST write's output rather than of the file the person had
+/// before Far Cooler touched it. So a caller that cannot hold the answer is told
+/// the size and the file is not touched at all.
+///
+/// The longest answer is `{"error":"damaged"}` at 19 bytes;
+/// `the_answer_never_outgrows_the_size_it_asks_for` is what keeps that true.
+const SSH_CONFIG_ANSWER: usize = 32;
+
+/// Rewrite Far Cooler's fenced block in `~/.ssh/config`.
+///
+/// `entries_json` is a JSON array of the lines that become the block, in order —
+/// no newlines, no marker lines, no blanks, one `Host`/`HostName`/`IdentityFile`
+/// line per element. An empty array removes the block, because a Mac with
+/// nothing enrolled should not carry two comment lines forever. The composing
+/// and the alias collision check are the app's (`SshConfig.swift`): what is
+/// shared is the write, not the policy.
+///
+/// Answers `{"ok":true}` or `{"error":"damaged"|"missing"|"io"}`. **A word,
+/// never a Rust error string.** `FenceError::Damaged` carries a sentence for a
+/// log — "3 opening and 1 closing markers" — and this repo renders error strings
+/// from these layers in Settings, so that sentence stops here and the app owns
+/// the copy a person reads.
+///
+/// Returns the bytes needed, writes nothing into `out` when that exceeds
+/// `capacity`, and NULL asks for the size — the same contract as every entry
+/// point above, with one addition it needs and they do not: a call that cannot
+/// answer does not write the FILE either.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_ssh_config_write(
+    path: *const c_char,
+    entries_json: *const c_char,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    guarded(0, || {
+        // Before anything is read or opened, so a sizing call is a sizing call.
+        if out.is_null() || capacity < SSH_CONFIG_ANSWER {
+            return SSH_CONFIG_ANSWER;
+        }
+        // A null or non-UTF-8 path is the empty path, which names no file and is
+        // reported `missing` by the writer rather than guessed at here.
+        let path = unsafe { read_str(path) }.unwrap_or_default();
+        let entries_json = unsafe { read_str(entries_json) }.unwrap_or_default();
+        spill(&ssh_config_write(&path, &entries_json), out, capacity)
+    })
+}
+
+/// The write itself, on the platforms that have an `~/.ssh` to fence.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn ssh_config_write(path: &str, entries_json: &str) -> String {
+    use farcooler_daemon::fence::{self, FenceError, Markers, Placement};
+
+    let Ok(entries) = serde_json::from_str::<Vec<String>>(entries_json) else {
+        // A caller that sent an object, or an array of numbers, has a bug — and
+        // the file it was about to rewrite is the one everybody's `ssh` reads, so
+        // nothing is attempted. The parser's message is logged rather than
+        // returned: it is built from a caller's bytes and belongs nowhere near a
+        // screen.
+        tracing::debug!("an ssh_config block that was not an array of lines was refused");
+        return json!({ "error": "io" }).to_string();
+    };
+
+    // One pair of markers serves both files, because `#` opens a comment in
+    // `ssh_config` as it does in `authorized_keys`. Taken from the writer's own
+    // constants: a marker spelled again here would, on the day one copy was
+    // reworded, read as a file with no fence and write a second block beneath
+    // the first.
+    let markers = Markers { begin: fence::BEGIN, end: fence::END };
+
+    // `Placement::First`, and this is the one argument that must not be
+    // "whatever the other caller passes". `ssh_config` is FIRST-match-wins per
+    // keyword, so a block appended below an `Include ~/.ssh/config.d/*` or a
+    // `Host *` is silently overridden: the `IdentityFile` this just wrote is
+    // never offered, ssh tries the wrong key, and Zed reports an authentication
+    // failure for a runner that enrolled perfectly. Appending is the one
+    // placement that reliably does nothing at all. `authorized_keys` is the
+    // opposite — sshd reads every line and order carries no meaning — which is
+    // why the writer takes this as a parameter instead of choosing.
+    //
+    // An existing block is rewritten where it already is, whatever this says.
+    // Moving somebody's block would silently change which keywords win.
+    //
+    // `foreign` is empty, unlike the `authorized_keys` caller, and that is a
+    // decision rather than an omission. A foreign line there is identifiable: our
+    // lines carry a forced command and a stranger's does not, so one can be
+    // carried through and the other rewritten. Inside an `ssh_config` fence
+    // nothing distinguishes a line we wrote from a line somebody added, so
+    // "preserve what is not ours" would mean "preserve everything" and the block
+    // could never lose a runner. The marker says not to edit inside it, the app
+    // composes the whole block every time, and a line somebody put in there is
+    // replaced — which is why their own `Host` entries belong outside the fence,
+    // where every byte is left alone.
+    match fence::write(std::path::Path::new(path), markers, &entries, &[], Placement::First) {
+        Ok(()) => json!({ "ok": true }).to_string(),
+        Err(e) => {
+            // The detail goes to the log, on its way to nobody's screen.
+            tracing::debug!(error = %e, "the ~/.ssh/config block was not written");
+            let word = match e {
+                FenceError::Missing => "missing",
+                FenceError::Damaged(_) => "damaged",
+                // Everything the writer refuses outright arrives as an
+                // `io::Error` too — an entry carrying a newline or a marker, a
+                // file that is not UTF-8, a `.ssh` somebody else can write — so
+                // `io` is "this write did not happen" rather than a claim about a
+                // disk. The word a person is shown for it says only that.
+                FenceError::Io(_) => "io",
+            };
+            json!({ "error": word }).to_string()
+        }
+    }
+}
+
+/// The same entry point on a phone, where there is no such file.
+///
+/// Not an error path worth a word of its own: iOS and Android have no `~/.ssh`,
+/// so `missing` is exactly what the writer would say if it were compiled in. The
+/// point of answering rather than not existing is that the header declares this
+/// on every platform, and a symbol that is only sometimes there fails at link
+/// time in whichever app shares that code next.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn ssh_config_write(_path: &str, _entries_json: &str) -> String {
+    json!({ "error": "missing" }).to_string()
+}
+
 /// The themes compiled into this build, as JSON, with no session required.
 ///
 /// Session-free on purpose. A phone that has never reached a runner still needs
@@ -1093,6 +1246,14 @@ async fn dispatch(
                     &text("label"),
                     &required("clientId")?,
                     &required("scope")?,
+                    // Absent means false, which is the restricted Key A line —
+                    // matching the proto's default, so a phone built before this
+                    // existed asks for exactly what it always asked for. Defaulted
+                    // rather than required because the DANGEROUS direction here is
+                    // the other one: a missing scope could widen a key to the whole
+                    // runner, a missing `shellAccess` can only narrow it. A Mac
+                    // sends this twice, once each way, with the same `clientId`.
+                    args.get("shellAccess").and_then(|v| v.as_bool()).unwrap_or(false),
                 )
                 .await
         }
