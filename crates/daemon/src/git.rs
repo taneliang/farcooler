@@ -74,7 +74,7 @@ pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
 /// **It cannot outlive its caller.** `kill_on_drop` means a request whose
 /// connection went away takes its git with it. Review recomputes a change set
 /// whenever a client asks; without this, a phone that drops off a train tunnel
-/// mid-scroll leaves a `git diff` running on the host for as long as it likes,
+/// mid-scroll leaves a `git diff` running on the runner for as long as it likes,
 /// once per abandoned request.
 pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
     let child = Command::new("git")

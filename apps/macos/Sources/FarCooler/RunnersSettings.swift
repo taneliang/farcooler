@@ -1,43 +1,43 @@
 import AgentKit
 import SwiftUI
 
-/// Add a machine, see what it is, install onto it.
+/// Add a runner, see what it is, install onto it.
 ///
 /// The old settings pane was one text field and a paragraph explaining that
-/// Far Cooler reaches other machines over ssh. That explanation is still true and
+/// Far Cooler reaches other runners over ssh. That explanation is still true and
 /// still worth making — there is no listener to set up anywhere — but it left
-/// every consequence to the user: whether the machine was reachable, whether
+/// every consequence to the user: whether the runner was reachable, whether
 /// Far Cooler was installed, whether the install matched this Mac, and what to
 /// type to fix any of it.
 ///
-/// So this asks the host instead. `farcooler host probe` changes nothing and
+/// So this asks the runner instead. `farcooler host probe` changes nothing and
 /// answers all four, which is what makes it safe to run on appearance and what
 /// makes the install button able to say what it is about to do.
-struct HostsSettings: View {
-    @ObservedObject private var hosts = Hosts.shared
+struct RunnersSettings: View {
+    @ObservedObject private var runners = Runners.shared
 
     @State private var newTarget = ""
     @State private var busy: Set<String> = []
     @State private var log: [String: String] = [:]
-    /// The machine whose settings sheet is open, by ssh target — `""` for this
+    /// The runner whose settings sheet is open, by ssh target — `""` for this
     /// Mac, which is a real value here and not "nothing".
     ///
     /// Optional-of-target rather than a bool plus a target, so the sheet cannot
-    /// be presented without knowing which machine it is about.
-    @State private var editingMachine: MachineChoice?
+    /// be presented without knowing which runner it is about.
+    @State private var editingRunner: RunnerChoice?
 
     var body: some View {
         Form {
             Section {
                 localRow
-                ForEach(hosts.all) { host in
-                    hostRow(host)
+                ForEach(runners.all) { runner in
+                    runnerRow(runner)
                 }
             } header: {
                 HStack {
-                    Text("Machines")
+                    Text("Runners")
                     Spacer()
-                    // Per-host dots already retry one machine with a click;
+                    // Per-runner dots already retry one runner with a click;
                     // this is the same `reconnectNow()` for every one of
                     // them at once — the escape hatch for "I fixed the VPN"
                     // without waiting out however many backoffs are
@@ -47,7 +47,7 @@ struct HostsSettings: View {
                         .buttonStyle(.link)
                 }
             } footer: {
-                Text("Connect to any machine you can reach over SSH.")
+                Text("Connect to any runner you can reach over SSH.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
@@ -56,38 +56,38 @@ struct HostsSettings: View {
                 HStack {
                     TextField("user@host, or an ssh alias", text: $newTarget)
                         .autocorrectionDisabled()
-                        .onSubmit(addHost)
-                    Button("Add", action: addHost)
+                        .onSubmit(addRunner)
+                    Button("Add", action: addRunner)
                         .disabled(newTarget.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
         .formStyle(.grouped)
-        .sheet(item: $editingMachine) { choice in
-            MachineSettingsSheet(name: choice.name, target: choice.target)
+        .sheet(item: $editingRunner) { choice in
+            RunnerSettingsSheet(name: choice.name, target: choice.target)
         }
         .task {
             // Everything at once. These are independent ssh round trips and a
-            // fleet of five machines should not take five times as long to
+            // fleet of five runners should not take five times as long to
             // describe as one.
             await withTaskGroup(of: Void.self) { group in
-                for host in hosts.all {
-                    group.addTask { await probe(host.target) }
+                for runner in runners.all {
+                    group.addTask { await probe(runner.target) }
                 }
             }
         }
     }
 
-    // MARK: - Machine settings
+    // MARK: - Runner settings
 
-    /// Opens one machine's own `config.toml` as a screen.
+    /// Opens one runner's own `config.toml` as a screen.
     ///
     /// A sheet rather than a disclosure in this row: the theme editor inside it
-    /// is nineteen colour wells over a live terminal preview, and this window is
+    /// is nineteen color wells over a live terminal preview, and this window is
     /// 520 points wide.
     private func settingsButton(name: String, target: String) -> some View {
         Button {
-            editingMachine = MachineChoice(name: name, target: target)
+            editingRunner = RunnerChoice(name: name, target: target)
         } label: {
             Image(systemName: "slider.horizontal.3")
         }
@@ -99,15 +99,15 @@ struct HostsSettings: View {
 
     /// This Mac, in the same list as everything else.
     ///
-    /// Not a special case at the top of the window: "no remote host" IS a
-    /// choice of machine, and hiding that behind an empty text field is what
+    /// Not a special case at the top of the window: "no remote runner" IS a
+    /// choice of runner, and hiding that behind an empty text field is what
     /// made the old setting hard to read.
     private var localRow: some View {
-        // A VStack, so a message about this machine is a LINE in the row rather
+        // A VStack, so a message about this runner is a LINE in the row rather
         // than an overlay hanging off the bottom of it. It was the latter, and
         // an overlay offset past its own bounds is one the form clips — so the
         // one thing this row had to say ("Sign in first") arrived half cut off.
-        // `hostRow` had it right; this did not match it.
+        // `runnerRow` had it right; this did not match it.
         VStack(alignment: .leading, spacing: 6) {
             localHeader
             if let message = log[""] {
@@ -137,8 +137,8 @@ struct HostsSettings: View {
             // route — being local buys it no special path.
             settingsButton(name: "This Mac", target: "")
             Menu {
-                Button("Notify me from this machine") { Task { await pair("") } }
-                Button("Stop notifications from this machine") { Task { await unpair("") } }
+                Button("Notify me from this runner") { Task { await pair("") } }
+                Button("Stop notifications from this runner") { Task { await unpair("") } }
             } label: {
                 Image(systemName: "bell")
             }
@@ -147,19 +147,19 @@ struct HostsSettings: View {
         }
     }
 
-    private func hostRow(_ host: RemoteHost) -> some View {
+    private func runnerRow(_ runner: Runner) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Image(systemName: icon(for: host))
+                Image(systemName: icon(for: runner))
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(host.target).font(.body)
-                    Text(subtitle(for: host))
+                    Text(runner.target).font(.body)
+                    Text(subtitle(for: runner))
                         .font(.caption)
                         .foregroundStyle(
-                            host.lastError == nil
+                            runner.lastError == nil
                                 ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -167,22 +167,22 @@ struct HostsSettings: View {
 
                 Spacer()
 
-                if busy.contains(host.target) {
+                if busy.contains(runner.target) {
                     ProgressView().controlSize(.small)
                 } else {
-                    settingsButton(name: host.target, target: host.target)
-                    actions(for: host)
+                    settingsButton(name: runner.target, target: runner.target)
+                    actions(for: runner)
                 }
             }
 
-            if let output = log[host.target] {
+            if let output = log[runner.target] {
                 // The installer's own words, not a paraphrase. It is the thing
                 // that knows what went wrong.
                 DetailBox(text: output)
             }
 
-            if let probe = host.probe, probe.isInstalled,
-                let matches = probe.matchesThisMac(Hosts.localBuild), matches == false
+            if let probe = runner.probe, probe.isInstalled,
+                let matches = probe.matchesThisMac(Runners.localBuild), matches == false
             {
                 Label(
                     "Built from different source than this Mac. Install again to match.",
@@ -196,25 +196,25 @@ struct HostsSettings: View {
     }
 
     @ViewBuilder
-    private func actions(for host: RemoteHost) -> some View {
+    private func actions(for runner: Runner) -> some View {
         HStack(spacing: 8) {
-            if host.probe?.installable == true {
-                Button(host.probe?.isInstalled == true ? "Reinstall" : "Install") {
-                    Task { await install(host.target) }
+            if runner.probe?.installable == true {
+                Button(runner.probe?.isInstalled == true ? "Reinstall" : "Install") {
+                    Task { await install(runner.target) }
                 }
             }
 
             Menu {
-                Button("Check again") { Task { await probe(host.target) } }
+                Button("Check again") { Task { await probe(runner.target) } }
                 Section {
-                    Button("Notify me from this machine") {
-                        Task { await pair(host.target) }
+                    Button("Notify me from this runner") {
+                        Task { await pair(runner.target) }
                     }
-                    Button("Stop notifications from this machine") {
-                        Task { await unpair(host.target) }
+                    Button("Stop notifications from this runner") {
+                        Task { await unpair(runner.target) }
                     }
                 }
-                Button("Remove", role: .destructive) { hosts.remove(host.target) }
+                Button("Remove", role: .destructive) { runners.remove(runner.target) }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -223,27 +223,27 @@ struct HostsSettings: View {
         }
     }
 
-    private func icon(for host: RemoteHost) -> String {
-        switch host.probe?.platform {
+    private func icon(for runner: Runner) -> String {
+        switch runner.probe?.platform {
         case "macos": return "desktopcomputer"
         case "wsl": return "pc"
         case "linux": return "server.rack"
-        default: return host.lastError == nil ? "network" : "exclamationmark.triangle"
+        default: return runner.lastError == nil ? "network" : "exclamationmark.triangle"
         }
     }
 
-    private func subtitle(for host: RemoteHost) -> String {
-        if let error = host.lastError { return error }
-        guard let probe = host.probe else { return "Checking…" }
+    private func subtitle(for runner: Runner) -> String {
+        if let error = runner.lastError { return error }
+        guard let probe = runner.probe else { return "Checking…" }
         return "\(probe.platformLabel) · \(probe.summary)"
     }
 
-    // MARK: - Doing things to machines
+    // MARK: - Doing things to runners
 
-    private func addHost() {
+    private func addRunner() {
         let target = newTarget.trimmingCharacters(in: .whitespaces)
         guard !target.isEmpty else { return }
-        hosts.add(target)
+        runners.add(target)
         newTarget = ""
         Task { await probe(target) }
     }
@@ -251,19 +251,19 @@ struct HostsSettings: View {
     private func probe(_ target: String) async {
         busy.insert(target)
         defer { busy.remove(target) }
-        await hosts.probe(target)
+        await runners.probe(target)
     }
 
     private func pair(_ target: String) async {
         busy.insert(target)
         defer { busy.remove(target) }
-        log[target] = await hosts.pairForNotifications(target)
+        log[target] = await runners.pairForNotifications(target)
     }
 
     private func unpair(_ target: String) async {
         busy.insert(target)
         defer { busy.remove(target) }
-        log[target] = await hosts.unpairNotifications(target)
+        log[target] = await runners.unpairNotifications(target)
     }
 
     private func install(_ target: String) async {
@@ -274,14 +274,14 @@ struct HostsSettings: View {
         // Shown whether it worked or not. An install that failed halfway is
         // exactly when the transcript matters, and it is the only place the
         // reason exists.
-        log[target] = await hosts.install(target)
-        await hosts.probe(target)
+        log[target] = await runners.install(target)
+        await runners.probe(target)
 
-        // `hosts.probe` only updates this row's own display. The
+        // `runners.probe` only updates this row's own display. The
         // `DaemonClient` everything else reads through — the sidebar, "Add
         // repository", every `store.refusal(for:)` — is a separate object
         // that landed in `.notInstalled` before this install ran, and by
-        // design does not recheck for minutes at a time so a host that
+        // design does not recheck for minutes at a time so a runner that
         // genuinely has no Far Cooler is not hammered forever. Without this,
         // an install that just succeeded here still refuses everywhere else
         // until that backoff happens to elapse. The same call "Reconnect
@@ -290,11 +290,11 @@ struct HostsSettings: View {
     }
 }
 
-/// Which machine a settings sheet is about.
+/// Which runner a settings sheet is about.
 ///
 /// A type rather than a bare `String?`, because `""` is a real target — this Mac
-/// — and an optional string could not tell it apart from "no machine chosen".
-struct MachineChoice: Identifiable, Hashable {
+/// — and an optional string could not tell it apart from "no runner chosen".
+struct RunnerChoice: Identifiable, Hashable {
     let name: String
     let target: String
     var id: String { target }

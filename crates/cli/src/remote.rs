@@ -1,6 +1,6 @@
-//! Reaching another machine.
+//! Reaching another runner.
 //!
-//! There is no Far Cooler network protocol. `farcooler --host you@box ...` runs
+//! There is no Far Cooler network protocol. `farcooler --runner you@box ...` runs
 //! `ssh you@box farcoolerd --stdio` and speaks the exact framing it speaks over
 //! a local socket, because sshd has already authenticated both directions and
 //! the caller is the same Unix user who owns the database there. Far Cooler adds
@@ -9,7 +9,7 @@
 //!
 //! Two consequences worth stating, because they shape everything here:
 //!
-//! - **No port is opened anywhere.** A host that is reachable by SSH is
+//! - **No port is opened anywhere.** A runner that is reachable by SSH is
 //!   reachable by Far Cooler, and one that is not, is not. Tailscale or a
 //!   bastion is the answer to reachability, not something Far Cooler reimplements.
 //! - **Live terminal bytes do not go through this.** Streaming runs the remote
@@ -24,7 +24,7 @@ use std::time::Duration;
 use farcooler_transport::{Client, ClientError};
 use tokio::process::{Child, Command};
 
-use crate::host_install;
+use crate::runner_install;
 
 type Reader = Box<dyn tokio::io::AsyncRead + Unpin + Send>;
 type Writer = Box<dyn tokio::io::AsyncWrite + Unpin + Send>;
@@ -49,7 +49,7 @@ pub struct RemoteLink {
 /// vanishes without closing its socket leaves ssh waiting forever on a
 /// connection that will never carry another byte, and a client watching for the
 /// process to exit waits just as long. `ServerAliveInterval` probes; three
-/// unanswered probes end the session, so a dead machine is noticed in about
+/// unanswered probes end the session, so a dead host is noticed in about
 /// forty-five seconds instead of never.
 ///
 /// Fifteen seconds where `crates/client/src/ssh.rs` uses thirty: that path is
@@ -112,9 +112,10 @@ fn ssh_args(target: &str, identity: Option<&Path>) -> Vec<String> {
         //
         // ssh reads a leading `-` as an option wherever it appears, so a
         // destination of `-oProxyCommand=...` is command execution on this
-        // machine. Every destination is typed by a human today, which is why
-        // this has never mattered; onboarding has them arrive in a scanned
-        // manifest, which is the transition that makes it reachable.
+        // client, not on the runner. Every destination is typed by a human
+        // today, which is why this has never mattered; onboarding has them
+        // arrive in a scanned manifest, which is the transition that makes it
+        // reachable.
         "--".into(),
         target.to_string(),
     ]);
@@ -132,17 +133,17 @@ fn control_path() -> String {
 
 /// What to run on the far side to get a daemon speaking the protocol.
 ///
-/// `host install` puts it in ~/.local/bin, but a non-login ssh command's PATH
+/// `runner install` puts it in ~/.local/bin, but a non-login ssh command's PATH
 /// is whatever the remote shell config gives it — often not that. Naming it by
 /// tilde (expanded by the remote shell, not guessed here) finds it regardless
 /// of PATH.
 ///
-/// The name carries this build's channel, and no fallback: this asks a machine
-/// for the daemon `host install` put there, which is exactly one name. Falling
-/// back to the bare `farcoolerd` would find the release daemon on any machine
+/// The name carries this build's channel, and no fallback: this asks a runner
+/// for the daemon `runner install` put there, which is exactly one name. Falling
+/// back to the bare `farcoolerd` would find the release daemon on any host
 /// that has one and quietly join a preview client to it.
 fn daemon_command() -> String {
-    format!("~/.local/bin/{} --stdio", host_install::daemon_name())
+    format!("~/.local/bin/{} --stdio", runner_install::daemon_name())
 }
 
 /// Open a protocol connection to a remote daemon.
@@ -203,33 +204,33 @@ async fn explain(target: &str, error: ClientError, child: &mut Child) -> String 
         // tells the two apart.
         ClientError::Closed | ClientError::NoHello if ssh_never_connected(child).await => format!(
             "Could not reach {target} over ssh.\n\
-             Check the host name, your ssh config, and that the machine is reachable."
+             Check the host name, your ssh config, and that the host is reachable."
         ),
         ClientError::Closed | ClientError::NoHello => not_installed(target),
         ClientError::VersionMismatch { daemon, client } => format!(
             "{target} runs protocol {daemon}; this client speaks {client}.\n\
-             Update the older side:  {cli} host install {target}",
-            cli = host_install::cli_name()
+             Update the older side:  {cli} runner install {target}",
+            cli = runner_install::cli_name()
         ),
         other => format!("{target}: {other}"),
     }
 }
 
-/// Reached the machine, got nothing back from the daemon.
+/// Reached the host, got nothing back from the daemon.
 ///
 /// Names this channel's binaries rather than Far Cooler in general. A preview
 /// build that reported `farcoolerd` would send someone to check a binary it
 /// never asked for — and one that is very likely present and healthy, since a
-/// machine running the release build has it — so the report would read as
+/// host running the release build has it — so the report would read as
 /// nonsense. Naming the CLI in the fix has the same reason: a preview install
 /// is done by `farcooler-preview`, and the bare `farcooler` may not be on that
-/// person's machine at all.
+/// person's host at all.
 fn not_installed(target: &str) -> String {
     format!(
         "Connected to {target}, but `{daemon} --stdio` did not answer.\n\
-         Is Far Cooler installed there?  {cli} host install {target}",
-        daemon = host_install::daemon_name(),
-        cli = host_install::cli_name()
+         Is Far Cooler installed there?  {cli} runner install {target}",
+        daemon = runner_install::daemon_name(),
+        cli = runner_install::cli_name()
     )
 }
 
@@ -270,7 +271,7 @@ fn is_ssh_connection_failure(status: Option<std::process::ExitStatus>) -> bool {
     status.and_then(|s| s.code()) == Some(255)
 }
 
-/// Run a command on the remote host's own CLI, passing our streams straight
+/// Run a command on the remote runner's own CLI, passing our streams straight
 /// through.
 ///
 /// Used for the live-byte commands. They are already a byte pipe, and ssh is a
@@ -296,16 +297,16 @@ pub async fn exec(
     Ok(status.code().unwrap_or(1))
 }
 
-/// What to run on the far side to reach the remote host's own CLI.
+/// What to run on the far side to reach the remote runner's own CLI.
 ///
 /// Named by tilde, not bare: a non-login ssh exec's PATH often lacks
-/// ~/.local/bin, where `host install` puts the binary — same reason
+/// ~/.local/bin, where `runner install` puts the binary — same reason
 /// `daemon_command` above does not exec a bare name either. And carrying this
-/// build's channel for the same reason again: the CLI on that machine is the
+/// build's channel for the same reason again: the CLI on that runner is the
 /// one this CLI uploaded, and a channel that streamed through the release CLI
 /// would be reading a different daemon's terminals.
 fn cli_command(args: &[String]) -> String {
-    format!("~/.local/bin/{} {}", host_install::cli_name(), shell_join(args))
+    format!("~/.local/bin/{} {}", runner_install::cli_name(), shell_join(args))
 }
 
 /// Quote arguments for the remote login shell.
@@ -331,10 +332,10 @@ fn shell_quote(arg: &str) -> String {
 mod tests {
     use super::*;
 
-    /// The bug this file had: `host install` uploads `farcoolerd-local`, and
-    /// then every connection asked the machine for `farcoolerd`. On a machine
+    /// The bug this file had: `runner install` uploads `farcoolerd-local`, and
+    /// then every connection asked the runner for `farcoolerd`. On a host
     /// with nothing else installed that is a confusing "is Far Cooler
-    /// installed there?" against a machine where it plainly is. On a machine
+    /// installed there?" against a host where it plainly is. On a host
     /// that also runs the release build it is worse and silent — the local CLI
     /// gets a working session with the stable daemon, and the two channels
     /// that were supposed to never meet share a database.
@@ -374,7 +375,7 @@ mod tests {
 
     /// The wording sends someone somewhere. A preview build reporting that
     /// `farcoolerd` did not answer sends them to check a binary that is not
-    /// the one it asked for, and `farcooler host install` is a command they
+    /// the one it asked for, and `farcooler runner install` is a command they
     /// may not have — the same reason `crates/client/src/session.rs` names its
     /// own channel's daemon in the error it raises.
     #[test]
@@ -431,7 +432,7 @@ mod tests {
     /// Without these, a peer that goes away without closing the socket — a lid
     /// that closes, a VPN that drops, a server that reboots — leaves ssh parked
     /// on a half-open TCP connection indefinitely. The process never exits, so
-    /// nothing above it ever learns, and the machine keeps looking connected
+    /// nothing above it ever learns, and the runner keeps looking connected
     /// while delivering nothing. There is no signal for a client to react to,
     /// which is why this cannot be fixed any higher up.
     ///
@@ -441,7 +442,7 @@ mod tests {
     /// The values are asserted exactly, not just their presence, because the
     /// timing is the behavior here, not an implementation detail: silently
     /// loosening `ServerAliveInterval` from 15 to 999 would mean fifty minutes
-    /// to notice a dead machine instead of forty-five seconds, and that change
+    /// to notice a dead host instead of forty-five seconds, and that change
     /// should have to touch this test on purpose.
     #[test]
     fn ssh_notices_a_peer_that_stopped_answering() {
@@ -459,7 +460,7 @@ mod tests {
         );
     }
 
-    /// A never-reachable machine must be told apart from a reachable one
+    /// A never-reachable host must be told apart from a reachable one
     /// missing the install — this is the review that caught it: a
     /// `.notInstalled` dot (grey) instead of `.unreachable` (red), plus
     /// `DaemonClient`'s slow five-minute retry cadence for what should back
@@ -483,7 +484,7 @@ mod tests {
         // A login shell reporting "command not found" for a reached target —
         // 127 is the traditional code, but the point is any code other than
         // ssh's own 255. Misreading this as a connection failure would send
-        // someone to check their network for a machine that answered fine.
+        // someone to check their network for a host that answered fine.
         let command_not_found = std::process::ExitStatus::from_raw(127 << 8);
         assert!(!is_ssh_connection_failure(Some(command_not_found)));
     }
@@ -499,7 +500,7 @@ mod tests {
     /// `--` before the destination, or an address is an option.
     ///
     /// ssh reads a leading `-` as a flag wherever it appears, so a destination
-    /// of `-oProxyCommand=...` runs a command on THIS machine. Nothing types
+    /// of `-oProxyCommand=...` runs a command on the CLIENT. Nothing types
     /// that today — every destination is typed by a human — but device
     /// onboarding has them arrive in a scanned manifest, and that is the
     /// transition that turns a latent hazard into a vulnerability.

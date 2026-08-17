@@ -143,7 +143,7 @@ pub unsafe extern "C" fn farcooler_client_free(handle: *mut c_void) {
     })
 }
 
-/// Connect to a host.
+/// Connect to a runner.
 ///
 /// `config` is JSON:
 ///
@@ -176,10 +176,10 @@ pub unsafe extern "C" fn farcooler_client_connect(
                 Ok(destination) => match Session::connect_ssh(&destination).await {
                     Ok(open) => {
                         let version = open.daemon_version().to_string();
-                        // What that machine can do, so the app can dim what it
+                        // What that runner can do, so the app can dim what it
                         // cannot serve rather than offering a control that fails.
                         // Normalized here rather than in each app: iOS and Android
-                        // must not disagree about what a machine supports.
+                        // must not disagree about what a runner supports.
                         let capabilities: Vec<String> = farcooler_protocol::capability::ALL
                             .iter()
                             .filter(|c| open.can(c))
@@ -528,9 +528,9 @@ pub unsafe extern "C" fn farcooler_client_public_key(
 
 /// The themes compiled into this build, as JSON, with no session required.
 ///
-/// Session-free on purpose. A phone that has never reached a host still needs
+/// Session-free on purpose. A phone that has never reached a runner still needs
 /// a theme to render with — the whole point of the built-ins being built in —
-/// and every other call here needs a live ssh connection. Whatever a host adds
+/// and every other call here needs a live ssh connection. Whatever a runner adds
 /// arrives separately, through the `themes` method, and is merged by the
 /// client on top of these.
 ///
@@ -594,7 +594,7 @@ pub unsafe extern "C" fn farcooler_client_connected(handle: *mut c_void) -> bool
     guarded(false, || {
         let Some(h) = (unsafe { as_handle(handle) }) else { return false };
         // try_lock rather than blocking: this is called from a UI thread, and a
-        // call in flight holds the session for as long as the host takes to answer.
+        // call in flight holds the session for as long as the runner takes to answer.
         h.session.try_lock().map(|guard| guard.is_some()).unwrap_or(true)
     })
 }
@@ -633,7 +633,7 @@ async fn dispatch(
     match method {
         "fleet" => session.fleet().await,
 
-        // What this machine is, and whether it was built from the same source
+        // What this runner is, and whether it was built from the same source
         // as the client asking.
         //
         // Exposed because the phone had no way to find out. The Mac reads it
@@ -641,13 +641,13 @@ async fn dispatch(
         // that makes a fix you already shipped go on reproducing — so a client
         // that cannot see it is a client that cannot explain itself.
         "host" => {
-            // What this machine can do, by name — from the handshake, so it
+            // What this runner can do, by name — from the handshake, so it
             // costs nothing here.
             //
             // Beside `buildsMatch` rather than replacing it: the two answer
             // different questions. That one is "are these the same build", this
-            // is "what can that machine do", and only the second is something a
-            // client can act on when it is newer than the machine it reached.
+            // is "what can that runner do", and only the second is something a
+            // client can act on when it is newer than the runner it reached.
             let capabilities: Vec<&str> = farcooler_protocol::capability::ALL
                 .iter()
                 .copied()
@@ -663,7 +663,7 @@ async fn dispatch(
                 "livePanes": facts.live_terminal_count,
                 "healthy": facts.self_health
                     != farcooler_protocol::v1::SelfHealth::Degraded as i32,
-                // What this machine says a derived branch name starts with. The
+                // What this runner says a derived branch name starts with. The
                 // client applies it, because the composer shows you the branch
                 // it is about to create and a prefix added on the far side would
                 // make that preview a lie.
@@ -674,8 +674,8 @@ async fn dispatch(
             }))
         }
 
-        // The host's own themes. The built-ins are compiled into each client,
-        // so only what this machine adds crosses the wire.
+        // The runner's own themes. The built-ins are compiled into each client,
+        // so only what this runner adds crosses the wire.
         "themes" => {
             let items = session.themes().await?;
             Ok(json!({
@@ -690,9 +690,9 @@ async fn dispatch(
             }))
         }
 
-        // MARK: - Machine settings
+        // MARK: - Runner settings
         //
-        // Editing what this machine's config.toml holds. Every write answers
+        // Editing what this runner's config.toml holds. Every write answers
         // with the file's new state read back, not with what was sent, so a
         // value the writer normalized is what the caller ends up holding.
 
@@ -853,7 +853,7 @@ async fn dispatch(
 
         "pr.refresh" => Ok(session.pr_refresh(id("repository")?).await?),
 
-        // ---- the machine itself ----
+        // ---- the runner itself ----
 
         "daemon.version" => Ok(session.daemon_capabilities().await?),
 

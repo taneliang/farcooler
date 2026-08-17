@@ -54,7 +54,7 @@ public struct AccountSection: View {
             Text("Account")
         } footer: {
             Text(
-                "An account exists for one reason: so a machine can wake this device "
+                "An account exists for one reason: so a runner can wake this device "
                     + "when an agent needs you. Everything else in Far Cooler works signed "
                     + "out, over your own SSH, with nothing in the middle."
             )

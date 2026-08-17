@@ -41,15 +41,15 @@ import com.farcooler.net.TerminalRef
  * as routine as glancing at a second agent. This makes every terminal one tap
  * away without ever leaving the screen that made checking on it worthwhile.
  *
- * Deliberately flat across the whole fleet — every machine included — rather
+ * Deliberately flat across the whole fleet — every runner included — rather
  * than scoped to the current workspace: the 3am case this exists for is "is the
  * OTHER agent still blocked", which is exactly as likely to be on a different
- * machine as in the same worktree.
+ * runner as in the same worktree.
  */
 @Composable
 fun TerminalTabStrip(
     entries: List<FleetEntry>,
-    showMachine: Boolean,
+    showRunner: Boolean,
     current: TerminalRef,
     onSelect: (TerminalRef) -> Unit,
     modifier: Modifier = Modifier,
@@ -57,7 +57,7 @@ fun TerminalTabStrip(
     data class Chip(
         val ref: TerminalRef,
         val label: String,
-        val machine: String,
+        val runner: String,
         val kind: StateKind,
         val wantsAttention: Boolean,
         val attention: com.farcooler.model.AgentActivity,
@@ -69,7 +69,7 @@ fun TerminalTabStrip(
             Chip(
                 ref = TerminalRef(entry.host.id, entry.workspace.id, terminal.id),
                 label = terminal.displayName(numbering[terminal.id]),
-                machine = entry.host.displayLabel,
+                runner = entry.host.displayLabel,
                 kind = StateKind.parse(terminal.state),
                 wantsAttention = terminal.agent.wantsAttention,
                 attention = terminal.agent,
@@ -133,7 +133,7 @@ fun TerminalTabStrip(
                     // one "Complete D17 authorization decision for Far Cooler"
                     // — which filled the strip with a single tab and pushed
                     // every other pane off the end of it.
-                    if (showMachine) "${chip.label} · ${chip.machine}" else chip.label,
+                    if (showRunner) "${chip.label} · ${chip.runner}" else chip.label,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (chip.wantsAttention) FontWeight.SemiBold else FontWeight.Normal,
                     maxLines = 1,

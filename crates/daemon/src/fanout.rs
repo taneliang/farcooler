@@ -58,7 +58,7 @@ const BACKLOG: usize = 1024;
 ///
 /// And named for the INSTALL as well as the pane, because a pane number is
 /// only unique within one tmux server. Every server numbers its panes from
-/// `%0`, so two daemons on one machine — a stable install beside a canary, or
+/// `%0`, so two daemons on one host — a stable install beside a canary, or
 /// a local build beside either — both had a `%0`, and by number alone both
 /// resolved to one socket here. The second daemon did not fail: it connected,
 /// to the first one's fanout, and so never started a pipe of its own. It then
@@ -83,7 +83,7 @@ pub fn socket_path(install: &str, pane_id: &str) -> PathBuf {
     //
     // The TAIL of the id, not the head. An install id is a v7 uuid, whose
     // leading 48 bits are a millisecond timestamp — two installs created on one
-    // machine minutes apart share their first eight characters, which is
+    // host minutes apart share their first eight characters, which is
     // exactly the case this whole function exists to separate. Observed:
     // `01a00ce67d5e…` and `01a00ce67e61…`. The tail is the random half.
     let install = install.trim_start_matches("farcooler-");
@@ -199,7 +199,7 @@ async fn feed(mut socket: UnixStream, mut rx: tokio::sync::broadcast::Receiver<b
 mod tests {
     use super::*;
 
-    /// Two daemons on one machine must not share a pane's fanout.
+    /// Two daemons on one host must not share a pane's fanout.
     ///
     /// Every tmux server numbers its panes from `%0`, so a second install's
     /// first pane has the same number as the first install's. Named by number

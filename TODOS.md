@@ -51,11 +51,11 @@ the known answer.
 **Surfaced by:** `/plan-eng-review` 2026-08-05, Review design, scope finding
 
 **What:** Extend `Scope` beyond the host-wide `READ` / `CONTROL` / `HOST_ADMIN` so a client can be
-authorized for specific repositories rather than the whole machine.
+authorized for specific repositories rather than the whole runner.
 
 **Why:** The Review design wanted "this phone may read the code in one repository." That is not
 expressible today, so review methods that return file content were placed at `CONTROL` — the same
-scope that can drive every terminal on the machine. A device that should only be able to read one
+scope that can drive every terminal on the runner. A device that should only be able to read one
 project's diffs must instead be trusted with the whole host. It also forced `review.inbox` to
 return bare counts at `READ` rather than the scoped view it was designed for.
 
@@ -64,7 +64,7 @@ contract in the table, and the scope checks in all three clients. The Review fea
 and safe answer without it — `CONTROL`, which exposes nothing a terminal screen did not already
 expose — so this buys granularity, not safety.
 
-**Trigger:** A second person or a shared machine. The moment a host is used by anyone other than
+**Trigger:** A second person or a shared host. The moment a runner is used by anyone other than
 its owner, or a device is enrolled that should not be able to drive terminals, host-wide scope
 stops being adequate.
 

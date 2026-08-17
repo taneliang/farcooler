@@ -13,7 +13,7 @@
 //! What this deliberately does NOT do:
 //!
 //! - **No password authentication.** A phone holding a reusable password is a
-//!   worse asset than a phone holding a key that a host can revoke by deleting
+//!   worse asset than a phone holding a key that a runner can revoke by deleting
 //!   one line from `authorized_keys`.
 //! - **No trust-on-first-use without saying so.** An unknown host key is
 //!   reported to the caller with its fingerprint, and connecting anyway is the

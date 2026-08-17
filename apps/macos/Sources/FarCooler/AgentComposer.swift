@@ -14,10 +14,10 @@ struct AgentComposer: View {
     @ObservedObject var stream: AgentStream
     let terminal: Terminal
     let isFocused: Bool
-    /// Why this pane's machine cannot be reached, or nil when it can.
+    /// Why this pane's runner cannot be reached, or nil when it can.
     ///
     /// Only `activity` reads it, and only to stop claiming an agent is
-    /// starting on a machine that is not answering — see there.
+    /// starting on a runner that is not answering — see there.
     let unreachable: String?
     /// The worktree file search, injected rather than reached for directly —
     /// the same reason `CommandPalette` is handed a `screen:` closure instead
@@ -588,7 +588,7 @@ struct AgentComposer: View {
     /// genuinely indistinguishable from a broken one.
     ///
     /// An empty transcript has two causes, not one, and they had been conflated.
-    /// It means "starting" only when there is a machine to start on; on one
+    /// It means "starting" only when there is a runner to start on; on one
     /// that has stopped answering it means the subscription died with the link
     /// and nothing is coming. Reporting a launch in progress there is the app
     /// stating as fact the one thing it knows is not happening — and it did so
@@ -604,13 +604,13 @@ struct AgentComposer: View {
         } else if let unreachable {
             HStack(spacing: 5) {
                 StatusGlyph(status: .lost, size: 6)
-                // The machine's own reason, not a paraphrase: it distinguishes
+                // The runner's own reason, not a paraphrase: it distinguishes
                 // "asleep" from "Far Cooler is not installed there", and those
                 // have different fixes.
                 Text(unreachable)
             }
             .font(.caption)
-            .help("This chat reconnects on its own once the machine answers")
+            .help("This chat reconnects on its own once the runner answers")
         } else if stream.transcript.configOptions.isEmpty && stream.transcript.rows.isEmpty {
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini)
@@ -663,8 +663,8 @@ struct AgentComposer: View {
         // The BYTES, not the path.
         //
         // This used to write `@/Users/you/x.png` into the message. That names a
-        // file on the machine that picked it, and the agent runs on the host —
-        // so it worked when those were the same machine and silently referred
+        // file on the Mac that picked it, and the agent runs on the host —
+        // so it worked when those were the same box and silently referred
         // to nothing when they were not, which is every remote host.
         let images = attachments.compactMap { attachment -> ComposerImage? in
             guard let data = try? Data(contentsOf: attachment.url) else { return nil }

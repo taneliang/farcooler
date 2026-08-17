@@ -45,16 +45,16 @@ struct TerminalCanvas: NSViewRepresentable {
     let terminal: String
     let binary: String?
     let environment: [String: String]
-    /// Put in front of every launch, to aim it at another machine. See
+    /// Put in front of every launch, to aim it at another runner. See
     /// `DaemonClient.cliHostArguments`.
     let hostArguments: [String]
-    /// Bumped by `DaemonClient` when this machine's link is replaced, so a
+    /// Bumped by `DaemonClient` when this runner's link is replaced, so a
     /// pane whose stream died with the old one opens a new one.
     ///
-    /// Without it a remote machine dropping killed the `farcooler terminal
+    /// Without it a remote runner dropping killed the `farcooler terminal
     /// stream` subprocess behind every pane, and nothing ever started another:
     /// `attach` runs when the pane changes terminals, and this pane is still
-    /// showing the same terminal it always was. The machine came back, the
+    /// showing the same terminal it always was. The runner came back, the
     /// sidebar went green, and every pane stayed frozen on its last byte.
     let linkGeneration: Int
     /// Resize the pane. Must complete before the stream replays history.
@@ -110,7 +110,7 @@ struct TerminalCanvas: NSViewRepresentable {
         // SwiftUI update would wipe the screen constantly.
         //
         // The generation is compared rather than merely checked against zero
-        // so a pane that mounts onto an already-reconnected machine records
+        // so a pane that mounts onto an already-reconnected runner records
         // where it started and re-attaches only on the NEXT drop, instead of
         // re-attaching once for a reconnection that happened before it existed.
         if context.coordinator.attached != terminal

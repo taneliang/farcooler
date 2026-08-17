@@ -54,7 +54,7 @@
         </activity>
 
         <!--
-            Pushes from the relay, about an agent on a machine this phone is not
+            Pushes from the relay, about an agent on a runner this phone is not
             watching. Not exported: only the messaging library binds to it.
         -->
         <service

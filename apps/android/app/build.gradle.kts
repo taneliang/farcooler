@@ -109,7 +109,7 @@ android {
         versionName = displayVersion
 
         // Read back by `AppVersion`, which reports it to the relay so the
-        // devices screen can say which of your machines is behind.
+        // devices screen can say which of your runners is behind.
         buildConfigField("String", "CHANNEL", "\"$releaseChannel\"")
         buildConfigField("String", "MARKETING_VERSION", "\"$marketingVersion\"")
 
@@ -171,8 +171,8 @@ android {
         // AGP uninstalls the app under test when `connectedAndroidTest`
         // finishes. Run against `debug` that is the build someone is actually
         // using — and the uninstall takes its data with it, which here means
-        // the machine list AND the device's SSH identity, since the Keystore
-        // key goes when the app does. The phone then has a new key the machine
+        // the runner list AND the device's SSH identity, since the Keystore
+        // key goes when the app does. The phone then has a new key the runner
         // has never authorized, which looks exactly like a rejected connection.
         //
         // A separate id means the tests install, run and uninstall something

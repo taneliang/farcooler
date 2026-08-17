@@ -17,15 +17,15 @@ import kotlinx.coroutines.launch
 /**
  * The app, and the one decision it makes before anything else: where to open.
  *
- * Onto TERMINALS, not onto a list of machines. A list of machines is
+ * Onto TERMINALS, not onto a list of runners. A list of runners is
  * onboarding, and onboarding is not a home screen — so it appears exactly when
- * it is the thing to do, which is when there are no machines.
+ * it is the thing to do, which is when there are no runners.
  *
  * ## The drawer
  *
  * The fleet lives in a navigation drawer rather than behind a button, which is
  * where the Mac's sidebar and the phone's "switch terminal" sheet both end up
- * on this platform. It is the one place worktrees, machines, settings and
+ * on this platform. It is the one place worktrees, runners, settings and
  * "start something new" all belong together, and an edge swipe reaches it
  * without a target to hit — which matters at 3am, one-handed, checking whether
  * the other agent is still blocked.
@@ -45,7 +45,7 @@ fun RootScreen(model: AppModel) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // Decided once a machine has answered, then left alone.
+    // Decided once a runner has answered, then left alone.
     LaunchedEffect(entries, connections, hosts) { model.landIfNeeded() }
 
     if (route is Route.Onboarding || hosts.isEmpty()) {
@@ -76,13 +76,13 @@ fun RootScreen(model: AppModel) {
             BackHandler { model.back() }
             SettingsScreen(
                 model,
-                onOpenMachineSettings = { model.navigate(Route.MachineSettings(it.host.id)) },
+                onOpenRunnerSettings = { model.navigate(Route.RunnerSettings(it.host.id)) },
                 onBack = { model.back() },
             )
             return
         }
 
-        is Route.MachineSettings -> {
+        is Route.RunnerSettings -> {
             BackHandler { model.back() }
             // Looked up fresh rather than carried: a reconnect replaces the
             // Connection, and a screen holding the old one would be editing a
@@ -91,7 +91,7 @@ fun RootScreen(model: AppModel) {
             if (live == null) {
                 model.back()
             } else {
-                MachineSettingsScreen(live, onBack = { model.back() })
+                RunnerSettingsScreen(live, onBack = { model.back() })
             }
             return
         }

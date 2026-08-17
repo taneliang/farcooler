@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// One machine's `config.toml`, as a screen instead of an ssh session.
+/// One runner's `config.toml`, as a screen instead of an ssh session.
 ///
-/// A sheet rather than a disclosure inside the machine row it opens from. The
+/// A sheet rather than a disclosure inside the runner row it opens from. The
 /// Settings window is 520 points wide, and the theme editor below is nineteen
-/// colour wells over a live terminal preview — inside a form row that is a
+/// color wells over a live terminal preview — inside a form row that is a
 /// column of swatches two wide. A sheet can be the size the content needs.
-struct MachineSettingsSheet: View {
-    /// The machine, as it reads in the list that opened this.
+struct RunnerSettingsSheet: View {
+    /// The runner, as it reads in the list that opened this.
     let name: String
-    @StateObject private var store: MachineSettingsStore
+    @StateObject private var store: RunnerSettingsStore
     @Environment(\.dismiss) private var dismiss
 
     /// The theme being edited, or nil.
@@ -18,13 +18,13 @@ struct MachineSettingsSheet: View {
     /// with nothing to edit is a sheet that eventually will be.
     @State private var editingTheme: Theme?
     @State private var editingAdapter: AdapterInfo?
-    /// What is in the branch-prefix field, which is not what the machine says
+    /// What is in the branch-prefix field, which is not what the runner says
     /// until it is committed — otherwise every keystroke would be a write.
     @State private var prefixDraft = ""
 
     init(name: String, target: String) {
         self.name = name
-        _store = StateObject(wrappedValue: MachineSettingsStore(target: target))
+        _store = StateObject(wrappedValue: RunnerSettingsStore(target: target))
     }
 
     var body: some View {
@@ -53,7 +53,7 @@ struct MachineSettingsSheet: View {
         .sheet(item: $editingAdapter) { adapter in
             AdapterEditor(
                 adapter: adapter, store: store,
-                // New only when nothing on the machine has this name yet.
+                // New only when nothing on the runner has this name yet.
                 isNew: !store.adapters.contains { $0.preset == adapter.preset }
             ) { edited in
                 Task { await store.save(adapter: edited) }
@@ -67,7 +67,7 @@ struct MachineSettingsSheet: View {
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.headline)
-                Text("Settings on this machine, in its own config file.")
+                Text("Settings on this runner, in its own config file.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -81,7 +81,7 @@ struct MachineSettingsSheet: View {
     private var footer: some View {
         HStack {
             // One banner for every failure here, because they are all the same
-            // kind: the machine could not be reached, or it refused.
+            // kind: the runner could not be reached, or it refused.
             if let failure = store.failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
@@ -132,21 +132,21 @@ struct MachineSettingsSheet: View {
 
     // MARK: - Themes
 
-    /// Built-ins and this machine's own, merged by name.
+    /// Built-ins and this runner's own, merged by name.
     ///
     /// The built-ins are compiled into every client, so this needs nothing from
-    /// the machine to show them — and a host theme sharing a built-in's name is
+    /// the runner to show them — and a runner theme sharing a built-in's name is
     /// an override, which is a fact a name comparison already knows.
-    private var allThemes: [(theme: Theme, isHostDefined: Bool, shadowsBuiltIn: Bool)] {
-        let hostNames = Set(store.themes.map(\.name))
+    private var allThemes: [(theme: Theme, isRunnerDefined: Bool, shadowsBuiltIn: Bool)] {
+        let runnerNames = Set(store.themes.map(\.name))
         var rows = store.themes.map {
-            (theme: $0, isHostDefined: true, shadowsBuiltIn: store.shadowsBuiltIn.contains($0.name))
+            (theme: $0, isRunnerDefined: true, shadowsBuiltIn: store.shadowsBuiltIn.contains($0.name))
         }
         // `Themes.shared.available` is the MERGED list every picker in the app
-        // reads, so subtracting the host's own leaves exactly the shipped ones.
+        // reads, so subtracting the runner's own leaves exactly the shipped ones.
         rows += Themes.shared.available
-            .filter { !hostNames.contains($0.name) }
-            .map { (theme: $0, isHostDefined: false, shadowsBuiltIn: false) }
+            .filter { !runnerNames.contains($0.name) }
+            .map { (theme: $0, isRunnerDefined: false, shadowsBuiltIn: false) }
         return rows.sorted {
             $0.theme.name.localizedStandardCompare($1.theme.name) == .orderedAscending
         }
@@ -169,7 +169,7 @@ struct MachineSettingsSheet: View {
                     // Only what the file owns can be removed. A built-in has no
                     // table to delete, so offering it would be a button that
                     // does nothing.
-                    if row.isHostDefined {
+                    if row.isRunnerDefined {
                         Button(row.shadowsBuiltIn ? "Revert to Default" : "Delete") {
                             Task { await store.delete(themeNamed: row.theme.name) }
                         }
@@ -179,7 +179,7 @@ struct MachineSettingsSheet: View {
                 }
             }
             Button {
-                // Duplicating is how a new theme starts: nineteen colours from
+                // Duplicating is how a new theme starts: nineteen colors from
                 // nothing is not a thing anyone wants to type, and every good
                 // theme is a tweak to one that already works.
                 var copy = Themes.shared.current
@@ -192,17 +192,17 @@ struct MachineSettingsSheet: View {
         } header: {
             Text("Themes")
         } footer: {
-            Text("Editing a shipped theme writes an override on this machine. Reverting removes it.")
+            Text("Editing a shipped theme writes an override on this runner. Reverting removes it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
     }
 
-    private func themeOrigin(_ row: (theme: Theme, isHostDefined: Bool, shadowsBuiltIn: Bool))
+    private func themeOrigin(_ row: (theme: Theme, isRunnerDefined: Bool, shadowsBuiltIn: Bool))
         -> String
     {
         if row.shadowsBuiltIn { return "Overriding a shipped theme" }
-        return row.isHostDefined ? "Defined on this machine" : "Shipped with Far Cooler"
+        return row.isRunnerDefined ? "Defined on this runner" : "Shipped with Far Cooler"
     }
 
     /// "Nord" → "Nord Copy", then "Nord Copy 2", and so on.
@@ -279,12 +279,12 @@ struct MachineSettingsSheet: View {
     }
 }
 
-/// A theme's colours as one small strip, for a list row.
+/// A theme's colors as one small strip, for a list row.
 private struct ThemeSwatchRow: View {
     let theme: Theme
 
     var body: some View {
-        // The background, the text, and the eight normal ANSI colours. Enough to
+        // The background, the text, and the eight normal ANSI colors. Enough to
         // tell two themes apart at a glance, which is all a row has to do.
         HStack(spacing: 1) {
             ForEach(Array(preview.enumerated()), id: \.offset) { _, packed in

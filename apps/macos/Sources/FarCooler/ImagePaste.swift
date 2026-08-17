@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 /// Pasting or dropping a file into a terminal.
 ///
 /// A terminal takes bytes and an agent running in one opens a path, so anything
-/// handed to a pane has to become a file on the machine that pane is on before
+/// handed to a pane has to become a file on the runner that pane is on before
 /// it can become anything the agent can see. The daemon does that and types the
 /// path; this decides what to hand it, and says so while it is happening.
 ///
@@ -79,7 +79,7 @@ final class ImagePasteQueue: ObservableObject {
     ) {
         let isLocal = hostArguments.isEmpty
 
-        // A file already on the machine the agent runs on needs nothing done to
+        // A file already on the runner the agent runs on needs nothing done to
         // it. Copying would put the same image in two places with two
         // lifetimes, and the one the daemon owns would expire while the user's
         // own copy sat there forever.
@@ -250,7 +250,7 @@ enum ImagePasteProcess {
                 // with a newline, so it was consumed as a complete line, found
                 // not to be progress, and dropped — leaving the failure path
                 // nothing to read and every failure reported as the catch-all,
-                // "Couldn't reach this machine", whatever had actually gone
+                // "Couldn't reach this runner", whatever had actually gone
                 // wrong. That cost a debugging session on a message that was
                 // being produced correctly the whole time.
                 var diagnostic = ""
@@ -315,7 +315,7 @@ enum ImagePasteProcess {
         // to know the method, or a pane that closed before the path
         // could be typed. Named together rather than guessed.
         if text.contains("predates this") {
-            return "That terminal may have closed, or this machine's Far Cooler may be too old."
+            return "That terminal may have closed, or this runner's Far Cooler may be too old."
         }
         if text.contains("file size") {
             return "That file is too large to send. Files up to 16 MB work."
@@ -323,7 +323,7 @@ enum ImagePasteProcess {
         if text.contains("not found") {
             return "That terminal isn't running anymore."
         }
-        return "Couldn't reach this machine."
+        return "Couldn't reach this runner."
     }
 }
 

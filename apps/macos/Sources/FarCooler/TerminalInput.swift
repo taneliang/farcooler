@@ -62,7 +62,7 @@ final class TerminalInput {
             // and this is being called from the typing path.
             //
             // The pane is not stranded: `DaemonClient` bumps `linkGeneration`
-            // when a machine's link is replaced, which re-attaches the surface
+            // when a runner's link is replaced, which re-attaches the surface
             // and starts a new input channel. What is lost is the keystroke
             // that discovered the corpse.
             self.stdin = nil

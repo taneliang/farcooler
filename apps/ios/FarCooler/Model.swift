@@ -270,7 +270,7 @@ struct RepositoryRoot: Decodable, Identifiable, Hashable {
     var id: String
     /// Absent unless this client holds `host_admin`, which is the point: a
     /// read-scoped phone learns that a root exists without learning where on
-    /// the machine it is. Shown as "Hidden" rather than as an empty row.
+    /// the runner it is. Shown as "Hidden" rather than as an empty row.
     var displayPath: String?
 }
 
@@ -330,7 +330,7 @@ struct StackResponse: Decodable {
     var links: [StackLink]
 }
 
-/// What the machine says about its own daemon.
+/// What the runner says about itself.
 struct HostHealth: Decodable {
     var platform: String
     var daemonVersion: String

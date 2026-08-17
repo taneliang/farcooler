@@ -375,7 +375,7 @@ what closes it, and openat2 would be neater but is Linux-only."
   - `client.enroll` → `EnrolledClient` at `Scope::HostAdmin`
   - `client.revoke` → `Operation` at `Scope::HostAdmin`
   - `message EnrolledClient { string client_id; string fingerprint; string label; Scope scope; string account; int64 enrolled_at; bool foreign; }`
-  - `host.get` gains `runner_id`, carrying **the existing `stable_host_id(install_id)`** from `crates/daemon/src/service.rs:378`. Do not invent a second identifier: `install-id` is already persistent, already lives in the runtime directory (`config.rs:10`), and is already per-`FARCOOLER_HOME`, so three engineers on one box have three. That is exactly the property the spec argued for when it ruled out the SSH host key, which all three would share. `RunnerEntry.id` in the ceremony plan consumes this and had no producer before review.
+  - `host.get` gains `runner_id`, carrying **the existing `stable_host_id(install_id)`** — defined at `crates/daemon/src/service.rs:1934` as `pub(crate) fn stable_host_id(install_id: &str) -> Uuid`, called at `service.rs:378` and `runtime.rs:43`. Exposing it on the wire means widening it to `pub`; it is a name, not a secret, and it is already visible as the tmux socket name and in worktree owner markers. Do not invent a second identifier: `install-id` is already persistent, already lives in the runtime directory (`config.rs:10`), and is already per-`FARCOOLER_HOME`, so three engineers on one box have three. That is exactly the property the spec argued for when it ruled out the SSH host key, which all three would share. `RunnerEntry.id` in the ceremony plan consumes this and had no producer before review.
 
 - [ ] **Step 1: Add the messages to `proto/farcooler.proto`**
 

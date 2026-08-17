@@ -3,22 +3,22 @@ import SwiftUI
 
 /// Create a workspace: one worktree plus branch for one task.
 struct NewWorkspaceSheet: View {
-    /// Every machine's repositories, tagged the same way `FleetStore.repositories`
+    /// Every runner's repositories, tagged the same way `FleetStore.repositories`
     /// tags them — carried together rather than flattened to a bare
     /// `[Repository]`. A repository's `short` is eight hex characters minted
     /// per daemon (see `FleetStore.repositories`'s own doc comment), so two
-    /// machines can hand back the same one for two different repositories; the
+    /// runners can hand back the same one for two different repositories; the
     /// picker below has to choose host and repository together; a repository
     /// chosen without its host, submitted through whatever host happened to be
     /// "active" elsewhere, is exactly how a workspace gets created on the wrong
-    /// machine with no error at all.
+    /// runner with no error at all.
     let repositories: [(host: String, repository: Repository)]
     /// The repository to open on, when this was reached from a project header.
     /// Empty means "ask", which is what the sidebar's own `+` wants.
     var preselected: String = ""
-    /// The machine `preselected` lives on. Only consulted alongside
+    /// The runner `preselected` lives on. Only consulted alongside
     /// `preselected`, to disambiguate a display name that exists on more than
-    /// one machine — once the picker below has been touched, its own
+    /// one runner — once the picker below has been touched, its own
     /// selection carries its own host and this is never read again.
     var preselectedHost: String = ""
     /// Receives host and repository together with the rest of the form, and
@@ -27,7 +27,7 @@ struct NewWorkspaceSheet: View {
     /// sheet stay open and say why, the same way `RemoveWorkspaceSheet` and
     /// `AddRepositorySheet` already do — `createWorkspace` failing used to
     /// dismiss the sheet exactly as if it had succeeded.
-    /// What a given machine says branch names start with. Per machine, because
+    /// What a given runner says branch names start with. Per runner, because
     /// the branch is created on the one holding the repository.
     var branchPrefix: (String) -> String = { _ in "" }
     let onCreate: (_ host: String, _ repo: String, _ name: String, _ branch: String, _ base: String)
@@ -49,8 +49,8 @@ struct NewWorkspaceSheet: View {
     @State private var working = false
     @State private var error: String?
 
-    /// Whether more than one machine has a repository on offer — the picker
-    /// names the machine alongside the repository only when that distinction
+    /// Whether more than one runner has a repository on offer — the picker
+    /// names the runner alongside the repository only when that distinction
     /// is real, same rule the sidebar's own host labels follow.
     private var multipleHosts: Bool {
         Set(repositories.map(\.host)).count > 1
@@ -66,7 +66,7 @@ struct NewWorkspaceSheet: View {
     ///
     /// The prefix used to be `feat/` written out here, which is where this and
     /// the task composer disagreed: the composer used none. It is now whatever
-    /// the chosen machine says, defaulting to `feat/` — so the two agree and the
+    /// the chosen runner says, defaulting to `feat/` — so the two agree and the
     /// answer is configurable in one place.
     ///
     /// This one lowercases and the directory below does not. A branch is a
@@ -162,7 +162,7 @@ struct NewWorkspaceSheet: View {
             guard choice == nil else { return }
             // The project whose header was clicked, if there was one. Matching
             // on display name because that is what the sidebar groups by, and
-            // on host too, because two machines can share a display name and
+            // on host too, because two runners can share a display name and
             // only one of them is the project that header actually named.
             let preferred = repositories.first {
                 $0.repository.displayName == preselected
@@ -514,17 +514,17 @@ struct Callout: View {
 /// the exact folder it would add, and asks once. What it never does is
 /// silently grant access to a directory the user did not see.
 ///
-/// This Mac is browsed with an `NSOpenPanel`, because it is the one machine
-/// whose disk this process can actually see. Any other machine is typed as a
+/// This Mac is browsed with an `NSOpenPanel`, because it is the one runner
+/// whose disk this process can actually see. Any other runner is typed as a
 /// path instead — the app has no filesystem to browse there, only the
-/// daemon on that machine does, and it is the one that decides whether the
+/// daemon on that runner does, and it is the one that decides whether the
 /// path exists and looks like a repository.
 struct AddRepositorySheet: View {
-    /// Every machine that could take a new repository.
+    /// Every runner that could take a new repository.
     let hosts: [String]
-    /// Allowlisted roots across every machine, tagged the same way
-    /// `FleetStore.roots` tags them — filtered here to whichever machine is
-    /// currently chosen, so a root on one machine can never look like it
+    /// Allowlisted roots across every runner, tagged the same way
+    /// `FleetStore.roots` tags them — filtered here to whichever runner is
+    /// currently chosen, so a root on one runner can never look like it
     /// covers a path on another that merely happens to share the string.
     let roots: [(host: String, root: RepositoryRoot)]
     /// Allowlist a folder on `host`. Returns a message on failure.
@@ -536,7 +536,7 @@ struct AddRepositorySheet: View {
     /// offered immediately. That is the moment they matter: the person has
     /// just pointed at a project and it very likely has three or four checked
     /// out already. The host is handed back rather than assumed, because it
-    /// is this sheet's own `host` state that decided which machine registered
+    /// is this sheet's own `host` state that decided which runner registered
     /// — nothing upstream chose it.
     var onRegistered: (_ host: String) -> Void = { _ in }
 
@@ -556,8 +556,8 @@ struct AddRepositorySheet: View {
         host.isEmpty ? chosen : (remotePath.isEmpty ? nil : URL(fileURLWithPath: remotePath))
     }
 
-    /// This machine's own allowlisted roots. A root string-identical to one
-    /// on a different machine still must not answer for this one.
+    /// This runner's own allowlisted roots. A root string-identical to one
+    /// on a different runner still must not answer for this one.
     private var rootsOnHost: [RepositoryRoot] {
         roots.filter { $0.host == host }.map(\.root)
     }
@@ -579,7 +579,7 @@ struct AddRepositorySheet: View {
         return path.deletingLastPathComponent()
     }
 
-    /// Only meaningful on this Mac — the one machine whose disk this process
+    /// Only meaningful on this Mac — the one runner whose disk this process
     /// can read. A remote path is taken on faith here; the daemon that owns
     /// that disk is what actually confirms it, when `onRegister` reaches it.
     private var looksLikeRepository: Bool {
@@ -605,7 +605,7 @@ struct AddRepositorySheet: View {
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 if hosts.count > 1 {
-                    Picker("Machine", selection: $host) {
+                    Picker("Runner", selection: $host) {
                         ForEach(hosts, id: \.self) { h in
                             Text(h.isEmpty ? "This Mac" : h).tag(h)
                         }
@@ -631,7 +631,7 @@ struct AddRepositorySheet: View {
                             .font(.callout)
                         TextField("/home/you/src/project", text: $remotePath)
                             .textFieldStyle(.roundedBorder)
-                        Text("Checked on that machine when you add it — this Mac cannot see its disk.")
+                        Text("Checked on that runner when you add it — this Mac can't see its disk.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

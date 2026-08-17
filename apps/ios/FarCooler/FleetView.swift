@@ -12,8 +12,8 @@ import SwiftUI
 /// disagree with the daemon and with the Mac about the same terminal.
 @MainActor
 struct FleetView: View {
-    let host: Host
-    let store: HostStore
+    let host: Runner
+    let store: RunnerStore
 
     @StateObject private var connection = Connection()
 
@@ -37,7 +37,7 @@ struct FleetView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Open when correcting this machine's details, from any phase that has a
+    /// Open when correcting this runner's details, from any phase that has a
     /// reason to doubt them.
     @State private var editing = false
 
@@ -54,7 +54,7 @@ struct FleetView: View {
                 escapable { failure(message) }
 
             // Reconnecting renders exactly what connected renders. The fleet on
-            // screen is the last one this machine sent, and it is a better
+            // screen is the last one this runner sent, and it is a better
             // answer than a spinner while the link comes back — see
             // `Connection.Phase.reconnecting`. The status chip in the bar is
             // where the difference shows.
@@ -112,13 +112,13 @@ struct FleetView: View {
     /// it.
     ///
     /// This is the bug those screens all had. `FleetView` is the root of the
-    /// app's only navigation stack — the app opens onto a machine rather than a
+    /// app's only navigation stack — the app opens onto a runner rather than a
     /// list of them — so it has no back button, and the host switcher lives
     /// inside `WorkspaceListView`, which only exists once a connection has
     /// succeeded. Any phase short of `.connected` was therefore a room with no
     /// doors: "Could not connect" offered "Try again" and nothing else, and if
-    /// trying again could not work — the wrong address, a machine that never
-    /// authorized this phone — there was no way to reach another machine, add
+    /// trying again could not work — the wrong address, a runner that never
+    /// authorized this phone — there was no way to reach another runner, add
     /// one, fix this one, or even see this device's key. Force-quitting was the
     /// only exit.
     ///
@@ -212,7 +212,7 @@ struct FleetView: View {
     /// again" each start a fresh connection of their own, and each one needs
     /// the same decision made afterwards, not the one left over from a
     /// connection attempt that never got this far.
-    private func connect(_ target: Host) async {
+    private func connect(_ target: Runner) async {
         await connection.start(host: target)
         landing = connection.fleet.landingTerminal
         landingDecided = true
@@ -225,7 +225,7 @@ struct FleetView: View {
     /// interception invisible.
     private func approval(_ fingerprint: String) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Unrecognized Machine", systemImage: "questionmark.circle")
+            Label("Unrecognized Runner", systemImage: "questionmark.circle")
                 .font(.headline)
             Text("\(host.address) presented this key:")
                 .font(.callout)
@@ -236,12 +236,12 @@ struct FleetView: View {
                 .background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             Text(
-                "Check it against the machine: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
+                "Check it on the host: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
             )
             .font(.footnote)
             .foregroundStyle(.secondary)
 
-            Button("Trust This Machine") {
+            Button("Trust This Runner") {
                 store.trust(host, fingerprint: fingerprint)
                 var trusted = host
                 trusted.fingerprint = fingerprint
@@ -321,7 +321,7 @@ struct FleetView: View {
                     Button("Try Again") { Task { await connect(host) } }
                 }
                 if kind != .noIdentity {
-                    Button("Edit This Machine…") { editing = true }
+                    Button("Edit This Runner…") { editing = true }
                 }
             }
             .padding(.horizontal, 40)
@@ -400,7 +400,7 @@ struct FleetView: View {
     /// Ours wherever we know what happened, the core's own text only where we
     /// do not. The raw string crossing up from Rust is written for whoever is
     /// reading a log — lowercase, and ending in things like "(os error 61)" —
-    /// and putting that in front of someone who just wants their machine back
+    /// and putting that in front of someone who just wants their runner back
     /// is asking them to translate. Two cases keep it deliberately: the changed
     /// host key, whose message carries the two fingerprints being compared and
     /// must not be paraphrased, and the unclassified failure, where the core's
@@ -414,7 +414,7 @@ struct FleetView: View {
             return "\(host.user)@\(host.address) hasn’t been given this device’s key."
         case .unreachable:
             return
-                "Nothing answered on port \(host.port). The machine may be asleep, "
+                "Nothing answered on port \(host.port). The runner may be asleep, "
                 + "or the address may be wrong."
         case .daemonMissing:
             return "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
@@ -426,7 +426,7 @@ struct FleetView: View {
     private func headline(_ kind: Connection.Failure) -> String {
         switch kind {
         case .keyRejected: return "Not Authorized Yet"
-        case .hostKeyChanged: return "This Machine’s Key Changed"
+        case .hostKeyChanged: return "This Host’s Key Changed"
         case .unreachable: return "Can’t Reach \(host.address)"
         case .daemonMissing: return "Far Cooler Isn’t Installed"
         case .noIdentity: return "This Device Has No Key"
@@ -454,14 +454,14 @@ struct WorkspaceListView: View {
     /// Non-nil only in the sheet: what "Done" calls. `FleetView`'s own use
     /// leaves this nil because a pushed screen already has a back button.
     var onDismiss: (() -> Void)?
-    /// The machines to switch between, when this is the sheet.
+    /// The runners to switch between, when this is the sheet.
     ///
     /// Switching hosts lives here because this is already where you go to
     /// switch what you are looking at. The app opens onto terminals now (see
     /// `RootView`), so there is no host list to go back to — and inventing a
     /// second switcher screen for the rarer of the two switches would be one
     /// more place to look.
-    var hosts: HostStore?
+    var hosts: RunnerStore?
 
     @State private var showNewWorkspace = false
     @State private var showQuickTask = false
@@ -541,10 +541,10 @@ struct WorkspaceListView: View {
     }
 }
 
-/// Which machine you are looking at, and every way of changing that.
+/// Which runner you are looking at, and every way of changing that.
 ///
 /// A strip along the bottom rather than a section in a list: the list above it
-/// is worktrees on ONE machine, and putting the machine inside it would read as
+/// is worktrees on ONE runner, and putting the runner inside it would read as
 /// one more thing in the same collection. This says what the collection belongs
 /// to.
 ///
@@ -554,20 +554,20 @@ struct WorkspaceListView: View {
 /// connecting, approval and failure screens too, which is what makes those
 /// screens leaveable at all.
 struct HostSwitcherBar: View {
-    @ObservedObject var hosts: HostStore
+    @ObservedObject var hosts: RunnerStore
     /// The connection whose state the chip shows, and which its tap retries.
     /// Also how the settings screen names the daemon it is talking to. Absent
     /// before a connection exists, which is most of the time this bar matters.
     @ObservedObject var connection: Connection
-    /// Called after picking a different machine, for the caller that is a sheet
+    /// Called after picking a different runner, for the caller that is a sheet
     /// and needs to close itself. Nil where the bar is part of the screen.
     var onSwitch: (() -> Void)?
 
-    @State private var showAddHost = false
+    @State private var showAddRunner = false
     /// The host being edited, rather than a bare flag: a flag plus a separate
     /// `hosts.selected` lookup can present a sheet with nothing in it if the
     /// selection changes between the tap and the presentation.
-    @State private var editingHost: Host?
+    @State private var editingRunner: Runner?
     @State private var showSettings = false
 
     var body: some View {
@@ -590,14 +590,14 @@ struct HostSwitcherBar: View {
                     }
                 }
                 Divider()
-                Button("Add a Machine…") { showAddHost = true }
+                Button("Add a Runner…") { showAddRunner = true }
                 if let selected = hosts.selected {
                     // Editing and removing were unreachable from anywhere in the
-                    // app: `HostStore.remove` existed and had no caller, so a
-                    // machine typed in wrong was permanent, and permanent plus
+                    // app: `RunnerStore.remove` existed and had no caller, so a
+                    // runner typed in wrong was permanent, and permanent plus
                     // unreachable meant the app opened onto a screen it could
                     // never get past.
-                    Button("Edit This Machine…") { editingHost = selected }
+                    Button("Edit This Runner…") { editingRunner = selected }
                 }
                 // Reachable from here because there is nowhere else left.
                 //
@@ -609,7 +609,7 @@ struct HostSwitcherBar: View {
                 Button("This Device…") { showSettings = true }
             } label: {
                 HStack(spacing: 4) {
-                    Text(hosts.selected?.label ?? "No Machine")
+                    Text(hosts.selected?.label ?? "No Runner")
                         .font(.callout.weight(.medium))
                     Image(systemName: "chevron.up.chevron.down").font(.caption2)
                 }
@@ -622,10 +622,10 @@ struct HostSwitcherBar: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
-        .sheet(isPresented: $showAddHost) {
+        .sheet(isPresented: $showAddRunner) {
             HostEditorView { hosts.add($0) }
         }
-        .sheet(item: $editingHost) { host in
+        .sheet(item: $editingRunner) { host in
             HostEditorView(
                 existing: host,
                 onSave: { hosts.update($0) },
@@ -644,10 +644,10 @@ struct HostSwitcherBar: View {
     }
 }
 
-/// Whether this machine is answering, and a way to ask it again.
+/// Whether this runner is answering, and a way to ask it again.
 ///
-/// The Mac's sidebar dot, on a phone. It sits in the machine bar because that
-/// strip is already what says which machine you are looking at, and because it
+/// The Mac's sidebar dot, on a phone. It sits in the runner bar because that
+/// strip is already what says which runner you are looking at, and because it
 /// is under every phase including the ones you cannot otherwise escape — the
 /// same property that made the bar the app's escape hatch in the first place.
 ///
@@ -684,7 +684,7 @@ struct LinkStatusChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label ?? "Connected")
-        .accessibilityHint("Reconnects to this machine")
+        .accessibilityHint("Reconnects to this runner")
     }
 
     private var color: Color {
@@ -747,7 +747,7 @@ struct FleetList: View {
     var body: some View {
         List {
             if fleet.workspaces.isEmpty {
-                Text("No workspaces on this machine.")
+                Text("No workspaces on this runner.")
                     .foregroundStyle(.secondary)
             }
 
@@ -914,7 +914,7 @@ struct FleetList: View {
         if kind == .lost {
             Button("Dismiss") { onAction(.dismissLost, terminal) }.tint(.gray)
         }
-        // Nothing destructive for a terminal whose machine did not answer.
+        // Nothing destructive for a terminal whose runner did not answer.
         // Restart kills the pane and starts a new epoch: the right answer for a
         // process that is gone, and the wrong one for a process that is fine
         // behind a tmux server that was busy for a moment — which is exactly
@@ -1159,13 +1159,13 @@ struct NewWorkspaceView: View {
     /// named is invisible.
     private var folder: String { TaskSlug.sanitize(trimmedName) }
 
-    /// Sixty is the machine's cap on a name.
+    /// Sixty is the runner's cap on a name.
     private var isTooLong: Bool { trimmedName.unicodeScalars.count > 60 }
 
-    /// The branch this form suggests, from the name and the machine's prefix.
+    /// The branch this form suggests, from the name and the runner's prefix.
     ///
     /// This form had no suggestion at all and made you type a branch by hand,
-    /// which meant the machine's branch prefix — the whole point of the setting
+    /// which meant the runner's branch prefix — the whole point of the setting
     /// — could not reach the one place on this screen that names a branch. Now
     /// it matches the Mac's sheet: type nothing and get the suggestion.
     private var suggestedBranch: String {
@@ -1178,12 +1178,12 @@ struct NewWorkspaceView: View {
         return typed.isEmpty ? suggestedBranch : typed
     }
 
-    /// Both name rules are checked here, not just left to the machine, because
+    /// Both name rules are checked here, not just left to the runner, because
     /// `createWorkspace` swallows its error: a refused name would close this
     /// sheet on a worktree that was never created and say nothing about why.
     private var isValid: Bool {
         // Adoption has nothing to validate but the repository: the branch was
-        // picked from a list the machine produced, and the name comes from it.
+        // picked from a list the runner produced, and the name comes from it.
         if adopting != nil { return !repository.isEmpty }
         return !repository.isEmpty && !folder.isEmpty && !isTooLong && !effectiveBranch.isEmpty
     }

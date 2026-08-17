@@ -278,7 +278,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePublicKey(
 /// The themes compiled into this build, as JSON.
 ///
 /// Session-free, like the key helpers above: a phone that has never reached a
-/// host still needs a theme to render with, and every other client call needs
+/// runner still needs a theme to render with, and every other client call needs
 /// a live ssh connection.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeBuiltinThemes(

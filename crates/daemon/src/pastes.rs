@@ -2,7 +2,7 @@
 //!
 //! A terminal takes bytes, and an agent running in one reads a file by opening
 //! a path. So anything handed to a pane from a phone — or from a Mac attached
-//! to a machine that is not this one — has to become a file here before it can
+//! to a runner that is not this one — has to become a file here before it can
 //! become anything the agent can see.
 //!
 //! The bytes arrive in chunks, accumulate under `.incoming`, and are renamed
@@ -236,7 +236,7 @@ async fn finalize(
 ///
 /// The sender's name is worth keeping — `quarterly-report.pdf` in a prompt says
 /// what it is and `2026-08-09-114812Z.bin` says nothing — but it is a string
-/// from another machine that becomes a filename on this one. So it is rebuilt
+/// from another runner that becomes a filename on this one. So it is rebuilt
 /// rather than filtered: every character not explicitly allowed is dropped, and
 /// what comes out cannot contain a separator, a `..`, a NUL, a leading dot or a
 /// shell metacharacter, whatever went in.
@@ -660,7 +660,7 @@ mod tests {
     #[test]
     fn a_senders_name_cannot_escape_the_paste_directory() {
         // The name crosses a network and becomes a filename on someone else's
-        // machine. Rebuilt from allowed characters rather than filtered, so
+        // runner. Rebuilt from allowed characters rather than filtered, so
         // there is no clever encoding left to find.
         assert_eq!(name_parts("../../etc/passwd", None), ("passwd".into(), String::new()));
         assert_eq!(name_parts("/etc/shadow", None), ("shadow".into(), String::new()));

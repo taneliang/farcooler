@@ -47,9 +47,9 @@ import com.farcooler.net.Connection
 import kotlinx.coroutines.launch
 
 /**
- * One machine's `config.toml`, from a phone.
+ * One runner's `config.toml`, from a phone.
  *
- * The reason this belongs on a phone: the machine holding the file is frequently
+ * The reason this belongs on a phone: the runner holding the file is frequently
  * a Linux box with no Far Cooler app on it, reached over ssh. Changing its branch
  * prefix used to mean an ssh session and a text editor, which is not a thing
  * anybody does from a phone — and the theme section's own help text used to say
@@ -57,7 +57,7 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MachineSettingsScreen(connection: Connection, onBack: () -> Unit) {
+fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     var prefix by remember { mutableStateOf("") }
@@ -157,7 +157,7 @@ fun MachineSettingsScreen(connection: Connection, onBack: () -> Unit) {
                     scope.launch {
                         val stored = connection.setBranchPrefix(prefix)
                         if (stored == null) {
-                            failure = "That machine did not accept the change."
+                            failure = "That runner didn’t accept the change."
                         } else {
                             storedPrefix = stored
                             prefix = stored
@@ -168,9 +168,9 @@ fun MachineSettingsScreen(connection: Connection, onBack: () -> Unit) {
             }
 
             HorizontalDivider()
-            SectionTitle("Themes on this machine")
+            SectionTitle("Themes on this runner")
             Text(
-                "Only themes this machine defines are listed. Shipped themes have nothing to " +
+                "Only themes this runner defines are listed. Shipped themes have nothing to " +
                     "delete; saving one under a shipped name overrides it here.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -43,7 +43,7 @@ private data class ThemeList(val themes: List<Theme> = emptyList())
  *
  * Two sources, one list. The built-ins come from the client core with no
  * connection at all — a phone on a train still has to render something — and
- * whatever a connected machine defines is merged on top, the host winning a
+ * whatever a connected runner defines is merged on top, the runner winning a
  * name collision because it is the more specific statement.
  *
  * What is STORED is the name, never the colours: a host theme can be edited,
@@ -115,10 +115,10 @@ object Themes {
     }
 
     /**
-     * Merge in whatever the connected machine defines.
+     * Merge in whatever the connected runner defines.
      *
      * Additive: the built-ins belong to this device and do not depend on which
-     * machine it happens to be talking to, so switching hosts must not empty
+     * runner it happens to be talking to, so switching runners must not empty
      * the picker.
      */
     fun merge(hostThemes: List<Theme>) {

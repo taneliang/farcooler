@@ -1,20 +1,20 @@
 import SwiftUI
 
-/// One machine's `config.toml`, from a phone.
+/// One runner's `config.toml`, from a phone.
 ///
-/// The whole reason this exists on a phone at all: the machine whose settings
-/// these are is frequently a Linux box with no Far Cooler app on it, reached over
-/// ssh. Before this, changing its branch prefix meant an ssh session and a text
-/// editor — from a phone, which is not a thing anybody does.
+/// The whole reason this exists on a phone at all: the runner whose settings
+/// these are is frequently on a Linux box with no Far Cooler app on it, reached
+/// over ssh. Before this, changing its branch prefix meant an ssh session and a
+/// text editor — from a phone, which is not a thing anybody does.
 ///
 /// Talks over the same JSON bridge every other screen here uses, so the shapes
 /// are the ones `Connection` already decodes.
 @MainActor
-final class MachineSettingsModel: ObservableObject {
+final class RunnerSettingsModel: ObservableObject {
     @Published private(set) var branchPrefix = ""
     @Published private(set) var themes: [Theme] = []
     @Published private(set) var adapters: [AdapterInfo] = []
-    /// What the machine says about itself, once it has been asked. Optional
+    /// What the runner says about itself, once it has been asked. Optional
     /// rather than a blank default, so a daemon too old to answer shows nothing
     /// instead of showing zeroes that look like real readings.
     @Published private(set) var health: HostHealth?
@@ -42,7 +42,7 @@ final class MachineSettingsModel: ObservableObject {
 
     func removeRoot(_ root: RepositoryRoot) async {
         guard await connection.removeRepositoryRoot(root.id) else {
-            failure = "That machine wouldn't stop watching that folder."
+            failure = "That runner wouldn't stop watching that folder."
             return
         }
         roots.removeAll { $0.id == root.id }
@@ -50,7 +50,7 @@ final class MachineSettingsModel: ObservableObject {
 
     func setBranchPrefix(_ prefix: String) async {
         guard let stored = await connection.setBranchPrefix(prefix) else {
-            failure = "That machine did not accept the change."
+            failure = "That runner didn't accept the change."
             return
         }
         branchPrefix = stored
@@ -135,17 +135,17 @@ struct AdapterInfo: Identifiable, Equatable {
     }
 }
 
-/// The machine's own settings, as a screen.
-struct MachineSettingsView: View {
+/// The runner's own settings, as a screen.
+struct RunnerSettingsView: View {
     let name: String
-    @StateObject private var model: MachineSettingsModel
+    @StateObject private var model: RunnerSettingsModel
     @State private var prefixDraft = ""
     @State private var editingTheme: Theme?
     @State private var editingAdapter: AdapterInfo?
 
     init(name: String, connection: Connection) {
         self.name = name
-        _model = StateObject(wrappedValue: MachineSettingsModel(connection: connection))
+        _model = StateObject(wrappedValue: RunnerSettingsModel(connection: connection))
     }
 
     var body: some View {
@@ -198,10 +198,10 @@ struct MachineSettingsView: View {
                     Label("Duplicate the Current Theme", systemImage: "plus")
                 }
             } header: {
-                Text("Themes on this machine")
+                Text("Themes on this runner")
             } footer: {
                 Text(
-                    "Only themes this machine defines are listed. Shipped themes have nothing "
+                    "Only themes this runner defines are listed. Shipped themes have nothing "
                     + "to delete; saving one under a shipped name overrides it here.")
             }
 
@@ -275,7 +275,7 @@ struct MachineSettingsView: View {
         }
     }
 
-    /// What this machine is and whether it is well.
+    /// What this runner is and whether it is well.
     ///
     /// First, because it is the question you open this screen with when
     /// something is wrong — and because it is what says whether the rest of the
@@ -304,14 +304,14 @@ struct MachineSettingsView: View {
                 LabeledContent("Platform", value: health.platform)
                 LabeledContent("Live panes", value: "\(health.livePanes)")
             } header: {
-                Text("This Machine")
+                Text("This Runner")
             } footer: {
                 Text("Protocol \(health.protocolVersion).")
             }
         }
     }
 
-    /// Where work can start, and which folders the machine looks in.
+    /// Where work can start, and which folders the runner looks in.
     ///
     /// Two lists rather than one because they answer different questions, and
     /// only the second is something this screen can change: a repository is
@@ -356,7 +356,7 @@ struct MachineSettingsView: View {
             } footer: {
                 Text(
                     "Far Cooler looks for repositories in these. Removing one stops "
-                    + "the search; nothing on the machine is deleted.")
+                    + "the search; nothing on the runner is deleted.")
             }
         }
     }

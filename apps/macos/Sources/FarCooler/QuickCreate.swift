@@ -17,9 +17,9 @@ import SwiftUI
 /// quick succession and a panel that closes on every one turns a burst into a
 /// sequence of separate decisions.
 struct QuickCreate: View {
-    /// Every machine's repositories, tagged the same way `FleetStore.repositories`
+    /// Every runner's repositories, tagged the same way `FleetStore.repositories`
     /// tags them. Carried together rather than flattened to a bare `[Repository]`
-    /// so the picker below can name the machine, not just the project — see
+    /// so the picker below can name the runner, not just the project — see
     /// `NewWorkspaceSheet`, which tags the same way for the same reason.
     let projects: [(host: String, repository: Repository)]
     @Binding var project: String
@@ -30,18 +30,18 @@ struct QuickCreate: View {
     /// resolved `project` — not re-derived by the caller from `project`
     /// alone. `NewWorkspaceSheet.Choice` carries host and repository
     /// together for exactly this reason: a repository chosen without its
-    /// host, handed to whatever machine happens to be "current" downstream,
+    /// host, handed to whatever runner happens to be "current" downstream,
     /// is how a task starts on the wrong one with no error at all.
     let onSubmit: (String, String, String, String) -> Void
     let onResume: () -> Void
     let onClose: () -> Void
-    /// What the CHOSEN machine says branch names start with.
+    /// What the CHOSEN runner says branch names start with.
     ///
-    /// Per machine rather than one setting for the app: the branch is created on
-    /// the machine holding the project, and that machine's convention is the one
+    /// Per runner rather than one setting for the app: the branch is created on
+    /// the runner holding the project, and that runner's convention is the one
     /// that matters. Looked up by the caller from `chosen`'s host for the same
     /// reason `onSubmit` carries the host — a repository resolved without it is
-    /// how work starts on the wrong machine with no error at all.
+    /// how work starts on the wrong runner with no error at all.
     var branchPrefix: (String) -> String = { _ in "" }
 
     /// The draft survives closing the panel.
@@ -55,22 +55,22 @@ struct QuickCreate: View {
 
     @State private var justCreated: String?
 
-    /// The project `project` names, or nil if it names nothing any machine
+    /// The project `project` names, or nil if it names nothing any runner
     /// currently has.
     ///
     /// No fallback to `projects.first`. `project` is `tasks.lastProject`,
     /// persisted across launches — if the repository it names was removed
-    /// (or the whole machine it lived on was), the picker below renders with
+    /// (or the whole runner it lived on was), the picker below renders with
     /// no row selected, and this being nil is what keeps `⏎` from starting a
     /// task on whatever happened to be first in the list instead: a fallback
-    /// here would be a machine picked with nothing on screen saying so, which
+    /// here would be a runner picked with nothing on screen saying so, which
     /// is the exact failure this project exists to remove.
     private var chosen: (host: String, repository: Repository)? {
         projects.first { $0.repository.id == project }
     }
 
-    /// Whether more than one machine has a repository on offer — the picker
-    /// names the machine alongside the repository only when that distinction
+    /// Whether more than one runner has a repository on offer — the picker
+    /// names the runner alongside the repository only when that distinction
     /// is real, same rule `NewWorkspaceSheet` follows.
     private var multipleHosts: Bool {
         Set(projects.map(\.host)).count > 1
@@ -181,7 +181,7 @@ struct QuickCreate: View {
             // Shown whenever there is more than one project to confuse, or
             // whenever the persisted selection matches none of them — the
             // latter is what makes a stale `tasks.lastProject` a visible
-            // "pick one" instead of a silent wrong machine (see `chosen`).
+            // "pick one" instead of a silent wrong runner (see `chosen`).
             if projects.count > 1 || chosen == nil {
                 Picker("", selection: $project) {
                     ForEach(projects, id: \.repository.id) { entry in
@@ -286,7 +286,7 @@ enum WorktreeName {
 
 /// Turning a sentence into a branch name.
 enum Branch {
-    /// A git-safe slug, behind whatever the machine says branches start with.
+    /// A git-safe slug, behind whatever the runner says branches start with.
     ///
     /// Conservative on purpose: git accepts far more than this, but a branch
     /// name is something people type, paste into a PR title and see in a CI

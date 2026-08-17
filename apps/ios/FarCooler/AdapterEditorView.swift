@@ -54,7 +54,7 @@ struct AdapterEditorView: View {
             if draft.origin == .builtIn {
                 Section {
                     Label(
-                        "Saving this writes an override on that machine. You can revert to the "
+                        "Saving this writes an override on that runner. You can revert to the "
                         + "shipped one at any time.",
                         systemImage: "info.circle")
                         .font(.callout)

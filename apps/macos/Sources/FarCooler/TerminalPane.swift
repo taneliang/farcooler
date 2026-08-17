@@ -16,11 +16,11 @@ struct TerminalPane: View {
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
-    /// Which link the panes below were opened on, so a machine that dropped
+    /// Which link the panes below were opened on, so a runner that dropped
     /// and came back gets fresh streams instead of frozen ones. See
     /// `DaemonClient.linkGeneration`.
     let linkGeneration: Int
-    /// Why this pane's machine cannot be acted on, or nil if it can — passed
+    /// Why this pane's runner cannot be acted on, or nil if it can — passed
     /// straight through to `AgentSurface`, which is the one branch below
     /// that mutates outside `onAction`'s own `act(on:)` gate.
     let refusal: () -> String?
@@ -31,7 +31,7 @@ struct TerminalPane: View {
     /// Whether to draw a terminal here at all.
     ///
     /// `.unknown` counts, and that is the point of it. It means the daemon could
-    /// not read this machine's pane inventory on this tick — not that this pane
+    /// not read this runner's pane inventory on this tick — not that this pane
     /// died — and the byte stream feeding this view is a channel of its own that
     /// a failed `list-panes` does not touch.
     ///

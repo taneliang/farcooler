@@ -1,10 +1,10 @@
 import AgentKit
 import Foundation
 
-/// Where a machine's connection stands.
+/// Where a runner's connection stands.
 ///
 /// `notInstalled` is separate from `unreachable` because it is not a failure
-/// worth retrying at full speed. It is a machine that needs `host install`,
+/// worth retrying at full speed. It is a runner that needs `host install`,
 /// and retrying it every second forever produces noise instead of the one
 /// sentence that would fix it. It still gets checked again — every few
 /// minutes, see `DaemonClient.scheduleRetry()` — because "never" is the
@@ -22,20 +22,20 @@ enum HostState: Equatable {
     /// What to tell someone whose action was refused, or nil to let it proceed.
     ///
     /// Only `.unreachable` and `.notInstalled` refuse. Those are the two states
-    /// where a command was already tried against this machine and failed, so
+    /// where a command was already tried against this runner and failed, so
     /// trying another is asking the same question twice. `.connecting` and
     /// `.reconnecting` mean "we do not know yet", not "no" — refusing on those
     /// would turn an ordinary transient stream drop on an otherwise-reachable
-    /// machine into a read-only window for up to a 30s backoff, when the
+    /// runner into a read-only window for up to a 30s backoff, when the
     /// command itself would simply have succeeded, or failed on its own and
-    /// bounded by `ConnectTimeout`, exactly as it would on a machine this
+    /// bounded by `ConnectTimeout`, exactly as it would on a runner this
     /// client had never seen go down at all. A false refusal here is worse
     /// than the bounded wait a real attempt risks.
     var refusal: String? {
         switch self {
         case .connected, .connecting, .reconnecting: return nil
         case .unreachable(let why): return why
-        case .notInstalled: return "Far Cooler is not installed on this machine"
+        case .notInstalled: return "Far Cooler is not installed on this runner"
         }
     }
 }
@@ -52,10 +52,10 @@ enum HostState: Equatable {
 final class DaemonClient: ObservableObject {
     /// Diff status per worktree short id, for the sidebar. Empty until read.
     @Published var changesInbox: [String: InboxRow] = [:]
-    /// Whether this machine's daemon knows about review at all.
+    /// Whether this runner's daemon knows about review at all.
     ///
     /// `nil` until asked. `false` means the daemon ANSWERED and refused — which
-    /// on a machine installed before review is every review call, because an
+    /// on a runner installed before review is every review call, because an
     /// unknown method is a `NOT_FOUND` there. Distinguished from "unreachable",
     /// which is not the daemon's answer and must not be remembered as one.
     @Published var changesSupported: Bool?
@@ -66,9 +66,9 @@ final class DaemonClient: ObservableObject {
     @Published var lastError: String?
     @Published var busy = false
 
-    /// The machine this client drives. Empty means the Mac it runs on.
+    /// The runner this client drives. Empty means the Mac it runs on.
     ///
-    /// An instance property, not a global preference. One client per machine is
+    /// An instance property, not a global preference. One client per runner is
     /// what lets an unreachable one be a single object in a bad state rather
     /// than a condition threaded through shared code — and it is what makes
     /// holding several at once possible at all.
@@ -85,13 +85,13 @@ final class DaemonClient: ObservableObject {
     /// `scheduleRetry`'s `Task` calls `startEvents`, whose `onEnd` arms the
     /// next `scheduleRetry` — self → retryTask → self, with no owner left to
     /// break the cycle. It would keep spawning `farcooler … events` and
-    /// `workspace list` subprocesses against a machine this app no longer
+    /// `workspace list` subprocesses against a runner this app no longer
     /// shows anywhere, invisible except in `ps`.
     deinit { retryTask?.cancel() }
 
     @Published private(set) var state: HostState = .connecting
 
-    /// Bumped every time this machine's link is replaced by a new one.
+    /// Bumped every time this runner's link is replaced by a new one.
     ///
     /// What the per-pane streams watch. `state` alone cannot serve: it settles
     /// back to `.connected` and a view comparing it against its last value sees
@@ -110,7 +110,7 @@ final class DaemonClient: ObservableObject {
 
     /// How long to wait before the next attempt, in seconds.
     ///
-    /// Doubling from 1 to a 30s ceiling, with jitter: several machines
+    /// Doubling from 1 to a 30s ceiling, with jitter: several runners
     /// recovering from one network event must not retry in lockstep, or the
     /// first thing a just-returned network sees is a thundering herd.
     private var attempt = 0
@@ -140,7 +140,7 @@ final class DaemonClient: ObservableObject {
         return base * jitter
     }
 
-    /// Whether a failure names a machine that needs installing rather than
+    /// Whether a failure names a runner that needs installing rather than
     /// one that is merely unreachable right now.
     ///
     /// `crates/cli/src/remote.rs`'s `explain` produces this exact phrase when
@@ -164,7 +164,7 @@ final class DaemonClient: ObservableObject {
         !target.isEmpty && message.localizedCaseInsensitiveContains("update the older side")
     }
 
-    /// How long a machine that needs installing, or that speaks a different
+    /// How long a runner that needs installing, or that speaks a different
     /// protocol version, waits between checks.
     ///
     /// Five minutes: no amount of retrying fixes either condition, so the
@@ -234,7 +234,7 @@ final class DaemonClient: ObservableObject {
             // `retryTask` at that point, which is exactly the idempotency
             // above. That is not a dead end: `startEvents()` below still
             // runs, and the subprocess it starts either survives (this
-            // machine is back) or dies and fires `onEnd`, which finds
+            // runner is back) or dies and fires `onEnd`, which finds
             // `retryTask` nil by then and arms the next wait correctly.
             await self.refresh()
             guard !Task.isCancelled else { return }
@@ -243,7 +243,7 @@ final class DaemonClient: ObservableObject {
         }
     }
 
-    /// Retry this machine at once, whatever the backoff had planned.
+    /// Retry this runner at once, whatever the backoff had planned.
     ///
     /// The escape hatch for the case the timer cannot know about: you fixed the
     /// VPN, and waiting out a thirty second ceiling to find out is the wrong
@@ -289,7 +289,7 @@ final class DaemonClient: ObservableObject {
     var cliEnvironment: [String: String] { environment }
 
     /// What to put in front of every CLI invocation to aim it at this client's
-    /// machine. Empty when it is the machine the app runs on.
+    /// runner. Empty when it is the runner the app runs on.
     ///
     /// Before the subcommand, not after: `--host` is a top-level option, and
     /// clap will not see it once a subcommand has been named.
@@ -353,7 +353,7 @@ final class DaemonClient: ObservableObject {
                     // when `stopEvents()` runs is read and decoded regardless
                     // — `EventStream.stop()` tears down the process but
                     // cannot un-read bytes already sitting in the pipe — so
-                    // without this a buffered event for a removed machine
+                    // without this a buffered event for a removed runner
                     // still mutates `fleet` and fires a notification for it.
                     guard let self, self.streamGeneration == generation else { return }
                     self.apply(event)
@@ -608,7 +608,7 @@ final class DaemonClient: ObservableObject {
         let (maybeData, failureMessage) = await runRaw(
             ["workspace", "list", "--json"], background: true)
         guard let data = maybeData else {
-            let reason = failureMessage ?? "Could not reach this machine."
+            let reason = failureMessage ?? "Couldn't reach this runner."
             lastError = reason
             if looksNotInstalled(reason) {
                 state = .notInstalled
@@ -639,13 +639,13 @@ final class DaemonClient: ObservableObject {
             let justReconnected = state != .connected
             state = .connected
             if justReconnected {
-                // Every stream this machine was carrying died with the link.
+                // Every stream this runner was carrying died with the link.
                 //
                 // `onReconnect` re-reads repositories, roots and layouts, and
-                // for a long time that was mistaken for "the machine is back".
+                // for a long time that was mistaken for "the runner is back".
                 // It is not: a terminal pane and an agent chat each own a
                 // `farcooler … ` subprocess of their own, and those exited when
-                // ssh did. Nothing restarted them, so a remote machine coming
+                // ssh did. Nothing restarted them, so a remote runner coming
                 // back left every pane on screen frozen at the last byte it
                 // received before the drop — the panes were dead and the app
                 // said nothing, because as far as it knew it was connected.
@@ -1006,7 +1006,7 @@ final class DaemonClient: ObservableObject {
     /// screen alone — and useless to the focus paths, which have just written an
     /// ASSUMPTION into that copy. Handed it back, they cannot tell a daemon that
     /// agreed from a daemon that never answered, so a focus against an
-    /// unreachable machine would leave the ring on a pane that never got it.
+    /// unreachable runner would leave the ring on a pane that never got it.
     ///
     /// `nil` means the command did not produce a layout, whether it failed to
     /// run or answered with something undecodable.
@@ -1031,7 +1031,7 @@ final class DaemonClient: ObservableObject {
     /// Pick up work that already exists on a branch.
     ///
     /// A branch that is only on a remote gets a local tracking branch, which is
-    /// the whole point when the work came from another machine or another
+    /// the whole point when the work came from another runner or another
     /// person: pushing back has to go where it came from.
     @discardableResult
     func adoptBranch(project: String, branch: String, agent: String) async -> String? {
@@ -1049,7 +1049,7 @@ final class DaemonClient: ObservableObject {
     }
 
     func startTask(project: String, description: String, agent: String) async -> String? {
-        // This machine's own prefix, read from the fleet it last refreshed — the
+        // This runner's own prefix, read from the fleet it last refreshed — the
         // same value the composer previewed, so the branch that gets made is the
         // branch the user was shown.
         let prefix = fleet.branchPrefix ?? ""
@@ -1087,10 +1087,10 @@ final class DaemonClient: ObservableObject {
         for _ in 0..<120 {
             try? await Task.sleep(for: .milliseconds(500))
             // `try?` swallows `Task.sleep`'s `CancellationError`, so a
-            // cancelled `startTask` — the machine it targets was just
+            // cancelled `startTask` — the runner it targets was just
             // removed — would otherwise fall straight through into another
             // `refresh()` and, once the agent went idle, `send()` the task
-            // description into a machine nothing holds a client for anymore.
+            // description into a runner nothing holds a client for anymore.
             // Checked explicitly rather than relying on the sleep to throw.
             guard !Task.isCancelled else { return workspace.id }
             await refresh()
@@ -1302,7 +1302,7 @@ final class DaemonClient: ObservableObject {
             try? await Task.sleep(for: .milliseconds(150))
             // Same reasoning as `startTask`'s own loop just above: `try?`
             // alone lets a cancelled caller keep polling — up to 20 more
-            // `workspace list` subprocesses against a machine that may have
+            // `workspace list` subprocesses against a runner that may have
             // just been removed — instead of stopping the moment it is told to.
             guard !Task.isCancelled else { return nil }
             await refresh()
@@ -1369,7 +1369,7 @@ final class DaemonClient: ObservableObject {
     /// A thin wrapper over `runRaw`, kept for the roughly thirty call sites
     /// in this file that only ever wanted the data-or-banner behavior. The
     /// one caller that needs its OWN failure's exact words — `refresh()`,
-    /// which decides `.unreachable`'s reason and whether this is a machine
+    /// which decides `.unreachable`'s reason and whether this is a runner
     /// that needs installing — calls `runRaw` directly instead. See there.
     @discardableResult
     // ---- changes ----
@@ -1380,7 +1380,7 @@ final class DaemonClient: ObservableObject {
 
     func changesJSON(_ args: [String]) async -> Data? {
         let (data, message) = await runRaw(args, background: true)
-        // Kept rather than dropped. Swallowing this is what made a machine
+        // Kept rather than dropped. Swallowing this is what made a runner
         // running an older daemon look like a worktree with no changes: the call
         // failed, the pane rendered an empty diff, and nothing anywhere said why.
         changesError = data == nil ? message : nil
@@ -1388,7 +1388,7 @@ final class DaemonClient: ObservableObject {
         return data
     }
 
-    /// Diff status for every worktree on this machine, in one call.
+    /// Diff status for every worktree on this runner, in one call.
     ///
     /// One call rather than one per row: the daemon answers it from counts it
     /// already has plus a two-syscall gate, so a quiet fleet costs almost
@@ -1398,8 +1398,8 @@ final class DaemonClient: ObservableObject {
     func refreshChangesInbox() async {
         let (maybe, message) = await runRaw(["changes", "inbox", "--json"], background: true)
         guard let data = maybe else {
-            // Only a CONNECTED machine refusing the call proves it cannot do it.
-            // A machine that is merely unreachable will answer differently once
+            // Only a CONNECTED runner refusing the call proves it cannot do it.
+            // A runner that is merely unreachable will answer differently once
             // it is back, and remembering "unsupported" for it would be a lie
             // that outlives the network.
             if state == .connected {

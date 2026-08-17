@@ -62,7 +62,7 @@ impl Rpc {
 fn required_scope(method: &str) -> Option<Scope> {
     Some(match method {
         // Themes are what a client paints with. Read, not Control: naming a
-        // colour changes nothing on the host, and a phone connected in a
+        // color changes nothing on the runner, and a phone connected in a
         // read-only capacity should still be able to render itself properly.
         "host.get" | "host.health" | "daemon.version" | "theme.list" => Scope::Read,
         // Stopping the daemon stops nothing a user is watching — terminals are
@@ -93,7 +93,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         // and tokens — and `read` is the scope handed to something that should
         // only see the shape of the fleet.
         | "terminal.screen"
-        // Pasting a file writes bytes to a pane and a file to the machine.
+        // Pasting a file writes bytes to a pane and a file to the runner.
         //
         // The bytes are the same privilege as `terminal.write`, and so is the
         // file: anything that can type into a shell can already create a file
@@ -105,7 +105,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         // A pane's agent channel is exactly as sensitive as its screen — it is
         // the same conversation, just structured — so it sits at the same
         // scope rather than behind `host_admin`. Search returns
-        // worktree-relative paths only, never a host path, so it belongs here
+        // worktree-relative paths only, never a runner path, so it belongs here
         // too rather than beside `worktree.list`.
         "terminal.set_pane_mode"
         | "terminal.agent_subscribe"
@@ -120,7 +120,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         // only see the shape of the fleet, and serving file content there would
         // quietly redefine what every already-enrolled read-only client is
         // allowed to see — a change of security posture made as a side effect of
-        // adding a feature. `Scope` is host-wide (there is no per-repository
+        // adding a feature. `Scope` is runner-wide (there is no per-repository
         // authorization to reach for), so the honest answer is the scope that
         // can already read a terminal screen, which already shows source.
         "changes.change_set"
@@ -154,9 +154,9 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "repository_root.add"
         | "repository_root.remove"
         | "workspace.remove_worktree" => Scope::HostAdmin,
-        // Machine settings, reads included.
+        // Runner settings, reads included.
         //
-        // These write a file in the user's home directory on a machine that may
+        // These write a file in the user's home directory on a runner that may
         // not be the one asking, which is `host_admin` by the same rule paths
         // are. `adapter.list` is a READ and still belongs here: it reports
         // `program`, `args` and `env`, which is local paths and, for an agent
@@ -293,9 +293,12 @@ impl Rpc {
             .ok_or(DomainError::NotFound)
     }
 
-    // MARK: - Machine settings helpers
+    // MARK: - Runner settings helpers
 
-    /// This host as it is right now, for a settings write to answer with.
+    /// This runner as it is right now, for a settings write to answer with.
+    ///
+    /// Named for the wire type it builds, not for the word a person reads —
+    /// see `wire::host` for why `Host` stays `Host` on the wire.
     async fn host_now(&self, svc: &Service) -> Result<farcooler_protocol::v1::Host> {
         svc.inventory.refresh().await;
         Ok(wire::host(&self.daemon_version, svc.host_id, &svc.inventory_snapshot(), 0))
@@ -311,12 +314,12 @@ impl Rpc {
         DomainError::OperationFailed
     }
 
-    /// The host's themes, in the shape every settings write answers with.
+    /// The runner's themes, in the shape every settings write answers with.
     ///
     /// Read back from the file rather than assembled from what was sent, so a
-    /// client's list is what the file now says — including a colour the writer
+    /// client's list is what the file now says — including a color the writer
     /// normalized on the way in.
-    fn host_themes() -> farcooler_protocol::v1::ThemeList {
+    fn runner_themes() -> farcooler_protocol::v1::ThemeList {
         let items = farcooler_core::config::load_themes()
             .into_iter()
             .map(|t| farcooler_protocol::v1::Theme {
@@ -486,13 +489,13 @@ impl Rpc {
                 ))
             }
 
-            // What this host defines in `[themes.<name>]`, read fresh.
+            // What this runner defines in `[themes.<name>]`, read fresh.
             //
             // Read on each call rather than cached at startup, so editing the
             // file and reconnecting is enough to see the change — which is the
             // whole reason themes live in a hand-edited file. It is a few
             // hundred bytes of TOML parsed a handful of times per session, and
-            // a file watcher on every host would be a lot of machinery for
+            // a file watcher on every runner would be a lot of machinery for
             // something that changes twice a year.
             "theme.list" => {
                 let items = farcooler_core::config::load_themes()
@@ -509,7 +512,7 @@ impl Rpc {
                 Ok(result::Value::ThemeList(farcooler_protocol::v1::ThemeList { items }))
             }
 
-            // MARK: - Machine settings
+            // MARK: - Runner settings
             //
             // Editing what `config.toml` holds, from a settings screen instead
             // of an ssh session and a text editor.
@@ -545,7 +548,7 @@ impl Rpc {
                     farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
                 farcooler_core::config::write_theme(&path, &theme)
                     .map_err(|e| Self::config_write_failed("the theme", e))?;
-                Ok(result::Value::ThemeList(Self::host_themes()))
+                Ok(result::Value::ThemeList(Self::runner_themes()))
             }
 
             "theme.delete" => {
@@ -559,7 +562,7 @@ impl Rpc {
                     farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
                 farcooler_core::config::delete_theme(&path, p.typed_confirmation.trim())
                     .map_err(|e| Self::config_write_failed("the theme", e))?;
-                Ok(result::Value::ThemeList(Self::host_themes()))
+                Ok(result::Value::ThemeList(Self::runner_themes()))
             }
 
             "adapter.list" => Ok(result::Value::AdapterList(Self::adapters(svc))),
@@ -938,7 +941,7 @@ impl Rpc {
             // A screen, for clients that cannot read tmux themselves.
             //
             // The CLI and the Mac app go straight to tmux because they are on the
-            // host; a phone over ssh cannot, so without this it can list
+            // runner; a phone over ssh cannot, so without this it can list
             // terminals and act on them but never show one.
             "terminal.screen" => {
                 let id = Self::target(&req)?;
@@ -1622,9 +1625,9 @@ mod tests {
     }
 
     #[test]
-    fn every_machine_setting_method_requires_host_admin() {
+    fn every_runner_setting_method_requires_host_admin() {
         // Writes, because they touch a file in the user's home directory on a
-        // machine that may not be the one asking.
+        // runner that may not be the one asking.
         for method in [
             "settings.set_branch_prefix",
             "theme.upsert",
@@ -1693,7 +1696,7 @@ mod tests {
 /// FNV-1a over the capture and the cursor. Not a checksum anyone relies on for
 /// correctness — a collision means one stale frame until the next change, which
 /// is a redraw, not corruption — and it is compared only against a value this
-/// same host produced moments earlier.
+/// same runner produced moments earlier.
 fn screen_revision(contents: &str, cursor_column: u32, cursor_row: u32) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut eat = |bytes: &[u8]| {

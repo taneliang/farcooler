@@ -45,7 +45,7 @@ class QuickTaskTest {
     }
 
     @Test
-    fun aSentenceBecomesAWorktreeNameTheMachineWillAccept() {
+    fun aSentenceBecomesAWorktreeNameTheRunnerWillAccept() {
         // A name is a directory now: too long, or nothing left after sanitizing,
         // and the create call fails somewhere in the middle of Quick Task rather
         // than at the start of it.
@@ -56,28 +56,28 @@ class QuickTaskTest {
         assertEquals("task", TaskSlug.name("!!!"))
         assertEquals("task", TaskSlug.sanitize(TaskSlug.name("!!!")))
 
-        // Kotlin calls 写 a letter and the machine does not, so a description
+        // Kotlin calls 写 a letter and the runner does not, so a description
         // with no ASCII in it has to fall back rather than hand over a name
         // every character of which the daemon will dash away to nothing.
         assertEquals("task", TaskSlug.name("写代码"))
         // And an accent is dropped rather than transliterated: "caf", not "cafe".
-        // The machine would have done exactly this to it.
+        // The runner would have done exactly this to it.
         assertEquals("caf", TaskSlug.name("Café"))
         assertTrue(
-            "every generated name must survive the machine's own sanitizing",
+            "every generated name must survive the runner's own sanitizing",
             TaskSlug.sanitize(TaskSlug.name("写代码")).isNotEmpty(),
         )
     }
 
     @Test
-    fun sanitizingAgreesWithTheMachineAboutWhereANameLands() {
+    fun sanitizingAgreesWithTheRunnerAboutWhereANameLands() {
         // Runs collapse and edges are trimmed, so a typed sentence and the slug
         // of that sentence land in the same directory.
         assertEquals("Rate-Limiting", TaskSlug.sanitize("Rate  Limiting!"))
         assertEquals("Rate-Limiting", TaskSlug.sanitize("Rate-Limiting"))
         // Case is information typed on purpose, and underscores are legal.
         assertEquals("Keep_This", TaskSlug.sanitize("Keep_This"))
-        // Nothing left is a name the machine refuses, so the forms check for it.
+        // Nothing left is a name the runner refuses, so the forms check for it.
         assertEquals("", TaskSlug.sanitize("!!!"))
     }
 

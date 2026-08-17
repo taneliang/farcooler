@@ -5,8 +5,8 @@ import SwiftUI
 /// Two lists, because they are two different powers and conflating them is how
 /// people end up unable to answer the only question that matters after losing a
 /// laptop: what can that machine still do? A DEVICE receives notifications. A
-/// MACHINE sends them. Revoking either is one swipe, and takes effect at the
-/// relay — which is the point, since the machine you want to revoke is usually
+/// RUNNER sends them. Revoking either is one swipe, and takes effect at the
+/// relay — which is the point, since the runner you want to revoke is usually
 /// the one you can no longer run a command on.
 ///
 /// In the apps rather than a web dashboard on purpose: two lists and two delete
@@ -25,7 +25,7 @@ public struct AccountDevicesView: View {
         Form {
             if !account.isSignedIn {
                 Section {
-                    Text("Sign in to see the devices and machines on your account.")
+                    Text("Sign in to see the devices and runners on your account.")
                         .foregroundStyle(.secondary)
                 }
             } else if loading {
@@ -38,7 +38,7 @@ public struct AccountDevicesView: View {
                 }
             } else if failed {
                 Section {
-                    Text("Could not reach the relay.")
+                    Text("Couldn’t reach the relay.")
                         .foregroundStyle(.secondary)
                     Button("Try again") { Task { await load() } }
                 }
@@ -52,12 +52,12 @@ public struct AccountDevicesView: View {
                         + "reappears the next time that device opens Far Cooler."
                 )
                 list(
-                    "Machines", kind: .machine, rows: registrations?.machines ?? [],
-                    empty: "No machines paired. Pair one from Machines.",
+                    "Runners", kind: .runner, rows: registrations?.runners ?? [],
+                    empty: "No runners paired. Pair one from Runners.",
                     footer: "These may notify you, and report their version when they do — "
-                        + "so a machine showing an old one is a machine to reinstall. "
+                        + "so a runner showing an old one is a runner to reinstall. "
                         + "Removing one takes effect immediately at the relay, whether or "
-                        + "not you can still reach the machine itself."
+                        + "not you can still reach the runner itself."
                 )
             }
         }
@@ -120,11 +120,11 @@ public struct AccountDevicesView: View {
         if kind == .device {
             registrations = Registrations(
                 devices: (registrations?.devices ?? []).filter { $0.id != row.id },
-                machines: registrations?.machines ?? [])
+                runners: registrations?.runners ?? [])
         } else {
             registrations = Registrations(
                 devices: registrations?.devices ?? [],
-                machines: (registrations?.machines ?? []).filter { $0.id != row.id })
+                runners: (registrations?.runners ?? []).filter { $0.id != row.id })
         }
         _ = await account.revoke(row, kind: kind)
         await load()

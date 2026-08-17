@@ -99,8 +99,8 @@ async fn a_client_connects_and_learns_the_daemon_version() {
 }
 
 #[tokio::test]
-async fn a_client_learns_what_the_machine_can_do_before_asking_it_anything() {
-    // The mechanism a newer app uses to degrade against an older machine. It
+async fn a_client_learns_what_the_runner_can_do_before_asking_it_anything() {
+    // The mechanism a newer app uses to degrade against an older runner. It
     // has to be answered by the handshake rather than by a call, because the
     // app decides what to draw before it has made one.
     let daemon = start().await;
@@ -108,7 +108,7 @@ async fn a_client_learns_what_the_machine_can_do_before_asking_it_anything() {
 
     assert!(session.can(farcooler_protocol::capability::WORKSPACES));
     assert!(session.can(farcooler_protocol::capability::CHANGES));
-    assert!(!session.can("time-travel"), "a machine must not claim what it cannot do");
+    assert!(!session.can("time-travel"), "a runner must not claim what it cannot do");
 }
 
 #[tokio::test]

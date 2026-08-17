@@ -34,11 +34,11 @@ import kotlinx.coroutines.launch
  * Pasting an image into a terminal.
  *
  * A terminal takes bytes and an agent running in one opens a path, so an image
- * from a phone has to become a file on the machine the pane is on before the
+ * from a phone has to become a file on the runner the pane is on before the
  * agent can see it. The daemon writes it and types the path; this carries the
  * bytes there and says how far along it is.
  *
- * Always a transfer: a phone is never the machine the pane is on.
+ * Always a transfer: a phone is never the runner the pane is on.
  */
 
 /** The largest image the daemon accepts, checked here so a slow link is not spent learning it. */
@@ -117,11 +117,11 @@ class ImagePasteQueue {
             // know the method, or a pane that closed before the path could be
             // typed. Named together rather than guessed at.
             text.contains("predates this") ->
-                "That terminal may have closed, or this machine's Far Cooler may be too old."
+                "That terminal may have closed, or this runner's Far Cooler may be too old."
             text.contains("file size") ->
                 "That file is too large to send. Files up to 16 MB work."
             text.contains("not found") -> "That terminal isn't running anymore."
-            else -> "Couldn't reach this machine."
+            else -> "Couldn't reach this runner."
         }
     }
 }

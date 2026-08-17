@@ -1,7 +1,7 @@
 package com.farcooler.net
 
 import com.farcooler.core.ClientCore
-import com.farcooler.data.Host
+import com.farcooler.data.Runner
 import com.farcooler.data.Identity
 import com.farcooler.data.Theme
 import com.farcooler.model.AdapterInfo
@@ -33,19 +33,19 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * One machine's session and the state a screen renders from it.
+ * One runner's session and the state a screen renders from it.
  *
  * The rule the whole product rests on holds here too: this never computes a
  * terminal's state. It asks, and shows what the daemon derived. A phone that
  * re-derived could disagree with the daemon and with the Mac about the same
  * terminal, which is exactly the confusion the design removed everywhere else.
  *
- * One of these per machine, always — see [FleetRepository]. That is the same
- * shape the Mac arrived at, and it is why "this machine is down, here is why"
+ * One of these per runner, always — see [FleetRepository]. That is the same
+ * shape the Mac arrived at, and it is why "this runner is down, here is why"
  * has somewhere natural to live instead of being a flag threaded through shared
  * code.
  */
-class Connection(val host: Host, private val scope: CoroutineScope) {
+class Connection(val host: Runner, private val scope: CoroutineScope) {
 
     sealed interface Phase {
         data object Connecting : Phase
@@ -65,7 +65,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
          * [Connecting] means "there has never been a fleet"; [Failed] means
          * "stopped, waiting for you", and this is not stopped.
          *
-         * Rows keep their place through this. A machine that stops answering
+         * Rows keep their place through this. A runner that stops answering
          * keeps its rows, dimmed, rather than dropping them — the rule this
          * app already follows, and the reason it can afford a phase that means
          * "stale, on purpose, for the moment".
@@ -77,7 +77,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      * What a failure MEANS, as opposed to what it says.
      *
      * A failure screen that offers the same button for every failure is one
-     * that is wrong most of the time: "Try again" fixes a machine that was
+     * that is wrong most of the time: "Try again" fixes a runner that was
      * asleep and fixes nothing at all about a key this device was never
      * authorised with, or a host key that changed underneath us. Each of these
      * has exactly one useful next move and they are not the same move.
@@ -90,7 +90,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      * so wrapping the error in more context does not stop it matching.
      */
     enum class Failure {
-        /** The machine answered but does not know this device's key. */
+        /** The runner answered but does not know this device's key. */
         KEY_REJECTED,
 
         /**
@@ -100,13 +100,13 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
          */
         HOST_KEY_CHANGED,
 
-        /** Nothing answered: wrong address, machine asleep, off the network. */
+        /** Nothing answered: wrong address, host asleep, off the network. */
         UNREACHABLE,
 
         /** SSH worked; Far Cooler is not installed over there. */
         DAEMON_MISSING,
 
-        /** This device has no usable key, so no machine will ever accept it. */
+        /** This device has no usable key, so no runner will ever accept it. */
         NO_IDENTITY,
 
         /**
@@ -157,7 +157,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
     val daemon: StateFlow<DaemonBuild?> = _daemon.asStateFlow()
 
     /**
-     * Not private: a terminal screen talks to the same machine through this
+     * Not private: a terminal screen talks to the same runner through this
      * same core, rather than opening a second SSH session just to watch one
      * pane.
      */
@@ -185,8 +185,8 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      */
     private var reconnector: Job? = null
 
-    /** The machine details the last [start] used, which a retry reconnects to. */
-    private var current: Host = host
+    /** The runner details the last [start] used, which a retry reconnects to. */
+    private var current: Runner = host
 
     /**
      * Which connection attempt is current.
@@ -250,7 +250,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
         }
     }
 
-    suspend fun start(withHost: Host = host) {
+    suspend fun start(withHost: Runner = host) {
         poller?.cancel()
         reconnector?.cancel()
         current = withHost
@@ -315,7 +315,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      * Retry at once, whatever the backoff had planned.
      *
      * The escape hatch for everything a timer cannot know: you walked back
-     * into Wi-Fi range, you woke the machine, or you can simply see that this
+     * into Wi-Fi range, you woke the host, or you can simply see that this
      * is stuck. Deliberately available while [Phase.Connected] too — that is
      * the case where the app believes it is fine and the person holding it
      * knows better.
@@ -363,7 +363,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
         _reconnects.value += 1
         refresh()
         // Re-read rather than trust what a previous session reported: a
-        // machine that dropped and came back may have gained a repository, and
+        // runner that dropped and came back may have gained a repository, and
         // staying invisible to the pickers until relaunch is the failure the
         // Mac's `onReconnect` seeding exists to prevent.
         loadRepositories()
@@ -411,7 +411,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      *
      * Not a way to abort the SSH attempt — see [attempt] — but a way off the
      * spinner, which is the thing that was actually missing. A connection to a
-     * machine that is asleep shows the same indefinite spinner as one that is
+     * runner that is asleep shows the same indefinite spinner as one that is
      * about to succeed.
      */
     fun giveUp() {
@@ -422,7 +422,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      * Back out of the fingerprint question without answering it.
      *
      * Lands on the failure screen rather than the spinner, because that is the
-     * screen with the machine switcher, the editor and this device's key on it.
+     * screen with the runner switcher, the editor and this device's key on it.
      * The wording is what [Failure.KEY_NOT_TRUSTED] matches on.
      */
     fun declineHostKey() {
@@ -475,7 +475,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
             platform = body["platform"]?.jsonPrimitive?.contentOrNull.orEmpty(),
             // Absent from a daemon older than capabilities. `DaemonBuild.can`
             // reads an empty set as the features that existed then, so an old
-            // machine keeps working rather than going dark.
+            // runner keeps working rather than going dark.
             capabilities = body["capabilities"]?.jsonArray
                 ?.mapNotNull { it.jsonPrimitive.contentOrNull }
                 ?.toSet()
@@ -492,7 +492,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
     }
 
     /**
-     * What this machine says a derived branch name starts with.
+     * What this runner says a derived branch name starts with.
      *
      * Applied on this side rather than by the daemon, because the composer shows
      * you the branch it is about to create — a prefix added on the far side
@@ -566,7 +566,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
     }
 
     /**
-     * Merge whatever this machine defines into the picker.
+     * Merge whatever this runner defines into the picker.
      *
      * Read on every connection and reconnection, alongside repositories, so a
      * `[themes.*]` table added to the host's config.toml does not stay
@@ -620,14 +620,14 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
      * Hide or unhide a worktree.
      *
      * The Mac has had this since worktree management landed and neither phone
-     * app ever got it, which on a machine that adopts every worktree it already
+     * app ever got it, which on a runner that adopts every worktree it already
      * has means a sidebar of twenty rows and no way to put nineteen away.
      * Hiding never touches git and is never refused for a running terminal — it
      * is a view preference, not a lifecycle step.
      */
-    // ---- machine settings ----
+    // ---- runner settings ----
     //
-    // Editing what the connected machine's config.toml holds. Every write
+    // Editing what the connected runner's config.toml holds. Every write
     // answers with the file's new state, read back by the daemon rather than
     // echoed from the request, so a value the writer normalized is what this
     // phone ends up holding.
@@ -636,7 +636,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
     // carry arrays and a map, and that helper handles scalars only.
 
     /**
-     * Only the themes this machine's file defines.
+     * Only the themes this runner's file defines.
      *
      * Not the merged list [com.farcooler.data.Themes.available], which includes
      * this phone's built-ins — a built-in shown in an editor as though the file
@@ -671,7 +671,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
     }
 
     /**
-     * Put the machine's themes back into the picker every screen reads.
+     * Put the runner's themes back into the picker every screen reads.
      *
      * Without this, a theme you just made is missing from the one place you
      * would go to choose it.
@@ -702,7 +702,7 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
     /** Prove an adapter works, without saving it first. */
     suspend fun testAdapter(adapter: AdapterInfo): AdapterTestOutcome {
         val data = attempt { core.call("adapter.test", adapter.toJson()) }.getOrNull()
-            ?: return AdapterTestOutcome.Failed("That machine could not be reached.")
+            ?: return AdapterTestOutcome.Failed("That runner couldn't be reached.")
         return if (data["ok"]?.jsonPrimitive?.booleanOrNull == true) {
             AdapterTestOutcome.Worked(
                 data["reported"]?.jsonPrimitive?.contentOrNull ?: "answered")
@@ -809,19 +809,19 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
 
     companion object {
         /**
-         * What a derived branch name starts with when the machine says nothing.
+         * What a derived branch name starts with when the runner says nothing.
          *
          * Matches `farcooler_core::config::DEFAULT_BRANCH_PREFIX`. Stated here
          * as well because an older daemon does not send the key, and defaulting
          * to no prefix would have this phone name branches differently from
-         * every other client talking to the same machine.
+         * every other client talking to the same runner.
          */
         const val DEFAULT_BRANCH_PREFIX = "feat/"
 
         private const val POLL_INTERVAL_MS = 3_000L
 
         /**
-         * How long a machine that answered SSH but not Far Cooler waits.
+         * How long a runner that answered SSH but not Far Cooler waits.
          *
          * Five minutes, matching the Mac. No amount of retrying installs a
          * daemon, so the exponential schedule — which exists to survive a
@@ -838,8 +838,8 @@ class Connection(val host: Host, private val scope: CoroutineScope) {
          * iPhone's `Connection.backoff`, deliberately: "how long until it comes
          * back" should have one answer across the three apps. Doubling from two
          * seconds to a thirty second ceiling, with jitter, because several
-         * machines recovering from one network event must not retry in
-         * lockstep — and this app connects to every machine at once, so that is
+         * runners recovering from one network event must not retry in
+         * lockstep — and this app connects to every runner at once, so that is
          * the ordinary case here rather than the unlucky one.
          */
         fun backoffMs(attempt: Int): Long {

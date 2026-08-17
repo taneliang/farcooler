@@ -5,11 +5,11 @@ import UniformTypeIdentifiers
 /// Pasting an image into a terminal.
 ///
 /// A terminal takes bytes and an agent running in one opens a path, so an image
-/// from a phone has to become a file on the machine the pane is on before the
+/// from a phone has to become a file on the runner the pane is on before the
 /// agent can see it. The daemon writes it and types the path; this carries the
 /// bytes there and says how far along it is.
 ///
-/// Always a transfer here, unlike the Mac: a phone is never the machine the
+/// Always a transfer here, unlike the Mac: a phone is never the runner the
 /// pane is on.
 
 /// One image on its way into a pane.
@@ -106,7 +106,7 @@ final class ImagePasteQueue: ObservableObject {
         // to know the method, or a pane that closed before the path
         // could be typed. Named together rather than guessed.
         if text.contains("predates this") {
-            return "That terminal may have closed, or this machine's Far Cooler may be too old."
+            return "That terminal may have closed, or this runner's Far Cooler may be too old."
         }
         if text.contains("file size") {
             return "That file is too large to send. Files up to 16 MB work."
@@ -114,7 +114,7 @@ final class ImagePasteQueue: ObservableObject {
         if text.contains("not found") {
             return "That terminal isn't running anymore."
         }
-        return "Couldn't reach this machine."
+        return "Couldn't reach this runner."
     }
 
     /// PNG for anything with sharp edges, JPEG for a photograph.
@@ -148,7 +148,7 @@ final class ImagePasteQueue: ObservableObject {
 /// crates/protocol/src/lib.rs). `framing::encode` refuses to encode a larger
 /// one, so an untouched 4032x3024 photo — three to eight megabytes — could
 /// never be sent as a prompt attachment and failed every time, reported as
-/// though the machine were unreachable.
+/// though the runner were unreachable.
 ///
 /// Shrinking rather than raising the cap: the cap is a deliberate guard on the
 /// control channel, and full resolution buys nothing here anyway. Models

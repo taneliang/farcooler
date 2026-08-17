@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
  *
  * The local `Notifier` covers the case where the phone is awake and the app is
  * running. This covers the case the product exists for: the app is not running,
- * the device is asleep, and an agent on a machine three time zones away is
+ * the device is asleep, and an agent on a runner three time zones away is
  * stuck. Nothing local can know that — only the daemon can, and the only route
  * to a sleeping device is FCM.
  *

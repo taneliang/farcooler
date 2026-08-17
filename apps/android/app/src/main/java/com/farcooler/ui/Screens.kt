@@ -62,19 +62,19 @@ import com.farcooler.net.Connection
 import kotlinx.coroutines.launch
 
 /**
- * The first-run screen: no machines yet, so there is nothing else to show.
+ * The first-run screen: no runners yet, so there is nothing else to show.
  *
  * One statement and two actions, the more important one loud. The ORDER those
- * steps go in is not a preference: a machine that has never seen this device's
+ * steps go in is not a preference: a runner that has never seen this device's
  * key refuses the very first connection, so "add one, then authorize" ends
  * onboarding on a failure screen. Authorizing first costs nothing and makes the
  * first connection the one that succeeds — which is why it is the prominent
- * button and adding a machine is the quiet one.
+ * button and adding a runner is the quiet one.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OnboardingScreen(
-    onAdd: (com.farcooler.data.Host) -> Unit,
+    onAdd: (com.farcooler.data.Runner) -> Unit,
     onAuthorize: () -> Unit,
     onSettings: () -> Unit,
     showBack: Boolean,
@@ -111,10 +111,10 @@ fun OnboardingScreen(
                 modifier = Modifier.size(44.dp),
             )
             Spacer(Modifier.height(22.dp))
-            Text("Connect a machine", style = MaterialTheme.typography.headlineSmall)
+            Text("Connect a runner", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Far Cooler runs coding agents on machines you already reach over SSH. " +
+                "Far Cooler runs coding agents on runners you already reach over SSH. " +
                     "Put this device's key on one, then add its address.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -125,12 +125,12 @@ fun OnboardingScreen(
                 Text("Authorize this device")
             }
             Spacer(Modifier.height(12.dp))
-            TextButton(onClick = { adding = true }) { Text("Add a machine") }
+            TextButton(onClick = { adding = true }) { Text("Add a runner") }
         }
     }
 
     if (adding) {
-        HostEditorSheet(
+        RunnerEditorSheet(
             existing = null,
             onSave = onAdd,
             onRemove = null,
@@ -140,10 +140,10 @@ fun OnboardingScreen(
 }
 
 /**
- * Shows the public key to install on a machine.
+ * Shows the public key to install on a runner.
  *
  * Deliberately the whole of enrolment. There is no pairing code and no account:
- * a machine authorizes this device exactly the way it authorizes any other SSH
+ * a runner authorizes this device exactly the way it authorizes any other SSH
  * client, and revokes it by deleting one line.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -173,7 +173,7 @@ fun AuthorizeScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Add this device's public key to the machine:")
+            Text("Add this device's public key to the runner:")
             Mono(publicKey)
             Button(
                 onClick = { scope.launch { clipboard.writeText("Far Cooler device key", publicKey) } },
@@ -182,7 +182,7 @@ fun AuthorizeScreen(onBack: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 Text("Copy public key")
             }
-            Text("On the machine, run:")
+            Text("On the runner, run:")
             Mono("echo '<paste>' >> ~/.ssh/authorized_keys")
             Text(
                 "The private key never leaves this device. Revoke it by deleting that line " +
@@ -216,7 +216,7 @@ private fun Mono(text: String) {
 @Composable
 fun SettingsScreen(
     model: AppModel,
-    onOpenMachineSettings: (Connection) -> Unit,
+    onOpenRunnerSettings: (Connection) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -229,7 +229,7 @@ fun SettingsScreen(
     val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
     val onAttention by model.settings.notifyOnAttention.collectAsStateWithLifecycle()
     val onDone by model.settings.notifyOnDone.collectAsStateWithLifecycle()
-    val allMachines by model.settings.allMachinesAtOnce.collectAsStateWithLifecycle()
+    val allRunners by model.settings.allRunnersAtOnce.collectAsStateWithLifecycle()
     val reshape by model.settings.reshapePanes.collectAsStateWithLifecycle()
     val email by model.account.email.collectAsStateWithLifecycle()
     val signingIn by model.account.signingIn.collectAsStateWithLifecycle()
@@ -265,7 +265,7 @@ fun SettingsScreen(
                 Text(email, style = MaterialTheme.typography.bodyMedium)
                 Row {
                     TextButton(onClick = { model.navigate(Route.Devices) }) {
-                        Text("Devices and machines")
+                        Text("Devices and runners")
                     }
                     TextButton(onClick = { scope.launch { model.account.signOut() } }) {
                         Text("Sign out")
@@ -273,7 +273,7 @@ fun SettingsScreen(
                 }
             } else {
                 Text(
-                    "Sign in so a machine you own can notify this phone while the app is " +
+                    "Sign in so a runner you own can notify this phone while the app is " +
                         "closed. Everything else works without it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -302,13 +302,13 @@ fun SettingsScreen(
             )
 
             HorizontalDivider()
-            SectionTitle("Machines")
-            SettingRow("Connect every machine at once", allMachines) {
-                model.settings.setAllMachinesAtOnce(it)
+            SectionTitle("Runners")
+            SettingRow("Connect every runner at once", allRunners) {
+                model.settings.setAllRunnersAtOnce(it)
             }
             Text(
-                "One fleet across every machine, the way the Mac app works. Turn it off to " +
-                    "talk only to the machine you picked, which costs less battery when you " +
+                "One fleet across every runner, the way the Mac app works. Turn it off to " +
+                    "talk only to the runner you picked, which costs less battery when you " +
                     "have several.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -331,12 +331,12 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // Editing the machine's own file, rather than telling someone to go
+            // Editing the runner's own file, rather than telling someone to go
             // and edit it. That instruction used to be this section's help text —
             // reasonable advice, and not something anybody does from a phone.
             val live = connections.firstOrNull { it.phase.value is Connection.Phase.Connected }
             if (live != null) {
-                OutlinedButton(onClick = { onOpenMachineSettings(live) }) {
+                OutlinedButton(onClick = { onOpenRunnerSettings(live) }) {
                     Text("Settings on ${live.host.displayLabel}")
                 }
             }
@@ -448,7 +448,7 @@ private fun diagnostics(model: AppModel, connections: List<Connection>): String 
 /**
  * A section heading, shared by every settings screen in this app.
  *
- * Was private to this file until the machine-settings screens needed the same
+ * Was private to this file until the runner-settings screens needed the same
  * heading. Two definitions of one heading is how two screens come to look
  * slightly different for no reason anybody can find later.
  */
@@ -487,7 +487,7 @@ private fun Warning(text: String) {
 /**
  * Everything this account has registered, and how to revoke it.
  *
- * Revoking here rather than on the machine is the case that matters: a laptop
+ * Revoking here rather than on the runner is the case that matters: a laptop
  * you no longer have is exactly the one you cannot run a command on.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -505,7 +505,7 @@ fun DevicesScreen(model: AppModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Devices and machines") },
+                title = { Text("Devices and runners") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -528,7 +528,7 @@ fun DevicesScreen(model: AppModel, onBack: () -> Unit) {
             }
             val current = registrations
             if (current == null) {
-                Text("Could not reach the relay.")
+                Text("Couldn’t reach the relay.")
                 return@Column
             }
 
@@ -550,18 +550,18 @@ fun DevicesScreen(model: AppModel, onBack: () -> Unit) {
             }
 
             HorizontalDivider()
-            SectionTitle("Machines")
-            for (machine in current.machines) {
-                RegistrationRow(machine) {
+            SectionTitle("Runners")
+            for (runner in current.runners) {
+                RegistrationRow(runner) {
                     scope.launch {
-                        model.account.revoke(machine, RegistrationKind.MACHINE)
+                        model.account.revoke(runner, RegistrationKind.RUNNER)
                         registrations = model.account.fetchRegistrations()
                     }
                 }
             }
-            if (current.machines.isEmpty()) {
+            if (current.runners.isEmpty()) {
                 Text(
-                    "No machines are paired to notify this account.",
+                    "No runners are paired to notify this account.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

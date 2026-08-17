@@ -66,7 +66,7 @@ import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.launch
 
 /**
- * Every worktree on every machine, in one scroll area.
+ * Every worktree on every runner, in one scroll area.
  *
  * Shown two places — as the whole screen when nothing is running anywhere, and
  * inside the drawer over a terminal — so a task started from either one works
@@ -158,14 +158,14 @@ private fun FleetBody(
     var showQuickTask by remember { mutableStateOf(false) }
     var showNewWorkspace by remember { mutableStateOf(false) }
     var showHidden by remember { mutableStateOf(false) }
-    var editingHost by remember { mutableStateOf<com.farcooler.data.Host?>(null) }
-    var addingHost by remember { mutableStateOf(false) }
+    var editingRunner by remember { mutableStateOf<com.farcooler.data.Runner?>(null) }
+    var addingRunner by remember { mutableStateOf(false) }
     var newTerminalIn by remember { mutableStateOf<Pair<Connection, Workspace>?>(null) }
 
-    // Naming the machine only earns its place once there is more than one.
-    // With a single machine connected its name is on every row and says
+    // Naming the runner only earns its place once there is more than one.
+    // With a single runner connected its name is on every row and says
     // nothing about which row is which.
-    val namesMachines = connections.size > 1
+    val namesRunners = connections.size > 1
 
     val visible = entries.filter { showHidden || !it.workspace.isHidden }
     val hiddenCount = entries.count { it.workspace.isHidden }
@@ -191,15 +191,15 @@ private fun FleetBody(
             }
         }
 
-        // A machine that failed says so where its rows would be, rather than
+        // A runner that failed says so where its rows would be, rather than
         // dropping out of the list. Its rows are still there when it had any:
         // reads keep showing the last good fetch.
         items(connections, key = { it.host.id }) { connection ->
-            MachineStatusRow(
+            RunnerStatusRow(
                 connection = connection,
-                showLabel = namesMachines,
+                showLabel = namesRunners,
                 onRetry = { model.fleet.retry(connection.host.id) },
-                // Not `retry`: this machine already has a session object with a
+                // Not `retry`: this runner already has a session object with a
                 // backoff armed, and starting over would discard the schedule
                 // rather than skip the wait it is counting down.
                 onReconnectNow = { connection.reconnectNow() },
@@ -214,14 +214,14 @@ private fun FleetBody(
                     model.hosts.forgetKey(connection.host)
                     model.fleet.retry(connection.host.id, connection.host.copy(fingerprint = null))
                 },
-                onEdit = { editingHost = connection.host },
+                onEdit = { editingRunner = connection.host },
             )
         }
 
         if (visible.isEmpty()) {
             item {
                 Text(
-                    if (entries.isEmpty()) "No worktrees on any connected machine."
+                    if (entries.isEmpty()) "No worktrees on any connected runner."
                     else "Every worktree is hidden.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -234,7 +234,7 @@ private fun FleetBody(
             item(key = "${entry.host.id}/${entry.workspace.id}") {
                 WorkspaceHeader(
                     entry = entry,
-                    showMachine = namesMachines,
+                    showRunner = namesRunners,
                     onHide = { hidden ->
                         scope.launch { entry.connection.setHidden(entry.workspace, hidden) }
                     },
@@ -304,7 +304,7 @@ private fun FleetBody(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { addingHost = true }) { Text("Add a machine") }
+                TextButton(onClick = { addingRunner = true }) { Text("Add a runner") }
             }
         }
     }
@@ -322,20 +322,20 @@ private fun FleetBody(
             onDismiss = { newTerminalIn = null },
         )
     }
-    if (addingHost) {
-        HostEditorSheet(
+    if (addingRunner) {
+        RunnerEditorSheet(
             existing = null,
             onSave = { model.addHost(it) },
             onRemove = null,
-            onDismiss = { addingHost = false },
+            onDismiss = { addingRunner = false },
         )
     }
-    editingHost?.let { host ->
-        HostEditorSheet(
+    editingRunner?.let { host ->
+        RunnerEditorSheet(
             existing = host,
             onSave = { model.hosts.update(it) },
             onRemove = { model.removeHost(it) },
-            onDismiss = { editingHost = null },
+            onDismiss = { editingRunner = null },
         )
     }
 }
@@ -343,23 +343,23 @@ private fun FleetBody(
 private fun liveSummary(connections: List<Connection>): String {
     val healthy = connections.count { it.fleet.value.runtimeHealthy }
     val live = connections.sumOf { it.fleet.value.livePanes }
-    if (connections.isEmpty()) return "No machines"
+    if (connections.isEmpty()) return "No runners"
     if (healthy == 0) return "tmux unavailable"
-    val machines = if (connections.size == 1) "1 machine" else "${connections.size} machines"
-    return "$live live · $machines"
+    val runners = if (connections.size == 1) "1 runner" else "${connections.size} runners"
+    return "$live live · $runners"
 }
 
 /**
- * What one machine is doing, when that is not simply "answering".
+ * What one runner is doing, when that is not simply "answering".
  *
- * A machine that stops answering keeps its rows, dimmed, rather than dropping
+ * A runner that stops answering keeps its rows, dimmed, rather than dropping
  * them — so this row is what explains why they are stale. Every failure has
  * exactly one useful next move and they are not the same move, which is why
  * this switches on [Connection.Failure] rather than offering "try again" for
  * everything.
  */
 @Composable
-private fun MachineStatusRow(
+private fun RunnerStatusRow(
     connection: Connection,
     showLabel: Boolean,
     onRetry: () -> Unit,
@@ -386,7 +386,7 @@ private fun MachineStatusRow(
             }
 
             // Not an error, and deliberately not worded as one: the rows above
-            // are this machine's last good answer and are still worth reading.
+            // are this runner's last good answer and are still worth reading.
             //
             // The attempt number is left out. "Reconnecting (4)" prices a wait
             // nobody asked for and reads as an error count; what someone wants
@@ -406,7 +406,7 @@ private fun MachineStatusRow(
 
             is Connection.Phase.NeedsApproval -> {
                 Text(
-                    "This machine presented a key Far Cooler has never seen:",
+                    "This runner presented a key Far Cooler has never seen:",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -416,7 +416,7 @@ private fun MachineStatusRow(
                     fontFamily = FontFamily.Monospace,
                 )
                 Text(
-                    "Check it on the machine: " +
+                    "Check it on the host: " +
                         "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -461,7 +461,7 @@ private fun MachineStatusRow(
 
 private fun failureHeadline(kind: Connection.Failure, connection: Connection): String = when (kind) {
     Connection.Failure.KEY_REJECTED -> "Not authorized yet"
-    Connection.Failure.HOST_KEY_CHANGED -> "This machine's key changed"
+    Connection.Failure.HOST_KEY_CHANGED -> "This host's key changed"
     Connection.Failure.UNREACHABLE -> "Can't reach ${connection.host.address}"
     Connection.Failure.DAEMON_MISSING -> "Far Cooler isn't installed there"
     Connection.Failure.NO_IDENTITY -> "This device has no key"
@@ -474,7 +474,7 @@ private fun failureHeadline(kind: Connection.Failure, connection: Connection): S
  * Ours wherever we know what happened, the core's own text only where we do
  * not. The raw string crossing up from Rust is written for whoever is reading a
  * log — lowercase, ending in things like "(os error 61)" — and putting that in
- * front of someone who just wants their machine back is asking them to
+ * front of someone who just wants their runner back is asking them to
  * translate. Two cases keep it deliberately: the changed host key, whose
  * message carries the two fingerprints being compared, and the unclassified
  * failure, where the core's account is the only account there is.
@@ -488,7 +488,7 @@ private fun failureDetail(
         "${connection.host.user}@${connection.host.address} hasn't been given this device's key."
 
     Connection.Failure.UNREACHABLE ->
-        "Nothing answered on port ${connection.host.port}. The machine may be asleep, " +
+        "Nothing answered on port ${connection.host.port}. The runner may be asleep, " +
             "or the address may be wrong."
 
     Connection.Failure.DAEMON_MISSING ->
@@ -500,7 +500,7 @@ private fun failureDetail(
 @Composable
 private fun WorkspaceHeader(
     entry: FleetEntry,
-    showMachine: Boolean,
+    showRunner: Boolean,
     onHide: (Boolean) -> Unit,
     onNewTerminal: () -> Unit,
 ) {
@@ -519,7 +519,7 @@ private fun WorkspaceHeader(
             Text(
                 buildString {
                     append(entry.workspace.branch)
-                    if (showMachine) append(" · ${entry.host.displayLabel}")
+                    if (showRunner) append(" · ${entry.host.displayLabel}")
                 },
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,

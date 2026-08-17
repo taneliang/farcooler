@@ -79,16 +79,16 @@ pub enum DomainError {
     #[error("the agent may or may not have received this dispatch")]
     DispatchUnknown,
 
-    /// This machine's Far Cooler is older than what the client asked for.
+    /// This runner's Far Cooler is older than what the client asked for.
     ///
     /// Distinct from `NotFound`, which it used to arrive as. "No such
-    /// workspace" and "this machine cannot do that yet" call for opposite
+    /// workspace" and "this runner cannot do that yet" call for opposite
     /// responses, and a newer app could not tell them apart — so it could
     /// neither dim the control nor say anything a person could act on.
     ///
     /// Names the capability, because "update it" is only useful advice if the
     /// person can tell which feature is missing.
-    #[error("this machine is running an older Far Cooler that can't do this yet")]
+    #[error("this runner is running an older Far Cooler that can't do this yet")]
     CapabilityUnsupported { needed: &'static str },
 
     #[error("path is outside every allowlisted repository root")]

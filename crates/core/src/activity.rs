@@ -1037,7 +1037,7 @@ Do you want to allow this command?
     ///
     /// `wants_attention` covered agents only, so a `cargo build` that exited 101 at
     /// 3am was silent and you found out in the morning. For a design whose whole
-    /// point is overseeing work away from the machine, that is a hole in the one
+    /// point is overseeing work away from the runner, that is a hole in the one
     /// direction that costs real time.
     #[test]
     fn a_command_that_failed_wants_you() {

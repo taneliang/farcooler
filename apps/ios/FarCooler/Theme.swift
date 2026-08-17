@@ -49,7 +49,7 @@ struct Theme: Decodable, Equatable, Identifiable {
 ///
 /// Two sources, one list. The built-ins come from the client core with no
 /// connection at all — a phone on a train still has to render something — and
-/// whatever the connected machine defines is merged on top, host winning a
+/// whatever the connected runner defines is merged on top, host winning a
 /// name collision because it is the more specific statement.
 @MainActor
 final class Themes: ObservableObject {
@@ -102,10 +102,10 @@ final class Themes: ObservableObject {
         return (decoded?.isEmpty == false ? decoded! : [.fallback])
     }
 
-    /// Merge in whatever the connected machine defines.
+    /// Merge in whatever the connected runner defines.
     ///
     /// Additive rather than replacing: the built-ins are this phone's and do
-    /// not depend on which machine it happens to be talking to, so switching
+    /// not depend on which runner it happens to be talking to, so switching
     /// hosts must not empty the picker. Only the host's own entries move.
     func merge(hostThemes: [Theme]) {
         var merged = Themes.builtIn()

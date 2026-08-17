@@ -34,7 +34,7 @@ struct EditorsSettings: View {
                 Text(
                     "Found by looking for the applications themselves, so an editor "
                         + "installed anywhere is found. Only some can open a worktree "
-                        + "on another machine — the others are offered for local "
+                        + "on another runner — the others are offered for local "
                         + "worktrees only."
                 )
                 .font(.caption)
@@ -45,7 +45,7 @@ struct EditorsSettings: View {
                 TextField("Name", text: $name)
                 TextField("Command", text: $local)
                     .autocorrectionDisabled()
-                TextField("Command for another machine", text: $remote)
+                TextField("Command for another runner", text: $remote)
                     .autocorrectionDisabled()
                 HStack {
                     Spacer()
@@ -58,9 +58,9 @@ struct EditorsSettings: View {
                 Text("Add an editor")
             } footer: {
                 Text(
-                    "{path} becomes the worktree's path, {host} the machine it is on. "
-                        + "Leave the second field empty if the editor cannot open a "
-                        + "worktree on another machine."
+                    "{path} becomes the worktree's path, {host} the runner it is on. "
+                        + "Leave the second field empty if the editor can't open a "
+                        + "worktree on another runner."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -76,7 +76,7 @@ struct EditorsSettings: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(editor.name).font(.body)
-                Text(editor.opensRemote ? "This Mac and other machines" : "This Mac only")
+                Text(editor.opensRemote ? "This Mac and other runners" : "This Mac only")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -108,7 +108,7 @@ struct EditorsSettings: View {
     /// Marks the editor a click would actually use for a local worktree.
     ///
     /// Local, specifically. `Editors.preferred` substitutes another editor for a
-    /// worktree on a machine this one cannot reach, and showing that substitute
+    /// worktree on a runner this one cannot reach, and showing that substitute
     /// here as "Default" would claim the preference changed when it did not.
     private func isDefault(_ editor: Editor) -> Bool {
         editors.preferred(host: "")?.id == editor.id

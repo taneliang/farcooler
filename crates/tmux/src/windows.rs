@@ -501,7 +501,7 @@ fn parse_modes(text: &str) -> Option<PaneModes> {
 /// **Empty is false, and has to be.** tmux 3.4 renders an unset pane flag as
 /// an empty string rather than `0` — verified against a real 3.4 on a Linux
 /// host, where demanding `0` made every paste fail with "tmux is unavailable"
-/// on a machine whose tmux was working perfectly.
+/// on a runner whose tmux was working perfectly.
 ///
 /// Erring towards false is also the safe direction, which is why this is not
 /// merely a compatibility patch. Pasting unbracketed into a program that wanted

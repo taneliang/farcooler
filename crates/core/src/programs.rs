@@ -181,7 +181,7 @@ fn prefixes() -> Vec<PathBuf> {
 /// same stripped `PATH` this function exists to get around.
 ///
 /// Failure is not an error worth reporting. A shell that cannot start, a
-/// profile that exits non-zero, a machine with no passwd entry: each simply
+/// profile that exits non-zero, a host with no passwd entry: each simply
 /// means the next step gets a turn.
 fn login_shell_path() -> Option<Vec<PathBuf>> {
     let shell = crate::shell::login_shell();
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn a_program_every_unix_has_is_found_end_to_end() {
         // Exercises the real `find`, cache included, against something that is
-        // at `/bin/sh` on every machine this runs on.
+        // at `/bin/sh` on every host this runs on.
         let found = find("sh").expect("sh exists on every unix");
         assert!(found.is_absolute());
         assert!(is_executable(&found));
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn what_the_login_shell_knows_survives_a_daemons_stripped_path() {
         // The failure, in the shape it actually had. A `systemd --user` daemon
-        // on a Linux machine has this PATH and no other; the tmux server it
+        // on a Linux host has this PATH and no other; the tmux server it
         // starts hands exactly that down, and the agent adapter spawned under
         // it could not find the node its own shebang asks for. The login
         // shell's answer is the whole difference between a working flip and a
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn a_program_that_does_not_exist_is_none_and_stays_none() {
         // The negative is cached too. Without that, every tmux command on a
-        // machine with no tmux would spawn a login shell to be told so again.
+        // host with no tmux would spawn a login shell to be told so again.
         assert_eq!(find("farcooler-no-such-program-anywhere"), None);
         assert_eq!(find("farcooler-no-such-program-anywhere"), None);
     }

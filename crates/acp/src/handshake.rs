@@ -7,7 +7,7 @@
 //! `farcooler_agent::dispatch::handshake` chooses between them.
 //!
 //! The property that mattered survives the move: the Test button in the
-//! machine-settings editor and the test that checks every built-in adapter are
+//! runner-settings editor and the test that checks every built-in adapter are
 //! still ONE implementation rather than two that agree today.
 
 use farcooler_agent_core::backend::Launch;

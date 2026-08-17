@@ -39,7 +39,7 @@ pub struct Signals {
     /// by the parser and never reaches here — there is a test that asserts it.
     ///
     /// That default stands because of what this product is: agents running
-    /// unattended on machines nobody is sitting at. One of them being able to
+    /// unattended on runners nobody is sitting at. One of them being able to
     /// read the clipboard of the Mac watching it is a data path in the wrong
     /// direction, over a link that exists to carry terminal output. Copy is a
     /// program handing you something; paste is a program taking something.
@@ -521,7 +521,7 @@ mod tests {
     #[test]
     fn a_program_asking_to_read_the_clipboard_gets_no_reply() {
         // The security property, so it is a test rather than a comment. This
-        // app exists to run agents on machines nobody is sitting at; one of
+        // app exists to run agents on runners nobody is sitting at; one of
         // them being able to read the watching Mac's clipboard is a data path
         // in the wrong direction over a link that carries terminal output.
         let mut t = Terminal::new(40, 6);

@@ -37,7 +37,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.farcooler.data.Host
+import com.farcooler.data.Runner
 import com.farcooler.model.QuickAgents
 import com.farcooler.model.TaskSlug
 import com.farcooler.model.TerminalPresets
@@ -47,19 +47,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Add a machine, or correct one that was typed in wrong.
+ * Add a runner, or correct one that was typed in wrong.
  *
  * One sheet for both, because they are the same four fields and because the
- * second is what makes an unreachable machine survivable: the app opens onto a
- * machine, so a mistyped address is a screen you can never get past and never
+ * second is what makes an unreachable runner survivable: the app opens onto a
+ * runner, so a mistyped address is a screen you can never get past and never
  * fix. That made "Remove" the other thing this had to grow.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HostEditorSheet(
-    existing: Host?,
-    onSave: (Host) -> Unit,
-    onRemove: ((Host) -> Unit)?,
+fun RunnerEditorSheet(
+    existing: Runner?,
+    onSave: (Runner) -> Unit,
+    onRemove: ((Runner) -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -81,7 +81,7 @@ fun HostEditorSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                if (existing == null) "Add a machine" else "Edit machine",
+                if (existing == null) "Add a runner" else "Edit runner",
                 style = MaterialTheme.typography.headlineSmall,
             )
 
@@ -123,7 +123,7 @@ fun HostEditorSheet(
 
             Text(
                 "Far Cooler connects over SSH. This device must be authorized on the " +
-                    "machine first.",
+                    "runner first.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -133,7 +133,7 @@ fun HostEditorSheet(
                     onClick = {
                         val trimmed = address.trim()
                         onSave(
-                            Host(
+                            Runner(
                                 id = existing?.id ?: java.util.UUID.randomUUID().toString(),
                                 label = label.trim().ifBlank { trimmed },
                                 address = trimmed,
@@ -161,7 +161,7 @@ fun HostEditorSheet(
         AlertDialog(
             onDismissRequest = { confirmingRemove = false },
             title = { Text("Remove ${existing.displayLabel}?") },
-            text = { Text("Removes it from this device only. Nothing on the machine changes.") },
+            text = { Text("Removes it from this device only. Nothing on the runner changes.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmingRemove = false
@@ -193,7 +193,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
     val connections by model.fleet.active.collectAsStateWithLifecycle()
 
     var text by remember { mutableStateOf("") }
-    var machineIndex by remember { mutableStateOf(0) }
+    var runnerIndex by remember { mutableStateOf(0) }
     var repositoryId by remember { mutableStateOf("") }
     var agentId by remember { mutableStateOf("claude") }
     var model_ by remember { mutableStateOf("") }
@@ -202,11 +202,11 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
     var working by remember { mutableStateOf(false) }
 
     val connected = connections.filter { it.phase.value is Connection.Phase.Connected }
-    val connection = connected.getOrNull(machineIndex.coerceIn(0, (connected.size - 1).coerceAtLeast(0)))
+    val connection = connected.getOrNull(runnerIndex.coerceIn(0, (connected.size - 1).coerceAtLeast(0)))
     val repositories by (connection?.repositories
         ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
-    // Per machine, because the branch is created on the one holding the project
-    // and that machine's convention is the one that matters.
+    // Per runner, because the branch is created on the one holding the project
+    // and that runner's convention is the one that matters.
     val branchPrefix by (connection?.branchPrefix
         ?: kotlinx.coroutines.flow.MutableStateFlow(Connection.DEFAULT_BRANCH_PREFIX))
         .collectAsStateWithLifecycle()
@@ -250,11 +250,11 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
             // a picker, it is a label that looks tappable.
             if (connected.size > 1) {
                 Picker(
-                    label = "Machine",
+                    label = "Runner",
                     options = connected.map { it.host.id to it.host.displayLabel },
                     selected = connection?.host?.id.orEmpty(),
                     enabled = !working,
-                ) { id -> machineIndex = connected.indexOfFirst { it.host.id == id } }
+                ) { id -> runnerIndex = connected.indexOfFirst { it.host.id == id } }
             }
 
             if (repositories.size > 1) {
@@ -342,7 +342,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                         }
 
                         // Up to a minute, polling the same activity the fleet
-                        // list shows: a cold agent on a slow machine is not a
+                        // list shows: a cold agent on a slow runner is not a
                         // failure, and there is no fixed delay that is both
                         // short enough to feel quick and long enough to never
                         // be wrong.
@@ -417,8 +417,8 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
     val connections by model.fleet.active.collectAsStateWithLifecycle()
     val connected = connections.filter { it.phase.value is Connection.Phase.Connected }
 
-    var machineId by remember { mutableStateOf(connected.firstOrNull()?.host?.id.orEmpty()) }
-    val connection = connected.firstOrNull { it.host.id == machineId } ?: connected.firstOrNull()
+    var runnerId by remember { mutableStateOf(connected.firstOrNull()?.host?.id.orEmpty()) }
+    val connection = connected.firstOrNull { it.host.id == runnerId } ?: connected.firstOrNull()
     val repositories by (connection?.repositories
         ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
 
@@ -428,7 +428,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
     var working by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
 
-    // Per machine, because the branch is created on the one holding the project.
+    // Per runner, because the branch is created on the one holding the project.
     val branchPrefix by (connection?.branchPrefix
         ?: kotlinx.coroutines.flow.MutableStateFlow(Connection.DEFAULT_BRANCH_PREFIX))
         .collectAsStateWithLifecycle()
@@ -437,11 +437,11 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
     // The name IS the worktree's directory now, and nothing encourages naming
     // one carefully while the thing being named is invisible.
     val folder = TaskSlug.sanitize(trimmedName)
-    // Sixty is the machine's cap on a name.
+    // Sixty is the runner's cap on a name.
     val tooLong = trimmedName.codePointCount(0, trimmedName.length) > 60
 
     // This form used to make you type a branch by hand, which meant the
-    // machine's branch prefix — the whole point of the setting — could not reach
+    // runner's branch prefix — the whole point of the setting — could not reach
     // the one place on this screen that names a branch. Now it matches the Mac's
     // sheet: type nothing and get the suggestion.
     val suggestedBranch =
@@ -467,11 +467,11 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
 
             if (connected.size > 1) {
                 Picker(
-                    label = "Machine",
+                    label = "Runner",
                     options = connected.map { it.host.id to it.host.displayLabel },
                     selected = connection?.host?.id.orEmpty(),
                     enabled = !working,
-                ) { machineId = it }
+                ) { runnerId = it }
             }
             Picker(
                 label = "Project",

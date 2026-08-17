@@ -28,7 +28,7 @@ class Reachability(context: Context, private val onShouldRetry: () -> Unit) {
      *
      * Android reports `onAvailable` for every network that appears, including
      * a second one alongside a working first — walking into Wi-Fi while cell
-     * data is fine is not a recovery, and reconnecting every machine for it
+     * data is fine is not a recovery, and reconnecting every runner for it
      * would be a burst of SSH handshakes for nothing. Only the transition out
      * of having none counts.
      */

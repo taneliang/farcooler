@@ -5,7 +5,7 @@
 //! **Paths are `host_admin` only.** Every path-bearing field is optional in the
 //! proto and is populated only for a client that holds `host_admin`. Ordinary
 //! clients get an opaque token instead. A phone on someone else's network has
-//! no business learning the directory layout of the machine it is driving, and
+//! no business learning the directory layout of the runner it is driving, and
 //! making the redaction a property of the conversion — rather than something
 //! each handler remembers — is what stops one forgotten call site leaking it.
 //!
@@ -45,12 +45,23 @@ fn path_token(id: Uuid) -> String {
     format!("p-{}", &hex[hex.len() - 12..])
 }
 
-/// Host facts, including whether the runtime is answering.
+/// Runner facts, including whether the runtime is answering.
 ///
 /// Health is reported by the daemon rather than sampled by the client. A remote
 /// client has no tmux to look at, and a local one that looked would be a second
 /// authority on the same question — which is the whole failure the derivation
 /// model exists to prevent.
+///
+/// Still `Host` on the wire, deliberately. `proto/farcooler.proto` is a
+/// versioned interface with negotiation on both sides — see
+/// `docs/superpowers/specs/2026-08-11-api-versioning-design.md`. Renaming a
+/// message is a protocol change that needs a version and a compatibility
+/// window, not a side effect of a vocabulary decision. The word a person sees
+/// is "runner"; the word on the wire changes when someone plans that change on
+/// purpose. That is why `host_id`, `HostSettings` and `Scope::HostAdmin` still
+/// read as they do here — every one of them is the generated type or a direct
+/// projection of it, and renaming the projection alone would only hide which
+/// names are load-bearing.
 pub fn host(
     daemon_version: &str,
     host_id: Uuid,
@@ -211,7 +222,7 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
 ///
 /// A second function rather than widening `terminal()` itself: `watch::
 /// Watcher`'s broadcast path builds a `Terminal` for every state change on
-/// the host from a bare view, with no supervisor at hand, and giving it one
+/// the runner from a bare view, with no supervisor at hand, and giving it one
 /// only to feed two fields it does not yet report is a call site this change
 /// has no cause to touch. `Rpc::with_activity` — the one place terminal
 /// replies and list entries are built — calls this instead.

@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn a_missing_codex_sessions_directory_is_simply_not_resumable() {
-        // No `.codex/sessions` at all — codex has never run on this machine,
+        // No `.codex/sessions` at all — codex has never run on this runner,
         // or `$HOME` in the test is a bare scratch directory. Either way this
         // must report false rather than error: the caller's fallback (start
         // clean) is exactly the right behavior for "nothing to find".

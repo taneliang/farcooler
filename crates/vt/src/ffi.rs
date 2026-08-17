@@ -308,7 +308,7 @@ pub unsafe extern "C" fn farcooler_vt_take_bell(handle: *mut c_void) -> bool {
 /// There is deliberately no read counterpart. A program asking for the
 /// clipboard's contents is refused by the parser and never reaches this handle:
 /// copy is a program handing you something, paste is a program taking
-/// something, and this app exists to run agents on machines nobody is watching.
+/// something, and this app exists to run agents on runners nobody is watching.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_take_clipboard(
     handle: *mut c_void,

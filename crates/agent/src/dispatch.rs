@@ -31,13 +31,13 @@ pub fn resolve(spec: &AdapterSpec) -> Result<Launch, String> {
     // through the user's login shell, so chat mode worked while the Test button
     // said the adapter could not start.
     let program = farcooler_core::programs::find(spec.program.trim())
-        .ok_or_else(|| format!("could not find `{}` on this machine", spec.program.trim()))?;
+        .ok_or_else(|| format!("could not find `{}` on this runner", spec.program.trim()))?;
     let mut env = spec.env.clone();
     // Resolving the program is not enough on its own, and this is the half that
     // was missing. `npx` is a `#!/usr/bin/env node` script: found at its real
     // path out of `~/.nvm/…/bin` and then spawned with the daemon's own `PATH`,
     // it cannot find `node` and dies — so the adapter never starts, on a
-    // machine where typing the same command works. That is not hypothetical on
+    // runner where typing the same command works. That is not hypothetical on
     // a Mac and it is not hypothetical on Linux either: a `systemd --user`
     // daemon's `PATH` is `/usr/local/bin:/usr/bin:/bin:/usr/games:/snap/bin`,
     // with no nvm, no volta and no `~/.local/bin`, and the tmux server it
@@ -54,7 +54,7 @@ pub fn resolve(spec: &AdapterSpec) -> Result<Launch, String> {
 
 /// Prove an adapter can start and complete its own handshake.
 ///
-/// One implementation, reached both by the Test button in the machine-settings
+/// One implementation, reached both by the Test button in the runner-settings
 /// editor and by `every_built_in_backend_completes_a_handshake`. Keeping those
 /// two the same code is why the handshake was hoisted out of the test file in
 /// the first place, and the crate split must not quietly undo it.

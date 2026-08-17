@@ -87,16 +87,16 @@ struct ChangesPane: View {
         min(280, max(220, paneWidth * 0.20))
     }
 
-    /// An older machine cannot do this at all, and that is worth saying rather
+    /// An older runner cannot do this at all, and that is worth saying rather
     /// than rendering as a worktree with no changes.
     private var problem: some View {
         let old = changes.client.changesSupported == false
         return VStack(alignment: .leading, spacing: 3) {
-            Text(old ? "This machine can't show changes yet" : "Couldn't read this worktree")
+            Text(old ? "This runner can't show changes yet" : "Couldn't read this worktree")
                 .font(.system(size: 11.5, weight: .medium))
             Text(
                 old
-                    ? "Its copy of Far Cooler is older than this. Update it in Settings › Machines."
+                    ? "Its copy of Far Cooler is older than this. Update it in Settings › Runners."
                     : (changes.error ?? "")
             )
             .font(.system(size: 11))

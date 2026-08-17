@@ -1,7 +1,7 @@
 //! Telling the relay that an agent needs its owner.
 //!
 //! The daemon holds NO user credential and does no sign-in. It has a bearer
-//! token the relay issued when a signed-in phone paired this machine, and that
+//! token the relay issued when a signed-in phone paired this runner, and that
 //! token names nothing but "this account". So there is no WorkOS here, no
 //! browser to open on a headless Linux box, and no user identity sitting on a
 //! server the user does not own.
@@ -9,11 +9,11 @@
 //! What that buys, concretely: a stolen daemon token can notify the phone of
 //! the person it was stolen from and can do nothing else — it cannot enumerate
 //! devices, cannot name a destination, and is revocable from the app without
-//! touching this machine.
+//! touching this runner.
 
 use std::path::{Path, PathBuf};
 
-/// Where a paired machine keeps its token.
+/// Where a paired runner keeps its token.
 ///
 /// Beside the database rather than in it: a token is a credential, not durable
 /// intent, and keeping it out of the schema means a database copied for support
@@ -68,7 +68,7 @@ impl Pairing {
         let path = config_path(runtime_dir);
         // Not `unwrap_or_default()`. That wrote an EMPTY file, returned Ok, and
         // let the CLI print "paired" — after which `load_in` parses nothing,
-        // `push status` says "not paired", and the machine is silently mute.
+        // `push status` says "not paired", and the runner is silently mute.
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
 
         // Owner-only from the moment it exists. Setting the mode after writing
@@ -123,8 +123,8 @@ struct Notification<'a> {
     /// on the lock screen, and neither can be cut back out of a sentence.
     label: &'a str,
     terminal: &'a str,
-    /// What this machine is running, so the devices screen can show which of
-    /// someone's machines is behind without them going to each one to look.
+    /// What this runner is running, so the devices screen can show which of
+    /// someone's runners is behind without them going to each one to look.
     ///
     /// Sent here rather than on a route of its own because a daemon that
     /// notifies is a daemon that is running, which is exactly when the answer
@@ -133,7 +133,7 @@ struct Notification<'a> {
     version: &'a str,
 }
 
-/// Send one, or quietly do nothing if this machine was never paired.
+/// Send one, or quietly do nothing if this runner was never paired.
 ///
 /// Failure is logged and swallowed on purpose. A push that does not arrive is a
 /// missed notification; a push that takes the watcher down with it is every
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn a_saved_pairing_comes_back_and_can_be_forgotten() {
         // The whole contract of `farcooler push pair|status|forget`, which had
-        // no test at all: whether a machine is paired is the difference between
+        // no test at all: whether a runner is paired is the difference between
         // being told an agent is stuck and finding out in the morning.
         let dir = tempfile::tempdir().expect("tempdir");
         assert!(Pairing::load_in(dir.path()).is_none(), "nothing is paired yet");
@@ -220,7 +220,7 @@ mod tests {
         // One deployment per channel: its own database and its own WorkOS
         // environment. Two channels sharing a relay would mean a preview
         // pairing could notify a stable app — an app that cannot reach the
-        // machine that sent it, because they are different binaries at
+        // runner that sent it, because they are different binaries at
         // different paths.
         use farcooler_protocol::Channel;
         let urls: Vec<_> = [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable]

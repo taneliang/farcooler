@@ -1,9 +1,9 @@
 import Foundation
 import SwiftUI
 
-/// One machine's `config.toml`, as something a settings sheet can edit.
+/// One runner's `config.toml`, as something a settings sheet can edit.
 ///
-/// Per machine, and that is the whole point: a fleet spans several, each with
+/// Per runner, and that is the whole point: a fleet spans several, each with
 /// its own file, and "the branch prefix" is a different answer on each of them.
 /// So this is constructed with a target — `""` for this Mac — and every call it
 /// makes carries it.
@@ -13,7 +13,7 @@ import SwiftUI
 /// a second path to the daemon would be a second answer to which binary this app
 /// is driving.
 @MainActor
-final class MachineSettingsStore: ObservableObject {
+final class RunnerSettingsStore: ObservableObject {
     /// The ssh target, or `""` for this Mac.
     let target: String
 
@@ -22,7 +22,7 @@ final class MachineSettingsStore: ObservableObject {
     /// Which of `themes` shadow a theme Far Cooler ships.
     ///
     /// Reported by the CLI rather than worked out here: it holds the built-in
-    /// table and the host's list at the same moment, and a client deriving it
+    /// table and the runner's list at the same moment, and a client deriving it
     /// would need a third call to find out what "shipped" even means.
     @Published private(set) var shadowsBuiltIn: Set<String> = []
     @Published private(set) var adapters: [AdapterInfo] = []
@@ -30,7 +30,7 @@ final class MachineSettingsStore: ObservableObject {
     /// What the last write or test said, when it did not work.
     ///
     /// Held here rather than shown per control: every one of these is the same
-    /// kind of failure — the machine could not be reached, or it refused — and
+    /// kind of failure — the runner could not be reached, or it refused — and
     /// one banner that says which is easier to read than five that might.
     @Published var failure: String?
     @Published private(set) var loading = false
@@ -39,7 +39,11 @@ final class MachineSettingsStore: ObservableObject {
         self.target = target
     }
 
-    /// `--host` for a remote machine, nothing for this one.
+    /// `--host` for a remote runner, nothing for this one.
+    ///
+    /// Named for the flag it builds, and the flag is still spelled `--host`: it
+    /// lives in shell history and in scripts, the CLI understands it forever,
+    /// and a vocabulary change is no reason for this app to be what breaks it.
     private var hostArguments: [String] {
         target.isEmpty ? [] : ["--host", target]
     }
@@ -61,12 +65,12 @@ final class MachineSettingsStore: ObservableObject {
         branchPrefix = body["branchPrefix"] as? String ?? ""
     }
 
-    /// The host's own themes, which is what this screen edits.
+    /// The runner's own themes, which is what this screen edits.
     ///
     /// Deliberately not `theme list`, which merges the built-ins in: this list
-    /// answers "what does this machine's file define", and a built-in shown here
+    /// answers "what does this runner's file define", and a built-in shown here
     /// as if the file defined it would offer a Delete that does nothing.
-    /// `MachineSettings` merges the built-ins for display, marking each.
+    /// `RunnerSettings` merges the built-ins for display, marking each.
     private func loadThemes() async {
         guard let body = await json(["theme", "list", "--only-host"]) else { return }
         let items = body["themes"] as? [[String: Any]] ?? []
@@ -93,7 +97,7 @@ final class MachineSettingsStore: ObservableObject {
     /// Save a theme, whether it is new or replacing one.
     ///
     /// Goes through a temporary JSON file rather than nineteen arguments,
-    /// because nineteen positional colours on a command line is a contract
+    /// because nineteen positional colors on a command line is a contract
     /// nobody can read and one transposition away from a theme nobody chose.
     func save(theme: Theme) async {
         guard let payload = theme.commandJSON else {
@@ -136,7 +140,7 @@ final class MachineSettingsStore: ObservableObject {
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             // A non-zero exit with unparseable output is the CLI's own words —
-            // usually "could not reach that machine" — and they are better than
+            // usually "couldn't reach that runner" — and they are better than
             // anything invented here.
             return .failed(Self.tidy(result.output))
         }
@@ -180,7 +184,7 @@ final class MachineSettingsStore: ObservableObject {
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty && !$0.hasPrefix("Usage:") }
-        guard let line, !line.isEmpty else { return "That machine could not be reached." }
+        guard let line, !line.isEmpty else { return "That runner couldn't be reached." }
         return line.replacingOccurrences(of: "error: ", with: "")
     }
 }

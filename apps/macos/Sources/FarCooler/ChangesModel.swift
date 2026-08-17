@@ -6,7 +6,7 @@ import SwiftUI
 ///
 /// Decoded from `farcooler changes … --json`, which is the same path every other
 /// read in this app takes. The daemon owns all of it; nothing here computes
-/// state, it draws what the machine derived — the same contract the terminal
+/// state, it draws what the runner derived — the same contract the terminal
 /// rows keep.
 
 struct ChangeSet: Decodable, Equatable {
@@ -345,7 +345,7 @@ final class ChangesStore: ObservableObject {
             error = nil
         } else {
             // A failure is NOT an empty diff. Saying so was a real bug once: a
-            // machine whose daemon predates this answered NOT_FOUND to every
+            // runner whose daemon predates this answered NOT_FOUND to every
             // call, and the pane drew a worktree with no changes.
             changeSet = .empty
             error = client.changesError

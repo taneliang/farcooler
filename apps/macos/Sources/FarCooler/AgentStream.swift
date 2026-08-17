@@ -42,15 +42,15 @@ final class AgentStream: ObservableObject {
     private var environment: [String: String] = [:]
     private var hostArguments: [String] = []
     private var pollTask: Task<Void, Never>?
-    /// Why this session's machine cannot be acted on, or nil if it can —
+    /// Why this session's runner cannot be acted on, or nil if it can —
     /// the same check `ContentView.act(on:)` runs for every terminal-pane
     /// mutation, reached here too.
     ///
     /// Without this, `send`, `answer`, `cancel`, `setConfig` and the rest
     /// below routed correctly BY `hostArguments` — the CLI subprocess really
-    /// does run against the right machine — but never asked FIRST whether
-    /// that machine was already known to be gone. Messaging an agent on a
-    /// machine already `.unreachable` burned a full `ConnectTimeout` finding
+    /// does run against the right runner — but never asked FIRST whether
+    /// that runner was already known to be gone. Messaging an agent on a
+    /// runner already `.unreachable` burned a full `ConnectTimeout` finding
     /// that out the hard way, with no banner, for a refusal `FleetStore`
     /// already had the answer to.
     private var refusal: () -> String? = { nil }
@@ -159,10 +159,10 @@ final class AgentStream: ObservableObject {
         return try JSONDecoder().decode(Batch.self, from: data)
     }
 
-    /// True, and `connectionError` set, when this session's machine already
+    /// True, and `connectionError` set, when this session's runner already
     /// refuses. Every mutating call below starts with this — before any
     /// local, optimistic transcript edit as well as before the CLI call —
-    /// so a message typed to a machine already known to be gone gets an
+    /// so a message typed to a runner already known to be gone gets an
     /// immediate, honest banner instead of either a silent hang or a local
     /// echo of something that was never sent.
     private func refuseIfNeeded() -> Bool {

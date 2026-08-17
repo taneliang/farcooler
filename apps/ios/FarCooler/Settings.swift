@@ -151,7 +151,7 @@ struct SettingsView: View {
             AccountSection()
             if Account.shared.isSignedIn {
                 Section {
-                    NavigationLink("Devices and machines") { AccountDevicesView() }
+                    NavigationLink("Devices and runners") { AccountDevicesView() }
                 }
             }
 
@@ -171,13 +171,13 @@ struct SettingsView: View {
                         Text(theme.name).tag(theme.name)
                     }
                 }
-                // Editing the machine's own file, rather than telling someone to
+                // Editing the runner's own file, rather than telling someone to
                 // go and edit it. That instruction used to be this section's
                 // footer — reasonable advice, and not something anybody does from
                 // a phone over ssh.
                 if let connection {
-                    NavigationLink("Settings on this machine") {
-                        MachineSettingsView(
+                    NavigationLink("Settings on this runner") {
+                        RunnerSettingsView(
                             name: connection.hostLabel, connection: connection)
                     }
                 }

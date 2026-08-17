@@ -80,10 +80,10 @@ import kotlinx.coroutines.withContext
 @Composable
 fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) {
     val connection = model.fleet.connection(ref) ?: run {
-        // The machine this pane was on is gone — removed in settings, or its
+        // The runner this pane was on is gone — removed in settings, or its
         // connection torn down and rebuilt. Saying so beats a blank screen.
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("That machine is no longer connected.")
+            Text("That runner is no longer connected.")
         }
         return
     }
@@ -222,7 +222,7 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
                     // the terminal already names itself in its tab strip chip,
                     // and repeating it here would waste the one line of title
                     // bar a phone has on something already on screen. The
-                    // machine appears only when more than one is connected.
+                    // runner appears only when more than one is connected.
                     Column {
                         Text(
                             workspace?.task?.ifBlank { null } ?: name,
@@ -389,7 +389,7 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
 
             TerminalTabStrip(
                 entries = entries,
-                showMachine = connections.size > 1,
+                showRunner = connections.size > 1,
                 current = ref,
                 onSelect = { model.open(it) },
                 modifier = Modifier.navigationBarsPadding(),

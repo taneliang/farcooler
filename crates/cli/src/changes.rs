@@ -58,8 +58,8 @@ pub enum ChangesCmd {
     },
 }
 
-pub async fn changes(host: Option<&str>, cmd: ChangesCmd, json: bool) -> Fallible {
-    let mut link = connect_to(host).await?;
+pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Fallible {
+    let mut link = connect_to(runner).await?;
 
     match cmd {
         ChangesCmd::Status { workspace, fresh } => {

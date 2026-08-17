@@ -1,8 +1,8 @@
-//! An Far Cooler session, over whichever transport reached the host.
+//! An Far Cooler session, over whichever transport reached the runner.
 //!
 //! Above this line nothing knows whether it is talking to a local Unix socket
 //! or to a daemon on the other side of an SSH connection. That is the property
-//! worth protecting: a remote host is not a different product with its own
+//! worth protecting: a remote runner is not a different product with its own
 //! subtly different behavior.
 //!
 //! Answers come back as JSON rather than protobuf. Not because JSON is better —
@@ -37,10 +37,10 @@ pub enum SessionError {
     /// `farcoolerd` would send someone to check the wrong thing — and finding
     /// it installed would make the error look like a lie.
     #[error(
-        "connected, but `{daemon} --stdio` did not answer. Is Far Cooler installed on that machine?"
+        "connected, but `{daemon} --stdio` did not answer. Is Far Cooler installed on that runner?"
     )]
     DaemonMissing { daemon: &'static str },
-    #[error("the host runs protocol {daemon}; this client speaks {client}")]
+    #[error("the runner runs protocol {daemon}; this client speaks {client}")]
     VersionMismatch { daemon: u32, client: u32 },
     /// The link underneath this session is gone.
     ///
@@ -48,7 +48,7 @@ pub enum SessionError {
     /// something we could not make sense of — that is a session still worth
     /// talking on, and a client that reconnected over it would be reconnecting
     /// over a bug.
-    #[error("the connection to the host was lost: {0}")]
+    #[error("the connection to the runner was lost: {0}")]
     Disconnected(String),
 }
 
@@ -121,7 +121,7 @@ impl AsyncRead for StreamReader {
     }
 }
 
-/// A connected Far Cooler host.
+/// A connected Far Cooler runner.
 pub struct Session {
     client: Client<Reader, Writer>,
     /// Held so the SSH connection lives as long as the session does.
@@ -142,7 +142,7 @@ impl Session {
     pub async fn connect_ssh(destination: &ssh::Destination) -> Result<Self, SessionError> {
         let mut transport = ssh::Session::open(destination).await?;
         // Named by tilde, not bare: a non-login ssh exec's PATH often lacks
-        // ~/.local/bin, where `host install` puts the binary.
+        // ~/.local/bin, where `runner install` puts the binary.
         //
         // The name carries this client's own channel, which is what keeps a
         // preview app off a stable daemon: they are different binaries at
@@ -195,7 +195,7 @@ impl Session {
         Ok(Box::new(StreamReader { reader: streams.reader, _writer: streams.writer }))
     }
 
-    /// Connect to a daemon on this machine. Used by tests and by any desktop
+    /// Connect to a daemon on this runner. Used by tests and by any desktop
     /// client that wants the same API as the mobile one.
     pub async fn connect_local(socket: &std::path::Path) -> Result<Self, SessionError> {
         let stream = tokio::net::UnixStream::connect(socket)
@@ -216,25 +216,25 @@ impl Session {
         &self.client.server_hello().daemon_version
     }
 
-    /// What the machine on the other end can do, by name.
+    /// What the runner on the other end can do, by name.
     ///
     /// Learned in the handshake, so it is available before the first request.
-    /// A client that is newer than the machine it reached uses this to DIM the
-    /// controls that machine cannot serve, with a reason — rather than hiding
-    /// them, which makes the same app look different on two machines for no
+    /// A client that is newer than the runner it reached uses this to DIM the
+    /// controls that runner cannot serve, with a reason — rather than hiding
+    /// them, which makes the same app look different on two runners for no
     /// stated cause, or letting them fail on use, which teaches people that
     /// buttons sometimes do nothing.
     pub fn capabilities(&self) -> &[String] {
         &self.client.server_hello().capabilities
     }
 
-    /// Whether the machine can do something, by name.
+    /// Whether the runner can do something, by name.
     ///
     /// Empty means a daemon too old to answer the question at all — every one
     /// of those predates capabilities, so it has exactly the feature set that
     /// existed then. Reporting `true` for the two floor capabilities and
     /// `false` for the rest is the honest reading, and it is what lets a new
-    /// app talk to an old machine without a special case at every call site.
+    /// app talk to an old runner without a special case at every call site.
     pub fn can(&self, capability: &str) -> bool {
         let advertised = self.capabilities();
         if advertised.is_empty() {
@@ -332,7 +332,7 @@ impl Session {
                             "paneMode": pane_mode_label(t.pane_mode),
                             // Without this the phone's terminal/chat switch
                             // could never appear: `canSwitchPaneMode` reads it,
-                            // and a field the host never sends is a capability
+                            // and a field the runner never sends is a capability
                             // the client always denies.
                             "chatCapable": t.chat_capable,
                             "agentSessionId": t.agent_session_id.clone(),
@@ -386,9 +386,9 @@ impl Session {
         }
     }
 
-    /// The colour schemes this host defines.
+    /// The colour schemes this runner defines.
     ///
-    /// Only the host's own — the built-ins are compiled into every client, so
+    /// Only the runner's own — the built-ins are compiled into every client, so
     /// sending eleven fixed palettes down an ssh link on every connection
     /// would be a round trip spent to be told what the client already knows.
     pub async fn themes(&mut self) -> Result<Vec<farcooler_protocol::v1::Theme>, SessionError> {
@@ -481,7 +481,7 @@ impl Session {
         Ok(crate::actions::register_repository(&mut self.client, relative_path).await?)
     }
 
-    // ---- machine settings ----
+    // ---- runner settings ----
     //
     // Every write answers with what the file now says, read back by the daemon
     // rather than echoed from the request, so a value the writer normalized is
@@ -600,7 +600,7 @@ impl Session {
 
     /// A terminal's visible screen, with escapes intact.
     ///
-    /// `known_revision` is the last one received; the host answers `unchanged`
+    /// `known_revision` is the last one received; the runner answers `unchanged`
     /// rather than resending a screen already held. Pass 0 to always get one.
     pub async fn screen(
         &mut self,
@@ -730,10 +730,10 @@ impl Session {
     /// Images ride WITH the prompt, as content blocks.
     ///
     /// The composer used to attach a picture by writing `@/Users/you/x.png`
-    /// into the message. That is a path on the machine that picked the file,
-    /// and the agent runs on the HOST — so it worked when those were the same
+    /// into the message. That is a path on the device that picked the file,
+    /// and the agent runs on the RUNNER — so it worked when those were the same
     /// machine and silently referred to nothing when they were not, which is
-    /// every phone and every remote host.
+    /// every phone and every remote runner.
     pub async fn agent_prompt(
         &mut self,
         terminal: Uuid,
@@ -862,7 +862,7 @@ impl Session {
 
     /// Worktree-relative paths matching `query`, for an `@`-mention.
     ///
-    /// Relative, never a host path: the same redaction the rest of this
+    /// Relative, never a runner path: the same redaction the rest of this
     /// protocol applies to everything below `host_admin`.
     pub async fn search_worktree_files(
         &mut self,

@@ -41,7 +41,7 @@ final class Preferences: ObservableObject {
     ///
     /// Stored as one newline-joined string because `@AppStorage` cannot hold a
     /// `Set`. Newline rather than anything else because `groupKey` already uses
-    /// `\u{1}` as its own host/project separator, and neither a machine name nor
+    /// `\u{1}` as its own host/project separator, and neither a runner name nor
     /// a project display name can contain a newline.
     @AppStorage("sidebar.collapsedProjects") private var collapsedProjects = ""
 
@@ -230,13 +230,16 @@ struct SettingsView: View {
         TabView(selection: $preferences.settingsTab) {
             terminal.tabItem { Label("Terminal", systemImage: "terminal") }.tag("terminal")
             behavior.tabItem { Label("Behavior", systemImage: "gearshape") }.tag("behavior")
-            HostsSettings().tabItem { Label("Machines", systemImage: "server.rack") }
+            RunnersSettings().tabItem { Label("Runners", systemImage: "server.rack") }
+                // The tag is a stored value, not a word anyone reads: it is what
+                // `settings.tab` already holds on disk, and changing it would
+                // drop people onto a different tab once, for nothing.
                 .tag("machines")
             EditorsSettings()
                 .tabItem { Label("Editors", systemImage: "chevron.left.forwardslash.chevron.right") }
                 .tag("editors")
             account.tabItem { Label("Account", systemImage: "person.crop.circle") }.tag("account")
-            host.tabItem { Label("Startup", systemImage: "bolt") }.tag("startup")
+            startup.tabItem { Label("Startup", systemImage: "bolt") }.tag("startup")
         }
         // Tall enough for the longest tab. Behavior is five settings and a
         // notification group, and at 400 it clipped the last group mid-row —
@@ -246,9 +249,9 @@ struct SettingsView: View {
 
     /// Signing in, which buys notifications and nothing else.
     ///
-    /// Its own tab rather than a row under Machines: an account is about this
-    /// person, and a machine list is about machines. Pairing — which machine may
-    /// notify you — stays in Machines, where the machines are.
+    /// Its own tab rather than a row under Runners: an account is about this
+    /// person, and a runner list is about runners. Pairing — which runner may
+    /// notify you — stays in Runners, where the runners are.
     private var account: some View {
         // The sign-in row on top of the two lists it makes meaningful. One
         // scroll rather than a tab and a sheet: signing in, being notified, and
@@ -269,12 +272,12 @@ struct SettingsView: View {
         .padding(.vertical, 4)
     }
 
-    /// Whether this machine stays reachable when nobody is at it.
+    /// Whether this Mac stays reachable when nobody is at it.
     ///
     /// A preference you set once, not a status you watch. It used to sit in the
     /// sidebar's status bar, where a piece of configuration read as live
     /// information about the fleet.
-    private var host: some View {
+    private var startup: some View {
         Form {
             Setting("Keeps this Mac reachable from your iPhone while Far Cooler is closed.") {
                 switch service.state {

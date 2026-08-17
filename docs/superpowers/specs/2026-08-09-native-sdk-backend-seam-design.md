@@ -32,7 +32,7 @@ That matters now because ACP is costing real capability:
   a live 0.3.226), which spawns the `claude` binary. `npx` resolves and downloads
   before any of that starts, which is what the 90-second `Status::AdapterSilent`
   bound in `agent_host.rs` exists to tolerate.
-- **`npx` is an undeclared prerequisite.** `docs/remote-hosts.md` promises two
+- **`npx` is an undeclared prerequisite.** `docs/runners.md` promises two
   static musl binaries copied into `~/.local/bin`, with prerequisites listed as
   exactly tmux, git, and systemd. Node appears on no list, yet three of the four
   built-in adapters cannot start without it.
@@ -78,7 +78,7 @@ The obvious alternative was a Node shim per agent, written against each vendor's
 official TypeScript SDK. Writing against a typed, supported API beats writing
 against a wire format, and for a while that looked decisive.
 
-It loses to `docs/remote-hosts.md`. "Everything installs into your home
+It loses to `docs/runners.md`. "Everything installs into your home
 directory. No root, no package manager, no system service." A shim means either
 Node becomes a documented prerequisite — cementing something that is currently
 an accident — or `host install` grows a second per-platform artifact to copy and
@@ -383,7 +383,7 @@ revertable. Steps 5–7 add code nothing dispatches to yet.
 ## References
 
 - `docs/adapters.md` — the four built-in adapters, the config file, and detection.
-- `docs/remote-hosts.md` — the install contract this design is constrained by.
+- `docs/runners.md` — the install contract this design is constrained by.
 - `docs/superpowers/specs/2026-08-01-native-agent-view-design.md` — chat mode's
   original design, and the reasoning for ACP.
 - `docs/superpowers/specs/2026-08-02-acp-adapters-design.md` — the adapter registry.

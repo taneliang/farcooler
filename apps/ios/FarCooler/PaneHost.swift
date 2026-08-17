@@ -28,7 +28,7 @@ import UIKit
 @MainActor
 struct PaneHost: View {
     @ObservedObject var connection: Connection
-    let hosts: HostStore?
+    let hosts: RunnerStore?
 
     @State private var current: Terminal
     /// Visited panes, oldest first. An array rather than a set so the order is
@@ -51,7 +51,7 @@ struct PaneHost: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    init(terminal: Terminal, connection: Connection, hosts: HostStore? = nil) {
+    init(terminal: Terminal, connection: Connection, hosts: RunnerStore? = nil) {
         self.connection = connection
         self.hosts = hosts
         _current = State(initialValue: terminal)

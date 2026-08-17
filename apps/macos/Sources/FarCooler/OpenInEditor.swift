@@ -17,15 +17,20 @@ struct EditorMenuItems: View {
     @ObservedObject private var editors = Editors.shared
     @Environment(\.openSettings) private var openSettings
 
-    private var host: String { workspace.host ?? "" }
-    private var usable: [Editor] { editors.available.filter { $0.unavailability(host: host) == nil } }
+    /// The runner this worktree is on, as its ssh target. Empty means this Mac.
+    ///
+    /// The `host:` argument labels below keep their spelling: what they take is
+    /// the value substituted into an editor's `{host}` template, which is a
+    /// token people have already saved in custom editor arguments.
+    private var runner: String { workspace.host ?? "" }
+    private var usable: [Editor] { editors.available.filter { $0.unavailability(host: runner) == nil } }
 
     /// Kept in the menu rather than dropped from it. An editor you have
     /// installed, absent from a list of editors, reads as a bug in Far Cooler;
     /// the same editor greyed out under a heading that says why reads as the
     /// truth about the editor.
     private var unusable: [Editor] {
-        editors.available.filter { $0.unavailability(host: host) != nil }
+        editors.available.filter { $0.unavailability(host: runner) != nil }
     }
 
     var body: some View {
@@ -34,7 +39,7 @@ struct EditorMenuItems: View {
         }
 
         if !unusable.isEmpty {
-            Section("Cannot open a worktree on \(host)") {
+            Section("Cannot open a worktree on \(runner)") {
                 ForEach(unusable) { editor in
                     Button(editor.name) {}.disabled(true)
                 }
@@ -61,7 +66,7 @@ struct EditorMenuItems: View {
 ///
 /// Settings is a scene, not a sheet, so nothing that opens it can hand it a
 /// parameter — the tab is set first and read by `SettingsView`. Same shape as
-/// "Add a machine…" in `ContentView`.
+/// "Add a runner…" in `ContentView`.
 ///
 /// Takes the caller's own `openSettings` rather than reaching for
 /// `NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)`:
@@ -94,7 +99,8 @@ struct OpenInEditorButton: View {
     @ObservedObject private var editors = Editors.shared
     @Environment(\.openSettings) private var openSettings
 
-    private var host: String { workspace.host ?? "" }
+    /// The runner this worktree is on, as its ssh target. Empty means this Mac.
+    private var runner: String { workspace.host ?? "" }
 
     var body: some View {
         Menu {
@@ -102,7 +108,7 @@ struct OpenInEditorButton: View {
         } label: {
             Image(systemName: "chevron.left.forwardslash.chevron.right")
         } primaryAction: {
-            guard let editor = editors.preferred(host: host) else {
+            guard let editor = editors.preferred(host: runner) else {
                 EditorSettingsLink.open(openSettings)
                 return
             }
@@ -123,10 +129,10 @@ struct OpenInEditorButton: View {
     }
 
     private var tooltip: String {
-        guard let editor = editors.preferred(host: host) else {
+        guard let editor = editors.preferred(host: runner) else {
             return editors.available.isEmpty
                 ? "No editors found — add one in Settings"
-                : "No editor here can open a worktree on \(host)"
+                : "No editor here can open a worktree on \(runner)"
         }
         return "Open in \(editor.name)"
     }

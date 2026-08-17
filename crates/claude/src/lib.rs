@@ -3,7 +3,7 @@
 //! The `claude` CLI, run with stream-json in both directions, is what the
 //! official Agent SDK itself drives — the SDK is a TypeScript wrapper around
 //! this exact process. Speaking it directly is what keeps Node out of chat
-//! mode, which matters because `docs/remote-hosts.md` promises an install that
+//! mode, which matters because `docs/runners.md` promises an install that
 //! is two static binaries and names only tmux, git and systemd.
 //!
 //! The protocol is documented nowhere in prose but fully typed in the

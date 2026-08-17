@@ -164,7 +164,7 @@ state to recover from a corrupt database would take the config with it. The
 project already writes to `~/.config` on Linux hosts at `host_install.rs:163`.
 
 One path on every platform means one dotfiles-tracked config works on the Mac
-and on every remote host, which matters because `docs/remote-hosts.md` hosts run
+and on every remote host, which matters because `docs/runners.md` hosts run
 `farcoolerd` with no Mac app anywhere near them.
 
 Resolution order: `$FARCOOLER_CONFIG` → `$XDG_CONFIG_HOME/farcooler/config.toml`

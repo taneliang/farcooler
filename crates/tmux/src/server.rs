@@ -9,7 +9,7 @@
 //! ```
 //!
 //! A workspace is a daemon grouping of TAGGED WINDOWS, not a tmux session. There
-//! is one host-wide session.
+//! is one runner-wide session.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -18,7 +18,7 @@ use farcooler_core::{DomainError, Result, SCHEMA_VERSION, tags};
 use tokio::process::Command;
 use uuid::Uuid;
 
-/// Display name of the single host-wide session. Addressed internally by its
+/// Display name of the single runner-wide session. Addressed internally by its
 /// stable tmux session id, never by this name.
 pub const SESSION_NAME: &str = "farcooler";
 
@@ -90,7 +90,7 @@ impl TmuxServer {
     /// Compared rather than merely checked for existence. The file is keyed on
     /// the install id and lives in the temp directory, so it long outlives any
     /// one daemon — and "it exists, leave it" meant an upgrade that changed
-    /// these options never reached a machine that had already run the previous
+    /// these options never reached a runner that had already run the previous
     /// build. `default-shell` is the option that made that visible: the fix
     /// for it shipped and did nothing, because the stale file was still there.
     fn ensure_config(&self) -> Result<()> {

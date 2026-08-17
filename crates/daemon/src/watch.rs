@@ -4,7 +4,7 @@
 //!
 //! 1. **Derive each agent's activity** by reading its screen. This has to be
 //!    the daemon's job. A phone has no screen to inspect, and a Mac that
-//!    inspected one would be a second authority disagreeing with the host about
+//!    inspected one would be a second authority disagreeing with the runner about
 //!    the same terminal.
 //!
 //! 2. **Push changes to every connected client.** Clients used to poll, which
@@ -235,7 +235,7 @@ pub struct Watcher {
 ///
 /// The host-wide reads — `ps`, `lsof`, the fleet, the pane inventory — happen
 /// once and are joined here, so the classification pass below can run per
-/// terminal without going back to the machine for anything but that terminal's
+/// terminal without going back to the runner for anything but that terminal's
 /// screen. It was a tuple until it needed a title and a purpose; seven
 /// positional fields is not something a reader can hold.
 struct Sampled {
@@ -1267,7 +1267,7 @@ impl Watcher {
         self.push_notice(terminal, label, notice);
     }
 
-    /// Push a failed exit to the owner's devices, if this machine is paired.
+    /// Push a failed exit to the owner's devices, if this runner is paired.
     ///
     /// The other reason `push_if_paired` exists, for a command rather than an
     /// agent: see `exited_into_failure` for exactly when this fires. Kept as
@@ -1633,7 +1633,7 @@ impl Watcher {
         // loop, and a fleet of thirty panes must not mean thirty processes a
         // second.
         let foreground = crate::foreground::read().await;
-        // One `lsof` for the whole machine, on the same cadence and for the
+        // One `lsof` for the whole host, on the same cadence and for the
         // same reason as the one `ps`.
         //
         // Off the executor, because it is a blocking `Command::output` on a
@@ -1649,7 +1649,7 @@ impl Watcher {
         // shell script — is a child of the one the pane is showing.
         let ports = foreground.ports_by_group(&ports);
         // Once per tick, not once per pane: every pane compares against the
-        // same answer, and a machine that renamed itself mid-tick would
+        // same answer, and a host that renamed itself mid-tick would
         // otherwise name two rows by two different rules.
         let hostname = crate::hostname();
         // Bound once per tick rather than looked up per pane: the registry
@@ -1681,10 +1681,10 @@ impl Watcher {
                 //
                 // Only while the inventory is HEALTHY, which is the whole
                 // safety of this. `derive_terminal` reports every terminal on
-                // the machine as `Lost` when tmux cannot be read at all — so
+                // the runner as `Lost` when tmux cannot be read at all — so
                 // without this gate, one failed `list-panes` would delete every
                 // changes pane in the fleet and kill the panes on the way past,
-                // for a machine that was fine a second later.
+                // for a runner that was fine a second later.
                 if panes.inventory_healthy
                     && terminal.terminal.pane_mode == farcooler_store::models::PaneMode::Changes
                     && matches!(
@@ -1806,7 +1806,7 @@ impl Watcher {
             let (label, observed, chat_capable) = if !matches!(terminal_state, TerminalState::Running)
             {
                 // A finished agent KEEPS its summary, which is the point of
-                // reading titles at all: coming back to a machine, the useful
+                // reading titles at all: coming back to a runner, the useful
                 // thing about a pane that has stopped is what it did, not that
                 // it was claude.
                 //
@@ -1943,7 +1943,7 @@ impl Watcher {
             };
             // Resolved here, and sent resolved. A client has no screen to
             // inspect, so working out what an agent is called has to happen on
-            // the host — the same reason its activity does.
+            // the runner — the same reason its activity does.
             let command = label;
             let blocked_question = question;
 
@@ -2081,7 +2081,7 @@ impl Watcher {
             wire::apply_rungs(&mut message, observed.signals.line().as_deref());
 
             // A send with no subscribers is not a failure: it is the ordinary
-            // case of a host nobody is watching, which still has to keep
+            // case of a runner nobody is watching, which still has to keep
             // deriving so the first client to connect sees the truth.
             let _ = self.events.send(Event {
                 event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
@@ -3411,7 +3411,7 @@ mod tests {
 
     /// The question is the payload, and the lock screen is where it matters.
     ///
-    /// Derived on the host, redacted, and carried on four paths — and until it
+    /// Derived on the runner, redacted, and carried on four paths — and until it
     /// reached this subtitle, a phone could only say that SOMETHING was being
     /// asked. Answering from the lock screen needs the question on it.
     #[test]

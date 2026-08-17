@@ -401,7 +401,7 @@ pub fn discard_verdict(i: &DiscardInputs<'_>) -> DiscardVerdict {
 ///
 /// One short call, and it degrades to `None` for every reason `fetch_prs` does —
 /// `gh` absent, logged out, offline, rate limited. The caller falls back to
-/// `origin/HEAD`, so a machine without `gh` is not a machine without review.
+/// `origin/HEAD`, so a runner without `gh` is not a runner without review.
 pub async fn fetch_default_branch(worktree: &Path) -> Option<String> {
     let out = tokio::time::timeout(
         GH_TIMEOUT,

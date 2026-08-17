@@ -25,7 +25,7 @@ struct AdapterEditor: View {
     @State private var testing = false
     @State private var outcome: AdapterTestOutcome?
 
-    private let store: MachineSettingsStore
+    private let store: RunnerSettingsStore
     /// Whether this is being created rather than edited.
     ///
     /// The name is the table's key in the file and what a pane's process is
@@ -37,7 +37,7 @@ struct AdapterEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     init(
-        adapter: AdapterInfo, store: MachineSettingsStore, isNew: Bool,
+        adapter: AdapterInfo, store: RunnerSettingsStore, isNew: Bool,
         onSave: @escaping (AdapterInfo) -> Void
     ) {
         _draft = State(initialValue: adapter)
@@ -61,7 +61,7 @@ struct AdapterEditor: View {
                 if draft.origin == .builtIn {
                     Section {
                         Label(
-                            "Saving this writes an override on that machine. "
+                            "Saving this writes an override on that runner. "
                             + "You can revert to the shipped one at any time.",
                             systemImage: "info.circle")
                             .font(.caption)

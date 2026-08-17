@@ -349,7 +349,7 @@ final class ChangesStore: ObservableObject {
         } catch {
             // A failure is NOT an empty diff.
             //
-            // Saying so was a real bug on the Mac once: a machine whose daemon
+            // Saying so was a real bug on the Mac once: a runner whose daemon
             // predated this answered NOT_FOUND to every call and the pane drew
             // a worktree with no changes in it. An old daemon is the likeliest
             // reason a phone sees this, so the message says so.
@@ -422,7 +422,7 @@ final class ChangesStore: ObservableObject {
     private static func message(for error: Error) -> String {
         let text = error.localizedDescription.lowercased()
         if text.contains("not found") || text.contains("unknown method") {
-            return "This machine's Far Cooler is too old to review changes."
+            return "This runner's Far Cooler is too old to review changes."
         }
         return "Couldn't read what this worktree changed."
     }

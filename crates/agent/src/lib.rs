@@ -1,4 +1,4 @@
-//! The agent view's host side: one normalized event model, and the adapters
+//! The agent view's runner side: one normalized event model, and the adapters
 //! that produce it.
 //!
 //! Clients never see a vendor protocol. That is the entire point — the UI is

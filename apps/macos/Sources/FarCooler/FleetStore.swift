@@ -1,33 +1,34 @@
 import Combine
 import SwiftUI
 
-/// Every machine, at once.
+/// Every runner, at once.
 ///
-/// `Fleet` is one machine's decoded `workspace list --json`; this holds N of
+/// `Fleet` is one runner's decoded `workspace list --json`; this holds N of
 /// them and publishes the merge. Views observe this one object rather than
-/// subscribing to a client per machine.
+/// subscribing to a client per runner.
 ///
-/// Membership is always the local machine plus one client per configured host.
-/// `Hosts.all` lists remote machines only — this Mac is the implicit entry under
-/// the empty-string key, which is the same convention `workspace.host` uses on
-/// the wire and `OpenInEditor` already reads.
+/// Membership is always the local runner plus one client per configured runner.
+/// `Runners.all` lists remote runners only — this Mac is the implicit entry
+/// under the empty-string key, which is the same convention `workspace.host`
+/// uses on the wire and `OpenInEditor` already reads. The keys here stay
+/// host-shaped for that reason: they are ssh targets, matching the wire.
 @MainActor
 final class FleetStore: ObservableObject {
     @Published private(set) var fleet: Fleet = .empty
     @Published private(set) var clients: [String: DaemonClient] = [:]
 
-    private var hostsObserver: AnyCancellable?
+    private var runnersObserver: AnyCancellable?
     private var clientObservers: [String: AnyCancellable] = [:]
     /// The Task that brings a freshly-added client up: its first `refresh()`,
     /// then its event stream.
     ///
     /// Tracked for the same reason `DaemonClient.retryTask` is: without a
-    /// slot to cancel, removing a machine while this Task is still awaiting
+    /// slot to cancel, removing a runner while this Task is still awaiting
     /// its first `refresh()` cannot stop it. `stopEvents()` in the removal
     /// loop below is a no-op against a client that has not started anything
     /// yet, and the Task, still holding a strong reference to that client,
     /// resumes once `refresh()` returns and calls `startEvents()` regardless
-    /// — spawning `farcooler --host <removed> events` against a machine the
+    /// — spawning `farcooler --host <removed> events` against a runner the
     /// user just deleted. Cancelling this slot on removal, and checking
     /// `Task.isCancelled` before that `startEvents()` call, closes the gap.
     ///
@@ -37,9 +38,9 @@ final class FleetStore: ObservableObject {
 
     init() {
         rebuild()
-        hostsObserver = Hosts.shared.objectWillChange.sink { [weak self] _ in
+        runnersObserver = Runners.shared.objectWillChange.sink { [weak self] _ in
             // objectWillChange fires BEFORE the array is updated, so read it
-            // on the next turn or a machine added here is missed until the one
+            // on the next turn or a runner added here is missed until the one
             // after it.
             Task { @MainActor in self?.rebuild() }
         }
@@ -48,8 +49,8 @@ final class FleetStore: ObservableObject {
         }
     }
 
-    /// Every machine, local first.
-    var hosts: [String] { [""] + Hosts.shared.all.map(\.target) }
+    /// Every runner, local first.
+    var hosts: [String] { [""] + Runners.shared.all.map(\.target) }
 
     /// Resume every client's event stream.
     ///
@@ -71,9 +72,9 @@ final class FleetStore: ObservableObject {
         for client in clients.values { client.startEvents() }
     }
 
-    /// Bring clients into line with the configured machines.
+    /// Bring clients into line with the configured runners.
     ///
-    /// Adding a machine in Settings brings one up; removing one tears its
+    /// Adding a runner in Settings brings one up; removing one tears its
     /// client down. Existing clients are kept rather than replaced, because
     /// replacing one would drop a live connection and its fleet with it.
     private func rebuild() {
@@ -85,7 +86,7 @@ final class FleetStore: ObservableObject {
             // Assigned here, before the bring-up task below has awaited
             // anything, so it is in place no matter how early
             // `cancelBringUp()` cuts that task short — a click on a red
-            // trouble dot, `reconnectAll()`, or the machine simply coming
+            // trouble dot, `reconnectAll()`, or the runner simply coming
             // back on its own. Assigned any later and a bring-up cancelled
             // before reaching that point loses this callback for good: the
             // client keeps running (`DaemonClient`'s own retry loop owns
@@ -109,7 +110,7 @@ final class FleetStore: ObservableObject {
             }
             bringUpTasks[target] = Task { @MainActor [weak self] in
                 // A daemon going away is also the moment another build could
-                // take the socket, so the local machine claims it back
+                // take the socket, so the local runner claims it back
                 // before its first read — the same rule `DaemonClient`'s own
                 // retry loop follows in `scheduleRetry()` and
                 // `reconnectNow()`. Skipped for a remote target: only this
@@ -138,13 +139,13 @@ final class FleetStore: ObservableObject {
     }
 
     /// Re-read repositories, roots and layouts after a reconnection — the
-    /// same three reads that seed a machine the first time, run again
-    /// because a machine that drops and comes back must not stay invisible
+    /// same three reads that seed a runner the first time, run again
+    /// because a runner that drops and comes back must not stay invisible
     /// to the project pickers and root checks until the app relaunches. See
     /// `DaemonClient.onReconnect`, which this is wired to for every
     /// connection a client makes, bring-up's own first one included.
     ///
-    /// Sequential, with a cancellation check between each: a machine removed
+    /// Sequential, with a cancellation check between each: a runner removed
     /// (its client torn down by `rebuild()`) or reconnected again out from
     /// under this exact seed stops firing the next subprocess rather than
     /// running all three regardless.
@@ -156,12 +157,12 @@ final class FleetStore: ObservableObject {
         guard clients[target] === client else { return }
         await client.refreshLayouts()
         guard clients[target] === client else { return }
-        // Themes, for the same reason as the three above: a machine that
+        // Themes, for the same reason as the three above: a runner that
         // dropped and came back may have gained one, and a `[themes.*]` table
         // added to config.toml should not stay invisible until the app is
-        // relaunched. Only the local machine's, because a theme is what THIS
+        // relaunched. Only the local runner's, because a theme is what THIS
         // app paints with — asking three remote hosts and merging their
-        // answers would make the picker's contents depend on which machines
+        // answers would make the picker's contents depend on which runners
         // happen to be awake.
         if target.isEmpty {
             await Themes.shared.reload(
@@ -171,9 +172,9 @@ final class FleetStore: ObservableObject {
 
     /// One list from N.
     ///
-    /// An unreachable machine still contributes its last good rows — that is
+    /// An unreachable runner still contributes its last good rows — that is
     /// what keeps your mental map of the fleet stable while a laptop sleeps. A
-    /// machine that has never connected contributes none, and appears only as a
+    /// runner that has never connected contributes none, and appears only as a
     /// header with its state.
     private func remerge() {
         var merged: [Workspace] = []
@@ -182,13 +183,13 @@ final class FleetStore: ObservableObject {
         for target in hosts {
             guard let client = clients[target] else { continue }
             merged.append(contentsOf: client.fleet.workspaces)
-            // Not counted once a machine is known unreachable or never
+            // Not counted once a runner is known unreachable or never
             // installed: `client.fleet.livePanes` and `client.fleet.runtimeHealthy`
             // are then whatever was last read before it went quiet, not a live
             // reading, and letting either in reports hands on deck — or tmux
             // health — that in fact went home. Without this gate on `healthy`,
-            // a single unreachable machine with a stale `runtimeHealthy == true`
-            // could paint the whole bar green while the only machine actually
+            // a single unreachable runner with a stale `runtimeHealthy == true`
+            // could paint the whole bar green while the only runner actually
             // answering has no tmux at all; on a fleet of one, the sole
             // daemon dying would still show a green dot and "0 live".
             if client.state.refusal == nil {
@@ -199,20 +200,20 @@ final class FleetStore: ObservableObject {
         fleet = Fleet(runtimeHealthy: healthy, livePanes: live, workspaces: merged)
     }
 
-    /// Machines that are not fully healthy right now, for the status bar to
+    /// Runners that are not fully healthy right now, for the status bar to
     /// name individually.
     ///
-    /// `fleet.runtimeHealthy` above ORs across every machine, and stays an OR
+    /// `fleet.runtimeHealthy` above ORs across every runner, and stays an OR
     /// on purpose — ANDing would paint the whole status bar orange every time
     /// any one laptop was merely asleep, which is not news worth a color
     /// change. But a single merged boolean is also the whole story only if
-    /// nobody needs to know WHICH machine is the problem, and with more than
-    /// one machine configured that is exactly the question a green dot can no
-    /// longer answer: it takes only one healthy machine to turn it green
+    /// nobody needs to know WHICH runner is the problem, and with more than
+    /// one runner configured that is exactly the question a green dot can no
+    /// longer answer: it takes only one healthy runner to turn it green
     /// while a second sits there with no tmux at all. This is how the bar can
-    /// name that second machine instead of just going quiet about it.
+    /// name that second runner instead of just going quiet about it.
     ///
-    /// A machine still in `.connecting` — the few seconds before its first
+    /// A runner still in `.connecting` — the few seconds before its first
     /// read has come back — is not yet known to be anything, so it is left
     /// out rather than reported as broken before it has had a chance to say
     /// otherwise.
@@ -231,11 +232,11 @@ final class FleetStore: ObservableObject {
 
     // MARK: - Routing
 
-    /// The machine a row came from.
+    /// The runner a row came from.
     ///
     /// By `workspace.host`, which the CLI stamps from the `--host` flag it was
     /// invoked with. Never by id: short ids are the last eight hex of a UUID
-    /// minted per daemon, so they say nothing about which machine they are on.
+    /// minted per daemon, so they say nothing about which runner they are on.
     func client(for workspace: Workspace) -> DaemonClient? {
         clients[workspace.host ?? ""]
     }
@@ -244,20 +245,20 @@ final class FleetStore: ObservableObject {
         clients[host]?.state ?? .connecting
     }
 
-    // MARK: - Per-machine reads
+    // MARK: - Per-runner reads
 
-    /// Repositories across every machine, each tagged with the machine it is on.
+    /// Repositories across every runner, each tagged with the runner it is on.
     ///
     /// Not merged into a flat `[Repository]`: a repository's own short id is
     /// eight hex characters minted per daemon, same as a workspace's, so two
-    /// machines can hand back the same one for two different repositories.
+    /// runners can hand back the same one for two different repositories.
     var repositories: [(host: String, repository: Repository)] {
         hosts.flatMap { host in
             (clients[host]?.repositories ?? []).map { (host, $0) }
         }
     }
 
-    /// Allowlisted roots across every machine, tagged the same way.
+    /// Allowlisted roots across every runner, tagged the same way.
     var roots: [(host: String, root: RepositoryRoot)] {
         hosts.flatMap { host in
             (clients[host]?.roots ?? []).map { (host, $0) }
@@ -285,18 +286,18 @@ final class FleetStore: ObservableObject {
         return (root.root, siblings)
     }
 
-    /// One workspace's layout is per-machine as well as per-workspace, so the
+    /// One workspace's layout is per-runner as well as per-workspace, so the
     /// key carries both — a flat `[String: [PaneGroup]]` across several
-    /// machines could let one machine's layout answer for another's
+    /// runners could let one runner's layout answer for another's
     /// workspace of the same id.
     struct LayoutKey: Hashable {
         var host: String
         var workspace: String
     }
 
-    /// Every machine's layouts, merged. Read through `client(for:)` when a
+    /// Every runner's layouts, merged. Read through `client(for:)` when a
     /// workspace is already in hand — this exists for the one place that has
-    /// to watch every machine's layouts at once regardless of which is
+    /// to watch every runner's layouts at once regardless of which is
     /// selected: `ContentView`'s `.onChange(of:)` that keeps the app looking
     /// at wherever tmux just moved focus to.
     var layouts: [LayoutKey: [PaneGroup]] {
@@ -310,12 +311,12 @@ final class FleetStore: ObservableObject {
         return merged
     }
 
-    /// Why this row's machine cannot be acted on, or nil if it can.
+    /// Why this row's runner cannot be acted on, or nil if it can.
     ///
     /// Checked here rather than at each call site. There are around a hundred
     /// and twenty of those, and a rule every one of them has to remember is a
     /// rule that gets forgotten — the failure being a command that hangs for
-    /// ConnectTimeout against a machine already known to be gone.
+    /// ConnectTimeout against a runner already known to be gone.
     func refusal(for workspace: Workspace) -> String? {
         refusal(for: workspace.host ?? "")
     }
@@ -326,7 +327,7 @@ final class FleetStore: ObservableObject {
     /// have no workspace in hand yet to route by.
     func refusal(for host: String) -> String? {
         guard let client = clients[host] else {
-            return "this machine is no longer configured"
+            return "this runner is no longer configured"
         }
         return client.state.refusal
     }
@@ -335,7 +336,7 @@ final class FleetStore: ObservableObject {
 
     /// Cancel any bring-up still in flight for `host` before reconnecting.
     ///
-    /// Without this, a machine whose bring-up `refresh()` is still awaiting
+    /// Without this, a runner whose bring-up `refresh()` is still awaiting
     /// its first response and a `reconnectNow()` fired at the same target —
     /// a click on its trouble dot, or `reconnectAll()` — end up running two
     /// `refresh()` + `startEvents()` sequences on the one client at once,
@@ -355,8 +356,8 @@ final class FleetStore: ObservableObject {
     /// Not every client — a healthy one included would retry in lockstep
     /// with no jitter (the jitter in `DaemonClient.backoffSeconds` exists
     /// precisely to avoid this), and would tear down and restart the local
-    /// machine's own perfectly good event stream on every Wi-Fi change,
-    /// which is the one machine a network flap never actually touches.
+    /// runner's own perfectly good event stream on every Wi-Fi change,
+    /// which is the one runner a network flap never actually touches.
     func reconnectAll() {
         for (host, client) in clients where !client.state.isUsable {
             cancelBringUp(host)

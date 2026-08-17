@@ -1,6 +1,6 @@
 //! tmux control-mode client and notification parser.
 //!
-//! One long-lived `tmux -CC attach-session` client attaches to the host session.
+//! One long-lived `tmux -CC attach-session` client attaches to the runner session.
 //! Because tmux sends output from every pane in every window of the attached
 //! session, this client drains and routes all terminal output by stable pane ID.
 //!

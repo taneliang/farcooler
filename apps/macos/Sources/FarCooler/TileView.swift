@@ -49,11 +49,11 @@ struct TileView: View {
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
-    /// Which link the panes below were opened on, so a machine that dropped
+    /// Which link the panes below were opened on, so a runner that dropped
     /// and came back gets fresh streams instead of frozen ones. See
     /// `DaemonClient.linkGeneration`.
     let linkGeneration: Int
-    /// Why this workspace's machine cannot be acted on, or nil if it can —
+    /// Why this workspace's runner cannot be acted on, or nil if it can —
     /// passed down to each `TilePane`, which hands it to `AgentSurface` for
     /// an agent pane. See `AgentStream.refusal`'s own doc comment.
     let refusal: () -> String?
@@ -329,11 +329,11 @@ private struct TilePane: View {
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
-    /// Which link the panes below were opened on, so a machine that dropped
+    /// Which link the panes below were opened on, so a runner that dropped
     /// and came back gets fresh streams instead of frozen ones. See
     /// `DaemonClient.linkGeneration`.
     let linkGeneration: Int
-    /// Why this pane's machine cannot be acted on, or nil if it can — see
+    /// Why this pane's runner cannot be acted on, or nil if it can — see
     /// `AgentStream.refusal`'s own doc comment.
     let refusal: () -> String?
     let isFocused: Bool

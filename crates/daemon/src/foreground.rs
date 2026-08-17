@@ -34,7 +34,7 @@ pub struct Foreground {
     panes: HashMap<String, Running>,
     /// Every process's group, foreground or not.
     ///
-    /// Kept for the whole machine because the process holding a pane's socket
+    /// Kept for the whole host because the process holding a pane's socket
     /// is often not the one the pane is showing. The same walk already has
     /// both columns, so this costs a map and no extra process.
     groups: HashMap<i32, i32>,

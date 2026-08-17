@@ -44,7 +44,7 @@ public enum AppVersion {
     /// What the relay is told, and what it shows back on the devices screen.
     ///
     /// One field rather than three, because the relay's job here is to let
-    /// someone glance at a list and see which machine is behind — not to hold a
+    /// someone glance at a list and see which runner is behind — not to hold a
     /// version model of its own.
     public static var reported: String { "\(display) · \(build)" }
 

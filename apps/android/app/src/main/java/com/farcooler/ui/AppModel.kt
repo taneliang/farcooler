@@ -5,8 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.farcooler.account.Account
 import com.farcooler.account.PushRegistration
-import com.farcooler.data.Host
-import com.farcooler.data.HostStore
+import com.farcooler.data.Runner
+import com.farcooler.data.RunnerStore
 import com.farcooler.data.Identity
 import com.farcooler.data.Settings
 import com.farcooler.net.Connection
@@ -21,10 +21,10 @@ import kotlinx.coroutines.launch
 
 /** Where the app is. */
 sealed interface Route {
-    /** No machines yet, so there is nothing else to show. */
+    /** No runners yet, so there is nothing else to show. */
     data object Onboarding : Route
 
-    /** The worktree list — what a machine with nothing running shows. */
+    /** The worktree list — what a runner with nothing running shows. */
     data object Fleet : Route
 
     data class Terminal(val ref: TerminalRef) : Route
@@ -37,13 +37,13 @@ sealed interface Route {
     data object Devices : Route
 
     /**
-     * One machine's own config.toml.
+     * One runner's own config.toml.
      *
      * Carries the host id rather than the connection, so a route survives the
      * connection being replaced underneath it — a reconnect builds a new
      * `Connection` and a route holding the old one would edit a dead session.
      */
-    data class MachineSettings(val hostId: String) : Route
+    data class RunnerSettings(val hostId: String) : Route
 }
 
 /**
@@ -52,10 +52,10 @@ sealed interface Route {
  * A single model rather than one per screen. The alternative — a view model per
  * route — would mean the fleet is re-fetched every time someone opens a
  * terminal and re-connected every time they come back, on a product whose whole
- * claim is that every machine is already connected.
+ * claim is that every runner is already connected.
  */
 class AppModel(application: Application) : AndroidViewModel(application) {
-    val hosts = HostStore(application)
+    val hosts = RunnerStore(application)
     val settings = Settings(application)
     val notifier = Notifier(application, settings)
     val account = Account(application)
@@ -97,7 +97,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         // Generate the device key at launch rather than the first time
         // something asks for it. It used to appear only when the authorise
         // screen was opened on iOS, which put a several-hundred-millisecond
-        // keygen behind a tap and, worse, meant a machine could be added and
+        // keygen behind a tap and, worse, meant a runner could be added and
         // connected to before this device had an identity to offer.
         viewModelScope.launch { Identity.publicKey }
 
@@ -116,12 +116,12 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Open onto TERMINALS, not onto a list of machines.
+     * Open onto TERMINALS, not onto a list of runners.
      *
-     * Called once the first fleet has arrived. A list of machines is
-     * onboarding, and onboarding is not a home screen — so the machine list
+     * Called once the first fleet has arrived. A list of runners is
+     * onboarding, and onboarding is not a home screen — so the runner list
      * appears exactly when it is the thing to do, which is when there are no
-     * machines.
+     * runners.
      */
     fun landIfNeeded() {
         // A notification tap outranks the landing rule: someone who tapped
@@ -133,7 +133,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
             _route.value = Route.Onboarding
             return
         }
-        // Only once at least one machine has answered, or a slow SSH handshake
+        // Only once at least one runner has answered, or a slow SSH handshake
         // would land on the empty worktree list and stay there.
         val anySettled = fleet.active.value.any { it.phase.value !is Connection.Phase.Connecting }
         if (!anySettled) return
@@ -159,7 +159,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
      *
      * By id alone, because that is all a notification carries and all it can
      * carry: it may have been posted by the messaging service in a process that
-     * had no fleet at all. The machine and worktree are looked up from whatever
+     * had no fleet at all. The runner and worktree are looked up from whatever
      * has since connected, and a tap that arrives before the fleet does simply
      * lands on the list — which is the honest answer, not a guess.
      */
@@ -197,15 +197,15 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         backStack.clear()
     }
 
-    /** A machine was added from onboarding, so leave onboarding. */
-    fun addHost(host: Host) {
+    /** A runner was added from onboarding, so leave onboarding. */
+    fun addHost(host: Runner) {
         hosts.add(host)
         backStack.clear()
         _route.value = Route.Fleet
         _landed.value = false
     }
 
-    fun removeHost(host: Host) {
+    fun removeHost(host: Runner) {
         hosts.remove(host)
         if (hosts.hosts.value.isEmpty()) {
             backStack.clear()

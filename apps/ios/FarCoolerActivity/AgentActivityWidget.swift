@@ -13,7 +13,10 @@ import WidgetKit
 /// Nothing here reaches into the app. The extension has no network, no daemon
 /// connection, and no access to the fleet; everything it draws arrives in
 /// `AgentActivityAttributes` from a push. That is why the attributes carry the
-/// machine name and the label as plain strings rather than ids to look up.
+/// runner name and the label as plain strings rather than ids to look up.
+///
+/// That field is still spelled `machine`: the relay encodes the payload by
+/// field name, so renaming it here would only stop the push arriving.
 struct AgentActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: AgentActivityAttributes.self) { context in
@@ -75,7 +78,7 @@ struct AgentActivityWidget: Widget {
     }
 }
 
-/// The lock screen presentation: name and machine on one line, what it is doing
+/// The lock screen presentation: name and runner on one line, what it is doing
 /// under them, a colored badge on the right.
 private struct LockScreenCard: View {
     let attributes: AgentActivityAttributes

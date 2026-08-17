@@ -40,7 +40,7 @@ SOURCES = [
     "ImagePaste.swift",
     "AgentStream.swift",
     "AgentView.swift",
-    "MachineSettings.swift",
+    "RunnerSettings.swift",
     "ThemeEditorView.swift",
     "AdapterEditorView.swift",
     "Changes.swift",

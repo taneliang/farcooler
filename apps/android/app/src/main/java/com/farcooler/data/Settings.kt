@@ -56,17 +56,17 @@ class Settings(context: Context) {
     val notifyOnDone: StateFlow<Boolean> = _notifyOnDone.asStateFlow()
 
     /**
-     * Whether to connect every configured machine at once.
+     * Whether to connect every configured runner at once.
      *
      * The Mac does this unconditionally — see
      * `docs/superpowers/specs/2026-08-03-every-machine-in-one-fleet-design.md`
      * — and the argument for it is stronger on a phone, where switching costs a
      * sheet and two taps. It is a setting rather than a rule only because a
      * phone pays for each extra SSH session in radio wake-ups: someone with six
-     * machines on a train may want one.
+     * runners on a train may want one.
      */
-    private val _allMachinesAtOnce = MutableStateFlow(preferences.getBoolean(KEY_ALL_MACHINES, true))
-    val allMachinesAtOnce: StateFlow<Boolean> = _allMachinesAtOnce.asStateFlow()
+    private val _allRunnersAtOnce = MutableStateFlow(preferences.getBoolean(KEY_ALL_RUNNERS, true))
+    val allRunnersAtOnce: StateFlow<Boolean> = _allRunnersAtOnce.asStateFlow()
 
     /**
      * Whether opening a terminal reshapes the pane to this screen.
@@ -103,9 +103,9 @@ class Settings(context: Context) {
         preferences.edit().putBoolean(KEY_DONE, on).apply()
     }
 
-    fun setAllMachinesAtOnce(on: Boolean) {
-        _allMachinesAtOnce.value = on
-        preferences.edit().putBoolean(KEY_ALL_MACHINES, on).apply()
+    fun setAllRunnersAtOnce(on: Boolean) {
+        _allRunnersAtOnce.value = on
+        preferences.edit().putBoolean(KEY_ALL_RUNNERS, on).apply()
     }
 
     fun setReshapePanes(on: Boolean) {
@@ -116,7 +116,7 @@ class Settings(context: Context) {
     companion object {
         /**
          * Matches the size the Apple apps render at, so the same terminal on
-         * the same machine is the same size wherever you look at it.
+         * the same runner is the same size wherever you look at it.
          */
         const val DEFAULT_FONT_SIZE = 13f
         const val MIN_FONT_SIZE = 9f
@@ -126,7 +126,8 @@ class Settings(context: Context) {
         private const val KEY_FONT_SIZE = "terminalFontSize"
         private const val KEY_ATTENTION = "notifyOnAttention"
         private const val KEY_DONE = "notifyOnDone"
-        private const val KEY_ALL_MACHINES = "allMachinesAtOnce"
+        /** The stored spelling stays, so an existing install keeps its answer. */
+        private const val KEY_ALL_RUNNERS = "allMachinesAtOnce"
         private const val KEY_RESHAPE = "reshapePanes"
     }
 }

@@ -11,7 +11,7 @@
 //! nobody browses, dotfiles repositories do not track, and which gets deleted
 //! wholesale to recover from a corrupt database. One path on every platform
 //! also means one dotfiles-tracked config works on a Mac and on every remote
-//! host, which matters because those hosts run the daemon with no Mac app.
+//! runner, which matters because those runners run the daemon with no Mac app.
 
 use std::path::{Path, PathBuf};
 
@@ -169,7 +169,7 @@ pub fn registry_from(path: &Path) -> Registry {
     registry
 }
 
-/// The themes this host defines, in name order.
+/// The themes this runner defines, in name order.
 ///
 /// Separate from `registry_from` because they answer to different callers: the
 /// registry is how the daemon recognizes an agent, and this is what a client
@@ -203,7 +203,7 @@ pub fn themes_from(path: &Path) -> Vec<crate::theme::Theme> {
         .collect()
 }
 
-/// The host's themes, found the same way the registry is.
+/// The runner's themes, found the same way the registry is.
 pub fn load_themes() -> Vec<crate::theme::Theme> {
     match config_path() {
         Some(path) => themes_from(&path),
@@ -211,12 +211,12 @@ pub fn load_themes() -> Vec<crate::theme::Theme> {
     }
 }
 
-/// The prefix this host puts in front of a branch name derived from a task.
+/// The prefix this runner puts in front of a branch name derived from a task.
 ///
 /// Read per call, like `themes_from` and for the same reason stated there: a few
 /// hundred bytes of TOML parsed a handful of times per session, in exchange for
 /// an edit taking effect without restarting the daemon. It matters more here
-/// than it does for themes, because the machine settings editor writes this
+/// than it does for themes, because the runner settings editor writes this
 /// file — a value cached at startup would not reflect its own writes.
 ///
 /// Applied by the CLIENT, not by the daemon, because the task composer shows
@@ -246,7 +246,7 @@ pub fn branch_prefix_from(path: &Path) -> String {
     }
 }
 
-/// Which adapters this host's config file names, whatever it says about them.
+/// Which adapters this runner's config file names, whatever it says about them.
 ///
 /// Names only, and that is the point: it answers "is there a table for this?",
 /// which is what tells an override apart from a built-in. The merged registry
@@ -266,7 +266,7 @@ pub fn adapter_names_from(path: &Path) -> Vec<String> {
     parsed.adapters.into_keys().collect()
 }
 
-/// The adapters this host's config file names, found the way the registry is.
+/// The adapters this runner's config file names, found the way the registry is.
 pub fn load_adapter_names() -> Vec<String> {
     match config_path() {
         Some(path) => adapter_names_from(&path),
@@ -274,7 +274,7 @@ pub fn load_adapter_names() -> Vec<String> {
     }
 }
 
-/// The host's branch prefix, found the same way the registry is.
+/// The runner's branch prefix, found the same way the registry is.
 pub fn load_branch_prefix() -> String {
     match config_path() {
         Some(path) => branch_prefix_from(&path),
@@ -288,7 +288,7 @@ pub fn load_branch_prefix() -> String {
 //
 // The riskiest code in this crate, and the reason it is written the way it is:
 // this file is documented above as the one path a dotfiles repository tracks,
-// hand-edited, on a Mac and on every remote host. A settings screen that
+// hand-edited, on a Mac and on every remote runner. A settings screen that
 // rewrote it would be a data-loss bug wearing a feature's clothes.
 //
 // Three properties, each load-bearing:
@@ -306,7 +306,7 @@ pub fn load_branch_prefix() -> String {
 //
 // Default umask, deliberately not 0600: `push.json` is owner-only because it
 // holds a bearer token, and this file is the opposite — meant to be readable,
-// tracked, and copied between machines.
+// tracked, and copied between runners.
 
 /// Read a document for editing, or `None` if the file exists and is malformed.
 ///
@@ -593,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn a_host_theme_is_read_whole() {
+    fn a_runner_theme_is_read_whole() {
         let dir = scratch("theme-whole");
         let path = dir.join("config.toml");
         std::fs::write(

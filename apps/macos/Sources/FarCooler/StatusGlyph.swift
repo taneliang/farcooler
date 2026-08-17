@@ -35,7 +35,7 @@ struct StatusGlyph: View {
                 // the color does. `unreadable` shares the shape because what is
                 // missing is the same thing — an answer — and differs in color,
                 // because one of them is a problem to act on and the other is a
-                // machine that has not replied yet.
+                // runner that has not replied yet.
                 Circle()
                     .strokeBorder(color, lineWidth: 1.5)
             default:
@@ -62,7 +62,7 @@ struct StatusGlyph: View {
         // and a turn that worked were the same dot until this existed.
         case .lost, .failed, .failedRun, .failedTurn: return .red
         // Not red. Red is reserved for something that has gone wrong and wants
-        // a decision; a machine that has not answered yet is neither, and
+        // a decision; a runner that has not answered yet is neither, and
         // painting the whole fleet red every time tmux is busy is how a colour
         // stops meaning anything.
         case .unreadable: return .secondary

@@ -10,7 +10,7 @@ service holding their credentials.
 
 It is not a backend for the fleet. It never sees a transcript, a repository, a
 command, or a terminal's output. It knows: which accounts exist, which devices
-they own, which machines they have paired, and — as counters — how much all of
+they own, which runners they have paired, and — as counters — how much all of
 that gets used.
 
 ## The rule that makes it safe

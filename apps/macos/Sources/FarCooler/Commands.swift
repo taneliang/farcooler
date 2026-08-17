@@ -173,7 +173,7 @@ struct FarCoolerCommands: Commands {
             Button("Go to Anything…") { AppCommand.commandPalette.post() }
                 .keyboardShortcut("p", modifiers: .command)
             // Search is navigation here, not a nicety: worktrees are unbounded
-            // and typing is the fastest way to any of them, on any machine.
+            // and typing is the fastest way to any of them, on any runner.
             Button("Find Worktree or Agent") { AppCommand.search.post() }
                 .keyboardShortcut("f", modifiers: .command)
             Button("Reload Fleet") { AppCommand.reload.post() }

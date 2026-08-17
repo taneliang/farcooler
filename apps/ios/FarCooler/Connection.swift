@@ -26,10 +26,10 @@ final class Connection: ObservableObject {
         /// you", and this is not stopped.
         ///
         /// Views keep rendering the last known fleet through this. The Mac
-        /// settled that rule already — an unreachable machine still
+        /// settled that rule already — an unreachable runner still
         /// contributes its last good rows, because that is what keeps your
         /// mental map of the fleet stable while a laptop sleeps — and the
-        /// phone should not disagree with it about the same machine.
+        /// phone should not disagree with it about the same runner.
         case reconnecting(attempt: Int)
     }
 
@@ -55,7 +55,7 @@ final class Connection: ObservableObject {
         /// Retrying is guaranteed to fail, and offering it would suggest this is
         /// a glitch rather than a decision someone has to make.
         case hostKeyChanged
-        /// Nothing answered: wrong address, machine asleep, off the network.
+        /// Nothing answered: wrong address, host asleep, off the network.
         /// `SshError::Connect` — the one case where retrying is the right move.
         case unreachable
         /// SSH worked; Far Cooler is not installed over there.
@@ -123,17 +123,17 @@ final class Connection: ObservableObject {
     lazy var changesStores = ChangesStores(core: core)
     private var poller: Task<Void, Never>?
 
-    /// The machine this connection is for, remembered so a reconnection has
+    /// The runner this connection is for, remembered so a reconnection has
     /// something to reconnect TO. Before this, the host appeared only as an
     /// argument to `start` and was gone the moment it returned.
-    private var host: Host?
+    private var host: Runner?
 
-    /// The machine this connection is for, as it reads on screen.
+    /// The runner this connection is for, as it reads on screen.
     ///
     /// `host` itself stays private — nothing outside should be able to change
-    /// which machine a live connection points at — but a settings screen has to
-    /// be able to title itself with the machine it is editing.
-    var hostLabel: String { host?.label ?? "This machine" }
+    /// which runner a live connection points at — but a settings screen has to
+    /// be able to title itself with the runner it is editing.
+    var hostLabel: String { host?.label ?? "This runner" }
 
     /// The armed retry, or the attempt in flight. One slot, so a second
     /// request to reconnect replaces the first rather than running alongside
@@ -167,7 +167,7 @@ final class Connection: ObservableObject {
         reconnectTask?.cancel()
     }
 
-    func start(host: Host) async {
+    func start(host: Runner) async {
         poller?.cancel()
         reconnectTask?.cancel()
         self.host = host
@@ -175,7 +175,7 @@ final class Connection: ObservableObject {
         let mine = attempt
         phase = .connecting
 
-        // Claimed here rather than in `init`, so switching machines hands the
+        // Claimed here rather than in `init`, so switching runners hands the
         // slot to the connection that is now on screen. The old one's closure
         // captures `self` weakly and no-ops once it is gone.
         Reachability.shared.onShouldRetry = { [weak self] in self?.reconnectNow() }
@@ -209,13 +209,13 @@ final class Connection: ObservableObject {
     /// The same schedule as the Mac's `DaemonClient.backoffSeconds`,
     /// deliberately: "how long until it comes back" should have one answer
     /// across the three apps. Doubling from two seconds to a thirty second
-    /// ceiling, with jitter, because several machines recovering from one
+    /// ceiling, with jitter, because several runners recovering from one
     /// network event must not retry in lockstep.
     static func backoff(attempt: Int) -> Double {
         min(30, pow(2, Double(attempt))) * Double.random(in: 0.8...1.2)
     }
 
-    /// How long a machine that answered SSH but not Far Cooler waits.
+    /// How long a host that answered SSH but not Far Cooler waits.
     ///
     /// Five minutes, matching the Mac. No amount of retrying installs a
     /// daemon, so the exponential schedule — which exists to survive a burst
@@ -297,7 +297,7 @@ final class Connection: ObservableObject {
         reconnectGeneration += 1
         await refresh()
         // Re-read rather than trust what a previous session reported: a
-        // machine that dropped and came back may have gained a repository, and
+        // runner that dropped and came back may have gained a repository, and
         // staying invisible to the pickers until relaunch is the failure the
         // Mac's `onReconnect` seeding exists to prevent.
         await loadRepositories()
@@ -366,16 +366,16 @@ final class Connection: ObservableObject {
     /// machine that is asleep shows the same indefinite spinner as one that is
     /// about to succeed, and until this existed the only way out of that was to
     /// kill the app.
-    func giveUp(on host: Host) {
+    func giveUp(on host: Runner) {
         abandon("Stopped waiting for \(host.address). It may be asleep or off the network.")
     }
 
     /// Back out of the fingerprint question without answering it.
     ///
     /// Lands on the failure screen rather than the spinner, because that is the
-    /// screen with the machine switcher, the editor and this device's key on it.
+    /// screen with the runner switcher, the editor and this device's key on it.
     /// The wording is what `Failure.keyNotTrusted` matches on.
-    func declineHostKey(_ host: Host) {
+    func declineHostKey(_ host: Runner) {
         abandon(
             "The key \(host.address) presented has not been trusted on this device. "
                 + "Far Cooler won’t connect until it is.")
@@ -430,7 +430,7 @@ final class Connection: ObservableObject {
             platform: body["platform"] as? String ?? "",
             // Absent from a daemon older than capabilities. `DaemonBuild.can`
             // reads an empty set as the features that existed then, so an old
-            // machine keeps working rather than going dark.
+            // runner keeps working rather than going dark.
             capabilities: Set(body["capabilities"] as? [String] ?? []))
         // Read from the same call, which is already made once per connection.
         //
@@ -441,7 +441,7 @@ final class Connection: ObservableObject {
         branchPrefix = body["branchPrefix"] as? String ?? "feat/"
     }
 
-    /// What this machine says a derived branch name starts with.
+    /// What this runner says a derived branch name starts with.
     ///
     /// Applied on this side rather than by the daemon, because the composer
     /// shows you the branch it is about to create.
@@ -531,7 +531,7 @@ final class Connection: ObservableObject {
         repositories = (try? JSONDecoder().decode(RepositoryList.self, from: data))?.repositories ?? []
     }
 
-    /// Merge whatever this machine defines into the picker.
+    /// Merge whatever this runner defines into the picker.
     ///
     /// Read on every connection and every reconnection, alongside
     /// repositories, so a `[themes.*]` table added to the host's config.toml
@@ -577,14 +577,14 @@ final class Connection: ObservableObject {
         await refresh()
     }
 
-    // MARK: - Machine settings
+    // MARK: - Runner settings
     //
-    // Editing what the connected machine's config.toml holds. Every write
+    // Editing what the connected runner's config.toml holds. Every write
     // answers with the file's new state, read back by the daemon rather than
     // echoed from the request, so a value the writer normalized is what this
     // phone ends up holding.
 
-    /// Only the themes this machine's file defines.
+    /// Only the themes this runner's file defines.
     ///
     /// Not the merged list `Themes.shared.available` holds: that one includes
     /// this phone's built-ins, and a built-in shown in an editor as if the file
@@ -623,7 +623,7 @@ final class Connection: ObservableObject {
         return try? JSONDecoder().decode(StackResponse.self, from: data)
     }
 
-    /// What the machine says about itself.
+    /// What the runner says about itself.
     ///
     /// The fleet already carries `runtime_healthy` as a bare bool, which is
     /// enough to tint a chip and not enough to act on: "something is wrong" is
@@ -634,7 +634,7 @@ final class Connection: ObservableObject {
         return try? JSONDecoder().decode(HostHealth.self, from: data)
     }
 
-    /// The repositories Far Cooler knows on this machine, and the roots it
+    /// The repositories Far Cooler knows on this runner, and the roots it
     /// discovered them under.
     ///
     /// Two calls rather than one because they answer different questions — what
@@ -646,7 +646,7 @@ final class Connection: ObservableObject {
     }
 
     /// Stop watching a directory. The repositories already registered under it
-    /// are the machine's business, not this call's.
+    /// are the runner's business, not this call's.
     func removeRepositoryRoot(_ id: String) async -> Bool {
         ((try? await core.call("repository_root.remove", ["root": id])) != nil)
     }
@@ -675,7 +675,7 @@ final class Connection: ObservableObject {
         return Self.themes(from: body)
     }
 
-    /// Put the machine's themes back into the picker every screen reads.
+    /// Put the runner's themes back into the picker every screen reads.
     ///
     /// Without this, a theme you just made is missing from the one place you
     /// would go to choose it.
@@ -708,7 +708,7 @@ final class Connection: ObservableObject {
     func testAdapter(_ adapter: AdapterInfo) async -> AdapterTestOutcome {
         guard let data = try? await core.call("adapter.test", adapter.arguments),
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return .failed("That machine could not be reached.") }
+        else { return .failed("That runner couldn't be reached.") }
         if body["ok"] as? Bool == true {
             return .worked(body["reported"] as? String ?? "answered")
         }

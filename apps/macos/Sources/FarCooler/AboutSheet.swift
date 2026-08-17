@@ -10,11 +10,11 @@ import SwiftUI
 /// version, because those two are what have to match.
 ///
 /// This Mac only, deliberately, now that the app can be looking at several
-/// machines at once: a fleet-wide roundup here would either duplicate
-/// Settings ▸ Machines (which already shows each machine's installed version
+/// runners at once: a fleet-wide roundup here would either duplicate
+/// Settings ▸ Runners (which already shows each runner's installed version
 /// next to its name) or race it, and "what am I running" — the question this
 /// window answers — is a question about the app in your hand, which runs on
-/// exactly one machine regardless of how many others it is talking to.
+/// exactly one Mac regardless of how many runners it is talking to.
 struct AboutSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -39,7 +39,7 @@ struct AboutSheet: View {
 
             Form {
                 // Named explicitly rather than left at `VersionSection`'s
-                // default empty host: the default reads as "no machine to
+                // default empty host: the default reads as "no runner to
                 // say," which was right when a blank host meant "whichever
                 // one is being driven" and is wrong now that this window only
                 // ever shows this Mac's own daemon.

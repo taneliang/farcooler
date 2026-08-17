@@ -44,7 +44,7 @@ async fn a_relayed_stdio_session_is_not_promoted_to_host_admin() {
 /// command, so no `--scope`, so nothing to say and no line sent. Silence already
 /// means host_admin at the other end, and it has to keep meaning that — a
 /// preamble sent anyway would be read as a frame by a daemon built before
-/// preambles, which is exactly the process still listening on a machine that has
+/// preambles, which is exactly the process still listening on a runner that has
 /// just been upgraded.
 #[tokio::test]
 async fn a_relayed_session_with_no_scope_still_holds_host_admin() {

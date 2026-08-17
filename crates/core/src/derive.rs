@@ -62,7 +62,7 @@ pub fn derive_terminal(record: &TerminalRecord, snapshot: &RuntimeSnapshot) -> D
             // half was a false negative asserted with confidence. `lost` is a
             // FINDING — the inventory was read and nothing in it claims this
             // terminal. When the read itself failed there is no finding, and
-            // reporting one says every terminal on the machine has died.
+            // reporting one says every terminal on the runner has died.
             //
             // Which is not hypothetical: tmux answers one request at a time per
             // server, so a single pane whose program stopped reading its stdin
@@ -127,7 +127,7 @@ pub fn orphaned_panes<'a>(
 /// A workspace's state, from the durable facts plus its terminals.
 ///
 /// Ordered by what the user must act on. Hidden first because it is the user's
-/// own decision and outranks anything the machine noticed; a missing worktree
+/// own decision and outranks anything the runner noticed; a missing worktree
 /// next because every terminal in it is lost as a consequence, and reporting
 /// the consequence would send someone to restart a process in a directory that
 /// is not there.
@@ -164,12 +164,12 @@ pub fn derive_workspace(
     // already intend and nothing has disproved. Only the last is recoverable
     // without alarming anyone: a tmux server that answers a second later leaves
     // the sidebar exactly where it was, instead of having flashed every
-    // workspace on the machine red and back.
+    // workspace on the runner red and back.
     //
     // The honest signal is not thrown away, it is just carried somewhere it can
     // be said properly — `runtime_healthy` on the wire, which the clients show
-    // as the machine being unreadable. A per-workspace state cannot express
-    // "ask the machine, not me".
+    // as the runner being unreadable. A per-workspace state cannot express
+    // "ask the runner, not me".
     let any_live = terminals.iter().any(|(_, d)| {
         matches!(
             d.state,
@@ -305,7 +305,7 @@ mod tests {
     /// claim than `Running` — it is the opposite claim, made just as
     /// confidently, on the strength of a read that never completed. One pane
     /// with a blocked write stalls the tmux server, and every terminal on the
-    /// machine was reported dead.
+    /// runner was reported dead.
     #[test]
     fn unusable_inventory_does_not_claim_death_either() {
         let r = record(TerminalIntent::Running, true);
@@ -323,11 +323,11 @@ mod tests {
         assert_eq!(derive_terminal(&r, &s).state, TerminalState::Lost);
     }
 
-    /// A machine that cannot be read must not turn every workspace on it red.
+    /// A runner that cannot be read must not turn every workspace on it red.
     /// That flash — every row to Error and back — was the visible half of the
     /// bug, and `Error` is a claim about the workspace that nothing observed.
     #[test]
-    fn an_unreadable_machine_does_not_put_workspaces_in_error() {
+    fn an_unreadable_runner_does_not_put_workspaces_in_error() {
         let r = record(TerminalIntent::Running, true);
         let d = derive_terminal(&r, &RuntimeSnapshot::unavailable());
         assert_eq!(derive_workspace(false, false, false, &[(r, d)]), WorkspaceState::Active);

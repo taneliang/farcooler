@@ -66,7 +66,7 @@ The names are the ones a developer-tool audience already knows: Rust ships
 
 All four install side by side: separate bundle identifier, runtime directory,
 database, tmux server, binary name and relay. A canary cannot see a stable
-install's fleet, which is what makes it safe to run one on the machine your real
+install's fleet, which is what makes it safe to run one on the computer your real
 work lives on.
 
 The channel is derived from a tag, never from a flag someone remembers to pass:
@@ -94,7 +94,7 @@ binary that installs at the stable path and writes the stable runtime directory.
 
 **A channel is a separate installation**, not a label: its own bundle
 identifier, runtime directory, database, tmux server, binary name, service unit
-and relay, so all four coexist on one machine and none can see another's state.
+and relay, so all four coexist on one host and none can see another's state.
 See `docs/superpowers/specs/2026-08-11-release-channels-design.md`.
 
 Both apps stamp it into their `Info.plist` at build time (`FarCoolerChannel`,

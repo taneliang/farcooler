@@ -90,7 +90,7 @@ pub const DEFAULT_THEME: &str = "Nord";
 
 /// Every theme compiled in, in the order a picker should show them.
 ///
-/// Built in rather than fetched, so a phone that has never reached a host
+/// Built in rather than fetched, so a phone that has never reached a runner
 /// still has a light mode, and so choosing one costs no round trip.
 pub fn built_in() -> Vec<Theme> {
     vec![

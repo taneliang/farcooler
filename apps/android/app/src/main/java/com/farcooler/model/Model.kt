@@ -220,8 +220,8 @@ data class RepositoryList(val repositories: List<Repository> = emptyList())
  *
  * [capabilities] is distinct from [matches], and they answer different
  * questions. That one is "were these built from the same source"; this is "what
- * can that machine do", which is the one an app acts on when it is newer than
- * the machine it reached — Play review and `host install` do not tick together.
+ * can that runner do", which is the one an app acts on when it is newer than
+ * the runner it reached — Play review and `runner install` do not tick together.
  */
 data class DaemonBuild(
     val version: String,
@@ -230,15 +230,15 @@ data class DaemonBuild(
     val capabilities: Set<String> = emptySet(),
 ) {
     /**
-     * Whether this machine can do something, by name.
+     * Whether this runner can do something, by name.
      *
      * A control whose capability is missing is shown DIMMED with a reason,
-     * never hidden: the same app showing different controls on two machines
+     * never hidden: the same app showing different controls on two runners
      * with nothing said about why reads as a bug.
      *
      * An empty set means a daemon old enough to predate the question, so it has
      * exactly the feature set that existed then. Reading silence as "can do
-     * nothing" would blank the UI against every older machine, which is the
+     * nothing" would blank the UI against every older runner, which is the
      * opposite of the point. Matches the iOS reading exactly.
      */
     fun can(capability: String): Boolean {

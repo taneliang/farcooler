@@ -33,7 +33,7 @@ pub const BUILD: &str = env!("FARCOOLER_BUILD");
 
 /// Which installation this build belongs to.
 ///
-/// Four channels are four separate installs that coexist on one machine —
+/// Four channels are four separate installs that coexist on one host —
 /// separate runtime directory, database, tmux server, binary name and bundle
 /// identifier — so this is not a label. It decides where the daemon lives.
 ///
@@ -81,7 +81,7 @@ impl Channel {
     /// What this channel's daemon is called on disk.
     ///
     /// The SCHEME is frozen, not the literal: `farcoolerd[-<channel>]`. An App
-    /// Store binary hardcodes the path it asks a machine for, which makes the
+    /// Store binary hardcodes the path it asks a runner for, which makes the
     /// shape of this name as public as any proto message — and stable's has no
     /// suffix precisely so that every client already in the field keeps
     /// resolving exactly what it always did.
@@ -107,7 +107,7 @@ impl Channel {
     /// The names this channel's daemon may go by on disk, most specific first.
     ///
     /// Two names, because two different things produce a Far Cooler binary and
-    /// only one of them renames. `host install` writes `daemon_binary_name()`
+    /// only one of them renames. `runner install` writes `daemon_binary_name()`
     /// on the destination, which is what lets four channels share one
     /// `~/.local/bin`. Cargo does not: `[[bin]] name = "farcoolerd"` is what
     /// comes out of `target/` no matter which channel stamped it, and
@@ -175,7 +175,7 @@ pub const CHANNEL: Channel = Channel::from_str_or_local_const(env!("FARCOOLER_CH
 /// copy is exactly the drift this exists to prevent.
 ///
 /// Named per user-visible FEATURE, not per method. A client asks "does this
-/// machine do stacks", never "does it implement stack.set_parent".
+/// runner do stacks", never "does it implement stack.set_parent".
 pub mod capability {
     /// Workspaces, repositories and roots. The floor: a daemon without this is
     /// not a daemon, and every build that has ever existed has it.
@@ -194,7 +194,7 @@ pub mod capability {
     pub const PASTE: &str = "paste";
     /// Reading and writing adapter configuration.
     pub const ADAPTERS: &str = "adapters";
-    /// Themes and machine settings.
+    /// Themes and runner settings.
     pub const THEMES: &str = "themes";
 
     /// Every capability this build has, in a stable order.
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn an_unknown_method_names_no_capability() {
-        // What makes "this machine is too old" distinguishable from "no such
+        // What makes "this runner is too old" distinguishable from "no such
         // thing": a method nobody implements has no capability, and the daemon
         // turns that into CAPABILITY_UNSUPPORTED rather than NOT_FOUND.
         assert_eq!(capability::for_method("something.invented"), None);

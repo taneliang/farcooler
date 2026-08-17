@@ -11,7 +11,7 @@ import UserNotifications
 /// people turn off — after which it cannot tell them the thing that mattered.
 ///
 /// The daemon decides what those states are, so this works identically for an
-/// agent on this Mac and one on a machine across the world. That is also what
+/// agent on this Mac and one on a runner across the world. That is also what
 /// makes a future push notification or Live Activity a delivery change rather
 /// than a rethink.
 @MainActor
@@ -64,7 +64,7 @@ final class Notifier {
                     guard granted else { return }
                     // A Mac gets remote notifications for the same reason a
                     // phone does: it can be closed, asleep, or simply not the
-                    // machine the agent is running on.
+                    // runner the agent is running on.
                     NSApplication.shared.registerForRemoteNotifications()
                 }
             }

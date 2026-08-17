@@ -11,11 +11,11 @@ struct Fleet: Decodable, Equatable {
     var runtimeHealthy: Bool
     var livePanes: Int
     var workspaces: [Workspace]
-    /// What this machine says a derived branch name starts with.
+    /// What this runner says a derived branch name starts with.
     ///
     /// Optional, by the rule stated on `Workspace` below: a client meeting an
     /// older daemon must not fail to decode the entire fleet over one absent
-    /// key. `nil` and `""` are both "no prefix from this machine" here — the
+    /// key. `nil` and `""` are both "no prefix from this runner" here — the
     /// distinction between unset and deliberately empty is the daemon's to draw,
     /// and it has already drawn it by the time this arrives.
     var branchPrefix: String?
@@ -47,10 +47,10 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// because there are a handful of projects and potentially hundreds of
     /// worktrees across them.
     var repository: String?
-    /// Which machine it is on. Empty means this one.
+    /// Which runner it is on. Empty means this one.
     ///
     /// Deliberately NOT a filter. Hosts are a grouping, not a mode: you work
-    /// across machines at once, and a picker that shows one at a time would
+    /// across runners at once, and a picker that shows one at a time would
     /// make a remote agent something you have to go and look for rather than
     /// something already in front of you. It surfaces only where it
     /// disambiguates.
@@ -94,7 +94,7 @@ struct Workspace: Decodable, Identifiable, Hashable {
 
     var windowSubtitle: String {
         // Host only where it disambiguates, same rule as the sidebar: on a fleet
-        // of one machine, saying which machine is noise.
+        // of one runner, saying which runner is noise.
         [repository, branch, (host?.isEmpty ?? true) ? nil : host]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
@@ -402,7 +402,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
             // A non-zero code or a signal is a failure worth seeing; a clean
             // exit is not. An ABSENT code is not a failure either — an older
             // daemon sends none, and reading that as broken would mark every
-            // finished terminal on the machine.
+            // finished terminal on the runner.
             if exitSignal != nil || (exitCode.map { $0 != 0 } ?? false) {
                 return .failedRun
             }
@@ -537,7 +537,7 @@ enum Status: Equatable {
     /// have saved a line at the cost of the notification quoting a code that
     /// does not exist.
     case failedTurn
-    /// The machine did not answer, so this row is not saying anything.
+    /// The runner did not answer, so this row is not saying anything.
     ///
     /// Distinct from `lost`, which is a finding the daemon actually made. This
     /// is the daemon reporting that it could not look: tmux answers one request

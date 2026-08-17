@@ -47,7 +47,7 @@ const PLACEHOLDERS: &[&str] = &["Claude Code", "Cursor Agent", "Codex", "OpenAI 
 
 /// Read a pane title.
 ///
-/// `program` is the pane's foreground process and `hostname` this machine's
+/// `program` is the pane's foreground process and `hostname` this host's
 /// name; both are needed only to reject a title that is one of them.
 pub fn parse(title: &str, program: &str, hostname: &str) -> PaneTitle {
     let sanitized = sanitize(title);
@@ -182,7 +182,7 @@ fn name_from(rest: &str, program: &str, hostname: &str) -> Option<String> {
     if rest.is_empty() {
         return None;
     }
-    // The machine's name, which a plain shell leaves behind.
+    // The host's name, which a plain shell leaves behind.
     if rest.eq_ignore_ascii_case(hostname) {
         return None;
     }
@@ -191,7 +191,7 @@ fn name_from(rest: &str, program: &str, hostname: &str) -> Option<String> {
         return None;
     }
     // bash's default title is `\u@\h: \w`, which is the default on most Linux
-    // distributions and therefore on most machines anyone SSHes into. It is a
+    // distributions and therefore on most hosts anyone SSHes into. It is a
     // prompt, not a name: `e-liang@Mac: ~/Dev/overnight` in a sidebar row says
     // where the pane is, which the workspace row already said, and hides what it
     // is running.
@@ -344,7 +344,7 @@ mod tests {
     /// bash's default title is a prompt, and a prompt is not a name.
     ///
     /// `\u@\h: \w` is the default on most distributions, so this is what a row
-    /// says for any pane on a machine nobody has customized.
+    /// says for any pane on a host nobody has customized.
     #[test]
     fn a_shell_prompt_is_not_a_name() {
         // The prompt: rejected on its `user@host:` token, before the path in it

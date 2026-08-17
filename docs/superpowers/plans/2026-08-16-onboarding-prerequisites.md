@@ -949,7 +949,7 @@ With these landed, `read` is a real boundary, an address cannot execute a comman
 
 The next plans, in order:
 
-1. **`host`/`machine` → `runner`**, repo-wide: README, `docs/remote-hosts.md`, `docs/farcooler-design.md`, `--host`, `farcooler host install`, every UI string, and the two specs. Mechanical, and worth doing in one pass so the CLI and the docs never disagree.
+1. **`host`/`machine` → `runner`**, repo-wide: README, `docs/runners.md`, `docs/farcooler-design.md`, `--host`, `farcooler host install`, every UI string, and the two specs. Mechanical, and worth doing in one pass so the CLI and the docs never disagree.
 2. **Runner-side enrollment**: `client.enroll`, the fenced atomic write with descriptor-relative traversal, key rendering, the audit entry, and revocation that closes the multiplexed master.
 3. **The ceremony and the apps**: the account lookup and proof-of-possession registration on the relay, QR display and scanning on iOS, Android and macOS, `~/.ssh/config` writing, multi-account, and sign-out.
 

@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 import SwiftUI
 
-/// Who you are, so a machine you own can reach a phone you carry.
+/// Who you are, so a runner you own can reach a phone you carry.
 ///
 /// This is the ONLY place in Far Cooler that knows about WorkOS, and it lives in
 /// the apps rather than in the daemon on purpose. A daemon signs in to nothing:
@@ -151,9 +151,9 @@ public final class Account: NSObject, ObservableObject {
 
     /// Forget the session on this device.
     ///
-    /// Paired machines keep working: they hold tokens, not your session, and
+    /// Paired runners keep working: they hold tokens, not your session, and
     /// signing out of a phone should not silence the fleet. `farcooler push
-    /// forget` or the app's revoke button is how a machine is unpaired.
+    /// forget` or the app's revoke button is how a runner is unpaired.
     public func signOut() async {
         // Told to the relay first, while there is still a token to tell it
         // with. Clearing locally alone left the refresh token valid at WorkOS
@@ -220,7 +220,7 @@ public final class Account: NSObject, ObservableObject {
         guard let token = await accessToken() else { return false }
         var payload: [String: Any] = [
             "pushToken": pushToken, "platform": platform, "label": label,
-            // So the devices screen can show which of your machines is
+            // So the devices screen can show which of your runners is
             // behind, without anyone having to go and look.
             "version": AppVersion.reported,
             // Which APNs the relay has to talk to for this token. A build
@@ -271,10 +271,10 @@ public final class Account: NSObject, ObservableObject {
         return body != nil
     }
 
-    /// Ask for a token that lets one machine notify this account.
+    /// Ask for a token that lets one runner notify this account.
     ///
     /// Returned once and stored on the relay only as a hash, so this is the only
-    /// moment it exists in readable form — hand it straight to the machine.
+    /// moment it exists in readable form — hand it straight to the runner.
     public func pairDaemon(label: String) async -> String? {
         guard let token = await accessToken() else { return nil }
         let body = try? await post("/v1/daemons", ["label": label], bearer: token)
@@ -293,20 +293,23 @@ public final class Account: NSObject, ObservableObject {
                 version: $0["version"] as? String,
                 at: $0["updatedAt"] as? Double)
         }
-        let machines = (body["machines"] as? [[String: Any]] ?? []).map {
+        // `machines` is the relay's own JSON key. It names a paired daemon —
+        // a runner — and stays spelled that way because the relay's API is a
+        // contract, not a word this app gets to choose.
+        let runners = (body["machines"] as? [[String: Any]] ?? []).map {
             Registration(
                 id: $0["id"] as? String ?? "",
-                label: $0["label"] as? String ?? "Machine",
+                label: $0["label"] as? String ?? "Runner",
                 detail: "Paired",
                 version: $0["version"] as? String,
                 at: ($0["lastSeenAt"] as? Double) ?? ($0["createdAt"] as? Double))
         }
-        return Registrations(devices: devices, machines: machines)
+        return Registrations(devices: devices, runners: runners)
     }
 
-    /// Stop notifying a device, or stop a machine notifying anything.
+    /// Stop notifying a device, or stop a runner notifying anything.
     ///
-    /// Revoking here rather than on the machine is the case that matters: a
+    /// Revoking here rather than on the runner is the case that matters: a
     /// laptop you no longer have is exactly the one you cannot run a command on.
     public func revoke(_ registration: Registration, kind: RegistrationKind) async -> Bool {
         guard let token = await accessToken() else { return false }
@@ -452,12 +455,12 @@ public struct Registration: Identifiable, Hashable, Sendable {
     /// What this thing last reported running, or nil if it never has.
     ///
     /// The point of the whole devices screen once there is more than one
-    /// machine: seeing which one is behind without opening each of them. Nil is
-    /// not an error — a paired machine that has never had an agent get stuck
+    /// runner: seeing which one is behind without opening each of them. Nil is
+    /// not an error — a paired runner that has never had an agent get stuck
     /// has never had a reason to talk to the relay.
     public let version: String?
     /// Last heard from, as a Unix millisecond stamp — the only thing that tells
-    /// you whether a row is a machine you still use or one you forgot about.
+    /// you whether a row is a runner you still use or one you forgot about.
     public let at: Double?
 
     /// The second line: what it is, what it runs, when it last spoke.
@@ -476,12 +479,12 @@ public struct Registration: Identifiable, Hashable, Sendable {
 
 public struct Registrations: Sendable {
     public let devices: [Registration]
-    public let machines: [Registration]
+    public let runners: [Registration]
 }
 
 public enum RegistrationKind: Sendable {
     case device
-    case machine
+    case runner
 }
 
 extension Account: ASWebAuthenticationPresentationContextProviding {

@@ -464,7 +464,7 @@ fn config_options(
 /// If a later codex rejects `data:` URLs, the fallback is `localImage`, the
 /// sibling variant that takes a `path`: write the bytes to a temporary file and
 /// send that. It is the fallback and not the first choice because a path is
-/// only meaningful on the machine that codex runs on.
+/// only meaningful on the runner that codex runs on.
 ///
 /// The text goes first and unconditionally, so a rejected image can still only
 /// cost the picture. Losing the picture is bad; losing the question with it

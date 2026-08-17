@@ -60,7 +60,7 @@ class AgentStream(
             while (isActive) {
                 pump()
                 // Not the Mac's 200 ms: that poll is a local call into a daemon
-                // on the same machine, and this one is an SSH round trip. A chat
+                // on the same runner, and this one is an SSH round trip. A chat
                 // transcript has no per-frame redraw to protect the way a
                 // terminal's screen does, so a slower, still-brisk cadence costs
                 // far less battery for a difference nobody reading a

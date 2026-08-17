@@ -344,7 +344,7 @@ impl Runtime {
         // rather than a second answer to the same question, which could
         // disagree with the first.
         //
-        // It is load-bearing. Without it, two daemons on one machine share a
+        // It is load-bearing. Without it, two daemons on one host share a
         // fanout socket per pane NUMBER, and every tmux server numbers from
         // `%0`: the second daemon connects to the first one's fanout, never
         // starts a pipe of its own, and reads a stranger's pane. See

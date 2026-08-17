@@ -97,8 +97,8 @@ before you tried the toggle.
 ## Editing it from an app
 
 Everything below can be edited from a settings screen instead of an ssh session
-and a text editor: **Machines → a machine → Settings** on the Mac, and
-**Settings → Settings on this machine** on iOS and Android. Per machine, because
+and a text editor: **Runners → a runner → Settings** on the Mac, and
+**Settings → Settings on this runner** on iOS and Android. Per runner, because
 each one has its own file and "the branch prefix" is a different answer on each.
 
 Three things about those writes are worth knowing, because they are what make it
@@ -169,7 +169,7 @@ built from the same source, which for a config-only edit is just a restart.
 
 The other two tables are read per call, so editing them takes effect on the next
 one. Themes are read that way because a colour is something you tune by looking
-at it; branches because the machine-settings editor writes that table, and a
+at it; branches because the runner-settings editor writes that table, and a
 value cached at startup would not reflect its own writes.
 
 ## Branch names
@@ -199,7 +199,7 @@ composer shows you the branch it is about to create — a prefix added on the fa
 side would make that preview a lie. The daemon still validates the finished name
 through `validate::branch_name`, which is the check that actually protects git.
 It is carried to clients on `Host.settings.branch_prefix`, so all three apps and
-the CLI agree with the machine the worktree is created on rather than each other.
+the CLI agree with the runner the worktree is created on rather than each other.
 
 A configured entry is a `[adapters.<name>]` table:
 
@@ -307,7 +307,7 @@ report a working adapter for a protocol nothing ever spoke to
 
 The Mac adapter editor shows its **Protocol** picker only for the two presets
 that have one, on the same rule (`nativeIsAvailable` in
-`apps/macos/Sources/FarCooler/MachineSettingsStore.swift`).
+`apps/macos/Sources/FarCooler/RunnerSettingsStore.swift`).
 
 ## What native buys
 

@@ -6,7 +6,7 @@ Extends `docs/farcooler-design.md`.
 
 ## Problem
 
-`docs/remote-hosts.md` says a macOS host is "set up by running the Far Cooler
+`docs/runners.md` says a macOS host is "set up by running the Far Cooler
 app there once." That is only true for the login-item daemon. The app bundles
 `farcooler` and `farcoolerd` inside `Contents/Resources/`, but never puts
 either on `PATH`. An SSH session onto the Mac — which is exactly how the iOS
@@ -23,7 +23,7 @@ So "run the app once" needs to become true.
 
 A small `ObservableObject`, `CommandLineTools`, that symlinks the bundled
 `farcooler` and `farcoolerd` into `~/.local/bin` — the same directory
-`docs/remote-hosts.md` already documents as the expected location — plus a
+`docs/runners.md` already documents as the expected location — plus a
 toggle for it in Settings and a one-time launch prompt for people who have
 never looked at Settings.
 

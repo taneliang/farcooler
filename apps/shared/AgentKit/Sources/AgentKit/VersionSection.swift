@@ -3,7 +3,7 @@ import SwiftUI
 /// What you are running, on both ends.
 ///
 /// Two versions rather than one, because Far Cooler is two programs: the app in
-/// your hand and the daemon on the machine doing the work. They are meant to
+/// your hand and the daemon on the runner doing the work. They are meant to
 /// match — everything else in this project's versioning exists to make that
 /// true — so the interesting case is the one where they do not, and that is the
 /// case a person needs to be able to see without being told to run a command.
@@ -47,8 +47,8 @@ public struct VersionSection: View {
                     // perfectly and still behave like two programs — and the
                     // symptom is a bug you already fixed still happening.
                     Label(
-                        "This app and that machine were built from different source. "
-                            + "Reinstall on the machine to match.",
+                        "This app and that runner were built from different source. "
+                            + "Reinstall on the runner to match.",
                         systemImage: "exclamationmark.triangle.fill"
                     )
                     .font(.caption)
@@ -91,17 +91,17 @@ public struct DaemonBuild: Equatable, Sendable {
     /// one that knows both stamps.
     public let matches: Bool
     public let platform: String
-    /// What that machine can do, by name.
+    /// What that runner can do, by name.
     ///
     /// Distinct from `matches`, and they answer different questions. That one
     /// is "were these built from the same source"; this is "what can that
-    /// machine do", which is the one an app acts on when it is newer than the
-    /// machine it reached — App Store review takes days, `host install` takes
+    /// runner do", which is the one an app acts on when it is newer than the
+    /// runner it reached — App Store review takes days, `host install` takes
     /// one command, and those clocks do not tick together.
     ///
     /// Empty means a daemon old enough to predate the question. See
     /// `can(_:)`, which reads that as the features that existed then rather
-    /// than as a machine that can do nothing.
+    /// than as a runner that can do nothing.
     public let capabilities: Set<String>
 
     public init(
@@ -113,12 +113,12 @@ public struct DaemonBuild: Equatable, Sendable {
         self.capabilities = capabilities
     }
 
-    /// Whether this machine can do something, by name.
+    /// Whether this runner can do something, by name.
     ///
     /// A control whose capability is missing is shown DIMMED with a reason,
-    /// never hidden: the same app showing different controls on two machines
+    /// never hidden: the same app showing different controls on two runners
     /// with nothing said about why reads as a bug, and this app already tells
-    /// you when a machine has no Far Cooler installed rather than omitting it.
+    /// you when a runner has no Far Cooler installed rather than omitting it.
     public func can(_ capability: String) -> Bool {
         // A daemon that answered nothing predates capabilities entirely, so it
         // has exactly the feature set that existed then — workspaces and

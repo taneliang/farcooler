@@ -90,7 +90,7 @@ pub(crate) async fn fixture() -> (ScratchDir, Arc<Service>, Uuid) {
 
 /// Two services at two roots, both registering the SAME repository.
 ///
-/// This is what two channels on one machine are. A channel's only job is to
+/// This is what two channels on one host are. A channel's only job is to
 /// choose a runtime directory, so two roots is two channels — and it is the
 /// same shape `rpc_over_socket.rs` already relies on, where every test gets "a
 /// daemon on a private socket with a private database" at an explicit

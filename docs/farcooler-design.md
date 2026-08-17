@@ -10,6 +10,19 @@ Revised 2026-07-26 to add SSH connectivity, tmux reuse and shell fallback, and d
 
 Revised again during `/plan-eng-review` on 2026-07-26. The load-bearing changes: SSH is the only control transport and the Far Cooler certificate authority is gone; terminal runtime state is derived from tmux rather than stored and reconciled; tmux is a hard dependency with no PTY fallback; declared servers, Mosh, and all notification surfaces are removed from the product; and the snapshot path buffers nothing.
 
+> **Vocabulary note, 2026-08-16.** Where this document says *host*, the product
+> now says **runner**: one `farcoolerd`, meaning one Unix user on one host, with
+> its own worktrees and its own `~/.ssh/authorized_keys`. A host may carry
+> several — three engineers sharing a Linux box is three runners — which is why
+> the word changed. See [`runners.md`](runners.md).
+>
+> The prose below is left as it was written. This is a dated design record, and
+> rewriting it to match today's vocabulary would lose what was actually true and
+> decided when. Only stale *command names* were corrected, because those are
+> instructions rather than history. The wire protocol still says `Host`
+> deliberately: renaming a proto message needs a version and a compatibility
+> window, not a vocabulary decision.
+
 ## Problem Statement
 
 Engineers can run increasingly capable coding agents, but serious parallel use still pulls them back to a laptop. Desktop orchestrators make it easier to run multiple agents, while first-party mobile products make individual vendor sessions reachable from a phone. The missing experience is a terminal-first command center that lets an engineer create and supervise many task-scoped coding workspaces across machines they control.
@@ -1007,7 +1020,7 @@ SSH is Far Cooler's only control-plane transport and its only authentication mec
 5. **Bootstrap.** Enrolling the first device requires access the user already has: an existing SSH key or agent, a host-permitted password, Tailscale SSH, or a local shell. Far Cooler adds no separate bootstrapping secret and no QR nonce. The client connects with that existing credential once, generates its device key, enrolls it, and uses only the device key afterward.
 6. **Scope changes and revocation.** `client.revoke` removes the fenced entry and closes that client's live connections before succeeding. Scope changes rewrite the entry's forced command. The daemon edits only inside its own fence markers, writes atomically through a temporary file and rename while preserving mode `0600`, keeps a checksummed backup, and never reorders or removes entries it did not create. If the fence markers are missing or damaged, it refuses to edit and surfaces the exact manual instructions rather than risking the user's SSH access.
 7. **Recovery.** If every enrolled device is lost, recovery uses ordinary SSH or local shell access plus `farcooler client list` and `farcooler client revoke`. There is no remote account-recovery bypass, and there is no expired-credential bypass because there are no expiring credentials to bypass.
-8. **Remote installation.** `farcooler host install` runs over the same SSH connection: it detects platform and architecture, verifies the checksum of the daemon binary before execution, installs a `systemd --user` unit, and enables lingering so the daemon survives logout. This is Linux and WSL2 only. A macOS host keeps the bundled-app path from the packaging decision, because registering a LaunchAgent through `SMAppService` requires a GUI session; headless remote installation on macOS is not supported in MVP.
+8. **Remote installation.** `farcooler runner install` runs over the same SSH connection: it detects platform and architecture, verifies the checksum of the daemon binary before execution, installs a `systemd --user` unit, and enables lingering so the daemon survives logout. This is Linux and WSL2 only. A macOS host keeps the bundled-app path from the packaging decision, because registering a LaunchAgent through `SMAppService` requires a GUI session; headless remote installation on macOS is not supported in MVP.
 
 Security boundaries:
 
@@ -1030,7 +1043,7 @@ Onboarding requires no physical presence at the host. With working SSH access an
 
 1. In the app, add a host by entering its SSH target: a tailnet MagicDNS name, an address, or an existing `ssh_config` alias, plus a bastion or `ProxyJump` if the user's configuration names one.
 2. Verify and accept the host-key fingerprint on first use, then authenticate with an existing key, agent, or host-permitted password.
-3. The app checks whether a compatible daemon is already running. If none is installed and the host is Linux or WSL2, it offers `farcooler host install`, which verifies the binary checksum, installs the `systemd --user` unit, and runs `loginctl enable-linger` so the daemon runs with nobody logged in. A macOS host installs `Far Cooler.app` instead.
+3. The app checks whether a compatible daemon is already running. If none is installed and the host is Linux or WSL2, it offers `farcooler runner install`, which verifies the binary checksum, installs the `systemd --user` unit, and runs `loginctl enable-linger` so the daemon runs with nobody logged in. A macOS host installs `Far Cooler.app` instead.
 4. The app generates a device key in the Keychain and enrolls it at the chosen scope. It uses only the device key from this point forward, and the bootstrap credential is never stored.
 5. The host appears with its health, route, and daemon version.
 6. Add an allowlisted repository root.
@@ -1289,7 +1302,7 @@ CODE PATHS                                          USER FLOWS
                                                       ├── [GAP] Indicator raised in other clients
 [+] crates/cli                                        └── [GAP] Attach + detach audited
   ├── [GAP] attach selects last active window
-  ├── [GAP] host install verifies checksum          [+] Terminal quality (conformance corpus)
+  ├── [GAP] runner install verifies checksum          [+] Terminal quality (conformance corpus)
   └── [GAP] protocol inspect redacts by default       ├── [GAP] [→CONF] UTF-8, ANSI, alt-screen, color
                                                       ├── [GAP] [→CONF] Key encoding, control chords
 [+] apps/macos                                        ├── [GAP] [→CONF] 10,000-line scrollback

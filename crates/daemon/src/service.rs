@@ -268,7 +268,7 @@ pub struct Service {
     /// Held rather than re-read, for the reason `root` is: the file it comes
     /// from sits under a directory the environment can move. It is also what
     /// marks a worktree as belonging to this install rather than to another
-    /// one sharing the machine.
+    /// one sharing the host.
     install_id: String,
     /// Where this service's runtime data lives.
     ///
@@ -412,7 +412,7 @@ impl Service {
     /// `origin/HEAD` when it cannot.
     ///
     /// Asked at most once per repository per daemon lifetime, including the
-    /// misses — a machine without `gh` must not pay for a process launch every
+    /// misses — a runner without `gh` must not pay for a process launch every
     /// time somebody scrolls a diff.
     pub async fn default_branch(&self, repository_id: Uuid, worktree: &Path) -> Option<String> {
         if let Some(cached) =
@@ -656,7 +656,7 @@ impl Service {
         let base_commit = git::resolve_revision(&repo_path, base_revision).await?;
         git::create_worktree(&repo_path, branch, base_revision, &dest).await?;
         // Claim it before anyone can adopt it. Another install sharing this
-        // machine sees the same worktree in `git worktree list` and would
+        // host sees the same worktree in `git worktree list` and would
         // otherwise take it for its own fleet.
         git::mark_owner(&dest, &self.install_id).await;
 
@@ -1331,10 +1331,10 @@ impl Service {
         // `Unknown` is refused by the check below too, and that is the whole
         // point of it being its own state: a terminal must never be dismissed
         // as lost because tmux was busy for a second. It is named separately
-        // only so the refusal points at the real obstacle — the machine, not
+        // only so the refusal points at the real obstacle — the runner, not
         // the row.
         if derived.state == TerminalState::Unknown {
-            return Err(DomainError::InvalidArgument { what: "this machine cannot be read yet" });
+            return Err(DomainError::InvalidArgument { what: "this runner cannot be read yet" });
         }
         if derived.state != TerminalState::Lost {
             return Err(DomainError::InvalidArgument { what: "terminal is not lost" });
@@ -1781,7 +1781,7 @@ impl Service {
     /// Type a path into a terminal, as a paste.
     ///
     /// The daemon does this rather than handing the path back for the client to
-    /// send, because the bracketing depends on a mode only the machine holding
+    /// send, because the bracketing depends on a mode only the runner holding
     /// the pane can answer for, and because the CLI form of this has no
     /// terminal emulator to encode with.
     ///
@@ -2245,7 +2245,7 @@ mod preset_tests {
         assert_eq!(shim_binary(None), on_path);
     }
 
-    /// `~/.local/bin` holds every channel a machine has installed, so the CLI
+    /// `~/.local/bin` holds every channel a runner has installed, so the CLI
     /// beside the daemon is ambiguous by name alone. An agent pane opened by
     /// the preview daemon that ran the release `farcooler` would attach to the
     /// release daemon's fleet, and the pane would look fine while belonging to

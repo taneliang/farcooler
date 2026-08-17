@@ -7,7 +7,7 @@
     private key and the account's refresh token are encrypted with Keystore keys
     that cannot leave the hardware they were generated on, so a restored copy of
     the preferences would be ciphertext nothing can open — and a phone restored
-    from another phone would authenticate as a device the machine never
+    from another phone would authenticate as a device the runner never
     authorized, with no way to tell that from a rejected key.
 
     Making the exclusion explicit means a future preferences file cannot be

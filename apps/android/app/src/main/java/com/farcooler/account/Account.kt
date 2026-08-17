@@ -26,7 +26,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * Who you are, so a machine you own can reach a phone you carry.
+ * Who you are, so a runner you own can reach a phone you carry.
  *
  * This is the ONLY place in the Android app that knows about WorkOS, matching
  * the Apple apps. A daemon signs in to nothing: it holds an opaque token this
@@ -193,7 +193,7 @@ class Account(context: Context) {
     /**
      * Forget the session on this device.
      *
-     * Paired machines keep working: they hold tokens, not your session, and
+     * Paired runners keep working: they hold tokens, not your session, and
      * signing out of a phone should not silence the fleet.
      */
     suspend fun signOut() {
@@ -261,7 +261,7 @@ class Account(context: Context) {
                 put("pushToken", JsonPrimitive(pushToken))
                 put("platform", JsonPrimitive(platform))
                 put("label", JsonPrimitive(label))
-                // So the devices screen can show which of your machines is
+                // So the devices screen can show which of your runners is
                 // behind, without anyone having to go and look.
                 put("version", JsonPrimitive(AppVersion.reported))
             },
@@ -271,10 +271,10 @@ class Account(context: Context) {
     }
 
     /**
-     * Ask for a token that lets one machine notify this account.
+     * Ask for a token that lets one runner notify this account.
      *
      * Returned once and stored on the relay only as a hash, so this is the only
-     * moment it exists in readable form — hand it straight to the machine.
+     * moment it exists in readable form — hand it straight to the runner.
      */
     suspend fun pairDaemon(label: String): String? {
         val token = accessToken() ?: return null
@@ -302,11 +302,14 @@ class Account(context: Context) {
             )
         } ?: emptyList()
 
-        val machines = body["machines"]?.jsonArray?.map { element ->
+        // `machines` is the relay's own JSON key. It names a paired daemon —
+        // a runner — and stays spelled that way because the relay's API is a
+        // contract, not a word this app gets to choose.
+        val runners = body["machines"]?.jsonArray?.map { element ->
             val item = element.jsonObject
             Registration(
                 id = item.text("id"),
-                label = item.text("label").ifEmpty { "Machine" },
+                label = item.text("label").ifEmpty { "Runner" },
                 detail = "Paired",
                 version = item.textOrNull("version"),
                 at = item["lastSeenAt"]?.jsonPrimitive?.doubleOrNull
@@ -314,13 +317,13 @@ class Account(context: Context) {
             )
         } ?: emptyList()
 
-        return Registrations(devices, machines)
+        return Registrations(devices, runners)
     }
 
     /**
-     * Stop notifying a device, or stop a machine notifying anything.
+     * Stop notifying a device, or stop a runner notifying anything.
      *
-     * Revoking here rather than on the machine is the case that matters: a
+     * Revoking here rather than on the runner is the case that matters: a
      * laptop you no longer have is exactly the one you cannot run a command on.
      */
     suspend fun revoke(registration: Registration, kind: RegistrationKind): Boolean {
@@ -460,8 +463,8 @@ data class Registration(
      * What this thing last reported running, or null if it never has.
      *
      * The point of the whole devices screen once there is more than one
-     * machine: seeing which one is behind without opening each of them. Null is
-     * not an error — a paired machine that has never had an agent get stuck has
+     * runner: seeing which one is behind without opening each of them. Null is
+     * not an error — a paired runner that has never had an agent get stuck has
      * never had a reason to talk to the relay.
      */
     val version: String?,
@@ -469,9 +472,9 @@ data class Registration(
     val at: Double?,
 )
 
-data class Registrations(val devices: List<Registration>, val machines: List<Registration>)
+data class Registrations(val devices: List<Registration>, val runners: List<Registration>)
 
-enum class RegistrationKind { DEVICE, MACHINE }
+enum class RegistrationKind { DEVICE, RUNNER }
 
 private fun JsonObject.text(key: String): String =
     this[key]?.jsonPrimitive?.contentOrNull.orEmpty()

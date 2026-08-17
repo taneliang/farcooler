@@ -29,7 +29,7 @@ enum Grid {
     ///
     /// Invisible, unavoidable, and only partly correctable. A trailing `+`
     /// lands on `edge` once this is cancelled. A LEADING label does not: the
-    /// control clamps how far a negative pad may move it, so the machine picker
+    /// control clamps how far a negative pad may move it, so the runner picker
     /// still sits about 9pt inside the search field below it. Closing that last
     /// gap means not using `Menu` for the picker at all — a plain `Button`
     /// presenting an `NSMenu` — which is a deliberate change, not a padding
@@ -144,11 +144,11 @@ struct WorkspaceSection: View {
     /// and is not in the environment, and the banner that shows this belongs to
     /// the window, not to one sidebar row.
     var onEditorError: (String) -> Void = { _ in }
-    /// Whether this workspace's machine can be acted on right now.
+    /// Whether this workspace's runner can be acted on right now.
     ///
     /// Reads stay live even when this is `false` — the row is still
     /// selectable and its terminals still show whatever was last read from
-    /// it — but the affordances that would MUTATE something on a machine
+    /// it — but the affordances that would MUTATE something on a runner
     /// already known to be unreachable are dimmed and inert rather than
     /// left to fail silently or hang on a dead connection.
     var usable: Bool = true
@@ -424,18 +424,18 @@ struct ProjectHeader: View {
     /// A terminal in the repository's own checkout, not in a worktree.
     var onNewTerminal: (() -> Void)?
     /// Opens `RemoveRepositorySheet` for this project. `nil` for a silent
-    /// host's placeholder header — it names a machine, not a repository,
+    /// host's placeholder header — it names a runner, not a repository,
     /// and there is nothing there to remove.
     var onRemove: (() -> Void)?
-    /// Which machine this project's worktrees are on.
+    /// Which runner this project's worktrees are on.
     var host: String = ""
     var hostState: HostState = .connected
-    /// Whether to name the machine at all — noise on a fleet of one.
+    /// Whether to name the runner at all — noise on a fleet of one.
     var showHost: Bool = false
     var onReconnect: () -> Void = {}
     /// Whether this project's worktrees are hidden right now.
     var isCollapsed: Bool = false
-    /// `nil` for a silent host's placeholder header, which names a machine and
+    /// `nil` for a silent host's placeholder header, which names a runner and
     /// has no worktrees under it to collapse.
     var onToggleCollapse: (() -> Void)?
 
@@ -534,11 +534,11 @@ struct ProjectHeader: View {
     }
 }
 
-/// A machine's connection, said as quietly as possible.
+/// A runner's connection, said as quietly as possible.
 ///
 /// Absent when healthy: a dot that is always there is a dot nobody reads, and
 /// the whole point is that you notice it only when something is wrong.
-/// Reconnection is amber and silent; only a machine that has given up is red,
+/// Reconnection is amber and silent; only a runner that has given up is red,
 /// and clicking it retries at once rather than waiting out the backoff.
 struct HostDot: View {
     let state: HostState
@@ -552,7 +552,7 @@ struct HostDot: View {
             Circle()
                 .fill(Color.orange)
                 .frame(width: 5, height: 5)
-                .help("Reconnecting to this machine")
+                .help("Reconnecting to this runner")
         case .unreachable(let why):
             Button(action: onReconnect) {
                 Circle().fill(Color.red).frame(width: 5, height: 5)
@@ -564,7 +564,7 @@ struct HostDot: View {
                 Circle().fill(Color.secondary).frame(width: 5, height: 5)
             }
             .buttonStyle(.plain)
-            .help("Far Cooler is not installed on this machine — open Settings ▸ Machines")
+            .help("Far Cooler is not installed on this runner — open Settings ▸ Runners")
         }
     }
 }
@@ -605,7 +605,7 @@ struct TerminalRow: View {
     /// the old behavior and it labeled a lone `claude` as "Terminal 7", which
     /// answers a question nobody asked.
     var ordinal: Int?
-    /// Whether this terminal's machine can be acted on right now. See
+    /// Whether this terminal's runner can be acted on right now. See
     /// `WorkspaceSection.usable`, which this mirrors row by row.
     var usable: Bool = true
 
@@ -796,7 +796,7 @@ struct TerminalRow: View {
             // Dragging arranges panes, which is a mutation like any other —
             // guarded here rather than by hiding the gesture, because the row
             // still has to stay a normal drop TARGET for other terminals'
-            // drags even when this machine cannot itself be rearranged.
+            // drags even when this runner cannot itself be rearranged.
             guard usable else { return NSItemProvider() }
             MainActor.assumeIsolated { PaneDrag.shared.begin(terminal.id) }
             return NSItemProvider(object: terminal.id as NSString)

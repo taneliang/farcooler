@@ -11,7 +11,7 @@ import SwiftUI
 /// There is no shell in the launch path, so there is nothing to quote.
 ///
 /// `remote` is optional and NOT defaulted, because that is the whole gate: an
-/// editor with no way to reach another machine says so by having nothing to
+/// editor with no way to reach another runner says so by having nothing to
 /// say, and every remote decision in this file reads that one field.
 struct Editor: Identifiable, Hashable, Codable {
     /// Stable across launches and across renames — it is what
@@ -27,7 +27,7 @@ struct Editor: Identifiable, Hashable, Codable {
     /// typed.
     var local: [String]
 
-    /// Arguments for a worktree on another machine, with `{host}` as well.
+    /// Arguments for a worktree on another runner, with `{host}` as well.
     /// Nil means this editor cannot open one.
     var remote: [String]?
 
@@ -180,7 +180,7 @@ extension Editor {
     /// Every editor Far Cooler can find by itself, in menu order.
     ///
     /// Order is deliberate: the ones that can also open a worktree on another
-    /// machine come first, because this is a tool for driving a fleet and the
+    /// runner come first, because this is a tool for driving a fleet and the
     /// default for someone who has several editors installed should be one that
     /// works everywhere they work.
     static let builtIns: [Editor] = [
@@ -350,7 +350,7 @@ extension Editor {
     /// broken and one that is honest.
     func unavailability(host: String) -> String? {
         if !host.trimmingCharacters(in: .whitespaces).isEmpty, !opensRemote {
-            return "\(name) cannot open worktrees on another machine"
+            return "\(name) can't open worktrees on another runner"
         }
         if let bundle, bundle.resolve() == nil {
             return "\(name) is not installed"
@@ -496,11 +496,11 @@ final class Editors: ObservableObject {
 
     /// Which editor a click should use for this worktree.
     ///
-    /// The last-used one, unless that editor cannot reach the machine the
+    /// The last-used one, unless that editor cannot reach the runner the
     /// worktree is on — in which case the first that can, WITHOUT changing what
     /// is stored. Zed on this Mac and VS Code on the box is a normal way to
     /// work; it should not need a second setting, and it should not leave the
-    /// preference flipping every time you switch machines.
+    /// preference flipping every time you switch runners.
     func preferred(host: String) -> Editor? {
         let remote = !host.trimmingCharacters(in: .whitespaces).isEmpty
         let usable = remote ? available.filter(\.opensRemote) : available

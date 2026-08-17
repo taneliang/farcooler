@@ -92,7 +92,7 @@ class VtCore(columns: Int, rows: Int) {
      * There is no counterpart that reads the clipboard. A program asking for
      * its contents is refused inside the core — copy is a program handing you
      * something, paste is a program taking something, and Far Cooler runs
-     * agents on machines nobody is watching.
+     * agents on runners nobody is watching.
      */
     fun takeClipboard(): String? =
         if (handle == 0L) null else NativeVt.nativeTakeClipboard(handle)

@@ -82,11 +82,11 @@ public struct RelaySection: View {
             }
 
             if saved {
-                // Changing where a machine reports invalidates what it was
+                // Changing where a runner reports invalidates what it was
                 // given: a daemon token is issued BY a relay and means nothing
                 // to another one, so the pairing has to be redone rather than
                 // silently failing the next time something tries to notify.
-                Text("Saved. Pair your machines again — a token from one relay means nothing to another.")
+                Text("Saved. Pair your runners again — a token from one relay means nothing to another.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

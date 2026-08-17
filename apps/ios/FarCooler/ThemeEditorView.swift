@@ -5,7 +5,7 @@ import SwiftUI
 /// All nineteen on a phone, which was a deliberate choice rather than the easy
 /// one: the config format treats the sixteen ANSI colours as optional, so a
 /// "grounds only" editor would have been a first-class config and less work. But
-/// the machine holding the file is often a Linux box with no app on it, and a
+/// the runner holding the file is often on a Linux box with no app on it, and a
 /// phone that could only edit three colours would send you back to ssh for the
 /// other sixteen.
 ///

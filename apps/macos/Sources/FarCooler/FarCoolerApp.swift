@@ -84,7 +84,7 @@ enum Entry {
     /// Writing to a dead pipe must be an error, not a death.
     ///
     /// This app is a fleet of pipes: every pane holds a `farcooler terminal
-    /// input` child, and for a remote machine that child is ssh-backed. A
+    /// input` child, and for a remote runner that child is ssh-backed. A
     /// laptop that sleeps drops those connections, the children exit, and the
     /// read end of each pipe closes with them.
     ///

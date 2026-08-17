@@ -17,13 +17,13 @@ struct ContentView: View {
     /// Which repository the new-workspace sheet should open on, when it was
     /// reached from a project header rather than the sidebar's own `+`.
     @State private var newWorkspaceRepository = ""
-    /// The machine `newWorkspaceRepository` lives on, when the sheet was
+    /// The runner `newWorkspaceRepository` lives on, when the sheet was
     /// reached from a project header. `nil` means "no header was clicked" —
     /// the sidebar's own `+` and the empty-state button both mean "no host
     /// named yet," and the sheet's own picker is left to choose one. A
     /// header's `+` is never that ambiguous: the group key it was clicked on
-    /// already says which machine, and preselecting anything else would put
-    /// the worktree on a machine other than the one the row named.
+    /// already says which runner, and preselecting anything else would put
+    /// the worktree on a runner other than the one the row named.
     @State private var newWorkspaceHost: String?
     /// Each worktree's change state, kept across selection changes: a review is
     /// a session, not a mode. Coming back to a worktree should still be showing
@@ -48,8 +48,8 @@ struct ContentView: View {
     /// pane you were reading is the reason you came back, and finding it again
     /// means walking a sidebar you had already navigated once. The host is part
     /// of the key now, same as `Selection`: a workspace id alone does not say
-    /// which machine to look for it on, and it does not need to — full ids are
-    /// unique per machine already — but resolving it needs the client, and the
+    /// which runner to look for it on, and it does not need to — full ids are
+    /// unique per runner already — but resolving it needs the client, and the
     /// client is looked up by host.
     @AppStorage("fleet.lastTerminal") private var lastTerminal = ""
     @FocusState private var searchFocused: Bool
@@ -82,7 +82,7 @@ struct ContentView: View {
     ///
     /// Its own state now rather than one client's `lastError`: there is no
     /// longer one client whose `lastError` could stand for "the last thing
-    /// that went wrong" — an action against one machine must not be reported
+    /// that went wrong" — an action against one runner must not be reported
     /// through, or cleared by, a banner bound to a different one. Set by
     /// `act(on:default:_:)`, which is also the one place that clears it: on
     /// refusal, and by copying back whatever the client itself set on
@@ -92,12 +92,12 @@ struct ContentView: View {
     /// What the detail pane is showing.
     ///
     /// Carries the host alongside the id. A workspace's own id is a full
-    /// per-daemon UUID and is not expected to collide across machines, but
+    /// per-daemon UUID and is not expected to collide across runners, but
     /// resolving a selection means finding both the workspace AND the client
     /// that owns it, and `FleetStore.client(for:)` — deliberately, see its own
     /// doc comment — never routes by id alone. Matching on host as well here
     /// keeps that same rule rather than leaning on id uniqueness as the only
-    /// thing standing between a click and the right machine.
+    /// thing standing between a click and the right runner.
     enum Selection: Hashable {
         case workspace(host: String, id: String)
         case terminal(host: String, workspace: String, terminal: String)
@@ -106,10 +106,10 @@ struct ContentView: View {
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
         let id = UUID()
-        /// Which machine `terminal` is on — routing is by workspace, not by
+        /// Which runner `terminal` is on — routing is by workspace, not by
         /// the client that was current when the confirmation was raised,
         /// because by the time someone answers the sheet that may no longer
-        /// be the same machine.
+        /// be the same runner.
         let workspace: Workspace
         let terminal: String
         let mode: String
@@ -132,10 +132,10 @@ struct ContentView: View {
                 // window is showing, which is exactly what the control acts on.
                 .openInEditorToolbar(workspace: detailWorkspace) { editorError = $0 }
                 .toolbar {
-                    // Not offered on a machine that has already said it cannot
+                    // Not offered on a runner that has already said it cannot
                     // read changes at all. Its daemon predates the whole
                     // feature, so the split would open a pane running a
-                    // subcommand that machine has never heard of — a dead pane
+                    // subcommand that runner has never heard of — a dead pane
                     // where a diff was asked for, with nothing saying why.
                     if let ws = detailWorkspace,
                         store.client(for: ws)?.changesSupported != false
@@ -175,7 +175,7 @@ struct ContentView: View {
             // earlier build would otherwise answer it, and everything from that
             // point on would be this app talking to a different program.
             //
-            // `FleetStore` already does this itself for the local machine's own
+            // `FleetStore` already does this itself for the local runner's own
             // bring-up — see `rebuild()` — so this call is almost always just
             // confirming what is already running by the time it lands. Kept
             // anyway so a daemon that failed to start is never silent even if
@@ -183,7 +183,7 @@ struct ContentView: View {
             if let problem = await LocalDaemon.shared.ensure().problem {
                 store.clients[""]?.lastError = problem
             }
-            // Every machine's own fleet, repositories, roots, and layouts are
+            // Every runner's own fleet, repositories, roots, and layouts are
             // already being brought up by `FleetStore` — see `rebuild()`.
             // Its event stream is a separate question: `rebuild()` starts
             // one only the first time a client is added, and `.onDisappear`
@@ -221,7 +221,7 @@ struct ContentView: View {
             // else — no click, no selection change — so this is the only hook
             // that can catch the case where you were already watching it.
             markVisibleSeen()
-            // A machine's first read can land well after this view's own
+            // A runner's first read can land well after this view's own
             // `.task` already ran and found nothing to select — `FleetStore`
             // brings every client up in the background, on its own schedule.
             // Guarded on `selection == nil` inside, so this is a no-op once
@@ -278,7 +278,7 @@ struct ContentView: View {
             }
 
             // Opening a terminal is what ends `done`. Being LISTED is still not
-            // being read — the sidebar shows every terminal on the machine and
+            // being read — the sidebar shows every terminal on the runner and
             // clearing a notification nobody read is worse than not sending one
             // — but being on screen is, which is more than the pane you clicked.
             markVisibleSeen()
@@ -370,7 +370,7 @@ struct ContentView: View {
                 onAddRoot: { host, path in
                     if let why = store.refusal(for: host) { return why }
                     guard let client = store.clients[host] else {
-                        return "that machine is not connected"
+                        return "that runner is not connected"
                     }
                     let failure = await client.addRoot(path)
                     await client.refreshRoots()
@@ -379,7 +379,7 @@ struct ContentView: View {
                 onRegister: { host, path in
                     if let why = store.refusal(for: host) { return why }
                     guard let client = store.clients[host] else {
-                        return "that machine is not connected"
+                        return "that runner is not connected"
                     }
                     return await client.registerRepository(path)
                 },
@@ -388,7 +388,7 @@ struct ContentView: View {
                         // Registering adopts every worktree the repository
                         // already has, main checkout included, so there is
                         // nothing left to offer to import. Refreshed on the
-                        // machine it was registered on — there is no event
+                        // runner it was registered on — there is no event
                         // push for a repository or root change, so any other
                         // host would leave that host's sidebar rows stale.
                         await store.clients[host]?.refreshRepositories()
@@ -401,9 +401,9 @@ struct ContentView: View {
             NewWorkspaceSheet(
                 repositories: store.repositories,
                 preselected: newWorkspaceRepository,
-                // `newWorkspaceHost` is the machine the header's `+` was
+                // `newWorkspaceHost` is the runner the header's `+` was
                 // clicked on; nil is the sidebar's own `+` and the
-                // empty-state button, neither of which named a machine, so
+                // empty-state button, neither of which named a runner, so
                 // the sheet's own picker is left to choose one.
                 preselectedHost: newWorkspaceHost ?? "",
                 branchPrefix: { host in store.clients[host]?.fleet.branchPrefix ?? "" }
@@ -412,7 +412,7 @@ struct ContentView: View {
                     return "Cannot do that: \(why)"
                 }
                 guard let client = store.clients[host] else {
-                    return "that machine is not connected"
+                    return "that runner is not connected"
                 }
                 return await client.createWorkspace(repo: repo, task: task, branch: branch, base: base)
             }
@@ -431,7 +431,7 @@ struct ContentView: View {
                 }.count
             ) { typed in
                 let result = await act(
-                    on: ws, default: .failed("This machine cannot be reached right now.")
+                    on: ws, default: .failed("This runner can't be reached right now.")
                 ) { c in
                     await c.removeWorktree(ws.short, confirm: typed)
                 }
@@ -452,7 +452,7 @@ struct ContentView: View {
                 ) { confirm in
                     if let why = store.refusal(for: target.host) { return .failed(why) }
                     guard let client = store.clients[target.host] else {
-                        return .failed("that machine is not connected")
+                        return .failed("that runner is not connected")
                     }
                     return await client.removeRoot(found.root.id, confirm: confirm)
                 }
@@ -471,7 +471,7 @@ struct ContentView: View {
         .sheet(item: $pendingPaneModeSwitch) { pending in
             PaneModeConfirmSheet(message: pending.message) {
                 await act(
-                    on: pending.workspace, default: .failed("This machine cannot be reached right now.")
+                    on: pending.workspace, default: .failed("This runner can't be reached right now.")
                 ) { c in
                     await c.setPaneMode(pending.terminal, mode: pending.mode, force: true)
                 }
@@ -481,12 +481,12 @@ struct ContentView: View {
 
     // MARK: - Sidebar
 
-    /// Worktrees matching the search, grouped by machine and project.
+    /// Worktrees matching the search, grouped by runner and project.
     ///
-    /// The key carries the host because two machines can have a project of the
+    /// The key carries the host because two runners can have a project of the
     /// same name, and they are not the same project. The host is only DISPLAYED
-    /// when there is more than one machine — on a fleet of one, saying which
-    /// machine is noise.
+    /// when there is more than one runner — on a fleet of one, saying which
+    /// runner is noise.
     ///
     /// Hidden worktrees are separated rather than filtered out: they still
     /// belong to the project, and a collapsed section at the bottom is how you
@@ -542,10 +542,10 @@ struct ContentView: View {
             return ProjectGroup(host: host, project: project, shown: shown, hidden: all.filter(\.isHidden))
         }
 
-        // A machine that has never connected has no rows of its own, and
+        // A runner that has never connected has no rows of its own, and
         // without this it would simply be missing — leaving you to wonder
         // where it went rather than seeing that it needs attention. Skipped
-        // while searching: a machine with nothing on it can never match a
+        // while searching: a runner with nothing on it can never match a
         // query, and a header appearing only here would look like a hit.
         if query.isEmpty {
             for host in silentHosts {
@@ -556,18 +556,18 @@ struct ContentView: View {
         return result
     }
 
-    /// Whether to name machines at all.
+    /// Whether to name runners at all.
     private var showHosts: Bool { store.hosts.count > 1 }
 
-    /// Machines with nothing to show yet still get a header.
+    /// Runners with nothing to show yet still get a header.
     ///
-    /// A machine that has never connected has no rows, and without this it
+    /// A runner that has never connected has no rows, and without this it
     /// would simply be missing — leaving you to wonder where it went rather
     /// than seeing that it needs attention.
     ///
-    /// The local machine is excluded: it already has a dedicated placeholder
+    /// The local runner is excluded: it already has a dedicated placeholder
     /// (`fleetPlaceholder`, below) that reads its loading/error state in more
-    /// detail than a bare header could say. Only a REMOTE machine that has
+    /// detail than a bare header could say. Only a REMOTE runner that has
     /// contributed nothing gets one of these instead.
     private var silentHosts: [String] {
         let present = Set(store.fleet.workspaces.map { $0.host ?? "" })
@@ -576,10 +576,10 @@ struct ContentView: View {
 
     /// A group's identity for `hiddenExpanded`'s key.
     ///
-    /// Two machines can have a project of the same name, and a lone project
+    /// Two runners can have a project of the same name, and a lone project
     /// name is no longer unique on its own now that the group carries the host
     /// separately — so `hiddenExpanded`, keyed by this rather than by
-    /// `project` alone, cannot conflate "hidden expanded on this machine" with
+    /// `project` alone, cannot conflate "hidden expanded on this runner" with
     /// "hidden expanded on that one." Same value as `ProjectGroup.id` above.
     private func groupKey(host: String, project: String) -> String {
         "\(host)\u{1}\(project)"
@@ -671,13 +671,13 @@ struct ContentView: View {
             searchField
 
             // Gated on `groups`, not the raw merged workspace count: a
-            // machine that has never connected contributes no workspaces but
+            // runner that has never connected contributes no workspaces but
             // still gets a `silentHosts` header in `groups` (unless it's the
-            // local machine, which has its own placeholder below). Gating on
+            // local runner, which has its own placeholder below). Gating on
             // `workspaces.isEmpty` instead used to short-circuit straight to
-            // the LOCAL machine's empty state whenever the merged fleet had
-            // no rows — even with a remote machine configured and its header
-            // sitting in `groups` right below — making that remote machine
+            // the LOCAL runner's empty state whenever the merged fleet had
+            // no rows — even with a remote runner configured and its header
+            // sitting in `groups` right below — making that remote runner
             // vanish from the sidebar entirely rather than showing as
             // unreachable. `query.isEmpty` keeps this from swallowing a
             // plain "no search results" into the same screen.
@@ -700,7 +700,7 @@ struct ContentView: View {
                             let key = groupKey(host: group.host, project: group.project)
                             // A silent host's placeholder has no project of its
                             // own to name or add into — the header names the
-                            // machine instead, and there is nothing yet to
+                            // runner instead, and there is nothing yet to
                             // route a `+` to.
                             let isSilentHost = group.project.isEmpty
                             let usable = store.refusal(for: group.host) == nil
@@ -756,8 +756,8 @@ struct ContentView: View {
     /// Search, because worktrees are unbounded.
     ///
     /// It matches terminals too, so typing an agent's name finds the worktree
-    /// containing it — which is how you reach an agent on another machine
-    /// without going looking for the machine.
+    /// containing it — which is how you reach an agent on another runner
+    /// without going looking for the runner.
     private var searchField: some View {
         SidebarRow {
             HStack(spacing: 6) {
@@ -785,10 +785,10 @@ struct ContentView: View {
         .padding(.bottom, 6)
     }
 
-    /// Everything waiting on you, across every project and every machine.
+    /// Everything waiting on you, across every project and every runner.
     ///
     /// The one number the app exists to produce, and it deliberately spans
-    /// hosts: an agent blocked on a machine in another room is exactly as
+    /// hosts: an agent blocked on a runner in another room is exactly as
     /// urgent as one on this desk.
     private var attentionCount: Int {
         store.fleet.workspaces.flatMap(\.terminals).filter(\.status.wantsAttention).count
@@ -797,10 +797,10 @@ struct ContentView: View {
     private var sidebarHeader: some View {
         SidebarRow {
             HStack(spacing: 8) {
-            // Just the word, now. It used to be the one machine being driven,
-            // because the sidebar was that machine's workspaces and the pane
-            // could not otherwise say whose. Now it is every machine's at
-            // once, and each row already names its own machine below, so a
+            // Just the word, now. It used to be the one runner being driven,
+            // because the sidebar was that runner's workspaces and the pane
+            // could not otherwise say whose. Now it is every runner's at
+            // once, and each row already names its own runner below, so a
             // header naming one would be naming the wrong thing, or picking
             // a favorite among rows that are not ranked.
             Text("Fleet")
@@ -810,7 +810,7 @@ struct ContentView: View {
             Spacer()
 
             // With the actions, not beside the title. It is a button — it jumps
-            // to the next agent waiting — and sitting it against the machine
+            // to the next agent waiting — and sitting it against the runner
             // name read as part of the name, which is the one thing it is not.
             if attentionCount > 0 {
                 // A dot and a number, not a filled capsule. A solid block of
@@ -830,7 +830,7 @@ struct ContentView: View {
             // repository without dropping to the terminal.
             SidebarMenuButton(
                 systemImage: "plus",
-                help: "Add a workspace, a repository, or a machine",
+                help: "Add a workspace, a repository, or a runner",
                 items: [
                     SidebarMenuItem(title: "New workspace…") {
                         newWorkspaceRepository = ""
@@ -839,9 +839,11 @@ struct ContentView: View {
                     },
                     SidebarMenuItem(title: "Add repository…") { showAddRepository = true },
                     // Here as well as in the picker, because this is the menu
-                    // people open looking for "add a thing" — and a machine is
+                    // people open looking for "add a thing" — and a runner is
                     // a thing you add.
-                    SidebarMenuItem(title: "Add a machine…") {
+                    SidebarMenuItem(title: "Add a runner…") {
+                        // Not a word anyone reads: `"machines"` is the tab
+                        // value already stored on disk — see `SettingsView`.
                         Preferences.shared.settingsTab = "machines"
                         // `NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil,
                         // from: nil)` was here before, and never worked: nil-target
@@ -865,12 +867,12 @@ struct ContentView: View {
     /// not read them is worse than saying nothing, because it sends them to
     /// create one they already have.
     ///
-    /// Reads the LOCAL machine's own load state, not a merged one across every
-    /// configured machine: this Mac is always present (`FleetStore.hosts` puts
-    /// it first), and it is the one machine whose failure to answer is worth a
+    /// Reads the LOCAL runner's own load state, not a merged one across every
+    /// configured runner: this Mac is always present (`FleetStore.hosts` puts
+    /// it first), and it is the one runner whose failure to answer is worth a
     /// dedicated screen here rather than a row in the sidebar saying so — which
-    /// is what an unreachable REMOTE machine gets instead, so its own trouble
-    /// does not blank out a sidebar the local machine is perfectly able to show.
+    /// is what an unreachable REMOTE runner gets instead, so its own trouble
+    /// does not blank out a sidebar the local runner is perfectly able to show.
     @ViewBuilder
     private var fleetPlaceholder: some View {
         let local = store.clients[""]
@@ -951,20 +953,20 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                // The dot above is an OR across every machine, deliberately —
+                // The dot above is an OR across every runner, deliberately —
                 // ANDing would paint the bar orange every time one laptop was
                 // merely asleep. But on a fleet of more than one, an OR alone
-                // means it takes just ONE healthy machine to turn that dot
+                // means it takes just ONE healthy runner to turn that dot
                 // green while a second sits there unreachable or without
-                // tmux at all, invisibly. These name that machine instead of
+                // tmux at all, invisibly. These name that runner instead of
                 // letting the merged dot speak for it; a click retries it at
                 // once, same as a header's own dot.
                 //
                 // Built by hand here rather than calling `HostDot`, and
                 // deliberately so, not as an oversight: `HostDot` draws
                 // `EmptyView()` for `.connected`, which is right for a
-                // header naming only whether the MACHINE answers, but wrong
-                // here — a machine can be fully reachable and still be the
+                // header naming only whether the RUNNER answers, but wrong
+                // here — a runner can be fully reachable and still be the
                 // reason this row reads orange (reachable, no tmux), and
                 // that case has to draw a dot. See `troubleColor(for:)`
                 // below for the resulting, deliberately different, palette.
@@ -1011,12 +1013,12 @@ struct ContentView: View {
         }
     }
 
-    /// A trouble dot's color, for a machine `store.unhealthyHosts` has
+    /// A trouble dot's color, for a runner `store.unhealthyHosts` has
     /// already decided is not fully well.
     ///
     /// Not `HostDot`'s palette reused outright: `HostDot` renders nothing at
     /// all for `.connected`, which is right for a header naming only whether
-    /// the MACHINE is reachable — but a machine can be perfectly reachable
+    /// the RUNNER is reachable — but a runner can be perfectly reachable
     /// and still be the reason the fleet's tmux status reads orange, and that
     /// case has to draw something here.
     private func troubleColor(for host: String) -> Color {
@@ -1142,7 +1144,7 @@ struct ContentView: View {
     /// One changes store per worktree.
     ///
     /// Cached on the client too, not just the worktree. `FleetStore` drops a
-    /// `DaemonClient` when its machine leaves and builds a fresh one when it
+    /// `DaemonClient` when its runner leaves and builds a fresh one when it
     /// comes back, and a store held over from the old one would go on talking to
     /// a connection nobody is answering.
     private func changesStore(for ws: Workspace, client: DaemonClient) -> ChangesStore {
@@ -1309,8 +1311,8 @@ struct ContentView: View {
     /// chosen yet — the empty state's "New workspace" button, the sidebar's
     /// own `+`, and the palette's "new task" all reach this with no project
     /// and therefore no host in hand at all, which is the one case where a
-    /// default machine is legitimate rather than the picker again in
-    /// disguise. This Mac's own repositories come first: it is the machine
+    /// default runner is legitimate rather than the picker again in
+    /// disguise. This Mac's own repositories come first: it is the runner
     /// guaranteed to be present, the one everything else is optional next to.
     /// Falls back to any repository so the picker still has something to
     /// preselect the very first time, before this Mac has one of its own.
@@ -1319,12 +1321,12 @@ struct ContentView: View {
             ?? store.repositories.first?.repository.id
     }
 
-    /// Route a mutation to the machine a workspace is on, refusing it first.
+    /// Route a mutation to the runner a workspace is on, refusing it first.
     ///
     /// Checked here rather than at each call site — see `FleetStore.refusal(for:)`
     /// for why. On refusal, `fallback` is handed back and nothing is called; on
     /// success, whatever the client itself left in `lastError` is surfaced too,
-    /// which is how a command that reached its machine and failed there still
+    /// which is how a command that reached its runner and failed there still
     /// reaches the banner.
     @discardableResult
     private func act<T>(
@@ -1347,14 +1349,14 @@ struct ContentView: View {
     /// A terminal's rendered screen, for the palette's preview tiles.
     ///
     /// `short` is what `ScreenPreviews` keys everything by, and short ids can
-    /// collide across machines — the reason `Selection` carries a host at all.
+    /// collide across runners — the reason `Selection` carries a host at all.
     /// This is the one place left that has to work backwards from a bare short
     /// id with no host of its own to check against, because that is the whole
     /// interface `ScreenPreviews` and `CommandPalette` were built around. Local
-    /// machine first, then the rest in the same order the sidebar lists them:
-    /// with one machine, or with short ids that do not collide, this finds the
+    /// runner first, then the rest in the same order the sidebar lists them:
+    /// with one runner, or with short ids that do not collide, this finds the
     /// right terminal every time; a genuine collision costs a preview tile
-    /// showing the wrong screen, never an action landing on the wrong machine.
+    /// showing the wrong screen, never an action landing on the wrong runner.
     private func screen(forTerminalShort short: String) async -> String {
         for host in store.hosts {
             guard let client = store.clients[host] else { continue }
@@ -1386,7 +1388,7 @@ struct ContentView: View {
     /// Land on something usable rather than an empty pane.
     /// Where to land on launch.
     ///
-    /// Whatever wants you first, wherever it is — including on another machine.
+    /// Whatever wants you first, wherever it is — including on another runner.
     /// Falling back to "the first running terminal" would open a fleet on
     /// something arbitrary while an agent two projects down waits for an answer.
     private func selectFirstRunningTerminal() {
@@ -1508,7 +1510,7 @@ struct ContentView: View {
     /// else would only be a subprocess spent to be told no.
     ///
     /// Not routed through `act(on:_:)`: this is a best-effort background
-    /// bookkeeping call, not a user-initiated action, and a machine gone quiet
+    /// bookkeeping call, not a user-initiated action, and a runner gone quiet
     /// for a moment must not put "Cannot do that" on screen just because an
     /// agent on it happened to finish.
     private func markVisibleSeen() {
@@ -1517,7 +1519,7 @@ struct ContentView: View {
         for terminal in visibleTerminals where terminal.agent == .done {
             // The daemon is idempotent, but this is not free: each call is a
             // CLI subprocess, and a fleet event arrives for every terminal on
-            // the machine. Without this, ten busy panes would mean ten
+            // the runner. Without this, ten busy panes would mean ten
             // redundant processes for every one that finished.
             guard !markingSeen.contains(terminal.id) else { continue }
             markingSeen.insert(terminal.id)
@@ -1946,7 +1948,7 @@ struct ContentView: View {
     /// `QuickCreate.chosen`, which resolves both together from the same
     /// picker selection. A lookup repeated at this end, from `project`
     /// alone, is exactly the shape that goes silently wrong: `project` can
-    /// name a repository that has since been removed, or one on a machine
+    /// name a repository that has since been removed, or one on a runner
     /// whose `repositories` has not been re-read since a reconnect, and a
     /// lookup that finds nothing has to be answered with a refusal, not a
     /// fallback to this Mac.
@@ -2059,12 +2061,12 @@ struct ContentView: View {
     /// The workspace the selection is in — nil when nothing is selected.
     ///
     /// Used to be "or the first one": with nothing selected, that first
-    /// workspace could belong to ANY machine in the fleet, chosen by nothing
+    /// workspace could belong to ANY runner in the fleet, chosen by nothing
     /// more meaningful than merge order. `tileTarget` and ⌘T both read this
     /// to decide what a keystroke acts on, and a fallback here meant a ⌃B
     /// command issued while the detail pane was blank still landed — split,
     /// break, preset, cycle, zoom, focus, a new terminal — on whichever
-    /// machine happened to own that first row. Wrong-machine routing is the
+    /// runner happened to own that first row. Wrong-runner routing is the
     /// one failure this feature must never produce, so with no selection
     /// there is now no target, and `tileTarget`'s and `.newTerminal`'s own
     /// `guard`/`if let` already do nothing rather than guess.

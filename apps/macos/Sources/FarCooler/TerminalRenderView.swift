@@ -40,7 +40,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// Encoded bytes leaving the terminal, ready for the pane.
     var onInput: (([UInt8]) -> Void)?
     /// An image was pasted or dropped. Handled above this view, because getting
-    /// it onto the machine the pane is on is a daemon conversation, not drawing.
+    /// it onto the runner the pane is on is a daemon conversation, not drawing.
     var onPasteImage: ((PastedImage) -> Void)?
     /// The grid this view can show, which is what the pane must be resized to.
     var onGeometry: ((Int, Int) -> Void)?
@@ -238,7 +238,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// runs continuously and wrong for the one caller that needs the report as
     /// a TRIGGER rather than as news. `TerminalSurface.attach` starts the byte
     /// stream from inside `onGeometry`, so that the pane is resized before its
-    /// history replays; a pane re-attaching because its machine reconnected has
+    /// history replays; a pane re-attaching because its runner reconnected has
     /// exactly the grid it always had, so the deduplication swallowed the
     /// report and the stream was never started. The reconnection looked fixed
     /// and the pane stayed as frozen as before.

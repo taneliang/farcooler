@@ -275,13 +275,13 @@ git commit -m "feat(apps): runners, in every string a person reads"
 ### Task 4: Documentation
 
 **Files:**
-- Modify: `README.md`, `docs/remote-hosts.md` → `git mv` to `docs/runners.md`, `docs/farcooler-design.md`, `docs/adapters.md`, `docs/releasing.md`, `apps/android/README.md`, `services/relay/README.md`
+- Modify: `README.md`, `docs/runners.md` → `git mv` to `docs/runners.md`, `docs/farcooler-design.md`, `docs/adapters.md`, `docs/releasing.md`, `apps/android/README.md`, `services/relay/README.md`
 - Modify: `docs/superpowers/specs/2026-08-16-device-onboarding-design.md` — already uses runner; check for stragglers
 
 - [ ] **Step 1: Rename and rewrite**
 
 ```bash
-git mv docs/remote-hosts.md docs/runners.md
+git mv docs/runners.md docs/runners.md
 grep -rn "remote-hosts.md" --exclude-dir=.git . | grep -v target
 ```
 

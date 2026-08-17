@@ -125,7 +125,7 @@ struct StackView: View {
                     Text("This branch isn't part of a stack.")
                         .foregroundStyle(.secondary)
                 } else if response == nil {
-                    Text("This machine's Far Cooler is too old to answer.")
+                    Text("This runner's Far Cooler is too old to answer.")
                         .foregroundStyle(.secondary)
                 }
 

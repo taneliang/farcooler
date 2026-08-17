@@ -16,7 +16,7 @@ package com.farcooler.model
  */
 object TaskSlug {
     /**
-     * A git-safe slug, behind whatever the machine says branches start with.
+     * A git-safe slug, behind whatever the runner says branches start with.
      *
      * Conservative on purpose: git accepts far more than this, but a branch name
      * is something people type, paste into a PR title and see in a CI log, and
@@ -53,7 +53,7 @@ object TaskSlug {
      * The worktree's name, which is the directory it is created in.
      *
      * The slug again, minus the branch prefix, rather than the trimmed sentence
-     * this used to hand over. A name is a path component now: the machine caps
+     * this used to hand over. A name is a path component now: the runner caps
      * it at 60 characters and refuses one with no letters or numbers left after
      * sanitizing, and a sentence can be either — "Ship it!!!" is the second.
      * Slugging is the one derivation that can be neither, and it costs nothing,
@@ -62,7 +62,7 @@ object TaskSlug {
     fun name(text: String): String {
         // Through `sanitize` and not merely `slug`, because the two disagree
         // about what a letter is: Kotlin says yes to `é` and to 写, and the
-        // machine — which keeps ASCII and dashes everything else — says no to
+        // runner — which keeps ASCII and dashes everything else — says no to
         // both. A description written in Chinese would otherwise slug to
         // something this thinks is a name and the daemon refuses outright.
         val name = sanitize(slug(text))
@@ -72,10 +72,10 @@ object TaskSlug {
     /**
      * The directory a typed name lands in.
      *
-     * Duplicated from the machine for the same reason the branch prefix is
+     * Duplicated from the runner for the same reason the branch prefix is
      * applied here rather than there: the form shows the folder it is about to
      * create, and a preview computed on the far side would be a preview that can
-     * lie. The machine still has the last word, and refuses a name this leaves
+     * lie. The runner still has the last word, and refuses a name this leaves
      * empty.
      */
     fun sanitize(text: String): String {

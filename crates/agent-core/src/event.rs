@@ -57,7 +57,7 @@ pub struct QueuedPrompt {
 /// An image traveling WITH a prompt rather than as a path beside it.
 ///
 /// Base64 because that is what an ACP image content block carries, and because
-/// the alternative — a path — is only meaningful on the machine that produced
+/// the alternative — a path — is only meaningful on the runner that produced
 /// it. See `RunningSession::send_prompt`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PromptImage {

@@ -94,7 +94,7 @@ where
     }
 }
 
-/// Send a file into a terminal, and return the path it landed at on the host.
+/// Send a file into a terminal, and return the path it landed at on the runner.
 ///
 /// Here rather than in `Session` for the reason this module exists: the CLI and
 /// the mobile core reach the daemon through different connections but must
@@ -153,7 +153,7 @@ where
         // first chunk IS the last, so a lost pane fails here too.
         //
         // This said only the first for a while, and confidently. It then told
-        // someone their machine was out of date when the terminal had simply
+        // someone their runner was out of date when the terminal had simply
         // died, which is the same failure as the catch-all it replaced: a
         // definite answer that sends you to the wrong place. The raw text is
         // logged either way, and that is what distinguishes them.
@@ -161,7 +161,7 @@ where
             if let Err(ClientError::Daemon { code, .. }) = &answer {
                 if *code == farcooler_protocol::v1::ErrorCode::NotFound as i32 {
                     return Err(ClientError::WrongResult {
-                        expected: "a terminal that is still running, on a machine new enough",
+                        expected: "a terminal that is still running, on a runner new enough",
                         got: "a terminal that has closed, or a Far Cooler that predates this",
                     });
                 }

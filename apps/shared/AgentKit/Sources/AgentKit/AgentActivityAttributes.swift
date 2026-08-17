@@ -56,7 +56,10 @@ import Foundation
         /// ("orchard needs you") and cannot be split back apart reliably.
         public var label: String
 
-        /// Which machine it is running on.
+        /// Which runner it is running on.
+        ///
+        /// The field keeps the old spelling because the relay encodes this
+        /// payload by field name — see the note on the type above.
         public var machine: String
 
         public init(terminal: String, label: String, machine: String) {

@@ -187,7 +187,7 @@ final class AgentStream: ObservableObject {
         if text.contains("not found") {
             return "That agent isn't running anymore."
         }
-        return "Couldn't reach this machine. Your message wasn't sent."
+        return "Couldn't reach this runner. Your message wasn't sent."
     }
 
     /// Rewrite a message that has not gone out yet.

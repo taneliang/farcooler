@@ -32,7 +32,7 @@ class BackoffTest {
     @Test
     fun it_stops_growing_at_thirty_seconds() {
         // Without a ceiling this reaches hours, which on a phone means a
-        // machine that came back an hour ago is still showing as down.
+        // runner that came back an hour ago is still showing as down.
         for (attempt in 5..20) {
             val wait = Connection.backoffMs(attempt)
             assertTrue("attempt $attempt waited ${wait}ms", wait <= 30_000 * 1.2)
@@ -40,8 +40,8 @@ class BackoffTest {
     }
 
     @Test
-    fun two_machines_recovering_together_do_not_retry_in_lockstep() {
-        // The whole reason for the jitter: this app connects to every machine
+    fun two_runners_recovering_together_do_not_retry_in_lockstep() {
+        // The whole reason for the jitter: this app connects to every runner
         // at once, so one network event recovering them all is the ordinary
         // case here rather than the unlucky one, and an unjittered schedule
         // would aim the whole fleet's handshakes at the same instant.

@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * What an app is allowed to assume about a machine it is newer than.
+ * What an app is allowed to assume about a runner it is newer than.
  *
  * Play review and `farcooler host install` do not tick together, so a phone
  * weeks behind talking to a daemon updated this morning is the ordinary case.
@@ -13,7 +13,7 @@ import org.junit.Test
  */
 class CapabilityTest {
     @Test
-    fun aMachineThatNamesAFeatureCanDoIt() {
+    fun aRunnerThatNamesAFeatureCanDoIt() {
         val daemon = DaemonBuild(
             version = "0.1.0+abc",
             matches = true,
@@ -25,7 +25,7 @@ class CapabilityTest {
     }
 
     @Test
-    fun aMachineThatDoesNotNameAFeatureCannotDoIt() {
+    fun aRunnerThatDoesNotNameAFeatureCannotDoIt() {
         // The whole point: a control whose capability is absent gets dimmed
         // with a reason rather than offered and failing.
         val daemon = DaemonBuild(
@@ -42,7 +42,7 @@ class CapabilityTest {
     fun aDaemonTooOldToAnswerStillGetsItsOldFeatures() {
         // Silence means a daemon predating capabilities entirely, so it has
         // exactly the feature set that existed then. Reading that as "can do
-        // nothing" would blank the UI against every older machine.
+        // nothing" would blank the UI against every older runner.
         val ancient = DaemonBuild(version = "0.1.0+old", matches = false, platform = "linux")
         assertTrue(ancient.can("workspaces"))
         assertTrue(ancient.can("terminals"))
@@ -53,7 +53,7 @@ class CapabilityTest {
     @Test
     fun capabilitiesAreSeparateFromWhetherTheBuildsMatch() {
         // Two different questions. `matches` is "were these built from the same
-        // source"; `can` is "what does that machine do". A machine can be a
+        // source"; `can` is "what does that runner do". A runner can be a
         // different build and still do everything this app needs.
         val different = DaemonBuild(
             version = "0.9.0+other",

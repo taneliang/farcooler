@@ -151,7 +151,7 @@ async fn locate(svc: &Service, workspace_id: Uuid) -> Result<(String, String, St
 /// 5. **A local `main` or `master`** — the only one labeled a guess, because it
 ///    is the only one that can quietly be the wrong answer.
 ///
-/// Every step degrades to the next, so a machine with no `gh`, no network and no
+/// Every step degrades to the next, so a runner with no `gh`, no network and no
 /// remote still reviews.
 async fn resolve_base(
     svc: &Service,

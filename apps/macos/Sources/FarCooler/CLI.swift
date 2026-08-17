@@ -51,7 +51,7 @@ enum CLI {
     /// Run the CLI and hand back everything it said.
     ///
     /// Both streams, and the exit status, because the callers here are about
-    /// INSTALLING software on someone else's machine: an installer that failed
+    /// INSTALLING software on someone else's runner: an installer that failed
     /// halfway is exactly when its own words matter, and they arrive on stderr.
     /// - Parameter stdin: fed to the process and closed. For credentials: an
     ///   argument is visible in `ps` to every process on the machine, and a

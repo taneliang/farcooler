@@ -10,7 +10,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
 /**
- * A push from the relay, about an agent on a machine this phone is not watching.
+ * A push from the relay, about an agent on a runner this phone is not watching.
  *
  * The one case the product exists for: the app is closed, the phone is asleep,
  * and an agent three time zones away has stopped and is waiting for an answer.

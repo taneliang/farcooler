@@ -319,7 +319,7 @@ impl Store {
             .map_err(map_err)
     }
 
-    /// Every visible workspace on this machine, across repositories.
+    /// Every visible workspace on this runner, across repositories.
     ///
     /// For the fleet's own questions, which are not scoped to a project the way
     /// the sidebar's are. Hidden worktrees are left out: the user said not to

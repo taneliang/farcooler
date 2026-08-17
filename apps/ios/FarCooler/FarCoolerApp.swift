@@ -43,19 +43,19 @@ func UIDeviceName() -> String {
     return "farcooler-\(name)"
 }
 
-/// The app opens onto TERMINALS, not onto a list of machines.
+/// The app opens onto TERMINALS, not onto a list of runners.
 ///
-/// It used to open on the host list, which meant the common case — one machine,
+/// It used to open on the host list, which meant the common case — one runner,
 /// already added, agents running on it — cost a tap on every launch to get past
-/// a screen with one row on it. A list of machines is onboarding, and onboarding
+/// a screen with one row on it. A list of runners is onboarding, and onboarding
 /// is not a home screen.
 ///
 /// So the host list appears exactly when it is the thing to do: when there are
-/// no hosts. Once there is one, the app lands on it, and switching machines
+/// no hosts. Once there is one, the app lands on it, and switching runners
 /// moves to where you already go to switch terminals — see
 /// `WorkspaceListView`, which is the phone's equivalent of the Mac's sidebar.
 struct RootView: View {
-    @StateObject private var hosts = HostStore()
+    @StateObject private var hosts = RunnerStore()
 
     var body: some View {
         Group {
@@ -68,16 +68,16 @@ struct RootView: View {
                 // no terminal/chat switch, and `navigationDestination` had
                 // nothing to push into.
                 //
-                // Keyed on the host, so switching machines rebuilds everything
+                // Keyed on the host, so switching runners rebuilds everything
                 // below rather than handing one host's screen the other's
                 // connection. The same rule the Mac follows for a pane whose
                 // terminal changes underneath it.
                 //
                 // On the whole VALUE, not just its id: correcting a mistyped
-                // address is as much a change of machine as picking a different
+                // address is as much a change of runner as picking a different
                 // one from the list, and keying on the id alone left the old
                 // connection running while the screen showed the new details.
-                // `HostStore.trust` deliberately does not write through to
+                // `RunnerStore.trust` deliberately does not write through to
                 // `selected`, so approving a host key is not mistaken for one.
                 NavigationStack {
                     FleetView(host: host, store: hosts)
@@ -115,7 +115,7 @@ struct RootView: View {
     }
 }
 
-/// The first-run screen: no machines yet, so there is nothing else to show.
+/// The first-run screen: no runners yet, so there is nothing else to show.
 ///
 /// One statement and two actions, the more important one loud. It used to be a
 /// list — a prose card that looked like a row but did nothing, then two rows
@@ -124,15 +124,15 @@ struct RootView: View {
 ///
 /// The order those steps go in is not a preference. The screen used to say "Add
 /// one, then authorize this device on it", a sequence that cannot work: a
-/// machine that has never seen this device's key refuses the very first
+/// runner that has never seen this device's key refuses the very first
 /// connection, so anyone who followed the instructions ended onboarding on a
 /// failure screen. Authorizing first costs nothing and makes the first
 /// connection the one that succeeds — which is why it is the prominent button
-/// and adding a machine is the quiet one.
+/// and adding a runner is the quiet one.
 struct HostOnboardingView: View {
-    @ObservedObject var hosts: HostStore
+    @ObservedObject var hosts: RunnerStore
 
-    @State private var showAddHost = false
+    @State private var showAddRunner = false
     @State private var showSettings = false
 
     var body: some View {
@@ -145,15 +145,15 @@ struct HostOnboardingView: View {
                     .foregroundStyle(.tertiary)
                     .padding(.bottom, 22)
 
-                // One statement of what to do, not a status line ("No machines
+                // One statement of what to do, not a status line ("No runners
                 // yet") followed by a paragraph restating it followed by two
                 // rows restating it again.
-                Text("Connect a Machine")
+                Text("Connect a Runner")
                     .font(.title2.weight(.semibold))
                     .padding(.bottom, 8)
 
                 Text(
-                    "Far Cooler runs coding agents on machines you already reach "
+                    "Far Cooler runs coding agents on runners you already reach "
                         + "over SSH. Put this device’s key on one, then add its address."
                 )
                 .font(.callout)
@@ -165,7 +165,7 @@ struct HostOnboardingView: View {
 
                 // The order is carried by which button is the loud one, which
                 // is the only place it needs to be carried. Authorizing first
-                // is not a preference: a machine that has never seen this
+                // is not a preference: a runner that has never seen this
                 // phone's key refuses the very first connection, so the other
                 // order ends onboarding on a failure screen.
                 VStack(spacing: 18) {
@@ -177,7 +177,7 @@ struct HostOnboardingView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
 
-                    Button("Add a Machine") { showAddHost = true }
+                    Button("Add a Runner") { showAddRunner = true }
                 }
                 .padding(.horizontal, 40)
                 .padding(.bottom, 40)
@@ -185,7 +185,7 @@ struct HostOnboardingView: View {
             .frame(maxWidth: .infinity)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // No "+" beside these. A third way to add a machine on a screen
+                // No "+" beside these. A third way to add a runner on a screen
                 // whose whole purpose is two ordered steps is one more thing to
                 // weigh up, and it is the step that must not come first.
                 ToolbarItem(placement: .topBarLeading) {
@@ -193,7 +193,7 @@ struct HostOnboardingView: View {
                         .accessibilityLabel("Settings")
                 }
             }
-            .sheet(isPresented: $showAddHost) {
+            .sheet(isPresented: $showAddRunner) {
                 HostEditorView { hosts.add($0) }
             }
             .sheet(isPresented: $showSettings) {
@@ -214,7 +214,7 @@ struct AuthorizeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Add this device’s public key to the machine:")
+                Text("Add this device’s public key to the runner:")
                     .font(.callout)
 
                 Text(publicKey)
@@ -231,7 +231,7 @@ struct AuthorizeView: View {
                 }
                 .buttonStyle(.borderedProminent)
 
-                Text("On the machine, run:")
+                Text("On the runner, run:")
                     .font(.callout)
                     .padding(.top, 8)
                 Text("echo '<paste>' >> ~/.ssh/authorized_keys")
@@ -256,7 +256,7 @@ struct AuthorizeView: View {
     }
 }
 
-/// Add a machine, or correct one that was typed in wrong.
+/// Add a runner, or correct one that was typed in wrong.
 ///
 /// One screen for both, because they are the same four fields and because the
 /// second was missing entirely: the app opens onto the selected host, so a
@@ -267,10 +267,10 @@ struct HostEditorView: View {
     /// The host being corrected, or nil when adding a new one. Everything that
     /// differs between the two modes — the title, the confirm button's word,
     /// whether Remove exists at all — comes from this and nothing else.
-    var existing: Host?
-    let onSave: (Host) -> Void
+    var existing: Runner?
+    let onSave: (Runner) -> Void
     /// Only supplied when removing is something the caller can survive.
-    var onRemove: ((Host) -> Void)?
+    var onRemove: ((Runner) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -303,7 +303,7 @@ struct HostEditorView: View {
                 // which, and a port of "1" or a user of "me" gives no clue at
                 // all. The label is the only thing that makes an edit screen
                 // legible without emptying a field to find out what it was.
-                Section("Machine") {
+                Section("Runner") {
                     field("Name", text: $label, hint: "Optional")
                     field("Address", text: $address, hint: "Required")
                         .textInputAutocapitalization(.never)
@@ -319,7 +319,7 @@ struct HostEditorView: View {
                 Section {
                     Text(
                         "Far Cooler connects over SSH. This device must be authorized "
-                        + "on the machine first."
+                        + "on the runner first."
                     )
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -328,16 +328,16 @@ struct HostEditorView: View {
 
                 if isEditing, let existing {
                     // Only when editing, and only when the caller can handle it:
-                    // removing the machine you are currently connected to is
+                    // removing the runner you are currently connected to is
                     // fine (the app falls back to another, or to onboarding),
                     // but it is the caller that knows that, not this screen.
                     if let onRemove {
                         Section {
-                            Button("Remove This Machine", role: .destructive) {
+                            Button("Remove This Runner", role: .destructive) {
                                 confirmingRemove = true
                             }
                         } footer: {
-                            Text("Removes it from this device only. Nothing on the machine changes.")
+                            Text("Removes it from this device only. Nothing on the runner changes.")
                         }
                         .confirmationDialog(
                             "Remove \(existing.label)?",
@@ -353,7 +353,7 @@ struct HostEditorView: View {
                     }
                 }
             }
-            .navigationTitle(isEditing ? "Edit Machine" : "Add Machine")
+            .navigationTitle(isEditing ? "Edit Runner" : "Add Runner")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -390,9 +390,9 @@ struct HostEditorView: View {
 
     /// The host as typed. Keeps `existing`'s identity so an edit updates the
     /// host in place rather than adding a second one alongside it.
-    private func edited() -> Host {
+    private func edited() -> Runner {
         let trimmed = address.trimmingCharacters(in: .whitespaces)
-        return Host(
+        return Runner(
             id: existing?.id ?? UUID(),
             label: label.trimmingCharacters(in: .whitespaces).isEmpty ? trimmed : label,
             address: trimmed,

@@ -1,7 +1,7 @@
 package com.farcooler.net
 
-import com.farcooler.data.Host
-import com.farcooler.data.HostStore
+import com.farcooler.data.Runner
+import com.farcooler.data.RunnerStore
 import com.farcooler.data.Settings
 import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
@@ -14,47 +14,47 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
- * Which terminal a screen is looking at, on which machine.
+ * Which terminal a screen is looking at, on which runner.
  *
  * The host is carried rather than looked up. Short ids are the last eight hex
- * characters of a UUID minted per daemon; across three machines and a hundred
+ * characters of a UUID minted per daemon; across three runners and a hundred
  * worktrees the birthday collision probability is around one in a hundred
  * thousand, and the cost of losing that coin flip is acting on the wrong
- * machine. Carrying the host removes the class of bug rather than betting
+ * runner. Carrying the runner removes the class of bug rather than betting
  * against it — the same conclusion the Mac reached.
  */
 data class TerminalRef(val hostId: String, val workspaceId: String, val terminalId: String)
 
-/** One workspace, and the machine it is on. */
+/** One workspace, and the runner it is on. */
 data class FleetEntry(
-    val host: Host,
+    val host: Runner,
     val connection: Connection,
     val workspace: Workspace,
 )
 
 /**
- * Every configured machine, connected at once.
+ * Every configured runner, connected at once.
  *
- * The Mac's `FleetStore`, on a phone. It holds one [Connection] per machine,
+ * The Mac's `FleetStore`, on a phone. It holds one [Connection] per runner,
  * merges their workspaces into one list, and answers "which connection owns
  * this row". Every mutation goes through the connection this names.
  *
- * The iOS app has a machine picker instead, which makes a remote agent
+ * The iOS app has a runner picker instead, which makes a remote agent
  * something you have to go and look for — the product's whole claim is that an
- * agent blocked on a machine in another room is exactly as urgent as one on
- * this desk, and a picker answers that claim by asking you to switch machines
+ * agent blocked on a runner in another room is exactly as urgent as one on
+ * this desk, and a picker answers that claim by asking you to switch runners
  * to find out. This is the fix, ported from the Mac design
  * (`docs/superpowers/specs/2026-08-03-every-machine-in-one-fleet-design.md`).
  *
- * **Failure isolation is structural.** One machine being unreachable is one
+ * **Failure isolation is structural.** One runner being unreachable is one
  * object in a bad state, not a flag threaded through shared code. That is the
- * reason to prefer a connection per machine over one that takes a host
- * parameter: there is somewhere natural for "this machine is down, here is why"
- * to live, and a row from a machine that stopped answering keeps its place
+ * reason to prefer a connection per runner over one that takes a runner
+ * parameter: there is somewhere natural for "this runner is down, here is why"
+ * to live, and a row from a runner that stopped answering keeps its place
  * rather than vanishing.
  */
 class FleetRepository(
-    private val hosts: HostStore,
+    private val hosts: RunnerStore,
     private val settings: Settings,
     private val scope: CoroutineScope,
 ) {
@@ -70,36 +70,36 @@ class FleetRepository(
 
     private val _entries = MutableStateFlow<List<FleetEntry>>(emptyList())
 
-    /** Every workspace on every connected machine, in machine order. */
+    /** Every workspace on every connected runner, in runner order. */
     val entries: StateFlow<List<FleetEntry>> = _entries.asStateFlow()
 
     private val _connections = MutableStateFlow<List<Connection>>(emptyList())
 
-    /** One per machine currently being talked to, in the order they are listed. */
+    /** One per runner currently being talked to, in the order they are listed. */
     val active: StateFlow<List<Connection>> = _connections.asStateFlow()
 
-    /** Reported once per fleet refresh, whichever machine produced it. */
-    var onFleet: ((Host, com.farcooler.model.Fleet) -> Unit)? = null
+    /** Reported once per fleet refresh, whichever runner produced it. */
+    var onFleet: ((Runner, com.farcooler.model.Fleet) -> Unit)? = null
 
     init {
         scope.launch {
-            combine(hosts.hosts, hosts.selectedId, settings.allMachinesAtOnce) { all, selected, everything ->
+            combine(hosts.hosts, hosts.selectedId, settings.allRunnersAtOnce) { all, selected, everything ->
                 if (everything) all else all.filter { it.id == selected }
             }.collect { wanted -> reconcile(wanted) }
         }
     }
 
     /**
-     * Bring up a connection per wanted machine and tear down the rest.
+     * Bring up a connection per wanted runner and tear down the rest.
      *
-     * Membership follows the host list, so adding a machine in settings brings
+     * Membership follows the runner list, so adding a runner in settings brings
      * up a connection and removing one tears its connection down, with no
-     * relaunch. A machine whose details were EDITED is torn down and rebuilt:
-     * correcting a mistyped address is as much a change of machine as picking a
+     * relaunch. A runner whose details were EDITED is torn down and rebuilt:
+     * correcting a mistyped address is as much a change of runner as picking a
      * different one, and reusing the connection would leave the old session
      * running under new details.
      */
-    private fun reconcile(wanted: List<Host>) {
+    private fun reconcile(wanted: List<Runner>) {
         val byId = wanted.associateBy { it.id }
 
         for ((id, connection) in connections.toList()) {
@@ -169,12 +169,12 @@ class FleetRepository(
         publish()
     }
 
-    /** Refresh every machine at once, for pull-to-refresh. */
+    /** Refresh every runner at once, for pull-to-refresh. */
     suspend fun refreshAll() {
         connections.values.forEach { it.refresh() }
     }
 
-    /** Retry a machine that failed, without disturbing the others. */
+    /** Retry a runner that failed, without disturbing the others. */
     fun retry(hostId: String) {
         val connection = connections[hostId] ?: return
         starts[hostId]?.cancel()
@@ -189,7 +189,7 @@ class FleetRepository(
      * host, because that would rebuild the whole screen at the exact moment
      * approval succeeded.
      */
-    fun retry(hostId: String, withHost: Host) {
+    fun retry(hostId: String, withHost: Runner) {
         val connection = connections[hostId] ?: return
         starts[hostId]?.cancel()
         starts[hostId] = scope.launch { connection.start(withHost) }
@@ -211,7 +211,7 @@ class FleetRepository(
     }
 
     /**
-     * Retry every machine at once, whatever each one's backoff had planned.
+     * Retry every runner at once, whatever each one's backoff had planned.
      *
      * What the network coming back means. Only the transition into reachable
      * reaches this — see [Reachability] — because a path that was already
@@ -223,10 +223,10 @@ class FleetRepository(
     }
 
     /**
-     * The terminal to open on, across every machine.
+     * The terminal to open on, across every runner.
      *
-     * The same rule one machine's fleet uses, applied to the union: an agent
-     * waiting on you outranks everything else regardless of which machine it is
+     * The same rule one runner's fleet uses, applied to the union: an agent
+     * waiting on you outranks everything else regardless of which runner it is
      * on, which is the entire point of connecting to all of them.
      */
     fun landing(): TerminalRef? {

@@ -1,4 +1,4 @@
-//! Installing Far Cooler on a Linux host, over ssh.
+//! Installing a Far Cooler runner on a Linux host, over ssh.
 //!
 //! Everything here runs through one `ssh` session and touches only the user's
 //! own home directory. No root, no package manager, no system unit, nothing
@@ -14,7 +14,7 @@
 //!   the one the receiver computes catches that before anything executes.
 //!
 //! - **Lingering is enabled.** Without it systemd tears down a user's services
-//!   at logout, so a host would stop being reachable the moment the user logged
+//!   at logout, so a runner would stop being reachable the moment the user logged
 //!   out of it — which is precisely the situation Far Cooler exists for.
 
 use std::path::{Path, PathBuf};
@@ -28,8 +28,8 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 /// This build's daemon binary. See `Channel::daemon_binary_name`.
 ///
 /// Crate-wide rather than private, because what this returns is the name that
-/// lands on the host — so every other module that reaches for that machine
-/// afterwards (`remote::connect`, `push --host`) has to spell it the same way
+/// lands on the runner — so every other module that reaches for that runner
+/// afterwards (`remote::connect`, `push --runner`) has to spell it the same way
 /// or it will ask for a binary nobody installed. It was two spellings once,
 /// and the second one was `farcoolerd` on every channel.
 pub(crate) fn daemon_name() -> &'static str {
@@ -45,7 +45,7 @@ pub(crate) fn cli_name() -> &'static str {
 ///
 /// Channel-specific for the same reason the binary is: installing a preview
 /// must not replace the stable daemon's supervision. It would, silently, and
-/// the symptom would be a machine that stops coming back after a reboot as the
+/// the symptom would be a runner that stops coming back after a reboot as the
 /// wrong channel.
 fn systemd_unit_name() -> &'static str {
     use farcooler_protocol::Channel;
@@ -146,7 +146,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
 
     // Everything that makes this host impossible, said at once.
     //
-    // These used to be sequential early returns, so a machine with neither tmux
+    // These used to be sequential early returns, so a host with neither tmux
     // nor a supported OS told you about one problem, waited for you to fix it,
     // and then told you about the next.
     if !probe.installable() {
@@ -185,7 +185,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
         } else {
             "This copy of Far Cooler was not built with a Linux install \
              bundled in.\nPass --from <dir> with `farcooler` and `farcoolerd` \
-             inside, built for this machine's architecture."
+             inside, built for that host's architecture."
                 .to_string()
         };
         return Err(format!("No Linux binaries in {}.\n{hint}", dir.display()).into());
@@ -224,7 +224,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
             println!("  what you lose is being told about them while you are away.");
             if probe.platform == Platform::Wsl {
                 println!();
-                println!("  WSL can run systemd. In /etc/wsl.conf on that machine:");
+                println!("  WSL can run systemd. In /etc/wsl.conf on that host:");
                 println!("      [boot]");
                 println!("      systemd=true");
                 println!("  then `wsl --shutdown` from Windows and install again.");
@@ -233,7 +233,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
         Persistence::None => println!("  WARNING: nothing will keep the daemon running."),
     }
     println!();
-    println!("Check it:   farcooler --host {target} status");
+    println!("Check it:   farcooler --runner {target} status");
     Ok(())
 }
 
@@ -264,7 +264,7 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
             }
 
             // `enable --now` STARTS an inactive service and does nothing to a
-            // running one, so on every host that already had Far Cooler the
+            // running one, so on every runner that already had Far Cooler the
             // new binary sat on disk while the old daemon kept serving. The
             // install said it succeeded, `status` reported the old version,
             // and the two together read as a lie.
@@ -287,7 +287,7 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
             println!("==> Registering the launchd agent");
             remote_run(target, "mkdir -p ~/Library/LaunchAgents").await?;
             // `$HOME` is not expanded inside a plist, so the path is baked in
-            // at write time from the host's own answer.
+            // at write time from the runner's own answer.
             let home = remote_capture(target, "echo $HOME").await?;
             let plist = launch_agent().replace("__HOME__", home.trim());
             let plist_path = format!("~/Library/LaunchAgents/{}.plist", launchd_label());
@@ -315,7 +315,7 @@ async fn register_service(target: &str, wanted: Persistence) -> Result<Persisten
             }
 
             // Bootstrapping an ALREADY-bootstrapped agent is a no-op, so on
-            // any host that already had Far Cooler the old daemon would keep
+            // any runner that already had Far Cooler the old daemon would keep
             // running against a new binary — the same trap the systemd path
             // fell into. `kickstart -k` restarts it whether or not the
             // bootstrap above did anything.
@@ -383,10 +383,10 @@ fn has_dev_checkout() -> bool {
     Path::new("scripts/build-linux.sh").is_file()
 }
 
-/// What a host IS, before anything is changed on it.
+/// What a runner IS, before anything is changed on it.
 ///
 /// Separate from `install` because the app has to be able to ask "can this
-/// machine host Far Cooler, and what would installing involve" without
+/// host run Far Cooler, and what would installing involve" without
 /// installing anything. A user adding a server should be told it has no tmux
 /// before binaries start landing on it, not after.
 ///
@@ -395,8 +395,8 @@ fn has_dev_checkout() -> bool {
 /// `loginctl` must still report its architecture.
 pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
     // Asks about THIS channel's install, not about Far Cooler in general. A
-    // beta CLI probing a machine reports what the beta daemon is doing there;
-    // a release install on the same machine is a separate thing and answers
+    // beta CLI probing a runner reports what the beta daemon is doing there;
+    // a release install on the same host is a separate thing and answers
     // separately.
     let script = format!(
         "        echo \"os=$(uname -s)\"; \
@@ -427,7 +427,7 @@ pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
     let kernel = get("kernel");
     // WSL announces itself in the kernel release, and nowhere else that is
     // reliable: `uname -s` says Linux exactly like any other Linux, but the
-    // machine has no systemd unless the user opted into it, and its lifetime is
+    // host has no systemd unless the user opted into it, and its lifetime is
     // tied to a Windows session rather than to a login.
     let wsl = kernel.to_lowercase().contains("microsoft");
     let tmux = get("tmux");
@@ -589,7 +589,7 @@ impl Persistence {
     }
 }
 
-/// What is installed and running on a host.
+/// What is installed and running on a runner.
 pub async fn status(target: &str) -> Fallible {
     let report = remote_capture(
         target,
@@ -653,7 +653,7 @@ async fn upload_verified(target: &str, local: &Path, name: &str) -> Fallible {
     // Rename only after the hash matches. A running daemon holds the old
     // inode and keeps serving until the service is restarted, which is what
     // makes the swap atomic — and why the caller MUST restart it afterwards.
-    // Nothing did, once, and an install that reported success left the machine
+    // Nothing did, once, and an install that reported success left the runner
     // running the daemon it already had.
     remote_run(target, &format!("mv {destination}.new {destination}")).await?;
     println!("    {name}  {} bytes  sha256 {}…", bytes.len(), &expected[..12]);
@@ -693,10 +693,10 @@ pub(crate) async fn remote_run(target: &str, command: &str) -> Fallible {
 
 /// Run a remote command, feeding it something on stdin.
 ///
-/// Exists so a credential can reach a machine without ever being an argument.
+/// Exists so a credential can reach a runner without ever being an argument.
 /// The error deliberately does NOT name the command: `remote_run` does, which is
 /// right for an installer step and wrong for anything carrying a secret, and the
-/// only way to be sure is for the secret-carrying path to have its own runner.
+/// only way to be sure is for the secret-carrying path to have its own function.
 pub(crate) async fn remote_run_with_stdin(target: &str, command: &str, input: &str) -> Fallible {
     use tokio::io::AsyncWriteExt;
 
@@ -736,7 +736,7 @@ async fn remote_capture(target: &str, command: &str) -> Result<String, Box<dyn s
     // This returned stdout regardless of exit status, so a host that refused
     // the connection came back as a host that answered with nothing — and a
     // probe then read those empty fields as "some OS I do not recognize". The
-    // user was told their machine was an unsupported platform when the truth
+    // user was told their host was an unsupported platform when the truth
     // was that ssh could not reach it, which sends them to fix the wrong thing.
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -886,7 +886,7 @@ mod tests {
             unit.contains("KillMode=process"),
             "a restart would kill the tmux server and every agent in it"
         );
-        // A crash loop with systemd's 100ms default would hammer the machine.
+        // A crash loop with systemd's 100ms default would hammer the host.
         assert!(unit.contains("RestartSec=5s"));
         // Every placeholder was filled. A stray __DAEMON__ would be written to
         // the host verbatim and systemd would fail to start a binary of that
@@ -897,7 +897,7 @@ mod tests {
     #[test]
     fn a_channels_service_names_do_not_collide() {
         // Installing a beta must not replace the release daemon's supervision.
-        // It would, silently, and the machine would come back from a reboot as
+        // It would, silently, and the runner would come back from a reboot as
         // whichever channel was installed last.
         use farcooler_protocol::Channel;
         assert_eq!(Channel::Stable.daemon_binary_name(), "farcoolerd");
@@ -913,7 +913,7 @@ mod tests {
     fn wsl_is_its_own_platform_because_persistence_differs() {
         // `uname -s` says Linux on WSL exactly as it does anywhere else, and
         // the kernel release is the only reliable tell. Treating it as ordinary
-        // Linux means promising a systemd service on a machine that usually has
+        // Linux means promising a systemd service on a host that usually has
         // no systemd at all — the daemon then never starts, and nothing says so.
         for kernel in ["5.15.153.1-microsoft-standard-WSL2", "4.4.0-19041-Microsoft"] {
             assert!(
@@ -925,7 +925,7 @@ mod tests {
         assert!(!"25.5.0".to_lowercase().contains("microsoft"));
     }
 
-    /// The asymmetry that broke `host install` on every channel but stable:
+    /// The asymmetry that broke `runner install` on every channel but stable:
     /// what gets uploaded is named for the channel, but what gets READ never
     /// is. `scripts/build-linux.sh`, `release.yml` and `apps/macos/build-app.sh`
     /// all copy cargo's `farcooler`/`farcoolerd` straight out of `target/`, so

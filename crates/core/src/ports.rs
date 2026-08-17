@@ -1,7 +1,7 @@
 //! What a pane is serving, read from the kernel rather than from its output.
 //!
 //! A pane running `python -m http.server 8099` either holds a listening socket
-//! on 8099 or it does not; that is a fact about the machine, available without
+//! on 8099 or it does not; that is a fact about the host, available without
 //! interpreting a single character of what the program printed. Pattern
 //! matching prose is the mistake the rest of this work exists to correct, and
 //! it would be perverse to reintroduce it here.
@@ -17,13 +17,13 @@ pub fn purpose(ports: &[u16]) -> Option<String> {
     ports.iter().min().map(|p| format!("web :{p}"))
 }
 
-/// Every listening TCP port on this machine, by owning process.
+/// Every listening TCP port on this host, by owning process.
 ///
 /// One call for the whole host, on the sampling loop's cadence, for the same
 /// reason `ps` is: a fleet of thirty panes must not mean thirty processes a
 /// second.
 ///
-/// Failure is silently empty. A machine without `lsof`, or one where it is
+/// Failure is silently empty. A host without `lsof`, or one where it is
 /// refused, loses a decoration — it must not lose the row.
 pub fn listening_ports() -> HashMap<i32, Vec<u16>> {
     let out = std::process::Command::new("lsof")

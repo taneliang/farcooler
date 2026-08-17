@@ -1,7 +1,7 @@
-//! `farcoolerd` — the host daemon.
+//! `farcoolerd` — the runner daemon.
 //!
 //! It opens no network listener. The only entry point is a mode-0600 Unix
-//! socket under a user-only directory; reaching a host from elsewhere means
+//! socket under a user-only directory; reaching a runner from elsewhere means
 //! going through sshd, which already authenticates both directions. That is the
 //! whole of Far Cooler's attack surface, and it is deliberately this small.
 //!
@@ -45,7 +45,7 @@ async fn run() -> Result<(), i32> {
     // `farcoolerd --version` answers instead of starting a daemon.
     //
     // It used to do neither: the flag was unrecognized, so the process started
-    // up, logged, and exited — and `host probe`, which runs
+    // up, logged, and exited — and `runner probe`, which runs
     // `farcoolerd --version` over ssh to find out what is installed, captured
     // that log line as the version. There was no way to ask this binary what it
     // was, which is a strange gap in a system whose components check each
@@ -94,7 +94,7 @@ async fn run() -> Result<(), i32> {
             return Err(2);
         };
         // Which install's pane this is. A pane number is unique only within one
-        // tmux server, so two daemons on this machine both have a `%0`; without
+        // tmux server, so two daemons on this host both have a `%0`; without
         // this they share one socket and the second silently reads the first
         // one's pane. See `fanout::socket_path`.
         //
@@ -144,8 +144,8 @@ async fn run() -> Result<(), i32> {
     // through a `Watcher` no client could reach.
     //
     // It is not a rare race. Sixty-three of these were found alive on one
-    // machine, in groups sharing a start time to the second, and they are the
-    // likeliest reason `capture-pane` on that machine had slowed from
+    // runner, in groups sharing a start time to the second, and they are the
+    // likeliest reason `capture-pane` on that runner had slowed from
     // milliseconds to the better part of a second.
     //
     // An advisory `flock` closes it properly: the kernel hands it to exactly
@@ -177,14 +177,14 @@ async fn run() -> Result<(), i32> {
     // is listening on and every agent pane goes silent while looking healthy.
     service.resume_agent_listeners();
 
-    // One watcher for the host, shared by every connection. Deriving activity
+    // One watcher for the runner, shared by every connection. Deriving activity
     // once and pushing it is the whole point: N clients must not mean N
     // processes reading the same screens.
     let watcher = Watcher::new(service.clone());
     tokio::spawn(watcher.clone().run());
 
     // Expire pasted images. Once at startup and daily after that, because the
-    // machine this runs on is a laptop that is asleep more often than it is
+    // host this runs on is a laptop that is asleep more often than it is
     // up — an interval alone would let a directory grow for weeks between two
     // long-running sessions that never reached the next tick.
     let sweeping = service.clone();
@@ -230,7 +230,7 @@ async fn run() -> Result<(), i32> {
     // is a `--stdio` process relaying an ssh session into this daemon: sshd gave
     // it a scope, it says so in one line before the first frame, and that has to
     // survive the relay or a read-enrolled device would hold host admin on every
-    // machine where a daemon happens to be running — which is every machine in
+    // runner where a daemon happens to be running — which is every runner in
     // normal use.
     let sessions = {
         let service = service.clone();
@@ -241,7 +241,7 @@ async fn run() -> Result<(), i32> {
                 // A local socket caller holds host_admin.
                 //
                 // Reaching this socket already requires being the owning user on
-                // this machine, who can read the database and the worktrees
+                // this host, who can read the database and the worktrees
                 // directly anyway. Granting less here would protect nothing; it
                 // would only stop the user's own Mac app from showing them their
                 // own paths. Remote clients arrive over SSH and are scoped
@@ -378,12 +378,12 @@ fn scope_word(scope: Scope) -> &'static str {
 /// sshd runs that instead of whatever the client asked for — so these are the
 /// one part of this process's command line the connecting device cannot choose.
 /// That is the whole mechanism: identity and scope are asserted by a file on
-/// this machine, not by the connection.
+/// this runner, not by the connection.
 struct Session {
     /// `None` when the command line said nothing about scope at all, which is
     /// every key enrolled before this existed.
     scope: Option<Scope>,
-    /// Which enrolled device this is, as this machine's file says rather than as
+    /// Which enrolled device this is, as this runner's file says rather than as
     /// the connection claims.
     ///
     /// Parsed, relayed, and carried no further — `Handler` has no per-connection
@@ -412,7 +412,7 @@ impl Session {
     /// other end, so the line would add nothing. It would cost something,
     /// though: a daemon built before preambles reads it as a frame, finds a
     /// sixteen-megabyte length where a length should be, and closes. That is
-    /// every relayed session on a machine whose binary has been upgraded but
+    /// every relayed session on a runner whose binary has been upgraded but
     /// whose daemon process has not yet restarted — failing IN FRONT OF the
     /// handshake, which is where the version mismatch would otherwise have been
     /// explained and the restart asked for.
@@ -464,11 +464,11 @@ async fn serve_stdio_session() -> Result<(), i32> {
     // started.
     //
     // The effect was that agent chat could never work over ssh: not on the
-    // phone, which reaches every host this way, and not on any remote host from
+    // phone, which reaches every runner this way, and not on any remote runner from
     // the Mac. The fleet listed perfectly and the chat was permanently empty.
     //
     // So when a daemon is listening, this becomes a pipe to it. One daemon per
-    // host owns the live state and every entry point reaches that one, which is
+    // runner owns the live state and every entry point reaches that one, which is
     // what the rest of the design already assumes.
     if let Ok(socket) = paths::socket_path() {
         if let Ok(mut stream) = tokio::net::UnixStream::connect(&socket).await {
@@ -487,7 +487,7 @@ async fn serve_stdio_session() -> Result<(), i32> {
             if let Some(preamble) = session.preamble() {
                 use tokio::io::AsyncWriteExt;
                 if stream.write_all(preamble.as_bytes()).await.is_err() {
-                    eprintln!("cannot reach the daemon on this machine");
+                    eprintln!("cannot reach the daemon on this runner");
                     return Err(1);
                 }
             }
@@ -561,7 +561,7 @@ impl Handler for RpcFactory {
     ///
     /// No opt-in request: a client that connected wants to know when something
     /// changes, and making it ask would just be a round trip before the first
-    /// event. Cost is zero on a quiet host, because only changes are sent.
+    /// event. Cost is zero on a quiet runner, because only changes are sent.
     fn events(&self) -> Option<tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>> {
         Some(self.watcher.subscribe())
     }

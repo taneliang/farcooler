@@ -96,7 +96,7 @@ pub fn status_line(status: &Status) -> String {
              {reason}\n\
              This daemon does not run in a shell, so a program installed by nvm, \
              volta, Homebrew or pipx is only found through your login shell — check \
-             that running the command above in a terminal on this machine works.\n\
+             that running the command above in a terminal on this runner works.\n\
              Terminal mode needs no adapter and is unaffected."
         ),
         Status::Connected { session_id } => {
@@ -126,7 +126,7 @@ async fn start_backend(
     // Resolved for BOTH backends, because both spawn a program the user
     // installed. The ACP branch used to spawn `spec.program` by name, and that
     // is the entire reason switching a pane to chat mode did nothing on a
-    // machine whose daemon runs under systemd or launchd: `npx` is not on those
+    // runner whose daemon runs under systemd or launchd: `npx` is not on those
     // `PATH`s, the spawn failed with `ENOENT` before any adapter existed, and
     // the native branch beside it — which did resolve — worked. `resolve` also
     // supplies the `PATH` the adapter needs to find the rest of its own
@@ -680,7 +680,9 @@ mod tests {
             preset: "cursor".into(),
             command: "npx -y cursor-agent-acp".into(),
         });
-        assert!(line.contains("cursor"), "must name the agent, not just the runner: {line}");
+        // "the launcher", not "the runner": a runner is a farcoolerd now, and
+        // the thing this must not stop at naming is `npx`.
+        assert!(line.contains("cursor"), "must name the agent, not just the launcher: {line}");
         assert!(line.contains("npx -y cursor-agent-acp"));
         assert!(line.contains("terminal mode"), "must name the working fallback: {line}");
     }

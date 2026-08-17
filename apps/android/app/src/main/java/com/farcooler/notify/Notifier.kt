@@ -26,7 +26,7 @@ import com.farcooler.ui.MainActivity
  * tell them the thing that mattered.
  *
  * The daemon decides those states, so this works identically for an agent on a
- * machine in the next room and one across the world. That is also what makes
+ * runner in the next room and one across the world. That is also what makes
  * the push path a delivery change rather than a rethink.
  *
  * ## Two channels, not one
@@ -59,8 +59,8 @@ class Notifier(private val context: Context, private val settings: Settings) {
      * over; being told twice that the same agent finished is how people learn
      * to ignore notifications.
      *
-     * Concurrent because every machine polls on its own coroutine and they all
-     * report here — with three machines connected this is three writers, and a
+     * Concurrent because every runner polls on its own coroutine and they all
+     * report here — with three runners connected this is three writers, and a
      * plain map would eventually corrupt rather than merely race.
      */
     private val announced = java.util.concurrent.ConcurrentHashMap<String, AgentActivity>()
@@ -90,7 +90,7 @@ class Notifier(private val context: Context, private val settings: Settings) {
     }
 
     /** Announce a change, if it is worth announcing. */
-    fun report(terminal: Terminal, workspace: String, machine: String) {
+    fun report(terminal: Terminal, workspace: String, runner: String) {
         val activity = terminal.agent
         val previous = announced[terminal.id]
         announced[terminal.id] = activity
@@ -136,10 +136,10 @@ class Notifier(private val context: Context, private val settings: Settings) {
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
-            // The machine, only when it adds something. With one machine
+            // The runner, only when it adds something. With one runner
             // connected its name is on every notification and says nothing;
             // with three it is the first thing you need.
-            .setContentText(if (machine.isBlank()) body else "$body · $machine")
+            .setContentText(if (runner.isBlank()) body else "$body · $runner")
             .setAutoCancel(true)
             // Grouped by terminal so a later state replaces the earlier
             // notification for the same one rather than stacking up.

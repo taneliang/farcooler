@@ -139,27 +139,27 @@ enum Identity {
     }
 }
 
-extension Host {
-    /// A host supplied at launch, for trying the app against a machine you own.
+extension Runner {
+    /// A runner supplied at launch, for trying the app against a box you own.
     ///
     /// `-farcoolerDemoHost user@address:port`, which `UserDefaults` exposes for
     /// free: any `-key value` pair on the command line becomes a default in the
     /// argument domain, above everything on disk.
     ///
-    /// It exists because the app is useless without a host and getting one
+    /// It exists because the app is useless without a runner and getting one
     /// normally means turning on Remote Login and copying a key between two
-    /// screens. This grants nothing — a host entry is only an address, and the
+    /// screens. This grants nothing — a runner entry is only an address, and the
     /// device still has to be authorized on the far end before it can connect —
-    /// and it is not persisted, so removing the argument removes the host.
+    /// and it is not persisted, so removing the argument removes the runner.
     ///
     /// `scripts/demo-host.sh` is what passes it.
-    static func fromLaunchArgument() -> Host? {
+    static func fromLaunchArgument() -> Runner? {
         guard let value = UserDefaults.standard.string(forKey: "farcoolerDemoHost"),
             let (user, rest) = split(value, on: "@")
         else { return nil }
 
         let (address, port) = split(rest, on: ":").map { ($0.0, Int($0.1) ?? 22) } ?? (rest, 22)
-        return Host(
+        return Runner(
             label: "Demo host",
             address: address,
             port: port,
@@ -176,14 +176,19 @@ extension Host {
     }
 }
 
-/// A host this device knows how to reach.
-struct Host: Codable, Identifiable, Hashable {
+/// A runner this device knows how to reach.
+///
+/// One `farcoolerd`: a Unix user on a host, with its own worktrees. Two entries
+/// may name the same box under different users, and they share nothing — which
+/// is why this is a runner rather than a machine.
+struct Runner: Codable, Identifiable, Hashable {
     var id: UUID = UUID()
     var label: String
     var address: String
     var port: Int = 22
     var user: String
-    /// The host key we have accepted. Nil means we have never connected, and
+    /// The host key we have accepted — the box's key, not the runner's. Nil
+    /// means we have never connected, and
     /// the first attempt will report the fingerprint rather than trusting it.
     var fingerprint: String?
 
@@ -200,34 +205,38 @@ struct Host: Codable, Identifiable, Hashable {
     }
 }
 
-/// Known hosts. Plain UserDefaults: none of this is secret, and the one thing
+/// Known runners. Plain UserDefaults: none of this is secret, and the one thing
 /// that is lives in the Keychain.
+///
+/// The defaults keys keep their old spelling on purpose: they name slots on disk
+/// that existing installs already wrote, and renaming one would silently forget
+/// every runner anybody had added.
 @MainActor
-final class HostStore: ObservableObject {
-    @Published private(set) var hosts: [Host] = []
+final class RunnerStore: ObservableObject {
+    @Published private(set) var hosts: [Runner] = []
     private let key = "hosts"
     private let lastKey = "hosts.last"
 
-    /// The host the app opens onto.
+    /// The runner the app opens onto.
     ///
     /// Persisted because the phone's home screen is now the terminals on a
-    /// machine rather than a list of machines — see `RootView`. Landing on
-    /// whichever host happened to be first in the list would mean the app
+    /// runner rather than a list of runners — see `RootView`. Landing on
+    /// whichever runner happened to be first in the list would mean the app
     /// forgets where you were every time you close it.
-    @Published var selected: Host? {
+    @Published var selected: Runner? {
         didSet { UserDefaults.standard.set(selected?.id.uuidString, forKey: lastKey) }
     }
 
     init() {
         if let data = UserDefaults.standard.data(forKey: key),
-            let decoded = try? JSONDecoder().decode([Host].self, from: data)
+            let decoded = try? JSONDecoder().decode([Runner].self, from: data)
         {
             hosts = decoded
         }
-        if let demo = Host.fromLaunchArgument() {
+        if let demo = Runner.fromLaunchArgument() {
             // Not saved. It exists for as long as the app was launched with the
             // argument and vanishes without it, so there is nothing to clean up
-            // and no way to be left with a host you did not add.
+            // and no way to be left with a runner you did not add.
             hosts.append(demo)
         }
 
@@ -238,10 +247,10 @@ final class HostStore: ObservableObject {
         selected = hosts.first { $0.id.uuidString == remembered } ?? hosts.first
     }
 
-    func add(_ host: Host) {
+    func add(_ host: Runner) {
         hosts.append(host)
-        // Added means wanted: a host you just typed in is the one you want to
-        // be looking at, and the app opens onto whatever is selected.
+        // Added means wanted: a runner you just typed in is the one you want
+        // to be looking at, and the app opens onto whatever is selected.
         selected = host
         save()
     }
@@ -252,11 +261,11 @@ final class HostStore: ObservableObject {
     /// cannot get past — the app opens onto it — so a mistyped address used to
     /// be permanent, and the app's own screens gave no way to fix or delete it.
     ///
-    /// Clears the pinned fingerprint when the machine the pin was ABOUT changes.
+    /// Clears the pinned fingerprint when the host the pin was ABOUT changes.
     /// A fingerprint is a promise about one host at one address; carrying it
-    /// across to a corrected address would meet the new machine with a
-    /// changed-key warning describing a machine nobody ever trusted.
-    func update(_ host: Host) {
+    /// across to a corrected address would meet the new host with a changed-key
+    /// warning describing a host nobody ever trusted.
+    func update(_ host: Runner) {
         guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return }
         var edited = host
         let previous = hosts[index]
@@ -274,7 +283,7 @@ final class HostStore: ObservableObject {
     /// Forget a host key we pinned, so the next connection asks about it again.
     ///
     /// The only honest answer to "this key is not the one recorded". Either the
-    /// machine was rebuilt, in which case the new key is fine and someone should
+    /// host was rebuilt, in which case the new key is fine and someone should
     /// look at its fingerprint and say so, or it is an interception, in which
     /// case nothing this app offers should quietly paper over it. Both roads go
     /// through the approval screen, which is where this leads.
@@ -282,13 +291,13 @@ final class HostStore: ObservableObject {
     /// Does NOT touch `selected`: the value there carries no fingerprint of its
     /// own worth preserving, and reassigning it would rebuild the screen out
     /// from under the reconnection this is about to trigger.
-    func forgetKey(_ host: Host) {
+    func forgetKey(_ host: Runner) {
         guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return }
         hosts[index].fingerprint = nil
         save()
     }
 
-    func remove(_ host: Host) {
+    func remove(_ host: Runner) {
         hosts.removeAll { $0.id == host.id }
         if selected?.id == host.id { selected = hosts.first }
         save()
@@ -301,7 +310,7 @@ final class HostStore: ObservableObject {
     /// down and rebuild the connection at the exact moment approval succeeded —
     /// the one moment it must not. The caller reconnects with its own approved
     /// copy, and the next launch reads the saved fingerprint back out of `hosts`.
-    func trust(_ host: Host, fingerprint: String) {
+    func trust(_ host: Runner, fingerprint: String) {
         guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return }
         hosts[index].fingerprint = fingerprint
         save()

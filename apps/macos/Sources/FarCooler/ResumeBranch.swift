@@ -48,17 +48,17 @@ struct BranchList: Decodable {
 /// labeled as one: it has no local ref here yet, so adopting it has to create a
 /// tracking branch, which is what makes pushing back go where it came from.
 struct ResumeBranch: View {
-    /// Every machine's repositories, tagged the same way `FleetStore.repositories`
+    /// Every runner's repositories, tagged the same way `FleetStore.repositories`
     /// tags them — see `QuickCreate.projects` and `NewWorkspaceSheet.repositories`
-    /// for the same shape and the same reason: this picker is the machine
+    /// for the same shape and the same reason: this picker is the runner
     /// selector for `resume` now, and a bare `[Repository]` cannot name one.
     let projects: [(host: String, repository: Repository)]
     @Binding var project: String
-    /// Branches for a project on a given machine. `host` is handed in
+    /// Branches for a project on a given runner. `host` is handed in
     /// alongside `project` rather than re-derived from it downstream — see
     /// `chosen` below and `onAdopt`'s own doc comment.
     let load: (_ host: String, _ project: String) async -> [BranchInfo]
-    /// The branch adopted, the machine and project it came from, and the
+    /// The branch adopted, the runner and project it came from, and the
     /// chosen preset.
     ///
     /// `host` comes from `chosen`, the same picker selection that resolved
@@ -78,17 +78,17 @@ struct ResumeBranch: View {
     @State private var loading = true
     @State private var selection: String?
 
-    /// The project `project` names, together with the machine it is on —
+    /// The project `project` names, together with the runner it is on —
     /// same rule `QuickCreate.chosen` follows, and for the same reason: no
     /// fallback to `projects.first`, so a stale `project` (a repository
-    /// that was removed, or one on a machine not yet re-read after a
+    /// that was removed, or one on a runner not yet re-read after a
     /// reconnect) resolves to nothing rather than to whichever project
     /// happened to be first.
     private var chosen: (host: String, repository: Repository)? {
         projects.first { $0.repository.id == project }
     }
 
-    /// Whether more than one machine has a repository on offer — same rule
+    /// Whether more than one runner has a repository on offer — same rule
     /// `QuickCreate` and `NewWorkspaceSheet` follow.
     private var multipleHosts: Bool {
         Set(projects.map(\.host)).count > 1
@@ -262,8 +262,8 @@ struct ResumeBranch: View {
     private func reload() async {
         loading = true
         // No fallback host, matching `chosen`'s own doc comment: a `project`
-        // that names nothing any machine currently has loads no branches
-        // rather than guessing which machine to ask.
+        // that names nothing any runner currently has loads no branches
+        // rather than guessing which runner to ask.
         if let chosen {
             branches = await load(chosen.host, project)
         } else {

@@ -160,7 +160,7 @@ struct PaneHeaderBackground: View {
     }
 }
 
-/// Every theme this machine offers, and which one is in force.
+/// Every theme this runner offers, and which one is in force.
 ///
 /// One object rather than a preference holding colours: a theme defined on a
 /// host can be EDITED, and a client that had cached its values would go on
@@ -210,10 +210,10 @@ final class Themes: ObservableObject {
         available.first { $0.name == selectedName } ?? .fallback
     }
 
-    /// Re-read the list from the machine the app drives.
+    /// Re-read the list from the runner the app drives.
     ///
     /// Called at launch and on every reconnection, for the same reason
-    /// repositories and roots are: a machine that dropped and came back may
+    /// repositories and roots are: a runner that dropped and came back may
     /// have gained a theme, and staying invisible until relaunch is the
     /// failure `FleetStore.seed` exists to prevent.
     func reload(binary: String?, environment: [String: String], host: [String]) async {

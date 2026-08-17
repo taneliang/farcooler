@@ -375,7 +375,7 @@ fun AdapterEditorScreen(
         ) {
             if (adapter.origin == "builtIn") {
                 Text(
-                    "Saving this writes an override on that machine. You can revert to the " +
+                    "Saving this writes an override on that runner. You can revert to the " +
                         "shipped one at any time.",
                     style = MaterialTheme.typography.bodySmall,
                 )

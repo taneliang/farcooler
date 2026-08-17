@@ -167,7 +167,7 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
         // A worktree another install made is not ours to adopt.
         //
         // git reports every worktree of a repository regardless of which daemon
-        // created it, so without this two installs sharing a machine each adopt
+        // created it, so without this two installs sharing a host each adopt
         // the other's, show it in their own fleet, and can start agents in the
         // same directory at the same time on separate tmux servers. This is the
         // rule `@farcooler_daemon_id` already applies to panes, extended to the
@@ -706,7 +706,7 @@ mod tests {
     }
 }
 
-/// Two installs on one machine do not adopt each other's worktrees.
+/// Two installs on one host do not adopt each other's worktrees.
 ///
 /// The property the whole channel design rests on, and the reason a worktree
 /// needs an owner at all: `list_worktrees` reports what GIT knows, and git knows

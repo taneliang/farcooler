@@ -578,7 +578,7 @@ impl RunningSession {
         //
         // The apps used to attach a picture by putting `@/Users/you/x.png` in
         // the message. That works on the machine you are sitting at and nowhere
-        // else: the agent runs on the HOST, and a path from a phone or from a
+        // else: the agent runs on the RUNNER, and a path from a phone or from a
         // Mac driving a remote box refers to a file that does not exist there.
         // The adapter advertises `promptCapabilities.image`, so the bytes
         // travel with the prompt and the question never arises.

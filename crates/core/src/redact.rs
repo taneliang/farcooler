@@ -1,4 +1,4 @@
-//! Strip anything credential-shaped before it leaves the machine.
+//! Strip anything credential-shaped before it leaves the runner.
 //!
 //! A pane's feed and its blocked question are put on the wire and into push
 //! payloads, so they reach a phone through the relay. The strings involved are

@@ -183,7 +183,7 @@ class NativeBridgeTest {
 
         // And the public half derives from the private one rather than being
         // stored beside it — two sources for one fact diverge, and the symptom
-        // is a machine rejecting a correct-looking key.
+        // is a runner rejecting a correct-looking key.
         val derived = ClientCore.publicKey(private)
         assertNotNull(derived)
         assertEquals(public.split(" ").take(2), derived!!.split(" ").take(2))

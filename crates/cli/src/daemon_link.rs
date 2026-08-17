@@ -1,4 +1,4 @@
-//! Reaching the daemon — locally, or on another machine.
+//! Reaching the daemon — locally, or on another runner.
 //!
 //! Durable state has exactly one owner. Before this existed, every `farcooler`
 //! invocation opened the database itself, which meant two commands running at
@@ -8,7 +8,7 @@
 //! Local and remote produce the SAME `Link`, because they are the same
 //! protocol: one over a Unix socket, one over ssh's stdin and stdout. Every
 //! command above this file is written once and works against either, which is
-//! the property that keeps a remote host from being a second-class citizen with
+//! the property that keeps a remote runner from being a second-class citizen with
 //! its own subtly different behavior.
 //!
 //! Auto-start is local-only and deliberate: the first thing a user does is run
@@ -58,8 +58,8 @@ impl Link {
 
     /// What the daemon on the other end can do, by name.
     ///
-    /// Also free, and for the same reason. The Mac app drives remote machines
-    /// through this CLI rather than through the FFI, so `host status --json`
+    /// Also free, and for the same reason. The Mac app drives remote runners
+    /// through this CLI rather than through the FFI, so `runner status --json`
     /// is how it learns the same thing the phones learn from the handshake.
     pub fn daemon_capabilities(&self) -> &[String] {
         &self.client.server_hello().capabilities
@@ -76,11 +76,11 @@ impl Link {
 /// Connect to a daemon: the local one, or `target`'s over ssh.
 pub async fn connect_to(target: Option<&str>) -> Result<Link, Box<dyn std::error::Error>> {
     match target {
-        Some(host) => {
+        Some(runner) => {
             // No identity named: ssh offers whatever the agent and `~/.ssh`
             // volunteer, which is what a person at a shell expects and what
             // this has always done. Device onboarding is what will pass one.
-            let remote = crate::remote::connect(host, None).await?;
+            let remote = crate::remote::connect(runner, None).await?;
             Ok(Link { client: remote.client, _ssh: Some(remote.child), peer: None })
         }
         None => connect().await,
@@ -191,7 +191,7 @@ impl Ensured {
     }
 }
 
-/// Leave this machine running a daemon built from the same source as this CLI.
+/// Leave this runner running a daemon built from the same source as this CLI.
 ///
 /// The Mac app calls this at launch, which is what makes "the app owns the
 /// local daemon" true rather than aspirational. Before it existed, a daemon
@@ -404,7 +404,7 @@ mod tests {
         dir
     }
 
-    /// The bug: `~/.local/bin` is where every channel installs, so a machine
+    /// The bug: `~/.local/bin` is where every channel installs, so a host
     /// running the release build and a local one has both daemons sitting side
     /// by side. Joining `farcoolerd` flat meant the local CLI started the
     /// release daemon, and nothing anywhere said so — the handshake succeeds,

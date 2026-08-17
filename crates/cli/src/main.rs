@@ -19,8 +19,8 @@
 
 mod agent_host;
 mod daemon_link;
-mod host_install;
 mod remote;
+mod runner_install;
 
 use std::path::PathBuf;
 
@@ -39,8 +39,8 @@ use uuid::Uuid;
     name = "farcooler",
     // The BUILD STAMP, not `CARGO_PKG_VERSION`. Clap's bare `version` printed
     // "farcooler 0.1.0" — the same string in every build ever made — and two
-    // things read this expecting to tell builds apart: `host probe` captures it
-    // from a remote machine, and `HostProbe.matchesThisMac` compares the two.
+    // things read this expecting to tell builds apart: `runner probe` captures it
+    // from a remote runner, and `HostProbe.matchesThisMac` compares the two.
     // Comparing "0.1.0" to "0.1.0" always matched, so the "built from different
     // source than this Mac" warning could never fire. That warning is the
     // entire reason FARCOOLER_BUILD exists.
@@ -53,13 +53,19 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
-    /// Operate on another machine, as `user@host` or an ssh config alias.
+    /// Operate on another runner, as `user@host` or an ssh config alias.
     ///
     /// Runs the same protocol over ssh. There is no Far Cooler network
-    /// listener: a host reachable by ssh is reachable by Far Cooler, and one
+    /// listener: a runner reachable by ssh is reachable by Far Cooler, and one
     /// that is not, is not.
-    #[arg(long, global = true, value_name = "TARGET")]
-    host: Option<String>,
+    //
+    // The alias is a plain comment, not a doc comment: `--host` is accepted
+    // and hidden rather than removed — it lives in shell history and in
+    // scripts, and a vocabulary change is not a reason to break either — but
+    // saying so in `--help` would teach the word this rename is retiring. One
+    // word is taught; both are understood.
+    #[arg(long = "runner", alias = "host", global = true, value_name = "TARGET")]
+    runner: Option<String>,
 
     #[command(subcommand)]
     command: Command,
@@ -67,13 +73,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Show host and daemon facts.
+    /// Show runner and daemon facts.
     Status,
-    /// Start, stop, or replace this machine's daemon.
+    /// Start, stop, or replace this runner's daemon.
     ///
-    /// Local only. `--host` reaches another machine's daemon through ssh, and
+    /// Local only. `--runner` reaches another runner's daemon through ssh, and
     /// stopping one from here would take away the connection carrying the
-    /// request; installing and inspecting a remote daemon is `host`'s job.
+    /// request; installing and inspecting a remote daemon is `runner`'s job.
     #[command(subcommand)]
     Daemon(DaemonCmd),
     /// Manage allowlisted repository roots.
@@ -82,12 +88,12 @@ enum Command {
     /// Manage registered repositories.
     #[command(subcommand)]
     Repo(RepoCmd),
-    /// List the colour schemes available on this machine.
+    /// List the colour schemes available on this runner.
     #[command(subcommand)]
     Theme(ThemeCmd),
-    /// Read and change what this machine's config.toml holds.
+    /// Read and change what this runner's config.toml holds.
     ///
-    /// The same writes the apps' machine-settings screens make, for scripting
+    /// The same writes the apps' runner-settings screens make, for scripting
     /// and for looking at what a screen actually did. Every write is
     /// format-preserving: comments and layout elsewhere in the file survive.
     #[command(subcommand)]
@@ -122,18 +128,21 @@ enum Command {
     /// poll, which forces a choice between noticing an agent's question late
     /// and spending a phone's battery asking constantly.
     Events,
-    /// Pair this machine with your account so it can notify your devices.
+    /// Pair this runner with your account so it can notify your devices.
     ///
     /// There is no sign-in here on purpose. The app does the signing in, asks
     /// the relay for a token that names nothing but the account, and hands that
-    /// token to this machine over the ssh channel you already trust. So a
+    /// token to this runner over the ssh channel you already trust. So a
     /// headless Linux box never needs a browser, and the worst a leaked token
     /// can do is notify the phone of the person it was taken from.
     #[command(subcommand)]
     Push(PushCmd),
-    /// Install or inspect Far Cooler on a Linux host over ssh.
-    #[command(subcommand, name = "host")]
-    HostCmd(HostCmd),
+    /// Install or inspect a Far Cooler runner on a Linux host over ssh.
+    //
+    // `farcooler host …` still works, hidden, for the reason `--host` does:
+    // it is in every runbook already written.
+    #[command(subcommand, name = "runner", alias = "host")]
+    RunnerCmd(RunnerCmd),
     /// Host a headless coding agent in this pane. Started by the daemon.
     ///
     /// Not a command a user types. It is the process a pane runs in agent pane
@@ -276,12 +285,12 @@ enum LayoutCmd {
 
 #[derive(Subcommand)]
 enum PushCmd {
-    /// Store the token the app issued for this machine. Reads it from stdin.
+    /// Store the token the app issued for this runner. Reads it from stdin.
     ///
     /// STDIN, not an argument, and that is the whole reason this reads oddly.
     /// A bearer token in argv is a bearer token in `ps aux` — world-readable on
-    /// a default Linux box — on both the machine running this and, over ssh, the
-    /// machine being paired. It also ends up in shell history, in sshd's command
+    /// a default Linux box — on both the host running this and, over ssh, the
+    /// runner being paired. It also ends up in shell history, in sshd's command
     /// logging, and in any error that echoes the command back. One observation
     /// by any local user is permanent: the token does not expire.
     Pair {
@@ -289,14 +298,14 @@ enum PushCmd {
         #[arg(long)]
         relay: Option<String>,
     },
-    /// Say whether this machine is paired, without printing the token.
+    /// Say whether this runner is paired, without printing the token.
     Status,
     /// Forget the token. Notifications stop; nothing else changes.
     Forget,
 }
 
 #[derive(Subcommand)]
-enum HostCmd {
+enum RunnerCmd {
     /// Copy the daemon and CLI to a Linux host and register a user service.
     Install {
         target: String,
@@ -304,9 +313,9 @@ enum HostCmd {
         #[arg(long)]
         from: Option<PathBuf>,
     },
-    /// Report what is installed and running on a host.
+    /// Report what is installed and running on a runner.
     Status { target: String },
-    /// Report what a host IS, changing nothing on it.
+    /// Report what a runner IS, changing nothing on it.
     ///
     /// What the Mac app asks before offering to install: the platform, whether
     /// tmux is there, what would keep the daemon alive, and what is already
@@ -333,16 +342,19 @@ enum RootCmd {
 
 #[derive(Subcommand)]
 enum ThemeCmd {
-    /// Every theme this machine offers: the built-ins, plus whatever
+    /// Every theme this runner offers: the built-ins, plus whatever
     /// `[themes.<name>]` in config.toml adds.
     List {
-        /// Only the themes this machine's config.toml defines.
+        /// Only the themes this runner's config.toml defines.
         ///
         /// What a settings editor wants: the merged list cannot say which
         /// entries the file actually owns, and a built-in shown as if it did
         /// would offer a Delete that does nothing.
-        #[arg(long)]
-        only_host: bool,
+        //
+        // `--only-host` is kept, hidden, for the reason `--host` is: the Mac
+        // app already spells it that way and so does anyone's script.
+        #[arg(long = "only-runner", alias = "only-host")]
+        only_runner: bool,
     },
     /// Write one `[themes.<name>]` table, from JSON on stdin.
     ///
@@ -364,7 +376,7 @@ enum ThemeCmd {
 
 #[derive(Subcommand)]
 enum SettingsCmd {
-    /// Show what this machine's config.toml decides.
+    /// Show what this runner's config.toml decides.
     Show,
     /// Set what a derived branch name starts with. Empty opts out entirely.
     SetBranchPrefix { prefix: String },
@@ -472,7 +484,7 @@ enum WorkspaceCmd {
 #[derive(Subcommand)]
 enum WorktreeCmd {
     /// Search file paths inside a workspace's worktree, for an agent chat's
-    /// @-mention picker. Results are worktree-relative, never a host path —
+    /// @-mention picker. Results are worktree-relative, never a runner path —
     /// the same redaction `wire.rs` applies to every other path this scope
     /// can see.
     FileSearch {
@@ -511,7 +523,7 @@ enum TerminalCmd {
     SendHex { terminal: String, hex: String },
     /// Paste a file into a terminal.
     ///
-    /// The file is copied to the machine the terminal is on and its path is
+    /// The file is copied to the runner the terminal is on and its path is
     /// typed into the pane, which is how an agent in that pane gets to look at
     /// it. Any type: an image, a PDF, a log, a CSV. Prints the path on stdout.
     ///
@@ -550,8 +562,8 @@ enum TerminalCmd {
     // -- Agent channel: `terminal.set_pane_mode` and friends. Every one of
     // these is a daemon RPC, not a byte stream, so — like `Seen`/`Stop` above
     // and unlike `Send`/`Screen`/`Stream` below — none of them need `proxy()`:
-    // `connect_to(host)` already reaches a remote daemon over ssh, and these
-    // never touch the local tmux runtime a remote host does not have.
+    // `connect_to(runner)` already reaches a remote daemon over ssh, and these
+    // never touch the local tmux runtime a remote runner does not have.
     /// Switch a pane between its terminal view and its agent chat view.
     ///
     /// The daemon is the sole owner of which mode a pane is in — `AgentStream.swift`'s
@@ -641,12 +653,12 @@ async fn main() {
 
 pub(crate) type Fallible = Result<(), Box<dyn std::error::Error>>;
 
-/// Pair, unpair, or report — on this machine or, with `--host`, on another.
+/// Pair, unpair, or report — on this runner or, with `--runner`, on another.
 ///
 /// Forwarded over ssh rather than through the daemon protocol because a
 /// credential should travel over the channel the user already authenticated,
 /// not over one the daemon would have to be trusted to keep private.
-async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
+async fn push(runner: Option<&str>, cmd: PushCmd) -> Fallible {
     use farcooler_daemon::push::Pairing;
     // The daemon's, not a third copy. This crate already had two spellings of
     // shell quoting — `remote::shell_quote`, which passes safe arguments
@@ -655,12 +667,12 @@ async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
     // wrong later.
     use farcooler_daemon::service::shell_quote;
 
-    if let Some(target) = host {
-        // This channel's CLI on that machine, not the bare name: it is the one
+    if let Some(target) = runner {
+        // This channel's CLI on that runner, not the bare name: it is the one
         // this build uploaded, it keeps its pairing beside its own daemon's
-        // database, and asking for `farcooler` on a machine that also runs the
+        // database, and asking for `farcooler` on a host that also runs the
         // release build would pair the wrong fleet to these devices.
-        let remote = |rest: &str| format!("~/.local/bin/{} push {rest}", host_install::cli_name());
+        let remote = |rest: &str| format!("~/.local/bin/{} push {rest}", runner_install::cli_name());
         match &cmd {
             PushCmd::Pair { relay } => {
                 let relay = relay
@@ -671,7 +683,7 @@ async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
                 // means it is also absent from the error if this fails — see
                 // `remote_run`, which names the command it ran.
                 let token = read_token()?;
-                return host_install::remote_run_with_stdin(
+                return runner_install::remote_run_with_stdin(
                     target,
                     &remote(&format!("pair{relay}")),
                     &token,
@@ -679,10 +691,10 @@ async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
                 .await;
             }
             PushCmd::Status => {
-                return host_install::remote_run(target, &remote("status")).await;
+                return runner_install::remote_run(target, &remote("status")).await;
             }
             PushCmd::Forget => {
-                return host_install::remote_run(target, &remote("forget")).await;
+                return runner_install::remote_run(target, &remote("forget")).await;
             }
         }
     }
@@ -705,7 +717,7 @@ async fn push(host: Option<&str>, cmd: PushCmd) -> Fallible {
         },
         PushCmd::Forget => {
             Pairing::forget_in(&dir);
-            println!("forgotten · this machine will not notify anything");
+            println!("forgotten · this runner will not notify anything");
         }
     }
     Ok(())
@@ -722,36 +734,36 @@ fn read_token() -> Result<String, Box<dyn std::error::Error>> {
     std::io::stdin().read_to_string(&mut token)?;
     let token = token.trim().to_string();
     if token.is_empty() {
-        return Err("no token on stdin (the app pairs a machine for you)".into());
+        return Err("no token on stdin (the app pairs a runner for you)".into());
     }
     Ok(token)
 }
 
 async fn run() -> Fallible {
     let cli = Cli::parse();
-    let host = cli.host.as_deref();
+    let runner = cli.runner.as_deref();
     match cli.command {
-        Command::Status => status(host, cli.json).await,
-        Command::Daemon(c) => daemon(host, c, cli.json).await,
-        Command::Root(c) => root(host, c, cli.json).await,
-        Command::Repo(c) => repo(host, c, cli.json).await,
-        Command::Theme(c) => theme(host, c, cli.json).await,
-        Command::Settings(c) => settings(host, c, cli.json).await,
-        Command::Adapter(c) => adapter(host, c, cli.json).await,
-        Command::Workspace(c) => workspace(host, c, cli.json).await,
-        Command::Terminal(c) => terminal(host, c, cli.json).await,
-        Command::Changes(c) => changes::changes(host, c, cli.json).await,
-        Command::Worktree(c) => worktree(host, c, cli.json).await,
-        Command::Layout(c) => layout(host, c, cli.json).await,
-        Command::Attach { workspace } => attach(host, &workspace).await,
-        Command::Events => events(host).await,
-        Command::Push(c) => push(host, c).await,
-        Command::HostCmd(HostCmd::Install { target, from }) => {
-            host_install::install(&target, from.as_deref()).await
+        Command::Status => status(runner, cli.json).await,
+        Command::Daemon(c) => daemon(runner, c, cli.json).await,
+        Command::Root(c) => root(runner, c, cli.json).await,
+        Command::Repo(c) => repo(runner, c, cli.json).await,
+        Command::Theme(c) => theme(runner, c, cli.json).await,
+        Command::Settings(c) => settings(runner, c, cli.json).await,
+        Command::Adapter(c) => adapter(runner, c, cli.json).await,
+        Command::Workspace(c) => workspace(runner, c, cli.json).await,
+        Command::Terminal(c) => terminal(runner, c, cli.json).await,
+        Command::Changes(c) => changes::changes(runner, c, cli.json).await,
+        Command::Worktree(c) => worktree(runner, c, cli.json).await,
+        Command::Layout(c) => layout(runner, c, cli.json).await,
+        Command::Attach { workspace } => attach(runner, &workspace).await,
+        Command::Events => events(runner).await,
+        Command::Push(c) => push(runner, c).await,
+        Command::RunnerCmd(RunnerCmd::Install { target, from }) => {
+            runner_install::install(&target, from.as_deref()).await
         }
-        Command::HostCmd(HostCmd::Status { target }) => host_install::status(&target).await,
-        Command::HostCmd(HostCmd::Probe { target }) => {
-            let probe = host_install::probe(&target).await?;
+        Command::RunnerCmd(RunnerCmd::Status { target }) => runner_install::status(&target).await,
+        Command::RunnerCmd(RunnerCmd::Probe { target }) => {
+            let probe = runner_install::probe(&target).await?;
             if cli.json {
                 println!("{}", probe.to_json());
                 return Ok(());
@@ -792,10 +804,10 @@ async fn pane_host(kind: &str) -> Fallible {
     Ok(())
 }
 
-/// Start, stop, or replace the daemon on THIS machine.
-async fn daemon(host: Option<&str>, cmd: DaemonCmd, json: bool) -> Fallible {
-    if host.is_some() {
-        return Err("daemon manages this machine's daemon; drop --host".into());
+/// Start, stop, or replace the daemon on THIS runner.
+async fn daemon(runner: Option<&str>, cmd: DaemonCmd, json: bool) -> Fallible {
+    if runner.is_some() {
+        return Err("daemon manages this runner's daemon; drop --runner".into());
     }
 
     match cmd {
@@ -838,16 +850,16 @@ async fn daemon(host: Option<&str>, cmd: DaemonCmd, json: bool) -> Fallible {
 // Durable state, through the daemon
 // ---------------------------------------------------------------------------
 
-async fn status(host: Option<&str>, json: bool) -> Fallible {
-    let mut link = connect_to(host).await?;
+async fn status(runner: Option<&str>, json: bool) -> Fallible {
+    let mut link = connect_to(runner).await?;
     let roots = list_roots(&mut link).await?;
     let repos = list_repositories(&mut link).await?;
     let workspaces = list_workspaces(&mut link).await?;
     let terminals = list_terminals(&mut link, None).await?;
     let host_facts = host_get(&mut link).await?;
     let healthy = host_facts.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
-    // What this machine can do, by name, from the handshake. The Mac app reads
-    // it here because it drives remote machines through this CLI rather than
+    // What this runner can do, by name, from the handshake. The Mac app reads
+    // it here because it drives remote runners through this CLI rather than
     // through the FFI the phones use — same answer, same source, one round trip
     // fewer than asking.
     let capabilities = link.daemon_capabilities().to_vec();
@@ -864,8 +876,8 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
                 "buildsMatch": host_facts.daemon_version == farcooler_protocol::BUILD,
                 // Distinct from `buildsMatch`, and they answer different
                 // questions. That one is "are these the same build"; this is
-                // "what can that machine do", which is the one a client acts on
-                // when it is newer than the machine it reached.
+                // "what can that runner do", which is the one a client acts on
+                // when it is newer than the runner it reached.
                 "capabilities": capabilities,
                 "platform": host_facts.platform,
                 "branchPrefix": host_facts.settings
@@ -883,7 +895,7 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
         return Ok(());
     }
 
-    println!("host          {}", host.unwrap_or("local"));
+    println!("runner        {}", runner.unwrap_or("local"));
     println!("platform      {}", host_facts.platform);
     println!("daemon        {}", host_facts.daemon_version);
     println!("this cli      {}", farcooler_protocol::BUILD);
@@ -906,10 +918,10 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
     println!("workspaces    {}", workspaces.len());
     println!("live panes    {}", host_facts.live_terminal_count);
 
-    // The recovery command names a tmux socket on THIS machine, so it is only
+    // The recovery command names a tmux socket on THIS runner, so it is only
     // meaningful locally. Printing a local socket path while reporting a remote
-    // host would be an invitation to run the wrong thing.
-    if host.is_none() {
+    // runner would be an invitation to run the wrong thing.
+    if runner.is_none() {
         let runtime = Runtime::open().await?;
         println!();
         println!("recovery: {}", runtime.tmux.recovery_command());
@@ -917,8 +929,8 @@ async fn status(host: Option<&str>, json: bool) -> Fallible {
     Ok(())
 }
 
-async fn root(host: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
-    let mut link = connect_to(host).await?;
+async fn root(runner: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
+    let mut link = connect_to(runner).await?;
     match cmd {
         RootCmd::Add { path } => {
             // Canonicalised here so the daemon is handed an absolute path
@@ -976,9 +988,9 @@ async fn root(host: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
     Ok(())
 }
 
-/// What this machine's config.toml decides, and how to change it.
-async fn settings(host: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallible {
-    let mut link = connect_to(host).await?;
+/// What this runner's config.toml decides, and how to change it.
+async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallible {
+    let mut link = connect_to(runner).await?;
     match cmd {
         SettingsCmd::Show => {
             let facts = host_get(&mut link).await?;
@@ -1026,8 +1038,8 @@ async fn settings(host: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallible 
 /// meant to replace — `$EDITOR ~/.config/farcooler/config.toml` is the right
 /// tool for that, and the apps have a form. What a terminal is good for is
 /// seeing what is in force and proving one works, which is what these do.
-async fn adapter(host: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible {
-    let mut link = connect_to(host).await?;
+async fn adapter(runner: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible {
+    let mut link = connect_to(runner).await?;
     match cmd {
         AdapterCmd::List => {
             let r = link.call(req("adapter.list")).await?;
@@ -1233,14 +1245,14 @@ fn backend_label(backend: i32) -> &'static str {
     }
 }
 
-/// The themes a machine offers.
+/// The themes a runner offers.
 ///
-/// Built-ins merged with the host's own, resolved HERE rather than in the app,
+/// Built-ins merged with the runner's own, resolved HERE rather than in the app,
 /// so the Mac and the two phones cannot come to disagree about what "Nord"
 /// means or about which of two definitions wins.
-async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
+async fn theme(runner: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
     if let ThemeCmd::Delete { name } = &cmd {
-        let mut link = connect_to(host).await?;
+        let mut link = connect_to(runner).await?;
         let req = with(
             req("theme.delete"),
             request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
@@ -1254,7 +1266,7 @@ async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
         if json {
             println!("{}", serde_json::json!({ "themes": list.items.len() }));
         } else {
-            println!("removed theme {name}  ({} host themes left)", list.items.len());
+            println!("removed theme {name}  ({} runner themes left)", list.items.len());
         }
         return Ok(());
     }
@@ -1277,7 +1289,7 @@ async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
         };
         let name = wire_theme.name.clone();
 
-        let mut link = connect_to(host).await?;
+        let mut link = connect_to(runner).await?;
         let r = link.call(with(req("theme.upsert"), request::Payload::Theme(wire_theme))).await?;
         let result::Value::ThemeList(list) = expect_value(r.value, "themes")? else {
             return Err("the daemon returned the wrong resource".into());
@@ -1290,22 +1302,22 @@ async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
         return Ok(());
     }
 
-    let ThemeCmd::List { only_host } = cmd else { unreachable!("handled above") };
+    let ThemeCmd::List { only_runner } = cmd else { unreachable!("handled above") };
 
-    // The host's own, over whichever transport reaches it. A machine that
+    // The runner's own, over whichever transport reaches it. A runner that
     // cannot be reached still has the built-ins — the picker should not empty
     // itself because a laptop is asleep.
-    let custom = match connect_to(host).await {
+    let custom = match connect_to(runner).await {
         Ok(mut link) => list_themes(&mut link).await.unwrap_or_default(),
         Err(_) => Vec::new(),
     };
 
-    if only_host {
+    if only_runner {
         // What the FILE defines, nothing else. A settings editor needs to know
         // which entries it can delete, and the merged list below cannot say.
         // Whether each one shadows something Far Cooler ships, computed here
         // because this is the one place both halves are already in hand: the
-        // built-in table is compiled in and the host's list just arrived. A
+        // built-in table is compiled in and the runner's list just arrived. A
         // client would otherwise need a third call to work it out.
         let shipped: std::collections::BTreeSet<String> =
             farcooler_core::theme::built_in().into_iter().map(|t| t.name).collect();
@@ -1344,11 +1356,11 @@ async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
             ansi: match <[u32; 16]>::try_from(one.ansi.as_slice()) {
                 Ok(a) => a,
                 // The daemon drops these before sending, so reaching here means
-                // an older host. Skipping beats padding a colour nobody chose.
+                // an older runner. Skipping beats padding a colour nobody chose.
                 Err(_) => continue,
             },
         };
-        // The host wins a name collision: it is the more specific statement,
+        // The runner wins a name collision: it is the more specific statement,
         // and the one somebody edited a file on purpose to make.
         match themes.iter().position(|t| t.name == resolved.name) {
             Some(i) => themes[i] = resolved,
@@ -1383,8 +1395,8 @@ async fn theme(host: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
     Ok(())
 }
 
-async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
-    let mut link = connect_to(host).await?;
+async fn repo(runner: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
+    let mut link = connect_to(runner).await?;
     match cmd {
         RepoCmd::Register { path } => {
             let absolute = path.canonicalize().unwrap_or(path);
@@ -1432,8 +1444,8 @@ async fn repo(host: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
     Ok(())
 }
 
-async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
-    let mut link = connect_to(host).await?;
+async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
+    let mut link = connect_to(runner).await?;
     match cmd {
         WorkspaceCmd::Create { repo, name, branch, base, terminal, no_terminal } => {
             let repos = list_repositories(&mut link).await?;
@@ -1484,10 +1496,15 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
                             // Which project this belongs to. A fleet is grouped
                             // by project in the UI, and a client cannot join
                             // ids to names by itself.
-                            // Which machine. Empty means this one; a client
-                            // merges several hosts into one fleet and needs to
-                            // know where to route an action back to.
-                            "host": host.unwrap_or_default(),
+                            // Which runner. Empty means this one; a client
+                            // merges several runners into one fleet and needs
+                            // to know where to route an action back to.
+                            //
+                            // Still spelled `host` because the apps decode this
+                            // key. `--json` is an interface, so renaming a
+                            // field is a compatibility change with a migration
+                            // in it, not a vocabulary one.
+                            "host": runner.unwrap_or_default(),
                             "repository": repositories.iter()
                                 .find(|r| r.id == w.repository_id)
                                 .map(|r| r.display_name.clone())
@@ -1653,8 +1670,8 @@ async fn workspace(host: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallibl
     Ok(())
 }
 
-async fn attach(host: Option<&str>, workspace: &str) -> Fallible {
-    let mut link = connect_to(host).await?;
+async fn attach(runner: Option<&str>, workspace: &str) -> Fallible {
+    let mut link = connect_to(runner).await?;
     let all = list_workspaces(&mut link).await?;
     let ws = resolve(&all, workspace, |w| &w.id, "workspace")?;
 
@@ -1663,8 +1680,8 @@ async fn attach(host: Option<&str>, workspace: &str) -> Fallible {
     println!("This is a recovery interface. It takes no writer lease and is");
     println!("outside lease enforcement, exactly like raw tmux attach.");
     println!();
-    match host {
-        // The tmux socket is on the host, so the command has to run there.
+    match runner {
+        // The tmux socket is on the runner, so the command has to run there.
         Some(target) => {
             println!("  ssh -t {target} farcooler attach {workspace}");
         }
@@ -1683,10 +1700,10 @@ async fn attach(host: Option<&str>, workspace: &str) -> Fallible {
 /// One JSON object per line, flushed immediately: a client reads this with a
 /// line reader and reacts, rather than asking again and again. Line-delimited
 /// rather than a JSON array because there is no end to wait for.
-async fn events(host: Option<&str>) -> Fallible {
+async fn events(runner: Option<&str>) -> Fallible {
     use std::io::Write;
 
-    let mut link = connect_to(host).await?;
+    let mut link = connect_to(runner).await?;
     let mut out = std::io::stdout();
 
     loop {
@@ -1744,11 +1761,11 @@ async fn events(host: Option<&str>) -> Fallible {
 // once and each command is a payload.
 // ---------------------------------------------------------------------------
 
-async fn layout(host: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
+async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     use farcooler_daemon::layout::parse_preset;
     use farcooler_protocol::v1::LayoutUpdate;
 
-    let mut link = connect_to(host).await?;
+    let mut link = connect_to(runner).await?;
     let workspaces = list_workspaces(&mut link).await?;
 
     let workspace_arg = match &cmd {
@@ -1979,11 +1996,11 @@ fn layout_json(
 // Terminals: records through the daemon, bytes through tmux
 // ---------------------------------------------------------------------------
 
-async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible {
+async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible {
     match cmd {
         // Record changes. These write durable intent, so they go to the daemon.
         TerminalCmd::Create { workspace, preset, title, tile } => {
-            let mut link = connect_to(host).await?;
+            let mut link = connect_to(runner).await?;
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
             let title = title.unwrap_or_else(|| preset.clone());
@@ -2004,25 +2021,25 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::Stop { terminal } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(req_for("terminal.stop", id)).await?;
             println!("stopped {}", short(id));
         }
 
         TerminalCmd::DismissLost { terminal } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(req_for("terminal.dismiss_lost", id)).await?;
             println!("dismissed {}", short(id));
         }
 
         TerminalCmd::Remove { terminal } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(req_for("terminal.remove", id)).await?;
             println!("removed {}", short(id));
         }
 
         TerminalCmd::Seen { terminal } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(req_for("terminal.seen", id)).await?;
             println!("marked {} seen", short(id));
         }
@@ -2032,7 +2049,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         // comment in `crates/daemon/src/rpc.rs` — so `req(method)` plus
         // `with(...)` is right, not `req_for`.
         TerminalCmd::SetPaneMode { terminal, mode, force } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             let pane_mode = match mode.as_str() {
                 "terminal" => farcooler_protocol::v1::PaneMode::Terminal,
                 "agent" => farcooler_protocol::v1::PaneMode::Agent,
@@ -2053,7 +2070,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentSubscribe { terminal, from_seq, epoch } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             let r = link
                 .call(with(
                     req("terminal.agent_subscribe"),
@@ -2098,7 +2115,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         // `stop` have none.
         TerminalCmd::PasteFile { terminal, file } => {
             let data = std::fs::read(&file)?;
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("file");
             let path = farcooler_client::actions::paste_file(
                 link.client_mut(),
@@ -2120,7 +2137,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
 
         TerminalCmd::AgentPrompt { terminal, text, images } => {
             use farcooler_protocol::v1::agent_prompt_block::Content;
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
 
             let mut blocks = Vec::new();
             for path in &images {
@@ -2150,7 +2167,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentAnswer { terminal, request_id, option_id } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(with(
                 req("terminal.agent_answer"),
                 request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
@@ -2164,7 +2181,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentSetMode { terminal, agent_mode } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(with(
                 req("terminal.agent_set_mode"),
                 request::Payload::AgentSetMode(farcooler_protocol::v1::AgentSetMode {
@@ -2177,7 +2194,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentSetModel { terminal, model } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(with(
                 req("terminal.agent_set_model"),
                 request::Payload::AgentSetModel(farcooler_protocol::v1::AgentSetModel {
@@ -2190,7 +2207,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentSetConfig { terminal, config_id, value } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(with(
                 req("terminal.agent_set_config"),
                 request::Payload::AgentSetConfig(farcooler_protocol::v1::AgentSetConfig {
@@ -2204,7 +2221,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentEditQueued { terminal, queued_id, text } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(with(
                 req("terminal.agent_edit_queued"),
                 request::Payload::AgentEditQueued(farcooler_protocol::v1::AgentEditQueued {
@@ -2218,7 +2235,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentCancelQueued { terminal, queued_id } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(with(
                 req("terminal.agent_cancel_queued"),
                 request::Payload::AgentCancelQueued(farcooler_protocol::v1::AgentCancelQueued {
@@ -2231,7 +2248,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentSteerQueued { terminal, queued_id } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(with(
                 req("terminal.agent_steer_queued"),
                 request::Payload::AgentSteerQueued(farcooler_protocol::v1::AgentSteerQueued {
@@ -2244,7 +2261,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::AgentCancel { terminal } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(with(
                 req("terminal.agent_cancel"),
                 request::Payload::AgentCancel(farcooler_protocol::v1::AgentCancel {
@@ -2256,7 +2273,7 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         }
 
         TerminalCmd::Restart { terminal } => {
-            let (mut link, id) = terminal_by_record(host, &terminal).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             let r = link.call(req_for("terminal.restart", id)).await?;
             let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
                 return Err("the daemon returned the wrong resource".into());
@@ -2268,38 +2285,38 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
         // holding a request/response conversation open for the life of a
         // stream would be the wrong shape for both.
         //
-        // On a remote host they run over their own ssh session, hitting the
-        // host's own CLI. ssh is already a byte pipe and so are these, so the
+        // On a remote runner they run over their own ssh session, hitting the
+        // runner's own CLI. ssh is already a byte pipe and so are these, so the
         // honest implementation is to connect the two and get out of the way.
-        TerminalCmd::Send { terminal, data } if host.is_some() => {
-            return proxy(host, &["terminal".into(), "send".into(), terminal, data]).await;
+        TerminalCmd::Send { terminal, data } if runner.is_some() => {
+            return proxy(runner, &["terminal".into(), "send".into(), terminal, data]).await;
         }
-        TerminalCmd::SendHex { terminal, hex } if host.is_some() => {
-            return proxy(host, &["terminal".into(), "send-hex".into(), terminal, hex]).await;
+        TerminalCmd::SendHex { terminal, hex } if runner.is_some() => {
+            return proxy(runner, &["terminal".into(), "send-hex".into(), terminal, hex]).await;
         }
-        TerminalCmd::Stream { terminal } if host.is_some() => {
-            return proxy(host, &["terminal".into(), "stream".into(), terminal]).await;
+        TerminalCmd::Stream { terminal } if runner.is_some() => {
+            return proxy(runner, &["terminal".into(), "stream".into(), terminal]).await;
         }
-        TerminalCmd::Input { terminal } if host.is_some() => {
-            return proxy(host, &["terminal".into(), "input".into(), terminal]).await;
+        TerminalCmd::Input { terminal } if runner.is_some() => {
+            return proxy(runner, &["terminal".into(), "input".into(), terminal]).await;
         }
-        TerminalCmd::Screen { terminal } if host.is_some() => {
+        TerminalCmd::Screen { terminal } if runner.is_some() => {
             let mut args = vec!["terminal".into(), "screen".into(), terminal];
             if json {
                 args.push("--json".into());
             }
-            return proxy(host, &args).await;
+            return proxy(runner, &args).await;
         }
-        TerminalCmd::Resize { terminal, columns, rows } if host.is_some() => {
+        TerminalCmd::Resize { terminal, columns, rows } if runner.is_some() => {
             return proxy(
-                host,
+                runner,
                 &["terminal".into(), "resize".into(), terminal, columns.to_string(), rows.to_string()],
             )
             .await;
         }
-        TerminalCmd::Read { terminal, lines } if host.is_some() => {
+        TerminalCmd::Read { terminal, lines } if runner.is_some() => {
             return proxy(
-                host,
+                runner,
                 &["terminal".into(), "read".into(), terminal, "--lines".into(), lines.to_string()],
             )
             .await;
@@ -2361,14 +2378,14 @@ async fn terminal(host: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible 
 
 // ---------------------------------------------------------------------------
 // Worktree file search: a daemon RPC, so — like the agent channel above and
-// unlike the tmux-backed reads further up — `connect_to(host)` alone reaches
-// a remote host correctly and no `proxy()` is needed.
+// unlike the tmux-backed reads further up — `connect_to(runner)` alone reaches
+// a remote runner correctly and no `proxy()` is needed.
 // ---------------------------------------------------------------------------
 
-async fn worktree(host: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible {
+async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible {
     match cmd {
         WorktreeCmd::FileSearch { workspace, query, limit } => {
-            let mut link = connect_to(host).await?;
+            let mut link = connect_to(runner).await?;
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
             let id = uuid_of(&ws.id);
@@ -2400,9 +2417,9 @@ async fn worktree(host: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible 
     Ok(())
 }
 
-/// Run a command on the host's own CLI and adopt its exit status.
-async fn proxy(host: Option<&str>, args: &[String]) -> Fallible {
-    let Some(target) = host else { return Ok(()) };
+/// Run a command on the runner's own CLI and adopt its exit status.
+async fn proxy(runner: Option<&str>, args: &[String]) -> Fallible {
+    let Some(target) = runner else { return Ok(()) };
     let code = remote::exec(target, args, false).await?;
     if code != 0 {
         std::process::exit(code);
@@ -2415,10 +2432,10 @@ async fn proxy(host: Option<&str>, args: &[String]) -> Fallible {
 /// Stopping, restarting or dismissing a terminal has to work on one that is
 /// already dead, which is precisely when it has no pane to be found by.
 async fn terminal_by_record(
-    host: Option<&str>,
+    runner: Option<&str>,
     prefix: &str,
 ) -> Result<(Link, Uuid), Box<dyn std::error::Error>> {
-    let mut link = connect_to(host).await?;
+    let mut link = connect_to(runner).await?;
     let terminals = list_terminals(&mut link, None).await?;
     let t = resolve(&terminals, prefix, |t| &t.id, "terminal")?;
     let id = uuid_of(&t.id);
@@ -2772,7 +2789,7 @@ fn terminal_label(s: TerminalState) -> &'static str {
         TerminalState::Error => "error",
         TerminalState::Lost => "LOST",
         // Lower case, unlike LOST. LOST shouts because it is a finding that
-        // wants a decision from you; this is the machine being unreadable for a
+        // wants a decision from you; this is the runner being unreadable for a
         // moment, and it usually resolves before anyone could act on it.
         TerminalState::Unknown => "unknown",
     }
@@ -2793,7 +2810,7 @@ fn normalize_id(text: &str) -> String {
 /// they typed it when they registered it, they see it in every listing, and
 /// `farcooler workspace discover myrepo` is what anyone would write. Ids still
 /// work, and an ambiguous name is refused rather than guessed at — two projects
-/// called `api` on one host is a thing that happens.
+/// called `api` on one runner is a thing that happens.
 pub(crate) fn resolve_repository<'a>(
     repositories: &'a [Repository],
     given: &str,

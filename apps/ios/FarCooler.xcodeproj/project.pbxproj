@@ -28,7 +28,7 @@
 		B4BDBBB96BBB55309500381C /* ImagePaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = 913FA772187950F79075A3AA; };
 		090F5919118C5EE2A6F910CC /* AgentStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E65812E2025DDCA0AE929F; };
 		155CBF2767425E0385B106DD /* AgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F819FB63EB645686A9D99358; };
-		BA757BB1C6A656C484BF2D43 /* MachineSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE0452D9E935FE28127F6F4; };
+		504D78619E0151F0A9482BD6 /* RunnerSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F36ED55B5B5F27B2D6E4AB; };
 		208A3D3091E05C62AB008B84 /* ThemeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98AAF7970245ACE931B6CA0; };
 		F230819A70605327976EA2BC /* AdapterEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81B3FFFD38BC535DA1105E27; };
 		E1D175A7B1405C9EABF1E458 /* Changes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A8FED8736D857F49A57514C; };
@@ -44,6 +44,7 @@
 		632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15A666CD6FD525982BAC34F; };
 		72C8B4DFB7B95847A02B9623 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB01EEA774815AC5A7038DAD; };
 		CBDDC5EC069D53FC8EB3004A /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BD8F54D5B935B33A810D490; };
+		6ED88B8CE5605E7382A93B98 /* RelaySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35606FB34F805ACB98820C9C; };
 		A4677749D2C9588EB8FA703D /* TokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F21B2F4E7305C52A6B39A5D; };
 		A057A865719A51ED8C536CF7 /* VersionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5B7BC3FED5259D183C18D69; };
 		739934EC2264588692457640 /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F7004A6B092527BAE191DD2; };
@@ -82,7 +83,7 @@
 		913FA772187950F79075A3AA /* ImagePaste.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePaste.swift; sourceTree = "<group>"; };
 		28E65812E2025DDCA0AE929F /* AgentStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStream.swift; sourceTree = "<group>"; };
 		F819FB63EB645686A9D99358 /* AgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentView.swift; sourceTree = "<group>"; };
-		7EE0452D9E935FE28127F6F4 /* MachineSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachineSettings.swift; sourceTree = "<group>"; };
+		42F36ED55B5B5F27B2D6E4AB /* RunnerSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerSettings.swift; sourceTree = "<group>"; };
 		F98AAF7970245ACE931B6CA0 /* ThemeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeEditorView.swift; sourceTree = "<group>"; };
 		81B3FFFD38BC535DA1105E27 /* AdapterEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdapterEditorView.swift; sourceTree = "<group>"; };
 		0A8FED8736D857F49A57514C /* Changes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Changes.swift; sourceTree = "<group>"; };
@@ -98,6 +99,7 @@
 		B15A666CD6FD525982BAC34F /* DiffComputation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffComputation.swift; sourceTree = "<group>"; };
 		DB01EEA774815AC5A7038DAD /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
 		1BD8F54D5B935B33A810D490 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
+		35606FB34F805ACB98820C9C /* RelaySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySection.swift; sourceTree = "<group>"; };
 		9F21B2F4E7305C52A6B39A5D /* TokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStore.swift; sourceTree = "<group>"; };
 		E5B7BC3FED5259D183C18D69 /* VersionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionSection.swift; sourceTree = "<group>"; };
 		3F7004A6B092527BAE191DD2 /* Transcript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcript.swift; sourceTree = "<group>"; };
@@ -108,7 +110,7 @@
 		78C00FC7C5AC5565A723E44C /* farcooler_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_client.xcframework; path = Frameworks/farcooler_client.xcframework; sourceTree = "<group>"; };
 		E57A0A7090B459EA8D69806B /* IosevkaNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Regular.ttf; sourceTree = "<group>"; };
 		718EE640EBC05D97A1B17342 /* IosevkaNerdFontMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IosevkaNerdFontMono-Bold.ttf; sourceTree = "<group>"; };
-		1AD44E8CEF485BABA3BB3DE1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = ../shared/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+		1AD44E8CEF485BABA3BB3DE1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = build/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		A133A464581D57FABB4108BE /* FarCooler.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FarCooler.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		519B5ED0E0F35300BA7F8EDA /* FarCoolerActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FarCoolerActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		54C77836D1A35B5FB47F2833 /* FarCoolerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FarCoolerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -171,7 +173,7 @@
 				913FA772187950F79075A3AA /* ImagePaste.swift */,
 				28E65812E2025DDCA0AE929F /* AgentStream.swift */,
 				F819FB63EB645686A9D99358 /* AgentView.swift */,
-				7EE0452D9E935FE28127F6F4 /* MachineSettings.swift */,
+				42F36ED55B5B5F27B2D6E4AB /* RunnerSettings.swift */,
 				F98AAF7970245ACE931B6CA0 /* ThemeEditorView.swift */,
 				81B3FFFD38BC535DA1105E27 /* AdapterEditorView.swift */,
 				0A8FED8736D857F49A57514C /* Changes.swift */,
@@ -221,6 +223,7 @@
 				B15A666CD6FD525982BAC34F /* DiffComputation.swift */,
 				DB01EEA774815AC5A7038DAD /* MarkdownView.swift */,
 				1BD8F54D5B935B33A810D490 /* PushRegistration.swift */,
+				35606FB34F805ACB98820C9C /* RelaySection.swift */,
 				9F21B2F4E7305C52A6B39A5D /* TokenStore.swift */,
 				E5B7BC3FED5259D183C18D69 /* VersionSection.swift */,
 				3F7004A6B092527BAE191DD2 /* Transcript.swift */,
@@ -407,7 +410,7 @@
 				B4BDBBB96BBB55309500381C /* ImagePaste.swift in Sources */,
 				090F5919118C5EE2A6F910CC /* AgentStream.swift in Sources */,
 				155CBF2767425E0385B106DD /* AgentView.swift in Sources */,
-				BA757BB1C6A656C484BF2D43 /* MachineSettings.swift in Sources */,
+				504D78619E0151F0A9482BD6 /* RunnerSettings.swift in Sources */,
 				208A3D3091E05C62AB008B84 /* ThemeEditorView.swift in Sources */,
 				F230819A70605327976EA2BC /* AdapterEditorView.swift in Sources */,
 				E1D175A7B1405C9EABF1E458 /* Changes.swift in Sources */,
@@ -423,6 +426,7 @@
 				632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */,
 				72C8B4DFB7B95847A02B9623 /* MarkdownView.swift in Sources */,
 				CBDDC5EC069D53FC8EB3004A /* PushRegistration.swift in Sources */,
+				6ED88B8CE5605E7382A93B98 /* RelaySection.swift in Sources */,
 				A4677749D2C9588EB8FA703D /* TokenStore.swift in Sources */,
 				A057A865719A51ED8C536CF7 /* VersionSection.swift in Sources */,
 				739934EC2264588692457640 /* Transcript.swift in Sources */,
@@ -484,12 +488,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 7b45dd8)";
+				FARCOOLER_CHANNEL = local;
+				FARCOOLER_URL_SCHEME = "farcooler-local";
+				FARCOOLER_APP_NAME = "FC Local";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 67f80cc)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 322;
+				CURRENT_PROJECT_VERSION = 377;
 				PRODUCT_NAME = FarCooler;
-				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
 				CODE_SIGN_STYLE = Manual;
 				CODE_SIGN_IDENTITY = "-";
@@ -508,12 +514,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				FARCOOLER_CHANNEL = dev;
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (dev 7b45dd8)";
+				FARCOOLER_CHANNEL = local;
+				FARCOOLER_URL_SCHEME = "farcooler-local";
+				FARCOOLER_APP_NAME = "FC Local";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 67f80cc)";
 				FARCOOLER_WORKOS_CLIENT_ID = "";
-				CURRENT_PROJECT_VERSION = 322;
+				CURRENT_PROJECT_VERSION = 377;
 				PRODUCT_NAME = FarCooler;
-				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
 				CODE_SIGN_STYLE = Manual;
 				CODE_SIGN_IDENTITY = "-";
@@ -532,9 +540,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 322;
+				CURRENT_PROJECT_VERSION = 377;
+				FARCOOLER_APP_NAME = "FC Local";
 				PRODUCT_NAME = FarCoolerActivity;
-				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.activity;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local.activity;
 				INFOPLIST_FILE = FarCoolerActivity/Info.plist;
 				CODE_SIGN_STYLE = Manual;
 				CODE_SIGN_IDENTITY = "-";
@@ -548,9 +557,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 322;
+				CURRENT_PROJECT_VERSION = 377;
+				FARCOOLER_APP_NAME = "FC Local";
 				PRODUCT_NAME = FarCoolerActivity;
-				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.activity;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local.activity;
 				INFOPLIST_FILE = FarCoolerActivity/Info.plist;
 				CODE_SIGN_STYLE = Manual;
 				CODE_SIGN_IDENTITY = "-";
@@ -564,7 +574,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local.uitests;
 				GENERATE_INFOPLIST_FILE = YES;
 				TEST_TARGET_NAME = FarCooler;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
@@ -580,7 +590,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local.uitests;
 				GENERATE_INFOPLIST_FILE = YES;
 				TEST_TARGET_NAME = FarCooler;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";

@@ -1,10 +1,15 @@
 # Far Cooler
 
-A terminal-first command center for parallel coding agents on hosts you own.
+A terminal-first command center for parallel coding agents on runners you own.
 
 A **workspace** is one git worktree plus one branch for one task, along with its
 terminals and agent processes. Far Cooler lets you run several at once and see,
 truthfully, which are alive.
+
+A **runner** is one `farcoolerd`: one Unix user, on one host, with its own
+worktrees and its own `~/.ssh/authorized_keys`. A host may carry several — three
+engineers sharing a Linux box is three runners, sharing nothing — which is why
+the word is not *host*. See [`docs/runners.md`](docs/runners.md).
 
 Design: [`docs/farcooler-design.md`](docs/farcooler-design.md).
 Deferred work: [`TODOS.md`](TODOS.md).
@@ -145,7 +150,7 @@ agents ship one, the config file for adding your own, and known gaps.
 
 Both connect over SSH with a key the device generates and never hands out, and
 both render from the same Rust cores the Mac does. The Android client is the
-newer of the two and connects to every configured machine at once, the way the
+newer of the two and connects to every configured runner at once, the way the
 Mac does; the iOS client still switches between them.
 [`apps/android/README.md`](apps/android/README.md) has the full list of what
 differs and why.
@@ -160,15 +165,15 @@ A fleet sidebar, per-terminal output, and an input box. It renders the state the
 daemon derived and never computes state itself, so two clients cannot disagree
 about the same terminal.
 
-Every machine added under Settings ▸ Machines is connected at once, over SSH,
-alongside this Mac — there is no picker and no "current machine" to switch
-between first. Projects from every machine appear in one sidebar, each naming
-the machine it is on. A machine that stops answering keeps its rows, dimmed,
+Every runner added under Settings ▸ Runners is connected at once, over SSH,
+alongside this Mac — there is no picker and no "current runner" to switch
+between first. Projects from every runner appear in one sidebar, each naming
+the runner it is on. A runner that stops answering keeps its rows, dimmed,
 rather than dropping them: reads keep showing the last good fetch, and an
-action against that machine is refused at once with its own error instead of
+action against that runner is refused at once with its own error instead of
 hanging or being queued for later.
 
-The app owns this Mac's own daemon specifically — the one machine it can start
+The app owns this Mac's own daemon specifically — the one runner it can start
 and stop directly, because it ships one inside its own bundle. It runs
 `farcooler daemon ensure` at launch, which replaces any daemon built from
 different source than the app:
@@ -194,7 +199,7 @@ crates/
 ├── daemon      git worktree transactions, domain services
 ├── cli         the farcooler command
 ├── vt          the terminal emulator every client renders from
-├── client      "talk to a host": ssh, protocol, and a C ABI over both
+├── client      "talk to a runner": ssh, protocol, and a C ABI over both
 └── android     a JNI shim over `client` and `vt`, and nothing else
 apps/macos      SwiftUI client
 apps/ios        SwiftUI client, over `client`'s C ABI
@@ -237,7 +242,7 @@ workspaces with real git worktrees, terminals in a private tmux server, derived
 fleet state, input and output, restart, loss dismissal, hide/unhide, and the
 SwiftUI app.
 
-Also working: every configured machine connects over SSH at once, alongside
+Also working: every configured runner connects over SSH at once, alongside
 this Mac, with its own reconnection and backoff — see `docs/farcooler-design.md`
 for the connection states this is built on.
 

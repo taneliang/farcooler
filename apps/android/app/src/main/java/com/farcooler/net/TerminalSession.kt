@@ -824,7 +824,7 @@ class TerminalSession(
      * Paste, bracketed if the program asked for it — without which an editor
      * auto-indents every pasted line and a shell runs each newline as a
      * command. A phone has no other way to get a long command into a terminal,
-     * so this is not a nicety here the way it is on a machine with a keyboard.
+     * so this is not a nicety here the way it is on a desk with a keyboard.
      */
     fun paste(text: String) {
         scope.launch {

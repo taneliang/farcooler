@@ -14,7 +14,7 @@
 - `apps/macos` has **no XCTest target** (`Package.swift` defines only the `"Far Cooler"` executable target). Verification here follows the app's existing probe pattern (`FARCOOLER_SERVICE_PROBE` in `FarCoolerApp.swift` / `ServiceRegistration.swift`): a `FARCOOLER_CLI_TOOLS_PROBE={install,uninstall,refresh}` env var runs the action headlessly against the real built bundle and prints the resulting state. Do not add a new test target — that would be new infrastructure the codebase doesn't otherwise have, for one class.
 - `farcooler` and `farcoolerd` are tracked and acted on **as a pair**, never independently.
 - Never overwrite or delete anything at `~/.local/bin/farcooler(d)` that isn't already a symlink to this app's own bundled binary. A conflict is reported, never resolved automatically.
-- Target directory: `~/.local/bin` (`FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")`), matching what `docs/remote-hosts.md` already documents.
+- Target directory: `~/.local/bin` (`FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")`), matching what `docs/runners.md` already documents.
 - Bundled binary location: `Bundle.main.bundleURL.appendingPathComponent("Contents/Resources").appendingPathComponent(name)` — confirmed by inspecting the installed app (`Contents/Resources/farcooler`, `Contents/Resources/farcoolerd`).
 - Follow existing copy style: plain prose in UI strings, no Markdown/backtick formatting (none of the existing Settings captions use it).
 
@@ -38,7 +38,7 @@ import Foundation
 /// `~/.local/bin`, so a shell — including one an SSH session execs on this
 /// Mac — can find them.
 ///
-/// Without this, "run the app once" (see docs/remote-hosts.md) is true for
+/// Without this, "run the app once" (see docs/runners.md) is true for
 /// the login-item daemon and false for everything else: an SSH-invoked shell
 /// has no idea either binary exists, `farcoolerd --stdio` finds nothing, and
 /// the client reports the closed pipe as "did not answer" — indistinguishable,

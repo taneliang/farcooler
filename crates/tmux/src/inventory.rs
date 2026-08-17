@@ -52,14 +52,14 @@ impl LiveInventory {
     /// a `send-keys` and stall every read queued behind it until the command
     /// deadline fires. That is a lost race, not a broken server — but a single
     /// failed attempt here marks the inventory unavailable, and an unavailable
-    /// inventory is every terminal on the machine reporting that it cannot be
+    /// inventory is every terminal on the runner reporting that it cannot be
     /// accounted for.
     ///
     /// One retry costs nothing in the common case, where the first attempt
     /// succeeds, and turns the great majority of those stalls into a hiccup
     /// nobody sees. It does not fix the underlying serialization — see
     /// `TmuxServer::run` — it stops one wedged pane from speaking for the whole
-    /// machine.
+    /// runner.
     ///
     /// Reads only. A retried write could be performed twice, and nothing here
     /// needs one.
@@ -84,7 +84,7 @@ impl LiveInventory {
                 // durable state with every terminal derived as `unknown` — not
                 // `lost`, which would claim a finding this never made — and
                 // reports the runtime as unhealthy so clients can say which
-                // machine stopped answering.
+                // runner stopped answering.
                 tracing::warn!(
                     error = %last,
                     "tmux inventory unavailable after a retry, deriving everything unknown"

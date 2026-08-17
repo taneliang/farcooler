@@ -54,7 +54,7 @@ fn every_built_in_backend_completes_a_handshake() {
     //
     // The handshake itself lives in the backend that performs it, and
     // `dispatch::handshake` chooses between them, so this test and the Test
-    // button in the machine-settings editor are one implementation. Everything
+    // button in the runner-settings editor are one implementation. Everything
     // that used to be explained here — the 90-second bound, the off-thread
     // read, skipping chatter before the answer — is documented on the ACP
     // handshake, and unit-tested there against fakes that need no network.

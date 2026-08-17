@@ -1,6 +1,6 @@
 //! Base64, written out rather than pulled in.
 //!
-//! The same trade `host_install::sha256_hex` makes: one dependency avoided for
+//! The same trade `runner_install::sha256_hex` makes: one dependency avoided for
 //! forty lines, in a workspace that currently has none. It exists because an
 //! image travels to the agent as an ACP content block, which is base64, while
 //! the protocol carries it as raw bytes — so one side encodes and the other
