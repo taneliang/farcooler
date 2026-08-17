@@ -181,13 +181,12 @@ impl Pane {
     }
 
     fn tmux(&self, args: &[&str]) -> String {
-        let out = Command::new("tmux")
+        Command::new("tmux")
             .args(["-L", &self.socket])
             .args(args)
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-            .unwrap_or_default();
-        out
+            .unwrap_or_default()
     }
 
     fn screen(&self) -> String {
@@ -438,4 +437,71 @@ fn cursor_session_log_still_carries_what_stage_two_reads() {
 
 fn dirs_home() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").expect("a home directory"))
+}
+
+/// The signals a row shows instead of `taskupdate`, read back out of whatever
+/// claude has actually written on this machine.
+///
+/// Key presence is not enough for these two. A task list is only worth
+/// anything if the phrase survives the parse, and a subagent is only worth
+/// anything if the log can still tell a spawn from an ending — so this runs
+/// the real parser over real sessions and asserts on the EVENTS, not on the
+/// field names. It skips loudly on a machine whose claude has never been
+/// asked to keep a task list or spawn an agent, which is a legitimate way for
+/// a machine to be.
+#[test]
+#[ignore = "reads the agent's own session logs on this machine"]
+fn claude_still_writes_down_its_tasks_and_its_subagents() {
+    use farcooler_core::session_log::{claude, TurnEvent};
+
+    let root = dirs_home().join(".claude/projects");
+    if !root.exists() {
+        eprintln!("SKIP claude signals: {} does not exist", root.display());
+        return;
+    }
+    // Newest first: the shapes stage 3 reads are recent, and an old session is
+    // no evidence about what claude writes today.
+    let mut logs = Vec::new();
+    if let Ok(projects) = std::fs::read_dir(&root) {
+        for project in projects.flatten() {
+            if let Ok(files) = std::fs::read_dir(project.path()) {
+                logs.extend(files.flatten().map(|f| f.path()).filter(|p| p.extension().is_some_and(|e| e == "jsonl")));
+            }
+        }
+    }
+    logs.sort_by_key(|p| p.metadata().and_then(|m| m.modified()).ok());
+    let (mut checked_tasks, mut checked_agents) = (false, false);
+    for log in logs.iter().rev() {
+        let Ok(text) = std::fs::read_to_string(log) else { continue };
+        let events: Vec<TurnEvent> = text.lines().flat_map(claude::parse_line).collect();
+        // The raw file is the witness, and the parse has to agree with it: a
+        // file that says `activeForm` and yields no phrase is the parser
+        // having gone quietly stale, which is the failure this file exists for.
+        if !checked_tasks && text.contains("\"activeForm\"") {
+            checked_tasks = true;
+            let phrase = events.iter().find_map(|event| match event {
+                TurnEvent::TaskState { active_form: Some(form), .. } => Some(form.clone()),
+                _ => None,
+            });
+            assert!(phrase.is_some(), "{} carries activeForm, but no phrase parsed out of it", log.display());
+            eprintln!("== claude task phrase OK ({:?}, {})", phrase.unwrap(), log.display());
+        }
+        if !checked_agents && text.contains("\"name\":\"Agent\"") && text.contains("\"status\":\"completed\"") {
+            checked_agents = true;
+            let spawned = events.iter().any(|e| matches!(e, TurnEvent::Subagent { running: true, .. }));
+            let ended = events.iter().any(|e| matches!(e, TurnEvent::Subagent { running: false, .. }));
+            assert!(spawned, "{} spawned an agent that did not parse as one", log.display());
+            assert!(ended, "{} has a completed agent result that did not end one", log.display());
+            eprintln!("== claude subagents OK ({})", log.display());
+        }
+        if checked_tasks && checked_agents {
+            return;
+        }
+    }
+    if !checked_tasks {
+        eprintln!("SKIP claude task phrase: no session under {} created a task", root.display());
+    }
+    if !checked_agents {
+        eprintln!("SKIP claude subagents: no session under {} spawned and finished one", root.display());
+    }
 }

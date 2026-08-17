@@ -429,6 +429,53 @@ Cursor's is the simplest and still complete: a `user` record opening the turn, a
 human-written `description`, and `{"type":"turn_ended","status":"success"}`
 closing it.
 
+### What reconnaissance found, and what it refuted
+
+Everything above this heading was written from a handful of sessions captured by
+hand. Before stage 2 was planned, four investigators went through every session
+log on one developer's machine — 276 claude files, 183 codex, and every cursor
+transcript that exists. Some of what they found contradicts what is written
+above, and the contradictions matter more than the confirmations.
+
+**The blocked state is not in any of the three logs.** This is the finding that
+reshapes the stage. Claude records the OUTCOME of a permission decision —
+`toolDenialKind` is `automode-blocked`, `user-rejected` and so on — but never
+the pending state, so a log reader cannot tell that an agent is waiting right
+now. Codex's rollout has nothing approval-shaped at all across 183 files.
+Cursor's transcripts show none either, though with only four files totalling
+under two kilobytes that is suggestive rather than settled.
+
+So stage 2 does NOT replace the screen. It replaces it for turn boundaries,
+timing, the feed and the counts — where the logs are exact and the screen was
+guessing — and the footer scoping from stage 1 remains the only thing that can
+say "this agent needs you". That is the one state the whole feature exists for,
+and it stays where it already works.
+
+**Three specific claims above are wrong.**
+
+- Subagents are not marked by `isSidechain`. Claude writes each subagent to its
+  own file under `<project>/<session-uuid>/subagents/agent-<id>.jsonl`. The
+  field itself does exist — 40,724 occurrences in one project — but is `false`
+  in every one, so it marks nothing. (An earlier draft said it appeared zero
+  times, which was wrong: a reader could have concluded claude had dropped it.)
+- Claude's `timestamp` is not monotonic. 235 of 276 files contain adjacent lines
+  whose timestamps go backwards. Line order is the only order a parser may
+  trust.
+- Codex's `started_at` and `completed_at` are unix **seconds** while
+  `duration_ms` is milliseconds, in the same payload.
+
+**What the logs are genuinely good for**, confirmed rather than assumed: codex
+opens a turn with `task_started` and closes it with `task_complete` or
+`turn_aborted`, all carrying a matching `turn_id`; claude opens with a `user`
+record carrying `promptId` and `promptSource`, and closes with an explicit
+`system` / `turn_duration` record that always appears and carries `durationMs`
+and, when it is above zero, `pendingBackgroundAgentCount`.
+
+**Hazards a parser has to survive**, all observed: single claude lines over a
+megabyte inside files over a hundred; five of 183 codex files ending on a
+`task_started` with no matching completion, leaving a turn open forever; and
+codex's `rate_limits` shape differing by subscription plan.
+
 ### Which file belongs to which pane
 
 The one hard problem, and it has a different answer per agent.
@@ -436,15 +483,42 @@ The one hard problem, and it has a different answer per agent.
 Codex holds its session file **open**, so `lsof -p <pid>` on the pane's
 foreground process names it outright. Verified against a running codex.
 
+Two nuances the first pass missed, both from watching a bare codex rather than a
+wrapped one. The rollout file is not opened when the process starts — only once
+the first turn is submitted, so a freshly launched pane has no file to find yet.
+And a codex started through a wrapper holds a SECOND, unrelated jsonl open (the
+wrapper's own shadow log), so the match has to be against
+`~/.codex/sessions/**/rollout-*.jsonl` specifically rather than "the open jsonl".
+
 Claude and cursor append and close, so the file cannot be found that way.
 Instead the pane's cwd gives the project directory by a deterministic slug, and
 within it the file being appended to is the live session. When two panes share a
 cwd — normal in a worktree — the tie is broken by the pane's OSC title: claude's
 transcript carries `aiTitle`, and that string is **exactly** what the title
-shows. Verified: a probe session titled `Write tmux haiku and explain escape key
-behavior` had that same string as `aiTitle` in its transcript.
+shows once the leading activity glyph is stripped. Verified live on a bare
+claude: pane title `✳ Write haiku about lighthouse`, transcript
+`"aiTitle":"Write haiku about lighthouse"`.
 
 So the title stops being merely a nice name and becomes the join key.
+
+**The two slug algorithms are not the same, and neither is guessable.** Cursor's
+was recovered from its own source (`workspace-paths.js` in the shipped bundle):
+every non-alphanumeric character becomes `-`, runs collapse to one, leading and
+trailing hyphens are trimmed, and if the joined path exceeds 92 characters it is
+cut to 84 and given a `-` plus the first seven hex of the full path's sha256.
+Claude's was established behaviourally across 35 real directories and one clean
+live test: it does NOT collapse runs, so `/Users/e-liang/.unixconfig` becomes
+`-Users-e-liang--unixconfig` — a double hyphen where cursor would write one. No
+truncation behaviour was observed for claude, but no path long enough to trigger
+one was tried, so that is unknown rather than absent.
+
+One trap for anyone testing this by hand: a `claude` launched from inside a
+claude session inherits `CLAUDE_CODE_SESSION_ID` and adopts the PARENT session's
+`aiTitle`, which makes the join look broken when it is not. Strip
+`CLAUDE_CODE_*` and `CLAUDECODE` before spawning a test agent.
+
+And the column to put the answer in already exists: `terminals.agent_session_id`
+is in the store, unpopulated, reserved for exactly this.
 
 ### Watching cheaply
 

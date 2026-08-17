@@ -184,6 +184,26 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // The watcher's to decide, for the same reason as `activity`: it takes
         // a screen read, and only the sampling loop does those.
         chat_capable: false,
+        // Also the watcher's: the feed is built by reading the agent's session
+        // log line by line, and only the sampling loop holds that file offset.
+        // A converter that guessed would report an empty feed over a real one.
+        feed: Vec::new(),
+        // The watcher's for the identical reason: a spawned agent is found by
+        // reading the same file at the same offset.
+        subagents: Vec::new(),
+        // The compact ladder is derived from `activity`, `blocked_question`
+        // and `feed` above — all of them the watcher's to decide, and none of
+        // them known yet at this point in the conversion. `apply_rungs` fills
+        // these in once every other field on the message is set.
+        glyph: String::new(),
+        headline: String::new(),
+        line: String::new(),
+        rank: 0,
+        // The watcher's as well, and for the strongest version of the reason:
+        // it is read out of the agent's own session log, which only the
+        // sampling loop holds a file offset into. `false` here is "nothing has
+        // claimed this turn went badly", not "the turn went well".
+        turn_failed: false,
     }
 }
 
@@ -211,6 +231,111 @@ pub fn terminal_with_agent_state(view: &TerminalView, agents: &AgentSupervisor) 
         message.title = title;
     }
     message
+}
+
+/// This terminal's compact ladder, from the facts already assembled on it.
+///
+/// Called after `activity`, `blocked_question`, `current_command`,
+/// `turn_started_at`, `activity_changed_at`, `exit_status` and `feed` are all
+/// set — from `Watcher::announce` and `Rpc::with_activity`, the two places
+/// that finish building a live `Terminal` for a client, per this module's own
+/// header comment. Not folded into `terminal()` or `terminal_with_agent_state`
+/// themselves: both run before any of those fields are known, for the reasons
+/// given on each of them above, so the ladder has to be computed after, from
+/// the same message those callers are about to send — which is also what
+/// keeps a Mac's reading and a phone's reading of the same terminal from ever
+/// being built from different facts.
+///
+/// `signal` is the one fact that arrives BESIDE the message rather than on it:
+/// where the agent is, in one line, already composed by
+/// `farcooler_core::feed::signal` out of the task list the watcher folds. It
+/// is an argument rather than a field because the composed line and the parts
+/// it is composed from would be two things on the wire that must agree, and
+/// every field this file's history is a list of went missing exactly that way.
+/// Both callers hold the watcher, so both can supply it; a caller with no
+/// watcher passes `None` and gets the ladder a pane with no session log has.
+pub fn apply_rungs(message: &mut wire::Terminal, signal: Option<&str>) {
+    let subject = rung_subject(message, crate::review::now_millis(), signal);
+    message.glyph = farcooler_core::feed::glyph(&subject).to_string();
+    message.headline = farcooler_core::feed::headline(&subject);
+    message.line = farcooler_core::feed::line(&subject);
+    message.rank = farcooler_core::feed::rank(&subject);
+}
+
+/// `message`'s Unix-millisecond timestamp fields, as milliseconds.
+///
+/// The same arithmetic `client::session::activity_since` and `cli::main::
+/// activity_since` already carry — not shared with them because those live in
+/// crates this one is not on the dependency graph of, and three copies of one
+/// multiply-and-divide is a cheaper disagreement to avoid than a new shared
+/// crate would be to add.
+fn millis_of(ts: &Option<prost_types::Timestamp>) -> Option<i64> {
+    ts.as_ref().map(|t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000)
+}
+
+/// How long ago `since` was, clamped to never-negative: a clock that jumped
+/// backward between the sample and this read must not hand `rank` a duration
+/// it would have to panic on.
+fn elapsed_since(since: Option<i64>, now: i64) -> std::time::Duration {
+    let since = since.unwrap_or(now);
+    std::time::Duration::from_millis(now.saturating_sub(since).max(0) as u64)
+}
+
+/// Build the ladder's one argument from a `Terminal` that already carries
+/// everything it needs.
+///
+/// `message.activity` is the discriminator between the two shapes: `None`
+/// (not an agent at all — a plain shell) and `Unspecified` (the screen could
+/// not be read this tick) both fall through to `Subject::Command`, because
+/// neither has a session log or a turn clock to report — the same "we could
+/// not tell, so we are not saying" honesty `TerminalState::Unknown` already
+/// practices for process liveness.
+fn rung_subject(
+    message: &wire::Terminal,
+    now: i64,
+    signal: Option<&str>,
+) -> farcooler_core::feed::Subject {
+    use farcooler_core::feed::{AgentState, Exit, Subject};
+
+    let state_age = elapsed_since(millis_of(&message.activity_changed_at), now);
+    let activity = wire::AgentActivity::try_from(message.activity).unwrap_or(wire::AgentActivity::Unspecified);
+
+    if matches!(activity, wire::AgentActivity::None | wire::AgentActivity::Unspecified) {
+        return Subject::Command {
+            command: message.current_command.clone(),
+            exit: message.exit_status.as_ref().map(|e| Exit { code: e.code, signal: e.signal }),
+            state_age,
+        };
+    }
+
+    Subject::Agent {
+        name: message.current_command.clone(),
+        state: failure_narrowed(AgentState::from(activity), message.turn_failed),
+        turn_elapsed: millis_of(&message.turn_started_at).map(|since| elapsed_since(Some(since), now)),
+        state_age,
+        question: message.blocked_question.clone(),
+        signal: signal.map(str::to_string),
+    }
+}
+
+/// `state`, reading a finished turn that DIED as the failure it was.
+///
+/// `Done` only, and that narrowness is the decision. `Done` is finished and
+/// unseen, which is exactly the window where the news is worth an alarm: a
+/// pane that has been looked at has moved to `Idle`, and a row still flying a
+/// red mark hours after somebody read it is how a mark stops meaning anything.
+/// `Working` and `Blocked` are about the turn happening NOW, which the last
+/// turn's outcome says nothing about — and `Blocked` in particular must never
+/// be overwritten by anything (see `watch::resolved_activity`).
+fn failure_narrowed(
+    state: farcooler_core::feed::AgentState,
+    turn_failed: bool,
+) -> farcooler_core::feed::AgentState {
+    use farcooler_core::feed::AgentState;
+    match (state, turn_failed) {
+        (AgentState::Done, true) => AgentState::Failed,
+        (state, _) => state,
+    }
 }
 
 /// A replay or fast-attach batch, for one terminal.
@@ -431,5 +556,172 @@ mod tests {
         assert!(before.nanos >= 0, "nanos must never be negative");
         assert_eq!(timestamp(1500).seconds, 1);
         assert_eq!(timestamp(1500).nanos, 500_000_000);
+    }
+
+    // ---------------------------------------------------------------------
+    // `apply_rungs`: the ladder, computed from a `Terminal` already carrying
+    // everything `Watcher::announce` and `Rpc::with_activity` would have set.
+    // ---------------------------------------------------------------------
+
+    fn ago(secs: i64) -> Option<prost_types::Timestamp> {
+        Some(timestamp(crate::review::now_millis() - secs * 1000))
+    }
+
+    #[test]
+    fn apply_rungs_computes_the_ladder_for_a_blocked_agent() {
+        let mut message = wire::Terminal {
+            activity: wire::AgentActivity::Blocked as i32,
+            activity_changed_at: ago(90),
+            blocked_question: Some("Run: cargo test?".to_string()),
+            current_command: "codex".to_string(),
+            ..Default::default()
+        };
+        // A signal line is passed, and outranked. The question wins outright
+        // for a blocked pane, which is the one priority in the whole ladder
+        // that must never be negotiable.
+        apply_rungs(&mut message, Some("3/7 · Designing test matrix"));
+        assert_eq!(message.glyph, "?");
+        assert_eq!(message.headline, "codex needs you");
+        assert_eq!(message.line, "Run: cargo test?");
+    }
+
+    #[test]
+    fn apply_rungs_computes_the_ladder_for_a_working_agent_on_a_task_list() {
+        let mut message = wire::Terminal {
+            activity: wire::AgentActivity::Working as i32,
+            activity_changed_at: ago(240),
+            turn_started_at: ago(240),
+            current_command: "overnight-fix".to_string(),
+            // The transcript is beside the signal line, not the source of it.
+            // A row used to read its own last feed step back as `line`, which
+            // is how `says Done.` became the most prominent string on a lock
+            // screen.
+            feed: vec!["I'll create fruit.txt, then verify it.".into()],
+            subagents: vec!["Auditing the redaction rules".into()],
+            ..Default::default()
+        };
+        apply_rungs(&mut message, Some("3/7 · Designing test matrix · 2 agents"));
+        assert_eq!(message.glyph, "●");
+        assert_eq!(message.headline, "overnight-fix 4m");
+        assert_eq!(message.line, "3/7 · Designing test matrix · 2 agents");
+    }
+
+    #[test]
+    fn apply_rungs_computes_the_ladder_for_a_finished_agent() {
+        let mut message = wire::Terminal {
+            activity: wire::AgentActivity::Done as i32,
+            activity_changed_at: ago(30),
+            current_command: "cursor".to_string(),
+            feed: vec!["Done. `fruit.txt` now contains `banana`.".into()],
+            ..Default::default()
+        };
+        apply_rungs(&mut message, Some("Writing fruit.txt"));
+        assert_eq!(message.glyph, "✓");
+        assert_eq!(message.headline, "cursor done");
+        assert_eq!(message.line, "Writing fruit.txt");
+    }
+
+    /// The finding: a turn that DIED reached every client as a clean `done`.
+    ///
+    /// `turn_failed` is the only difference between this terminal and the one
+    /// above, and every rung has to change with it — otherwise a cursor turn
+    /// that came back "Named models unavailable" says `✓ cursor done` on the
+    /// lock screen of somebody who now has to notice, unaided, that their
+    /// fleet is one agent short.
+    #[test]
+    fn apply_rungs_reports_a_turn_that_died_as_failed_rather_than_done() {
+        let failed = |turn_failed| {
+            let mut message = wire::Terminal {
+                activity: wire::AgentActivity::Done as i32,
+                activity_changed_at: ago(30),
+                current_command: "cursor".to_string(),
+                turn_failed,
+                ..Default::default()
+            };
+            apply_rungs(&mut message, Some("Running cargo test"));
+            message
+        };
+
+        let died = failed(true);
+        assert_eq!(died.glyph, "✗", "the mark a failed command already uses");
+        assert_eq!(died.headline, "cursor failed");
+        assert_eq!(died.line, "Running cargo test", "the last thing it did before it died");
+        // Same tier as an ordinary `Done`: news that has already happened, not
+        // an open question. What changes is what the row SAYS, not where it
+        // sorts.
+        assert_eq!(died.rank, failed(false).rank);
+
+        // And a turn that ended well is untouched by any of this.
+        assert_eq!(failed(false).glyph, "✓");
+        assert_eq!(failed(false).headline, "cursor done");
+    }
+
+    /// A failure belongs to the turn that ended, so nothing about a turn still
+    /// in flight may be repainted by it — least of all `Blocked`, which is the
+    /// one state this whole layer is built to protect.
+    #[test]
+    fn a_turn_still_running_is_never_painted_by_the_last_turns_failure() {
+        for activity in [wire::AgentActivity::Blocked, wire::AgentActivity::Working] {
+            let mut message = wire::Terminal {
+                activity: activity as i32,
+                activity_changed_at: ago(30),
+                turn_started_at: ago(30),
+                current_command: "codex".to_string(),
+                blocked_question: Some("Run: cargo test?".to_string()),
+                turn_failed: true,
+                ..Default::default()
+            };
+            apply_rungs(&mut message, None);
+            assert_ne!(message.glyph, "✗", "{activity:?} was repainted as a failure");
+            assert!(!message.headline.contains("failed"), "{}", message.headline);
+        }
+    }
+
+    #[test]
+    fn apply_rungs_computes_the_ladder_for_a_failed_non_agent_command() {
+        // `activity: None` — "not an agent at all", per the proto — is what
+        // routes this to `Subject::Command` instead of `Subject::Agent`.
+        let mut message = wire::Terminal {
+            activity: wire::AgentActivity::None as i32,
+            activity_changed_at: ago(132),
+            current_command: "cargo test".to_string(),
+            exit_status: Some(wire::ExitStatus { code: Some(101), signal: None }),
+            ..Default::default()
+        };
+        apply_rungs(&mut message, None);
+        assert_eq!(message.glyph, "✗");
+        assert_eq!(message.headline, "cargo test failed");
+        assert_eq!(message.line, "cargo test · exit 101 · 2m 12s");
+    }
+
+    #[test]
+    fn a_blocked_agent_outranks_a_finished_one_on_the_wire() {
+        // The same ordering `farcooler_core::feed::rank` is tested against
+        // directly, proved here end to end through `apply_rungs` so a future
+        // change to `rung_subject` cannot silently stop passing the right
+        // facts through even while the pure function underneath stays right.
+        let mut blocked =
+            wire::Terminal { activity: wire::AgentActivity::Blocked as i32, activity_changed_at: ago(1), ..Default::default() };
+        let mut done =
+            wire::Terminal { activity: wire::AgentActivity::Done as i32, activity_changed_at: ago(1), ..Default::default() };
+        apply_rungs(&mut blocked, None);
+        apply_rungs(&mut done, None);
+        assert!(blocked.rank < done.rank, "blocked ({}) must outrank done ({})", blocked.rank, done.rank);
+    }
+
+    #[test]
+    fn an_unspecified_activity_is_treated_as_a_non_agent_pane() {
+        // A screen that could not be read this tick (`Unspecified`) has no
+        // more to say than a plain shell does -- both fall through to
+        // `Subject::Command` rather than `apply_rungs` guessing at a turn
+        // clock that was never observed.
+        let mut message = wire::Terminal {
+            activity: wire::AgentActivity::Unspecified as i32,
+            current_command: "zsh".to_string(),
+            ..Default::default()
+        };
+        apply_rungs(&mut message, None);
+        assert_eq!(message.glyph, "●", "still running, so still the in-progress glyph");
+        assert_eq!(message.headline, "zsh running");
     }
 }

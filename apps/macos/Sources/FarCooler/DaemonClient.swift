@@ -515,6 +515,21 @@ final class DaemonClient: ObservableObject {
             // whatever a later refresh happens to backfill.
             fleet.workspaces[w].terminals[t].turnStartedAt = event.turnStartedAt
             fleet.workspaces[w].terminals[t].blockedQuestion = event.blockedQuestion
+            // The fields whose whole job is "what is it doing RIGHT NOW".
+            // Applied from the push rather than waited on, because a row that
+            // only arrived with a full refresh would always be describing the
+            // previous minute — which for these lines is the same as not
+            // sending them. `line` is the one that moves most often of all: a
+            // task completing takes `3/7` to `4/7` while nothing else about
+            // the pane changes.
+            fleet.workspaces[w].terminals[t].feed = event.feed
+            fleet.workspaces[w].terminals[t].line = event.line
+            fleet.workspaces[w].terminals[t].subagents = event.subagents
+            // And the field with the most expensive omission: without this a
+            // row whose agent just died kept a clean `Done` tick until
+            // something else happened in that pane, which for a dead agent is
+            // never.
+            fleet.workspaces[w].terminals[t].turnFailed = event.turnFailed
 
             let terminal = fleet.workspaces[w].terminals[t]
             Notifier.shared.report(terminal: terminal, workspace: fleet.workspaces[w].task)

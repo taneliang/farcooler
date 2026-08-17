@@ -199,6 +199,54 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var turnStartedAt: Double?
     /// What the agent is asking, when it is blocked.
     var blockedQuestion: String?
+    /// The last few things the agent SAID, oldest first, at most three.
+    ///
+    /// A transcript, and only a transcript: the agent's own prose, verbatim,
+    /// with no verb in front of it. What it DID is not here — a tool call is
+    /// where the agent IS rather than what it told you, and it arrives on
+    /// `line` instead. This field used to carry both, prefixed with the tool's
+    /// own lowercased name, which is how a row came to read `taskupdate`.
+    ///
+    /// Finished lines, not structured steps: the daemon reads the agent's own
+    /// session log, redacts each one and cuts it to the width of a row before
+    /// it ever reaches here, so a Mac, a phone and a watch cannot each put the
+    /// ellipsis somewhere different. This app renders them and decides nothing
+    /// about them.
+    ///
+    /// Optional because a daemon from before this existed sends no key at all,
+    /// and a row with no feed has to read as "nothing to say" rather than as a
+    /// decoding failure.
+    var feed: [String]?
+    /// Where the agent is, in one line: the question it is blocked on, its
+    /// position in its own task list (`3/7 · Designing test matrix · 2
+    /// agents`), or what it is doing right now (`Writing fruit.txt`).
+    ///
+    /// One rung of the daemon's compact ladder, and the one a sidebar row has
+    /// room for. The priority between those three is decided on the host — see
+    /// `farcooler_core::feed::line` — because a phone, a watch and this app
+    /// deciding it separately is three surfaces disagreeing about one pane.
+    ///
+    /// Optional for the same reason `feed` is.
+    var line: String?
+    /// The agents this agent spawned and has not finished with, named by the
+    /// short description it spawned them with.
+    ///
+    /// Running only, and already redacted and cut to a row's width like every
+    /// other line here. Their COUNT is already inside `line`; these are the
+    /// names, for a surface with room to list them.
+    var subagents: [String]?
+    /// Whether the turn the agent just finished DIED rather than completed.
+    ///
+    /// Read from the agent's own session log on the host — a cursor turn that
+    /// came back "Named models unavailable" ends with an error status — and
+    /// carried beside `activity`, which has no word for it: a turn that died
+    /// and one that succeeded are both `done` there. Without this the row said
+    /// "Done" with a green dot for an agent that had stopped working, which is
+    /// the most expensive thing a fleet at a glance can get wrong.
+    ///
+    /// Optional because a daemon from before this existed sends no key, and
+    /// absent means "nothing claimed the turn went badly" rather than "it did".
+    var turnFailed: Bool?
     var epoch: Int
     /// What this terminal's pane is hosting. Absent on older daemons, which is
     /// why it is optional rather than defaulted to something that would look
@@ -342,7 +390,12 @@ struct Terminal: Decodable, Identifiable, Hashable {
             case .idle: return .idle
             case .working: return .working
             case .blocked: return .blocked
-            case .done: return .done
+            // Finished, and how it finished. `done` is the daemon's word for
+            // "the turn ended and nobody has looked yet", which is true of a
+            // turn that died as well as one that worked — the log says which,
+            // and a row that drew both the same way told the reader everything
+            // was fine when it was not.
+            case .done: return turnFailed == true ? .failedTurn : .done
             }
         case .starting: return .starting
         case .exited:
@@ -408,20 +461,56 @@ struct Terminal: Decodable, Identifiable, Hashable {
         status == .working ? turnDuration : statusDuration
     }
 
-    /// What the agent is asking, when asking is what it's doing.
+    /// The one line that says where this agent is.
     ///
-    /// The daemon derives this from the pane, redacts it, and carries it on
-    /// every read path — and a row that only says "Needs you" makes you open
-    /// the pane to find out what for, which is the trip this whole feature
-    /// exists to save.
+    /// The question it is blocked on, its position in its own task list, or
+    /// what it is doing right now — decided on the host, in that order, so a
+    /// phone and a watch and this sidebar cannot each pick a different one. See
+    /// `farcooler_core::feed::line`.
     ///
-    /// Gated on the status rather than shown whenever the field is set: the
-    /// question stays on the record after the prompt is answered, and "Working
-    /// — Do you want to create haiku.txt?" reads as a question still open.
-    var openQuestion: String? {
-        guard status == .blocked else { return nil }
-        let asked = blockedQuestion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return asked.isEmpty ? nil : asked
+    /// Agents only. The daemon fills the same rung for a plain shell with
+    /// `zsh · running · 5s`, which is the row's own name and status read back
+    /// to it — useful to a watch face that has nothing else, and noise under
+    /// every shell in a sidebar that already draws both.
+    var signalLine: String? {
+        guard agent.isAgent else { return nil }
+        let text = line?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return text.isEmpty ? nil : text
+    }
+
+    /// The agents this one has running, named.
+    ///
+    /// Trimmed and emptied out for the same reason `recentSteps` is: a blank
+    /// line makes the row taller and says nothing. Capped for the same reason
+    /// too — a fleet of twenty background agents must not turn one sidebar row
+    /// into a screenful.
+    var runningSubagents: [String] {
+        let named = (subagents ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(named.prefix(3))
+    }
+
+    /// The steps worth drawing under this row.
+    ///
+    /// NOT gated on the status, unlike `signalLine` above, and that is the
+    /// difference between the two: where an agent IS stops being true the
+    /// moment it moves, but what it said stays true afterwards. "What did it
+    /// do while I was away" is exactly the moment the summary is worth most,
+    /// so an idle or finished agent keeps its lines — and a row that shed them
+    /// on going idle would also mean the sidebar rearranging itself under
+    /// someone reading it.
+    ///
+    /// Trimmed and emptied-out here rather than trusted whole: an empty string
+    /// would still draw a blank line and make the row taller for nothing.
+    var recentSteps: [String] {
+        let steps = (feed ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        // The daemon already keeps only three; the cap is repeated here so a
+        // host that ever sent four could not make one row twice the height of
+        // every other row in the fleet.
+        return Array(steps.suffix(3))
     }
 }
 
@@ -438,6 +527,16 @@ enum Status: Equatable {
     /// stopped and is not news. A build that failed overnight is the reason to
     /// look at the fleet at all.
     case failedRun
+    /// The agent's turn ended badly.
+    ///
+    /// The same news as `failedRun`, one layer up: the process is alive and
+    /// perfectly healthy, and the WORK died. Kept as its own case rather than
+    /// folded into `failedRun` because the two are announced differently — a
+    /// command has an exit code to quote and an agent has a turn — and because
+    /// a terminal can only ever be one of them, so sharing a case would only
+    /// have saved a line at the cost of the notification quoting a code that
+    /// does not exist.
+    case failedTurn
     /// The machine did not answer, so this row is not saying anything.
     ///
     /// Distinct from `lost`, which is a finding the daemon actually made. This
@@ -460,7 +559,7 @@ enum Status: Equatable {
         case .blocked: return "Needs you"
         case .done: return "Done"
         case .exited: return "Exited"
-        case .failedRun: return "Failed"
+        case .failedRun, .failedTurn: return "Failed"
         case .failed: return "Failed to start"
         case .lost: return "Lost"
         case .unreadable: return "Not answering"
@@ -474,7 +573,7 @@ enum Status: Equatable {
     /// badge on the window every time a pane took a moment to answer.
     var wantsAttention: Bool {
         self == .blocked || self == .done || self == .lost || self == .failed
-            || self == .failedRun
+            || self == .failedRun || self == .failedTurn
     }
 
     /// Should it move?

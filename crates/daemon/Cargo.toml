@@ -18,6 +18,9 @@ farcooler-agent.workspace = true
 farcooler-core.workspace = true
 farcooler-review.workspace = true
 sha2 = "0.10"
+# Recursive filesystem watching for the three session-log roots. Not already
+# in the tree (checked `Cargo.lock` and every crate's `Cargo.toml` first).
+notify = "8"
 farcooler-protocol.workspace = true
 farcooler-store.workspace = true
 farcooler-tmux.workspace = true

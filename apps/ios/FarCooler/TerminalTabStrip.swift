@@ -115,7 +115,7 @@ private struct TabChip: View {
             .overlay(
                 Capsule()
                     .strokeBorder(
-                        wantsAttention ? attentionColor(terminal.agent) : .clear, lineWidth: 1.5)
+                        wantsAttention ? attentionColor(terminal) : .clear, lineWidth: 1.5)
             )
             .foregroundStyle(isCurrent ? Color.white : Color.white.opacity(0.75))
         }

@@ -720,6 +720,94 @@ message Terminal {
   // Credential-shaped text is stripped before this is set: it is put in front
   // of people on lock screens, and a shell command is where tokens live.
   optional string blocked_question = 24;
+
+  // The last few things the agent SAID, oldest first, at most three.
+  //
+  // A transcript, and only a transcript: the agent's own prose, verbatim, with
+  // no verb in front of it. What it DID is not here — a tool call is where the
+  // agent IS rather than what it told you, and it goes to `line` instead. This
+  // field used to carry both, prefixed with the tool's own lowercased name,
+  // which is how a lock screen came to read `taskupdate` and `says Done.`
+  //
+  // Finished lines, not structured steps. Credential-shaped text is stripped
+  // and each line is already cut to the width of a row, both on the host and
+  // for the same reason `blocked_question` is redacted there: this reaches a
+  // phone's lock screen, and a Mac, a phone and a watch must not each decide
+  // where the ellipsis goes. See `farcooler_core::feed`.
+  //
+  // Kept after the turn ends rather than cleared. "What did it do while I was
+  // away" is exactly when the summary is worth most.
+  repeated string feed = 25;
+
+  // The compact-rendering ladder: what a Mac, a phone and a watch would each
+  // show of this terminal, decided ONCE here rather than composed by every
+  // client. Each rung is a strict narrowing of the one below it -- whatever
+  // `headline` says is derivable from `line`, and `glyph` from both -- so a
+  // Dynamic Island showing one rung and a sidebar showing another can never
+  // disagree about the same pane. See `farcooler_core::feed`.
+
+  // The state, and nothing else, in one character: `?` blocked, `●` working
+  // or running, `✓` done or ok, `✗` failed, `·` idle. A watch complication, an
+  // Island's minimal presentation.
+  string glyph = 26;
+  // The state plus just enough to say whose, at most ~18 characters:
+  // `codex needs you`, `claude 4m`, `cargo test failed`. An Island's compact
+  // presentation, a notification's title. Never the blocked question itself
+  // -- this budget cannot hold one; see `line`.
+  string headline = 27;
+  // THE SIGNAL LINE: where this pane is, at most ~40 characters. A lock
+  // screen, a sidebar row. Strictly prioritized, first match wins:
+  //
+  //   1. the question, for a blocked agent -- the single most actionable
+  //      string on any compact surface, and it outranks a task count because
+  //      only one of the two needs a person;
+  //   2. the agent's position in its own task list: `3/7 · Designing test
+  //      matrix`, plus a subagent count when any are running;
+  //   3. what it is doing right now: `Writing fruit.txt`;
+  //   4. a non-agent command's outcome.
+  //
+  // Composed on the host, in the agent's own words where it has any. See
+  // `farcooler_core::feed::signal`.
+  string line = 28;
+  // Where this terminal sorts in a fleet view. SMALLER sorts FIRST: blocked
+  // outranks done outranks working, and within a tier the OLDEST first -- the
+  // pane that has been stuck longest is the one costing the most. Computed
+  // here, beside `activity`, so an Island showing one agent and a sidebar
+  // showing twelve agree about which one that is.
+  uint32 rank = 29;
+
+  // Whether the turn the agent just finished DIED rather than completed.
+  //
+  // Read from the agent's own session log — cursor writes `turn_ended` with
+  // `status: "error"` — and carried beside `activity` rather than folded into
+  // it, because "the turn failed" is a fact about the turn that just ended and
+  // not a state the agent is in. A client that only had `activity` reported a
+  // dead turn as `done`, glyph `✓` and all, which is the most expensive lie
+  // this ladder can tell: the whole point of a fleet at a glance is knowing
+  // which panes need you.
+  //
+  // A turn the USER cancelled is not this. Escape is a decision somebody made
+  // on purpose, and alarming about it teaches people to ignore the alarm.
+  bool turn_failed = 30;
+
+  // The agents this pane's agent spawned and has not finished with, named by
+  // the 3-5 word description it spawned them with: `Auditing the redaction
+  // rules`.
+  //
+  // Running only. A background spawn's tool result comes back at LAUNCH
+  // carrying `async_launched`, seconds after the call, while the agent keeps
+  // going for another hour -- a third of the spawns measured on this machine
+  // -- so only `completed` takes one off this list. Reading a launch as an
+  // ending would empty it the instant it filled.
+  //
+  // Agent-authored text, so it is redacted and cut to a row's width on the
+  // host exactly as `feed` and `blocked_question` are: a description is a
+  // string the agent chose and can carry a path as easily as a tool argument.
+  //
+  // The COUNT of these also appears on `line`, because a watch face has room
+  // for one line and not for a list. The names are here for the surfaces that
+  // have room for them.
+  repeated string subagents = 31;
 }
 
 // What a pane is hosting.

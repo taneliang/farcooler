@@ -94,8 +94,18 @@ final class Notifier {
             content.body = "\(workspace) — waiting for your answer"
             content.interruptionLevel = .timeSensitive
         case .done:
-            content.title = "\(terminal.title) finished"
-            content.body = workspace
+            // How the turn ENDED, which `activity` alone cannot say — the
+            // daemon reads it out of the agent's own log and sends it beside
+            // this. Telling someone an agent finished when its turn died is
+            // the same lie the green dot used to tell, in the surface they are
+            // most likely to be looking at.
+            if terminal.status == .failedTurn {
+                content.title = "\(terminal.title) failed"
+                content.body = "\(workspace) — its last turn didn't finish"
+            } else {
+                content.title = "\(terminal.title) finished"
+                content.body = workspace
+            }
         default:
             return
         }

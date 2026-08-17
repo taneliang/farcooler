@@ -77,8 +77,17 @@ final class Notifier {
             // is blocked has stopped, and will stay stopped until answered.
             content.interruptionLevel = .timeSensitive
         case .done:
-            content.title = "\(terminal.label) finished"
-            content.body = workspace
+            // Whether it finished or DIED. The daemon reads that out of the
+            // agent's own log; `activity` says only that the turn ended, and a
+            // card claiming an agent finished when its turn came back an error
+            // is the lie the row's green checkmark used to tell.
+            if terminal.turnDidFail {
+                content.title = "\(terminal.label) failed"
+                content.body = "\(workspace) — its last turn didn't finish"
+            } else {
+                content.title = "\(terminal.label) finished"
+                content.body = workspace
+            }
         default:
             return
         }

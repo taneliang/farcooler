@@ -298,6 +298,36 @@ impl Session {
                             "exitSignal": t.exit_status.as_ref().and_then(|e| e.signal),
                             "turnStartedAt": turn_started_at(t),
                             "blockedQuestion": t.blocked_question.clone(),
+                            // The last three things the agent did, already
+                            // redacted and cut to a row's width by the daemon.
+                            // The phone is the client this matters most to:
+                            // it is the one with no screen to scroll back
+                            // through and the smallest row to say it in.
+                            "feed": t.feed.clone(),
+                            // The agents it spawned and has not finished with,
+                            // named, on the same terms. A phone shows these
+                            // under the row exactly as the Mac does, and their
+                            // COUNT is already inside `line` for the surfaces
+                            // with room for only one string.
+                            "subagents": t.subagents.clone(),
+                            // The compact ladder, decided on the host. This is
+                            // the projection a Live Activity will be built
+                            // from — a lock screen, an Island, a watch face —
+                            // and each of those has room for a different rung,
+                            // so all four travel together rather than the
+                            // phone re-deriving the narrow ones from the wide
+                            // one and disagreeing with the Mac about the same
+                            // pane.
+                            "glyph": t.glyph.clone(),
+                            "headline": t.headline.clone(),
+                            "line": t.line.clone(),
+                            "rank": t.rank,
+                            // How the last turn ended, which `activity` cannot
+                            // say: a turn that died reads as `done` there. The
+                            // rungs above already carry it, and this is what
+                            // lets a phone draw its own indicator without
+                            // having to parse one of them back apart.
+                            "turnFailed": t.turn_failed,
                             "epoch": t.epoch,
                             "paneMode": pane_mode_label(t.pane_mode),
                             // Without this the phone's terminal/chat switch

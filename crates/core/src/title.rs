@@ -157,6 +157,26 @@ fn is_invisible_format(c: char) -> bool {
     matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
+/// Strip a leading activity glyph, if the title has one, and the whitespace
+/// after it.
+///
+/// Unlike `parse`, this does not judge whether what remains is a name worth
+/// showing -- it exists for a caller that wants to compare a title's TEXT to
+/// something else byte for byte, such as claude's own `aiTitle`
+/// (`docs/agent-session-logs.md`, "claude and cursor -- slug, then title":
+/// pane title `✳ Write a haiku` has to equal `aiTitle: "Write a haiku"` once
+/// the glyph is gone). A title with no recognized glyph is returned
+/// unchanged, untrimmed -- there is nothing to strip, and trimming it here
+/// would silently mask a caller comparing against a title that legitimately
+/// has no glyph at all.
+pub fn strip_glyph(title: &str) -> &str {
+    let mut chars = title.chars();
+    match chars.next() {
+        Some(c) if SPINNERS.contains(&c) || RESTING.contains(&c) => chars.as_str().trim_start(),
+        _ => title,
+    }
+}
+
 /// Whatever is left of a title once the glyph is gone, if it is a name at all.
 fn name_from(rest: &str, program: &str, hostname: &str) -> Option<String> {
     if rest.is_empty() {
@@ -440,6 +460,23 @@ mod tests {
         // Redacted whole, not cut: truncating first would have ended this in
         // `…FEMIK…`, the first fourteen characters of a live key.
         assert!(name.ends_with("AWS_SECRET_ACCESS_KEY=…"), "{name}");
+    }
+
+    #[test]
+    fn strip_glyph_matches_the_worked_example_from_the_reference_doc() {
+        // `docs/agent-session-logs.md`: pane title `✳ Write haiku about
+        // lighthouse` verified live against `"aiTitle":"Write haiku about
+        // lighthouse"` -- the exact join this function exists to make possible.
+        assert_eq!(strip_glyph("✳ Write a haiku"), "Write a haiku");
+        assert_eq!(strip_glyph("◐ Write a haiku"), "Write a haiku");
+    }
+
+    #[test]
+    fn strip_glyph_leaves_a_glyphless_title_alone() {
+        // No glyph to strip -- and no trimming invented either, so a caller
+        // comparing byte for byte sees exactly what the pane wrote.
+        assert_eq!(strip_glyph("Write a haiku"), "Write a haiku");
+        assert_eq!(strip_glyph(""), "");
     }
 
     #[test]

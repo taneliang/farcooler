@@ -6,6 +6,8 @@ pub mod file_diff;
 pub mod foreground;
 pub mod git;
 pub mod layout;
+pub mod log_join;
+pub mod log_watch;
 pub mod pastes;
 pub mod paths;
 pub mod push;

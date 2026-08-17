@@ -55,10 +55,12 @@ struct StatusGlyph: View {
         switch status {
         case .blocked: return .orange
         case .done: return .green
-        // `failedRun` is filled rather than hollow, like `done`: it is a
-        // definite outcome, not a missing answer. Left out of the shape
-        // switch above so it falls to the filled-circle default there.
-        case .lost, .failed, .failedRun: return .red
+        // `failedRun` and `failedTurn` are filled rather than hollow, like
+        // `done`: both are a definite outcome, not a missing answer. Left out
+        // of the shape switch above so they fall to the filled-circle default
+        // there. Red rather than green is the whole point — a turn that died
+        // and a turn that worked were the same dot until this existed.
+        case .lost, .failed, .failedRun, .failedTurn: return .red
         // Not red. Red is reserved for something that has gone wrong and wants
         // a decision; a machine that has not answered yet is neither, and
         // painting the whole fleet red every time tmux is busy is how a colour

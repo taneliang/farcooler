@@ -615,67 +615,155 @@ struct TerminalRow: View {
         return terminal.displayDuration.map { "\(status.label) \($0)" } ?? status.label
     }
 
+    /// The gap between the status column and the text beside it.
+    ///
+    /// Named rather than written twice: the feed's lines below have to begin
+    /// in the same column the terminal's name does, and two hand-written 7s is
+    /// exactly how a column goes out of alignment — see `Grid`'s own note on
+    /// the four measurements that used to be chosen locally.
+    private static let markerGap: CGFloat = 7
+
     var body: some View {
-        HStack(spacing: 7) {
-            StatusGlyph(status: status, size: Grid.marker)
+        // A column, not a row, since this task: the status line reads across
+        // and the feed reads down under it. Everything that positions the row
+        // — padding, highlight, drop target — stays on the outside of this, so
+        // a row with three steps is one taller row rather than four rows.
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: Self.markerGap) {
+                StatusGlyph(status: status, size: Grid.marker)
 
-            Text(terminal.label)
-                .font(.system(size: 12.5))
-                .lineLimit(1)
-                // The name yields before the status does. Which terminal it is
-                // matters less than what it wants, and the sidebar is narrow.
-                .layoutPriority(0)
+                Text(terminal.label)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1)
+                    // The name yields before the status does. Which terminal it
+                    // is matters less than what it wants, and the sidebar is
+                    // narrow.
+                    .layoutPriority(0)
 
-            if let ordinal {
-                Text("\(ordinal)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .layoutPriority(1)
+                if let ordinal {
+                    Text("\(ordinal)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .layoutPriority(1)
+                }
+
+                if let meta {
+                    Text(meta)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+
+                Spacer(minLength: 0)
+
+                // One small mark for "this one is on screen right now", so the
+                // fourth agent running in the background is visibly the odd one
+                // out rather than indistinguishable from the three you
+                // arranged.
+                if isTiled {
+                    Image(systemName: "square.split.2x2")
+                        .font(.system(size: 9))
+                        .foregroundStyle(isSelected ? .primary : .tertiary)
+                }
+
+                if status == .lost {
+                    Button("Dismiss") { onAction(.dismissLost) }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 11))
+                        .opacity(usable ? 1 : 0.55)
+                        .allowsHitTesting(usable)
+                }
             }
 
-            if let meta {
-                Text(meta)
+            // Where the agent IS: the question it is blocked on, its place in
+            // its own task list, or what it is doing right now.
+            //
+            // The most valuable line on the row, and the reason the blocked
+            // question no longer sits inside the header above. Beside the name
+            // it was the first thing squeezed out by a narrow sidebar; on its
+            // own line it takes the full width and truncates at the tail like
+            // everything else here. Which of the three it says was decided on
+            // the host — see `Terminal.signalLine`.
+            //
+            // A step brighter than the transcript under it: the row reads
+            // status, then where it is, then what it has been saying.
+            if let signal = terminal.signalLine {
+                Text(signal)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .layoutPriority(1)
-            }
-
-            // What the agent is actually asking, beside the status that says it
-            // is asking something. Same register as the duration — 11pt, one
-            // line — and demoted a step in color, so the row reads status first
-            // and detail second.
-            //
-            // The lowest layout priority in the row, deliberately: this is the
-            // one part that can be cut short. "Needs you 2m" has to survive a
-            // narrow sidebar; the question is a bonus when there's room for it,
-            // and it truncates rather than squeezing the terminal's name out.
-            if let question = terminal.openQuestion {
-                Text(question)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
                     .truncationMode(.tail)
-                    .layoutPriority(-1)
+                    .padding(.leading, Grid.marker + Self.markerGap)
+                    // Take the width offered and no more — see the transcript
+                    // below, where the same modifier keeps the widest line from
+                    // setting the sidebar's ideal width.
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Spacer(minLength: 0)
-
-            // One small mark for "this one is on screen right now", so the
-            // fourth agent running in the background is visibly the odd one out
-            // rather than indistinguishable from the three you arranged.
-            if isTiled {
-                Image(systemName: "square.split.2x2")
-                    .font(.system(size: 9))
-                    .foregroundStyle(isSelected ? .primary : .tertiary)
+            // The last few things the agent SAID, in its own words.
+            //
+            // Under the row rather than beside it, and that is what keeps the
+            // narrow-sidebar promise the signal line makes one line up: a line
+            // of its own cannot take width from the terminal's name at all,
+            // and each one truncates at the tail when the column is too narrow
+            // for it. These arrive already cut to a row's width by the host, so
+            // this is the second cut and not the first — no client decides
+            // where an ellipsis goes.
+            //
+            // Not gated on the status: an idle or finished agent keeps its
+            // lines, because "what did it do while I was away" is precisely
+            // when the summary is worth most. That also means a row never
+            // shrinks on going idle or grows on waking up — a sidebar that
+            // rearranges itself while it is being read is worse than a long
+            // one.
+            if !terminal.recentSteps.isEmpty {
+                VStack(alignment: .leading, spacing: 1) {
+                    // Indexed rather than keyed by the step itself: an agent
+                    // that runs the same command twice would otherwise hand
+                    // `ForEach` two identical ids and lose a line.
+                    ForEach(Array(terminal.recentSteps.enumerated()), id: \.offset) { _, step in
+                        Text(step)
+                            .font(.system(size: 10.5))
+                            // A step further back than the question is: the row
+                            // reads status, then detail, then history.
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                // Aligned under the terminal's name, not under its status dot,
+                // so the steps read as belonging to the row rather than as a
+                // second column of their own.
+                .padding(.leading, Grid.marker + Self.markerGap)
+                // Take the width offered and no more. Without this the widest
+                // step would set the row's ideal width and the sidebar would
+                // report wanting to be wider than the name ever needed.
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if status == .lost {
-                Button("Dismiss") { onAction(.dismissLost) }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 11))
-                    .opacity(usable ? 1 : 0.55)
-                    .allowsHitTesting(usable)
+            // The agents this one has running, one line each.
+            //
+            // Named rather than counted here, because a sidebar has the room:
+            // the COUNT is already on the signal line above, for the surfaces
+            // that do not. Indented one step further than the transcript, so
+            // the branch mark reads as work happening underneath this row
+            // rather than as another thing the row itself said.
+            //
+            // Gone the moment they finish — unlike the transcript, which is
+            // kept. "Two agents are running" stops being true when they stop.
+            if !terminal.runningSubagents.isEmpty {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(Array(terminal.runningSubagents.enumerated()), id: \.offset) { _, agent in
+                        Text("⑂ \(agent)")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                .padding(.leading, Grid.marker + Self.markerGap * 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.vertical, SidebarGrid.rowVerticalPadding)

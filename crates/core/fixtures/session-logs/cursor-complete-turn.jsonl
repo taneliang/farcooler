@@ -1,0 +1,4 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Sunday, Aug 16, 2026, 8:43 AM (UTC-7)</timestamp>\n<user_query>\nRun the shell command: echo banana > fruit.txt\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Running that command now."},{"type":"tool_use","name":"Shell","input":{"command":"echo banana > fruit.txt","description":"Write banana to fruit.txt"}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Done. `fruit.txt` now contains `banana`."}]}}
+{"type":"turn_ended","status":"success"}

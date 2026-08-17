@@ -48,6 +48,31 @@ struct TerminalEvent: Sendable, Decodable {
     // `DaemonClient.apply(_:)`.
     var turnStartedAt: Double?
     var blockedQuestion: String?
+    // Pushed for the same reason, and this is the field with the shortest
+    // useful life of any of them: a line is news for as long as the agent is
+    // on it. Decoded here as well as on the full read because a field carried
+    // on one path and not the other is this app's oldest bug — see
+    // `DaemonClient.apply(_:)`.
+    var feed: [String]?
+    // Where the agent is, in one line. The single most valuable string on the
+    // row and the one that moves most often — a task completing moves `3/7` to
+    // `4/7` while nothing else about the pane changes at all, so a row that
+    // waited for a full refresh would be a progress indicator that only ever
+    // updated by accident.
+    var line: String?
+    // The agents it spawned, named. Pushed for the identical reason: a
+    // subagent that appeared on a row only at the next full refresh would be
+    // finished before anyone saw it start.
+    var subagents: [String]?
+    // Whether the turn that just finished DIED.
+    //
+    // The daemon has pushed this on every terminal event since it existed and
+    // this struct simply never decoded it — the same bug as `activitySince`
+    // above, in a fourth place, and with the most expensive symptom of any of
+    // them: a row whose agent had just died read `Done` with a clean tick
+    // until something else happened in that pane, which for a dead agent is
+    // indefinitely.
+    var turnFailed: Bool?
 }
 
 /// A workspace's tiling, pushed whole.

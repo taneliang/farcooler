@@ -1494,6 +1494,23 @@ impl Rpc {
             message.current_command = command;
         }
         message.chat_capable = self.watcher.chat_capable(view.terminal.id).await;
+        // The same lines the broadcast path sends, off the same `Observed`. A
+        // client that reads a list and then watches events must not see the
+        // feed appear, vanish, and come back.
+        message.feed = self.watcher.feed(view.terminal.id).await;
+        // Off the same `Observed` for the same reason the feed is: a client
+        // that lists terminals and then watches events must not be told a turn
+        // failed by one path and that it finished cleanly by the other.
+        message.turn_failed = self.watcher.turn_failed(view.terminal.id).await;
+        // The agents this one spawned and has not finished with, off the same
+        // `Observed` for the same reason again: a client that lists terminals
+        // and then watches events must not see two subagents in the list and
+        // none in the push.
+        message.subagents = self.watcher.subagents(view.terminal.id).await;
+        // The compact ladder, computed from everything just set above — see
+        // `wire::apply_rungs` for why it has to run last, and why the signal
+        // line is handed to it rather than read off the message.
+        wire::apply_rungs(&mut message, self.watcher.signal(view.terminal.id).await.as_deref());
         message
     }
 }

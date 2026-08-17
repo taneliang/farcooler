@@ -81,6 +81,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// inspect, so this arriving over the wire is the only way it can know —
     /// and it is why the same badge means the same thing here as on the Mac.
     var activity: String?
+    /// Whether the turn the agent just finished DIED rather than completed.
+    ///
+    /// Read from the agent's own session log on the host, and carried beside
+    /// `activity` because that has no word for it: a turn that died and one
+    /// that succeeded are both `done` there, so the phone drew a green
+    /// checkmark for an agent that had stopped working. Absent on older
+    /// daemons, and absent means "nothing claimed the turn went badly".
+    var turnFailed: Bool?
     var epoch: Int
     /// What this terminal's pane is hosting. Absent on older daemons, which is
     /// why it is optional rather than defaulted to something that would look
@@ -92,6 +100,29 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var availableAgentModes: [String]?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
+
+    /// Whether the turn this agent just finished, died — and whether saying so
+    /// is still the news.
+    ///
+    /// Gated on `done`, which is the daemon's word for "finished and nobody
+    /// has looked yet". The failure belongs to the turn that ENDED: an agent
+    /// already working again is not failing, and one whose row has been read
+    /// and cleared has been told.
+    ///
+    /// Deliberately a property beside `agent` rather than a case inside it.
+    /// `AgentActivity` is the daemon's own vocabulary — it is what
+    /// `terminal.seen` clears, what the notification dedup is keyed on, and
+    /// what the task composer waits for — and a fifth value invented on the
+    /// client would have to be understood by all of them. Only the two places
+    /// that DRAW a state need to know, and they ask for it here.
+    var turnDidFail: Bool { agent == .done && turnFailed == true }
+
+    /// What this agent's state is called in a row, failure included.
+    var activityLabel: String { turnDidFail ? "Failed" : agent.label }
+
+    /// The glyph for it. The same mark the ladder puts on a failed turn and a
+    /// failed command, in SF Symbols' vocabulary rather than a character's.
+    var activitySymbol: String { turnDidFail ? "xmark.circle.fill" : agent.symbol }
 
     /// Whether to draw a chat or a VT grid.
     var isAgentPane: Bool { paneMode == "agent" }

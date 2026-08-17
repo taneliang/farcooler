@@ -2633,6 +2633,32 @@ fn workspace_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_j
         // What the agent is asking, when it is blocked and legible. Without
         // this a row can say "Needs you" and never say what for.
         "blockedQuestion": t.blocked_question,
+        // The last three things it SAID, in the agent's own words. Already
+        // redacted and already cut to a row's width — a client renders these
+        // and decides nothing about them.
+        "feed": t.feed,
+        // The agents it spawned and has not finished with, named. On the same
+        // terms as the feed, and here for the same reason the rungs are: a
+        // field on the wire and missing from a projection is this function's
+        // own three strikes, and the fix is to plumb it when it is added.
+        "subagents": t.subagents,
+        // The compact ladder, in the daemon's words as well. Projected even
+        // though nothing here renders them yet, on purpose: the rungs exist so
+        // a Live Activity can pick the one its surface has room for, and the
+        // client that goes looking for them will look in exactly the two
+        // projections this file builds. A field present on the wire and
+        // dropped here is precisely the shape of this function's own three
+        // strikes — the fix is to plumb them when they are added, not when
+        // somebody finally reads them.
+        "glyph": t.glyph,
+        "headline": t.headline,
+        "line": t.line,
+        "rank": t.rank,
+        // How the last turn ENDED, which `activity` alone cannot say: a turn
+        // that died and one that succeeded are both `done` there. Rendered by
+        // the app rather than only by the ladder, because this is the app that
+        // draws its own indicator off `activity` — see `Terminal.status`.
+        "turnFailed": t.turn_failed,
         "epoch": t.epoch,
         // The Mac app decodes THIS, not the JSON
         // `crates/client` builds for iOS. Leaving
@@ -2690,6 +2716,29 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // permission prompt resolves.
         "turnStartedAt": turn_started_at(t),
         "blockedQuestion": t.blocked_question,
+        // Watched for the same reason again, and this is the field with the
+        // shortest useful life of any of them: a line is news for as long as
+        // the agent is on it, and a transcript that only arrived on a full
+        // refresh would always be describing the previous minute.
+        "feed": t.feed,
+        // Watched for the identical reason, one field along: a subagent that
+        // reached a row only at the next full refresh would be finished before
+        // anyone saw it start.
+        "subagents": t.subagents,
+        // Watched for the same reason the feed is: every rung is derived from
+        // `activity`, `blockedQuestion` and `feed`, all of which move on this
+        // event, so a ladder that only arrived on a full refresh would be
+        // describing a state the terminal has already left.
+        "glyph": t.glyph,
+        "headline": t.headline,
+        "line": t.line,
+        "rank": t.rank,
+        // Watched for the same reason the ladder is, and it moves on exactly
+        // the event the ladder does: the tick a turn ends. A row that learned
+        // about the failure only on a full refresh would show a clean `Done`
+        // for as long as nothing else happened in that pane — which, for a
+        // pane whose agent has just died, is indefinitely.
+        "turnFailed": t.turn_failed,
         // Watched as well as listed. A pane mode that only arrived on a full
         // refresh would mean toggling to chat did nothing until something
         // else happened to reload the fleet.
@@ -2869,6 +2918,8 @@ mod tests {
             turn_started_at: Some(prost_types::Timestamp { seconds: 1_700_000_000, nanos: 0 }),
             blocked_question: Some("Overwrite config.toml?".to_string()),
             chat_capable: true,
+            feed: vec!["Written to haiku.txt.".to_string(), "Both tests pass.".to_string()],
+            subagents: vec!["Auditing the redaction rules".to_string()],
             ..Default::default()
         };
         let json = workspace_list_terminal_json(&t);
@@ -2880,6 +2931,38 @@ mod tests {
         // already known to be present in — kept as a canary so a future
         // refactor of this function trips a test rather than a support ticket.
         assert_eq!(json["chatCapable"], serde_json::json!(true));
+        assert_eq!(json["feed"], serde_json::json!(["Written to haiku.txt.", "Both tests pass."]));
+        assert_eq!(json["subagents"], serde_json::json!(["Auditing the redaction rules"]));
+    }
+
+    /// The feed, on the push path.
+    ///
+    /// A step is news for as long as the agent is on it. A feed that only
+    /// arrived on a full refresh would always be describing the previous
+    /// minute, which for the one field whose whole job is "what is it doing
+    /// RIGHT NOW" is the same as not sending it.
+    #[test]
+    fn a_terminal_changed_event_carries_the_feed_and_the_subagents() {
+        let t = farcooler_protocol::v1::Terminal {
+            feed: vec!["Written to haiku.txt.".to_string(), "Both tests pass.".to_string()],
+            subagents: vec!["Auditing the redaction rules".to_string()],
+            ..Default::default()
+        };
+        let json = terminal_event_json(&t);
+        assert_eq!(json["feed"], serde_json::json!(["Written to haiku.txt.", "Both tests pass."]));
+        assert_eq!(json["subagents"], serde_json::json!(["Auditing the redaction rules"]));
+    }
+
+    /// A plain shell has nothing to report, and says so with an empty list
+    /// rather than by omitting the key — a client that had to tell "no feed"
+    /// from "feed missing" would be guessing.
+    #[test]
+    fn a_terminal_with_nothing_to_report_sends_an_empty_feed() {
+        let t = farcooler_protocol::v1::Terminal::default();
+        assert_eq!(terminal_event_json(&t)["feed"], serde_json::json!([]));
+        assert_eq!(workspace_list_terminal_json(&t)["feed"], serde_json::json!([]));
+        assert_eq!(terminal_event_json(&t)["subagents"], serde_json::json!([]));
+        assert_eq!(workspace_list_terminal_json(&t)["subagents"], serde_json::json!([]));
     }
 
     /// Keys the EVENT projection carries that the list one has no business
@@ -2918,6 +3001,13 @@ mod tests {
             turn_started_at: Some(prost_types::Timestamp { seconds: 1_700_000_000, nanos: 0 }),
             blocked_question: Some("Overwrite config.toml?".to_string()),
             chat_capable: true,
+            feed: vec!["Written to haiku.txt.".to_string(), "Both tests pass.".to_string()],
+            subagents: vec!["Auditing the redaction rules".to_string()],
+            glyph: "?".to_string(),
+            headline: "claude needs you".to_string(),
+            line: "Overwrite config.toml?".to_string(),
+            rank: 1,
+            turn_failed: true,
             ..Default::default()
         };
 
@@ -2945,7 +3035,20 @@ mod tests {
 
         // Not vacuous by construction either: an empty set equals an empty set,
         // so the branch's own fields are named here to prove the sets are real.
-        for field in ["exitCode", "exitSignal", "turnStartedAt", "blockedQuestion", "chatCapable"] {
+        for field in [
+            "exitCode",
+            "exitSignal",
+            "turnStartedAt",
+            "blockedQuestion",
+            "chatCapable",
+            "feed",
+            "subagents",
+            "glyph",
+            "headline",
+            "line",
+            "rank",
+            "turnFailed",
+        ] {
             assert!(event.contains(field), "{field} is in neither projection");
         }
     }

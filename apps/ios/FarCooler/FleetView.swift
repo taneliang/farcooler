@@ -960,11 +960,11 @@ struct TerminalRow: View {
             // The reason to have opened the app. Only the two states worth
             // acting on get color, so a list of twenty still reads at a glance.
             if terminal.agent.isAgent && terminal.agent != .unknown {
-                Label(terminal.agent.label, systemImage: terminal.agent.symbol)
+                Label(terminal.activityLabel, systemImage: terminal.activitySymbol)
                     .labelStyle(.iconOnly)
                     .font(.system(size: 13, weight: terminal.agent.wantsAttention ? .semibold : .regular))
-                    .foregroundStyle(attentionColor(terminal.agent))
-                    .accessibilityLabel(terminal.agent.label)
+                    .foregroundStyle(attentionColor(terminal))
+                    .accessibilityLabel(terminal.activityLabel)
             }
         }
         .contentShape(Rectangle())
@@ -993,6 +993,17 @@ func attentionColor(_ agent: AgentActivity) -> Color {
     case .done: return .green
     default: return .secondary
     }
+}
+
+/// The same color, for a terminal whose finished turn may have DIED.
+///
+/// Green and red are the whole difference between "it's done" and "it stopped
+/// working", and `AgentActivity` alone cannot tell them apart — the daemon
+/// sends both as `done` and says which in `turnFailed`. Every surface that has
+/// a terminal in hand asks this one instead, so the fleet list and the tab
+/// strip cannot disagree about the same pane.
+func attentionColor(_ terminal: Terminal) -> Color {
+    terminal.turnDidFail ? .red : attentionColor(terminal.agent)
 }
 
 /// The second phase: the worktree has uncommitted work, so removal needs its
