@@ -1136,6 +1136,8 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::FileDiff(_) => "file_diff",
         result::Value::StackLinkList(_) => "stack_link_list",
         result::Value::ChangesInbox(_) => "changes_inbox",
+        result::Value::ClientList(_) => "client_list",
+        result::Value::ClientEnroll(_) => "client_enroll",
     }
 }
 

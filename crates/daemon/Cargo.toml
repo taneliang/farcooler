@@ -37,6 +37,31 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 directories.workspace = true
 libc.workspace = true
+# Reading and writing `authorized_keys`, which is the one file this daemon
+# edits that somebody's SSH access already depends on. Hand-rolling a public
+# key parser to decide whether a received string is an ed25519 key would be a
+# parser written against attacker-supplied bytes, which is the last place to
+# want one.
+#
+# Already in the lock at this exact version, through russh in `farcooler-client`
+# — this adds an edge, not a tree. `default-features = false` with only `alloc`
+# because nothing here verifies a signature: the algorithms are decoded, never
+# used, so none of ed25519-dalek, rsa, p256, p384 or p521 is wanted.
+ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc"] }
+# Descriptor-relative file operations, for the one write in this program that
+# must not be redirected: `openat`, `flock`, `fstat`, `renameat`, `fsync`.
+#
+# A decision rather than an implementation detail. `O_NOFOLLOW` on the final
+# path guards only that component, so somebody who replaces `.ssh` with a
+# symlink between the check and the rename redirects a key into a directory
+# they can read. Anchoring every component to a held descriptor is what closes
+# that, `openat2` would be neater and is Linux-only, and doing it through raw
+# `libc` means hand-managing descriptor lifetimes in unsafe blocks on the path
+# where a mistake costs somebody their access.
+#
+# Already in the lock at this version, through `tempfile` and
+# `alacritty_terminal` — an edge, not a tree.
+rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile = "3"

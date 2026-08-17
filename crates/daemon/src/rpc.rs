@@ -22,7 +22,7 @@ use farcooler_protocol::v1::{
     result,
 };
 use farcooler_store::models;
-use farcooler_transport::Handler;
+use farcooler_transport::{Handler, Peer};
 use uuid::Uuid;
 
 use crate::service::Service;
@@ -31,7 +31,14 @@ use crate::wire;
 pub struct Rpc {
     service: Arc<Service>,
     watcher: Arc<crate::watch::Watcher>,
-    scope: Scope,
+    /// Who this request's connection belongs to: its scope, and which enrolled
+    /// device it is.
+    ///
+    /// Both halves of one fact, from one place. The scope used to be copied
+    /// from the connection into here and separately into the handshake, which
+    /// is how a session could be TOLD it held `read` and then be permitted
+    /// everything.
+    peer: Peer,
     daemon_version: String,
     /// Fired by `daemon.shutdown`; the process's own stop signal, from inside.
     stop: Arc<tokio::sync::Notify>,
@@ -41,16 +48,135 @@ impl Rpc {
     pub fn new(
         service: Arc<Service>,
         watcher: Arc<crate::watch::Watcher>,
-        scope: Scope,
+        peer: Peer,
         stop: Arc<tokio::sync::Notify>,
     ) -> Self {
         Self {
             service,
             watcher,
-            scope,
+            peer,
             daemon_version: farcooler_protocol::BUILD.to_string(),
             stop,
         }
+    }
+
+    /// Which device made this call, for a log line that has to name one.
+    ///
+    /// A device id, never a key or a secret: it is the name this runner's own
+    /// `authorized_keys` gave the entry, and it is already written in that file
+    /// in plain text. `-` rather than an empty field for a local caller, so an
+    /// audit line reads the same shape whoever made the call.
+    fn who(&self) -> &str {
+        self.peer.client_id.as_deref().unwrap_or("-")
+    }
+}
+
+/// One `Rpc` per request, over one shared `Service`, for one connection.
+///
+/// In the library rather than beside the socket loop in `main.rs`, because it
+/// is the only thing that knows a connection is a live session: it registers
+/// one when it is built and holds it until the connection ends. A second copy
+/// of that wiring — in a test harness, or in the stdio path — is a connection
+/// that revocation cannot find, which fails silently and only for the device it
+/// was supposed to contain.
+///
+/// The scope belongs to the connection; the service does not, and must not — a
+/// second `Service` would mean a second SQLite handle and a second, divergent
+/// view of the tmux inventory.
+#[derive(Clone)]
+pub struct RpcFactory {
+    service: Arc<Service>,
+    watcher: Arc<crate::watch::Watcher>,
+    /// Shared with whatever is waiting to stop this process. See `daemon.shutdown`.
+    stop: Arc<tokio::sync::Notify>,
+    /// Who this connection is, for its whole life. Copied into every `Rpc` this
+    /// builds, so the dispatcher's scope check and the handshake's advertised
+    /// scope are the same value and not two that happen to agree.
+    peer: Peer,
+    /// This connection's registration, which ends when this does.
+    ///
+    /// An `Arc` because this struct is `Clone`: the session lasts until the last
+    /// clone is gone, rather than until whichever clone happened to be dropped
+    /// first.
+    session: Arc<crate::sessions::Session>,
+}
+
+impl RpcFactory {
+    /// The handler for one accepted connection, registered as a live session.
+    ///
+    /// Registration happens HERE rather than at the call sites so it cannot be
+    /// forgotten by one of them. A connection that was never registered is one
+    /// `client.revoke` will report closing and quietly leave open.
+    pub fn new(
+        service: Arc<Service>,
+        watcher: Arc<crate::watch::Watcher>,
+        stop: Arc<tokio::sync::Notify>,
+        peer: Peer,
+    ) -> Self {
+        let session = service.sessions().open(peer.client_id.clone());
+        Self { service, watcher, stop, peer, session }
+    }
+}
+
+impl Handler for RpcFactory {
+    fn peer(&self) -> Peer {
+        self.peer.clone()
+    }
+
+    fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
+        let rpc = Rpc::new(
+            self.service.clone(),
+            self.watcher.clone(),
+            self.peer.clone(),
+            self.stop.clone(),
+        );
+        let session = self.session.clone();
+        async move {
+            // The one request a closed connection could still serve.
+            //
+            // `serve_connection` returns the moment a session is closed and
+            // dispatches nothing after that, so this only ever catches a
+            // request that was ALREADY in flight when the close landed —
+            // microseconds, and exactly the microseconds in which somebody is
+            // revoking a device they no longer trust. Answering it would be a
+            // call served by a device whose access had already been withdrawn.
+            if session.is_closed() {
+                return error_response(req.request_id, DomainError::AuthRequired);
+            }
+            rpc.handle(req).await
+        }
+    }
+
+    /// Every connection is subscribed to the push stream.
+    ///
+    /// No opt-in request: a client that connected wants to know when something
+    /// changes, and making it ask would just be a round trip before the first
+    /// event. Cost is zero on a quiet runner, because only changes are sent.
+    fn events(&self) -> Option<tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>> {
+        Some(self.watcher.subscribe())
+    }
+
+    fn closed(&self) -> impl std::future::Future<Output = ()> + Send {
+        let session = self.session.clone();
+        async move { session.closed().await }
+    }
+}
+
+/// A refusal in the shape every answer takes.
+///
+/// Shared with `Rpc::handle` so a response built outside the dispatcher cannot
+/// be a differently shaped one — same code mapping, same redaction.
+fn error_response(request_id: bytes::Bytes, err: DomainError) -> Response {
+    let (code, retryable) = err.wire();
+    Response {
+        request_id,
+        outcome: Some(response::Outcome::Error(WireError {
+            code: code as i32,
+            retryable,
+            // Redacted by construction: never a path, terminal byte, command,
+            // or session id.
+            message: err.redacted_message(),
+        })),
     }
 }
 
@@ -162,6 +288,20 @@ fn required_scope(method: &str) -> Option<Scope> {
         // `program`, `args` and `env`, which is local paths and, for an agent
         // that needs one, an API key. `Scope::Read` is for the shape of the
         // fleet, not for its secrets.
+        // Which devices may log in here.
+        //
+        // Reading is `read`: a list of enrolled devices is the shape of the
+        // fleet, carries no path and no secret — a public key's fingerprint is
+        // published by design — and a phone that can see the fleet should be
+        // able to see who else can.
+        //
+        // Enrolling and revoking are `host_admin` for a stronger reason than
+        // the settings writes below. They do not merely write a file in the
+        // user's home directory; they decide who may log in to this runner at
+        // all. A client that could enroll could widen its own access, which
+        // would make every scope beneath this one advisory.
+        "client.list" => Scope::Read,
+        "client.enroll" | "client.revoke" => Scope::HostAdmin,
         "settings.set_branch_prefix"
         | "theme.upsert"
         | "theme.delete"
@@ -220,6 +360,14 @@ fn satisfies(granted: Scope, required: Scope) -> bool {
 }
 
 impl Handler for Rpc {
+    /// One `Rpc` is built per request from its connection's peer, so this is
+    /// that connection's answer. Nothing serves a connection with an `Rpc`
+    /// directly — `RpcFactory` does — so this exists for the tests that dispatch
+    /// against one without a socket in front of it.
+    fn peer(&self) -> Peer {
+        self.peer.clone()
+    }
+
     async fn handle(&self, req: Request) -> Response {
         let request_id = req.request_id.clone();
         let outcome = match required_scope(&req.method) {
@@ -232,7 +380,7 @@ impl Handler for Rpc {
             None => Err(DomainError::CapabilityUnsupported {
                 needed: farcooler_protocol::capability::for_method(&req.method).unwrap_or("a newer Far Cooler"),
             }),
-            Some(required) if !satisfies(self.scope, required) => Err(DomainError::ScopeDenied { needed: scope_name(required) }),
+            Some(required) if !satisfies(self.peer.scope, required) => Err(DomainError::ScopeDenied { needed: scope_name(required) }),
             // The envelope's capability precondition, checked here beside scope
             // and before any domain logic — the same rule the target id and
             // expected version follow, and for the same reason.
@@ -252,19 +400,7 @@ impl Handler for Rpc {
                 request_id,
                 outcome: Some(response::Outcome::Result(WireResult { value: Some(value) })),
             },
-            Err(err) => {
-                let (code, retryable) = err.wire();
-                Response {
-                    request_id,
-                    outcome: Some(response::Outcome::Error(WireError {
-                        code: code as i32,
-                        retryable,
-                        // Redacted by construction: never a path, terminal
-                        // byte, command, or session id.
-                        message: err.redacted_message(),
-                    })),
-                }
-            }
+            Err(err) => error_response(request_id, err),
         }
     }
 }
@@ -417,7 +553,7 @@ impl Rpc {
 
     async fn dispatch(&self, req: Request) -> Result<result::Value> {
         let svc = &self.service;
-        let scope = self.scope;
+        let scope = self.peer.scope;
 
         match req.method.as_str() {
             // ---- reads ----
@@ -652,6 +788,40 @@ impl Rpc {
                         failure,
                     },
                 }))
+            }
+
+            // MARK: - Device enrollment
+            //
+            // Every one of these reads or writes this runner's own
+            // `~/.ssh/authorized_keys`, through `fence` and nothing else. The
+            // rules live in `enrollment`, so a second transport cannot acquire
+            // a different idea of what may be written into that file.
+            "client.list" => Ok(result::Value::ClientList(crate::enrollment::list(svc).await?)),
+
+            "client.enroll" => {
+                let Some(request::Payload::ClientEnroll(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                // Who granted access to whom, in this runner's log.
+                //
+                // The audit entry the spec asks for is on the wire in
+                // `EnrolledClient`; this is the other half of it, and it is the
+                // half that says which device performed the ceremony rather
+                // than merely which one was enrolled. Both are device ids, both
+                // are already written in `authorized_keys` in plain text.
+                tracing::info!(by = self.who(), client = %p.client_id, "enrolling a device");
+                Ok(result::Value::ClientEnroll(crate::enrollment::enroll(svc, &p).await?))
+            }
+
+            // Removes the line AND closes what the line let in — see
+            // `enrollment::revoke` for exactly what that does and does not
+            // contain.
+            "client.revoke" => {
+                let Some(request::Payload::ClientRevoke(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                tracing::info!(by = self.who(), client = %p.client_id, "revoking a device");
+                Ok(result::Value::ClientList(crate::enrollment::revoke(svc, &p).await?))
             }
 
             "repository.list" => {
@@ -1644,6 +1814,18 @@ mod tests {
         // colour is not a secret; an adapter's environment is.
         assert_eq!(required_scope("adapter.list"), Some(Scope::HostAdmin));
         assert_eq!(required_scope("theme.list"), Some(Scope::Read));
+    }
+
+    #[test]
+    fn enrolling_a_device_requires_host_admin_and_looking_does_not() {
+        // Stronger than the settings writes above: these decide who may log in
+        // to this runner. A client that could enroll could widen its own
+        // access, which would make every scope beneath this one advisory.
+        assert_eq!(required_scope("client.enroll"), Some(Scope::HostAdmin));
+        assert_eq!(required_scope("client.revoke"), Some(Scope::HostAdmin));
+        // Reading is the shape of the fleet: no path, and a public key's
+        // fingerprint is published by design.
+        assert_eq!(required_scope("client.list"), Some(Scope::Read));
     }
 
     #[test]

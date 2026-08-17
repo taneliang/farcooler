@@ -11,9 +11,9 @@
 
 use std::sync::Arc;
 
-use farcooler_daemon::{rpc::Rpc, service::Service};
+use farcooler_daemon::{rpc::RpcFactory, service::Service};
 use farcooler_protocol::v1::{ErrorCode, Scope, request, result};
-use farcooler_transport::{Client, ClientError, HandshakeConfig, UnixListenerServer, request};
+use farcooler_transport::{Client, ClientError, HandshakeConfig, Peer, UnixListenerServer, request};
 
 /// A daemon on a private socket with a private database.
 ///
@@ -35,6 +35,14 @@ struct Harness {
     /// cares whether a mutation ANNOUNCED — rather than merely succeeding —
     /// listens here instead.
     watcher: Arc<farcooler_daemon::watch::Watcher>,
+    /// The scratch `authorized_keys` this harness's daemon enrolls into.
+    ///
+    /// Per harness, and never the real one. `client.enroll` writes SSH keys, so
+    /// a test that reached the developer's own file would be a test that can
+    /// lock them out of their own machine — and an environment variable would
+    /// not help, because the environment is process-global and these tests run
+    /// in parallel.
+    authorized_keys: std::path::PathBuf,
 }
 
 /// Take the tmux server down with the test that started it.
@@ -75,7 +83,17 @@ async fn start(scope: Scope) -> Harness {
     let permit = TMUX_SERVERS.clone().acquire_owned().await.expect("permit");
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("farcoolerd.sock");
-    let service = Arc::new(Service::open_in(dir.path().to_path_buf()).await.expect("service"));
+    // The `.ssh` inside it is created by the write itself, at 0700 — what is
+    // needed here is the directory ABOVE it, which the writer anchors to.
+    let home = dir.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let authorized_keys = home.join(".ssh").join("authorized_keys");
+    let service = Arc::new(
+        Service::open_in(dir.path().to_path_buf())
+            .await
+            .expect("service")
+            .enrolling_into(authorized_keys.clone()),
+    );
     let tmux_socket = service.tmux.socket().to_string();
     let server = UnixListenerServer::bind(&socket).expect("bind");
 
@@ -85,14 +103,28 @@ async fn start(scope: Scope) -> Harness {
 
     let observed = watcher.clone();
     tokio::spawn(async move {
-        // Every connection to this harness gets the scope the test asked for.
-        // Nothing here sends a preamble — that is the stdio relay's business,
-        // and `a_relayed_session_keeps_its_scope.rs` covers it.
+        // Every connection to this harness gets the scope the test asked for,
+        // and names no device — which is what a local caller is. Nothing here
+        // sends a preamble; that is the stdio relay's business, and
+        // `a_relayed_session_keeps_its_scope.rs` and
+        // `revocation_closes_what_it_revoked.rs` cover it.
+        //
+        // The daemon's own `RpcFactory`, not a stand-in: a second handler here
+        // would be a second answer about what a connection is, and these tests
+        // would stop covering the one the daemon actually serves.
         let _ = server
             .serve(move |_| {
                 Some((
-                    HandshakeConfig { daemon_version: "test".into(), granted_scope: scope },
-                    Factory { service: service.clone(), watcher: watcher.clone(), scope },
+                    HandshakeConfig { daemon_version: "test".into() },
+                    // Nothing waits on this stop signal: the test server has no
+                    // process to end, and `daemon.shutdown` is exercised where
+                    // it matters — against a real daemon, by `daemon ensure`.
+                    RpcFactory::new(
+                        service.clone(),
+                        watcher.clone(),
+                        Arc::new(tokio::sync::Notify::new()),
+                        Peer { client_id: None, scope },
+                    ),
                 ))
             })
             .await;
@@ -101,32 +133,7 @@ async fn start(scope: Scope) -> Harness {
     // The listener is bound before serve() is spawned, so a connect cannot race
     // it — but give the task a turn so the first accept is already pending.
     tokio::task::yield_now().await;
-    Harness { _dir: dir, socket, _permit: permit, tmux_socket, watcher: observed }
-}
-
-#[derive(Clone)]
-struct Factory {
-    service: Arc<Service>,
-    watcher: Arc<farcooler_daemon::watch::Watcher>,
-    scope: Scope,
-}
-
-impl farcooler_transport::Handler for Factory {
-    fn handle(
-        &self,
-        req: farcooler_protocol::v1::Request,
-    ) -> impl std::future::Future<Output = farcooler_protocol::v1::Response> + Send {
-        // Nothing waits on this harness's stop signal: the test server has no
-        // process to end, and `daemon.shutdown` is exercised where it matters —
-        // against a real daemon, by `daemon ensure`.
-        let rpc = Rpc::new(
-            self.service.clone(),
-            self.watcher.clone(),
-            self.scope,
-            Arc::new(tokio::sync::Notify::new()),
-        );
-        async move { farcooler_transport::Handler::handle(&rpc, req).await }
-    }
+    Harness { _dir: dir, socket, _permit: permit, tmux_socket, watcher: observed, authorized_keys }
 }
 
 async fn connect(h: &Harness) -> Client<
@@ -1735,4 +1742,293 @@ async fn a_method_this_daemon_never_heard_of_says_so_precisely() {
         }
         other => panic!("expected a capability refusal, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Device enrollment
+//
+// `client.enroll` writes a line into the one file whose corruption costs
+// somebody SSH access to their own runner, so these run against a scratch
+// `authorized_keys` per harness and assert what actually landed in it — not
+// merely that a call returned Ok.
+// ---------------------------------------------------------------------------
+
+/// A valid ed25519 public key, chosen for being obviously synthetic.
+///
+/// Real bytes rather than a plausible-looking string: `from_openssh` decodes the
+/// base64 and checks the length the blob declares, so a fixture that is merely
+/// the right shape is refused as unparseable, and every assertion here would be
+/// testing the refusal path instead.
+const KEY: &str =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA phone";
+
+/// A second one, so a test can tell two devices apart.
+const OTHER_KEY: &str =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER laptop";
+
+/// The enrollment request, written out field by field on purpose.
+///
+/// Exhaustive — no `..Default::default()`. Adding a field to `ClientEnroll`
+/// stops this compiling, which is the point: the one field nobody may add is a
+/// way to ask for an unrestricted line, and the review that catches it should
+/// be the build failing rather than somebody noticing.
+fn enrollment(
+    public_key: &str,
+    label: &str,
+    client_id: &str,
+    scope: Scope,
+) -> farcooler_protocol::v1::Request {
+    let mut req = request("client.enroll");
+    req.payload = Some(request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
+        public_key: public_key.into(),
+        label: label.into(),
+        client_id: client_id.into(),
+        scope: scope as i32,
+    }));
+    req
+}
+
+async fn enrolled(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+) -> Vec<farcooler_protocol::v1::EnrolledClient> {
+    let result = client.call(request("client.list")).await.expect("client.list");
+    let Some(result::Value::ClientList(list)) = result.value else { panic!("wrong result") };
+    list.items
+}
+
+#[test]
+fn the_enrollment_request_cannot_ask_for_an_unrestricted_line() {
+    // An assertion about the SHAPE of the API, not about a flag being rejected.
+    //
+    // A refused flag is still a flag: it can be un-refused by one line in a
+    // dispatch arm, and the design says out loud that writing only restricted
+    // lines is a guard rail against a mistake rather than a security boundary.
+    // The way to keep a guard rail is to leave nothing to ask with, so this
+    // enumerates the whole request surface and insists no field means options,
+    // a command, or a key to be written as it arrived.
+    //
+    // prost derives `Debug` over every field of a message, so the printed form
+    // IS the field list — a new field shows up here without this test being
+    // edited.
+    let printed = format!(
+        "{:?}",
+        farcooler_protocol::v1::ClientEnroll {
+            public_key: KEY.into(),
+            label: "iPhone".into(),
+            client_id: "c1".into(),
+            scope: Scope::Control as i32,
+        }
+    );
+    for forbidden in ["restrict", "unrestricted", "plain", "raw", "options", "command", "force"] {
+        assert!(
+            !printed.contains(forbidden),
+            "ClientEnroll grew a way to ask for a line Far Cooler did not render: {printed}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_read_client_cannot_enroll() {
+    // Enrolling grants a device the right to log in to this runner. `read` is
+    // the scope handed to something that should only see the shape of the
+    // fleet, and a client that can widen its own access is not read-only.
+    let h = start(Scope::Read).await;
+    let mut client = connect(&h).await;
+
+    match client.call(enrollment(KEY, "iPhone", "c1", Scope::Read)).await {
+        Err(ClientError::Daemon { code, retryable, .. }) => {
+            assert_eq!(code, ErrorCode::ScopeDenied as i32);
+            assert!(!retryable, "retrying a scope denial can never succeed");
+        }
+        other => panic!("expected a scope denial, got {other:?}"),
+    }
+    let mut revoke = request("client.revoke");
+    revoke.payload = Some(request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
+        client_id: "c1".into(),
+    }));
+    match client.call(revoke).await {
+        Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::ScopeDenied as i32),
+        other => panic!("expected a scope denial, got {other:?}"),
+    }
+
+    // Nothing was written, which is the assertion that matters: a refusal that
+    // still touched the file would be a refusal in name only.
+    assert!(!h.authorized_keys.exists(), "a refused enrollment created the file");
+
+    // And LOOKING is `read`, because a phone showing which devices are enrolled
+    // is showing the shape of the fleet.
+    assert!(enrolled(&mut client).await.is_empty());
+}
+
+#[tokio::test]
+async fn enrolling_writes_a_restricted_line_and_lists_it_back() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let result =
+        client.call(enrollment(KEY, "iPhone 17", "c1", Scope::Control)).await.expect("enroll");
+    let Some(result::Value::ClientEnroll(outcome)) = result.value else { panic!("wrong result") };
+    assert!(!outcome.already_enrolled, "nothing was enrolled before this");
+    let device = outcome.client.expect("an enrollment describes what it enrolled");
+    assert_eq!(device.client_id, "c1");
+    assert_eq!(device.scope, Scope::Control as i32);
+    assert!(device.fingerprint.starts_with("SHA256:"), "{}", device.fingerprint);
+
+    // What LANDED, rather than what came back. The line is the boundary; the
+    // reply is only a description of it.
+    let written = std::fs::read_to_string(&h.authorized_keys).expect("the file was written");
+    let line =
+        written.lines().find(|line| line.contains("ssh-ed25519")).expect("a key reached the file");
+    assert!(line.starts_with("restrict,command=\""), "not restricted: {line}");
+    assert!(line.contains("--client c1"), "no client id: {line}");
+    assert!(line.contains("--scope control"), "no scope: {line}");
+    // The comment is ours, not the one the device sent.
+    assert!(line.contains("farcooler-iPhone-17-"), "label not ours: {line}");
+    assert!(!line.ends_with(" phone"), "their comment survived: {line}");
+
+    let listed = enrolled(&mut client).await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].client_id, "c1");
+    assert!(!listed[0].foreign);
+    assert_eq!(listed[0].fingerprint, device.fingerprint);
+}
+
+#[tokio::test]
+async fn enrolling_twice_reports_already_present_rather_than_failing() {
+    // The ordinary case, not an edge one: a Mac enrolling itself usually
+    // already has its own shell key in that file, and a ceremony offered a
+    // runner the device can already reach has to report the grant it has rather
+    // than write a second line for the same key.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    client.call(enrollment(KEY, "iPhone", "c1", Scope::Control)).await.expect("first");
+    // A second attempt at a DIFFERENT scope under a different name, so this
+    // cannot pass by the two requests being identical.
+    let result = client
+        .call(enrollment(KEY, "iPhone again", "c2", Scope::Read))
+        .await
+        .expect("an already-enrolled key is a report, not a failure");
+    let Some(result::Value::ClientEnroll(again)) = result.value else { panic!("wrong result") };
+    assert!(again.already_enrolled, "the second enrollment claimed to be the first");
+
+    // The grant it ALREADY has, not the one that was asked for. Reporting the
+    // requested scope would tell a person their phone is read-only while the
+    // file still says control.
+    let existing = again.client.expect("an already-present report names the grant");
+    assert_eq!(existing.client_id, "c1");
+    assert_eq!(existing.scope, Scope::Control as i32);
+
+    let listed = enrolled(&mut client).await;
+    assert_eq!(listed.len(), 1, "a second line was written for one key: {listed:?}");
+}
+
+#[tokio::test]
+async fn client_list_reports_a_foreign_line_as_foreign() {
+    // A line somebody added inside the fence by hand. Dropping it would mean
+    // the next enrollment deleted a key Far Cooler did not write, so it is
+    // carried through and reported — visibly, as not ours.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    std::fs::create_dir_all(h.authorized_keys.parent().unwrap()).unwrap();
+    std::fs::write(
+        &h.authorized_keys,
+        format!(
+            "{}\n{OTHER_KEY}\n{}\n",
+            farcooler_daemon::fence::BEGIN,
+            farcooler_daemon::fence::END
+        ),
+    )
+    .unwrap();
+
+    let listed = enrolled(&mut client).await;
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0].foreign, "a hand-added line was reported as ours");
+    assert!(listed[0].client_id.is_empty(), "a foreign line claimed a client id");
+    assert!(listed[0].fingerprint.starts_with("SHA256:"), "reported by fingerprint at least");
+
+    // And it survives an enrollment beside it.
+    client.call(enrollment(KEY, "iPhone", "c1", Scope::Control)).await.expect("enroll");
+    let written = std::fs::read_to_string(&h.authorized_keys).unwrap();
+    assert!(written.contains(OTHER_KEY), "the hand-added key was deleted: {written}");
+    assert_eq!(enrolled(&mut client).await.len(), 2);
+}
+
+#[tokio::test]
+async fn revoking_removes_the_line_and_leaves_everything_else() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    // A stranger's key ABOVE the fence: the ordinary case, and the one where a
+    // botched rewrite costs somebody their own access.
+    std::fs::create_dir_all(h.authorized_keys.parent().unwrap()).unwrap();
+    std::fs::write(&h.authorized_keys, format!("{OTHER_KEY}\n")).unwrap();
+
+    client.call(enrollment(KEY, "iPhone", "c1", Scope::Control)).await.expect("enroll");
+    assert_eq!(enrolled(&mut client).await.len(), 1);
+
+    let mut revoke = request("client.revoke");
+    revoke.payload = Some(request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
+        client_id: "c1".into(),
+    }));
+    let result = client.call(revoke).await.expect("client.revoke");
+    let Some(result::Value::ClientList(remaining)) = result.value else { panic!("wrong result") };
+    assert!(remaining.items.is_empty(), "the revoked device is still listed");
+
+    let written = std::fs::read_to_string(&h.authorized_keys).unwrap();
+    assert!(written.starts_with(OTHER_KEY), "somebody else's key went with it: {written}");
+    assert!(!written.contains("--client c1"), "the line survived revocation: {written}");
+}
+
+#[tokio::test]
+async fn revoking_something_nobody_enrolled_says_so() {
+    // NOT_FOUND rather than a cheerful success: "revoked" from a runner that
+    // revoked nothing is the one answer a person must never be given about a
+    // device they are trying to cut off.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    let mut revoke = request("client.revoke");
+    revoke.payload = Some(request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
+        client_id: "never-enrolled".into(),
+    }));
+    match client.call(revoke).await {
+        Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::NotFound as i32),
+        other => panic!("expected NOT_FOUND, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_key_that_is_not_ed25519_is_refused_with_something_a_form_can_show() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    // A real, tiny, valid RSA key: what is refused is its ALGORITHM, and a
+    // malformed fixture would pass this assertion for the wrong reason.
+    let rsa =
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAIH+rq6urq6urq6urq6urq6urq6urq6urq6urq6urq6sB me";
+    match client.call(enrollment(rsa, "laptop", "c1", Scope::Control)).await {
+        Err(ClientError::Daemon { code, message, .. }) => {
+            assert_eq!(code, ErrorCode::InvalidArgument as i32);
+            // Never the parser's own words: they are built from bytes off the
+            // wire, and this string is rendered in Settings.
+            assert!(!message.contains("ssh-rsa"), "the key reached the message: {message}");
+        }
+        other => panic!("expected INVALID_ARGUMENT, got {other:?}"),
+    }
+    assert!(!h.authorized_keys.exists(), "a refused key created the file");
+}
+
+#[tokio::test]
+async fn this_runner_names_itself_so_a_device_can_record_what_it_enrolled_on() {
+    // `host.get` gains the runner id rather than getting a call of its own: the
+    // app records a grant per runner, and it already makes this call.
+    let h = start(Scope::Read).await;
+    let mut client = connect(&h).await;
+
+    let result = client.call(request("host.get")).await.expect("host.get");
+    let Some(result::Value::Host(host)) = result.value else { panic!("wrong result") };
+    assert!(!host.runner_id.is_empty());
+    // The same identity the message already carries in bytes, as text — not a
+    // second identifier that could disagree with the first.
+    assert_eq!(host.runner_id, uuid::Uuid::from_slice(&host.id).unwrap().to_string());
 }

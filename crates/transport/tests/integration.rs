@@ -11,7 +11,7 @@ use std::time::Duration;
 use bytes::{BufMut, BytesMut};
 use farcooler_protocol::PROTOCOL_VERSION;
 use farcooler_protocol::v1::{self, Request, Response, WireEnvelope, wire_envelope};
-use farcooler_transport::{Connection, ConnectionError, FrameReader, FrameWriter, Handler, HandshakeConfig, UnixListenerServer};
+use farcooler_transport::{Connection, ConnectionError, FrameReader, FrameWriter, Handler, HandshakeConfig, Peer, UnixListenerServer};
 use tempfile::tempdir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -22,6 +22,13 @@ struct RecordingHandler {
 }
 
 impl Handler for RecordingHandler {
+    /// A local caller: no device named, and everything permitted. The scope
+    /// reaches `ServerHello` from here, which is what the round-trip test's
+    /// `granted_scope` assertion is reading.
+    fn peer(&self) -> Peer {
+        Peer { client_id: None, scope: v1::Scope::Control }
+    }
+
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let request_id = req.request_id.clone();
@@ -29,8 +36,42 @@ impl Handler for RecordingHandler {
     }
 }
 
+/// A handler something outside the connection can end.
+///
+/// The shape the daemon's session registry has, reduced to the part transport
+/// is responsible for: `closed` resolves, and the connection stops.
+#[derive(Clone)]
+struct ClosableHandler {
+    inner: RecordingHandler,
+    /// Zero permits, so awaiting it can only finish by the semaphore closing.
+    gate: Arc<tokio::sync::Semaphore>,
+}
+
+impl ClosableHandler {
+    fn new() -> Self {
+        Self { inner: RecordingHandler::default(), gate: Arc::new(tokio::sync::Semaphore::new(0)) }
+    }
+}
+
+impl Handler for ClosableHandler {
+    fn peer(&self) -> Peer {
+        Peer { client_id: Some("phone".into()), scope: v1::Scope::Read }
+    }
+
+    fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
+        self.inner.handle(req)
+    }
+
+    fn closed(&self) -> impl std::future::Future<Output = ()> + Send {
+        let gate = self.gate.clone();
+        async move {
+            let _ = gate.acquire().await;
+        }
+    }
+}
+
 fn handshake_cfg() -> HandshakeConfig {
-    HandshakeConfig { daemon_version: "test-daemon".into(), granted_scope: v1::Scope::Control }
+    HandshakeConfig { daemon_version: "test-daemon".into() }
 }
 
 fn request_envelope(method: &str) -> WireEnvelope {
@@ -279,4 +320,43 @@ async fn a_refused_session_never_reaches_the_handshake() {
     let err = client.client_handshake("itest", "0.1.0").await.unwrap_err();
     assert!(matches!(err, ConnectionError::Closed | ConnectionError::Codec(_)), "{err:?}");
     assert_eq!(handler.calls.load(Ordering::SeqCst), 0);
+}
+
+/// A connection closed from above stops being served, and serves nothing more.
+///
+/// The seam revocation is built on, tested where it lives: transport still owns
+/// the socket, and the only thing it is told is that this connection is over.
+/// The request sent afterwards is the assertion that matters — it is answered
+/// by nobody, because the handler's dispatch is never reached again.
+#[tokio::test]
+async fn a_handler_can_end_its_own_connection() {
+    let dir = tempdir().unwrap();
+    let sock_path = dir.path().join("farcooler.sock");
+    let handler = ClosableHandler::new();
+    let server = UnixListenerServer::bind(&sock_path).unwrap();
+    let server_handler = handler.clone();
+    tokio::spawn(async move {
+        let _ = server.serve(move |_| Some((handshake_cfg(), server_handler.clone()))).await;
+    });
+
+    let stream = UnixStream::connect(&sock_path).await.unwrap();
+    let (read_half, write_half) = stream.into_split();
+    let mut client = Connection::new(read_half, write_half);
+    client.client_handshake("itest", "0.1.0").await.unwrap();
+    client.send(&request_envelope("anything")).await.unwrap();
+    client.recv().await.expect("answered while the connection was open");
+
+    handler.gate.close();
+
+    // Sent after the close, so the only way it can be answered is the serve
+    // loop preferring a readable socket over the fact that this connection is
+    // finished.
+    let _ = client.send(&request_envelope("anything")).await;
+    match client.recv().await {
+        Ok(frame) => panic!("a closed connection answered a request: {frame:?}"),
+        Err(err) => {
+            assert!(matches!(err, ConnectionError::Closed | ConnectionError::Codec(_)), "{err:?}")
+        }
+    }
+    assert_eq!(handler.inner.calls.load(Ordering::SeqCst), 1, "the second request was dispatched");
 }

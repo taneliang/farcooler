@@ -196,13 +196,19 @@ pub mod capability {
     pub const ADAPTERS: &str = "adapters";
     /// Themes and runner settings.
     pub const THEMES: &str = "themes";
+    /// Reading, adding and removing the device keys in this runner's fence.
+    ///
+    /// Its own capability rather than part of `THEMES`: an app that cannot
+    /// enroll on a runner has to say so before the ceremony starts, not after
+    /// the user has scanned a code.
+    pub const ENROLLMENT: &str = "enrollment";
 
     /// Every capability this build has, in a stable order.
     ///
     /// Stable so that two daemons of the same build produce byte-identical
     /// hellos, which makes the list diffable in a log.
     pub const ALL: &[&str] =
-        &[WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES];
+        &[WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES, ENROLLMENT];
 
     /// The capability a method belongs to, or `None` if there is no such
     /// method.
@@ -259,6 +265,7 @@ pub mod capability {
             m if m.starts_with("layout.") => LAYOUT,
             "adapter.list" | "adapter.upsert" | "adapter.delete" | "adapter.test" => ADAPTERS,
             "theme.list" | "theme.upsert" | "theme.delete" | "settings.set_branch_prefix" => THEMES,
+            "client.list" | "client.enroll" | "client.revoke" => ENROLLMENT,
             _ => return None,
         })
     }
@@ -361,6 +368,7 @@ mod tests {
             "layout.split",
             "adapter.list",
             "theme.list",
+            "client.enroll",
         ] {
             let cap = capability::for_method(method).expect("a known method");
             assert!(capability::ALL.contains(&cap), "{method} names {cap}, which is not advertised");

@@ -278,6 +278,23 @@ pub struct Service {
     /// happens when two tests run in parallel, and would happen in production
     /// the first time anything set the variable after startup.
     root: PathBuf,
+    /// The `authorized_keys` this runner enrolls devices into.
+    ///
+    /// A field rather than a home directory looked up at each use, for the
+    /// reason `root` is one and then some: the file decides who may log in
+    /// here, and a test that reached the real one could take away the SSH
+    /// access of whoever ran the suite. Holding it means a test points ONE
+    /// service at a scratch file; an environment variable would be
+    /// process-global and would move every other test's target with it.
+    authorized_keys: PathBuf,
+    /// Every connection this daemon is serving, so a revocation can end the
+    /// ones belonging to the device it revoked.
+    ///
+    /// Here rather than beside the listener because `enrollment::revoke` is
+    /// where the decision is made and a `Service` is what it is handed. It is
+    /// runtime truth, never stored: a session is a live connection and a
+    /// restarted daemon has none.
+    sessions: Arc<crate::sessions::Sessions>,
     /// Which agents are recognized, and which can be hosted as a chat.
     ///
     /// Held rather than re-read per call, for the same reason `root` is: the
@@ -389,6 +406,8 @@ impl Service {
             host_id,
             install_id,
             root,
+            authorized_keys: default_authorized_keys(),
+            sessions: crate::sessions::Sessions::new(),
             registry,
             agents: agent_supervisor::AgentSupervisor::new(),
             review_cache: crate::review::ReviewCache::new(),
@@ -397,6 +416,28 @@ impl Service {
             default_branches: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    /// Enroll devices into some other file than this user's own.
+    ///
+    /// Exists for the tests, and says so: they run in parallel in one process
+    /// against a file whose corruption costs somebody SSH access, so each needs
+    /// its own. Taken by value and returned, so it can only be set before the
+    /// service is shared — a path that could change under a write in flight
+    /// would be a write that lands in two files.
+    pub fn enrolling_into(mut self, path: PathBuf) -> Self {
+        self.authorized_keys = path;
+        self
+    }
+
+    /// The file this runner's device keys live in.
+    pub fn authorized_keys(&self) -> &Path {
+        &self.authorized_keys
+    }
+
+    /// The connections this daemon is serving right now.
+    pub fn sessions(&self) -> &Arc<crate::sessions::Sessions> {
+        &self.sessions
     }
 
     /// Wait for permission to run `gh`. Held for the length of the call.
@@ -1929,9 +1970,25 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
+/// This user's own `~/.ssh/authorized_keys`.
+///
+/// An empty path when there is no home directory to speak of, which the fence
+/// writer turns into a refusal rather than a guess — the alternative is writing
+/// keys into whatever the process's working directory happens to be.
+fn default_authorized_keys() -> PathBuf {
+    directories::UserDirs::new()
+        .map(|dirs| dirs.home_dir().join(".ssh").join("authorized_keys"))
+        .unwrap_or_default()
+}
+
 /// Derive a stable UUID from the install id so the daemon identity survives
 /// restarts and previously written tags remain provable.
-pub(crate) fn stable_host_id(install_id: &str) -> Uuid {
+///
+/// `pub` because it is on the wire now: `Host.runner_id` is this value, and a
+/// device records it to remember which runner it enrolled on. It is a name
+/// rather than a secret — it is already the tmux socket's name and the marker
+/// on every worktree this install owns.
+pub fn stable_host_id(install_id: &str) -> Uuid {
     let mut bytes = [0u8; 16];
     for (i, b) in install_id.as_bytes().iter().enumerate() {
         bytes[i % 16] ^= *b;

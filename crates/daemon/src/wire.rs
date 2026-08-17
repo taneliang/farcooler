@@ -97,6 +97,30 @@ pub fn host(
         settings: Some(wire::HostSettings {
             branch_prefix: farcooler_core::config::load_branch_prefix(),
         }),
+        // The same identity `id` already carries, as text. Derived from it
+        // rather than computed a second time from the install id, so the two
+        // fields cannot come to disagree about which runner this is.
+        runner_id: host_id.to_string(),
+    }
+}
+
+/// One line of this runner's fence, as a client reads it.
+///
+/// `client_id.is_empty()` is what says a line is foreign — the fence's own
+/// convention — and it becomes an explicit flag here, because a client should
+/// not have to know that an empty string is a meaning.
+///
+/// No scope redaction and no path token: there is no path in it, and which
+/// devices may log in is exactly the shape-of-the-fleet fact `read` exists for.
+pub fn enrolled_client(entry: &crate::fence::Entry, enrolled_at: i64) -> wire::EnrolledClient {
+    wire::EnrolledClient {
+        client_id: entry.client_id.clone(),
+        fingerprint: entry.fingerprint.clone(),
+        label: entry.label.clone(),
+        scope: entry.scope as i32,
+        account: entry.account.clone().unwrap_or_default(),
+        enrolled_at,
+        foreign: entry.client_id.is_empty(),
     }
 }
 

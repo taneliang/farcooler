@@ -66,10 +66,17 @@ impl ConnectionError {
 
 /// Server-side handshake parameters. Auth/scope decisions live above this
 /// crate; transport just needs something to put in `ServerHello`.
+///
+/// The scope is deliberately NOT here. It used to be, and the dispatcher above
+/// this crate had a second copy of it: what a session was TOLD it held and what
+/// it was actually permitted were two values, and they were once two different
+/// values — the dispatcher hardcoded host admin, so a read session was
+/// advertised `read` and allowed everything. It now comes from `Handler::peer`,
+/// the same place enforcement reads it, so there is no second value left to
+/// disagree.
 #[derive(Debug, Clone)]
 pub struct HandshakeConfig {
     pub daemon_version: String,
-    pub granted_scope: Scope,
 }
 
 pub struct Connection<R> {
@@ -182,7 +189,14 @@ impl<R: AsyncRead + Unpin> Connection<R> {
     /// Server side of rule 2. Reads the first frame, requires it to be
     /// `ClientHello`, and replies with either `ServerHello` or an explicit
     /// rejection before anything else is ever dispatched.
-    pub async fn handshake(&mut self, cfg: &HandshakeConfig) -> Result<ClientHello, ConnectionError> {
+    ///
+    /// `granted` is passed rather than held in `cfg` so it can only come from
+    /// the same place the dispatcher reads it — the connection's `Peer`.
+    pub async fn handshake(
+        &mut self,
+        cfg: &HandshakeConfig,
+        granted: Scope,
+    ) -> Result<ClientHello, ConnectionError> {
         let first = self.recv().await?;
         let (client_message_id, hello) = match first.body {
             Some(wire_envelope::Body::ClientHello(h)) => (first.message_id, h),
@@ -205,7 +219,7 @@ impl<R: AsyncRead + Unpin> Connection<R> {
                 daemon_version: cfg.daemon_version.clone(),
                 max_control_envelope_bytes: farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES as u32,
                 max_terminal_payload_bytes: farcooler_protocol::MAX_TERMINAL_PAYLOAD_BYTES as u32,
-                granted_scope: cfg.granted_scope as i32,
+                granted_scope: granted as i32,
                 // Answered in the handshake so every client knows what this
                 // runner can do before its first request, at no extra round
                 // trip. Built from `capability::ALL`, the same table
@@ -298,7 +312,15 @@ where
     R: AsyncRead + Unpin,
     H: Handler,
 {
-    conn.handshake(cfg).await?;
+    let peer = handler.peer();
+    conn.handshake(cfg, peer.scope).await?;
+
+    // Created once, before the first request, so nothing can be dispatched
+    // between "this connection was closed" and this loop noticing. Polled from
+    // inside the `select!` below and never after it fires, because the first
+    // time it does the loop returns.
+    let closed = handler.closed();
+    let mut closed = std::pin::pin!(closed);
 
     // Events are pushed, not polled.
     //
@@ -313,7 +335,17 @@ where
             // Biased so a pending request is always answered before events are
             // drained. Without it a busy fleet could starve request handling,
             // and a user's click would wait behind a queue of notifications.
+            //
+            // The close arm goes FIRST, ahead of even that. It is the one thing
+            // that must win a tie: a revoked device whose request is already
+            // sitting in the socket buffer would otherwise be served it, and
+            // the whole point of closing the connection is that it is not.
             biased;
+
+            _ = &mut closed => {
+                tracing::debug!(client = ?peer.client_id, "this connection was closed from above");
+                return Ok(());
+            }
 
             incoming = conn.recv() => {
                 let envelope = incoming?;
@@ -447,9 +479,9 @@ mod tests {
         let mut server = Connection::new(sr, sw);
         let mut client = Connection::new(cr, cw);
 
-        let cfg = HandshakeConfig { daemon_version: "dtest".into(), granted_scope: Scope::Control };
+        let cfg = HandshakeConfig { daemon_version: "dtest".into() };
         let server_task = tokio::spawn(async move {
-            let hello = server.handshake(&cfg).await.unwrap();
+            let hello = server.handshake(&cfg, Scope::Control).await.unwrap();
             assert_eq!(hello.client_name, "itest");
             // `send`'s reply only queues the bytes; the writer task delivers
             // them on its own schedule. Stay alive (as `serve_connection`'s

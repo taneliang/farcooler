@@ -127,6 +127,8 @@ message Request {
     StackSetParent stack_set_parent = 63;
     PrRefresh pr_refresh = 64;
     ChangesInboxRequest changes_inbox = 65;
+    ClientEnroll client_enroll = 66;
+    ClientRevoke client_revoke = 67;
   }
 }
 
@@ -178,6 +180,8 @@ message Result {
     FileDiff file_diff = 26;
     StackLinkList stack_link_list = 32;
     ChangesInbox changes_inbox = 33;
+    ClientList client_list = 34;
+    ClientEnrollResult client_enroll = 35;
   }
 }
 
@@ -486,6 +490,17 @@ message Host {
   // workspace — a second round trip there would be a round trip spent asking
   // for a string.
   HostSettings settings = 10;
+  // This runner's stable identity, as text, for a device that has to record
+  // which runner it enrolled on.
+  //
+  // The same value `id` carries in bytes — derived from the install id, which
+  // is persistent, lives in the runtime directory and is per `FARCOOLER_HOME`,
+  // so three engineers on one machine have three. Deliberately not a second
+  // identifier: two names for one runner is two names that can disagree. Text
+  // rather than bytes because it is stored and compared by clients that keep it
+  // in a settings file, and it is a name rather than a secret — it is already
+  // visible as the tmux socket name and in worktree owner markers.
+  string runner_id = 11;
 }
 
 enum SelfHealth {
@@ -1676,3 +1691,96 @@ message ChangesInbox {
   // fleet is worse than one that says it is not showing you everything.
   uint32 elsewhere = 2;
 }
+
+// ---------------------------------------------------------------------------
+// Device enrollment
+//
+// Which devices may log in to this runner, and the two calls that change that.
+// The runner's own `~/.ssh/authorized_keys` is the authority: no enrollment
+// recorded anywhere else can disagree with the file, so everything here is read
+// back out of it rather than out of a database.
+// ---------------------------------------------------------------------------
+
+// One line inside this runner's fence.
+//
+// Including a line Far Cooler did not write. Dropping those would mean the next
+// enrollment deleted a key somebody added by hand, so they are carried through
+// and reported — see `foreign`.
+message EnrolledClient {
+  // The device, as the forced command on the line names it. Empty for a
+  // foreign line: nothing names a device there.
+  string client_id = 1;
+  // `SHA256:…`, as `ssh-keygen -lf` prints it. Empty only when the line held no
+  // key this build could parse at all.
+  string fingerprint = 2;
+  // The key's comment, which for Far Cooler's own lines is the name it chose.
+  string label = 3;
+  // What this device may do, as the forced command says. UNSPECIFIED for a
+  // foreign line, and for one of ours whose scope word this build does not
+  // have — which grants nothing, because the daemon serving it refuses the word
+  // too.
+  Scope scope = 4;
+  // Which local account's `authorized_keys` this line was read from.
+  //
+  // Not in the line: nothing in `authorized_keys` names the account it grants,
+  // the file's LOCATION is what does. Filled in by the daemon that opened it.
+  string account = 5;
+  // Milliseconds since the epoch, or 0 for unknown — which is the ordinary
+  // answer. `authorized_keys` records no time, and the file is the authority,
+  // so only the reply to an enrollment that just happened can fill this in.
+  int64 enrolled_at = 6;
+  // Far Cooler did not write this line. It is inside the fence and is left
+  // exactly as it was found; it is reported so a person can see it is there.
+  bool foreign = 7;
+}
+
+message ClientList { repeated EnrolledClient items = 1; }
+
+// Add a device's key to this runner's fence.
+//
+// There is deliberately NO field here for options, a forced command, or a key
+// to be written as it arrived. Every line this writes is
+// `restrict,command="farcoolerd --stdio --client <id> --scope <scope>"` with the
+// key rebuilt from its own key data, and the absence of a way to ask for
+// anything else is the guard rail — a flag that could be refused is a flag that
+// can be un-refused by one line in a dispatch arm.
+//
+// That guard rail is against a MISTAKE, not a security boundary, and the design
+// says so out loud: a device holding `control` drives a terminal, and a terminal
+// can append to `authorized_keys` by itself.
+message ClientEnroll {
+  // One OpenSSH public key line, ed25519, as the device generated it. Nothing
+  // of it survives into the file except the key material, re-encoded.
+  string public_key = 1;
+  // A name for humans. The comment written to the file is derived from it and
+  // suffixed with the fingerprint, never used verbatim.
+  string label = 2;
+  // The device this line will name. Refused if it would not survive being
+  // written into a forced command.
+  string client_id = 3;
+  // Refused when UNSPECIFIED. An unscoped line already means host_admin to
+  // sshd, so guessing would turn a field somebody forgot into the whole runner.
+  Scope scope = 4;
+}
+
+message ClientEnrollResult {
+  // What is enrolled now — which, when `already_enrolled` is set, is the grant
+  // that was already there rather than the one that was asked for.
+  EnrolledClient client = 1;
+  // This key, or this client id, was already in the fence and nothing was
+  // written.
+  //
+  // Not an error: it is the ordinary outcome of enrolling a Mac on itself,
+  // whose own shell key is usually already in that file, and of a ceremony
+  // offered a runner the device can already reach. A failure would send a
+  // person looking for a problem that does not exist; a second line for one key
+  // would leave the daemon unable to say which of them a session used.
+  bool already_enrolled = 2;
+}
+
+// Remove a device's line from this runner's fence.
+//
+// By client id, which is what the forced command carries. A line Far Cooler did
+// not write has no client id and so cannot be named here — deliberately: this
+// call must not be able to delete a key somebody added by hand.
+message ClientRevoke { string client_id = 1; }

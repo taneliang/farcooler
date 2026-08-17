@@ -13,9 +13,20 @@
 
 use std::sync::Arc;
 
-use farcooler_daemon::{paths, rpc::Rpc, service::Service, watch::Watcher};
-use farcooler_protocol::v1::{Request, Response, Scope};
-use farcooler_transport::{HandshakeConfig, Handler, UnixListenerServer};
+// The scope words come from `fence` rather than from a pair of matches here,
+// because that module WRITES the `--scope` word this one reads back off the
+// command line sshd forced. Two spellings of the same vocabulary would mean an
+// enrollment that grants nothing, and it would say so only on the runner.
+use farcooler_daemon::{
+    fence::{scope_from_word, scope_word},
+    paths,
+    rpc::RpcFactory,
+    service::Service,
+    sessions::peer_from_preamble,
+    watch::Watcher,
+};
+use farcooler_protocol::v1::Scope;
+use farcooler_transport::{HandshakeConfig, Peer, UnixListenerServer};
 
 #[tokio::main]
 async fn main() {
@@ -224,55 +235,46 @@ async fn run() -> Result<(), i32> {
         }
     };
 
-    // What an accepted connection is allowed to do, decided per connection.
+    // Who an accepted connection is, decided per connection.
     //
     // Almost every caller here is a local one and gets host_admin. The exception
     // is a `--stdio` process relaying an ssh session into this daemon: sshd gave
-    // it a scope, it says so in one line before the first frame, and that has to
-    // survive the relay or a read-enrolled device would hold host admin on every
-    // runner where a daemon happens to be running — which is every runner in
-    // normal use.
+    // it a scope and a device id, it says so in one line before the first frame,
+    // and both have to survive the relay. The scope, or a read-enrolled device
+    // would hold host admin on every runner where a daemon happens to be
+    // running — which is every runner in normal use. The device id, or nothing
+    // in this daemon can say which connections belong to a device, and
+    // `client.revoke` cannot close what it revoked.
     let sessions = {
         let service = service.clone();
         let watcher = watcher.clone();
         let stop = stop.clone();
         move |preamble: Option<farcooler_transport::SessionPreamble>| {
-            let granted = match preamble.as_ref().map(|said| said.scope.as_str()) {
-                // A local socket caller holds host_admin.
-                //
-                // Reaching this socket already requires being the owning user on
-                // this host, who can read the database and the worktrees
-                // directly anyway. Granting less here would protect nothing; it
-                // would only stop the user's own Mac app from showing them their
-                // own paths. Remote clients arrive over SSH and are scoped
-                // there, where the distinction is real.
-                //
-                // So an absent preamble is not a lesser session: it is every
-                // client installed before the preamble existed, and it means
-                // exactly what it has always meant.
-                None => Scope::HostAdmin,
-                // Present but unreadable is a different matter, and refuses. See
-                // `scope_from_word`.
-                Some(word) => scope_from_word(word)?,
-            };
-            // The preamble's client id stops here, deliberately. Which device
-            // this is belongs to the connection, and `Handler` carries nothing
-            // per connection — giving it that is the one change writer leases,
-            // per-client idempotency, auditing and revoke-by-client all need at
-            // once, and it is an open decision at the end of the onboarding plan
-            // rather than a detail to settle in passing. Scope needs no such
-            // seam: it is decided here, once, for the whole connection.
+            // A local socket caller holds host_admin.
+            //
+            // Reaching this socket already requires being the owning user on
+            // this host, who can read the database and the worktrees directly
+            // anyway. Granting less here would protect nothing; it would only
+            // stop the user's own Mac app from showing them their own paths.
+            // Remote clients arrive over SSH and are scoped there, where the
+            // distinction is real.
+            //
+            // So an absent preamble is not a lesser session: it is every client
+            // installed before the preamble existed, and it means exactly what
+            // it has always meant. It also names no device, which is what keeps
+            // a revocation from ever closing the Mac app's own connection.
+            //
+            // Present but unreadable is a different matter, and refuses. See
+            // `scope_from_word`.
+            //
+            // Both rules live in `peer_from_preamble` rather than here, because
+            // this is a binary: a test cannot call this closure, and the copy it
+            // would have to write instead is a second answer about who a caller
+            // is — asserted against, while the daemon uses the first one.
+            let peer = peer_from_preamble(preamble.as_ref())?;
             Some((
-                HandshakeConfig {
-                    daemon_version: farcooler_protocol::BUILD.to_string(),
-                    granted_scope: granted,
-                },
-                RpcFactory {
-                    service: service.clone(),
-                    watcher: watcher.clone(),
-                    stop: stop.clone(),
-                    granted,
-                },
+                HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() },
+                RpcFactory::new(service.clone(), watcher.clone(), stop.clone(), peer),
             ))
         }
     };
@@ -346,32 +348,6 @@ async fn relay_stdio(stream: tokio::net::UnixStream) -> Result<(), i32> {
     Ok(())
 }
 
-/// A scope word, as `authorized_keys` and the session preamble spell it.
-///
-/// `None` is a word this daemon does not have, which refuses rather than
-/// resolves. Absence of a scope is a decision — see `requested_scope` — but a
-/// misspelling is a mistake, and rounding a mistake up to host admin turns a
-/// typo on a line nobody re-reads into privilege escalation.
-fn scope_from_word(word: &str) -> Option<Scope> {
-    match word {
-        "read" => Some(Scope::Read),
-        "control" => Some(Scope::Control),
-        "host_admin" => Some(Scope::HostAdmin),
-        _ => None,
-    }
-}
-
-/// The same word going out, for the preamble the relay sends.
-fn scope_word(scope: Scope) -> &'static str {
-    match scope {
-        Scope::Read => "read",
-        Scope::Control => "control",
-        // `Unspecified` cannot reach here: a scope is either parsed from a word
-        // above or defaulted to host_admin, and neither produces it.
-        Scope::HostAdmin | Scope::Unspecified => "host_admin",
-    }
-}
-
 /// What the forced command says this session is.
 ///
 /// `authorized_keys` carries `command="... --scope read --client phone-7"`, and
@@ -386,11 +362,11 @@ struct Session {
     /// Which enrolled device this is, as this runner's file says rather than as
     /// the connection claims.
     ///
-    /// Parsed, relayed, and carried no further — `Handler` has no per-connection
-    /// context to put it in, and giving it one is the single change writer
-    /// leases, per-client idempotency, auditing and revoke-by-client all need at
-    /// once. That is an open decision in the onboarding plan, not something to
-    /// settle as a side effect of scoping a session.
+    /// Carried the whole way: into the preamble when this session is relayed
+    /// into a running daemon, and into `Peer` either way, which is what makes a
+    /// live connection attributable to a device at all. `client.revoke` closing
+    /// what it revoked is the first thing that depends on it; writer leases,
+    /// per-client idempotency and auditing are the rest.
     client: Option<String>,
 }
 
@@ -504,19 +480,26 @@ async fn serve_stdio_session() -> Result<(), i32> {
     let watcher = Watcher::new(service.clone());
     tokio::spawn(watcher.clone().run());
 
-    let cfg = HandshakeConfig {
-        daemon_version: farcooler_protocol::BUILD.to_string(),
-        granted_scope: granted,
-    };
+    let cfg = HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() };
 
     // `daemon.shutdown` ends this session, which is the whole of what this
     // process is. Nothing else here is shared, so there is no other daemon for
     // it to stop — when one exists, the branch above made this a pipe to it and
     // the request went there instead.
+    //
+    // The session is registered in this process's own `Service`, which is the
+    // honest scope of what a revocation here can close: exactly this session.
+    // A device with a session against the daemon on the socket is closed by
+    // that daemon, and this process is only ever reached when there is none.
     let stop = Arc::new(tokio::sync::Notify::new());
     let served = farcooler_transport::serve_stdio(
         cfg,
-        RpcFactory { service, watcher, stop: stop.clone(), granted },
+        RpcFactory::new(
+            service,
+            watcher,
+            stop.clone(),
+            Peer { client_id: session.client.clone(), scope: granted },
+        ),
     );
 
     tokio::select! {
@@ -525,45 +508,6 @@ async fn serve_stdio_session() -> Result<(), i32> {
             1
         }),
         _ = stop.notified() => Ok(()),
-    }
-}
-
-/// One `Rpc` per request, over one shared `Service`.
-///
-/// The scope belongs to the connection; the service does not, and must not — a
-/// second `Service` would mean a second SQLite handle and a second, divergent
-/// view of the tmux inventory.
-#[derive(Clone)]
-struct RpcFactory {
-    service: Arc<Service>,
-    watcher: Arc<Watcher>,
-    /// Shared with whatever is waiting to stop this process. See `daemon.shutdown`.
-    stop: Arc<tokio::sync::Notify>,
-    /// What this connection may do.
-    ///
-    /// It used to be a `Scope::HostAdmin` literal inside `handle`, which meant
-    /// the handshake could advertise a scope the dispatcher never applied: a
-    /// read session was TOLD it held read and then permitted everything. One
-    /// factory per connection, so this is the connection's own scope and not a
-    /// process-wide guess — a `--stdio` process serves exactly one session, and
-    /// the socket builds a factory per accepted caller.
-    granted: Scope,
-}
-
-impl Handler for RpcFactory {
-    fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
-        let rpc =
-            Rpc::new(self.service.clone(), self.watcher.clone(), self.granted, self.stop.clone());
-        async move { rpc.handle(req).await }
-    }
-
-    /// Every connection is subscribed to the push stream.
-    ///
-    /// No opt-in request: a client that connected wants to know when something
-    /// changes, and making it ask would just be a round trip before the first
-    /// event. Cost is zero on a quiet runner, because only changes are sent.
-    fn events(&self) -> Option<tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>> {
-        Some(self.watcher.subscribe())
     }
 }
 
