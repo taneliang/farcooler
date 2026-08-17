@@ -377,6 +377,25 @@ mod tests {
         p
     }
 
+    /// A worktree destination beside the scratch repo, and unique to this process.
+    ///
+    /// A worktree cannot live inside the repository it belongs to, so these have
+    /// to be siblings. The obvious spelling — joining `../wt-name` onto the
+    /// scratch repo — looks like it inherits `scratch`'s per-process name, and
+    /// does not: `..` climbs out of the very directory the pid is in, so every
+    /// concurrent `cargo test` process aimed at one `/tmp/wt-name` and one of
+    /// them lost.
+    ///
+    /// That made these tests fail only when two runs overlapped, which is the
+    /// worst shape a failure can have — it trains people to re-run rather than
+    /// read, and it fails in CI on a busy machine while passing on every desk.
+    fn sibling(name: &str) -> PathBuf {
+        let p = std::env::temp_dir()
+            .join(format!("farcooler-git-test-wt-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        p
+    }
+
     fn init_repo(dir: &Path) {
         for args in [
             vec!["init", "-q", "-b", "main"],
@@ -418,8 +437,7 @@ mod tests {
     async fn creates_a_worktree_on_a_new_branch() {
         let d = scratch("create");
         init_repo(&d);
-        let dest = d.join("../wt-create");
-        let _ = std::fs::remove_dir_all(&dest);
+        let dest = sibling("create");
 
         create_worktree(&d, "feature/x", "HEAD", &dest).await.unwrap();
 
@@ -434,10 +452,8 @@ mod tests {
     async fn refuses_an_existing_branch_rather_than_reusing_it() {
         let d = scratch("branchdup");
         init_repo(&d);
-        let a = d.join("../wt-a1");
-        let b = d.join("../wt-b1");
-        let _ = std::fs::remove_dir_all(&a);
-        let _ = std::fs::remove_dir_all(&b);
+        let a = sibling("a1");
+        let b = sibling("b1");
 
         create_worktree(&d, "dup", "HEAD", &a).await.unwrap();
         let err = create_worktree(&d, "dup", "HEAD", &b).await.unwrap_err();
@@ -451,8 +467,7 @@ mod tests {
     async fn refuses_an_occupied_destination() {
         let d = scratch("pathdup");
         init_repo(&d);
-        let dest = d.join("../wt-occupied");
-        let _ = std::fs::remove_dir_all(&dest);
+        let dest = sibling("occupied");
         std::fs::create_dir_all(&dest).unwrap();
 
         let err = create_worktree(&d, "newbranch", "HEAD", &dest).await.unwrap_err();
@@ -466,7 +481,7 @@ mod tests {
     async fn rejects_an_unknown_base_revision_before_mutating() {
         let d = scratch("badbase");
         init_repo(&d);
-        let dest = d.join("../wt-badbase");
+        let dest = sibling("badbase");
 
         let err = create_worktree(&d, "b", "no-such-rev", &dest).await.unwrap_err();
         assert!(matches!(err, DomainError::InvalidArgument { .. }));
@@ -480,8 +495,7 @@ mod tests {
     async fn rollback_removes_a_clean_untouched_worktree() {
         let d = scratch("rbclean");
         init_repo(&d);
-        let dest = d.join("../wt-rbclean");
-        let _ = std::fs::remove_dir_all(&dest);
+        let dest = sibling("rbclean");
 
         let base = resolve_revision(&d, "HEAD").await.unwrap();
         create_worktree(&d, "rb", "HEAD", &dest).await.unwrap();
@@ -497,8 +511,7 @@ mod tests {
     async fn rollback_preserves_a_dirty_worktree() {
         let d = scratch("rbdirty");
         init_repo(&d);
-        let dest = d.join("../wt-rbdirty");
-        let _ = std::fs::remove_dir_all(&dest);
+        let dest = sibling("rbdirty");
 
         let base = resolve_revision(&d, "HEAD").await.unwrap();
         create_worktree(&d, "rbd", "HEAD", &dest).await.unwrap();
