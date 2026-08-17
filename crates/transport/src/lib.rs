@@ -15,7 +15,7 @@ pub mod stdio;
 pub use client::{Client, ClientError, request};
 pub use codec::{CodecError, FrameReader, FrameWriter};
 pub use connection::{Connection, ConnectionError, HandshakeConfig, TOO_SLOW_DISCONNECT, serve_connection};
-pub use listener::UnixListenerServer;
+pub use listener::{SessionPreamble, UnixListenerServer};
 pub use stdio::serve_stdio;
 
 use farcooler_protocol::v1::{Request, Response};

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import worker from '../src/index'
 import { topicMismatch } from '../src/push'
+import { verifySession } from '../src/workos'
 
 /// What the relay must never get wrong.
 ///
@@ -40,21 +41,51 @@ const publicJwk = {
   kid: 'test-key',
 }
 
-async function sessionFor(userId: string): Promise<string> {
+/// The issuer and client id this test environment's tokens carry, taken from
+/// the bindings rather than repeated here: a fixture that hard-coded them would
+/// go on passing after someone changed the configuration the worker reads.
+const ISSUER = (env as any).WORKOS_ISSUER as string
+const CLIENT_ID = (env as any).WORKOS_CLIENT_ID as string
+
+const seconds = () => Math.floor(Date.now() / 1000)
+
+/// A signed token carrying exactly the claims a test names, and nothing else.
+///
+/// Separate from `sessionFor` because the verifier's whole job is refusing
+/// tokens with something missing, and a helper that quietly filled the gaps in
+/// could not express a token with a gap in it.
+async function signTestJwt(claims: Record<string, unknown>): Promise<string> {
   const header = base64Url(JSON.stringify({ alg: 'RS256', kid: 'test-key' }))
-  const claims = base64Url(
-    JSON.stringify({
-      sub: userId,
-      email: `${userId}@example.test`,
-      exp: Math.floor(Date.now() / 1000) + 3600,
-    }),
-  )
+  const payload = base64Url(JSON.stringify(claims))
   const signature = await crypto.subtle.sign(
     'RSASSA-PKCS1-v1_5',
     signing.privateKey,
-    new TextEncoder().encode(`${header}.${claims}`),
+    new TextEncoder().encode(`${header}.${payload}`),
   )
-  return `${header}.${claims}.${base64Url(new Uint8Array(signature))}`
+  return `${header}.${payload}.${base64Url(new Uint8Array(signature))}`
+}
+
+/// The claims a real AuthKit access token carries, which is what the routes are
+/// handed.
+///
+/// It used to be `sub`, `email` and `exp`. The verifier now requires the issuer,
+/// the `client_id` and `iat` as well — so a fixture short of any of them is no
+/// longer a session, and every signed-in test below would be testing a 401.
+///
+/// No `aud` and no `auth_time`, because a real token has neither. A fixture
+/// richer than the real thing is how a verifier that refuses production traffic
+/// passes its own suite.
+async function sessionFor(userId: string): Promise<string> {
+  const now = seconds()
+  return await signTestJwt({
+    sub: userId,
+    email: `${userId}@example.test`,
+    iss: ISSUER,
+    client_id: CLIENT_ID,
+    sid: 'session_test',
+    iat: now,
+    exp: now + 3600,
+  })
 }
 
 function base64Url(value: string | Uint8Array): string {
@@ -166,6 +197,127 @@ describe('the shape of the API', () => {
 
   it('does not invent routes', async () => {
     expect((await post('/v1/nope', {})).status).toBe(404)
+  })
+})
+
+// MARK: - The claims the authorization rests on
+
+/// What a valid signature is not.
+///
+/// A signature says WorkOS minted this token. It does not say the token was
+/// minted for THIS application, or that it has not expired — and every route
+/// below treats `sub` as an account it is about to hand data to. These are the
+/// checks that turn a verified signature into a session.
+///
+/// Every fixture here is the shape of a REAL AuthKit token, because the failure
+/// this suite has to catch is not only the forged token that gets in: it is
+/// equally the honest one that does not. A verifier demanding a claim WorkOS
+/// never sends refuses every sign-in on the channel, and a suite whose fixtures
+/// invented that claim would report it green.
+describe('session verification', () => {
+  /// The claims a real access token carries, so each test can spoil exactly one.
+  function wellFormed(overrides: Record<string, unknown> = {}) {
+    const now = seconds()
+    return {
+      sub: 'user_1',
+      email: 'user_1@example.test',
+      iss: ISSUER,
+      client_id: CLIENT_ID,
+      sid: 'session_test',
+      iat: now,
+      exp: now + 3600,
+      ...overrides,
+    }
+  }
+
+  it('refuses a token with no expiry', async () => {
+    // The old verifier checked `exp` only when it was there, so a token without
+    // one was a session that never ended.
+    watchFetch()
+    const { exp, ...claims } = wellFormed()
+    expect(await verifySession(await signTestJwt(claims), env as never)).toBeNull()
+  })
+
+  it('refuses a token that has expired', async () => {
+    watchFetch()
+    const token = await signTestJwt(wellFormed({ exp: seconds() - 3600 }))
+    expect(await verifySession(token, env as never)).toBeNull()
+  })
+
+  it('refuses a token from another issuer', async () => {
+    watchFetch()
+    const token = await signTestJwt(wellFormed({ iss: 'https://evil.example' }))
+    expect(await verifySession(token, env as never)).toBeNull()
+  })
+
+  it('refuses a token minted for another application', async () => {
+    // The sharpest one. Two applications in the same WorkOS environment share a
+    // key set, so the other application's token verifies here — and used to
+    // authenticate as its `sub`, against an account it had nothing to do with.
+    // `client_id` is where AuthKit records which application asked; there is no
+    // `aud` to compare.
+    watchFetch()
+    const token = await signTestJwt(wellFormed({ client_id: 'client_someone_else' }))
+    expect(await verifySession(token, env as never)).toBeNull()
+  })
+
+  it('refuses a token that names no application at all', async () => {
+    watchFetch()
+    const { client_id, ...claims } = wellFormed()
+    expect(await verifySession(await signTestJwt(claims), env as never)).toBeNull()
+  })
+
+  it('refuses a token that is not yet valid', async () => {
+    watchFetch()
+    const token = await signTestJwt(wellFormed({ nbf: seconds() + 3600 }))
+    expect(await verifySession(token, env as never)).toBeNull()
+  })
+
+  it('refuses a token with no subject', async () => {
+    watchFetch()
+    const token = await signTestJwt(wellFormed({ sub: '' }))
+    expect(await verifySession(token, env as never)).toBeNull()
+  })
+
+  it('accepts a token that never says when anyone authenticated', async () => {
+    // The real-world shape, and the reason this test exists rather than its
+    // opposite. A WorkOS access token carries no `auth_time` at all, so a
+    // verifier that demanded one would refuse every genuine session — and `iat`
+    // cannot stand in for it, because this relay mints fresh access tokens from
+    // refresh tokens at `/v1/auth/refresh`. The onboarding confirmation's
+    // freshness comes from LocalAuthentication on the device instead, which is
+    // about the person holding the phone rather than about a claim.
+    watchFetch()
+    const claims = wellFormed()
+    expect('auth_time' in claims).toBe(false)
+    expect((await verifySession(await signTestJwt(claims), env as never))?.userId).toBe('user_1')
+  })
+
+  it('accepts a well-formed token and says who it belongs to', async () => {
+    watchFetch()
+    const token = await signTestJwt(wellFormed())
+    expect(await verifySession(token, env as never)).toEqual({
+      userId: 'user_1',
+      email: 'user_1@example.test',
+    })
+  })
+
+  it('accepts an audience list that contains this application', async () => {
+    // A token with no `client_id` but an `aud` — the shape a custom AuthKit
+    // domain or a later token format might arrive in. `aud` is a string OR an
+    // array of them, per RFC 7519, so comparing the raw claim would refuse the
+    // array form outright.
+    watchFetch()
+    const { client_id, ...claims } = wellFormed()
+    const token = await signTestJwt({ ...claims, aud: ['client_other', CLIENT_ID] })
+    expect((await verifySession(token, env as never))?.userId).toBe('user_1')
+  })
+
+  it('refuses an audience list that does not', async () => {
+    watchFetch()
+    const { client_id, ...claims } = wellFormed()
+    const token = await signTestJwt({ ...claims, aud: ['client_other'] })
+    expect(await verifySession(token, env as never)).toBeNull()
   })
 })
 

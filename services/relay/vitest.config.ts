@@ -34,6 +34,10 @@ export default defineWorkersConfig(async () => {
             bindings: {
               TEST_MIGRATIONS: migrations,
               WORKOS_CLIENT_ID: 'client_test',
+              // The `iss` every token in this suite carries — the bare host a
+              // real AuthKit token carries, not the `/user_management/<client
+              // id>` path it is so often mistaken for.
+              WORKOS_ISSUER: 'https://api.workos.com',
               WORKOS_API_KEY: 'sk_test_do_not_use',
               ANALYTICS_SALT: 'salt',
               // A throwaway P-256 key, generated for this file and used nowhere

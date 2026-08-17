@@ -202,19 +202,6 @@ async fn run() -> Result<(), i32> {
 
     tracing::info!(socket = %socket.display(), "farcoolerd listening");
 
-    let cfg = HandshakeConfig {
-        daemon_version: farcooler_protocol::BUILD.to_string(),
-        // A local socket caller holds host_admin.
-        //
-        // Reaching this socket already requires being the owning user on this
-        // machine, who can read the database and the worktrees directly
-        // anyway. Granting less here would protect nothing; it would only stop
-        // the user's own Mac app from showing them their own paths. Remote
-        // clients arrive over SSH and are scoped there, where the distinction
-        // is real.
-        granted_scope: Scope::HostAdmin,
-    };
-
     // Stop on a signal rather than being killed, so the socket is unlinked and
     // the next start does not have to reason about whether it is stale.
     //
@@ -237,8 +224,61 @@ async fn run() -> Result<(), i32> {
         }
     };
 
+    // What an accepted connection is allowed to do, decided per connection.
+    //
+    // Almost every caller here is a local one and gets host_admin. The exception
+    // is a `--stdio` process relaying an ssh session into this daemon: sshd gave
+    // it a scope, it says so in one line before the first frame, and that has to
+    // survive the relay or a read-enrolled device would hold host admin on every
+    // machine where a daemon happens to be running — which is every machine in
+    // normal use.
+    let sessions = {
+        let service = service.clone();
+        let watcher = watcher.clone();
+        let stop = stop.clone();
+        move |preamble: Option<farcooler_transport::SessionPreamble>| {
+            let granted = match preamble.as_ref().map(|said| said.scope.as_str()) {
+                // A local socket caller holds host_admin.
+                //
+                // Reaching this socket already requires being the owning user on
+                // this machine, who can read the database and the worktrees
+                // directly anyway. Granting less here would protect nothing; it
+                // would only stop the user's own Mac app from showing them their
+                // own paths. Remote clients arrive over SSH and are scoped
+                // there, where the distinction is real.
+                //
+                // So an absent preamble is not a lesser session: it is every
+                // client installed before the preamble existed, and it means
+                // exactly what it has always meant.
+                None => Scope::HostAdmin,
+                // Present but unreadable is a different matter, and refuses. See
+                // `scope_from_word`.
+                Some(word) => scope_from_word(word)?,
+            };
+            // The preamble's client id stops here, deliberately. Which device
+            // this is belongs to the connection, and `Handler` carries nothing
+            // per connection — giving it that is the one change writer leases,
+            // per-client idempotency, auditing and revoke-by-client all need at
+            // once, and it is an open decision at the end of the onboarding plan
+            // rather than a detail to settle in passing. Scope needs no such
+            // seam: it is decided here, once, for the whole connection.
+            Some((
+                HandshakeConfig {
+                    daemon_version: farcooler_protocol::BUILD.to_string(),
+                    granted_scope: granted,
+                },
+                RpcFactory {
+                    service: service.clone(),
+                    watcher: watcher.clone(),
+                    stop: stop.clone(),
+                    granted,
+                },
+            ))
+        }
+    };
+
     let result = tokio::select! {
-        served = server.serve(cfg, RpcFactory { service, watcher, stop: stop.clone() }) => served.map_err(|e| {
+        served = server.serve(sessions) => served.map_err(|e| {
             tracing::error!(error = %e, "listener stopped");
             1
         }),
@@ -306,7 +346,112 @@ async fn relay_stdio(stream: tokio::net::UnixStream) -> Result<(), i32> {
     Ok(())
 }
 
+/// A scope word, as `authorized_keys` and the session preamble spell it.
+///
+/// `None` is a word this daemon does not have, which refuses rather than
+/// resolves. Absence of a scope is a decision — see `requested_scope` — but a
+/// misspelling is a mistake, and rounding a mistake up to host admin turns a
+/// typo on a line nobody re-reads into privilege escalation.
+fn scope_from_word(word: &str) -> Option<Scope> {
+    match word {
+        "read" => Some(Scope::Read),
+        "control" => Some(Scope::Control),
+        "host_admin" => Some(Scope::HostAdmin),
+        _ => None,
+    }
+}
+
+/// The same word going out, for the preamble the relay sends.
+fn scope_word(scope: Scope) -> &'static str {
+    match scope {
+        Scope::Read => "read",
+        Scope::Control => "control",
+        // `Unspecified` cannot reach here: a scope is either parsed from a word
+        // above or defaulted to host_admin, and neither produces it.
+        Scope::HostAdmin | Scope::Unspecified => "host_admin",
+    }
+}
+
+/// What the forced command says this session is.
+///
+/// `authorized_keys` carries `command="... --scope read --client phone-7"`, and
+/// sshd runs that instead of whatever the client asked for — so these are the
+/// one part of this process's command line the connecting device cannot choose.
+/// That is the whole mechanism: identity and scope are asserted by a file on
+/// this machine, not by the connection.
+struct Session {
+    /// `None` when the command line said nothing about scope at all, which is
+    /// every key enrolled before this existed.
+    scope: Option<Scope>,
+    /// Which enrolled device this is, as this machine's file says rather than as
+    /// the connection claims.
+    ///
+    /// Parsed, relayed, and carried no further — `Handler` has no per-connection
+    /// context to put it in, and giving it one is the single change writer
+    /// leases, per-client idempotency, auditing and revoke-by-client all need at
+    /// once. That is an open decision in the onboarding plan, not something to
+    /// settle as a side effect of scoping a session.
+    client: Option<String>,
+}
+
+impl Session {
+    /// What this session may do.
+    ///
+    /// Absent means host_admin, which is honest rather than lax. A key with no
+    /// forced command lets the device write the entire command line, so it could
+    /// pass any scope it liked; defaulting to less would protect nothing and
+    /// would break every entry enrolled before this existed.
+    fn granted(&self) -> Scope {
+        self.scope.unwrap_or(Scope::HostAdmin)
+    }
+
+    /// The line to send ahead of a relayed session — and `None` when there is
+    /// nothing to say, which is not the same as saying "host_admin".
+    ///
+    /// Silence is already what an unscoped session means to the daemon at the
+    /// other end, so the line would add nothing. It would cost something,
+    /// though: a daemon built before preambles reads it as a frame, finds a
+    /// sixteen-megabyte length where a length should be, and closes. That is
+    /// every relayed session on a machine whose binary has been upgraded but
+    /// whose daemon process has not yet restarted — failing IN FRONT OF the
+    /// handshake, which is where the version mismatch would otherwise have been
+    /// explained and the restart asked for.
+    ///
+    /// A session that was actually given a scope does send it, and does fail
+    /// against such a daemon. That is the right way round: a scope that cannot
+    /// be delivered must not be silently traded for host admin.
+    fn preamble(&self) -> Option<String> {
+        if self.scope.is_none() && self.client.is_none() {
+            return None;
+        }
+        let client = self.client.clone().unwrap_or_else(|| "-".into());
+        Some(format!("farcooler-session {} {client}\n", scope_word(self.granted())))
+    }
+}
+
+/// Read the session out of this process's own arguments.
+fn requested_session() -> Result<Session, i32> {
+    let args: Vec<String> = std::env::args().collect();
+    let after = |flag: &str| {
+        args.iter().position(|a| a == flag).map(|i| args.get(i + 1).cloned().unwrap_or_default())
+    };
+
+    let scope = match after("--scope") {
+        None => None,
+        Some(word) => Some(scope_from_word(&word).ok_or_else(|| {
+            eprintln!("--scope must be read, control or host_admin, not {word:?}");
+            2
+        })?),
+    };
+    Ok(Session { scope, client: after("--client").filter(|c| !c.is_empty()) })
+}
+
 async fn serve_stdio_session() -> Result<(), i32> {
+    // Before anything else, and before a socket is dialled: a session whose
+    // scope is a typo must not be served at either end.
+    let session = requested_session()?;
+    let granted = session.granted();
+
     // A daemon already running here owns everything that is not in SQLite.
     //
     // This used to open a second `Service` unconditionally, and for anything
@@ -326,7 +471,26 @@ async fn serve_stdio_session() -> Result<(), i32> {
     // host owns the live state and every entry point reaches that one, which is
     // what the rest of the design already assumes.
     if let Ok(socket) = paths::socket_path() {
-        if let Ok(stream) = tokio::net::UnixStream::connect(&socket).await {
+        if let Ok(mut stream) = tokio::net::UnixStream::connect(&socket).await {
+            // Say what this session is before any frame.
+            //
+            // The pipe below is deliberately dumb and must stay that way, so the
+            // scope cannot ride inside the protocol — this process would have to
+            // parse a conversation the two ends already agree about, which is a
+            // third opinion to keep in step. One line before the conversation
+            // starts is the whole mechanism. See `Session::preamble` for when
+            // there is nothing to say.
+            //
+            // Anything that can reach this socket is already the owning user,
+            // who holds host_admin regardless, so a caller that lies here gains
+            // nothing it did not already have.
+            if let Some(preamble) = session.preamble() {
+                use tokio::io::AsyncWriteExt;
+                if stream.write_all(preamble.as_bytes()).await.is_err() {
+                    eprintln!("cannot reach the daemon on this machine");
+                    return Err(1);
+                }
+            }
             return relay_stdio(stream).await;
         }
     }
@@ -342,7 +506,7 @@ async fn serve_stdio_session() -> Result<(), i32> {
 
     let cfg = HandshakeConfig {
         daemon_version: farcooler_protocol::BUILD.to_string(),
-        granted_scope: Scope::HostAdmin,
+        granted_scope: granted,
     };
 
     // `daemon.shutdown` ends this session, which is the whole of what this
@@ -352,7 +516,7 @@ async fn serve_stdio_session() -> Result<(), i32> {
     let stop = Arc::new(tokio::sync::Notify::new());
     let served = farcooler_transport::serve_stdio(
         cfg,
-        RpcFactory { service, watcher, stop: stop.clone() },
+        RpcFactory { service, watcher, stop: stop.clone(), granted },
     );
 
     tokio::select! {
@@ -375,12 +539,21 @@ struct RpcFactory {
     watcher: Arc<Watcher>,
     /// Shared with whatever is waiting to stop this process. See `daemon.shutdown`.
     stop: Arc<tokio::sync::Notify>,
+    /// What this connection may do.
+    ///
+    /// It used to be a `Scope::HostAdmin` literal inside `handle`, which meant
+    /// the handshake could advertise a scope the dispatcher never applied: a
+    /// read session was TOLD it held read and then permitted everything. One
+    /// factory per connection, so this is the connection's own scope and not a
+    /// process-wide guess — a `--stdio` process serves exactly one session, and
+    /// the socket builds a factory per accepted caller.
+    granted: Scope,
 }
 
 impl Handler for RpcFactory {
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         let rpc =
-            Rpc::new(self.service.clone(), self.watcher.clone(), Scope::HostAdmin, self.stop.clone());
+            Rpc::new(self.service.clone(), self.watcher.clone(), self.granted, self.stop.clone());
         async move { rpc.handle(req).await }
     }
 
@@ -436,4 +609,58 @@ fn acquire_daemon_lock(path: &std::path::Path) -> std::io::Result<Option<DaemonL
         return Ok(None);
     }
     Ok(Some(DaemonLock { file }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two directions have to agree, or a relayed session is granted one
+    /// thing here and told another at the far end.
+    #[test]
+    fn every_scope_survives_the_round_trip_through_a_word() {
+        for scope in [Scope::Read, Scope::Control, Scope::HostAdmin] {
+            assert_eq!(scope_from_word(scope_word(scope)), Some(scope));
+        }
+    }
+
+    #[test]
+    fn a_word_this_daemon_does_not_have_is_refused_rather_than_rounded_up() {
+        // The whole point: a typo in someone's authorized_keys must not become
+        // privilege escalation on the quietest possible path.
+        for word in ["reed", "admin", "HostAdmin", "host-admin", "", "read control"] {
+            assert_eq!(scope_from_word(word), None, "{word:?} must not resolve to a scope");
+        }
+    }
+
+    #[test]
+    fn a_session_told_nothing_says_nothing_and_holds_host_admin() {
+        let session = Session { scope: None, client: None };
+        assert_eq!(session.granted(), Scope::HostAdmin);
+        assert_eq!(session.preamble(), None, "silence already means host_admin at the far end");
+    }
+
+    #[test]
+    fn a_scoped_session_says_so_in_one_line() {
+        let session = Session { scope: Some(Scope::Read), client: Some("phone-7".into()) };
+        assert_eq!(session.granted(), Scope::Read);
+        assert_eq!(session.preamble().as_deref(), Some("farcooler-session read phone-7\n"));
+    }
+
+    /// A named device with no scope still speaks: the far end learns which
+    /// device this is, and reads the same host_admin it would have defaulted to.
+    #[test]
+    fn a_named_device_is_relayed_even_at_host_admin() {
+        let session = Session { scope: None, client: Some("mac-1".into()) };
+        assert_eq!(session.preamble().as_deref(), Some("farcooler-session host_admin mac-1\n"));
+    }
+
+    /// A scope with no device is the enrollment shape this all exists for, and
+    /// the dash is what tells the far end there is no name rather than a blank
+    /// field it should try to parse.
+    #[test]
+    fn an_unnamed_device_relays_a_dash_rather_than_an_empty_field() {
+        let session = Session { scope: Some(Scope::Control), client: None };
+        assert_eq!(session.preamble().as_deref(), Some("farcooler-session control -\n"));
+    }
 }

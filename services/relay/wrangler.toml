@@ -51,6 +51,22 @@ dataset = "farcooler_events"
 
 [vars]
 WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
+# The only issuer whose tokens this deployment accepts.
+#
+# A BARE HOST, and this is the trap. An AuthKit access token's `iss` is
+# `https://api.workos.com` — not `https://api.workos.com/user_management/<client
+# id>`, which is the path the SDKs and the docs' JWKS URLs make it look like it
+# should be. People lose afternoons to that mismatch; see
+# https://github.com/workos/authkit-tanstack-start/issues/45. Verified against
+# the decoded token in workos.com/docs/reference/authkit/session-tokens.
+#
+# In a var rather than a constant in code because it is not always this: a
+# custom AuthKit domain makes the issuer `https://auth.<domain>`, and a relay
+# that hard-coded the host would refuse every real token with no way to correct
+# it short of a deploy. It is the same value for every channel today only
+# because no channel has a custom domain yet — repeated per environment rather
+# than shared so the one that gets a domain can say so alone.
+WORKOS_ISSUER = "https://api.workos.com"
 # Which channel this deployment IS.
 #
 # Only so the relay can check that APNS_TOPIC belongs to it. That secret must
@@ -118,6 +134,8 @@ dataset = "farcooler_events_preview"
 
 [env.preview.vars]
 WORKOS_CLIENT_ID = "client_01M03MXE27CHCZJJ0TMY7KCMAH"
+# The bare host, for the reason the stable block gives at length.
+WORKOS_ISSUER = "https://api.workos.com"
 CHANNEL = "preview"
 
 # A separate namespace, so a burst against preview cannot spend the stable
@@ -150,6 +168,8 @@ dataset = "farcooler_events_canary"
 
 [env.canary.vars]
 WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
+# The bare host, for the reason the stable block gives at length.
+WORKOS_ISSUER = "https://api.workos.com"
 CHANNEL = "canary"
 
 [[env.canary.unsafe.bindings]]
@@ -184,6 +204,8 @@ dataset = "farcooler_events_local"
 
 [env.local.vars]
 WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD"
+# The bare host, for the reason the stable block gives at length.
+WORKOS_ISSUER = "https://api.workos.com"
 CHANNEL = "local"
 
 [[env.local.unsafe.bindings]]

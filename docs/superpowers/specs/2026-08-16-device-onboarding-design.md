@@ -223,9 +223,16 @@ the model:
 
 **4. WorkOS session verification must check the claims it relies on.**
 `services/relay/src/workos.ts:23` verifies a signature and an optional expiry. It
-does not require `exp`, and does not check the issuer, the `client_id`, the token
-type, `iat` or `nbf`. It also discards `auth_time`, which the
-fresh-authentication requirement below depends on.
+does not require `exp`, and does not check the issuer, the `client_id`, `iat` or
+`nbf` — so a token minted for another application in a reused WorkOS environment
+is accepted as a user session under its `sub`.
+
+Check the claims that exist, and only those. A WorkOS access token carries
+`iss, sub, client_id, act, org_id, role, roles, permissions, entitlements,
+feature_flags, sid, jti, exp, iat`. There is **no `aud`** — the client binding is
+the `client_id` claim — and **no `auth_time`**. `iss` is the bare
+`https://api.workos.com`, not a per-client URL; getting that wrong refuses every
+sign-in, and it is a documented trap.
 
 ## The ceremony
 
@@ -677,8 +684,20 @@ Adding a **Mac** shows the same list with the Key B choice above it:
 passcode, through `LocalAuthentication`, evaluated at the moment of the tap. Not
 a session, not an unlock from an hour ago. This is what a person standing at your
 unlocked laptop runs into, and it is the only thing between them and an enrolled
-device. The WorkOS session must also be fresh: `max_age` checked against
-`auth_time`, which prerequisite 4 makes available.
+device.
+
+**And it is the only freshness there is.** An earlier draft added "the WorkOS
+session must also be fresh, `max_age` checked against `auth_time`". A WorkOS
+access token carries `iss, sub, client_id, act, org_id, role, roles, permissions,
+entitlements, feature_flags, sid, jti, exp, iat` — **there is no `auth_time`**,
+so that check cannot be written, and requiring the claim would refuse every real
+token. `iat` cannot stand in for it either: this relay mints fresh access tokens
+from refresh tokens at `/v1/auth/refresh`, so a recent `iat` proves a refresh
+happened rather than that a person proved who they were.
+
+Which costs nothing the design was relying on. Session freshness was defense in
+depth; the fingerprint at the moment of the tap was always the gate that
+mattered, and it is on the device rather than in a token.
 
 Afterwards the same list is **Settings › Devices › iPhone 17**, a checkbox per
 runner, with Far Cooler access and shell access as separate rows for a Mac. The

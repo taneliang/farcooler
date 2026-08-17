@@ -17,6 +17,7 @@
 //!   Wrapping a multi-hour stream inside a request/response conversation would
 //!   be the wrong shape for both.
 
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -59,26 +60,74 @@ pub struct RemoteLink {
 /// `ConnectTimeout` bounds the one failure `ControlMaster` can introduce: a
 /// stale control socket left by a master that died badly, which a new
 /// connection would otherwise wait on indefinitely.
-fn ssh_args(target: &str) -> Vec<String> {
-    vec![
-        "-o".into(),
-        "BatchMode=yes".into(),
+fn ssh_args(target: &str, identity: Option<&Path>) -> Vec<String> {
+    let mut args: Vec<String> = vec!["-o".into(), "BatchMode=yes".into()];
+
+    match identity {
+        // A named identity does NOT multiplex.
+        //
+        // The obvious fix — keep multiplexing and put the key in the
+        // `ControlPath` — does not work, twice over. Hashing the key's PATH
+        // does not identify the KEY, so replacing a key at the same path
+        // silently reuses the master authenticated with the old one. And
+        // `ControlPersist` keeps that master answering for two minutes after
+        // the key is revoked: sshd reads `authorized_keys` at authentication
+        // and a surviving master never authenticates again. A runner cannot
+        // end it either, because `ssh -O exit` targets a socket on the
+        // CLIENT's disk.
+        //
+        // So the cost of naming an identity is a handshake per connection.
+        // That is the price of revocation meaning what it says.
+        Some(path) => {
+            args.push("-o".into());
+            args.push("ControlMaster=no".into());
+            args.push("-i".into());
+            args.push(path.to_string_lossy().into_owned());
+            // Bound to the key we named. Without this an agent holding a dozen
+            // keys offers all of them and can exhaust `MaxAuthTries` before it
+            // ever reaches this one.
+            args.push("-o".into());
+            args.push("IdentitiesOnly=yes".into());
+        }
         // Multiplex over one connection so a burst of commands does not mean a
         // burst of TCP handshakes and key exchanges.
-        "-o".into(),
-        "ControlMaster=auto".into(),
-        "-o".into(),
-        "ControlPath=~/.ssh/farcooler-%r@%h:%p".into(),
-        "-o".into(),
-        "ControlPersist=120".into(),
+        None => {
+            args.push("-o".into());
+            args.push("ControlMaster=auto".into());
+            args.push("-o".into());
+            args.push(format!("ControlPath={}", control_path()));
+            args.push("-o".into());
+            args.push("ControlPersist=120".into());
+        }
+    }
+
+    args.extend([
         "-o".into(),
         "ServerAliveInterval=15".into(),
         "-o".into(),
         "ServerAliveCountMax=3".into(),
         "-o".into(),
         "ConnectTimeout=10".into(),
+        // Everything after this is a destination, never a flag.
+        //
+        // ssh reads a leading `-` as an option wherever it appears, so a
+        // destination of `-oProxyCommand=...` is command execution on this
+        // machine. Every destination is typed by a human today, which is why
+        // this has never mattered; onboarding has them arrive in a scanned
+        // manifest, which is the transition that makes it reachable.
+        "--".into(),
         target.to_string(),
-    ]
+    ]);
+    args
+}
+
+/// Where the unnamed-identity multiplexed master lives.
+///
+/// Carries the channel, like everything else a channel owns: a canary client
+/// and a release one reaching the same destination must not share a master, any
+/// more than they share a daemon or a runtime directory.
+fn control_path() -> String {
+    format!("~/.ssh/farcooler-{}-%r@%h:%p", farcooler_protocol::CHANNEL.as_str())
 }
 
 /// What to run on the far side to get a daemon speaking the protocol.
@@ -97,9 +146,18 @@ fn daemon_command() -> String {
 }
 
 /// Open a protocol connection to a remote daemon.
-pub async fn connect(target: &str) -> Result<RemoteLink, Box<dyn std::error::Error>> {
+///
+/// `identity` names the key to authenticate with, or `None` to let ssh offer
+/// whatever the agent and config volunteer — which is what every caller does
+/// today and what a person at a shell expects. Device onboarding passes the
+/// managed key, because a session that cannot say which key authenticated it
+/// cannot be revoked by key either.
+pub async fn connect(
+    target: &str,
+    identity: Option<&Path>,
+) -> Result<RemoteLink, Box<dyn std::error::Error>> {
     let mut command = Command::new("ssh");
-    command.args(ssh_args(target));
+    command.args(ssh_args(target, identity));
     command.arg(daemon_command());
     command
         .stdin(Stdio::piped())
@@ -228,7 +286,9 @@ pub async fn exec(
         // A pty, so the remote program sees a terminal and Ctrl-C reaches it.
         command.arg("-t");
     }
-    command.args(ssh_args(target));
+    // The streaming path is a byte pipe for a person at a terminal, so it
+    // uses ordinary ssh identity resolution like any other shell command.
+    command.args(ssh_args(target, None));
     command.arg(cli_command(args));
     command.kill_on_drop(true);
 
@@ -361,7 +421,7 @@ mod tests {
 
     #[test]
     fn ssh_never_waits_for_input_it_will_not_get() {
-        let args = ssh_args("box");
+        let args = ssh_args("box", None);
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == "BatchMode=yes"));
         assert_eq!(args.last().unwrap(), "box");
     }
@@ -385,7 +445,7 @@ mod tests {
     /// should have to touch this test on purpose.
     #[test]
     fn ssh_notices_a_peer_that_stopped_answering() {
-        let args = ssh_args("box");
+        let args = ssh_args("box", None);
         let has_pair =
             |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
         assert!(
@@ -434,5 +494,78 @@ mod tests {
         // Silence about which failure this is beats confidently naming the
         // wrong one.
         assert!(!is_ssh_connection_failure(None));
+    }
+
+    /// `--` before the destination, or an address is an option.
+    ///
+    /// ssh reads a leading `-` as a flag wherever it appears, so a destination
+    /// of `-oProxyCommand=...` runs a command on THIS machine. Nothing types
+    /// that today — every destination is typed by a human — but device
+    /// onboarding has them arrive in a scanned manifest, and that is the
+    /// transition that turns a latent hazard into a vulnerability.
+    #[test]
+    fn the_destination_cannot_be_read_as_an_option() {
+        let args = ssh_args("-oProxyCommand=touch /tmp/pwned", None);
+        let end = args.iter().position(|a| a == "--").expect("no -- before the destination");
+        let target =
+            args.iter().position(|a| a.starts_with("-oProxyCommand")).expect("no destination");
+        assert!(end < target, "-- must come before the destination: {args:?}");
+        assert_eq!(target, args.len() - 1, "the destination is last: {args:?}");
+    }
+
+    #[test]
+    fn an_ordinary_destination_is_still_last() {
+        let args = ssh_args("you@box", None);
+        assert_eq!(args.last().map(String::as_str), Some("you@box"));
+        assert_eq!(args[args.len() - 2], "--");
+    }
+
+    /// A named identity is the only identity offered.
+    #[test]
+    fn a_named_identity_is_the_only_one_offered() {
+        let args = ssh_args("you@box", Some(Path::new("/tmp/farcooler-key")));
+        let has_pair =
+            |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+        assert!(has_pair(["-i", "/tmp/farcooler-key"]), "no -i: {args:?}");
+        assert!(has_pair(["-o", "IdentitiesOnly=yes"]), "no IdentitiesOnly: {args:?}");
+    }
+
+    /// A named identity does not multiplex, so revocation is not outlived.
+    ///
+    /// Keying the control path on the key instead would not fix it: a path
+    /// names a file, not the key inside it, and `ControlPersist` keeps a master
+    /// answering after the key is gone. A runner cannot close that master —
+    /// `ssh -O exit` reaches a socket on the client's own disk.
+    #[test]
+    fn a_named_identity_does_not_multiplex() {
+        let args = ssh_args("you@box", Some(Path::new("/tmp/k")));
+        let has_pair =
+            |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+        assert!(has_pair(["-o", "ControlMaster=no"]), "still multiplexing: {args:?}");
+        assert!(
+            !args.iter().any(|a| a.starts_with("ControlPersist")),
+            "a persistent master outlives revocation: {args:?}"
+        );
+    }
+
+    /// The unnamed path still multiplexes, and its socket carries the channel.
+    #[test]
+    fn the_unnamed_path_multiplexes_per_channel() {
+        let args = ssh_args("you@box", None);
+        let path = args
+            .iter()
+            .find(|a| a.starts_with("ControlPath="))
+            .expect("no ControlPath when no identity is named");
+        assert!(
+            path.contains(farcooler_protocol::CHANNEL.as_str()),
+            "a channel's master is its own: {path}"
+        );
+    }
+
+    #[test]
+    fn the_destination_is_still_last_with_an_identity() {
+        let args = ssh_args("you@box", Some(Path::new("/tmp/k")));
+        assert_eq!(args.last().map(String::as_str), Some("you@box"));
+        assert_eq!(args[args.len() - 2], "--");
     }
 }

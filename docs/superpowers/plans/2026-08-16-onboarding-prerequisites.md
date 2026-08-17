@@ -120,7 +120,7 @@ that turns it into a vulnerability."
 
 ### Task 2: The relay verifies the claims it relies on
 
-`services/relay/src/workos.ts:23` verifies a signature and an *optional* expiry. It does not require `exp`, and checks neither the issuer, the `client_id`, nor the token type, `iat` or `nbf` — so a token minted for another application in a reused WorkOS environment is accepted as a user session under its `sub`. It also discards `auth_time`, which the onboarding design's fresh-authentication requirement depends on.
+`services/relay/src/workos.ts:23` verifies a signature and an *optional* expiry. It does not require `exp`, and checks neither the issuer, the client binding, `iat` nor `nbf` — so a token minted for another application in a reused WorkOS environment is accepted as a user session under its `sub`.
 
 **Files:**
 - Modify: `services/relay/src/workos.ts`
@@ -128,13 +128,32 @@ that turns it into a vulnerability."
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `verifySession` keeps its existing return shape and **gains** a field. It already returns an object, not a bare `sub` — `services/relay/src/index.ts:751` reads `session.userId` and `session.email`, and dropping either breaks the account upsert. So: `Promise<Session | null>` where `Session` is the existing `{ userId, email, ... }` **plus** `authTime: number`. Read the real type in `workos.ts` before editing; do not retype it from this plan.
+- Produces: `verifySession` keeps its existing return shape and **gains** a field. It already returns an object, not a bare `sub` — `services/relay/src/index.ts:751` reads `session.userId` and `session.email`, and dropping either breaks the account upsert. `Session` keeps its existing shape unchanged; this task tightens the checks around it and adds no field. Read the real type in `workos.ts` before editing; do not retype it from this plan.
 
-**Two corrections to what this task originally said.** There is no
-`verifySignature()` helper to call — signature verification is inline in
-`verifySession` at `workos.ts:35-46`, and the claim checks go after it. And
-`WORKOS_ISSUER` must be read from a real token per deployment rather than
-guessed; record where you read it from in the commit message.
+**Corrections to what this task originally said**, all found before the code
+shipped.
+
+There is no `verifySignature()` helper to call — signature verification is inline
+in `verifySession` at `workos.ts:35-46`, and the claim checks go after it.
+
+**Check the claims that exist.** A WorkOS access token carries
+`iss, sub, client_id, act, org_id, role, roles, permissions, entitlements,
+feature_flags, sid, jti, exp, iat`. Three consequences, each of which would
+otherwise refuse every real token:
+
+- **No `aud`.** The client binding is the `client_id` claim, so check
+  `claims.client_id === env.WORKOS_CLIENT_ID`. That is the same goal — a token
+  minted for another application in a shared environment is refused — using the
+  claim that is actually there.
+- **No `auth_time`.** Do not require it and do not carry it. The
+  fresh-authentication idea it was for is gone; `LocalAuthentication` at the
+  moment of the tap is the freshness, and it lives on the device. `iat` cannot
+  substitute: `/v1/auth/refresh` mints fresh access tokens from refresh tokens,
+  so a recent `iat` proves a refresh, not a person.
+- **`iss` is the bare `https://api.workos.com`**, not a per-client URL. A custom
+  AuthKit domain makes it `https://auth.<domain>`. This exact mismatch has its
+  own WorkOS issue (workos/authkit-tanstack-start#45); confirm against a real
+  token per deployment before shipping.
 
 - [ ] **Step 1: Read the current verifier and its callers**
 
@@ -171,11 +190,11 @@ describe('session verification', () => {
     expect(await verifySession(token, env)).toBeNull()
   })
 
-  it('accepts a well-formed token and keeps auth_time', async () => {
+  it('accepts a token shaped like a real one', async () => {
     const token = await signTestJwt({
-      sub: 'user_1', iss: ISS, aud: CLIENT_ID, exp: soon(), iat: now(), auth_time: 1700000000,
+      sub: 'user_1', iss: ISS, client_id: CLIENT_ID, exp: soon(), iat: now(),
     })
-    expect(await verifySession(token, env)).toEqual({ sub: 'user_1', authTime: 1700000000 })
+    expect((await verifySession(token, env))?.userId).toBe('user_1')
   })
 })
 ```
@@ -201,13 +220,12 @@ Rewrite the claim checks in `services/relay/src/workos.ts`. Required, in this or
 /// environment carried a valid signature — so it authenticated as its
 /// `sub` here, against an account it had nothing to do with.
 ///
-/// `auth_time` is kept rather than discarded because the confirmation
+/// No `auth_time` is read, because a WorkOS access token does not carry one.
 /// step in the onboarding design demands a *fresh* authentication, and
 /// this is the only claim that can answer when the person last proved
 /// who they were.
 export interface Session {
   sub: string
-  authTime: number
 }
 
 const LEEWAY_SECONDS = 60
@@ -225,12 +243,7 @@ export async function verifySession(token: string, env: Env): Promise<Session | 
   if (!audienceMatches(claims.aud, env.WORKOS_CLIENT_ID)) return null
   if (typeof claims.sub !== 'string' || claims.sub.length === 0) return null
 
-  // No fallback to `iat`. This relay mints fresh access tokens from refresh
-  // tokens (`/v1/auth/refresh`), so a recent `iat` means a refresh happened,
-  // not that anyone proved who they were. Substituting it would manufacture
-  // the exact freshness the confirmation step is asking about.
-  if (typeof claims.auth_time !== 'number') return null
-  return { ...existing, authTime: claims.auth_time }
+  return existing
 }
 
 /// `aud` is a string or an array of them, per RFC 7519.
@@ -271,9 +284,9 @@ application in the same WorkOS environment carried a valid signature,
 so it authenticated here as its sub against an account it had nothing
 to do with. Issuer, audience, expiry, iat and nbf are now required.
 
-auth_time is kept rather than discarded: the onboarding design's
-confirmation demands a fresh authentication, and this is the only claim
-that can say when the person last proved who they were."
+There is no auth_time claim to keep: a WorkOS access token does not
+carry one, so requiring it would have refused every real token. The
+confirmation's freshness is LocalAuthentication on the device instead."
 ```
 
 ---

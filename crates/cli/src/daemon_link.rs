@@ -77,7 +77,10 @@ impl Link {
 pub async fn connect_to(target: Option<&str>) -> Result<Link, Box<dyn std::error::Error>> {
     match target {
         Some(host) => {
-            let remote = crate::remote::connect(host).await?;
+            // No identity named: ssh offers whatever the agent and `~/.ssh`
+            // volunteer, which is what a person at a shell expects and what
+            // this has always done. Device onboarding is what will pass one.
+            let remote = crate::remote::connect(host, None).await?;
             Ok(Link { client: remote.client, _ssh: Some(remote.child), peer: None })
         }
         None => connect().await,

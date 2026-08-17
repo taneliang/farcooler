@@ -62,7 +62,7 @@ async fn round_trip_request_response_over_real_unix_socket() {
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
     tokio::spawn(async move {
-        server.serve(handshake_cfg(), server_handler).await.unwrap();
+        server.serve(move |_| Some((handshake_cfg(), server_handler.clone()))).await.unwrap();
     });
 
     let stream = UnixStream::connect(&sock_path).await.unwrap();
@@ -94,7 +94,7 @@ async fn non_hello_first_frame_closes_connection_without_dispatch() {
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
     tokio::spawn(async move {
-        let _ = server.serve(handshake_cfg(), server_handler).await;
+        let _ = server.serve(move |_| Some((handshake_cfg(), server_handler.clone()))).await;
     });
 
     let stream = UnixStream::connect(&sock_path).await.unwrap();
@@ -117,7 +117,7 @@ async fn oversized_length_prefix_closes_connection_promptly() {
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
     tokio::spawn(async move {
-        let _ = server.serve(handshake_cfg(), server_handler).await;
+        let _ = server.serve(move |_| Some((handshake_cfg(), server_handler.clone()))).await;
     });
 
     let mut stream = UnixStream::connect(&sock_path).await.unwrap();
@@ -146,7 +146,7 @@ async fn truncated_frame_after_handshake_does_not_dispatch() {
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
     tokio::spawn(async move {
-        let _ = server.serve(handshake_cfg(), server_handler).await;
+        let _ = server.serve(move |_| Some((handshake_cfg(), server_handler.clone()))).await;
     });
 
     let stream = UnixStream::connect(&sock_path).await.unwrap();
@@ -196,7 +196,7 @@ async fn incompatible_client_hello_yields_version_incompatible() {
     let server = UnixListenerServer::bind(&sock_path).unwrap();
     let server_handler = handler.clone();
     tokio::spawn(async move {
-        let _ = server.serve(handshake_cfg(), server_handler).await;
+        let _ = server.serve(move |_| Some((handshake_cfg(), server_handler.clone()))).await;
     });
 
     let stream = UnixStream::connect(&sock_path).await.unwrap();
@@ -209,5 +209,74 @@ async fn incompatible_client_hello_yields_version_incompatible() {
         err.domain().map(|d| d.code()),
         Some(farcooler_protocol::v1::ErrorCode::VersionIncompatible)
     );
+    assert_eq!(handler.calls.load(Ordering::SeqCst), 0);
+}
+
+// ---- the line a session may open with, before the protocol ----
+
+/// A preamble names the session and is never mistaken for a frame.
+///
+/// The only sender is a `farcoolerd --stdio` process relaying an ssh session
+/// into the daemon already listening here, telling it what sshd's forced command
+/// granted. If those bytes reached the codec the handshake would fail on the
+/// first frame, and the symptom would be a hang-up rather than a reason.
+#[tokio::test]
+async fn a_session_preamble_names_the_connection_and_is_not_dispatched() {
+    let dir = tempdir().unwrap();
+    let sock_path = dir.path().join("farcooler.sock");
+    let handler = RecordingHandler::default();
+    let server = UnixListenerServer::bind(&sock_path).unwrap();
+    let server_handler = handler.clone();
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = seen.clone();
+    tokio::spawn(async move {
+        let _ = server
+            .serve(move |preamble| {
+                let said = preamble.expect("the preamble must reach the daemon");
+                recorded.lock().unwrap().push(format!("{} {:?}", said.scope, said.client));
+                Some((handshake_cfg(), server_handler.clone()))
+            })
+            .await;
+    });
+
+    let mut stream = UnixStream::connect(&sock_path).await.unwrap();
+    stream.write_all(b"farcooler-session read phone-7\n").await.unwrap();
+    let (read_half, write_half) = stream.into_split();
+    let mut client = Connection::new(read_half, write_half);
+
+    let hello = client.client_handshake("itest", "0.1.0").await.unwrap();
+    assert_eq!(hello.daemon_version, "test-daemon");
+    assert_eq!(seen.lock().unwrap().as_slice(), ["read Some(\"phone-7\")"]);
+}
+
+/// A connection the daemon will not place is closed, never served.
+///
+/// The daemon says no to a preamble whose scope word it does not have — a typo
+/// in someone's `authorized_keys` must not be rounded up to host admin — and
+/// that refusal has to happen before the handshake, or the connection would be
+/// answered by whatever handler was going to be built for it anyway.
+#[tokio::test]
+async fn a_refused_session_never_reaches_the_handshake() {
+    let dir = tempdir().unwrap();
+    let sock_path = dir.path().join("farcooler.sock");
+    let handler = RecordingHandler::default();
+    let server = UnixListenerServer::bind(&sock_path).unwrap();
+    let server_handler = handler.clone();
+    tokio::spawn(async move {
+        let _ = server
+            .serve(move |preamble: Option<farcooler_transport::SessionPreamble>| {
+                let said = preamble?;
+                (said.scope == "read").then(|| (handshake_cfg(), server_handler.clone()))
+            })
+            .await;
+    });
+
+    let mut stream = UnixStream::connect(&sock_path).await.unwrap();
+    stream.write_all(b"farcooler-session reed -\n").await.unwrap();
+    let (read_half, write_half) = stream.into_split();
+    let mut client = Connection::new(read_half, write_half);
+
+    let err = client.client_handshake("itest", "0.1.0").await.unwrap_err();
+    assert!(matches!(err, ConnectionError::Closed | ConnectionError::Codec(_)), "{err:?}");
     assert_eq!(handler.calls.load(Ordering::SeqCst), 0);
 }

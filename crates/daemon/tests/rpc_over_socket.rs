@@ -83,10 +83,19 @@ async fn start(scope: Scope) -> Harness {
     // and a sampling loop would make them race a tmux that may not be there.
     let watcher = farcooler_daemon::watch::Watcher::new(service.clone());
 
-    let cfg = HandshakeConfig { daemon_version: "test".into(), granted_scope: scope };
     let observed = watcher.clone();
     tokio::spawn(async move {
-        let _ = server.serve(cfg, Factory { service, watcher, scope }).await;
+        // Every connection to this harness gets the scope the test asked for.
+        // Nothing here sends a preamble — that is the stdio relay's business,
+        // and `a_relayed_session_keeps_its_scope.rs` covers it.
+        let _ = server
+            .serve(move |_| {
+                Some((
+                    HandshakeConfig { daemon_version: "test".into(), granted_scope: scope },
+                    Factory { service: service.clone(), watcher: watcher.clone(), scope },
+                ))
+            })
+            .await;
     });
 
     // The listener is bound before serve() is spawned, so a connect cannot race

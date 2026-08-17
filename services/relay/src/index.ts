@@ -32,6 +32,12 @@ export interface Env {
   AUTH_LIMIT?: RateLimit
   METRICS: Metrics
   WORKOS_CLIENT_ID: string
+  /// The `iss` this environment's tokens must carry. Required, not optional:
+  /// a missing issuer would have to mean "accept any", and one relay per
+  /// channel is precisely the arrangement where the token from the WorkOS
+  /// environment next door verifies against nothing else. Set in wrangler.toml
+  /// per environment.
+  WORKOS_ISSUER: string
   WORKOS_API_KEY: string
   ANALYTICS_SALT: string
   APNS_KEY_P8: string

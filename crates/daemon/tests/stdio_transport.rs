@@ -15,52 +15,90 @@ use farcooler_protocol::v1::{
     Scope, SetPaneMode, TerminalCreate, WorkspaceCreate,
 };
 use farcooler_transport::{request, Client, ClientError};
-use tokio::process::{ChildStdin, ChildStdout, Command};
+use tokio::process::{ChildStdin, ChildStdout};
 
-/// A spawned daemon, and the tmux server it will have started.
-///
-/// `kill_on_drop` ends the daemon and nothing else. The daemon's private tmux
-/// server is a separate process, on a socket named after this runtime
-/// directory's install id — so the moment the directory is deleted, nothing on
-/// the machine can work out what that socket was called, and the server stays
-/// up until the machine is restarted. One per tmux-using test, every run.
-///
-/// They are not idle passengers. tmux is single-threaded per server, and the
-/// crowd that accumulated this way was measured slowing `capture-pane` against
-/// the real fleet from 50ms to 740ms.
-///
-/// The same guard `rpc_over_socket.rs`'s `Harness` already carries, for the same
-/// reason; this file never got one.
-struct DaemonChild {
-    child: tokio::process::Child,
-    home: std::path::PathBuf,
+mod common;
+use common::{spawn, spawn_with, stdio_command};
+
+#[tokio::test]
+async fn the_daemon_serves_the_protocol_over_stdio() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_child, mut client) = spawn(dir.path()).await;
+
+    // A remote client whose key names no scope gets host_admin, same as a local
+    // socket one: ssh has already proved it is the user who owns the database
+    // there. See `no_scope_argument_still_means_host_admin`.
+    assert_eq!(client.server_hello().granted_scope, Scope::HostAdmin as i32);
+    assert!(!client.server_hello().daemon_version.is_empty());
+
+    let result = client.call(request("daemon.version")).await.expect("daemon.version");
+    let Some(result::Value::DaemonVersion(v)) = result.value else { panic!("wrong result") };
+    assert!(v.protocol_versions.contains(&farcooler_protocol::PROTOCOL_VERSION));
 }
 
-impl Drop for DaemonChild {
-    fn drop(&mut self) {
-        let _ = self.child.start_kill();
-        // Read rather than recomputed: how an install id becomes a socket name
-        // is the daemon's rule, and a second copy of it here would be one to
-        // get quietly wrong.
-        let Ok(install) = std::fs::read_to_string(self.home.join("install-id")) else { return };
-        let socket = format!("farcooler-{}", install.trim());
-        let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
-        let _ = std::process::Command::new(tmux)
-            .args(["-L", &socket, "kill-server"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+// ---- the scope the forced command gave this session ----
+
+/// A forced command's scope is the session's scope.
+///
+/// sshd runs the command in the `authorized_keys` entry and ignores whatever the
+/// client asked for, so `--scope` is the one thing in this process's arguments
+/// that the connecting device cannot choose. It used to be ignored entirely, and
+/// every stdio session got host_admin — so a device enrolled to read would have
+/// held full host administration and the word would have been decorative.
+#[tokio::test]
+async fn a_scope_in_the_arguments_is_the_scope_of_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_child, client) = spawn_with(dir.path(), &["--scope", "read"]).await;
+    assert_eq!(client.server_hello().granted_scope, Scope::Read as i32);
+}
+
+/// And the handshake is not the enforcement.
+///
+/// `ServerHello` only REPORTS the scope; the table in `rpc.rs` is what refuses.
+/// The two used to be wired to different things — the handshake to the argument,
+/// the dispatcher to a `Scope::HostAdmin` literal — which is the shape of bug
+/// that passes a scope test and grants everything.
+#[tokio::test]
+async fn a_read_session_is_refused_a_control_method() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_child, mut client) = spawn_with(dir.path(), &["--scope", "read"]).await;
+
+    client.call(request("repository.list")).await.expect("repository.list is a read method");
+
+    match client.call(request("daemon.shutdown")).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(
+                code,
+                ErrorCode::ScopeDenied as i32,
+                "a read session reached a host_admin method"
+            );
+        }
+        other => panic!("a read session must not reach daemon.shutdown: {other:?}"),
     }
 }
 
-/// Spawn the daemon in stdio mode against a private runtime directory.
-async fn spawn(dir: &std::path::Path) -> (DaemonChild, Client<ChildStdout, ChildStdin>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
-        .arg("--stdio")
-        .env("FARCOOLER_HOME", dir)
-        // Deliberately noisy: if any of this reaches stdout the handshake
-        // breaks, which is exactly what this test exists to catch.
-        .env("RUST_LOG", "debug")
+/// No scope means host_admin, and that is honest rather than lax.
+///
+/// A key with no forced command lets the connecting device write the whole
+/// command line, so it could pass any `--scope` it liked. Defaulting to less
+/// would protect nothing and would break every entry enrolled before this
+/// existed.
+#[tokio::test]
+async fn no_scope_argument_still_means_host_admin() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_child, client) = spawn(dir.path()).await;
+    assert_eq!(client.server_hello().granted_scope, Scope::HostAdmin as i32);
+}
+
+/// A scope nobody recognizes refuses the session rather than rounding up.
+///
+/// Absence is a decision; a misspelling is a mistake. Promoting one to host
+/// admin turns a typo in someone's `authorized_keys` into privilege escalation,
+/// and it would do it silently, on the one line nobody re-reads.
+#[tokio::test]
+async fn a_scope_nobody_recognizes_refuses_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = stdio_command(dir.path(), &["--scope", "reed"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -68,27 +106,14 @@ async fn spawn(dir: &std::path::Path) -> (DaemonChild, Client<ChildStdout, Child
         .spawn()
         .expect("spawn farcoolerd --stdio");
 
-    let stdin = child.stdin.take().unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let client = Client::over(stdout, stdin, "test-client", "0.0.0")
+    let status = tokio::time::timeout(std::time::Duration::from_secs(30), child.wait())
         .await
-        .expect("handshake over stdio");
-    (DaemonChild { child, home: dir.to_path_buf() }, client)
-}
-
-#[tokio::test]
-async fn the_daemon_serves_the_protocol_over_stdio() {
-    let dir = tempfile::tempdir().unwrap();
-    let (_child, mut client) = spawn(dir.path()).await;
-
-    // A remote client gets host_admin, same as a local socket one: ssh has
-    // already proved it is the user who owns the database there.
-    assert_eq!(client.server_hello().granted_scope, Scope::HostAdmin as i32);
-    assert!(!client.server_hello().daemon_version.is_empty());
-
-    let result = client.call(request("daemon.version")).await.expect("daemon.version");
-    let Some(result::Value::DaemonVersion(v)) = result.value else { panic!("wrong result") };
-    assert!(v.protocol_versions.contains(&farcooler_protocol::PROTOCOL_VERSION));
+        .expect("a refused session must exit rather than serve")
+        .expect("wait");
+    // Specifically the usage exit code, not merely non-zero: closing this
+    // session's stdin also ends the process non-zero, so `!success()` alone
+    // would pass against a daemon that had happily served the whole session.
+    assert_eq!(status.code(), Some(2), "an unknown scope must refuse the session outright");
 }
 
 #[tokio::test]
