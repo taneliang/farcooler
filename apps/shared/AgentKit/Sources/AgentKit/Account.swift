@@ -343,17 +343,33 @@ public final class Account: NSObject, ObservableObject {
         _ path: String, _ body: [String: Any]
     ) async -> [String: Any]? {
         guard let token = await accessToken() else { return nil }
+        return await Self.retryingUnauthorized(
+            token: token,
+            refresh: { await self.accessToken(forceRefresh: true) },
+            request: { try await self.post(path, body, bearer: $0) },
+            rejectSession: { self.clearSession() })
+    }
+
+    /// Retry an authenticated operation once with a freshly minted bearer.
+    /// Kept separate from HTTP so the retry limit and sign-out behavior are
+    /// regression-testable without a live identity provider.
+    static func retryingUnauthorized<Value>(
+        token: String,
+        refresh: () async -> String?,
+        request: (String) async throws -> Value,
+        rejectSession: () -> Void
+    ) async -> Value? {
         do {
-            return try await post(path, body, bearer: token)
+            return try await request(token)
         } catch AccountError.unauthorized {
-            guard let refreshed = await accessToken(forceRefresh: true) else { return nil }
+            guard let refreshed = await refresh() else { return nil }
             do {
-                return try await post(path, body, bearer: refreshed)
+                return try await request(refreshed)
             } catch AccountError.unauthorized {
                 // A freshly minted token that is still refused is not a usable
                 // session. Show the sign-in state instead of leaving every
                 // authenticated screen in a permanent retry loop.
-                clearSession()
+                rejectSession()
                 return nil
             } catch {
                 return nil

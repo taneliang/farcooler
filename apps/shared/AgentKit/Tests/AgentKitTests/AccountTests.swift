@@ -78,9 +78,69 @@ struct AccountTests {
     /// A 401 means the relay answered and rejected this bearer. Calling it an
     /// outage both lies to the user and prevents the one recovery that can
     /// work: refresh the session and retry once.
-    @Test func anUnauthorizedResponseRefreshesTheSession() {
+    @Test func responseStatusSelectsTheRightAuthenticationAction() {
         #expect(Account.responseAction(for: 200) == .accept)
         #expect(Account.responseAction(for: 401) == .refreshSession)
         #expect(Account.responseAction(for: 500) == .fail)
+    }
+
+    @Test func anUnauthorizedResponseRefreshesAndRetriesOnce() async {
+        var requested: [String] = []
+        var refreshes = 0
+        var rejections = 0
+
+        let result: String? = await Account.retryingUnauthorized(
+            token: "stale",
+            refresh: {
+                refreshes += 1
+                return "fresh"
+            },
+            request: { token in
+                requested.append(token)
+                if token == "stale" { throw AccountError.unauthorized }
+                return "accepted"
+            },
+            rejectSession: { rejections += 1 })
+
+        #expect(result == "accepted")
+        #expect(requested == ["stale", "fresh"])
+        #expect(refreshes == 1)
+        #expect(rejections == 0)
+    }
+
+    @Test func aFreshTokenRejectedByTheRelayEndsTheSession() async {
+        var requested: [String] = []
+        var rejections = 0
+
+        let result: String? = await Account.retryingUnauthorized(
+            token: "stale",
+            refresh: { "fresh" },
+            request: { token in
+                requested.append(token)
+                throw AccountError.unauthorized
+            },
+            rejectSession: { rejections += 1 })
+
+        #expect(result == nil)
+        #expect(requested == ["stale", "fresh"])
+        #expect(rejections == 1)
+    }
+
+    @Test func anotherRelayFailureDoesNotRefreshOrEndTheSession() async {
+        var refreshes = 0
+        var rejections = 0
+
+        let result: String? = await Account.retryingUnauthorized(
+            token: "current",
+            refresh: {
+                refreshes += 1
+                return "unused"
+            },
+            request: { _ in throw AccountError.relayRefused },
+            rejectSession: { rejections += 1 })
+
+        #expect(result == nil)
+        #expect(refreshes == 0)
+        #expect(rejections == 0)
     }
 }
