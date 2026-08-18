@@ -261,6 +261,21 @@ jobs:
           security create-keychain -p actions "$keychain"
           security default-keychain -s "$keychain"
           security unlock-keychain -p actions "$keychain"
+          # Unlocked STAYS unlocked. The keychain `security create-keychain`
+          # just made carries `timeout=300s` — five minutes after anything
+          # last touched it, it re-locks itself — and a codesign that meets a
+          # locked keychain does not fail. It blocks on the GUI unlock prompt
+          # that a runner has nobody to answer, until the job's six-hour
+          # ceiling or somebody cancels it. Thirty-eight minutes of "Sign and
+          # notarise" with not one line of notarytool output is what that
+          # looks like from the outside, and it reads as Apple being slow.
+          #
+          # Five minutes was longer than this job ever spent between here and
+          # signing, which is why it worked for months and was never true.
+          # Then the canary started carrying the Linux binaries, the build
+          # step crossed five minutes, and every run since has hung. The last
+          # green one had fifteen seconds of headroom.
+          security set-keychain-settings "$keychain"
           echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
           security import certificate.p12 -k "$keychain" \
             -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign

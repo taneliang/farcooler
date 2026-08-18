@@ -131,6 +131,12 @@ jobs:
           security create-keychain -p actions "$keychain"
           security default-keychain -s "$keychain"
           security unlock-keychain -p actions "$keychain"
+          # No auto-lock, for the reason canary.yml sets out at length: a new
+          # keychain re-locks after 300s idle, and the codesign that then
+          # meets it HANGS on an unlock prompt no runner can answer rather
+          # than failing. This job has more between import and signing than
+          # the canary does, not less.
+          security set-keychain-settings "$keychain"
           echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
           security import certificate.p12 -k "$keychain" \
             -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
