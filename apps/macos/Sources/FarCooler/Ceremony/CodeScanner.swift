@@ -1,6 +1,34 @@
-import AVFoundation
+// AVFoundation predates Sendable. The capture session is confined to the
+// serial queue below for every blocking lifecycle call.
+@preconcurrency import AVFoundation
 import AppKit
 import SwiftUI
+
+/// One lane for every blocking capture-session lifecycle call.
+///
+/// `AVCaptureSession` does not tolerate `startRunning` and `stopRunning` at the
+/// same time. Keeping the queue in a small type makes that guarantee testable
+/// without asking CI for a camera.
+final class CaptureSessionQueue: @unchecked Sendable {
+    private let queue: DispatchQueue
+
+    init(label: String = "com.farcooler.scanner") {
+        queue = DispatchQueue(label: label)
+    }
+
+    func perform(_ operation: @escaping @Sendable () -> Void) async {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                operation()
+                continuation.resume()
+            }
+        }
+    }
+
+    func enqueue(_ operation: @escaping @Sendable () -> Void) {
+        queue.async(execute: operation)
+    }
+}
 
 /// The camera, pointed at one code.
 ///
@@ -27,6 +55,7 @@ final class CodeScanner: NSObject, ObservableObject {
     @Published private(set) var problem: String?
 
     let session = AVCaptureSession()
+    private let lifecycle = CaptureSessionQueue()
     private var configured = false
 
     /// Ask for the camera, and start if it is granted.
@@ -41,34 +70,20 @@ final class CodeScanner: NSObject, ObservableObject {
             return
         }
         guard configure() else { return }
-        guard !session.isRunning else { return }
         // `startRunning` blocks until the camera is up, which on a Mac is long
         // enough to drop frames from the window server if it happens on the
-        // main thread.
-        let held = Held(session)
-        await Task.detached { held.session.startRunning() }.value
+        // main thread. Start and stop share one serial queue: using unrelated
+        // detached tasks let a retry start the session while the previous scan
+        // was still stopping it, which corrupts AVFoundation's session state.
+        await lifecycle.perform { [session] in
+            if !session.isRunning { session.startRunning() }
+        }
     }
 
     func stop() {
-        guard session.isRunning else { return }
-        let held = Held(session)
-        Task.detached { held.session.stopRunning() }
-    }
-
-    /// An `AVCaptureSession` carried off the main actor, on purpose.
-    ///
-    /// `AVCaptureSession` is not `Sendable` and never will be — most of it is
-    /// only safe between `beginConfiguration` and `commitConfiguration`, which
-    /// is exactly why the compiler refuses to let it cross. But `startRunning`
-    /// and `stopRunning` are the two calls Apple's own sample code makes from a
-    /// dedicated queue precisely BECAUSE they block, and configuration here
-    /// happens once, on the main actor, before either is ever called.
-    ///
-    /// So the unchecked part is checked by the shape of this file: nothing
-    /// touches the session off the main actor except those two calls.
-    private struct Held: @unchecked Sendable {
-        let session: AVCaptureSession
-        init(_ session: AVCaptureSession) { self.session = session }
+        lifecycle.enqueue { [session] in
+            if session.isRunning { session.stopRunning() }
+        }
     }
 
     /// Forget what was read, so the same sheet can scan again.
