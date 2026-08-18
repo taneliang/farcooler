@@ -37,8 +37,6 @@ struct DevicesSettings: View {
                             + "later aren’t shared automatically."
                         : "Sign in first in Settings › Account."
                 )
-                .font(.caption)
-                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
 

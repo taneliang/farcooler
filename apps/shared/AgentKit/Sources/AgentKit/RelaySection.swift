@@ -41,8 +41,6 @@ public struct RelaySection: View {
                 "Change the relay only for testing. Far Cooler Support will never ask you "
                     + "to change it."
             )
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
         .onAppear { draft = account.relay }
     }

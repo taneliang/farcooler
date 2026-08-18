@@ -93,7 +93,7 @@ public struct AccountDevicesView: View {
         } header: {
             Text(title)
         } footer: {
-            Text(footer).font(.caption).foregroundStyle(.secondary)
+            Text(footer)
         }
     }
 

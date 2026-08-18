@@ -418,8 +418,6 @@ struct SettingsView: View {
                     .disabled(!preferences.notifyOnAttention)
             } footer: {
                 Text("Far Cooler doesn’t send notifications while an agent is working.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

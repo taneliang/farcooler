@@ -40,8 +40,6 @@ struct ThemeEditor: View {
                     // the person choosing can read it.
                     Text(
                         "Choose whether this theme uses dark surfaces around the terminal.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("Ground") {
@@ -64,8 +62,6 @@ struct ThemeEditor: View {
                     Text(
                         "The theme controls these 16 ANSI colors. Extended colors are generated "
                         + "automatically.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)

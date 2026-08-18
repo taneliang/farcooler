@@ -57,8 +57,6 @@ public struct AccountSection: View {
                 "Sign in to receive notifications when an agent needs you. "
                     + "Everything else works without an account over SSH."
             )
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
     }
 

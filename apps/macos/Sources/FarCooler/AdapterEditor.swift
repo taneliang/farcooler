@@ -77,8 +77,6 @@ struct AdapterEditor: View {
                 } footer: {
                     if !isNew {
                         Text("The agent name is used in its configuration and can’t be changed later.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -124,14 +122,11 @@ struct AdapterEditor: View {
                     // A footer describing the opposite of what the toggle does
                     // is worse than no footer.
                     Text("Restart the daemon to apply this change.")
-                        .foregroundStyle(.secondary)
                 } else {
                     Text("Enter one argument or KEY=value environment variable per line.")
                 }
                 Text("Test checks these settings.")
-                    .foregroundStyle(.secondary)
             }
-            .font(.caption)
         }
     }
 
@@ -154,7 +149,6 @@ struct AdapterEditor: View {
                 )
                     .foregroundStyle(.orange)
             }
-            .font(.caption)
         }
     }
 

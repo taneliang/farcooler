@@ -116,8 +116,6 @@ struct RunnerSettingsSheet: View {
                 "Added to branch names created from task descriptions. For example, "
                 + "\u{201c}add authentication\u{201d} becomes \u{201c}\(effectivePrefix)add-authentication\u{201d}."
             )
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
     }
 
@@ -196,8 +194,6 @@ struct RunnerSettingsSheet: View {
                 "Editing a built-in theme saves an override on this runner. Revert it to restore "
                     + "the original."
             )
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
     }
 
@@ -265,8 +261,6 @@ struct RunnerSettingsSheet: View {
                 "Adapters let Far Cooler show supported agents in chat. Without a launch command, "
                     + "an agent opens in Terminal."
             )
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
     }
 

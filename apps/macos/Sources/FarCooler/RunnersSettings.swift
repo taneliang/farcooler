@@ -48,8 +48,6 @@ struct RunnersSettings: View {
                 }
             } footer: {
                 Text("Connect to any runner you can reach over SSH.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
 
             Section {

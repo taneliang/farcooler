@@ -35,8 +35,6 @@ struct EditorsSettings: View {
                     "Far Cooler finds installed editors automatically. Editors without remote "
                         + "support are available only for local worktrees."
                 )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
 
             Section {
@@ -59,8 +57,6 @@ struct EditorsSettings: View {
                     "Use {path} for the worktree path and {host} for its runner. Leave the remote "
                         + "command empty if the editor can’t open remote worktrees."
                 )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
