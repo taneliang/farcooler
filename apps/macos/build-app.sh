@@ -276,7 +276,9 @@ fi
 # Ad-hoc sign so macOS treats it as a stable identity across launches. This is
 # not notarization; public distribution needs a Developer ID.
 echo "==> Signing (ad-hoc)"
-codesign --force --deep --sign - "$APP" 2>/dev/null || echo "    (ad-hoc signing skipped)"
+codesign --force --deep --sign - \
+  --entitlements Resources/FarCooler.entitlements \
+  "$APP" 2>/dev/null || echo "    (ad-hoc signing skipped)"
 
 # Refresh Launch Services so the Dock picks up the icon and identifier.
 LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"

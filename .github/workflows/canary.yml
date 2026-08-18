@@ -348,6 +348,7 @@ jobs:
               --sign "$MACOS_SIGN_IDENTITY" "$binary"
           done
           codesign --force --options runtime --timestamp \
+            --entitlements apps/macos/Resources/FarCooler.entitlements \
             --sign "$MACOS_SIGN_IDENTITY" "$app"
 
           ditto -c -k --keepParent "$app" 'Far Cooler.zip'
