@@ -87,7 +87,6 @@ struct AccountTests {
     @Test func anUnauthorizedResponseRefreshesAndRetriesOnce() async {
         var requested: [String] = []
         var refreshes = 0
-        var rejections = 0
 
         let result: String? = await Account.retryingUnauthorized(
             token: "stale",
@@ -99,18 +98,15 @@ struct AccountTests {
                 requested.append(token)
                 if token == "stale" { throw AccountError.unauthorized }
                 return "accepted"
-            },
-            rejectSession: { rejections += 1 })
+            })
 
         #expect(result == "accepted")
         #expect(requested == ["stale", "fresh"])
         #expect(refreshes == 1)
-        #expect(rejections == 0)
     }
 
-    @Test func aFreshTokenRejectedByTheRelayEndsTheSession() async {
+    @Test func aFreshTokenRejectedByTheRelayStopsAfterOneRetry() async {
         var requested: [String] = []
-        var rejections = 0
 
         let result: String? = await Account.retryingUnauthorized(
             token: "stale",
@@ -118,17 +114,50 @@ struct AccountTests {
             request: { token in
                 requested.append(token)
                 throw AccountError.unauthorized
-            },
-            rejectSession: { rejections += 1 })
+            })
 
         #expect(result == nil)
         #expect(requested == ["stale", "fresh"])
-        #expect(rejections == 1)
     }
 
-    @Test func anotherRelayFailureDoesNotRefreshOrEndTheSession() async {
+    @Test func anUnauthorizedResponseWithNoRefreshedTokenStopsBeforeRetrying() async {
+        var requested: [String] = []
         var refreshes = 0
-        var rejections = 0
+
+        let result: String? = await Account.retryingUnauthorized(
+            token: "stale",
+            refresh: {
+                refreshes += 1
+                return nil
+            },
+            request: { token in
+                requested.append(token)
+                throw AccountError.unauthorized
+            })
+
+        #expect(result == nil)
+        #expect(requested == ["stale"])
+        #expect(refreshes == 1)
+    }
+
+    @Test func aRelayFailureAfterRefreshStopsAfterOneRetry() async {
+        var requested: [String] = []
+
+        let result: String? = await Account.retryingUnauthorized(
+            token: "stale",
+            refresh: { "fresh" },
+            request: { token in
+                requested.append(token)
+                if token == "stale" { throw AccountError.unauthorized }
+                throw AccountError.relayRefused
+            })
+
+        #expect(result == nil)
+        #expect(requested == ["stale", "fresh"])
+    }
+
+    @Test func anotherRelayFailureDoesNotRefreshTheSession() async {
+        var refreshes = 0
 
         let result: String? = await Account.retryingUnauthorized(
             token: "current",
@@ -136,11 +165,33 @@ struct AccountTests {
                 refreshes += 1
                 return "unused"
             },
-            request: { _ in throw AccountError.relayRefused },
-            rejectSession: { rejections += 1 })
+            request: { _ in throw AccountError.relayRefused })
 
         #expect(result == nil)
         #expect(refreshes == 0)
-        #expect(rejections == 0)
+    }
+
+    @Test func aFailedRefreshLeavesTheLocalSessionAlone() async {
+        var stored = false
+
+        let token = await Account.refreshingAccessToken(
+            refreshToken: "still-local",
+            request: { _ in throw AccountError.relayRefused },
+            store: { _ in stored = true })
+
+        #expect(token == nil)
+        #expect(!stored)
+    }
+
+    @Test func aSuccessfulRefreshStoresAndReturnsTheNewToken() async {
+        var stored: [String: Any]?
+
+        let token = await Account.refreshingAccessToken(
+            refreshToken: "refresh",
+            request: { _ in ["accessToken": "new-access"] },
+            store: { stored = $0 })
+
+        #expect(token == "new-access")
+        #expect(stored?["accessToken"] as? String == "new-access")
     }
 }

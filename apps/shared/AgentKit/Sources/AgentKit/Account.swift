@@ -162,12 +162,7 @@ public final class Account: NSObject, ObservableObject {
         if let refresh = TokenStore.read(Self.refreshKey) {
             _ = try? await post("/v1/auth/logout", ["refreshToken": refresh])
         }
-        userId = ""
-        email = ""
-        defaults.removeObject(forKey: "account.userId")
-        defaults.removeObject(forKey: "account.email")
-        TokenStore.delete(Self.accessKey)
-        TokenStore.delete(Self.refreshKey)
+        clearSession()
     }
 
     // MARK: - Talking to the relay
@@ -184,16 +179,24 @@ public final class Account: NSObject, ObservableObject {
         {
             return access
         }
-        let body = try? await post("/v1/auth/refresh", ["refreshToken": refresh])
-        guard let body else {
-            // A refresh token that no longer works means the session is over,
-            // and leaving a dead one in place makes every later call fail
-            // silently instead of showing a sign-in button. Cleared locally
-            // rather than through `signOut()`: the token the logout route would
-            // need is the one that just proved dead.
-            clearSession()
-            return nil
-        }
+        return await Self.refreshingAccessToken(
+            refreshToken: refresh,
+            request: { try await self.post("/v1/auth/refresh", ["refreshToken": $0]) },
+            store: { self.store($0) })
+    }
+
+    /// Refresh without inferring anything destructive from failure.
+    ///
+    /// The request can fail because the relay is unavailable, WorkOS is
+    /// unavailable, or the refresh token was rejected. Those cases are
+    /// indistinguishable here, so none of them is permission to erase a
+    /// session. Only an explicit Sign Out action clears local identity.
+    static func refreshingAccessToken(
+        refreshToken: String,
+        request: (String) async throws -> [String: Any],
+        store: ([String: Any]) -> Void
+    ) async -> String? {
+        guard let body = try? await request(refreshToken) else { return nil }
         store(body)
         return body["accessToken"] as? String
     }
@@ -346,18 +349,16 @@ public final class Account: NSObject, ObservableObject {
         return await Self.retryingUnauthorized(
             token: token,
             refresh: { await self.accessToken(forceRefresh: true) },
-            request: { try await self.post(path, body, bearer: $0) },
-            rejectSession: { self.clearSession() })
+            request: { try await self.post(path, body, bearer: $0) })
     }
 
     /// Retry an authenticated operation once with a freshly minted bearer.
-    /// Kept separate from HTTP so the retry limit and sign-out behavior are
+    /// Kept separate from HTTP so the retry limit and session behavior are
     /// regression-testable without a live identity provider.
     static func retryingUnauthorized<Value>(
         token: String,
         refresh: () async -> String?,
-        request: (String) async throws -> Value,
-        rejectSession: () -> Void
+        request: (String) async throws -> Value
     ) async -> Value? {
         do {
             return try await request(token)
@@ -366,10 +367,9 @@ public final class Account: NSObject, ObservableObject {
             do {
                 return try await request(refreshed)
             } catch AccountError.unauthorized {
-                // A freshly minted token that is still refused is not a usable
-                // session. Show the sign-in state instead of leaving every
-                // authenticated screen in a permanent retry loop.
-                rejectSession()
+                // The relay still refused the request, but it does not own the
+                // app's local identity. Keep the session intact so a transient
+                // account or configuration problem cannot sign the user out.
                 return nil
             } catch {
                 return nil
