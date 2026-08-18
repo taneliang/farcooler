@@ -58,8 +58,8 @@ struct ThemeEditorView: View {
                 Text("Bright")
             } footer: {
                 Text(
-                    "Colors above these sixteen are arithmetic every terminal agrees on, so no "
-                    + "theme sets them.")
+                    "The theme controls these 16 ANSI colors. Extended colors are generated "
+                    + "automatically.")
             }
         }
         .navigationTitle(original.name.isEmpty ? "New theme" : original.name)

@@ -153,8 +153,8 @@ struct HostOnboardingView: View {
                     .padding(.bottom, 8)
 
                 Text(
-                    "Far Cooler runs coding agents on runners you already reach "
-                        + "over SSH. Put this device’s key on one, then add its address."
+                    "Far Cooler runs coding agents on machines you connect to over SSH. "
+                        + "Authorize this device, then add the runner’s address."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -233,8 +233,8 @@ struct AuthorizeView: View {
                     .controlSize(.large)
 
                     Text(
-                        "Show a code to a device you’ve already added, and it picks which "
-                        + "runners this one may reach. Or add the key by hand:"
+                        "Use a device you’ve already added to choose which runners this device "
+                        + "can access. Or add its public key manually:"
                     )
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -268,8 +268,8 @@ struct AuthorizeView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
 
                 Text(
-                    "The private key never leaves this device. Revoke it by deleting "
-                    + "that line from authorized_keys."
+                    "The private key stays on this device. To revoke access, delete the line "
+                    + "from authorized_keys."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -344,8 +344,7 @@ struct HostEditorView: View {
 
                 Section {
                     Text(
-                        "Far Cooler connects over SSH. This device must be authorized "
-                        + "on the runner first."
+                        "Far Cooler connects over SSH. Authorize this device on the runner first."
                     )
                     .font(.footnote)
                     .foregroundStyle(.secondary)

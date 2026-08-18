@@ -32,10 +32,8 @@ struct EditorsSettings: View {
                 // The remote column needs explaining once, here, rather than in
                 // every disabled menu item.
                 Text(
-                    "Found by looking for the applications themselves, so an editor "
-                        + "installed anywhere is found. Only some can open a worktree "
-                        + "on another runner — the others are offered for local "
-                        + "worktrees only."
+                    "Far Cooler finds installed editors automatically. Editors without remote "
+                        + "support are available only for local worktrees."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -58,9 +56,8 @@ struct EditorsSettings: View {
                 Text("Add an editor")
             } footer: {
                 Text(
-                    "{path} becomes the worktree's path, {host} the runner it is on. "
-                        + "Leave the second field empty if the editor can't open a "
-                        + "worktree on another runner."
+                    "Use {path} for the worktree path and {host} for its runner. Leave the remote "
+                        + "command empty if the editor can’t open remote worktrees."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

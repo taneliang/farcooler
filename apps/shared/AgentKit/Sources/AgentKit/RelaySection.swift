@@ -38,9 +38,8 @@ public struct RelaySection: View {
             Text("Advanced")
         } footer: {
             Text(
-                "Far Cooler runs one relay per channel, and this build talks to its own. "
-                    + "Change it only to test a build against a different relay. "
-                    + "If someone asked you to change it, they are not from Far Cooler."
+                "Change the relay only for testing. Far Cooler Support will never ask you "
+                    + "to change it."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -59,7 +58,7 @@ public struct RelaySection: View {
                     // Said out loud, because a relay that is not this build's
                     // own is the reason notifications would be missing, and
                     // nothing else on this screen would explain it.
-                    Text("Not this build's own relay. Notifications go here instead.")
+                    Text("Using a custom relay. Notifications will be sent there.")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -74,10 +73,10 @@ public struct RelaySection: View {
                 #endif
 
             HStack {
-                Button("Use This Relay") { apply(draft) }
+                Button("Use Relay") { apply(draft) }
                     .disabled(!isUsable(draft))
                 Spacer()
-                Button("Reset to Default") { apply(Account.defaultRelay) }
+                Button("Reset") { apply(Account.defaultRelay) }
                     .disabled(isDefault)
             }
 
@@ -86,7 +85,7 @@ public struct RelaySection: View {
                 // given: a daemon token is issued BY a relay and means nothing
                 // to another one, so the pairing has to be redone rather than
                 // silently failing the next time something tries to notify.
-                Text("Saved. Pair your runners again — a token from one relay means nothing to another.")
+                Text("Relay changed. Pair your runners again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

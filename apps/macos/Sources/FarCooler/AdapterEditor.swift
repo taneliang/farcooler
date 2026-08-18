@@ -76,9 +76,7 @@ struct AdapterEditor: View {
                     Text("Agent")
                 } footer: {
                     if !isNew {
-                        Text(
-                            "The name identifies this agent in the config file and is matched "
-                            + "against the process in a pane, so it is fixed once it exists.")
+                        Text("The agent name is used in its configuration and can’t be changed later.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -117,20 +115,20 @@ struct AdapterEditor: View {
                     // arguments mean something different, and the protocol
                     // flags are not yours to set.
                     Text(
-                        "Native speaks this agent's own protocol, with no adapter and no npx. "
-                            + "Arguments are added after the flags the protocol needs."
+                        "Uses the agent’s native protocol. Arguments are added after the required "
+                            + "protocol options."
                     )
                     // This used to read "Chat mode still runs the ACP adapter",
                     // which stopped being true once `start_backend` began
                     // dispatching on this field (`crates/cli/src/agent_host.rs`).
                     // A footer describing the opposite of what the toggle does
                     // is worse than no footer.
-                    Text("Chat mode uses this after the daemon restarts.")
+                    Text("Restart the daemon to apply this change.")
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("One per line. Environment entries are KEY=value.")
+                    Text("Enter one argument or KEY=value environment variable per line.")
                 }
-                Text("This is the half Test can prove.")
+                Text("Test checks these settings.")
                     .foregroundStyle(.secondary)
             }
             .font(.caption)
@@ -148,12 +146,12 @@ struct AdapterEditor: View {
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(
-                    "How Far Cooler recognizes this agent on a screen. Process names are matched "
-                    + "as prefixes, because tmux truncates them; the rest are matched against the "
-                    + "text the agent draws.")
+                    "Process names use prefix matching because tmux truncates them. Other values "
+                    + "match text shown by the agent. Test doesn’t check these fields."
+                )
                 Text(
-                    "Test cannot check these. A wrong value here does not fail — the agent simply "
-                    + "stops being recognized, and notifications for it stop arriving.")
+                    "Incorrect values can prevent agent recognition and notifications."
+                )
                     .foregroundStyle(.orange)
             }
             .font(.caption)

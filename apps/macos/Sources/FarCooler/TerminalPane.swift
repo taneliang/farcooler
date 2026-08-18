@@ -127,7 +127,7 @@ struct TerminalPane: View {
             Spacer()
             StatusGlyph(status: terminal.status, size: 14)
             Text(terminal.status.label).font(.title3.weight(.medium))
-            Text("This terminal has no running session. It may have exited, or its session may be unreachable.")
+            Text("The session ended or the runner can’t be reached.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

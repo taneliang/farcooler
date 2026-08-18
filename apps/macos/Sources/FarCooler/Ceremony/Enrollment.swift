@@ -136,5 +136,5 @@ enum Enrollment {
     /// guesses is how an app ends up telling somebody to loosen an sshd setting
     /// that was never the problem.
     static let couldNotReachAll =
-        "Some runners didn't take the key. They'll be added when this Mac next reaches them."
+        "Some runners couldn’t be updated. Far Cooler will try again when this Mac reconnects."
 }

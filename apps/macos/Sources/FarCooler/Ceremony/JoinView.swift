@@ -44,14 +44,14 @@ struct JoinView: View {
     private var choosing: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Add this Mac to your runners").font(.title3.weight(.semibold))
+                Text("Add This Mac").font(.title3.weight(.semibold))
 
-                Text("**Far Cooler access** — run agents and terminals on the runners you pick.")
+                Text("Use Far Cooler with the runners you select.")
                     .font(.callout)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle(isOn: $shell.wanted) {
-                        Text("**Shell access** — Zed, git and Terminal on this Mac reach them too.")
+                        Text("Allow Zed, Git, and Terminal to connect to these runners")
                     }
 
                     Picker("", selection: $shell.source) {
@@ -124,10 +124,10 @@ struct JoinView: View {
 
     private func showing(_ offer: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Scan this from a device you already use").font(.headline)
+            Text("Scan this code with another device").font(.headline)
             Text(
-                "Open Far Cooler there, choose Add Device, and point its camera at this. "
-                    + "The code is good for two minutes."
+                "On a device you’ve already added, open Far Cooler and choose Add Device. "
+                    + "Then scan this code."
             )
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -145,7 +145,7 @@ struct JoinView: View {
             HStack {
                 Spacer()
                 Button("Cancel", action: dismissed).keyboardShortcut(.cancelAction)
-                Button("Scan the Reply") {
+                Button("Scan Code") {
                     scanningReply = true
                     Task { await scanner.start() }
                 }
@@ -156,8 +156,8 @@ struct JoinView: View {
 
     private var scanningTheReply: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Scan the code it shows back").font(.headline)
-            Text("That one carries the runners you were granted.")
+            Text("Scan the code on the other device").font(.headline)
+            Text("This shares the runners selected for this Mac.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -178,7 +178,7 @@ struct JoinView: View {
 
     private func finished(_ sentence: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("This Mac is added").font(.headline)
+            Text("This Mac is ready").font(.headline)
             Text(sentence)
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
@@ -220,7 +220,7 @@ struct JoinView: View {
                 name: thisMacName, account: account.userId, keyA: keyA.publicKey, keyB: keyB)
         } catch {
             problem = (error as? LocalizedError)?.errorDescription
-                ?? "Far Cooler couldn't prepare this Mac's keys."
+                ?? "Couldn’t prepare keys for this Mac."
         }
     }
 
@@ -248,8 +248,8 @@ struct JoinView: View {
         let count = manifest.runners.count
         store.finish(
             count == 1
-                ? "It can reach \(manifest.runners[0].label)."
-                : "It can reach \(count) runners.")
+                ? "This Mac can access \(manifest.runners[0].label)."
+                : "This Mac can access \(count) runners.")
     }
 
     private func target(for runner: CeremonyRunner) -> String {

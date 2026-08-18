@@ -166,10 +166,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Devices")
                 } footer: {
-                    Text(
-                        "Adding a device shows a code for it to scan, and grants only the "
-                        + "runners you pick."
-                    )
+                    Text("New devices can access only the runners you select.")
                 }
             }
 
@@ -180,7 +177,7 @@ struct SettingsView: View {
             } header: {
                 Text("Notifications")
             } footer: {
-                Text("A working agent never notifies you.")
+                Text("Far Cooler doesn’t send notifications while an agent is working.")
             }
 
             Section {
@@ -202,7 +199,7 @@ struct SettingsView: View {
             } header: {
                 Text("Theme")
             } footer: {
-                Text("Sets the terminal's colors and the app's.")
+                Text("Applies to the terminal and the app.")
             }
 
             Section("Terminal font") {
@@ -217,7 +214,7 @@ struct SettingsView: View {
                 // failed registration otherwise looks like nothing happened.
                 if fontChoice == .iosevka && !FontRegistry.iosevkaIsRegistered {
                     Label(
-                        "Iosevka did not register on this build — showing the system font instead.",
+                        "Iosevka isn’t available in this build. Using the system font.",
                         systemImage: "exclamationmark.triangle"
                     )
                     .font(.footnote)

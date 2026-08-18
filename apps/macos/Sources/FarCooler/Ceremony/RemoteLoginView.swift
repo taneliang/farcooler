@@ -17,10 +17,7 @@ struct RemoteLoginView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Turn on Remote Login").font(.headline)
-            Text(
-                "Your other devices reach this Mac over SSH, and macOS keeps that off until you "
-                    + "allow it."
-            )
+            Text("Far Cooler uses SSH to connect to this Mac from your other devices.")
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

@@ -167,8 +167,8 @@ struct RunnerSettingsView: View {
                 Text("Branches")
             } footer: {
                 Text(
-                    "Goes in front of a branch name made from a task description. "
-                    + "Leave it empty for no prefix.")
+                    "Added to branch names created from task descriptions. Leave it empty for "
+                    + "no prefix.")
             }
 
             Section {
@@ -201,8 +201,8 @@ struct RunnerSettingsView: View {
                 Text("Themes on this runner")
             } footer: {
                 Text(
-                    "Only themes this runner defines are listed. Shipped themes have nothing "
-                    + "to delete; saving one under a shipped name overrides it here.")
+                    "This list includes themes saved on this runner. Saving a theme with a "
+                    + "built-in name overrides it.")
             }
 
             Section {
@@ -234,8 +234,7 @@ struct RunnerSettingsView: View {
             } header: {
                 Text("Agents")
             } footer: {
-                Text(
-                    "An adapter lets Far Cooler show an agent as a chat instead of its terminal.")
+                Text("Adapters let Far Cooler show supported agents in chat.")
             }
 
             if let failure = model.failure {

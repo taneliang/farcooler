@@ -25,7 +25,7 @@ public struct AccountDevicesView: View {
         Form {
             if !account.isSignedIn {
                 Section {
-                    Text("Sign in to see the devices and runners on your account.")
+                    Text("Sign in to view the devices and runners on your account.")
                         .foregroundStyle(.secondary)
                 }
             } else if loading {
@@ -38,26 +38,22 @@ public struct AccountDevicesView: View {
                 }
             } else if failed {
                 Section {
-                    Text("Couldn’t reach the relay.")
+                    Text("Couldn’t load devices and runners.")
                         .foregroundStyle(.secondary)
                     Button("Try again") { Task { await load() } }
                 }
             } else {
                 list(
                     "Devices", kind: .device, rows: registrations?.devices ?? [],
-                    empty: "No devices yet. Allow notifications on a device and it appears here.",
-                    footer: "These receive notifications, and each says what version it "
-                        + "last reported — which is how you spot the one that needs "
-                        + "updating. Removing a device stops it being notified; it "
-                        + "reappears the next time that device opens Far Cooler."
+                    empty: "No devices. Allow notifications on a device to add it.",
+                    footer: "Devices receive notifications. Removing a device stops notifications "
+                        + "until it opens Far Cooler again."
                 )
                 list(
                     "Runners", kind: .runner, rows: registrations?.runners ?? [],
-                    empty: "No runners paired. Pair one from Runners.",
-                    footer: "These may notify you, and report their version when they do — "
-                        + "so a runner showing an old one is a runner to reinstall. "
-                        + "Removing one takes effect immediately at the relay, whether or "
-                        + "not you can still reach the runner itself."
+                    empty: "No paired runners. Pair one in Runners.",
+                    footer: "Runners can send notifications. Removing a runner stops it "
+                        + "immediately, even when the runner is offline."
                 )
             }
         }

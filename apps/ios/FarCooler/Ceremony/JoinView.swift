@@ -56,7 +56,7 @@ struct JoinView: View {
             case .scanning:
                 ScanScreen(
                     scanner: scanner,
-                    instruction: "Point the camera at the code the other device is showing.",
+                    instruction: "Scan the code on the other device.",
                     onCancel: { store.showCodeAgain() })
 
             case .done:
@@ -81,12 +81,11 @@ struct JoinView: View {
     private var signInFirst: some View {
         VStack(spacing: 16) {
             Spacer()
-            Text("Sign in first")
+            Text("Sign in to add this device")
                 .font(.title3.weight(.semibold))
             Text(
-                "Far Cooler records each enrollment under your account, so both devices have to "
-                    + "be signed into the same one. You can also add this device by pasting its "
-                    + "key."
+                "Both devices must be signed in to the same account. You can also add this "
+                    + "device by copying its public key."
             )
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -101,7 +100,7 @@ struct JoinView: View {
 
     private var offer: some View {
         VStack(spacing: 18) {
-            Text("Show this to a device you’ve already added")
+            Text("Scan this code with another device")
                 .font(.headline)
                 .multilineTextAlignment(.center)
 
@@ -109,8 +108,8 @@ struct JoinView: View {
                 .frame(maxWidth: 360)
 
             Text(
-                "It carries this device’s public key and nothing secret. The other device picks "
-                    + "which runners to grant, then shows a code back."
+                "On a device you’ve already added, open Far Cooler and choose Add Device. "
+                    + "Then scan this code."
             )
             .font(.footnote)
             .foregroundStyle(.secondary)
@@ -120,7 +119,7 @@ struct JoinView: View {
                 scanner.start()
                 store.beginScanning()
             } label: {
-                Text("Scan the Code It Shows Back").frame(maxWidth: .infinity)
+                Text("Scan Code").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -133,10 +132,10 @@ struct JoinView: View {
 
     private var added: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("These runners were granted")
+            Text("This device is ready")
                 .font(.title3.weight(.semibold))
 
-            Text("This device can reach each one once its key is on that runner.")
+            Text("This device can access these runners:")
             .font(.callout)
             .foregroundStyle(.secondary)
 

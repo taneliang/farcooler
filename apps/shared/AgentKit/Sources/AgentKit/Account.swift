@@ -337,7 +337,7 @@ public final class Account: NSObject, ObservableObject {
     /// Expiry is only the common reason a bearer stops working. The relay can
     /// reject one earlier after key rotation, revocation, or stricter claim
     /// validation. Treating that 401 like a dead server produced the Devices
-    /// screen's "Couldn’t reach the relay" error while the relay was healthy,
+    /// screen's "Couldn’t load devices and runners" error while the relay was healthy,
     /// and kept sending the same rejected token on every retry.
     private func authenticatedPost(
         _ path: String, _ body: [String: Any]

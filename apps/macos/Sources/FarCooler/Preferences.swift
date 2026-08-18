@@ -285,7 +285,7 @@ struct SettingsView: View {
     /// information about the fleet.
     private var startup: some View {
         Form {
-            Setting("Keeps this Mac reachable from your iPhone while Far Cooler is closed.") {
+            Setting("Keeps this Mac available to your other devices while Far Cooler is closed.") {
                 switch service.state {
                 case .registered:
                     Toggle("Start the daemon at login", isOn: .constant(true))
@@ -305,7 +305,7 @@ struct SettingsView: View {
             // `farcoolerd` — and a line promising those two names would be
             // telling someone to type a command that will not be there.
             Setting(
-                "Puts \(CommandLineTools.tools.map(\.link).joined(separator: " and ")) on your PATH, so a terminal or an SSH session can find them."
+                "Adds \(CommandLineTools.tools.map(\.link).joined(separator: " and ")) to your PATH for Terminal and SSH sessions."
             ) {
                 switch cliTools.state {
                 case .installed:
@@ -370,7 +370,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Setting("Sets the terminal's colors and, on \"Theme\", the app's too.") {
+                Setting("Applies to the terminal and, when Appearance is Theme, the app.") {
                     Picker("Theme", selection: themes.selectedNameBinding) {
                         ForEach(themes.available) { theme in
                             Text(theme.name).tag(theme.name)
@@ -378,7 +378,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Setting("Add your own under [themes.name] in ~/.config/farcooler/config.toml.") {
+                Setting("Choose Theme, System, Light, or Dark for the app.") {
                     Picker("Appearance", selection: $preferences.appearance) {
                         ForEach(Appearance.allCases) { Text($0.label).tag($0) }
                     }
@@ -389,7 +389,7 @@ struct SettingsView: View {
                     Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
                 }
 
-                Setting("Available for agents the registry recognizes. Switch any pane with ⌃B a.") {
+                Setting("Available for recognized coding agents. Press ⌃B A to switch a pane.") {
                     Toggle("Open coding agents as a chat", isOn: $preferences.preferChatMode)
                 }
 
@@ -417,7 +417,7 @@ struct SettingsView: View {
                 Toggle("Notify when an agent finishes", isOn: $preferences.notifyOnDone)
                     .disabled(!preferences.notifyOnAttention)
             } footer: {
-                Text("You are not notified while an agent is working.")
+                Text("Far Cooler doesn’t send notifications while an agent is working.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

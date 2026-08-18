@@ -18,7 +18,7 @@ public struct AccountSection: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(account.email.isEmpty ? "Signed in" : account.email)
-                        Text("Notifications can reach this device.")
+                        Text("This device can receive notifications.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text(AppVersion.display)
@@ -54,9 +54,8 @@ public struct AccountSection: View {
             Text("Account")
         } footer: {
             Text(
-                "An account exists for one reason: so a runner can wake this device "
-                    + "when an agent needs you. Everything else in Far Cooler works signed "
-                    + "out, over your own SSH, with nothing in the middle."
+                "Sign in to receive notifications when an agent needs you. "
+                    + "Everything else works without an account over SSH."
             )
             .font(.caption)
             .foregroundStyle(.secondary)

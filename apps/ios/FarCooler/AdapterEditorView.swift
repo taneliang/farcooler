@@ -70,9 +70,7 @@ struct AdapterEditorView: View {
                 Text("Agent")
             } footer: {
                 if !isNew {
-                    Text(
-                        "The name identifies this agent in the config file and is matched against "
-                        + "the process in a pane, so it is fixed once it exists.")
+                    Text("The agent name is used in its configuration and can’t be changed later.")
                 }
             }
 
@@ -85,9 +83,7 @@ struct AdapterEditorView: View {
             } header: {
                 Text("Launch")
             } footer: {
-                Text(
-                    "One per line. Environment entries are KEY=value. This is the half Test can "
-                    + "prove.")
+                Text("Enter one argument or KEY=value environment variable per line. Test checks these settings.")
             }
 
             Section {
@@ -99,9 +95,9 @@ struct AdapterEditorView: View {
                 Text("Detection")
             } footer: {
                 Text(
-                    "How Far Cooler recognizes this agent on a screen. Test cannot check these — a "
-                    + "wrong value does not fail, the agent simply stops being recognized and its "
-                    + "notifications stop arriving.")
+                    "Far Cooler uses these values to recognize an agent and determine its status. "
+                    + "Test doesn’t check them."
+                )
             }
 
             Section {

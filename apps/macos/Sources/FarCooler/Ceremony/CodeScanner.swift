@@ -36,8 +36,8 @@ final class CodeScanner: NSObject, ObservableObject {
     /// deny, and then the feature is broken for good in System Settings.
     func start() async {
         guard await granted() else {
-            problem = "Far Cooler needs camera access to scan the code. "
-                + "Allow it in System Settings › Privacy & Security › Camera."
+            problem = "Camera access is off. Allow Far Cooler to use the camera in "
+                + "System Settings › Privacy & Security › Camera."
             return
         }
         guard configure() else { return }
@@ -94,21 +94,21 @@ final class CodeScanner: NSObject, ObservableObject {
         guard let camera = AVCaptureDevice.default(for: .video),
             let input = try? AVCaptureDeviceInput(device: camera)
         else {
-            problem = "This Mac has no camera Far Cooler can use."
+            problem = "No camera is available."
             return false
         }
 
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         guard session.canAddInput(input) else {
-            problem = "This Mac's camera is in use by something else."
+            problem = "The camera is in use by another app."
             return false
         }
         session.addInput(input)
 
         let output = AVCaptureMetadataOutput()
         guard session.canAddOutput(output) else {
-            problem = "This Mac's camera can't read codes."
+            problem = "The camera can’t scan codes."
             return false
         }
         session.addOutput(output)

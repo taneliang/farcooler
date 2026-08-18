@@ -1024,7 +1024,7 @@ struct RemoveWorktreeConfirmSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("This worktree has uncommitted work. Type its name to remove it anyway.")
+                    Text("This worktree has uncommitted changes. Enter its name to remove it.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -1090,7 +1090,7 @@ struct AddRepositorySheet: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Section {
-                    Text("Far Cooler creates a worktree per task, so it needs an existing repository already on this host.")
+                    Text("Choose an existing repository on this runner for the new worktree.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -1240,8 +1240,8 @@ struct NewWorkspaceView: View {
 
                     Section {
                         Text(
-                            "A workspace is one git worktree and one branch. Its name is the "
-                            + "worktree's folder, so it can't be changed later.")
+                            "A workspace contains one Git worktree and branch. Its name is also "
+                            + "the folder name and can’t be changed later.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

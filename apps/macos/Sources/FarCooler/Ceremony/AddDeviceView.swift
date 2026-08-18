@@ -42,11 +42,11 @@ struct AddDeviceView: View {
 
     private var scanning: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Scan the code on the device you're adding")
+            Text("Scan the new device’s code")
                 .font(.headline)
             Text(
-                "Open Far Cooler on the new device and choose Add This Device. "
-                    + "Point this Mac's camera at the code it shows."
+                "On the new device, open Far Cooler and choose Add This Device. Then hold its "
+                    + "code up to this Mac’s camera."
             )
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -94,14 +94,13 @@ struct AddDeviceView: View {
                         // Markdown in a `Text` literal, not `Text + Text`: the
                         // latter is deprecated as of macOS 26 and this renders
                         // the same two weights.
-                        Text("**Far Cooler access** — run agents and terminals on the runners you pick.")
+                        Text("Use Far Cooler with the runners you select.")
                             .font(.callout)
                         shellAccess(confirmation)
                     }
                 } else {
                     Text(
-                        "\(name) will be able to run agents and commands on the runners you pick, "
-                            + "as you. Each enrollment is recorded under \(account.email)."
+                        "\(name) can run agents and commands as you on the runners you select."
                     )
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
@@ -118,9 +117,8 @@ struct AddDeviceView: View {
                 }
 
                 Text(
-                    "Far Cooler adds this key to ~/.ssh/authorized_keys on each runner you pick, "
-                        + "and changes nothing else. "
-                        + "You can add or remove runners later in Settings › Devices."
+                    "Far Cooler adds this device’s key to ~/.ssh/authorized_keys on each selected "
+                        + "runner. You can change its access later in Settings › Devices."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -149,13 +147,13 @@ struct AddDeviceView: View {
     private func shellAccess(_ confirmation: CeremonyStore.Confirmation) -> some View {
         if let shell = confirmation.shell {
             VStack(alignment: .leading, spacing: 4) {
-                Text("**Shell access** — Zed, git and Terminal on that Mac reach them too.")
+                Text("Allow Zed, Git, and Terminal on that Mac to connect to these runners.")
                     .font(.callout)
-                Toggle(isOn: .constant(true)) { Text("New key — \(shell.name)") }
+                Toggle(isOn: .constant(true)) { Text("New key: \(shell.name)") }
                     .disabled(true)
                 Toggle(isOn: .constant(shell.addToConfig)) { Text("Add to ~/.ssh/config") }
                     .disabled(true)
-                Text("Chosen on \(confirmation.offer.name) before it showed its code.")
+                Text("\(confirmation.offer.name) selected this before showing its code.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -194,8 +192,8 @@ struct AddDeviceView: View {
     @ViewBuilder
     private func reply(_ manifest: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Now scan this with the new device").font(.headline)
-            Text("It needs the addresses of the runners you just granted.")
+            Text("Scan this code with the new device").font(.headline)
+            Text("This shares the runners you selected.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 

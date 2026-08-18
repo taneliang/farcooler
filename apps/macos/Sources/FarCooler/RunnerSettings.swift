@@ -67,7 +67,7 @@ struct RunnerSettingsSheet: View {
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.headline)
-                Text("Settings on this runner, in its own config file.")
+                Text("Settings stored in this runner’s configuration file.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -113,11 +113,11 @@ struct RunnerSettingsSheet: View {
             Text("Branches")
         } footer: {
             Text(
-                "Goes in front of a branch name made from a task description, so "
-                + "\u{201c}add authentication\u{201d} becomes \u{201c}\(effectivePrefix)add-authentication\u{201d}. "
-                + "Leave it empty for no prefix.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                "Added to branch names created from task descriptions. For example, "
+                + "\u{201c}add authentication\u{201d} becomes \u{201c}\(effectivePrefix)add-authentication\u{201d}."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -192,9 +192,12 @@ struct RunnerSettingsSheet: View {
         } header: {
             Text("Themes")
         } footer: {
-            Text("Editing a shipped theme writes an override on this runner. Reverting removes it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(
+                "Editing a built-in theme saves an override on this runner. Revert it to restore "
+                    + "the original."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -259,10 +262,11 @@ struct RunnerSettingsSheet: View {
             Text("Agents")
         } footer: {
             Text(
-                "An adapter lets Far Cooler show an agent as a chat instead of its terminal. "
-                + "One with no launch command stays a terminal, which is a supported state.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                "Adapters let Far Cooler show supported agents in chat. Without a launch command, "
+                    + "an agent opens in Terminal."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 

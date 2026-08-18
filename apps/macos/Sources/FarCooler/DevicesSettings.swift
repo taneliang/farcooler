@@ -33,9 +33,9 @@ struct DevicesSettings: View {
             } footer: {
                 Text(
                     account.isSignedIn
-                        ? "Adding a device grants it the runners you pick, one at a time. "
-                            + "A runner you add later grants nothing on its own."
-                        : "Sign in first — Settings › Account."
+                        ? "New devices can access only the runners you select. Runners you add "
+                            + "later aren’t shared automatically."
+                        : "Sign in first in Settings › Account."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

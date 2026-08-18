@@ -35,10 +35,10 @@ struct AddDeviceView: View {
             // A declined gate stops here and says so. It does not fall back to
             // adding the device, and it does not explain what the gate wanted —
             // the sentence a person needs is that nothing happened.
-            .alert("Far Cooler couldn’t confirm it’s you", isPresented: $store.declined) {
+            .alert("Couldn’t verify your identity", isPresented: $store.declined) {
                 Button("OK") { store.declined = false }
             } message: {
-                Text("Nothing was added.")
+                Text("No device was added.")
             }
     }
 
@@ -48,7 +48,7 @@ struct AddDeviceView: View {
         case .idle, .scanning:
             ScanScreen(
                 scanner: scanner,
-                instruction: "Point the camera at the code on the device you’re adding.",
+                instruction: "Scan the code shown on the device you’re adding.",
                 onCancel: { dismiss() })
 
         case .mismatch:
@@ -84,13 +84,12 @@ struct AddDeviceView: View {
     private var mismatch: some View {
         VStack(spacing: 16) {
             Spacer()
-            Text("That device is signed into a different account")
+            Text("This device uses a different account")
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
 
             Text(
-                "Far Cooler can only add devices signed into \(store.accountEmail). Sign in to "
-                    + "that account on the new device, then show its code again."
+                "Sign in to \(store.accountEmail) on the new device, then show its code again."
             )
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -114,13 +113,12 @@ struct AddDeviceView: View {
     private var confirmation: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Add “\(store.offer?.name ?? "this device")” to \(store.accountEmail)?")
+                Text("Add “\(store.offer?.name ?? "this device")”?")
                     .font(.title3.weight(.semibold))
 
                 Text(
-                    "\(store.offer?.name ?? "That device") will be able to run agents and "
-                        + "commands on the runners you pick, as you. Each enrollment is "
-                        + "recorded under \(store.accountEmail)."
+                    "\(store.offer?.name ?? "This device") can run agents and commands as you "
+                        + "on the runners you select."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -152,9 +150,8 @@ struct AddDeviceView: View {
                 }
 
                 Text(
-                    "Far Cooler adds this key to ~/.ssh/authorized_keys on each runner you pick, "
-                        + "and changes nothing else. You can add or remove runners later in "
-                        + "Settings › Devices."
+                    "Far Cooler adds this device’s key to ~/.ssh/authorized_keys on each selected "
+                        + "runner. You can change its access later in Settings › Devices."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -189,16 +186,13 @@ struct AddDeviceView: View {
 
     private var reply: some View {
         VStack(spacing: 18) {
-            Text("Scan this with \(store.offer?.name ?? "the new device")")
+            Text("Scan this code with \(store.offer?.name ?? "the new device")")
                 .font(.headline)
 
             CodeImageView(payload: store.code)
                 .frame(maxWidth: 360)
 
-            Text(
-                "It carries the runners you picked and how to reach them. Nothing in it is a "
-                    + "secret."
-            )
+            Text("This shares the runners you selected.")
             .font(.footnote)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)

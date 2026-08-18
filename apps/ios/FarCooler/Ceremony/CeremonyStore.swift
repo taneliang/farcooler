@@ -94,17 +94,17 @@ enum Refusal: Equatable {
         switch self {
         case .version(let made):
             return made > 1
-                ? "That code is from a newer Far Cooler"
-                : "That code is from an older Far Cooler"
-        case .channel: return "That code is from a different Far Cooler"
-        case .malformed: return "That isn’t a Far Cooler code"
-        case .wrongCeremony: return "That code answers a different device"
-        case .wrongAccount: return "That code is for a different account"
-        case .wrongTarget: return "That code is meant for another device"
-        case .stale: return "That code expired"
-        case .alreadyTaken: return "That code has already been used"
-        case .tooLarge: return "Too many runners for one code"
-        case .unknown: return "Something went wrong"
+                ? "This code requires a newer version of Far Cooler"
+                : "This code is from an older version of Far Cooler"
+        case .channel: return "This code is from a different version of Far Cooler"
+        case .malformed: return "This isn’t a Far Cooler code"
+        case .wrongCeremony: return "This code is for a different request"
+        case .wrongAccount: return "This code is for a different account"
+        case .wrongTarget: return "This code is for another device"
+        case .stale: return "This code expired"
+        case .alreadyTaken: return "This code was already used"
+        case .tooLarge: return "Too many runners selected"
+        case .unknown: return "Couldn’t add this device"
         }
     }
 
@@ -116,23 +116,23 @@ enum Refusal: Equatable {
                 : "Update Far Cooler on the other device, then try again."
         case .channel(let channel):
             let named = channel.isEmpty ? "a different version" : "Far Cooler \(channel.capitalized)"
-            return "That device is running \(named). Both devices have to be running the same one."
+            return "The other device is using \(named). Both devices must use the same version."
         case .malformed:
-            return "Point the camera at the code the other device is showing."
+            return "Scan the code shown in Far Cooler on the other device."
         case .wrongCeremony:
-            return "Show this device’s code again, then scan the reply it gets."
+            return "Show a new code on this device, then scan the code on the other device."
         case .wrongAccount:
-            return "Both devices have to be signed into the same account."
+            return "Both devices must be signed in to the same account."
         case .wrongTarget:
-            return "Show this device’s code again, then scan the reply it gets."
+            return "Show a new code on this device, then scan the code on the other device."
         case .stale:
-            return "A code is good for two minutes. Show a new one and scan it again."
+            return "Show a new code, then scan it within two minutes."
         case .alreadyTaken:
-            return "Show a new code to add this device again."
+            return "Show a new code, then try again."
         case .tooLarge:
-            return "Pick fewer runners. You can grant the rest by adding this device again."
+            return "Select fewer runners. You can add the others later."
         case .unknown:
-            return "Far Cooler couldn’t finish adding this device. Try again."
+            return "Try again."
         }
     }
 }

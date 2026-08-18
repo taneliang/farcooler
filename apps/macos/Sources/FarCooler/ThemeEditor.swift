@@ -39,9 +39,7 @@ struct ThemeEditor: View {
                     // is the reasoning the core's own Theme documents, said where
                     // the person choosing can read it.
                     Text(
-                        "Carried with the theme rather than guessed from the background, so a "
-                        + "mid-grey ground is yours to decide about instead of a brightness "
-                        + "threshold deciding for you.")
+                        "Choose whether this theme uses dark surfaces around the terminal.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -64,8 +62,8 @@ struct ThemeEditor: View {
                     Text("Bright")
                 } footer: {
                     Text(
-                        "Colors above these sixteen are arithmetic every terminal agrees on, so "
-                        + "no theme sets them.")
+                        "The theme controls these 16 ANSI colors. Extended colors are generated "
+                        + "automatically.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

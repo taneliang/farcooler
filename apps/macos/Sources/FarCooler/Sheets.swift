@@ -265,7 +265,7 @@ struct RemoveWorkspaceSheet: View {
                     Callout(
                         icon: "exclamationmark.triangle.fill",
                         tone: .warning,
-                        text: "There is uncommitted work here. Type the workspace name to confirm you want it gone."
+                        text: "This workspace has uncommitted changes. Enter its name to remove it."
                     )
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -595,7 +595,7 @@ struct AddRepositorySheet: View {
     var body: some View {
         SheetFrame(
             title: "Add repository",
-            subtitle: "Far Cooler creates a worktree per task, so it needs an existing repository.",
+            subtitle: "Choose an existing repository for the new worktree.",
             confirmTitle: "Add repository",
             canConfirm: canConfirm,
             working: working,
@@ -631,7 +631,7 @@ struct AddRepositorySheet: View {
                             .font(.callout)
                         TextField("/home/you/src/project", text: $remotePath)
                             .textFieldStyle(.roundedBorder)
-                        Text("Checked on that runner when you add it — this Mac can't see its disk.")
+                        Text("Far Cooler checks this path on the runner when you add it.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

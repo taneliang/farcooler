@@ -166,13 +166,14 @@ struct ScanScreen: View {
         VStack(spacing: 20) {
             if scanner.denied {
                 message(
-                    "Far Cooler doesn’t have the camera",
-                    "Allow camera access in Settings, or add this device by pasting its key."
+                    "Camera access is off",
+                    "Allow Far Cooler to use the camera in Settings, or add this device with "
+                        + "its public key."
                 )
             } else if scanner.unavailable {
                 message(
-                    "There’s no camera on this device",
-                    "Add the device by pasting its key instead."
+                    "Camera not available",
+                    "Add the device with its public key instead."
                 )
             } else {
                 CameraPreview(session: scanner.session)
