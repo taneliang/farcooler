@@ -244,6 +244,11 @@ jobs:
           targets: aarch64-apple-ios-sim, aarch64-apple-ios
       - uses: Swatinem/rust-cache@v2
 
+      # Here rather than beside the other shell tests in the `swift` job because
+      # what it covers is the iOS archive's signing, and it needs a Mac to have
+      # a keychain to cover it with.
+      - run: ./scripts/import-ios-certificate-test.sh
+
       # The xcframeworks are gitignored — they are build output — so CI has to
       # build them before the project that links them. Without this the app
       # links nothing and fails at the linker, which reads as a Swift error.

@@ -441,6 +441,18 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      # Imported, never created, and for the reason the script gives at
+      # length: automatic signing below creates an Apple Development
+      # certificate whenever the keychain has none, and Apple caps how many an
+      # account may hold. Gated with the archive, so a fork still builds
+      # unsigned above and skips both.
+      - name: Import the signing certificate
+        if: env.HAS_APP_STORE_KEY == 'true'
+        env:
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+        run: ./scripts/import-ios-certificate.sh
+
       - name: Archive and upload to TestFlight
         if: env.HAS_APP_STORE_KEY == 'true'
         env:

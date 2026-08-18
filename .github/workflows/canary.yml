@@ -110,6 +110,17 @@ jobs:
       - name: Generate the Xcode project
         run: ./apps/ios/generate-project.py
 
+      # Imported, never created. Automatic signing creates a new Apple
+      # Development certificate when the keychain has none, and Apple caps how
+      # many an account may hold — see the script, which is the whole
+      # explanation. This step is what keeps `-allowProvisioningUpdates` below
+      # to making profiles.
+      - name: Import the signing certificate
+        env:
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+        run: ./scripts/import-ios-certificate.sh
+
       # The canary's own bundle identifier — `com.farcooler.ios.canary`, which
       # generate-project.py derives from the channel — so it installs alongside
       # the preview and the stable app rather than replacing either.

@@ -414,10 +414,11 @@ Cloudflare.
 | `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGN_IDENTITY` | Mac release | Developer ID, base64 `.p12` |
 | `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | notarisation, and the iOS archive's `DEVELOPMENT_TEAM` | app-specific password |
 | `APP_STORE_KEY_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_P8` | TestFlight, from both the canary and the release workflow | base64 `.p8`, and the key must be **Admin** — see below |
+| `IOS_CERTIFICATE`, `IOS_CERTIFICATE_PASSWORD` | the iOS archive, in both workflows | base64 `.p12` of an Apple Development identity. Not optional, and the reason is below |
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | relay deploy, and the Sparkle appcast publish | Four permissions for the relay, plus **R2 Object Read & Write** for the appcast — the last two relay permissions are the ones nobody expects, see below |
 | `CANARY_SPARKLE_KEY`, `PREVIEW_SPARKLE_KEY`, `STABLE_SPARKLE_KEY` | `sign_update`, in canary.yml and release.yml's `macos` job | base64 EdDSA private key, one per channel, from Sparkle's `generate_keys -x`. The matching public half is committed at `apps/macos/sparkle-public-keys.txt` — a fork can only sign its own updates, never impersonate another channel's |
 
-### Two credentials that need more than the obvious permission
+### Credentials that need more than the obvious setup
 
 **The App Store Connect key must be Admin, not App Manager.** App Manager is
 enough to upload a build, which is what it looks like the key is for, and enough
@@ -427,6 +428,28 @@ for distribution assets and gets `Cloud signing permission error` followed by
 `No profiles for 'com.farcooler.ios.canary' were found`, because creating a
 DISTRIBUTION certificate is Admin-only. A key's role cannot be changed after
 creation; generate a new one and replace all three secrets.
+
+**The iOS certificate has to be supplied, because otherwise CI makes its own.**
+The archive signs with automatic signing and `-allowProvisioningUpdates`, which
+is what lets a runner have the provisioning profiles it cannot have been born
+with. Profiles are free. Certificates are not: Apple caps how many an account
+may hold, and a runner with an empty keychain has no Apple Development identity,
+so cloud signing creates one — signs a perfectly good build with it, uploads it,
+and is then destroyed along with the private key. Nothing looks wrong for about
+eleven runs. Then every archive fails with `Choose a certificate to revoke. Your
+account has reached the maximum number of certificates.` and, underneath it, `No
+profiles for 'com.farcooler.ios.canary' were found` — which is not a second
+problem but the same one, since no certificate means no profile either.
+
+`scripts/import-ios-certificate.sh` is the fix, and it runs before the archive in
+both workflows: automatic signing reuses an identity the keychain already has and
+only creates one when it finds none. To make the secret, open Keychain Access,
+find your **Apple Development** certificate, expand the arrow so the private key
+underneath it is selected too, and export both as a `.p12` — a certificate
+exported alone imports without complaint and yields no identity at all, which the
+script refuses rather than pass on. Then `base64 -i certificate.p12 | pbcopy`.
+The certificates already stranded in the portal by earlier runs are safe to
+revoke: their private keys went with the runners, so nothing can sign with them.
 
 **The Cloudflare token needs zone permissions as well as account ones.** Account
 → Workers Scripts → Edit and Account → D1 → Edit get the script uploaded and the
