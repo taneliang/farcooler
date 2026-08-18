@@ -6,10 +6,14 @@ import CoreText
 /// The cell grid a font produces, and the insets a pane draws inside.
 ///
 /// Lifted out of the render view because two places now need it and they must
-/// not disagree. The view sizes its own grid from this; the tiled view sizes the
-/// whole VIEWPORT from it, in cells, and hands that to tmux — so if the two
-/// measured cells differently, tmux would lay out for a grid the renderer cannot
-/// draw and every pane would be a column or two out.
+/// not disagree: the tiled view sizes the whole VIEWPORT from it, in cells, and
+/// hands that to tmux, while the renderer positions every glyph with it — so if
+/// the two measured cells differently, tmux would lay out for a grid the
+/// renderer cannot draw and every pane would be a column or two out.
+///
+/// Agreeing about the CELL is necessary and was never sufficient. A pane's grid
+/// is not derived from cells here at all any more; it is whatever tmux says it
+/// is. See `TileGeometry` for why measuring it a second time was wrong.
 enum TerminalMetrics {
     /// Insets so glyphs do not touch the pane edges.
     static let padding = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
@@ -55,7 +59,23 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// every one of those layers would be passing it through untouched.
     private var themeObserver: AnyCancellable?
     private var lastDrawnRevision: UInt64 = .max
-    private var lastReportedGeometry = (columns: 0, rows: 0)
+    private var lastReportedGeometry = PaneGrid(columns: 0, rows: 0)
+    /// The grid tmux says this pane has, once somebody knows it.
+    ///
+    /// A pane's size is tmux's answer, not ours. This view can measure how many
+    /// cells fit in its own pixels, and in a tiled layout that measurement is
+    /// NOT the pane: `TileView` tells tmux one grid for the whole window, tmux
+    /// divides it, and each pane's share comes back through `list-panes`. The
+    /// two round trips do not agree — a pane spanning two rows of the layout
+    /// spends one header's worth of chrome while the window arithmetic charged
+    /// it two, so measuring gave it a few rows more than it has.
+    ///
+    /// Those extra rows and columns are the bug this exists to close. tmux only
+    /// ever paints inside its own pane, so anything the emulator held outside
+    /// it — whatever a reflow left there when the layout last changed — was
+    /// never overwritten, and sat on screen as stray characters until the pane
+    /// re-attached.
+    private var paneGrid: PaneGrid?
 
     // MARK: - Metrics
 
@@ -243,24 +263,72 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// report and the stream was never started. The reconnection looked fixed
     /// and the pane stayed as frozen as before.
     func reannounceGeometry() {
-        lastReportedGeometry = (0, 0)
+        lastReportedGeometry = PaneGrid(columns: 0, rows: 0)
         reportGeometry()
     }
 
-    /// Tell the core and the pane what grid actually fits.
-    private func reportGeometry() {
-        let usableWidth = bounds.width - padding.left - padding.right
-        let usableHeight = bounds.height - padding.top - padding.bottom
-        guard usableWidth > 0, usableHeight > 0, cellWidth > 0, cellHeight > 0 else { return }
-
-        let columns = max(20, Int(usableWidth / cellWidth))
-        let rows = max(5, Int(usableHeight / cellHeight))
-        guard (columns, rows) != lastReportedGeometry else { return }
-        lastReportedGeometry = (columns, rows)
-
-        core.resize(columns: columns, rows: rows)
+    /// Size the emulator to the pane tmux actually has.
+    ///
+    /// Called by whoever is reading the layout, which is the only thing that
+    /// knows. Nothing calls it in the single-terminal fallback or in the theme
+    /// editor's preview — neither has a tmux pane behind it — so those keep
+    /// sizing themselves from their own pixels, which is correct when the view
+    /// is the one asking for the size rather than being told it.
+    ///
+    /// Takes an optional so that a grid can be taken BACK, not only given. A
+    /// view told a pane's size and then moved somewhere with no layout behind it
+    /// would otherwise stay pinned to a pane it has left, with no way to say so.
+    func setPaneGrid(_ grid: PaneGrid?) {
+        guard let grid else {
+            // Only on the way from having one to not, never on every call. This
+            // runs on each SwiftUI update, and the single-terminal path passes
+            // nil on all of them — re-reporting there would send the daemon a
+            // resize per update of a size that has not changed.
+            guard paneGrid != nil else { return }
+            paneGrid = nil
+            // Defeat the deduplication as well, or the measurement this view is
+            // falling back to would be swallowed as one it has already reported
+            // and the core would keep the departed pane's size.
+            lastReportedGeometry = PaneGrid(columns: 0, rows: 0)
+            reportGeometry()
+            return
+        }
+        guard grid.columns > 0, grid.rows > 0, grid != paneGrid else { return }
+        paneGrid = grid
+        core.resize(columns: grid.columns, rows: grid.rows)
         needsDisplay = true
-        onGeometry?(columns, rows)
+    }
+
+    /// Tell the pane what grid would fit here, and size the emulator if nobody
+    /// else is going to.
+    ///
+    /// The measurement is a REQUEST, not an answer: it is what this view would
+    /// like to be, sent on to whoever can ask tmux for it. Only when no one is
+    /// reporting the pane's real grid — see `setPaneGrid` — does it also become
+    /// the size the emulator is held at.
+    private func reportGeometry() {
+        guard
+            let fits = TileGeometry.fitting(
+                bounds.size, cell: CGSize(width: cellWidth, height: cellHeight))
+        else { return }
+        guard fits != lastReportedGeometry else { return }
+        lastReportedGeometry = fits
+
+        if paneGrid == nil {
+            core.resize(columns: fits.columns, rows: fits.rows)
+        }
+        needsDisplay = true
+        onGeometry?(fits.columns, fits.rows)
+    }
+
+    /// The grid the emulator is actually holding.
+    ///
+    /// Read off the core rather than remembered, so it answers what IS rather
+    /// than what was last asked for — which is the distinction the pane-grid bug
+    /// lived in.
+    var grid: PaneGrid {
+        core.withSnapshot { PaneGrid(columns: $0.columns, rows: $0.rows) }
+            ?? PaneGrid(columns: 0, rows: 0)
     }
 
     /// Where the grid sits, so a diagnostic can check ink against cell rows.
@@ -289,7 +357,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         italicFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
         applyTheme()
         measure()
-        lastReportedGeometry = (0, 0)
+        lastReportedGeometry = PaneGrid(columns: 0, rows: 0)
         reportGeometry()
         needsDisplay = true
     }
@@ -315,6 +383,15 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         core.setPalette(Themes.shared.current.packed)
         selection = nil
         lastDrawnRevision = .max
+        // The new core is the size this call asked for, so both memories of the
+        // old one are claims about a terminal that is gone. Left in place, the
+        // pane grid would suppress the next `setPaneGrid` for the same numbers
+        // and the fresh core would never be told its size; the reported geometry
+        // would suppress the next `reportGeometry`, and with it the `onGeometry`
+        // that opens the byte stream — so a re-pointed view would size itself
+        // correctly and then sit there receiving nothing.
+        paneGrid = nil
+        lastReportedGeometry = PaneGrid(columns: 0, rows: 0)
         needsDisplay = true
     }
 
@@ -766,12 +843,33 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
     // MARK: - Mouse
 
+    /// Which cell the pointer is over, clamped to cells that exist.
+    ///
+    /// Clamped at BOTH ends, which it did not used to need to be. The view was
+    /// once exactly as big as its grid, so dividing its pixels by a cell could
+    /// not name a cell off the end of it. Now the grid is tmux's and the view is
+    /// whatever the layout gave it, and the two are a cell or three apart —
+    /// which leaves a thin band of background below and to the right of the last
+    /// row that is inside the view and outside the terminal.
+    ///
+    /// Unclamped, a click in that band reported row 58 of a 54-row screen to
+    /// whatever is running. `encode_mouse` states the number it is given, so a
+    /// full-screen program — vim, htop, lazygit — would have acted on a
+    /// coordinate off its own screen.
     private func cell(for event: NSEvent) -> GridPoint {
         let point = convert(event.locationInWindow, from: nil)
         let column = Int(((point.x - padding.left) / cellWidth).rounded(.down))
         let row = Int(((point.y - padding.top) / cellHeight).rounded(.down))
-        return GridPoint(row: max(0, row), column: max(0, column))
+        let grid = self.grid
+        return GridPoint(
+            row: min(max(0, row), max(0, grid.rows - 1)),
+            column: min(max(0, column), max(0, grid.columns - 1)))
     }
+
+    /// `cell(for:)`, reachable from a test. The clamp it applies is the whole
+    /// point of it and is otherwise only observable by running a program that
+    /// tracks the mouse and watching it act on a row it does not have.
+    func cellForTesting(_ event: NSEvent) -> GridPoint { cell(for: event) }
 
     private func modifiers(for event: NSEvent) -> VTModifiers {
         var m: VTModifiers = []

@@ -17,6 +17,9 @@ struct TerminalSurface: View {
     let onResize: (Int, Int) async -> Void
     var fontRevision: Int = 0
     var isFocused: Bool = true
+    /// The pane's grid as tmux reports it, when anything knows it. See
+    /// `TerminalRenderView.setPaneGrid`.
+    var grid: PaneGrid?
 
     /// One queue per pane, so two panes uploading at once each show their own.
     @StateObject private var pastes = ImagePasteQueue()
@@ -31,7 +34,8 @@ struct TerminalSurface: View {
             onResize: onResize,
             pastes: pastes,
             fontRevision: fontRevision,
-            isFocused: isFocused
+            isFocused: isFocused,
+            grid: grid
         )
         .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
     }
@@ -98,13 +102,26 @@ struct TerminalCanvas: NSViewRepresentable {
     /// pane that receives keystrokes. There is exactly one true at a time.
     var isFocused: Bool = true
 
+    /// The pane's grid, in cells, as tmux reports it. Nil in the single-terminal
+    /// fallback, which has no layout behind it and so is entitled to size itself.
+    var grid: PaneGrid?
+
     func makeNSView(context: Context) -> TerminalRenderView {
         let view = TerminalRenderView()
+        // BEFORE attaching, not after. Attaching replays the pane's history, and
+        // tmux wrapped that history at the PANE width — so the emulator has to
+        // already be that wide or every long line arrives wrapped a second time.
+        view.setPaneGrid(grid)
         attach(view, context: context)
         return view
     }
 
     func updateNSView(_ view: TerminalRenderView, context: Context) {
+        // First, so a re-attach below replays into the right grid. `setPaneGrid`
+        // ignores a repeat, so this costs nothing on the updates that are not
+        // about size — which is nearly all of them.
+        view.setPaneGrid(grid)
+
         // Only re-attach when the selected terminal actually changes, or when
         // the link underneath it has been replaced. Restarting on every
         // SwiftUI update would wipe the screen constantly.

@@ -211,9 +211,26 @@ impl Terminal {
 /// replay buffer, so the two stay in proportion.
 pub const SCROLLBACK_LINES: usize = 10_000;
 
-/// Terminal dimensions are clamped to the same range the protocol enforces.
+/// Terminal dimensions, held to what a grid can actually be.
+///
+/// The ceiling is the protocol's, which bounds what a client may ask a whole
+/// terminal to become. The floor is NOT: it used to be the protocol's 20×5 too,
+/// and that was a category error with a visible symptom.
+///
+/// 20×5 is a sensible smallest WINDOW to ask for. It is not a smallest PANE.
+/// tmux splits a window into panes and will hand out a fourteen-column one
+/// without hesitating — five panes across a narrow window is enough — and this
+/// emulator is sized to a pane. Clamping that pane up to twenty columns gave the
+/// grid six columns tmux does not believe it owns, so tmux never painted them
+/// and whatever a reflow had left there stayed on screen. That is the same bug
+/// as sizing a pane by measuring its pixels, arriving by a different road.
+///
+/// So the floor is now what the emulator itself needs rather than what the
+/// protocol prefers: one cell. A pane too small to be useful renders as a pane
+/// too small to be useful, which is honest, and is anyway tmux's decision to
+/// have made.
 fn clamp(columns: u16, rows: u16) -> (u16, u16) {
-    (columns.clamp(20, 500), rows.clamp(5, 200))
+    (columns.clamp(1, 500), rows.clamp(1, 200))
 }
 
 #[cfg(test)]
@@ -227,6 +244,41 @@ mod tests {
             .iter()
             .map(|r| r.cells.iter().map(|c| c.ch).collect::<String>().trim_end().to_string())
             .collect()
+    }
+
+    #[test]
+    fn a_narrow_pane_is_as_narrow_as_it_was_asked_to_be() {
+        // tmux hands out a fourteen-column pane the moment a window is split
+        // five ways, and the emulator has to be able to BE one. It used to clamp
+        // up to the protocol's smallest window, twenty columns — so the grid
+        // held six columns tmux would never paint, and whatever a reflow left
+        // there stayed on screen. A renderer cannot repair that: it draws the
+        // grid it is given, and the grid was wrong.
+        let t = Terminal::new(14, 3);
+        assert_eq!((t.columns(), t.rows()), (14, 3));
+
+        let mut resized = Terminal::new(80, 24);
+        resized.resize(14, 3);
+        assert_eq!((resized.columns(), resized.rows()), (14, 3), "a resize must not clamp either");
+    }
+
+    #[test]
+    fn a_narrow_pane_still_wraps_and_scrolls_at_its_own_size() {
+        // The floor came down to one cell, so the sizes below the old twenty
+        // have to actually work rather than merely be accepted.
+        let mut t = Terminal::new(4, 2);
+        t.feed(b"abcdefgh");
+        assert_eq!((t.columns(), t.rows()), (4, 2));
+        assert_eq!(render(&t), vec!["abcd".to_string(), "efgh".to_string()]);
+    }
+
+    #[test]
+    fn the_ceiling_is_still_the_protocols() {
+        // Unchanged, and deliberately: the upper bound is about what a client
+        // may ask a whole terminal to become, which is a different question
+        // from how small tmux may split one.
+        let t = Terminal::new(9000, 9000);
+        assert_eq!((t.columns(), t.rows()), (500, 200));
     }
 
     #[test]
@@ -306,10 +358,15 @@ mod tests {
         assert_eq!(snap.rows[0].cells[2].ch, 'a');
     }
 
+    /// The ceiling only. This used to assert the floor as well — that `1, 1`
+    /// came back `20, 5` — and that assertion was the bug holding itself in
+    /// place: a pane really can be narrower than the smallest window anyone may
+    /// ask for, and clamping it up gave the grid columns tmux would never paint.
+    /// See `clamp`, and `a_narrow_pane_is_as_narrow_as_it_was_asked_to_be`.
     #[test]
     fn resize_is_clamped_to_the_protocol_range() {
         let mut t = Terminal::new(1, 1);
-        assert_eq!((t.columns(), t.rows()), (20, 5));
+        assert_eq!((t.columns(), t.rows()), (1, 1));
         t.resize(9999, 9999);
         assert_eq!((t.columns(), t.rows()), (500, 200));
     }

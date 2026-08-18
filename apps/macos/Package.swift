@@ -95,5 +95,18 @@ let package = Package(
             dependencies: ["Far Cooler"],
             path: "Tests/CeremonyTests"
         ),
+        // Who decides how big a pane is.
+        //
+        // The other thing in this package that is invisible by looking. A pane
+        // whose emulator is three rows taller than the pane tmux split renders
+        // perfectly: every glyph is upright, in the right cell, in the right
+        // color. It is just that three rows of it are cells tmux will never
+        // paint again, so whatever was left there stays — and it reads as the
+        // terminal being buggy rather than as a number being wrong.
+        .testTarget(
+            name: "TilingTests",
+            dependencies: ["Far Cooler"],
+            path: "Tests/TilingTests"
+        ),
     ]
 )

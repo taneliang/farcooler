@@ -199,20 +199,10 @@ struct TileView: View {
         }
     }
 
-    /// A pane's cell rectangle, in points.
-    ///
-    /// The gap between cards is not padding this view adds: it is the one cell
-    /// tmux leaves between panes for a divider, scaled along with everything else.
-    /// So the cards separate by exactly as much as tmux thinks they do, and a
-    /// layout with no divider — one pane, or a zoomed one — fills the view edge to
-    /// edge without a special case.
+    /// A pane's cell rectangle, in points. See `TileGeometry.frame`.
     private func frame(of rect: PaneRect, in group: PaneGroup, size: CGSize) -> CGRect {
-        guard group.columns > 0, group.rows > 0 else { return CGRect(origin: .zero, size: size) }
-        let x = CGFloat(rect.left) / CGFloat(group.columns) * size.width
-        let y = CGFloat(rect.top) / CGFloat(group.rows) * size.height
-        let width = CGFloat(rect.columns) / CGFloat(group.columns) * size.width
-        let height = CGFloat(rect.rows) / CGFloat(group.rows) * size.height
-        return CGRect(x: x, y: y, width: max(width, 1), height: max(height, 1))
+        TileGeometry.frame(
+            of: rect, in: PaneGrid(columns: group.columns, rows: group.rows), size: size)
     }
 
     private func pane(
@@ -232,6 +222,9 @@ struct TileView: View {
             isZoomed: rect.zoomed,
             index: (group.panes.firstIndex(of: rect) ?? 0) + 1,
             size: size,
+            // The pane's grid as tmux reports it, which is the only correct
+            // answer to the question. See `TerminalRenderView.paneGrid`.
+            grid: PaneGrid(columns: rect.columns, rows: rect.rows),
             onDrop: { dragged, side in onDropOnPane(dragged, terminal.id, side) },
             onSearchFiles: onSearchFiles,
             onSwitchPaneMode: onSwitchPaneMode
@@ -259,48 +252,32 @@ struct TileView: View {
 
         init(size: CGSize, group: PaneGroup, font: Int) {
             self.size = size
-            // Taken from the rectangles rather than from the pane count: three
-            // panes side by side and three stacked spend chrome in different
-            // directions, and the count cannot tell them apart.
-            self.across = max(1, Set(group.panes.map(\.left)).count)
-            self.down = max(1, Set(group.panes.map(\.top)).count)
+            let depth = TileGeometry.depth(of: group.panes)
+            self.across = depth.across
+            self.down = depth.down
             self.font = font
             self.haveColumns = group.columns
             self.haveRows = group.rows
         }
     }
 
-    /// Tell tmux how big this view is, in cells.
+    /// Tell tmux how big this view is, in cells. See `TileGeometry.viewport`.
     ///
-    /// Deliberately conservative. Every pane spends some of its rectangle on
-    /// chrome — a header naming it, and the terminal's own insets — so a viewport
-    /// computed as a flat width÷cell would have tmux hand each pane more columns
-    /// than the renderer can draw, and every line long enough to reach the edge
-    /// would wrap a second time. Subtracting the chrome, once per pane in each
-    /// axis, errs the other way: a column or two of empty space at a pane's edge,
-    /// which nobody notices.
+    /// This is the ONLY grid this app computes. Everything below it — how many
+    /// columns any one pane has — is tmux's answer, read back off the layout and
+    /// handed to that pane's renderer. See `TilePane`'s `grid`.
     private func send(viewport size: CGSize, for group: PaneGroup) async {
         let viewport = Viewport(size: size, group: group, font: preferences.revision)
-        let cell = TerminalMetrics.cell(preferences.terminalFont())
-        guard cell.width > 0, cell.height > 0 else { return }
-
-        let chromeWidth = TerminalMetrics.padding.left + TerminalMetrics.padding.right
-        let chromeHeight =
-            TerminalMetrics.padding.top + TerminalMetrics.padding.bottom + TilePane.headerHeight
-
-        let usableWidth = size.width - CGFloat(viewport.across) * chromeWidth
-        let usableHeight = size.height - CGFloat(viewport.down) * chromeHeight
-        guard usableWidth > 0, usableHeight > 0 else { return }
-
-        // The same floors the renderer applies to its own bounds, so the two land
-        // on the same grid rather than a cell apart.
-        let columns = max(20, Int(usableWidth / cell.width))
-        let rows = max(5, Int(usableHeight / cell.height))
+        guard
+            let window = TileGeometry.viewport(
+                fitting: size, across: viewport.across, down: viewport.down,
+                cell: TerminalMetrics.cell(preferences.terminalFont()))
+        else { return }
 
         // Compared against what tmux HAS rather than against what we last asked
         // for. The two are not the same thing, and only the first one is a fact.
-        guard columns != group.columns || rows != group.rows else { return }
-        await onViewport(columns, rows)
+        guard window.columns != group.columns || window.rows != group.rows else { return }
+        await onViewport(window.columns, window.rows)
     }
 }
 
@@ -341,6 +318,13 @@ private struct TilePane: View {
     let index: Int
     /// The pane's own size, so a drop can be placed against its edges.
     let size: CGSize
+    /// The pane's grid, in cells, straight from tmux — NOT measured from `size`.
+    ///
+    /// `size` is this pane's share of the view in points, and a share of the
+    /// view does not carry a whole number of cells. Measuring it lands a cell or
+    /// three away from what tmux actually split, and every cell of the
+    /// difference is one tmux never repaints. See `TileGeometry`.
+    let grid: PaneGrid
     let onDrop: (String, TileDirection) -> Void
     let onSearchFiles: (String) async -> [String]
     /// Switch this pane between its terminal and its chat.
@@ -429,7 +413,11 @@ private struct TilePane: View {
                     // every pane's size falls out of that.
                     onResize: { _, _ in },
                     fontRevision: preferences.revision,
-                    isFocused: isFocused
+                    isFocused: isFocused,
+                    // And falls back IN here, which is the other half of that
+                    // deal. Without it the pane's emulator sized itself from its
+                    // own pixels and held a grid tmux does not have.
+                    grid: grid
                 )
                 // Identity includes the PANE MODE, not just the terminal.
                 //
