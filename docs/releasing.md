@@ -187,6 +187,46 @@ Signing is conditional throughout. Without a Developer ID the Mac job still
 produces a working ad-hoc-signed app, which is what a contributor gets and what
 must keep working for them.
 
+## The Linux binaries every shipped app carries
+
+The Mac app is the distribution unit for the Linux daemon too. Someone
+installing Far Cooler onto a machine they ssh to has the app and nothing else —
+no checkout, no Rust, no `scripts/build-linux.sh` — so `host_install.rs` looks
+for `Resources/dist/<arch>-linux` inside the bundle before it looks anywhere
+else, and there is no download fallback behind it. If the bundle has none, the
+Install button cannot work at all, and the only way out is `--from <dir>` with
+binaries built by hand.
+
+So `.github/workflows/linux-binaries.yml` builds them once and **every workflow
+that ships an installable app calls it**: `release.yml` for preview and stable,
+`canary.yml` for canary. It is a file of its own precisely because it was
+inline in `release.yml`, and canary — added later — therefore shipped without
+it, dmg after dmg, with nothing failing:
+`build-app.sh` only warns when `dist/` is empty, by design, so that a laptop
+without musl can still build the app, and a warning in a job that passes is a
+warning nobody reads. Both callers assert the binaries are present after
+unpacking rather than trusting that warning.
+
+`ci.yml` deliberately does not call it. That job builds the app to prove it
+compiles and throws the bundle away; nothing installable comes out of it, and
+paying for two musl builds on every pull request to check a `cp` loop is not
+the trade.
+
+The channel is stamped into those binaries like any other build, and for a
+canary it has to be **said** rather than derived: a commit on `main` carries no
+tag. `linux-binaries.yml` resolves the channel on the runner and passes it in
+as `FARCOOLER_CHANNEL`, and `Cross.toml` is what carries it across the
+container boundary — `cross` forwards `CARGO_*`, `CROSS_*` and `RUSTFLAGS` and
+nothing else, so a variable not named there never reaches the build script.
+Both halves are needed and the failure is silent in the usual direction: an
+unstamped binary calls itself `local` and writes the Local channel's runtime
+directory on every host it reaches, so a stable and a canary install on one
+machine would quietly share a database.
+
+`Cross.toml` earns its keep on a laptop too: `FARCOOLER_CHANNEL=preview
+./scripts/build-linux.sh` reaches the build script the same way it does in CI,
+where before it stopped at the container.
+
 ## Updating a Mac that already has one
 
 Cutting a release gets a build onto GitHub. It does nothing for the Mac that

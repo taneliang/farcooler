@@ -46,49 +46,14 @@ env:
   FARCOOLER_TAG: ${{ inputs.tag }}
 
 jobs:
+  # The static musl CLI and daemon, in linux-binaries.yml because canary.yml
+  # needs the identical thing and had none — see that file. The channel comes
+  # from the tag, which is what a release has and a canary does not.
   linux:
-    name: Linux ${{ matrix.arch }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - arch: x86_64
-            target: x86_64-unknown-linux-musl
-          - arch: aarch64
-            target: aarch64-unknown-linux-musl
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-
-      # musl, statically linked, for the reason scripts/build-linux.sh explains:
-      # a glibc build made on one distribution refuses to start on an older one,
-      # and "GLIBC_2.38 not found" is the most common way a self-installed
-      # daemon fails. One binary has to run on Debian, Alpine, and a NAS.
-      - name: Install cross
-        run: cargo install cross --locked
-
-      - name: Build
-        run: cross build --release --target ${{ matrix.target }} --bin farcooler --bin farcoolerd
-
-      # The same layout `farcooler host install` looks for, so a downloaded
-      # tarball unpacks straight into the path the installer already reads.
-      - name: Package
-        run: |
-          out="dist/${{ matrix.arch }}-linux"
-          mkdir -p "$out"
-          cp target/${{ matrix.target }}/release/farcooler "$out/"
-          cp target/${{ matrix.target }}/release/farcoolerd "$out/"
-          tar -czf "farcooler-$(scripts/version.sh)-${{ matrix.arch }}-linux.tar.gz" -C dist "${{ matrix.arch }}-linux"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-${{ matrix.arch }}
-          path: '*.tar.gz'
+    uses: ./.github/workflows/linux-binaries.yml
+    with:
+      ref: ${{ inputs.tag || github.ref }}
+      tag: ${{ inputs.tag }}
 
   macos:
     name: macOS app

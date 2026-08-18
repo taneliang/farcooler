@@ -1,0 +1,134 @@
+# The static Linux CLI and daemon, built once and reused by everything that
+# ships something carrying them.
+#
+# Its own file because two workflows need the SAME binaries and the cost of one
+# of them not having any is invisible. `release.yml` had this job inline;
+# `canary.yml` never had it at all, so every canary disk image shipped with an
+# empty `Resources/dist/` and the Install button could not reach a Linux host.
+# `build-app.sh` said so in its log — "(none found …)" — and a green job is not
+# where anyone reads that. One copy, called twice, is what stops the next
+# workflow that builds the Mac app from being added without it.
+name: Linux binaries
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit, branch or tag to build. Defaults to the caller's.
+        required: false
+        type: string
+      tag:
+        description: The tag being built, for scripts/version.sh. See release.yml.
+        required: false
+        type: string
+      channel:
+        description: >
+          The channel to stamp into these binaries, for a build that carries no
+          tag to derive one from. Canary is the only such build; everything else
+          leaves this empty and lets the tag answer.
+        required: false
+        type: string
+
+jobs:
+  build:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          # Tags as well as the commit: with no `channel` input the step below
+          # asks `version.sh` which tag is on HEAD, and a checkout that fetched
+          # none would answer `local` for a build that is anything but.
+          fetch-tags: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      # Resolved HERE, on the runner, and passed into the container as an
+      # answer rather than as a question.
+      #
+      # `crates/protocol/build.rs` stamps the channel by shelling out to
+      # `scripts/version.sh`, which derives it from a tag — and canary, the
+      # channel this exists for, has none: a commit on main carries no tag, so
+      # nothing inside the container could work it out. It has to be told.
+      #
+      # Telling it is what Cross.toml is for. cross forwards CARGO_*, CROSS_*
+      # and RUSTFLAGS and nothing else, so an environment variable set on this
+      # job does not reach the build script unless it is named there. Without
+      # both halves the answer is `local`, silently, and a `local` daemon on a
+      # host writes the Local channel's runtime directory.
+      #
+      # Resolving it out here rather than passing the tag in also removes the
+      # container's git from the answer entirely. git IS present in the cross
+      # images and the bind mount is owned by the container's own uid, so it
+      # would work — but it is one more thing between a tag and a stamp, and
+      # the failure it produces is the same silent `local`.
+      #
+      # One residual sharp edge: version.sh answers `local` for a dirty tree
+      # BEFORE it looks at FARCOOLER_CHANNEL, so anything that dirties the
+      # mounted checkout inside the container — a `cargo build` that rewrites
+      # Cargo.lock because it and Cargo.toml have drifted — overrides all of
+      # this. That is the same trap release.yml's APP_NAME comment describes,
+      # and the same fix applies: keep the lockfile in sync.
+      - name: Resolve this build's channel
+        env:
+          # Through the environment rather than interpolated into the script:
+          # a tag or a channel name is repository-controlled text, and `${{ }}`
+          # inside a `run:` is substituted before the shell ever sees it.
+          FARCOOLER_TAG: ${{ inputs.tag }}
+          CHANNEL_INPUT: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          channel="$CHANNEL_INPUT"
+          [ -n "$channel" ] || channel="$(scripts/version.sh channel "$FARCOOLER_TAG")"
+          [ -n "$channel" ] || {
+            echo "version.sh channel returned nothing; refusing to ship unstamped binaries" >&2
+            exit 1
+          }
+          echo "channel: $channel"
+          echo "FARCOOLER_CHANNEL=$channel" >> "$GITHUB_ENV"
+
+      # musl, statically linked, for the reason scripts/build-linux.sh explains:
+      # a glibc build made on one distribution refuses to start on an older one,
+      # and "GLIBC_2.38 not found" is the most common way a self-installed
+      # daemon fails. One binary has to run on Debian, Alpine, and a NAS.
+      #
+      # Swatinem/rust-cache caches `~/.cargo/bin`, so this compiles cross once
+      # per lockfile and restores it after. It is the slowest step here and it
+      # is now paid on every push to main, which is what makes the cache worth
+      # naming.
+      - name: Install cross
+        run: cargo install cross --locked
+
+      # `-p`, not `--bin`, so this is the same invocation
+      # `scripts/build-linux.sh` makes — the one a laptop has actually run.
+      # Two spellings of "build these two binaries" is two things that can
+      # diverge, and the one CI used had never executed: release.yml has never
+      # completed a run, so this job's contents were unproven when they were
+      # inline there.
+      - name: Build
+        run: cross build --release --target ${{ matrix.target }} -p farcooler-cli -p farcooler-daemon
+
+      # The same layout `farcooler host install` looks for, so a downloaded
+      # tarball unpacks straight into the path the installer already reads.
+      - name: Package
+        run: |
+          out="dist/${{ matrix.arch }}-linux"
+          mkdir -p "$out"
+          cp target/${{ matrix.target }}/release/farcooler "$out/"
+          cp target/${{ matrix.target }}/release/farcoolerd "$out/"
+          tar -czf "farcooler-$(scripts/version.sh)-${{ matrix.arch }}-linux.tar.gz" -C dist "${{ matrix.arch }}-linux"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: '*.tar.gz'

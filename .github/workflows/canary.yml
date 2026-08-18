@@ -37,6 +37,25 @@ env:
   FARCOOLER_CHANNEL: canary
 
 jobs:
+  # The static musl CLI and daemon the Mac app CARRIES, from the same file
+  # release.yml calls.
+  #
+  # This job did not exist, and the whole channel was unusable because of it:
+  # `host_install.rs` looks for `Resources/dist/<arch>-linux` inside the bundle
+  # before anywhere else, so a canary with an empty `dist/` cannot install Far
+  # Cooler onto a machine you ssh to — and someone running a canary has the app
+  # and nothing else. The only way to use it was to build the Linux binaries by
+  # hand first, which is not a thing an installed app should ask of anyone.
+  #
+  # `channel: canary`, spelled out, for the reason at the top of this file: a
+  # commit on main carries no tag, so nothing can derive the channel from one,
+  # and the Linux binaries would otherwise be stamped `local` and write the
+  # Local channel's runtime directory on every host they reached.
+  linux:
+    uses: ./.github/workflows/linux-binaries.yml
+    with:
+      channel: canary
+
   ios:
     name: iOS (internal TestFlight)
     runs-on: macos-latest
@@ -175,6 +194,11 @@ jobs:
   macos:
     name: macOS (signed disk image)
     runs-on: macos-latest
+    # Serialised behind the Linux build, which is a real cost paid for a real
+    # reason — release.yml pays it too, and says why at length: the app carries
+    # those binaries, so a Mac job that started before they existed would build
+    # an app that silently cannot install to a Linux host.
+    needs: linux
     # Hoisted so the steps can test them in an `if`: the `secrets` context is
     # not available there, and `secrets.X != ''` is always false — silently, so
     # the signing steps would skip and an unopenable dmg would ship looking
@@ -188,6 +212,32 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+
+      # The Linux binaries this app will carry, from the job that just built
+      # them. `build-app.sh` reads `dist/<arch>-linux/` at the repo root, which
+      # is exactly the layout the tarballs unpack into — they were packed with
+      # `-C dist` for this.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-*
+          merge-multiple: true
+          path: linux-tarballs
+
+      - name: Unpack the Linux binaries where build-app.sh looks for them
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for tarball in linux-tarballs/*.tar.gz; do
+            tar -xzf "$tarball" -C dist
+          done
+          # Loudly, because the alternative is exactly the canary this file
+          # used to ship — build-app.sh only warns when dist/ is empty, by
+          # design, so that a laptop without musl can still build the app, and
+          # a warning inside a job that passes is one nobody reads.
+          for slug in x86_64-linux aarch64-linux; do
+            [ -x "dist/$slug/farcoolerd" ] || { echo "missing dist/$slug/farcoolerd" >&2; exit 1; }
+            [ -x "dist/$slug/farcooler" ] || { echo "missing dist/$slug/farcooler" >&2; exit 1; }
+          done
 
       - name: Import the signing certificate
         if: env.HAS_CERTIFICATE == 'true'

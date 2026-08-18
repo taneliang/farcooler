@@ -1,0 +1,19 @@
+# What `cross` carries into the container.
+#
+# cross runs the build inside Docker, and the container starts with almost none
+# of the host's environment: a fixed list of cargo and rustup variables, plus
+# anything named here. Nothing else crosses.
+#
+# `crates/protocol/build.rs` stamps the channel into every binary by asking
+# `scripts/version.sh`, which reads exactly these two variables. Without them
+# the script finds no tag and no channel and answers `local`, so a musl build
+# made by the release workflow would call itself a local build — and a `local`
+# daemon installed on a host writes the Local channel's runtime directory. A
+# stable and a canary install on one machine would then share a database, and
+# nothing anywhere would say so. It fails silently in CI, silently on the host,
+# and shows up only as two channels standing on each other.
+#
+# This is also what makes `scripts/build-linux.sh` on a laptop agree with CI:
+# the same variables reach the same build script either way.
+[build.env]
+passthrough = ["FARCOOLER_CHANNEL", "FARCOOLER_TAG"]
