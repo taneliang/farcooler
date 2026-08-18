@@ -229,6 +229,11 @@ jobs:
       # the same reason as the icon test: CryptoKit is macOS-only.
       - run: ./scripts/sparkle-key-test.sh
 
+      # Hardened Runtime blocks camera access before macOS can show the consent
+      # prompt unless the final app signature carries the camera entitlement.
+      # Check every signing path, not only the local bundle assembled above.
+      - run: ./scripts/macos-entitlements-test.sh
+
       - name: Test AgentKit
         run: swift test --package-path apps/shared/AgentKit
 
