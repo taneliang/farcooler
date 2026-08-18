@@ -47,6 +47,21 @@ struct AccountTests {
         #expect(Account.jwtExpiry("a.!!!not-base64!!!.c") == nil)
     }
 
+    /// Authentication Services completes on Safari's XPC queue. Constructing
+    /// its callback on the main actor makes Swift 6 trap before the callback
+    /// body runs, so exercise the production callback entirely off that actor.
+    @Test func authenticationCanCompleteOffTheMainActor() async throws {
+        let expected = try #require(URL(string: "farcooler://auth?code=accepted"))
+        let callback = try await Task.detached {
+            try await withCheckedThrowingContinuation { continuation in
+                let completion = Account.authenticationCompletion(for: continuation)
+                completion(expected, nil)
+            }
+        }.value
+
+        #expect(callback == expected)
+    }
+
     /// Unverified on purpose — the relay holds the JWKS and does the verifying.
     /// This only decides whether to bother sending a token that is already
     /// stale, so a forged expiry buys an attacker one extra refresh.

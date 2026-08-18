@@ -368,20 +368,31 @@ public final class Account: NSObject, ObservableObject {
     private func authenticate(_ url: URL) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             let session = ASWebAuthenticationSession(
-                url: url, callbackURLScheme: Self.scheme
-            ) { callback, error in
-                if let callback {
-                    continuation.resume(returning: callback)
-                } else {
-                    continuation.resume(throwing: error ?? AccountError.relayRefused)
-                }
-            }
+                url: url, callbackURLScheme: Self.scheme,
+                completionHandler: Self.authenticationCompletion(for: continuation))
             session.presentationContextProvider = self
             // Deliberately NOT ephemeral: someone signing in on their Mac and
             // then their phone should meet a browser that already knows them.
             session.prefersEphemeralWebBrowserSession = false
             session.start()
             self.session = session
+        }
+    }
+
+    /// Authentication Services replies on Safari's XPC queue, not the actor
+    /// that started the session. Building this closure inside `authenticate`
+    /// made it inherit `Account`'s main-actor isolation, so Swift trapped before
+    /// the closure body could resume the continuation. Construct it from a
+    /// nonisolated context; checked continuations are safe to resume there.
+    nonisolated static func authenticationCompletion(
+        for continuation: CheckedContinuation<URL, any Error>
+    ) -> ASWebAuthenticationSession.CompletionHandler {
+        { callback, error in
+            if let callback {
+                continuation.resume(returning: callback)
+            } else {
+                continuation.resume(throwing: error ?? AccountError.relayRefused)
+            }
         }
     }
 
