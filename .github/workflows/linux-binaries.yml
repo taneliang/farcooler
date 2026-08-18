@@ -51,7 +51,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # Keyed by target, because the default key is not. rust-cache builds its
+      # key out of the JOB id — `build` — and the RUNNER's platform, and neither
+      # of those varies across this matrix: both arms read and wrote the single
+      # entry `v0-rust-build-Linux-x64-…`.
+      #
+      # That is not a near miss, it is a poisoned cache. `target/release/build/`
+      # holds build scripts compiled for the HOST, and under cross the host is
+      # the CONTAINER — a different image per target, carrying a different
+      # glibc. So the x86_64 arm saved libc's `build-script-build` linked
+      # against its image, the aarch64 arm restored it into an older one, and
+      # the build died on "`GLIBC_2.28' not found" before compiling a line of
+      # ours.
+      #
+      # It goes green exactly once, which is what earns this comment: on a cold
+      # cache both arms build everything themselves and pass, and every run
+      # after that fails. ci.yml keys its own matrix on `matrix.os` for the same
+      # reason.
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       # Resolved HERE, on the runner, and passed into the container as an
       # answer rather than as a question.
