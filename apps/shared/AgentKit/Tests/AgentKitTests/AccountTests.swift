@@ -74,4 +74,13 @@ struct AccountTests {
         let expiry = try #require(Account.jwtExpiry("header.\(encoded).signature"))
         #expect(expiry.timeIntervalSince1970 == 1_700_000_000)
     }
+
+    /// A 401 means the relay answered and rejected this bearer. Calling it an
+    /// outage both lies to the user and prevents the one recovery that can
+    /// work: refresh the session and retry once.
+    @Test func anUnauthorizedResponseRefreshesTheSession() {
+        #expect(Account.responseAction(for: 200) == .accept)
+        #expect(Account.responseAction(for: 401) == .refreshSession)
+        #expect(Account.responseAction(for: 500) == .fail)
+    }
 }

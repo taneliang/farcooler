@@ -177,9 +177,9 @@ public final class Account: NSObject, ObservableObject {
     /// Refresh happens through the relay for the same reason the exchange does:
     /// WorkOS wants the API key on that call, and an app that could refresh
     /// alone would be an app carrying the key.
-    public func accessToken() async -> String? {
+    public func accessToken(forceRefresh: Bool = false) async -> String? {
         guard let refresh = TokenStore.read(Self.refreshKey) else { return nil }
-        if let access = TokenStore.read(Self.accessKey),
+        if !forceRefresh, let access = TokenStore.read(Self.accessKey),
             let expiry = Self.jwtExpiry(access), expiry.timeIntervalSinceNow > 60
         {
             return access
@@ -191,12 +191,7 @@ public final class Account: NSObject, ObservableObject {
             // silently instead of showing a sign-in button. Cleared locally
             // rather than through `signOut()`: the token the logout route would
             // need is the one that just proved dead.
-            userId = ""
-            email = ""
-            defaults.removeObject(forKey: "account.userId")
-            defaults.removeObject(forKey: "account.email")
-            TokenStore.delete(Self.accessKey)
-            TokenStore.delete(Self.refreshKey)
+            clearSession()
             return nil
         }
         store(body)
@@ -217,7 +212,6 @@ public final class Account: NSObject, ObservableObject {
         environment: String,
         liveActivityStartToken: String? = nil
     ) async -> Bool {
-        guard let token = await accessToken() else { return false }
         var payload: [String: Any] = [
             "pushToken": pushToken, "platform": platform, "label": label,
             // So the devices screen can show which of your runners is
@@ -238,7 +232,7 @@ public final class Account: NSObject, ObservableObject {
         if let liveActivityStartToken {
             payload["liveActivityStartToken"] = liveActivityStartToken
         }
-        let body = try? await post("/v1/devices", payload, bearer: token)
+        let body = await authenticatedPost("/v1/devices", payload)
         return body != nil
     }
 
@@ -258,16 +252,14 @@ public final class Account: NSObject, ObservableObject {
     public func registerActivityToken(
         terminal: String, updateToken: String?, environment: String
     ) async -> Bool {
-        guard let token = await accessToken() else { return false }
         // NSNull rather than leaving the key out or passing the Optional along:
         // JSONSerialization throws on a bare `Optional.none`, and an absent key
         // reads to the relay as "no change" — but clearing is the entire point
         // of the nil case.
         let update: Any = updateToken.map { $0 as Any } ?? NSNull()
-        let body = try? await post(
+        let body = await authenticatedPost(
             "/v1/devices/activity",
-            ["terminal": terminal, "updateToken": update, "environment": environment],
-            bearer: token)
+            ["terminal": terminal, "updateToken": update, "environment": environment])
         return body != nil
     }
 
@@ -276,15 +268,13 @@ public final class Account: NSObject, ObservableObject {
     /// Returned once and stored on the relay only as a hash, so this is the only
     /// moment it exists in readable form — hand it straight to the runner.
     public func pairDaemon(label: String) async -> String? {
-        guard let token = await accessToken() else { return nil }
-        let body = try? await post("/v1/daemons", ["label": label], bearer: token)
+        let body = await authenticatedPost("/v1/daemons", ["label": label])
         return body?["token"] as? String
     }
 
     /// Everything this account has registered, for the management screen.
     public func fetchRegistrations() async -> Registrations? {
-        guard let token = await accessToken() else { return nil }
-        guard let body = try? await post("/v1/account", [:], bearer: token) else { return nil }
+        guard let body = await authenticatedPost("/v1/account", [:]) else { return nil }
         let devices = (body["devices"] as? [[String: Any]] ?? []).map {
             Registration(
                 id: $0["id"] as? String ?? "",
@@ -312,9 +302,8 @@ public final class Account: NSObject, ObservableObject {
     /// Revoking here rather than on the runner is the case that matters: a
     /// laptop you no longer have is exactly the one you cannot run a command on.
     public func revoke(_ registration: Registration, kind: RegistrationKind) async -> Bool {
-        guard let token = await accessToken() else { return false }
         let path = kind == .device ? "/v1/devices/revoke" : "/v1/daemons/revoke"
-        return (try? await post(path, ["id": registration.id], bearer: token)) != nil
+        return await authenticatedPost(path, ["id": registration.id]) != nil
     }
 
     // MARK: - Plumbing
@@ -342,6 +331,38 @@ public final class Account: NSObject, ObservableObject {
         }
     }
 
+    /// Make one authenticated call, refreshing once if the relay rejects the
+    /// cached access token.
+    ///
+    /// Expiry is only the common reason a bearer stops working. The relay can
+    /// reject one earlier after key rotation, revocation, or stricter claim
+    /// validation. Treating that 401 like a dead server produced the Devices
+    /// screen's "Couldn’t reach the relay" error while the relay was healthy,
+    /// and kept sending the same rejected token on every retry.
+    private func authenticatedPost(
+        _ path: String, _ body: [String: Any]
+    ) async -> [String: Any]? {
+        guard let token = await accessToken() else { return nil }
+        do {
+            return try await post(path, body, bearer: token)
+        } catch AccountError.unauthorized {
+            guard let refreshed = await accessToken(forceRefresh: true) else { return nil }
+            do {
+                return try await post(path, body, bearer: refreshed)
+            } catch AccountError.unauthorized {
+                // A freshly minted token that is still refused is not a usable
+                // session. Show the sign-in state instead of leaving every
+                // authenticated screen in a permanent retry loop.
+                clearSession()
+                return nil
+            } catch {
+                return nil
+            }
+        } catch {
+            return nil
+        }
+    }
+
     @discardableResult
     private func post(
         _ path: String, _ body: [String: Any], bearer: String? = nil
@@ -357,12 +378,37 @@ public final class Account: NSObject, ObservableObject {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
-            let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
+        guard let statusCode = (response as? HTTPURLResponse)?.statusCode else {
             throw AccountError.relayRefused
         }
-        return parsed
+        switch Self.responseAction(for: statusCode) {
+        case .accept:
+            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { throw AccountError.relayRefused }
+            return parsed
+        case .refreshSession:
+            throw AccountError.unauthorized
+        case .fail:
+            throw AccountError.relayRefused
+        }
+    }
+
+    /// The only HTTP failure the app can repair by changing its request.
+    static func responseAction(for statusCode: Int) -> AccountResponseAction {
+        switch statusCode {
+        case 200: return .accept
+        case 401: return .refreshSession
+        default: return .fail
+        }
+    }
+
+    private func clearSession() {
+        userId = ""
+        email = ""
+        defaults.removeObject(forKey: "account.userId")
+        defaults.removeObject(forKey: "account.email")
+        TokenStore.delete(Self.accessKey)
+        TokenStore.delete(Self.refreshKey)
     }
 
     private func authenticate(_ url: URL) async throws -> URL {
@@ -454,8 +500,15 @@ public final class Account: NSObject, ObservableObject {
     }
 }
 
+enum AccountResponseAction: Equatable {
+    case accept
+    case refreshSession
+    case fail
+}
+
 public enum AccountError: Error {
     case relayRefused
+    case unauthorized
 }
 
 /// One row on the management screen.
