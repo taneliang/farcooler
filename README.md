@@ -148,6 +148,19 @@ agents ship one, the config file for adding your own, and known gaps.
 ./scripts/build-android-libs.sh && (cd apps/android && ./gradlew installDebug)
 ```
 
+The iOS app and its four extensions share an App Group, and Apple's own API
+cannot attach one to an App ID — so a channel you have never built on this
+Apple ID needs one manual pass first:
+
+```sh
+FASTLANE_USER=you@example.com ruby scripts/portal-app-groups.rb local
+```
+
+Skip it and the build still compiles and signs; it fails at INSTALL, on the
+device, with *"This app cannot be installed because its integrity could not be
+verified"* — which reads like a broken certificate and is not one. See the
+script's own header for why it needs a 2FA login when nothing else here does.
+
 Both connect over SSH with a key the device generates and never hands out, and
 both render from the same Rust cores the Mac does. The Android client is the
 newer of the two and connects to every configured runner at once, the way the

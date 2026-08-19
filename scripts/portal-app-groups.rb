@@ -8,6 +8,16 @@
 # "doesn't match the entitlements file's value". Apple has left that gap open
 # for years; see the developer forums thread on it.
 #
+# That is how it presents in CI. On a device it presents COMPLETELY
+# DIFFERENTLY, and the second symptom is the one that wastes an afternoon: the
+# build compiles, signs and copies over, and install fails with "This app
+# cannot be installed because its integrity could not be verified" — which
+# reads like an untrusted or expired certificate and is neither. It is this,
+# and it is per CHANNEL, so a run for `canary` leaves a local build failing in
+# exactly that way. The watch app is usually where it shows first, because
+# `.watchkitapp` and `.watchkitapp.widgets` are the newest App IDs and so the
+# likeliest to have never been associated.
+#
 # So this drives the developer portal the only way anything can: spaceship,
 # which speaks the portal's own private API using an Apple ID cookie session
 # rather than an App Store Connect key. That is why this needs a 2FA login and
