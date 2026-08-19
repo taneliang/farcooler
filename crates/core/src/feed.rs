@@ -174,7 +174,24 @@ impl Phrase {
     /// nothing for a tool whose input names no file, command, pattern or
     /// description — so the join never produces a leading or trailing space.
     pub fn action(verb: &str, object: &str) -> Self {
-        let verb = cleaned(&humanized(verb), WIDTH);
+        Self::phrased(&humanized(verb), object)
+    }
+
+    /// The same tool call, once the turn that made it is over: `Wrote
+    /// fruit.txt`.
+    ///
+    /// The action outlives its turn on purpose — a finished row is read to
+    /// find out what the agent DID, which is why `Signals` clears this at the
+    /// start of the next turn rather than at the end of this one. But it was
+    /// rendered in the present tense either way, so a pane that had finished
+    /// half an hour ago still said `Running cd …` as though it were running
+    /// something. Same fact, correct tense.
+    pub fn action_done(verb: &str, object: &str) -> Self {
+        Self::phrased(&past(verb), object)
+    }
+
+    fn phrased(verb: &str, object: &str) -> Self {
+        let verb = cleaned(verb, WIDTH);
         // `saturating_sub` because a pathologically long verb can claim the
         // whole width, which leaves the object nothing rather than a negative
         // budget.
@@ -238,6 +255,30 @@ fn humanized(verb: &str) -> String {
         None => String::new(),
     };
     if rest.is_empty() { capitalized } else { format!("{capitalized} {rest}") }
+}
+
+/// The same tool name, said as something that already happened.
+///
+/// Only the table has a past tense. The fallback deliberately does not try to
+/// invent one: `humanized`'s unknown-verb path produces `Mcp linear create
+/// issue`, which is a tool's NAME rather than an English verb, and bolting
+/// `-ed` onto whatever an MCP server happens to call itself would be a
+/// guess that reads worse than the name it mangled. An unknown tool therefore
+/// reads the same in both tenses, which is the honest answer — it never
+/// claimed to be a verb in the first place.
+fn past(verb: &str) -> String {
+    let known = match verb {
+        "write" => Some("Wrote"),
+        "read" => Some("Read"),
+        "edit" | "multiedit" | "notebookedit" | "apply_patch" => Some("Edited"),
+        "bash" | "shell" | "run" | "bashoutput" => Some("Ran"),
+        "grep" | "glob" | "search" | "websearch" | "codebase_search" => Some("Searched"),
+        "webfetch" | "fetch" => Some("Fetched"),
+        "agent" | "task" => Some("Delegated"),
+        "taskcreate" | "taskupdate" | "tasklist" | "todowrite" | "update_plan" => Some("Planned"),
+        _ => None,
+    };
+    known.map_or_else(|| humanized(verb), str::to_string)
 }
 
 /// Where an agent is in its own task list, folded from its log.
@@ -1598,6 +1639,31 @@ mod tests {
         // Nothing at all yet: `None`, which `line` renders as the headline
         // rather than as a blank row.
         assert_eq!(signal(None, 0, None), None);
+    }
+
+    /// The same tool call, before and after the turn that made it ended.
+    ///
+    /// A finished agent keeps its last action on purpose — it is what a
+    /// finished row is read for — but it used to keep it in the present
+    /// tense, so a pane that stopped working half an hour ago went on
+    /// claiming `Running cd …`. The fact is right; only the tense was wrong.
+    #[test]
+    fn a_finished_turns_action_reads_as_something_that_already_happened() {
+        assert_eq!(Phrase::action("bash", "cd acme && cargo test").as_str(), "Running cd acme && cargo test");
+        assert_eq!(Phrase::action_done("bash", "cd acme && cargo test").as_str(), "Ran cd acme && cargo test");
+
+        assert_eq!(Phrase::action_done("write", "fruit.txt").as_str(), "Wrote fruit.txt");
+        assert_eq!(Phrase::action_done("edit", "main.rs").as_str(), "Edited main.rs");
+        assert_eq!(Phrase::action_done("grep", "needle").as_str(), "Searched needle");
+        assert_eq!(Phrase::action_done("task", "the subagent").as_str(), "Delegated the subagent");
+
+        // A tool nobody predicted has no verb to put in the past: the
+        // fallback renders its NAME, and a name reads the same either way
+        // rather than being mangled into a tense it never had.
+        assert_eq!(
+            Phrase::action_done("mcp__linear__create_issue", "FC-1").as_str(),
+            Phrase::action("mcp__linear__create_issue", "FC-1").as_str()
+        );
     }
 
     /// The join that can break, and the half that must not.

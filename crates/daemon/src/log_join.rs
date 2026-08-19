@@ -21,6 +21,7 @@
 //! same principle `session_discovery` already applies to hand-started
 //! sessions.
 
+use std::collections::HashSet;
 use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -36,9 +37,19 @@ use farcooler_core::title;
 /// process, needed only for codex. `cwd` and `title` are read straight off
 /// the pane. An unrecognized preset -- anything Far Cooler does not have a
 /// join strategy for -- yields `None` rather than guessing at one.
-pub fn find_session_log(preset: &str, pid: Option<i32>, cwd: &str, title: &str) -> Option<PathBuf> {
+///
+/// `claimed` is every file some OTHER pane is already tailing. A session file
+/// has exactly one pane writing it, so one already spoken for is not this
+/// pane's — see `pick_candidate`, which is where that matters and why.
+pub fn find_session_log(
+    preset: &str,
+    pid: Option<i32>,
+    cwd: &str,
+    title: &str,
+    claimed: &HashSet<PathBuf>,
+) -> Option<PathBuf> {
     let home = home_dir()?;
-    find_session_log_under(&home, preset, pid, cwd, title)
+    find_session_log_under(&home, preset, pid, cwd, title, claimed)
 }
 
 /// `$HOME` is not always set (a stripped-down service environment, a test
@@ -51,13 +62,18 @@ fn home_dir() -> Option<PathBuf> {
 
 /// `find_session_log` with `home` injected, so tests can point every root at
 /// a temp directory instead of a real, large, concurrently-changing one.
-fn find_session_log_under(home: &Path, preset: &str, pid: Option<i32>, cwd: &str, pane_title: &str) -> Option<PathBuf> {
+fn find_session_log_under(home: &Path, preset: &str, pid: Option<i32>, cwd: &str, pane_title: &str, claimed: &HashSet<PathBuf>) -> Option<PathBuf> {
     if preset.starts_with("claude") {
-        find_claude(home, &resolved(cwd), pane_title)
+        find_claude(home, &resolved(cwd), pane_title, claimed)
     } else if preset.starts_with("codex") {
+        // No `claimed` filter: codex is joined by `lsof` on the pane's OWN
+        // process, so two panes cannot arrive at one rollout file in the first
+        // place. Filtering here would only be able to do harm — a stale entry
+        // for a pane that has since gone would hide a file from its rightful
+        // owner.
         find_codex(pid)
     } else if preset.starts_with("cursor") {
-        find_cursor(home, &resolved(cwd), pane_title)
+        find_cursor(home, &resolved(cwd), pane_title, claimed)
     } else {
         None
     }
@@ -100,10 +116,10 @@ fn resolved(cwd: &str) -> String {
 /// running is a candidate at all (`is_terminal_session`), and only then does
 /// the counting rule below apply -- one candidate is unambiguous, several need
 /// the title.
-fn find_claude(home: &Path, cwd: &str, pane_title: &str) -> Option<PathBuf> {
+fn find_claude(home: &Path, cwd: &str, pane_title: &str, claimed: &HashSet<PathBuf>) -> Option<PathBuf> {
     let dir = home.join(".claude/projects").join(claude_slug(cwd));
     let candidates = jsonl_files(&dir).into_iter().filter(|p| is_terminal_session(p)).collect();
-    pick_candidate(candidates, pane_title, read_claude_title)
+    pick_candidate(candidates, pane_title, claimed, read_claude_title)
 }
 
 /// Whether this file is a conversation someone typed into a terminal.
@@ -195,11 +211,11 @@ fn scan_head<T>(path: &Path, pick: impl Fn(&serde_json::Value) -> Option<T>) -> 
 /// returns `None`: with exactly one candidate that is never consulted; with
 /// more than one, there is nothing honest to compare and the ambiguity rule
 /// refuses rather than guess which one the pane means.
-fn find_cursor(home: &Path, cwd: &str, pane_title: &str) -> Option<PathBuf> {
+fn find_cursor(home: &Path, cwd: &str, pane_title: &str, claimed: &HashSet<PathBuf>) -> Option<PathBuf> {
     let root = home.join(".cursor/projects");
     let dir = resolve_cursor_dir(&root, cwd)?;
     let candidates = cursor_transcript_files(&dir.join("agent-transcripts"));
-    pick_candidate(candidates, pane_title, |_| None)
+    pick_candidate(candidates, pane_title, claimed, |_| None)
 }
 
 /// Find the real `~/.cursor/projects/<slug>` directory for `cwd`.
@@ -438,7 +454,26 @@ fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
 /// is trustworthy; picking any other would attach the row to a conversation
 /// that is not the one on screen. So no match, and more than one match, both
 /// refuse rather than guess.
-fn pick_candidate(mut candidates: Vec<PathBuf>, pane_title: &str, read_title: impl Fn(&Path) -> Option<String>) -> Option<PathBuf> {
+///
+/// A file another pane is already tailing is not a candidate at all, and that
+/// is what makes the one-candidate rule safe. Two claude panes in one
+/// workspace share a `cwd`, so they share a project directory; a second one
+/// starting up has not written its own file yet, which left the FIRST pane's
+/// session as the sole candidate — and the counting rule handed it over
+/// without ever reading a title. Both rows then showed one conversation's
+/// summary, its plan position and its actions, which is the two-agents bug.
+///
+/// It is sticky once it happens, too: `advance_log` only re-derives a join
+/// when it holds no tail, or when `join_looks_dead` fires — and that needs the
+/// pane to look busy AND its file to have been silent for 30s, which the file
+/// being actively written by its real owner never is.
+///
+/// Excluding claimed files leaves the second pane with nothing, which is the
+/// honest answer until it writes its first turn — and is this module's
+/// standing rule: a wrong conversation is worse than none.
+fn pick_candidate(candidates: Vec<PathBuf>, pane_title: &str, claimed: &HashSet<PathBuf>, read_title: impl Fn(&Path) -> Option<String>) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> =
+        candidates.into_iter().filter(|path| !claimed.contains(path)).collect();
     if candidates.len() == 1 {
         return candidates.pop();
     }
@@ -458,6 +493,14 @@ fn pick_candidate(mut candidates: Vec<PathBuf>, pane_title: &str, read_title: im
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// The join with nothing claimed by anyone else, which is what every test
+    /// that is not about the claim rule is asking about. Shadows the real one
+    /// so those tests read as they did before it grew the argument; the tests
+    /// that ARE about it call `super::find_session_log_under` directly.
+    fn find_session_log_under(home: &Path, preset: &str, pid: Option<i32>, cwd: &str, pane_title: &str) -> Option<PathBuf> {
+        super::find_session_log_under(home, preset, pid, cwd, pane_title, &HashSet::new())
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("farcooler-log-join-{name}-{}", std::process::id()));
@@ -531,6 +574,50 @@ mod tests {
         let expected = write_claude_session(&dir, "sess-terminal", None);
         let found = find_session_log_under(&home, "claude", None, cwd, "✳ Write a haiku").unwrap();
         assert_eq!(found, expected);
+    }
+
+    /// Two claude panes in one workspace, and the second must not adopt the
+    /// first's conversation.
+    ///
+    /// This is the two-agents bug exactly as it was reported: both rows showed
+    /// the same summary and the same running task. Every pane in a workspace
+    /// shares a `cwd`, so they share a project directory -- and a pane that has
+    /// just started has written no file of its own yet, which left the pane
+    /// ALREADY RUNNING as the only candidate. The one-candidate rule then
+    /// handed its session over without ever reading a title.
+    ///
+    /// Nothing about the two files distinguishes them here: no `ai-title` on
+    /// either, so the title rule could not have saved this even if it ran. The
+    /// claim is what does it.
+    #[test]
+    fn a_second_claude_pane_does_not_adopt_the_first_ones_session() {
+        let home = scratch("claude-two-panes");
+        let cwd = "/Users/e-liang/Dev/two-agents";
+        let dir = home.join(".claude/projects").join(claude_slug(cwd));
+        let first = write_claude_session(&dir, "sess-first", None);
+
+        // Pane one, alone in the directory, joins it.
+        assert_eq!(
+            super::find_session_log_under(&home, "claude", None, cwd, "✳ Build the thing", &HashSet::new()),
+            Some(first.clone())
+        );
+
+        // Pane two, starting up beside it with no file of its own yet. The
+        // same lone candidate, and it must be refused.
+        let claimed = HashSet::from([first.clone()]);
+        assert_eq!(
+            super::find_session_log_under(&home, "claude", None, cwd, "✳ Build the thing", &claimed),
+            None,
+            "a second pane adopted the first pane's conversation"
+        );
+
+        // Once pane two writes its own, it joins that one and only that one.
+        let second = write_claude_session(&dir, "sess-second", None);
+        assert_eq!(
+            super::find_session_log_under(&home, "claude", None, cwd, "✳ Build the thing", &claimed),
+            Some(second),
+            "with its own file present, the second pane should join it"
+        );
     }
 
     /// The 270-byte metadata stubs that sit in real project directories --
@@ -886,7 +973,7 @@ mod tests {
         let bytes: u64 = files.iter().filter_map(|p| p.metadata().ok()).map(|m| m.len()).sum();
 
         let start = std::time::Instant::now();
-        let found = find_claude(&home, cwd, "a title no session on this machine has");
+        let found = find_claude(&home, cwd, "a title no session on this machine has", &HashSet::new());
         let elapsed = start.elapsed();
 
         eprintln!(

@@ -816,9 +816,29 @@ fn resolved_activity(
     }
     if let Some(turn) = log {
         if !turn.running {
-            return AgentActivity::Idle;
-        }
-        if now.saturating_sub(turn.last_event_at) < STALE_LOG_MS {
+            // Only while the screen still shows an agent at all.
+            //
+            // A finished turn stays finished, which is why this half carries no
+            // staleness bound — but "the turn ended" is a claim about an agent,
+            // and it cannot be the thing that makes a pane one. After someone
+            // quits claude the pane is a shell: the log still holds
+            // `running: false` and the tail is never dropped (`join_looks_dead`
+            // returns false the moment `working` is false), so this returned
+            // `Idle` forever. `Idle` is not `None` downstream — `rung_subject`
+            // only falls back to the command for `None`, and every client reads
+            // `activity != none` as "this is an agent" — so a plain shell went
+            // on being counted, summarized and rendered as a live agent until
+            // the terminal was removed.
+            //
+            // Deliberately not applied to the RUNNING half above. There the
+            // asymmetry runs the other way: a log saying a turn is open is
+            // evidence about a pane whose screen may simply not have redrawn,
+            // and refusing it would put back the stuck-on-Working bug this
+            // stage exists to close.
+            if screen != AgentActivity::None {
+                return AgentActivity::Idle;
+            }
+        } else if now.saturating_sub(turn.last_event_at) < STALE_LOG_MS {
             return AgentActivity::Working;
         }
     }
@@ -999,10 +1019,16 @@ struct Signals {
     /// the one it moved to most recently is the one it is doing.
     active: Option<String>,
     spawns: Vec<Spawn>,
-    /// The last tool call of THIS turn, as a line: `Writing fruit.txt`. The
-    /// signal line's fallback for an agent with no task list, which is codex,
-    /// cursor, and most claude sessions.
-    action: Option<farcooler_core::feed::Phrase>,
+    /// The last tool call of THIS turn, as the verb and object it arrived
+    /// as: `("bash", "cd acme && cargo test")`. The signal line's fallback
+    /// for an agent with no task list, which is codex, cursor, and most
+    /// claude sessions.
+    ///
+    /// Kept raw rather than as a rendered `Phrase`, because how it should
+    /// read depends on something that is not known when it is folded: a turn
+    /// still open says `Running cd …`, and the same call once the turn is
+    /// over says `Ran cd …`. See `line`.
+    action: Option<(String, String)>,
 }
 
 impl Signals {
@@ -1010,7 +1036,7 @@ impl Signals {
     fn saw(&mut self, event: &TurnEvent) {
         match event {
             TurnEvent::Did { verb, object } => {
-                self.action = Some(farcooler_core::feed::Phrase::action(verb, object));
+                self.action = Some((verb.clone(), object.clone()));
             }
             TurnEvent::TaskState { id, active_form, status } => {
                 self.task(id.as_deref(), active_form.as_deref(), *status);
@@ -1187,8 +1213,24 @@ impl Signals {
     /// Composed by `farcooler_core::feed::signal` rather than here, so the
     /// daemon that folds the facts and the rung that renders them cannot come
     /// to two different answers about one pane.
-    fn line(&self) -> Option<String> {
-        farcooler_core::feed::signal(self.plan().as_ref(), self.running(), self.action.as_ref())
+    /// `mid_turn` decides the tense of the action, and comes from the pane's
+    /// RESOLVED activity rather than from anything folded in here. A turn
+    /// boundary seen in the log is not the same question: a tail that attached
+    /// after the turn had already started never saw its `Started`, and a
+    /// daemon restarted mid-turn never saw one either — both would render a
+    /// working agent in the past tense. What the pane is doing now is decided
+    /// from three sources in `resolved_activity`, and this is that answer.
+    fn line(&self, mid_turn: bool) -> Option<String> {
+        // Rendered here rather than at fold time, because the tense is not
+        // knowable when the tool call arrives. See `action`.
+        let action = self.action.as_ref().map(|(verb, object)| {
+            if mid_turn {
+                farcooler_core::feed::Phrase::action(verb, object)
+            } else {
+                farcooler_core::feed::Phrase::action_done(verb, object)
+            }
+        });
+        farcooler_core::feed::signal(self.plan().as_ref(), self.running(), action.as_ref())
     }
 }
 
@@ -1356,9 +1398,17 @@ impl Observed {
         self.rendered() != before
     }
 
+    /// Whether this pane is inside a turn right now, which is what decides
+    /// the tense of its action line. `Blocked` counts: an agent waiting on a
+    /// permission prompt has not finished what it was doing, it has stopped
+    /// partway through it.
+    fn mid_turn(&self) -> bool {
+        matches!(self.activity, AgentActivity::Working | AgentActivity::Blocked)
+    }
+
     /// Everything a client renders out of this pane's session log.
     fn rendered(&self) -> (Vec<String>, Option<String>, Vec<String>) {
-        (self.feed.lines(), self.signals.line(), self.signals.subagents())
+        (self.feed.lines(), self.signals.line(self.mid_turn()), self.signals.subagents())
     }
 }
 
@@ -1568,7 +1618,7 @@ impl Watcher {
     /// outranks this, and `farcooler_core::feed::line` is where that priority
     /// is applied, because only the rungs know the agent's state.
     pub async fn signal(&self, terminal: Uuid) -> Option<String> {
-        self.state.lock().await.get(&terminal).and_then(|o| o.signals.line())
+        self.state.lock().await.get(&terminal).and_then(|o| o.signals.line(o.mid_turn()))
     }
 
     /// The agents this terminal's agent spawned and has not finished with,
@@ -1754,12 +1804,26 @@ impl Watcher {
         churn: bool,
         working: bool,
     ) -> (Option<LogTurn>, Vec<TurnEvent>) {
-        let log = self
-            .logs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&id)
-            .unwrap_or_else(PaneLog::new);
+        // Taken together, under one lock, and in this order: the entry for
+        // THIS pane comes out first, so what is left is exactly the files
+        // other panes hold. Without the removal a pane would find its own
+        // tail in the set and refuse to re-adopt the file it is already
+        // reading.
+        //
+        // A snapshot rather than a live view, because the join runs on a
+        // blocking thread with no lock. It can only go stale by naming a file
+        // whose pane has since gone, and one tick later that pane's entry is
+        // pruned and the file is free again.
+        let (log, claimed) = {
+            let mut logs = self.logs.lock().unwrap_or_else(|e| e.into_inner());
+            let log = logs.remove(&id).unwrap_or_else(PaneLog::new);
+            let claimed = logs
+                .values()
+                .filter_map(|other| other.tail.as_ref())
+                .map(|(tail, _)| tail.path().to_path_buf())
+                .collect::<std::collections::HashSet<_>>();
+            (log, claimed)
+        };
         // Off the executor for the same reason `listening_ports` is: this can
         // spawn a process and read files, and the sampling loop is shared with
         // everything else the daemon is doing.
@@ -1770,6 +1834,7 @@ impl Watcher {
                     pane.pid,
                     &pane.cwd,
                     &pane.title,
+                    &claimed,
                 )
             })
         })
@@ -2303,7 +2368,7 @@ impl Watcher {
             // The compact ladder, computed from everything just set above —
             // see `wire::apply_rungs` for why it has to run last, and why the
             // signal line is handed to it rather than read off the message.
-            wire::apply_rungs(&mut message, observed.signals.line().as_deref());
+            wire::apply_rungs(&mut message, observed.signals.line(observed.mid_turn()).as_deref());
 
             // The live card, from the same line the sidebar is about to draw.
             //
@@ -2537,7 +2602,7 @@ mod tests {
         ];
         assert!(entry.saw_events(&events), "the row moved");
         assert_eq!(entry.feed.lines(), vec!["Written to haiku.txt."]);
-        assert_eq!(entry.signals.line().as_deref(), Some("Writing haiku.txt"));
+        assert_eq!(entry.signals.line(true).as_deref(), Some("Writing haiku.txt"));
     }
 
     /// A tool argument is where a token lives, and this is the path one would
@@ -2571,7 +2636,7 @@ mod tests {
         entry.saw_events(&events);
 
         let mut everything = entry.feed.lines();
-        everything.extend(entry.signals.line());
+        everything.extend(entry.signals.line(true));
         everything.extend(entry.signals.subagents());
         for line in &everything {
             assert!(!line.contains("wJalrXUtnFEMI"), "a live credential reached a client: {line}");
@@ -2614,13 +2679,13 @@ mod tests {
         ] {
             signals.saw(&event);
         }
-        assert_eq!(signals.line().as_deref(), Some("0/2 · Designing test matrix"));
+        assert_eq!(signals.line(true).as_deref(), Some("0/2 · Designing test matrix"));
 
         // The first finishes and the second starts: both halves of the line
         // move, off two lines that each stated only one of them.
         signals.saw(&moved("1", TaskStatus::Completed));
         signals.saw(&moved("2", TaskStatus::InProgress));
-        assert_eq!(signals.line().as_deref(), Some("1/2 · Identifying edge cases"));
+        assert_eq!(signals.line(true).as_deref(), Some("1/2 · Identifying edge cases"));
     }
 
     /// The correction this stage's live run forced, as a test.
@@ -2651,7 +2716,7 @@ mod tests {
         signals.saw(&moved("3", TaskStatus::Completed));
         signals.saw(&moved("4", TaskStatus::InProgress));
         assert_eq!(
-            signals.line().as_deref(),
+            signals.line(true).as_deref(),
             Some("1/2 · Auditing the rules"),
             "two tasks in this turn, not four, and the phrase joined to the right one"
         );
@@ -2672,10 +2737,10 @@ mod tests {
         }
         signals.saw(&moved("1", TaskStatus::Completed));
         signals.saw(&moved("2", TaskStatus::Completed));
-        assert_eq!(signals.line().as_deref(), Some("2/3"));
+        assert_eq!(signals.line(true).as_deref(), Some("2/3"));
 
         signals.saw(&moved("3", TaskStatus::Deleted));
-        assert_eq!(signals.line().as_deref(), Some("2/2"), "a dropped task leaves both halves");
+        assert_eq!(signals.line(true).as_deref(), Some("2/2"), "a dropped task leaves both halves");
     }
 
     /// What is left to go wrong, and the half that must survive it.
@@ -2692,14 +2757,14 @@ mod tests {
         signals.saw(&numbered("1"));
         // An id no create was ever seen for — a pane that joined mid-turn.
         signals.saw(&moved("42", TaskStatus::Completed));
-        assert_eq!(signals.line().as_deref(), Some("1/2"), "the count survived");
+        assert_eq!(signals.line(true).as_deref(), Some("1/2"), "the count survived");
 
         // And the phrase of a task claimed by an id it was never numbered with
         // goes rather than being guessed at.
         let mut orphaned = Signals::default();
         orphaned.saw(&created("Designing test matrix"));
         orphaned.saw(&moved("42", TaskStatus::InProgress));
-        assert_eq!(orphaned.line().as_deref(), Some("0/1"), "no phrase rather than a guessed one");
+        assert_eq!(orphaned.line(true).as_deref(), Some("0/1"), "no phrase rather than a guessed one");
     }
 
     /// A plan belongs to the turn that wrote it.
@@ -2710,10 +2775,10 @@ mod tests {
         signals.saw(&numbered("1"));
         signals.saw(&moved("1", TaskStatus::InProgress));
         signals.saw(&TurnEvent::Subagent { id: "toolu_1".into(), description: "Auditing rules".into(), running: true });
-        assert_eq!(signals.line().as_deref(), Some("0/1 · Designing test matrix · 1 agent"));
+        assert_eq!(signals.line(true).as_deref(), Some("0/1 · Designing test matrix · 1 agent"));
 
         signals.saw(&TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Finished });
-        assert_eq!(signals.line(), None, "the plan ended with the turn that wrote it");
+        assert_eq!(signals.line(false), None, "the plan ended with the turn that wrote it");
         assert!(signals.subagents().is_empty());
     }
 
@@ -2737,13 +2802,13 @@ mod tests {
         });
         signals.saw(&TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Finished });
         assert_eq!(
-            signals.line().as_deref(),
-            Some("Running test \"$(< fruit.txt)\" = banana"),
-            "a finished row still says what it did"
+            signals.line(false).as_deref(),
+            Some("Ran test \"$(< fruit.txt)\" = banana"),
+            "a finished row still says what it did, in the tense it did it in"
         );
 
         signals.saw(&TurnEvent::Started { at_ms: None });
-        assert_eq!(signals.line(), None, "and a new turn starts from nothing");
+        assert_eq!(signals.line(true), None, "and a new turn starts from nothing");
     }
 
     /// A background spawn's result arrives at LAUNCH, not at the end.
@@ -3121,6 +3186,55 @@ mod tests {
         }
     }
 
+    /// Quitting the agent leaves a shell, and a shell is not an idle agent.
+    ///
+    /// The reported bug: after exiting claude, the sidebar row went on
+    /// carrying the agent's summary and its last task. A finished turn is
+    /// believed forever and deliberately so — `last_event_at` is never
+    /// consulted for an ended turn — and `join_looks_dead` will not let go of
+    /// the tail either, since it returns false the moment `working` is false.
+    /// So `Some(LogTurn { running: false })` sat there returning `Idle` for a
+    /// pane that had been a plain zsh prompt for an hour.
+    ///
+    /// `Idle` is not `None` anywhere downstream: `wire::rung_subject` only
+    /// falls back to the command for `None`, and every client reads
+    /// `activity != none` as "this is an agent", so the pane went on being
+    /// counted in fleet summaries and written into widget snapshots.
+    ///
+    /// The screen is the thing that can tell: `classify` returns `None` when
+    /// it cannot identify an agent on it at all, and a log cannot make a pane
+    /// into an agent that the screen says is not one.
+    #[test]
+    fn a_finished_log_does_not_keep_a_shell_looking_like_an_agent() {
+        let now = 1_000_000;
+        let ended = Some(LogTurn { running: false, failed: false, last_event_at: now - 60_000 });
+
+        // The agent is gone: nothing on the screen identifies one.
+        assert_eq!(
+            resolved_activity(AgentActivity::None, ended, now, "", "zsh", "Mac", 0),
+            AgentActivity::None,
+            "a pane running a shell reported as an agent"
+        );
+
+        // Still on screen, between turns: that IS an idle agent, and the
+        // finished log is exactly how it is known.
+        assert_eq!(
+            resolved_activity(AgentActivity::Idle, ended, now, "", "claude", "Mac", 0),
+            AgentActivity::Idle,
+            "an agent between turns stopped reading as one"
+        );
+
+        // The running half is deliberately NOT gated the same way: a log
+        // saying a turn is open is evidence about a pane whose screen may
+        // simply not have redrawn yet.
+        let open = Some(LogTurn { running: true, failed: false, last_event_at: now });
+        assert_eq!(
+            resolved_activity(AgentActivity::None, open, now, "", "claude", "Mac", 0),
+            AgentActivity::Working,
+            "an open turn stopped being believed over an unredrawn screen"
+        );
+    }
+
     /// A log that stopped being written stops being believed.
     ///
     /// The same trap `STALE_TITLE_SAMPLES` closed for the title's spinner,
@@ -3287,15 +3401,15 @@ mod tests {
         let (log, events) = advance_log(log, &pane, 6_500, false, false, never_joined);
         let mut entry = Observed::begin(AgentActivity::Working, 6_500);
         entry.saw_events(&events);
-        assert_eq!(entry.signals.line().as_deref(), Some("Writing haiku.txt"));
+        assert_eq!(entry.signals.line(true).as_deref(), Some("Writing haiku.txt"));
 
         writeln!(file, r#"{{"type":"system","subtype":"turn_duration","durationMs":1200}}"#).unwrap();
         let (log, events) = advance_log(log, &pane, 7_000, false, false, never_joined);
         entry.saw_events(&events);
         assert_eq!(log.turn, Some(LogTurn { running: false, failed: false, last_event_at: 7_000 }));
         assert_eq!(
-            entry.signals.line().as_deref(),
-            Some("Writing haiku.txt"),
+            entry.signals.line(false).as_deref(),
+            Some("Wrote haiku.txt"),
             "the turn ended; what it last did is still what a finished row reports"
         );
 
@@ -3529,7 +3643,9 @@ mod tests {
         let (log, events) = advance_log(log, &pane, start + 40_000, true, true, find);
         let mut entry = Observed::begin(AgentActivity::Working, start + 40_000);
         entry.saw_events(&events);
-        assert_eq!(entry.signals.line().as_deref(), Some("Writing haiku.txt"), "the row unfroze");
+        // Past tense: the appended turn ended. What matters here is that the
+        // row is reading the NEW session at all.
+        assert_eq!(entry.signals.line(false).as_deref(), Some("Wrote haiku.txt"), "the row unfroze");
         assert_eq!(log.turn, Some(LogTurn { running: false, failed: false, last_event_at: start + 40_000 }));
     }
 
