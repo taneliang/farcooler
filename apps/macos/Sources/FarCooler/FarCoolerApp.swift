@@ -69,6 +69,11 @@ struct FarCoolerApp: App {
 enum Entry {
     static func main() {
         ignoreSIGPIPE()
+        // Before the first CLI spawn, and before the window: the answer is
+        // wanted by `daemon ensure` at launch and by every pane opened after
+        // it. See `CLI.warmSearchPath` — it returns immediately and resolves
+        // on its own thread, so this costs nothing here.
+        CLI.warmSearchPath()
         if let path = ProcessInfo.processInfo.environment["FARCOOLER_RENDER_PROBE"] {
             MainActor.assumeIsolated { RenderProbe.run(writingTo: path) }
         }

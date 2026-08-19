@@ -353,8 +353,18 @@ impl Runtime {
         // Retried rather than slept through: the fanout has a process to spawn
         // and a socket to bind before it can be connected to, and how long that
         // takes belongs to the machine, not to a number chosen here.
-        for _ in 0..100 {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        //
+        // Probed BEFORE the first sleep, which is the difference between "as
+        // fast as the machine can manage" and "never faster than 10ms". The
+        // socket is frequently already there: `pipe_pane_start` above has
+        // already awaited tmux, and within the fanout's five-second idle grace
+        // a pane that was open moments ago still has a live one to connect to —
+        // the common case when someone switches away from a layout and back.
+        // Sleeping first put a floor under every one of those.
+        for attempt in 0..100 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
             if let Some(socket) = crate::fanout::subscribe(&install, pane_id).await {
                 return Ok(socket);
             }
