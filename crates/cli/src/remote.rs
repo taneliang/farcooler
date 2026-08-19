@@ -91,13 +91,21 @@ fn ssh_args(target: &str, identity: Option<&Path>) -> Vec<String> {
         }
         // Multiplex over one connection so a burst of commands does not mean a
         // burst of TCP handshakes and key exchanges.
+        //
+        // Only when there is somewhere to put the socket. See `control_path`:
+        // a home directory long enough to overflow `sun_path` leaves this
+        // opening a connection per command, which is slower and works, rather
+        // than naming a socket ssh cannot bind and failing every command with
+        // what reads as an unreachable host.
         None => {
-            args.push("-o".into());
-            args.push("ControlMaster=auto".into());
-            args.push("-o".into());
-            args.push(format!("ControlPath={}", control_path()));
-            args.push("-o".into());
-            args.push("ControlPersist=120".into());
+            if let Some(path) = control_path() {
+                args.push("-o".into());
+                args.push("ControlMaster=auto".into());
+                args.push("-o".into());
+                args.push(format!("ControlPath={path}"));
+                args.push("-o".into());
+                args.push("ControlPersist=120".into());
+            }
         }
     }
 
@@ -127,8 +135,64 @@ fn ssh_args(target: &str, identity: Option<&Path>) -> Vec<String> {
 /// Carries the channel, like everything else a channel owns: a canary client
 /// and a release one reaching the same destination must not share a master, any
 /// more than they share a daemon or a runtime directory.
-fn control_path() -> String {
-    format!("~/.ssh/farcooler-{}-%r@%h:%p", farcooler_protocol::CHANNEL.as_str())
+///
+/// `%C` — ssh's own hash of `%l%h%p%r`, a fixed 40 hex characters — and NOT the
+/// `%r@%h:%p` it stands for, because that spelling made the path a function of
+/// how long the user and host names happen to be. A unix socket path is bounded
+/// at 104 bytes on macOS, ssh appends a 17-character suffix of its own while
+/// the master is coming up, and a real destination reached that ceiling:
+///
+///     unix_listener: path "/Users/…/.ssh/farcooler-canary-\
+///     eliang_paraform_com@parasky1.intern.eliang.work:22.Gtlfh3xo5RhbkoaO"
+///     too long for Unix domain socket
+///
+/// What made it worth finding twice: ssh reports that and exits non-zero, so
+/// every command through this path reads as "could not reach the host". During
+/// onboarding that is the command which appends the device's key to the
+/// runner's `authorized_keys` — so the QR exchange completes, the key is never
+/// written, and the failure names the network instead of the socket.
+///
+/// `%C` hashes the destination rather than spelling it, so the length no
+/// longer grows with the host name. What it cannot make constant is the home
+/// directory the socket sits under, so this answers `None` when even the
+/// hashed path will not fit — and `ssh_args` then simply does not multiplex.
+///
+/// Degrading rather than failing is the point. Multiplexing is an optimization;
+/// reaching the runner is not. A client whose home directory is long enough to
+/// overflow the socket path should open one connection per command and be
+/// slightly slower, which is a thing nobody notices, rather than be unable to
+/// enroll a device, which is a thing that looks like a broken network.
+///
+/// Absolute rather than `~`, because a length this code cannot measure is a
+/// length this code cannot bound.
+fn control_path() -> Option<String> {
+    control_path_under(&std::env::var("HOME").ok()?)
+}
+
+/// The socket path under `home`, or `None` if it cannot fit in one.
+///
+/// Split out from `control_path` so the bound can be tested against a home
+/// directory this machine does not have — the real one is whatever it is, and
+/// a test that only ever sees a short one proves nothing about the case that
+/// broke.
+fn control_path_under(home: &str) -> Option<String> {
+    /// Characters usable in a `sun_path`, which is a 104-BYTE BUFFER on macOS
+    /// and one of those bytes is the NUL terminator. Linux allows 108, so the
+    /// smaller of the two is the one to hold to.
+    ///
+    /// 103 and not 104, and the difference is not academic: the path that
+    /// produced the bug report measured exactly 104 with ssh's suffix on it and
+    /// was refused. A bound of 104 would have called that one fine.
+    const SUN_PATH_USABLE: usize = 103;
+    /// What ssh appends to the path while the master is coming up, as in
+    /// `….Gtlfh3xo5RhbkoaO`.
+    const SSH_TEMP_SUFFIX: usize = 17;
+    /// `%C` is a hash, so it is this long for every destination there is.
+    const HASH: usize = 40;
+
+    let path = format!("{home}/.ssh/fc-{}-%C", farcooler_protocol::CHANNEL.as_str());
+    let expanded = path.len() - "%C".len() + HASH;
+    (expanded + SSH_TEMP_SUFFIX <= SUN_PATH_USABLE).then_some(path)
 }
 
 /// What to run on the far side to get a daemon speaking the protocol.
@@ -550,17 +614,89 @@ mod tests {
     }
 
     /// The unnamed path still multiplexes, and its socket carries the channel.
+    ///
+    /// Conditional on this machine having a home directory a socket fits
+    /// under, because that is now what decides whether there is a socket at
+    /// all — see `control_path`. Asserted as an equivalence rather than
+    /// skipped, so the two halves cannot drift into disagreeing: a
+    /// `ControlPath` argument appears exactly when `control_path` yields one.
     #[test]
     fn the_unnamed_path_multiplexes_per_channel() {
         let args = ssh_args("you@box", None);
-        let path = args
-            .iter()
-            .find(|a| a.starts_with("ControlPath="))
-            .expect("no ControlPath when no identity is named");
+        let found = args.iter().find(|a| a.starts_with("ControlPath="));
+
+        match control_path() {
+            Some(_) => {
+                let path = found.expect("no ControlPath when one fits");
+                assert!(
+                    path.contains(farcooler_protocol::CHANNEL.as_str()),
+                    "a channel's master is its own: {path}"
+                );
+            }
+            None => assert!(found.is_none(), "named a socket that cannot be bound: {found:?}"),
+        }
+    }
+
+    /// The socket path fits, whatever the destination is called.
+    ///
+    /// A unix socket path is bounded at 104 bytes on macOS and ssh adds a
+    /// 17-character suffix of its own while the master comes up. Spelled
+    /// `%r@%h:%p`, the path grew with the user and host names and a real
+    /// destination went over:
+    ///
+    ///     unix_listener: path "…/farcooler-canary-\
+    ///     eliang_paraform_com@parasky1.intern.eliang.work:22.Gtlfh3xo5RhbkoaO"
+    ///     too long for Unix domain socket
+    ///
+    /// It presents as "could not reach the host" — including for the command
+    /// that writes a device's key into `authorized_keys`, which is how a QR
+    /// exchange completes without enrolling anything.
+    ///
+    /// `%C` is 40 characters for every destination there is, so the host can
+    /// no longer push it over. This pins that for a long one.
+    #[test]
+    fn the_control_path_does_not_grow_with_the_destination() {
+        // 103, not 104: the buffer is 104 bytes and one is the NUL. The path
+        // in the report below measured exactly 104 and was refused.
+        const SUN_PATH_USABLE: usize = 103;
+        const SSH_TEMP_SUFFIX: usize = 17;
+        const HASH: usize = 40;
+
+        let home = "/Users/e-liang";
+        let path = control_path_under(home).expect("an ordinary home should multiplex");
+        assert!(path.contains("%C"), "the path must hash its destination: {path}");
+        assert!(!path.contains("%h"), "the host must not be spelled out: {path}");
+
+        let expanded = path.replace("%C", &"c".repeat(HASH)).len() + SSH_TEMP_SUFFIX;
         assert!(
-            path.contains(farcooler_protocol::CHANNEL.as_str()),
-            "a channel's master is its own: {path}"
+            expanded <= SUN_PATH_USABLE,
+            "control path needs {expanded} bytes, {SUN_PATH_USABLE} available: {path}"
         );
+
+        // The exact path from the report, under the same home, against the
+        // same bound — so the rule that was too loose stays caught.
+        let broke = format!(
+            "{home}/.ssh/farcooler-canary-\
+             eliang_paraform_com@parasky1.intern.eliang.work:22"
+        );
+        assert!(
+            broke.len() + SSH_TEMP_SUFFIX > SUN_PATH_USABLE,
+            "the path that actually failed must not measure as fitting"
+        );
+    }
+
+    /// A home directory too long for a socket gives up multiplexing, not the
+    /// connection.
+    ///
+    /// The hash bounds the destination; nothing bounds the home directory. So
+    /// the remaining case is answered by not naming a socket at all — one
+    /// connection per command is slower and works, and this is the difference
+    /// between a client that is slightly slower and a client that cannot
+    /// enroll a device.
+    #[test]
+    fn an_unfittable_home_stops_multiplexing_rather_than_failing() {
+        let absurd = format!("/Users/{}", "x".repeat(120));
+        assert_eq!(control_path_under(&absurd), None, "named a socket that cannot be bound");
     }
 
     #[test]
