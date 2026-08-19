@@ -243,13 +243,48 @@ pub struct Streams {
     pub writer: std::pin::Pin<Box<dyn AsyncWrite + Send>>,
 }
 
+/// Closes the ssh channel once both halves of a stream have been dropped.
+///
+/// Every stream is a `channel_open_session`, and sshd counts those against
+/// `MaxSessions` — ten by default, on the ONE TCP connection this client
+/// makes. Nothing here used to give one back. The pump task below owns the
+/// `Channel`, so dropping the reader and the writer left it parked in
+/// `wait()` on a quiet pane forever: russh sends no CHANNEL_CLOSE from a
+/// plain `Channel`'s destructor (only `ChannelCloseOnDrop` does, and that is
+/// reached through `into_stream()`, which this does not use), and dropping
+/// the writer sends nothing either — `ChannelTx::drop` only notifies.
+///
+/// So `~/.local/bin/farcoolerd --stream` never saw its stdin close, never hit
+/// the hangup path that exists to catch exactly this, and held its session
+/// slot alive. Nine tab switches later every `channel_open_session` came back
+/// `ConnectFailed`, which the phone rendered as "Could not load" on a pane
+/// that was perfectly healthy.
+///
+/// An `Arc` around the sender rather than a field on one half, because the
+/// two halves go to different owners: `open_stream` keeps the writer purely
+/// so the far end does not see a closed stdin (see its comment), while the
+/// reader is what the FFI task holds. The channel should outlive both and
+/// neither, so it closes when the last clone goes.
+type ChannelGuard = Arc<tokio::sync::oneshot::Sender<()>>;
+
 impl Streams {
     fn new(mut channel: Channel<Msg>) -> Self {
-        let writer = Box::pin(channel.make_writer());
+        let inner = Box::pin(channel.make_writer());
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        // Dropped, not sent on: a `oneshot::Sender` going out of scope wakes
+        // its receiver with an error, which is the signal. Nothing ever has a
+        // value to send here — the event IS the drop.
+        let (closed, mut closing) = tokio::sync::oneshot::channel::<()>();
+        let guard: ChannelGuard = Arc::new(closed);
 
         tokio::spawn(async move {
-            while let Some(msg) = channel.wait().await {
+            loop {
+                let msg = tokio::select! {
+                    // Both halves gone. Stop reading and say so, below.
+                    _ = &mut closing => break,
+                    msg = channel.wait() => msg,
+                };
+                let Some(msg) = msg else { break };
                 match msg {
                     ChannelMsg::Data { data } => {
                         if tx.send(data.to_vec()).is_err() {
@@ -269,9 +304,53 @@ impl Streams {
                     _ => {}
                 }
             }
+            // EOF first, then close. The EOF is what the far end reads as
+            // "nobody is watching any more" and exits on; the close is what
+            // hands the session slot back to sshd. Both are best-effort — a
+            // channel that died with the connection has nothing to say and
+            // nowhere to say it.
+            let _ = channel.eof().await;
+            let _ = channel.close().await;
         });
 
-        Self { reader: ChannelReader::new(rx), writer }
+        Self {
+            reader: ChannelReader::new(rx, guard.clone()),
+            writer: Box::pin(ChannelWriter { inner, _guard: guard }),
+        }
+    }
+}
+
+/// The channel's write half, holding its end of the channel open.
+///
+/// A wrapper purely to carry the guard: `make_writer` hands back an opaque
+/// `impl AsyncWrite` with nowhere to put one, and the writer is the half
+/// `open_stream` keeps alive on purpose.
+struct ChannelWriter {
+    inner: std::pin::Pin<Box<dyn AsyncWrite + Send>>,
+    _guard: ChannelGuard,
+}
+
+impl AsyncWrite for ChannelWriter {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        self.get_mut().inner.as_mut().poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        self.get_mut().inner.as_mut().poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        self.get_mut().inner.as_mut().poll_shutdown(cx)
     }
 }
 
@@ -280,11 +359,14 @@ pub struct ChannelReader {
     rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
     pending: Vec<u8>,
     offset: usize,
+    /// Held, never read. See `ChannelGuard`: this is one of the two halves
+    /// whose disappearance gives the ssh session slot back.
+    _guard: ChannelGuard,
 }
 
 impl ChannelReader {
-    fn new(rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) -> Self {
-        Self { rx, pending: Vec::new(), offset: 0 }
+    fn new(rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>, guard: ChannelGuard) -> Self {
+        Self { rx, pending: Vec::new(), offset: 0, _guard: guard }
     }
 }
 
