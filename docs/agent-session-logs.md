@@ -295,6 +295,21 @@ exactly once the leading activity glyph is stripped. Verified live — pane titl
 `✳ Write haiku about lighthouse`, transcript
 `"aiTitle":"Write haiku about lighthouse"`.
 
+**And a file one pane holds is not another's.** The title only tells panes
+apart once BOTH have written a file to compare. Before that — a second claude
+started in a workspace where the first is already running — the running pane's
+session is the only candidate in the directory, and a rule that takes the lone
+candidate hands it straight over: both rows then show one conversation's
+summary, plan position and actions. So a file some other pane is already
+tailing is excluded before the count is taken, which leaves the new pane with
+nothing until it writes its own. That is the honest answer, and the same
+direction everything else here errs in.
+
+It has to be, because the mistake is not self-correcting: a pane only
+re-derives its join when it holds no file, or when `join_looks_dead` fires —
+and that wants the pane to look busy AND its file to have been silent for 30s,
+which a file its real owner is actively writing never is.
+
 `terminals.agent_session_id` already exists in the store, unpopulated, for
 exactly this.
 
