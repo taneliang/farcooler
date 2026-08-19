@@ -289,6 +289,11 @@ KEYS = [
     "watchTarget", "watchProduct", "watchGroup", "watchSourcesPhase",
     "watchConfigList", "watchDebug", "watchRelease", "watchEmbedPhase",
     "watchDependency", "watchProxy",
+    # The watch's own resources phase, carrying the asset catalog. A watch app
+    # with no icon builds and signs perfectly and is then REFUSED AT UPLOAD --
+    # "Missing Info.plist value ... CFBundleIconName" and "No icons found for
+    # watch application" -- so nothing before App Store validation catches it.
+    "watchResourcesPhase",
     # The watch's complication: the same nine objects a third time, plus
     # `watchWidgetEmbedPhase`. That phase is 13/PlugIns like the phone's
     # `embedPhase` — an .appex is an .appex on either platform — but it belongs
@@ -375,6 +380,11 @@ watch_widget_build_ids = {
     name: oid("watch-widget-build/" + name)
     for name in WATCH_WIDGET_SOURCES + WATCH_WIDGET_AGENTKIT_SOURCES
 }
+
+# And the catalog the watch compiles, on the same rule as every set above: a
+# PBXBuildFile is "this file, compiled into THIS target", so the phone's
+# `build_ids[ASSET_CATALOG]` cannot be reused here.
+watch_asset_build_id = oid("watch-build/" + ASSET_CATALOG)
 
 P = {key: oid(key) for key in KEYS}
 
@@ -493,6 +503,12 @@ def build_files():
         )
     lines.append(
         f"\t\t{build_ids[ASSET_CATALOG]} /* {ASSET_CATALOG} in Resources */ = "
+        f"{{isa = PBXBuildFile; fileRef = {ids[ASSET_CATALOG]}; }};"
+    )
+    # The same catalog again, for the watch. One file reference, two build
+    # files -- see `watch_asset_build_id`.
+    lines.append(
+        f"\t\t{watch_asset_build_id} /* {ASSET_CATALOG} in Resources */ = "
         f"{{isa = PBXBuildFile; fileRef = {ids[ASSET_CATALOG]}; }};"
     )
     for name, build_id in activity_build_ids.items():
@@ -861,6 +877,7 @@ WATCH_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCODE_SIGN_IDENTITY = "-";
 \t\t\t\tCODE_SIGNING_ALLOWED = YES;
 \t\t\t\tCODE_SIGNING_REQUIRED = NO;
+\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 \t\t\t\tSKIP_INSTALL = YES;"""
 
 # The complication's settings: WATCH_COMMON's platform overrides and
@@ -1143,6 +1160,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildConfigurationList = {P['watchConfigList']};
 \t\t\tbuildPhases = (
 \t\t\t\t{P['watchSourcesPhase']},
+\t\t\t\t{P['watchResourcesPhase']},
 \t\t\t\t{P['watchWidgetEmbedPhase']},
 \t\t\t);
 \t\t\tbuildRules = ();
@@ -1320,6 +1338,14 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildActionMask = 2147483647;
 \t\t\tfiles = (
 {resource_list}
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
+\t\t{P['watchResourcesPhase']} = {{
+\t\t\tisa = PBXResourcesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+\t\t\t\t{watch_asset_build_id} /* {ASSET_CATALOG} in Resources */,
 \t\t\t);
 \t\t\trunOnlyForDeploymentPostprocessing = 0;
 \t\t}};
