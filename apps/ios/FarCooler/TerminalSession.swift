@@ -87,6 +87,23 @@ final class TerminalSession: ObservableObject {
     /// The size the emulator was built at, which is the pane's size as of the
     /// last time anything looked.
     private var paneSize: (columns: Int, rows: Int)?
+    /// The host's caret, for as long as the emulator's own cannot be believed.
+    ///
+    /// Set whenever `render` builds an emulator out of a CAPTURE. A capture is
+    /// text: feeding it leaves the emulator's caret wherever the last character
+    /// landed — the end of the last non-empty line — rather than at the prompt
+    /// someone is typing into. `render` already knew this and passed the host's
+    /// cursor explicitly; `publish` did not, so every path that redraws without
+    /// a fresh capture put the caret back at the end of the text.
+    ///
+    /// That is the jump: typing called `jumpToBottom` → `publish`, which drew
+    /// the caret at the last character of the last line, and ~100ms later the
+    /// poll's `render` put it back at the prompt. Once per keystroke.
+    ///
+    /// Cleared by `consume`, because from the first streamed byte onwards the
+    /// bytes that move the emulator's caret ARE the bytes that draw the screen
+    /// around it, and the host's separately-fetched cursor is the stale one.
+    private var capturedCursor: (row: Int, column: Int)?
     /// The revision of the last screen seen, so the geometry check can be
     /// answered in a hundred bytes when nothing moved.
     private var revision: UInt64 = 0
@@ -179,6 +196,7 @@ final class TerminalSession: ObservableObject {
         lastScreen = nil
         revision = 0
         paneSize = nil
+        capturedCursor = nil
         phase = .connecting
         started = true
         // The strike count belongs to the terminal being left, not the one
@@ -220,6 +238,7 @@ final class TerminalSession: ObservableObject {
         lastScreen = nil
         revision = 0
         paneSize = nil
+        capturedCursor = nil
         phase = .connecting
         failedAttaches = 0
         hasResized = false
@@ -505,6 +524,10 @@ final class TerminalSession: ObservableObject {
         guard !bytes.isEmpty else { return }
         failedAttaches = 0
         vt.feed(bytes)
+        // From here on the emulator's own caret is the true one: these bytes
+        // are a continuation of the screen they move the caret across, unlike
+        // a capture. See `capturedCursor`.
+        capturedCursor = nil
         publish()
     }
 
@@ -702,8 +725,13 @@ final class TerminalSession: ObservableObject {
         paneSize = (response.columns, response.rows)
         // The host's cursor, not the emulator's: a capture is text, so feeding
         // it leaves the caret wherever the last character landed — the bottom
-        // left — rather than at the prompt someone is typing into. The stream
-        // has no such gap, and `publish` uses the emulator's own.
+        // left — rather than at the prompt someone is typing into.
+        //
+        // Remembered rather than only used here. Every OTHER redraw of this
+        // emulator — a keystroke's `jumpToBottom`, a reflow, a wheel event —
+        // goes through `publish`, which has no response to read it off and
+        // used the emulator's own. See `capturedCursor`.
+        capturedCursor = (response.cursorRow, response.cursorColumn)
         grid = emulator.withSnapshot {
             TerminalGrid(
                 snapshot: $0,
@@ -758,7 +786,15 @@ final class TerminalSession: ObservableObject {
         if let copied = vt.takeClipboard() {
             UIPasteboard.general.string = copied
         }
-        grid = vt.withSnapshot { TerminalGrid(snapshot: $0) }
+        // Whichever caret can currently be believed. See `capturedCursor`:
+        // while the emulator holds a capture, its own is at the end of the
+        // text and the host's is at the prompt.
+        let host = capturedCursor
+        grid = vt.withSnapshot { snapshot in
+            guard let host else { return TerminalGrid(snapshot: snapshot) }
+            return TerminalGrid(
+                snapshot: snapshot, cursorRow: host.row, cursorColumn: host.column)
+        }
         phase = .live
     }
 
