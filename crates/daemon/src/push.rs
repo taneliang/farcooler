@@ -206,22 +206,34 @@ struct Notification<'a> {
     started_at: Option<i64>,
 }
 
+/// What one call to `notify` is about.
+///
+/// A struct rather than seven positional arguments, and for the same reason
+/// `watch::Notice` is one: `title`, `subtitle`, `status`, `label` and
+/// `terminal` are all `&str`, so any two of them transposed still compiles and
+/// shows up only as a wrong lock screen. Named fields make that a build error
+/// instead of a bug report.
+///
+/// Borrowed throughout. Every field is already owned by the caller's stack for
+/// the length of the await, and a payload that allocated five strings per
+/// notification would be paying for a copy nothing keeps.
+pub struct Outgoing<'a> {
+    pub title: &'a str,
+    pub subtitle: &'a str,
+    pub status: &'a str,
+    pub failed: bool,
+    pub label: &'a str,
+    pub terminal: &'a str,
+    pub started_at: Option<i64>,
+}
+
 /// Send one, or quietly do nothing if this runner was never paired.
 ///
 /// Failure is logged and swallowed on purpose. A push that does not arrive is a
 /// missed notification; a push that takes the watcher down with it is every
 /// future notification missed as well, plus the fleet.
-pub async fn notify(
-    client: &reqwest::Client,
-    pairing: &Pairing,
-    title: &str,
-    subtitle: &str,
-    status: &str,
-    failed: bool,
-    label: &str,
-    terminal: &str,
-    started_at: Option<i64>,
-) {
+pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoing<'_>) {
+    let Outgoing { title, subtitle, status, failed, label, terminal, started_at } = notice;
     let url = format!("{}/v1/notify", pairing.relay.trim_end_matches('/'));
     let result = client
         .post(&url)

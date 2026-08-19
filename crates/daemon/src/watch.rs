@@ -1514,13 +1514,15 @@ impl Watcher {
             crate::push::notify(
                 &client,
                 &pairing,
-                &notice.title,
-                &notice.subtitle,
-                notice.status,
-                notice.failed,
-                &label,
-                &terminal.to_string(),
-                notice.started_at,
+                crate::push::Outgoing {
+                    title: &notice.title,
+                    subtitle: &notice.subtitle,
+                    status: notice.status,
+                    failed: notice.failed,
+                    label: &label,
+                    terminal: &terminal.to_string(),
+                    started_at: notice.started_at,
+                },
             )
             .await;
         });
