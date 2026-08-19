@@ -87,13 +87,33 @@ jobs:
 
       # tmux is not a test double here. The tmux crate drives the real binary,
       # because a fake tmux would agree with whatever this code believed.
+      # Bounded, and it has to be. This step hung for an hour on two
+      # consecutive runs — `apt-get update` against a mirror that accepts the
+      # connection and then stops answering, which has no timeout of its own
+      # and no output, so the job reads as "still working" until someone looks
+      # at the step list. A run that fails in five minutes can be re-run; one
+      # that hangs holds a runner until the six-hour ceiling.
+      #
+      # The retries and the timeout are what make the failure fast rather than
+      # eventual; `command -v` first is what makes it usually free, since the
+      # Ubuntu runner image already ships tmux and the macOS one does not.
       - name: Install tmux
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
+          if command -v tmux >/dev/null 2>&1; then
+            tmux -V
+            exit 0
+          fi
           if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update && sudo apt-get install -y tmux
+            APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+            sudo apt-get $APT_OPTS update
+            sudo apt-get $APT_OPTS install -y tmux
           else
             brew install tmux
           fi
+          tmux -V
 
       # The ACP adapters are `npx` packages, which need only node and a network
       # — both of which the runner already has. These three are spawned BY NAME
