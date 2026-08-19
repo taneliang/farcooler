@@ -255,6 +255,39 @@ async fn resize_and_capture_target_the_exact_window() {
 }
 
 #[tokio::test]
+async fn a_scrollback_capture_stops_where_the_screen_starts() {
+    // `-E -1` is the whole of `capture_scrollback`, and only a real tmux can
+    // say whether it means what this depends on it meaning. Captured without
+    // it, the history would arrive with the visible screen glued to the bottom
+    // of it, and a client would open able to scroll up into a second copy of
+    // what it is already showing.
+    let Some(srv) = live_server().await else { return };
+    let t = Uuid::now_v7();
+    let win = srv
+        .create_terminal_window(Uuid::now_v7(), t, "scrolled", "/tmp", "seq 1 60; sleep 30")
+        .await
+        .unwrap();
+    srv.resize_window(&win.window_id, 80, 10).await.unwrap();
+
+    until("the pane to hold more than a screenful", || async {
+        srv.capture_scrollback(&win.pane_id).await.is_ok_and(|h| h.lines().count() > 10)
+    })
+    .await;
+
+    let history = srv.capture_scrollback(&win.pane_id).await.unwrap();
+    let screen = srv.capture_screen(&win.pane_id).await.unwrap();
+    let last_visible = screen.lines().rfind(|l| !l.trim().is_empty()).unwrap().trim();
+
+    assert!(history.contains("\n1\n") || history.starts_with("1\n"), "the oldest line is kept");
+    assert!(
+        !history.lines().any(|l| l.trim() == last_visible),
+        "the screen's last line is the screen's, not the history's: {last_visible:?}"
+    );
+
+    srv.kill_server().await.unwrap();
+}
+
+#[tokio::test]
 async fn respawning_a_pane_keeps_its_id_its_tag_and_its_place() {
     // The toggle's whole correctness argument. If the pane id changed, the
     // terminal would become unidentifiable and derive as `lost`; if the

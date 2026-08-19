@@ -309,11 +309,19 @@ pub fn encode_mouse(
     // Scrolling the alternate screen with no mouse reporting: the program is
     // full-screen and has no scrollback, so the wheel means arrow keys. This is
     // what makes the wheel scroll `less` and a full-screen agent's view.
+    //
+    // One arrow, for one tick. This used to send three, because a wheel notch
+    // is three lines everywhere — but a caller counts ticks and calls this once
+    // per tick, so the multiplier applied here and nowhere else made the same
+    // gesture move three lines in `less`, one line in a TUI that wants mouse
+    // reports, and one line of the client's own scrollback. A notch is not a
+    // distance this function can know: a trackpad and a finger measure in
+    // pixels and a wheel measures in notches, and only the caller holding the
+    // gesture can tell them apart. So it converts, and this counts.
     if wheel && !mode.intersects(TermMode::MOUSE_MODE) {
         if mode.contains(TermMode::ALT_SCREEN) && mode.contains(TermMode::ALTERNATE_SCROLL) {
             let key = if button == MouseButton::WheelUp { Key::Up } else { Key::Down };
-            let one = encode_key(mode, key, Modifiers::default());
-            return Some(one.repeat(3));
+            return Some(encode_key(mode, key, Modifiers::default()));
         }
         return None;
     }
@@ -559,6 +567,45 @@ mod tests {
     }
 
     #[test]
+    fn one_wheel_tick_is_one_line_however_it_is_delivered() {
+        // A tick has three possible destinations — a mouse report, an arrow
+        // key, the client's own scrollback — and they have to agree on what one
+        // is worth, or the same flick moves three lines in `less` and one in an
+        // agent's TUI. It did: this branch used to repeat the arrow three
+        // times, which is the notch convention applied in the one place that
+        // could not also apply it to the other two. How many lines a NOTCH is
+        // worth belongs to the caller, decided once where the gesture is
+        // measured and a notch can be told apart from a finger.
+        let arrows = TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL;
+        assert_eq!(
+            encode_mouse(
+                arrows,
+                MouseButton::WheelUp,
+                MouseAction::Press,
+                0,
+                0,
+                Modifiers::default()
+            ),
+            Some(b"\x1b[A".to_vec()),
+            "one tick, one arrow"
+        );
+
+        let reports = arrows | TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
+        assert_eq!(
+            encode_mouse(
+                reports,
+                MouseButton::WheelUp,
+                MouseAction::Press,
+                0,
+                0,
+                Modifiers::default()
+            ),
+            Some(b"\x1b[<64;1;1M".to_vec()),
+            "one tick, one report"
+        );
+    }
+
+    #[test]
     fn the_wheel_becomes_arrows_in_a_full_screen_program() {
         // This is what makes scrolling work in `less` and in a coding agent that
         // never asked for mouse reporting.
@@ -572,7 +619,7 @@ mod tests {
             Modifiers::default(),
         )
         .unwrap();
-        assert_eq!(up, b"\x1b[A\x1b[A\x1b[A".to_vec());
+        assert_eq!(up, b"\x1b[A".to_vec());
 
         let app = mode | TermMode::APP_CURSOR;
         let down = encode_mouse(
@@ -584,7 +631,7 @@ mod tests {
             Modifiers::default(),
         )
         .unwrap();
-        assert_eq!(down, b"\x1bOB\x1bOB\x1bOB".to_vec(), "must respect application cursor mode");
+        assert_eq!(down, b"\x1bOB".to_vec(), "must respect application cursor mode");
     }
 
     #[test]

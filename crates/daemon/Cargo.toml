@@ -67,3 +67,7 @@ rustix = { version = "1", features = ["fs", "process"] }
 [dev-dependencies]
 tempfile = "3"
 farcooler-transport.workspace = true
+# The emulator every client runs, so `replay`'s tests can assert what a client
+# ends up holding rather than which bytes were written at it. A dev-dependency
+# only: the daemon itself never parses a screen.
+farcooler-vt = { path = "../vt" }

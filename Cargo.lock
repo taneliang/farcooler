@@ -975,6 +975,7 @@ dependencies = [
  "farcooler-store",
  "farcooler-tmux",
  "farcooler-transport",
+ "farcooler-vt",
  "libc",
  "notify",
  "prost-types",

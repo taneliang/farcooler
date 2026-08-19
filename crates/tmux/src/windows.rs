@@ -347,12 +347,24 @@ impl TmuxServer {
     }
 
 
-    /// Everything tmux still holds for a pane, scrollback included, with color.
+    /// The scrollback a pane still holds ABOVE its visible screen, with color.
     ///
-    /// Sent once before live streaming begins so a client opens onto the session
-    /// as it already is rather than onto a blank screen.
-    pub async fn capture_history(&self, pane_id: &str) -> Result<String> {
-        let out = self.run(&["capture-pane", "-e", "-p", "-S", "-", "-t", pane_id]).await?;
+    /// `-E -1` is what makes this the history and not the history plus the
+    /// screen. tmux numbers the visible screen from zero and history upwards
+    /// from minus one, so ending at `-1` stops exactly where `capture_screen`
+    /// begins. Captured whole, a client would replay the current screen twice
+    /// and the user would scroll up into a copy of what they were already
+    /// looking at.
+    ///
+    /// `-J` unwraps. tmux stores a wrapped line hard-broken at the width it was
+    /// written at, and a client is rarely that width; replayed as stored, every
+    /// wrapped line arrives with a break in the wrong column and stays that way.
+    /// Joined, it arrives as the one logical line it always was and the client's
+    /// own emulator wraps it where its own edge is — which is the whole reason
+    /// reflow lives in the emulator.
+    pub async fn capture_scrollback(&self, pane_id: &str) -> Result<String> {
+        let args = ["capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-1", "-t", pane_id];
+        let out = self.run(&args).await?;
         if !out.ok() {
             return Err(DomainError::TmuxUnavailable);
         }

@@ -156,14 +156,23 @@ impl Runtime {
 
         let mut stdout = tokio::io::stdout();
 
-        // 1. Replay the VISIBLE screen only, not the whole scrollback.
+        // 1. Replay the pane: its scrollback, then its visible screen.
         //
-        // tmux stores scrollback as the lines were written, so history from when
-        // the pane was a different width re-wraps in a client sized differently
-        // and the screen arrives staggered. The visible screen is re-rendered by
-        // tmux at the current size, so it always lands correctly. Deep history
-        // is deliberately not replayed; the client accumulates its own scrollback
-        // from the live stream onward.
+        // The scrollback used to be left out. The stated reason was width: tmux
+        // stores history hard-wrapped at whatever the pane was when each line
+        // was written, so replayed as stored it arrives staggered in a client
+        // of any other size. True, and the wrong conclusion — `-J` unwraps it,
+        // and reflowing a logical line at the reader's own width is exactly
+        // what the client's emulator is for.
+        //
+        // What the omission actually cost was the scrollback itself. A client
+        // opened with an empty history and accumulated one only from the live
+        // stream onward, so scrolling up in a pane that had been running for an
+        // hour moved by exactly one line — the single line alacritty pushes
+        // when the replay's own `ESC[2J` clears the screen — and then stopped.
+        // Resizing the window appeared to fix it, because reflowing to fewer
+        // rows pushes real rows out of the active region and into history for
+        // the first time. That is the bug, and it looked like a scroll bug.
         //
         // Nothing is waited for before the capture. There used to be a flat
         // 120ms sleep here, to let "a resize that just happened settle" — but
@@ -190,61 +199,22 @@ impl Runtime {
         // queues behind whatever the sampler is doing, three queues hurt three
         // times as much as one.
         //
-        // Only the READS overlap. The writes below stay strictly ordered,
-        // because the order is the whole meaning: modes, then clear, then
+        // Only the READS overlap. `replay` below orders the writes, because the
+        // order is the whole meaning: modes, then scrollback, then clear, then
         // contents, then cursor.
-        let (modes, screen, cursor) = tokio::join!(
+        let (modes, scrollback, screen, cursor) = tokio::join!(
             self.tmux.pane_modes(&pane.pane_id),
+            self.tmux.capture_scrollback(&pane.pane_id),
             self.tmux.capture_screen(&pane.pane_id),
             self.tmux.cursor_position(&pane.pane_id),
         );
 
-        // The modes first, because a capture is contents and modes are not
-        // contents. Whether the program wants the mouse, whether it is on the
-        // alternate screen, whether an arrow key should send an application
-        // sequence — all of it was decided by escape sequences the program sent
-        // once, before any of today's clients existed. A client that replays
-        // only the screen is therefore wrong about every one of them, which is
-        // what made a full-screen program's own scroll area dead on both the
-        // Mac and the phone: the emulator believed no one wanted the wheel, so
-        // it scrolled a scrollback that an alternate screen does not have.
-        //
-        // Emitted before the clear, because switching to the alternate screen
-        // is what decides which screen the clear and the contents land on.
-        if let Ok(modes) = modes {
-            let _ = stdout.write_all(modes.restore_sequence().as_bytes()).await;
-        }
-
-        if let Ok(screen) = screen {
-            // Home the cursor and clear, so the replay paints a clean screen.
-            let _ = stdout.write_all(b"\x1b[H\x1b[2J").await;
-
-            // capture-pane separates lines with a bare LF. To a terminal that is
-            // line feed WITHOUT carriage return, so every line starts where the
-            // previous one ended and the screen arrives as a staircase. The live
-            // pipe does not need this because a pty already emits CRLF.
-            let normalized = screen.trim_end().replace('\n', "\r\n");
-            let _ = stdout.write_all(normalized.as_bytes()).await;
-
-            // No trailing newline.
-            //
-            // The capture is exactly as many lines as the screen is tall
-            // whenever the program fills it — which a full-screen agent always
-            // does. One more line feed at the bottom row scrolls the whole
-            // screen up by one: the top line is pushed into history, everything
-            // appears one row too high, and the caret is left on a blank bottom
-            // row. Both symptoms, one newline.
-
-            // A captured screen is text and carries no cursor, so tmux was
-            // asked where it actually is. Without this the caret sits wherever
-            // the last replayed character ended, which is the bottom-left
-            // corner, not the prompt the user is typing into.
-            if let Ok((column, row)) = cursor {
-                // The wire format is one-based.
-                let _ = stdout.write_all(format!("\x1b[{};{}H", row + 1, column + 1).as_bytes()).await;
-            }
-            let _ = stdout.flush().await;
-        }
+        let scrollback = scrollback.ok();
+        let screen = screen.ok();
+        let bytes =
+            replay(modes.ok(), scrollback.as_deref(), screen.as_deref(), cursor.ok());
+        let _ = stdout.write_all(&bytes).await;
+        let _ = stdout.flush().await;
 
         // 2. Live bytes, shared with every other watcher of this pane.
         //
@@ -517,6 +487,236 @@ impl Runtime {
 /// socket it then bound would be one this daemon never looks at.
 pub fn fanout_binary() -> Option<std::path::PathBuf> {
     fanout_binary_beside(&std::env::current_exe().ok()?)
+}
+
+/// The bytes that put a fresh emulator into the state a pane is already in.
+///
+/// Split out from `stream` because it is the whole of what a client sees when
+/// it opens a pane, and none of it needs tmux to be running to check.
+///
+/// Every part is optional and every part is skipped rather than guessed at: a
+/// tmux that could not answer leaves that piece out, which costs the client one
+/// property, where inventing a value would cost it the truth about all of them.
+fn replay(
+    modes: Option<farcooler_tmux::windows::PaneModes>,
+    scrollback: Option<&str>,
+    screen: Option<&str>,
+    cursor: Option<(u32, u32)>,
+) -> Vec<u8> {
+    // capture-pane separates lines with a bare LF. To a terminal that is line
+    // feed WITHOUT carriage return, so every line starts where the previous one
+    // ended and the capture arrives as a staircase. The live pipe does not need
+    // this because a pty already emits CRLF.
+    fn normalized(text: &str) -> String {
+        text.replace('\n', "\r\n")
+    }
+
+    let mut out = Vec::new();
+
+    // The modes first, because a capture is contents and modes are not
+    // contents. Whether the program wants the mouse, whether it is on the
+    // alternate screen, whether an arrow key should send an application
+    // sequence — all of it was decided by escape sequences the program sent
+    // once, before any of today's clients existed. A client that replays
+    // only the screen is therefore wrong about every one of them, which is
+    // what made a full-screen program's own scroll area dead on both the
+    // Mac and the phone: the emulator believed no one wanted the wheel, so
+    // it scrolled a scrollback that an alternate screen does not have.
+    //
+    // Emitted before everything, because switching to the alternate screen is
+    // what decides which screen the rest of this lands on.
+    if let Some(modes) = modes {
+        out.extend_from_slice(modes.restore_sequence().as_bytes());
+    }
+
+    // Then the scrollback, so the client opens able to scroll back.
+    //
+    // Only on the primary screen, and only when tmux said so rather than merely
+    // failing to say otherwise. An alternate screen has no history of its own,
+    // so tmux answers that question with a copy of the visible screen — which
+    // replayed here would sit directly above itself, and would still be sitting
+    // there, stale, after the program exited the alternate screen.
+    if matches!(modes, Some(m) if !m.alternate_screen) {
+        if let Some(history) = scrollback.map(str::trim_end).filter(|h| !h.is_empty()) {
+            out.extend_from_slice(normalized(history).as_bytes());
+            // A trailing newline HERE, unlike after the screen below. These
+            // lines belong above the screen, so the last of them has to be
+            // finished before the clear that pushes them all into history.
+            //
+            // And a reset with it. `capture-pane -e` states the color a line
+            // starts in and leaves it set, because the line after it states its
+            // own — but the last line of the history has no line after it, only
+            // the clear, and a clear paints every cell it erases in whatever
+            // background is current. Left off, opening a pane whose scrollback
+            // happened to end mid-color painted the whole screen in it.
+            out.extend_from_slice(b"\x1b[m\r\n");
+        }
+    }
+
+    if let Some(screen) = screen {
+        // Home the cursor and clear, so the replay paints a clean screen.
+        //
+        // The clear is also what turns the scrollback just written into
+        // scrollback: erasing the display scrolls what was on it into history
+        // rather than discarding it, which is the behavior that lets the two
+        // captures be replayed one after the other and add up to the whole
+        // pane.
+        out.extend_from_slice(b"\x1b[H\x1b[2J");
+        out.extend_from_slice(normalized(screen.trim_end()).as_bytes());
+
+        // No trailing newline.
+        //
+        // The capture is exactly as many lines as the screen is tall
+        // whenever the program fills it — which a full-screen agent always
+        // does. One more line feed at the bottom row scrolls the whole
+        // screen up by one: the top line is pushed into history, everything
+        // appears one row too high, and the caret is left on a blank bottom
+        // row. Both symptoms, one newline.
+
+        // A captured screen is text and carries no cursor, so tmux was
+        // asked where it actually is. Without this the caret sits wherever
+        // the last replayed character ended, which is the bottom-left
+        // corner, not the prompt the user is typing into.
+        if let Some((column, row)) = cursor {
+            // The wire format is one-based.
+            out.extend_from_slice(format!("\x1b[{};{}H", row + 1, column + 1).as_bytes());
+        }
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod replay_tests {
+    use super::replay;
+    use farcooler_tmux::windows::PaneModes;
+    use farcooler_vt::Terminal;
+
+    fn primary() -> PaneModes {
+        PaneModes { cursor_visible: true, wrap: true, ..Default::default() }
+    }
+
+    fn alternate() -> PaneModes {
+        PaneModes {
+            alternate_screen: true,
+            mouse_any: true,
+            mouse_sgr: true,
+            cursor_visible: true,
+            wrap: true,
+            ..Default::default()
+        }
+    }
+
+    /// Replay into a real emulator, because the property under test is what the
+    /// client ends up holding, not which bytes were written.
+    fn opened(bytes: &[u8], rows: u16) -> Terminal {
+        let mut t = Terminal::new(80, rows);
+        t.feed(bytes);
+        t
+    }
+
+    fn row(t: &Terminal, index: usize) -> String {
+        let snapshot = farcooler_vt::grid::snapshot(t);
+        snapshot.rows[index].cells.iter().map(|c| c.ch).collect::<String>().trim_end().to_string()
+    }
+
+    fn history_size(t: &Terminal) -> u32 {
+        farcooler_vt::grid::snapshot(t).history_size
+    }
+
+    /// The one that matters. A pane that has been running for an hour opens
+    /// with the hour in it.
+    ///
+    /// This used to replay the visible screen and nothing else, so a client
+    /// opened with an empty history and the wheel had one line to move through
+    /// — the line `ESC[2J` pushes — before it stopped. It read as a broken
+    /// scroll, and it was a missing capture.
+    #[test]
+    fn a_pane_opens_with_the_scrollback_it_already_had() {
+        let history: Vec<String> = (1..=40).map(|i| format!("old{i}")).collect();
+        let screen: Vec<String> = (1..=10).map(|i| format!("now{i}")).collect();
+        let bytes = replay(
+            Some(primary()),
+            Some(&history.join("\n")),
+            Some(&screen.join("\n")),
+            Some((0, 9)),
+        );
+
+        let mut t = opened(&bytes, 10);
+        assert_eq!(history_size(&t), 40, "every retained line, above the screen");
+        assert_eq!(row(&t, 0), "now1", "the live screen is still the live screen");
+
+        t.scroll(40);
+        assert_eq!(row(&t, 0), "old1", "scrolling back reaches the oldest line tmux kept");
+    }
+
+    /// The scrollback is not the screen, and must not arrive as both.
+    #[test]
+    fn the_visible_screen_is_not_replayed_twice() {
+        let bytes = replay(Some(primary()), Some("old1\nold2"), Some("now1\nnow2"), Some((0, 1)));
+        let mut t = opened(&bytes, 2);
+        t.scroll(2);
+        assert_eq!(row(&t, 0), "old1");
+        assert_eq!(row(&t, 1), "old2", "not a second copy of the screen");
+    }
+
+    /// An alternate screen has no history, and tmux answers that question with
+    /// the visible screen. Replaying it would put a copy of a TUI above itself.
+    #[test]
+    fn a_full_screen_program_gets_no_scrollback() {
+        let bytes =
+            replay(Some(alternate()), Some("copy1\ncopy2"), Some("tui1\ntui2"), Some((0, 1)));
+        let t = opened(&bytes, 2);
+        assert_eq!(history_size(&t), 0, "an alternate screen has nothing above it");
+        assert_eq!(row(&t, 0), "tui1");
+    }
+
+    /// Modes are what says which screen this is, so without them the scrollback
+    /// is not replayed at all. Guessing primary would be right most of the time
+    /// and would put a duplicate TUI into the history the rest of it.
+    #[test]
+    fn unknown_modes_replay_no_scrollback() {
+        let offered = replay(None, Some("old1\nold2"), Some("now1\nnow2"), Some((0, 1)));
+        let withheld = replay(None, None, Some("now1\nnow2"), Some((0, 1)));
+        assert_eq!(offered, withheld);
+    }
+
+    /// A pane with nothing above its screen answers with one empty line, and
+    /// replaying that would shift the screen down by a row it does not have.
+    #[test]
+    fn an_empty_scrollback_writes_nothing() {
+        let with = replay(Some(primary()), Some("\n"), Some("now1\nnow2"), Some((0, 1)));
+        let without = replay(Some(primary()), None, Some("now1\nnow2"), Some((0, 1)));
+        assert_eq!(with, without);
+    }
+
+    /// `capture-pane -e` writes the color a line starts in and leaves it set,
+    /// because the next line it writes will state its own. The last line of the
+    /// scrollback has no next line — the clear comes instead, and a clear paints
+    /// every cell it erases in whatever background is current.
+    #[test]
+    fn a_color_left_on_by_the_scrollback_does_not_paint_the_screen() {
+        let default = farcooler_vt::grid::Palette::default().background;
+        let bytes = replay(
+            Some(primary()),
+            Some("\x1b[41mred and never turned off"),
+            Some("now"),
+            Some((0, 0)),
+        );
+        let t = opened(&bytes, 3);
+        let snapshot = farcooler_vt::grid::snapshot(&t);
+        let blank = &snapshot.rows[2].cells[0];
+        assert_eq!(blank.bg, default, "the cleared screen is not still wearing the last line");
+    }
+
+    /// The cursor lands where tmux said, not where the last replayed byte did.
+    #[test]
+    fn the_caret_survives_the_scrollback() {
+        let bytes = replay(Some(primary()), Some("old1"), Some("now1\nnow2"), Some((3, 0)));
+        let t = opened(&bytes, 2);
+        let snapshot = farcooler_vt::grid::snapshot(&t);
+        assert_eq!((snapshot.cursor_column, snapshot.cursor_row), (3, 0));
+    }
 }
 
 /// The choice `fanout_binary` makes, given the executable it is made from, so

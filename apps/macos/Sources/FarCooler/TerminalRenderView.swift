@@ -1026,11 +1026,28 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         send(bytes)
     }
 
+    /// How many lines one detent of a wheel is worth.
+    ///
+    /// Three, which is the number every platform settled on decades ago and
+    /// every terminal inherited. It is not arbitrary here either: this is the
+    /// only place in Far Cooler that can apply it, because it is the only place
+    /// that knows a notch from a finger.
+    private static let linesPerNotch = 3
+
     /// Convert a scroll gesture to whole lines.
     ///
-    /// A trackpad reports continuous pixel deltas; a terminal scrolls in lines.
-    /// Accumulating the remainder keeps a slow drag from being rounded away to
-    /// nothing.
+    /// A trackpad reports continuous pixel deltas, and that is direct
+    /// manipulation: the content follows the finger, one line per cell height
+    /// of travel. Accumulating the remainder keeps a slow drag from being
+    /// rounded away to nothing.
+    ///
+    /// A wheel reports notches, which are not a distance at all — macOS hands
+    /// over a count of detents and leaves the distance to the application. This
+    /// used to return that count unmultiplied, so one notch scrolled exactly one
+    /// line, wherever the tick ended up: a mouse report to Claude Code, which
+    /// scrolls its transcript by one line per report; an arrow key to `less`;
+    /// one line of our own scrollback for Codex. Every one of them was correct
+    /// about the tick and a third of the way there.
     private var scrollRemainder: CGFloat = 0
 
     private func wheelTicks(_ event: NSEvent) -> Int {
@@ -1041,7 +1058,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
             return Int(lines)
         }
         scrollRemainder = 0
-        return Int(event.scrollingDeltaY.rounded())
+        return Int(event.scrollingDeltaY.rounded()) * Self.linesPerNotch
     }
 
     // MARK: - Selection
