@@ -41,5 +41,20 @@
         <key>NSExtensionPointIdentifier</key>
         <string>com.apple.widgetkit-extension</string>
     </dict>
+    <!-- Read by `SnapshotStore`. A build setting rather than a literal so the
+         four channels do not need four copies of this file — and so this value
+         cannot drift from the app's, which would leave the widget reading a
+         container nothing writes. -->
+    <key>FarCoolerAppGroup</key>
+    <string>$(FARCOOLER_APP_GROUP)</string>
+    <!-- Read by `AppScheme`, for the URL a tapped card opens. This extension
+         registers no scheme of its own — only the app does — so there is no
+         CFBundleURLTypes here to read it back out of, the way AgentKit's
+         `Account` does in the app. The card's link was hardcoded to
+         `farcooler://` and therefore opened STABLE from a canary build, or
+         nothing at all when stable wasn't installed; a build setting is what
+         keeps this from drifting from the scheme the app actually claims. -->
+    <key>FarCoolerURLScheme</key>
+    <string>$(FARCOOLER_URL_SCHEME)</string>
 </dict>
 </plist>

@@ -171,6 +171,12 @@ final class Connection: ObservableObject {
         poller?.cancel()
         reconnectTask?.cancel()
         self.host = host
+        // The watch performs everything through whichever connection the app is
+        // running, and this is the one place that knows which that is. Handed
+        // over before connecting rather than after: `WatchLinkHost` checks the
+        // phase itself, and registering only on success would answer "open the
+        // app" to somebody who is holding it open while it reconnects.
+        WatchLinkHost.shared.adopt(self)
         attempt += 1
         let mine = attempt
         phase = .connecting
@@ -452,6 +458,13 @@ final class Connection: ObservableObject {
         do {
             let data = try await core.call("fleet")
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
+
+            // The glance surfaces render from this and cannot fetch it
+            // themselves. Written on every poll rather than on change, because
+            // `capturedAt` is what makes the widget able to say how old it is,
+            // and a snapshot only rewritten on change would claim to be as old
+            // as the last state change rather than as old as the last look.
+            FleetSnapshotWriter.write(fleet: fleet, machine: hostLabel)
 
             // Announce anything worth announcing, from the fleet we just read.
             //

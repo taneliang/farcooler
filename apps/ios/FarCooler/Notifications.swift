@@ -131,11 +131,36 @@ private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDeleg
 }
 
 
-/// The only reason this app has a delegate.
+/// Why this app has a delegate.
 ///
 /// SwiftUI has no scene-phase equivalent of "APNs answered" — the token arrives
-/// through `UIApplicationDelegate` and nowhere else.
+/// through `UIApplicationDelegate` and nowhere else. The watch link is here for
+/// the mirror-image reason: it has to be listening before any scene exists.
 final class PushDelegate: NSObject, UIApplicationDelegate {
+    /// Activate the watch link at launch, including a launch nobody asked for.
+    ///
+    /// iOS starts this app in the background to deliver a `sendMessage` from the
+    /// watch, and a background launch may never build a `WindowGroup` at all —
+    /// so a SwiftUI `.task`, where `LiveActivities.start` lives, is a hook that
+    /// does not run in exactly the case the watch exists for. This one does:
+    /// `didFinishLaunchingWithOptions` runs on every launch, foreground or not.
+    /// Without it the watch's Allow button reaches a phone with no delegate
+    /// listening, waits out WatchConnectivity's timeout, and reports that the
+    /// phone did not answer.
+    ///
+    /// `assumeIsolated` rather than a `Task`, and it is an assertion rather
+    /// than a hope: UIKit calls every `UIApplicationDelegate` lifecycle method
+    /// on the main thread, so the claim is true and the check is free. A `Task`
+    /// would defer activation past the end of launch, which is precisely the
+    /// window a launch-to-deliver-a-message has.
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        MainActor.assumeIsolated { WatchLinkHost.shared.start() }
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data

@@ -77,18 +77,65 @@ const EVENT_BACKLOG: usize = 256;
 struct Notice {
     title: String,
     subtitle: String,
-    /// `"blocked"` or `"done"`, and nothing else — an empty or invented status
-    /// tells the relay it is talking to a daemon it should stop trusting. It is
-    /// `&'static str` so there is nowhere for a computed one to come from.
+    /// `"working"`, `"blocked"` or `"done"`, and nothing else — an empty or
+    /// invented status tells the relay it is talking to a daemon it should stop
+    /// trusting. It is `&'static str` so there is nowhere for a computed one to
+    /// come from.
+    ///
+    /// The relay reads this to decide which of two very different things a
+    /// notice becomes: `blocked` and `done` raise a banner, `working` only ever
+    /// moves the card — starting it silently when there is none, and updating it
+    /// in place when there is. That split is what lets a working agent be
+    /// reported at all without buzzing anyone: what separates the tiers is the
+    /// alert, never whether a push goes out.
     status: &'static str,
+    /// Whether this `done` is a turn that DIED.
+    ///
+    /// Beside `status` rather than folded into it, because the two answer
+    /// different questions and only one of them decides anything about the lock
+    /// screen. `status` is "raise, move or dismiss the card"; a failed turn is
+    /// still over, so it is still `"done"` for that purpose — see `exit_notice`.
+    /// What this carries is which MARK the agent gets, and that cannot be
+    /// recovered downstream: `title` says "claude failed" in a human sentence,
+    /// and a relay or an extension reading a verb out of one would be this
+    /// module's rule about deciding-in-one-place broken in a second language.
+    ///
+    /// The phone is where it matters most. The notification service extension
+    /// draws `feed::glyph`'s marks from `status` alone, and
+    /// `accessoryCircular` draws only the glyph — so without this field an
+    /// agent whose turn died wears `✓` on the lock screen until the app next
+    /// polls. Always `false` for `blocked` and `working`, neither of which has
+    /// ended at all.
+    failed: bool,
+    /// When the turn this notice is about began, in Unix milliseconds, or
+    /// `None` when no turn is running.
+    ///
+    /// Carried on the notice rather than read at the send site because it has
+    /// to come off the SAME record the title and the question came off. Read
+    /// separately, a card could quote one turn's question over another turn's
+    /// clock — which is not a wrong pixel, it is a wrong duration next to a
+    /// right question.
+    ///
+    /// `None` is a real answer and never a zero: the relay omits an absent
+    /// clock, and a card given zero would count from 1970. See
+    /// `crate::push::Notification::started_at` for the rest of that contract.
+    started_at: Option<i64>,
 }
 
 /// What, if anything, is worth waking a phone for.
 ///
 /// Split out from the sending so it can be tested at all: the rule it encodes —
-/// two states out of five — is the difference between a product people keep
-/// notifications on for and one they mute, and the sending half is a spawn and
-/// a filesystem read that no test can reach through.
+/// which states reach a phone at all, and as what — is the difference between a
+/// product people keep notifications on for and one they mute, and the sending
+/// half is a spawn and a filesystem read that no test can reach through.
+///
+/// Three states out of five produce a notice, but only two of them BUZZ. The
+/// relay is what separates them: it builds a banner for `blocked` and `done`,
+/// and for `working` it moves the card and nothing else — including raising one
+/// silently when the run has none yet, which is what makes the card follow a
+/// whole run rather than appear only once something has gone wrong. So the
+/// working arm below is not a relaxation of the rule that a busy agent must not
+/// interrupt anyone — that rule is about alerts and it is untouched.
 ///
 /// The status the phone acts on is decided HERE, next to the sentence the
 /// person reads, and not anywhere else. Both come off the same `AgentActivity`,
@@ -110,11 +157,24 @@ struct Notice {
 /// lie in the place it costs most. The relay's status stays `"done"` for the
 /// reason `exit_notice` gives below: a failed turn is a turn that is OVER,
 /// just over badly, and there is no live card to hold open for it.
+///
+/// `started_at` is `Observed::turn_started_at` — when the user's request began,
+/// held across Blocked so that approving a tool call does not restart the clock.
+/// It is passed through unread: nothing here decides anything by it, and the
+/// only shape it can take is the one the caller was already holding. Its whole
+/// job is to reach the attributes of the card the relay starts, which is where
+/// a lock screen gets a timer that ticks with no push behind it.
+///
+/// Every tier carries it, including the two the relay does not start a card
+/// from today. A `Done` turn has no clock to run and arrives as `None` on its
+/// own, so there is nothing to special-case — and a tier that dropped the field
+/// would be a card started from it with the timer silently missing.
 fn notification(
     activity: AgentActivity,
     label: &str,
     question: Option<&str>,
     failed: bool,
+    started_at: Option<i64>,
 ) -> Option<Notice> {
     match activity {
         AgentActivity::Blocked => Some(Notice {
@@ -124,18 +184,69 @@ fn notification(
                 _ => "Waiting for your answer".to_string(),
             },
             status: "blocked",
+            failed: false,
+            started_at,
         }),
         AgentActivity::Done if failed => Some(Notice {
             title: format!("{label} failed"),
             subtitle: "Its last turn didn't finish".to_string(),
             status: "done",
+            failed: true,
+            started_at,
         }),
         AgentActivity::Done => Some(Notice {
             title: format!("{label} finished"),
             subtitle: String::new(),
             status: "done",
+            failed: false,
+            started_at,
+        }),
+        // A card, not a banner. `push_notice`'s caller decides which of the two
+        // this becomes — the relay sends an alert for `blocked` and `done` and
+        // only ever moves the card for `working`, silently, whether that means
+        // starting one or updating it — so producing a notice here does NOT
+        // reintroduce buzzing for the normal case. What it buys is a Dynamic
+        // Island that says something during the only period there is anything
+        // to watch.
+        //
+        // `title` is the label alone. The relay never builds an alert from a
+        // working notice, so there is no sentence for it to be the subject of.
+        //
+        // `question` here is the composed signal line, not a question: a
+        // working agent has nothing to ask. The parameter is "whatever the card
+        // should say under the label", and for `Blocked` that happens to be
+        // what the agent asked.
+        AgentActivity::Working => Some(Notice {
+            title: label.to_string(),
+            subtitle: question.unwrap_or("").to_string(),
+            status: "working",
+            failed: false,
+            started_at,
         }),
         _ => None,
+    }
+}
+
+/// How often a live card may be refreshed while an agent stays in one tier.
+///
+/// A signal line can change several times a second, and pushing each one spends
+/// the app's Live Activity budget on text nobody can read at that rate. Ten
+/// seconds is roughly the fastest a changing line is still worth reading rather
+/// than watching flicker, and it caps a six-agent fleet at 36 pushes a minute.
+///
+/// A starting number, not a measured one — see the design's risk 2.
+const CARD_REFRESH_MS: i64 = 10_000;
+
+/// Whether a within-tier card refresh is due.
+///
+/// Only ever asked about `working`. A tier change — working to blocked to done
+/// — does not come through here at all: those are the pushes this whole feature
+/// exists to deliver, and withholding one to save a byte of budget would be
+/// throttling the alarm to keep the clock quiet.
+fn should_refresh_card(last_push_ms: Option<i64>, now_ms: i64) -> bool {
+    match last_push_ms {
+        None => true,
+        Some(at) => now_ms.saturating_sub(at) >= CARD_REFRESH_MS,
     }
 }
 
@@ -155,7 +266,17 @@ fn exit_notice(label: &str, exit_code: Option<i32>, exit_signal: Option<i32>) ->
         // guard, which already requires one of the two above.
         (None, None) => String::new(),
     };
-    Notice { title: format!("{label} failed"), subtitle, status: "done" }
+    // No clock. This is a command that exited, not an agent turn — there is no
+    // `turn_started_at` at this call site to be right about, and the relay ends
+    // a card on `done` rather than starting one, so a timer would have nowhere
+    // to appear even if one could be invented here.
+    Notice {
+        title: format!("{label} failed"),
+        subtitle,
+        status: "done",
+        failed: true,
+        started_at: None,
+    }
 }
 
 /// The supervisor's activity, reduced to a raw OBSERVATION.
@@ -302,6 +423,14 @@ struct Observed {
     chat_capable: bool,
     /// What the agent is asking, while it is asking.
     blocked_question: Option<String>,
+    /// When a live card was last refreshed for this terminal, in Unix
+    /// milliseconds. `None` until the first one.
+    ///
+    /// Only within-tier refreshes consult it; see `should_refresh_card`. A tier
+    /// change clears it back to `None` rather than stamping it, so the first
+    /// card of a new turn goes out on the tick the turn starts instead of up to
+    /// `CARD_REFRESH_MS` after it.
+    last_card_push: Option<i64>,
     /// Whether the turn that just ended, ended badly.
     ///
     /// Beside `activity` rather than inside it: `Done` is created and
@@ -1074,6 +1203,7 @@ impl Observed {
             command: String::new(),
             chat_capable: false,
             blocked_question: None,
+            last_card_push: None,
             turn_failed: false,
             feed: farcooler_core::feed::Feed::default(),
             signals: Signals::default(),
@@ -1281,10 +1411,13 @@ impl Watcher {
 
     /// Push an agent's state change to the owner's devices, if paired.
     ///
-    /// Blocked and done only. A working agent is the normal case, and something
-    /// that buzzes for the normal case is something people turn off — after
-    /// which it cannot tell them the thing that mattered. See `push_notice` for
-    /// why sending is detached rather than awaited here.
+    /// Blocked and done BUZZ, and nothing else does. A working agent is the
+    /// normal case, and something that buzzes for the normal case is something
+    /// people turn off — after which it cannot tell them the thing that
+    /// mattered. Working reaches here too now, from `refresh_card`, but only as
+    /// a silent card update: the relay is what holds that line, and it will not
+    /// build an alert out of a `working` notice. See `push_notice` for why
+    /// sending is detached rather than awaited here.
     fn push_if_paired(
         &self,
         terminal: Uuid,
@@ -1292,9 +1425,48 @@ impl Watcher {
         label: &str,
         question: Option<&str>,
         turn_failed: bool,
+        started_at: Option<i64>,
     ) {
-        let Some(notice) = notification(activity, label, question, turn_failed) else { return };
+        let Some(notice) = notification(activity, label, question, turn_failed, started_at) else {
+            return;
+        };
         self.push_notice(terminal, label, notice);
+    }
+
+    /// Refresh the live card of an agent that is still working, at most once
+    /// every `CARD_REFRESH_MS`.
+    ///
+    /// The counterpart to `push_if_paired`, for the tier that does not change.
+    /// A working agent moves its signal line several times a second while
+    /// everything else about it holds still, and one push per movement is a
+    /// budget spent on text that is gone before it can be read.
+    ///
+    /// Takes the state lock a second time rather than deciding under the
+    /// sampling loop's, because the timestamp records a push that ACTUALLY went
+    /// out: the line has to survive `apply_rungs` and the terminal has to still
+    /// be in the fleet, neither of which is known where that lock is held.
+    /// Stamping it earlier would silently swallow the next ten seconds of
+    /// refreshes to pay for a card that was never sent.
+    async fn refresh_card(&self, terminal: Uuid, label: &str, line: &str) {
+        let now = now_millis();
+        // Taken from the entry this call just found live, not from the record
+        // `announce` is holding: it is the same lock that decided the push goes
+        // out at all, so the clock on the card cannot be one turn older than the
+        // decision to send it.
+        let started_at;
+        {
+            let mut state = self.state.lock().await;
+            let Some(observed) = state.get_mut(&terminal) else { return };
+            if !should_refresh_card(observed.last_card_push, now) {
+                return;
+            }
+            observed.last_card_push = Some(now);
+            started_at = observed.turn_started_at;
+        }
+        // Outside the lock on principle rather than necessity — this spawns
+        // rather than awaits — so that nothing about the push path can ever
+        // become something the sampling loop waits on. See `push_notice`.
+        self.push_if_paired(terminal, AgentActivity::Working, label, Some(line), false, started_at);
     }
 
     /// Push a failed exit to the owner's devices, if this runner is paired.
@@ -1345,8 +1517,10 @@ impl Watcher {
                 &notice.title,
                 &notice.subtitle,
                 notice.status,
+                notice.failed,
                 &label,
                 &terminal.to_string(),
+                notice.started_at,
             )
             .await;
         });
@@ -2012,6 +2186,15 @@ impl Watcher {
             entry.chat_capable = chat_capable;
             entry.blocked_question = blocked_question;
             entry.turn_failed = turn_failed;
+            // A tier change is never withheld, and clearing the window is how
+            // that is enforced for the one tier whose card is throttled.
+            // Stamping `now` here instead would mean an agent that has just
+            // STARTED working sits behind a card describing the turn before it
+            // for up to ten seconds — the throttle silencing the transition it
+            // exists to make room for.
+            if activity_moved.is_some() {
+                entry.last_card_push = None;
+            }
             let record = entry.clone();
             drop(state);
 
@@ -2022,7 +2205,16 @@ impl Watcher {
             // means the activity moved — a terminal whose command or question
             // changed reports `None` and never reaches this arm, which is what
             // keeps a `cd` from buzzing a phone.
-            if let Some(next) = activity_moved {
+            //
+            // `Working` is the exception, and it is pushed from `announce`
+            // rather than here. What a working card says is the composed signal
+            // line, which does not exist until `wire::apply_rungs` has run a
+            // few lines further on — pushing from here as well would spend an
+            // APNs delivery on a card with a blank second line and then
+            // overwrite it milliseconds later with the real one. The transition
+            // is still unthrottled: `last_card_push` was just cleared above, so
+            // the refresh in `announce` fires on this very tick.
+            if let Some(next) = activity_moved.filter(|next| *next != AgentActivity::Working) {
                 // Both from `record`, not from the locals, which were moved
                 // into the entry above. Same values, and taking them off the
                 // record is what keeps the card and the row quoting one
@@ -2034,6 +2226,7 @@ impl Watcher {
                     &command,
                     record.blocked_question.as_deref(),
                     record.turn_failed,
+                    record.turn_started_at,
                 );
             }
             // A command failing is a STATE transition, not an activity one —
@@ -2109,6 +2302,22 @@ impl Watcher {
             // see `wire::apply_rungs` for why it has to run last, and why the
             // signal line is handed to it rather than read off the message.
             wire::apply_rungs(&mut message, observed.signals.line().as_deref());
+
+            // The live card, from the same line the sidebar is about to draw.
+            //
+            // Here rather than at the push site above because `message.line` is
+            // the composed rung and only exists once `apply_rungs` has run —
+            // and a card built from anything else is a phone and a Mac
+            // disagreeing about the same agent in the same second, which is the
+            // failure this whole module is arranged to prevent.
+            //
+            // Not a banner: the relay refuses to ALERT on `working`. It will
+            // start a card from one — silently, so the card covers the whole
+            // run — and after that this only ever moves the card already up.
+            // Nothing on this path can interrupt anyone.
+            if observed.activity == AgentActivity::Working && !message.line.is_empty() {
+                self.refresh_card(terminal, &observed.command, &message.line).await;
+            }
 
             // A send with no subscribers is not a failure: it is the ordinary
             // case of a runner nobody is watching, which still has to keep
@@ -2804,7 +3013,8 @@ mod tests {
         // actually looks like.
         let mut entry = Observed::begin(AgentActivity::Working, now);
         let published = entry.observe(resolved, now + 1_000);
-        let notice = notification(resolved, "claude", Some("Do you want to create haiku.txt?"), false);
+        let notice =
+            notification(resolved, "claude", Some("Do you want to create haiku.txt?"), false, None);
 
         println!("screen said      : {screen:?}");
         println!("log said         : {log:?}  (a turn still open, written this instant)");
@@ -3223,7 +3433,7 @@ mod tests {
         assert_eq!(message.headline, "cursor failed");
         // And the phone is told the same thing the sidebar shows.
         assert_eq!(
-            notification(folded, "cursor", None, died.failed).map(|n| n.title),
+            notification(folded, "cursor", None, died.failed, None).map(|n| n.title),
             Some("cursor failed".to_string())
         );
     }
@@ -3437,28 +3647,125 @@ mod tests {
     }
 
     #[test]
-    fn only_a_blocked_or_finished_agent_is_worth_a_phone() {
+    fn only_a_blocked_or_finished_agent_is_worth_a_banner() {
         // Working is the NORMAL case. Something that buzzes for the normal case
         // is something people turn off, after which it cannot tell them the
         // thing that mattered — so this is the rule the whole feature rests on.
+        //
+        // A working agent IS worth a phone now: it produces a notice, and the
+        // relay will even start a lock screen card from it. The rule is
+        // unchanged because the relay never builds a BANNER out of one — the
+        // card goes up and moves silently. So what this test guards is the
+        // status, which is what the relay switches on — never `blocked` or
+        // `done` for an agent that is merely busy.
         let asking = Some("Do you want to create haiku.txt?");
-        assert!(notification(AgentActivity::Working, "claude", None, false).is_none());
-        assert!(notification(AgentActivity::Idle, "claude", None, false).is_none());
-        assert!(notification(AgentActivity::Unspecified, "claude", None, false).is_none());
+        assert_eq!(
+            notification(AgentActivity::Working, "claude", None, false, None).map(|n| n.status),
+            Some("working")
+        );
+        assert!(notification(AgentActivity::Idle, "claude", None, false, None).is_none());
+        assert!(notification(AgentActivity::Unspecified, "claude", None, false, None).is_none());
         // Not even with a question in hand: a question is what a card SAYS, not
         // what decides there is one.
-        assert!(notification(AgentActivity::Working, "claude", asking, false).is_none());
+        assert_eq!(
+            notification(AgentActivity::Working, "claude", asking, false, None).map(|n| n.status),
+            Some("working")
+        );
         // And not because a turn failed, either. How the last turn ended is the
         // wording of a card, never the reason there is one — a turn that died
         // mid-flight is still a turn in flight, and a phone buzzing about an
         // agent that is busy is the noise this rule exists to refuse.
-        assert!(notification(AgentActivity::Working, "claude", None, true).is_none());
-        assert!(notification(AgentActivity::Idle, "claude", None, true).is_none());
+        assert_eq!(
+            notification(AgentActivity::Working, "claude", None, true, None).map(|n| n.status),
+            Some("working")
+        );
+        assert!(notification(AgentActivity::Idle, "claude", None, true, None).is_none());
+    }
+
+    /// A working agent gets a CARD, and never a banner.
+    ///
+    /// The rule that a working agent must not buzz is about alerts, and it
+    /// stands. A live card is not an alert: it updates silently, and the whole
+    /// point of it is watching a run you already know about.
+    #[test]
+    fn a_working_agent_gets_a_card_that_says_where_it_is() {
+        let notice = notification(
+            AgentActivity::Working,
+            "claude",
+            Some("3/7 · Designing test matrix"),
+            false,
+            None,
+        )
+        .expect("working now produces a notice");
+        assert_eq!(notice.status, "working");
+        assert_eq!(notice.subtitle, "3/7 · Designing test matrix");
+        // The label alone, with no sentence built around it. The relay never
+        // alerts on a working notice, so there is nothing for a sentence to be
+        // the subject of — and "claude needs you" on a card for an agent that
+        // needs nothing is the exact lie the status split exists to prevent.
+        assert_eq!(notice.title, "claude");
+    }
+
+    /// The card counts, and this is the only clock it can count from.
+    ///
+    /// The phone renders `startedAt` as a native timer — no push per tick, and
+    /// it keeps running with the device off the network. Nothing on the card
+    /// can derive that number: the daemon is the only thing that knows when the
+    /// turn began. So a notice that drops it is a card with no elapsed time on
+    /// it, which is not a broken build or a failed push but a feature that
+    /// quietly does nothing, in the one place where nobody is looking at logs.
+    #[test]
+    fn a_card_carries_the_turn_it_is_about_and_never_invents_one() {
+        // A real millisecond stamp, the shape `Observed::turn_started_at`
+        // holds. Seconds would be a plausible-looking number that the phone
+        // reads as a different decade — see the decoder in
+        // `AgentActivityAttributes`, which tells the two apart by magnitude.
+        const STARTED: i64 = 1_755_000_000_000;
+
+        let working = notification(
+            AgentActivity::Working,
+            "claude",
+            Some("3/7 · Designing"),
+            false,
+            Some(STARTED),
+        )
+        .expect("working");
+        assert_eq!(working.started_at, Some(STARTED), "the card counts the turn, not the push");
+
+        // Blocked matters most: it is the only tier the relay ever STARTS a
+        // card from, and attributes are fixed for an activity's life, so a
+        // clock missing here can never be sent again for that card.
+        let blocked = notification(AgentActivity::Blocked, "claude", None, false, Some(STARTED))
+            .expect("blocked");
+        assert_eq!(blocked.started_at, Some(STARTED));
+
+        // And between turns, nothing — never a zero. `turn_started_at` is
+        // `None` when no request is running, and zero is a decodable instant:
+        // a card given one counts up from January 1970 on the lock screen,
+        // which is worse than the missing timer this test exists to prevent.
+        let quiet = notification(AgentActivity::Working, "claude", Some("waiting"), false, None)
+            .expect("working");
+        assert_eq!(quiet.started_at, None, "no turn is running, so there is no clock to show");
+    }
+
+    /// A tier change is never withheld. Those are the pushes the feature is for.
+    #[test]
+    fn a_state_change_is_never_throttled() {
+        assert!(should_refresh_card(None, 1_000));
+        assert!(should_refresh_card(Some(1_000), 1_000 + CARD_REFRESH_MS));
+    }
+
+    /// A line that changes three times a second is not three pushes.
+    #[test]
+    fn a_line_that_moves_faster_than_it_reads_is_coalesced() {
+        assert!(!should_refresh_card(Some(1_000), 1_100));
+        assert!(!should_refresh_card(Some(1_000), 1_000 + CARD_REFRESH_MS - 1));
     }
 
     #[test]
     fn a_blocked_agent_says_what_it_wants() {
-        let notice = notification(AgentActivity::Blocked, "claude", None, false).expect("blocked");
+        let notice =
+            notification(AgentActivity::Blocked, "claude", None, false, None).expect("blocked");
         assert_eq!(notice.title, "claude needs you");
         assert_eq!(notice.subtitle, "Waiting for your answer");
         // What raises the live card. The relay is deliberately not in the
@@ -3475,9 +3782,14 @@ mod tests {
     /// asked. Answering from the lock screen needs the question on it.
     #[test]
     fn a_blocked_agent_puts_its_question_on_the_card() {
-        let notice =
-            notification(AgentActivity::Blocked, "claude", Some("Do you want to create haiku.txt?"), false)
-                .expect("blocked");
+        let notice = notification(
+            AgentActivity::Blocked,
+            "claude",
+            Some("Do you want to create haiku.txt?"),
+            false,
+            None,
+        )
+        .expect("blocked");
         assert_eq!(notice.title, "claude needs you");
         assert_eq!(notice.subtitle, "Do you want to create haiku.txt?");
         assert_eq!(notice.status, "blocked");
@@ -3486,15 +3798,15 @@ mod tests {
         // blank second line — see `registry.blocked_question`, which returns
         // None for a trust gate whose '?' is mid-line.
         for absent in [None, Some(""), Some("   ")] {
-            let notice =
-                notification(AgentActivity::Blocked, "claude", absent, false).expect("blocked");
+            let notice = notification(AgentActivity::Blocked, "claude", absent, false, None)
+                .expect("blocked");
             assert_eq!(notice.subtitle, "Waiting for your answer", "{absent:?}");
         }
     }
 
     #[test]
     fn a_finished_agent_needs_no_second_line() {
-        let notice = notification(AgentActivity::Done, "claude", None, false).expect("done");
+        let notice = notification(AgentActivity::Done, "claude", None, false, None).expect("done");
         assert_eq!(notice.title, "claude finished");
         assert!(notice.subtitle.is_empty());
         // And what takes the card back down. An empty subtitle is fine; an
@@ -3510,6 +3822,7 @@ mod tests {
             "claude",
             Some("Do you want to create haiku.txt?"),
             false,
+            None,
         )
         .expect("done");
         assert!(notice.subtitle.is_empty(), "{}", notice.subtitle);
@@ -3524,12 +3837,35 @@ mod tests {
     /// person reads one vocabulary for both.
     #[test]
     fn a_turn_that_died_says_so_rather_than_saying_it_finished() {
-        let notice = notification(AgentActivity::Done, "cursor", None, true).expect("done");
+        let notice = notification(AgentActivity::Done, "cursor", None, true, None).expect("done");
         assert_eq!(notice.title, "cursor failed");
         assert_eq!(notice.subtitle, "Its last turn didn't finish");
         // Still "done": there is no live card to hold open for a turn that is
         // over, however it ended — the same reasoning `exit_notice` follows.
         assert_eq!(notice.status, "done");
+        // And the fact the status cannot carry, carried beside it. The phone's
+        // notification service extension has a status word and nothing else to
+        // pick a mark from, so without this a dead agent wears the finished
+        // one — `✓` on a lock screen widget, for an agent that died, until the
+        // app next polls.
+        assert!(notice.failed);
+    }
+
+    /// A turn that FINISHED must not arrive looking like one that died.
+    ///
+    /// The other direction of the same field, which is worth pinning
+    /// separately: a `failed` stuck true would put `✗` on every completed run,
+    /// and a mark that is always wrong in one direction is noticed; one that is
+    /// wrong in both is simply not believed.
+    #[test]
+    fn a_finished_turn_is_not_reported_as_a_failed_one() {
+        let done = notification(AgentActivity::Done, "claude", None, false, None).expect("done");
+        assert!(!done.failed);
+        // Neither tier has ended at all, so neither can have ended badly.
+        let blocked = notification(AgentActivity::Blocked, "claude", None, true, None);
+        assert_eq!(blocked.map(|n| n.failed), Some(false));
+        let working = notification(AgentActivity::Working, "claude", Some("x"), true, None);
+        assert_eq!(working.map(|n| n.failed), Some(false));
     }
 
     #[test]
@@ -3541,6 +3877,10 @@ mod tests {
         // card to raise. Reusing "done" is what keeps the relay's vocabulary at
         // two words instead of a third it was never taught.
         assert_eq!(notice.status, "done");
+        // Which is exactly why the failure travels beside the status: a command
+        // that exited badly has to reach the phone as `✗`, and `"done"` alone
+        // cannot say so.
+        assert!(notice.failed);
     }
 
     #[test]

@@ -89,6 +89,61 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// checkmark for an agent that had stopped working. Absent on older
     /// daemons, and absent means "nothing claimed the turn went badly".
     var turnFailed: Bool?
+    /// Unix milliseconds when the current `activity` began, or nil when the host
+    /// did not say.
+    ///
+    /// Distinct from `turnStartedAt`: this restarts whenever the state changes,
+    /// so it answers "how long has this been blocked" rather than "how long has
+    /// this turn been running". Sent as `activitySince` — see `activity_since`
+    /// in `crates/client/src/session.rs` — and timed on the host rather than
+    /// here, because a clock started on the phone restarts at every reconnect
+    /// and lies across a laptop sleep.
+    ///
+    /// Optional like every other field added to this type, and for the reason
+    /// that rule exists: a daemon built before it sends no key at all, and a key
+    /// this decoder required would fail the WHOLE fleet rather than cost one row
+    /// its age.
+    var activitySince: Double?
+    /// Unix milliseconds when the current turn started, or nil between turns.
+    ///
+    /// Held across Blocked on the host: approving a tool call does not begin a
+    /// new turn, so a card's timer does not restart when you answer one.
+    var turnStartedAt: Double?
+    /// What the agent is asking, while it is asking it.
+    var blockedQuestion: String?
+    /// The last few things the agent SAID, oldest first, at most three.
+    ///
+    /// A transcript and only a transcript — the agent's own prose, with no verb
+    /// in front of it. What it DID arrives on `line` instead. Already redacted
+    /// and cut to a row's width by the daemon, so this app renders them and
+    /// decides nothing about them.
+    ///
+    /// Optional because a daemon from before this existed sends no key, and a
+    /// row with no feed must read as "nothing to say" rather than as a decoding
+    /// failure that takes the whole fleet down.
+    var feed: [String]?
+    /// Where the agent is, in one line: the question it is blocked on, its
+    /// position in its own task list, or what it is doing right now.
+    ///
+    /// One rung of the daemon's compact ladder. The priority between those is
+    /// decided on the host — see `farcooler_core::feed::line` — because a Mac,
+    /// a phone and a watch deciding it separately is three surfaces disagreeing
+    /// about one pane.
+    var line: String?
+    /// The state in one character: `?` blocked, `●` working, `✓` done, `✗`
+    /// failed, `·` idle. The narrowest rung, for a lock screen accessory.
+    var glyph: String?
+    /// The state plus just enough to say whose, at most ~18 characters.
+    var headline: String?
+    /// Where this terminal sorts in a fleet view. SMALLER sorts FIRST: blocked
+    /// outranks done outranks working, and within a tier the oldest first.
+    ///
+    /// Computed on the host beside `activity`, so a widget showing one agent
+    /// and this list showing twelve agree about which one matters.
+    var rank: UInt32?
+    /// The agents this agent spawned and has not finished with, named.
+    /// Their COUNT is already inside `line`; these are the names.
+    var subagents: [String]?
     var epoch: Int
     /// What this terminal's pane is hosting. Absent on older daemons, which is
     /// why it is optional rather than defaulted to something that would look
@@ -142,6 +197,30 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// absent means "do not offer": a switch that came back as a different
     /// agent is worse than no switch at all.
     var canSwitchPaneMode: Bool { chatCapable == true }
+
+    /// The signal line, or empty when the host has nothing to say.
+    ///
+    /// Trimmed here rather than at each call site: a line that is whitespace is
+    /// a line that draws a blank row and makes every surface taller for
+    /// nothing, and three surfaces trimming it separately is three chances to
+    /// forget.
+    var signalLine: String {
+        (line ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// When this activity began, as a date, or nil when the host did not say.
+    ///
+    /// Nil is "not told", which is a different thing from "just now" and must
+    /// never be rendered as it — a snapshot that treated an absent timestamp as
+    /// the present would vouch for an agent nobody has heard from.
+    var activityChangedAt: Date? {
+        activitySince.map { Date(timeIntervalSince1970: $0 / 1000) }
+    }
+
+    /// Where this terminal sorts. Absent `rank` sorts last: a daemon too old to
+    /// send one is a daemon that cannot tell us this pane is urgent, and
+    /// guessing that it is would put an unknown above a known blocked agent.
+    var sortRank: UInt32 { rank ?? UInt32.max }
 
     /// What to call this terminal.
     ///

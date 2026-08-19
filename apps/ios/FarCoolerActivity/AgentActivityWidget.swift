@@ -27,6 +27,14 @@ struct AgentActivityWidget: Widget {
                 // sticker.
                 .activityBackgroundTint(nil)
                 .activitySystemActionForegroundColor(.primary)
+                // The same tap target the Island gets, and it has to be applied
+                // HERE as well: `.widgetURL` on the `dynamicIsland` builder
+                // covers only that presentation. Without it a tap on the lock
+                // screen card — the presentation this whole feature is named
+                // for — opened the app's front door instead of the terminal the
+                // card is about, which is indistinguishable from a card that
+                // ignores taps.
+                .widgetURL(terminalURL(context.attributes.terminal))
         } dynamicIsland: { context in
             let status = AgentStatus(context.state.status)
             return DynamicIsland {
@@ -44,10 +52,16 @@ struct AgentActivityWidget: Widget {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(context.attributes.label)
                             .font(.headline)
-                        if !context.state.detail.isEmpty {
-                            Text(context.state.detail)
+                        let body = context.state.detail
+                        if !body.isEmpty {
+                            Text(body)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                        }
+                        if let started = context.attributes.startedAt {
+                            Text(started, style: .timer)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.tertiary)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -68,13 +82,47 @@ struct AgentActivityWidget: Widget {
                 Image(systemName: status.symbol)
                     .foregroundStyle(status.tint)
             }
-            // Where a tap lands. The app currently opens to wherever it was, so
-            // this is only the front door — nothing routes on the terminal id
-            // yet. It is in the URL rather than added later because the id is
-            // known here and nowhere else, and a card already on someone's lock
-            // screen cannot be given a better URL retroactively.
-            .widgetURL(URL(string: "farcooler://terminal/\(context.attributes.terminal)"))
+            .widgetURL(terminalURL(context.attributes.terminal))
         }
+    }
+}
+
+/// Where a tap on either presentation lands.
+///
+/// `FleetView.onOpenURL` reads the id back out and opens that terminal. It is in
+/// the URL rather than added later because the id is known here and nowhere
+/// else, and a card already on someone's lock screen cannot be given a better
+/// URL retroactively.
+///
+/// One function because there are two presentations and they must not drift:
+/// the lock screen card spent a while with no `widgetURL` at all, since the
+/// modifier had been written once, on the Island's builder, where it looks like
+/// it covers both.
+private func terminalURL(_ terminal: String) -> URL? {
+    URL(string: "\(AppScheme.current)://terminal/\(terminal)")
+}
+
+/// This build's URL scheme.
+///
+/// `farcooler` for stable, `farcooler-canary` and friends for the rest. It has
+/// to be read rather than written down: this file hardcoded `farcooler://`,
+/// which every non-stable channel does NOT register — so tapping a canary
+/// card opened stable if it happened to be installed, and opened nothing at all
+/// if it did not. The app's own Info.plist documents the same hazard for
+/// sign-in; the widget was missed because `ACTIVITY_COMMON` in
+/// generate-project.py deliberately does not inherit `TARGET_COMMON`.
+///
+/// Read from this extension's own bundle, not the app's — `Bundle.main` in an
+/// appex is the appex — which is why `FarCoolerURLScheme` has to be stamped
+/// into `FarCoolerActivity/Info.plist` as well. The fallback is stable's
+/// scheme and is unreachable in a generated build; it exists so a missing key
+/// produces a link that opens the wrong channel rather than `://terminal/…`,
+/// which opens nothing and cannot be told apart from a card that ignored the
+/// tap.
+enum AppScheme {
+    static var current: String {
+        Bundle.main.object(forInfoDictionaryKey: "FarCoolerURLScheme") as? String
+            ?? "farcooler"
     }
 }
 
@@ -95,11 +143,22 @@ private struct LockScreenCard: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
-                if !state.detail.isEmpty {
-                    Text(state.detail)
+                let body = state.detail
+                if !body.isEmpty {
+                    Text(body)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                        .padding(.top, 2)
+                }
+                // How long this turn has been going. `.timer` and not a string
+                // we compute: the extension gets no wake-up per second, so
+                // anything we render ourselves is frozen at the moment of the
+                // last push. The system counts this one, network or not.
+                if let started = attributes.startedAt {
+                    Text(started, style: .timer)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
                         .padding(.top, 2)
                 }
             }

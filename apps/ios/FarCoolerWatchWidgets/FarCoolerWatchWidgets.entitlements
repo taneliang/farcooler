@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The complication's half of the watch's container. It only ever READS:
+         the snapshot on this device is written by `WatchLinkClient` as each
+         application context arrives, and a complication that wrote would be a
+         second author of the one file every surface on the wrist trusts.
+
+         Naming a group does not grant one. An App Group is granted by this
+         entitlement and by nothing else, and an extension inherits nothing from
+         the app it is embedded in — the watch app's entitlement does not cover
+         the .appex inside it, any more than the phone app's covers
+         FarCoolerActivity. Without this key
+         `FileManager.containerURL(forSecurityApplicationGroupIdentifier:)`
+         returns nil, `SnapshotStore.read()` answers "nothing known" exactly as
+         it does when no context has ever arrived, and the complication is
+         permanently empty against a watch that is working fine.
+
+         The identifier is `$(FARCOOLER_APP_GROUP)` — the same expression the
+         watch app's entitlement and both Info.plists expand — and not anything
+         derived from this target's own bundle identifier. This extension's
+         identifier is the watch app's with `.widgets` appended and the watch
+         app's is the phone app's with `.watchkitapp` appended, so
+         `$(PRODUCT_BUNDLE_IDENTIFIER)` here would name a group nothing on this
+         watch has ever written to.
+
+         No `$(AppIdentifierPrefix)`: application-groups values are not
+         team-prefixed the way keychain groups are. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(FARCOOLER_APP_GROUP)</string>
+    </array>
+</dict>
+</plist>

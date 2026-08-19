@@ -49,12 +49,21 @@ final class AgentStream: ObservableObject {
         pollTask = nil
     }
 
-    private struct EventFrame: Decodable {
+    /// The shape `terminal.agent_subscribe` answers with.
+    ///
+    /// Not private, and not because anything here needed loosening:
+    /// `WatchLinkHost` makes the same call to answer the watch's one question
+    /// about a blocked agent, and a second declaration of these four fields
+    /// would be a second spelling of `payloadJson` waiting to happen. The
+    /// daemon's own CLI points at this type by name — see `TerminalCmd::
+    /// AgentSubscribe` in `crates/cli/src/main.rs` — so it is already the
+    /// documented Swift shape of that reply.
+    struct EventFrame: Decodable {
         let seq: UInt64
         let payloadJson: String
     }
 
-    private struct Batch: Decodable {
+    struct Batch: Decodable {
         let events: [EventFrame]
         /// Which run of the stream these numbers belong to. See `epoch`.
         let epoch: UInt64

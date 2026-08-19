@@ -41,5 +41,21 @@
          whole notification path exists for. -->
     <key>aps-environment</key>
     <string>development</string>
+
+    <!-- The container the app shares with its widget and its notification
+         service extension. `SnapshotStore` writes one file into it; nothing
+         else uses it.
+
+         `$(FARCOOLER_APP_GROUP)` rather than a literal, because there are four
+         channels and each needs its own — a shared group would be the one
+         thing canary and stable could both write to, which is exactly the
+         isolation the bundle id, keychain, URL scheme and relay already have.
+
+         Note there is no `$(AppIdentifierPrefix)` here, unlike the keychain
+         group above: application-groups entitlements are not team-prefixed. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(FARCOOLER_APP_GROUP)</string>
+    </array>
 </dict>
 </plist>

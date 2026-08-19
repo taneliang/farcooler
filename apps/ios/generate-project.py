@@ -21,6 +21,7 @@ SOURCES = [
     "FarCoolerApp.swift",
     "ClientCore.swift",
     "Connection.swift",
+    "FleetSnapshotWriter.swift",
     "FleetView.swift",
     "Model.swift",
     "Notifications.swift",
@@ -40,6 +41,10 @@ SOURCES = [
     "ImagePaste.swift",
     "AgentStream.swift",
     "AgentView.swift",
+    # The phone's half of the watch link. Not under `FarCoolerWatch/`: it runs
+    # on the phone, holds the connection, and makes the core calls the watch
+    # cannot.
+    "WatchLinkHost.swift",
     "RunnerSettings.swift",
     "ThemeEditorView.swift",
     "AdapterEditorView.swift",
@@ -90,7 +95,21 @@ AGENTKIT_SOURCES = [
     "AgentActivityAttributes.swift",
     "AgentEvent.swift",
     "Composer.swift",
+    # In this list AND in `WATCH_AGENTKIT_SOURCES` below: the phone and the
+    # watch are two binaries that have to agree about these messages down to the
+    # key names, which is the whole reason the file exists. A `WatchRequest` the
+    # phone could not construct would leave `WatchLinkHost` unable to answer
+    # anything.
+    "WatchLink.swift",
     "DiffComputation.swift",
+    # In this list AND in `activity_build_ids` AND in `notify_build_ids` below,
+    # for the same reason `AgentActivityAttributes.swift` is in two: THREE
+    # targets, three binaries, one file. The widget renders the snapshot the app
+    # writes and the notification service extension refreshes it while the app
+    # sleeps; a second copy of either type is two definitions of the file all
+    # three share.
+    "FleetSnapshot.swift",
+    "SnapshotStore.swift",
     # The markdown renderer, shared for the same reason the reducer is: the
     # phone drew agent replies as plain `Text`, so a table arrived as a wall of
     # pipes and a heading as a line beginning with a hash. Same conversation,
@@ -115,10 +134,109 @@ AGENTKIT_SOURCES = [
 # connection, and no fleet — everything it draws arrives in the push that started
 # it, which is why `AgentActivityAttributes` carries plain strings rather than
 # ids to look up.
+#
+# The home screen and lock screen widgets live here too, and they are the reason
+# `FleetSnapshot.swift` and `SnapshotStore.swift` appear in `activity_build_ids`
+# below: those two are the extension's only window onto the fleet, since it has
+# no connection to ask.
 ACTIVITY_SOURCES = [
     "FarCoolerActivityBundle.swift",
     "AgentActivityWidget.swift",
+    "FleetWidget.swift",
 ]
+
+# The notification service extension's own sources, in `apps/ios/FarCoolerNotify/`.
+#
+# A third target because a service extension is a separate process that iOS
+# starts for an incoming push whether or not the app is running — which is the
+# only moment the snapshot can be refreshed on a phone in a pocket.
+NOTIFY_SOURCES = ["NotificationService.swift"]
+
+# The watchOS app's own sources, in `apps/ios/FarCoolerWatch/`.
+#
+# A fourth target and a fourth binary because a watchOS app is a separate
+# executable that runs on separate hardware. It is not an extension of the
+# phone app; it is embedded in it only so the phone's install carries it to the
+# paired watch.
+WATCH_SOURCES = [
+    "FarCoolerWatchApp.swift",
+    "WatchLinkClient.swift",
+    "FleetListView.swift",
+    "AgentDetailView.swift",
+    "ComposeView.swift",
+    "PermissionView.swift",
+]
+
+# AgentKit files the watch target compiles, named one by one — the same way
+# `AGENTKIT_SOURCES` names the phone's.
+#
+# It is one file at a time and NOT the whole package, and that is not fastidious-
+# ness. `Account.swift` is built on `ASWebAuthenticationSession`, whose
+# `ASWebAuthenticationPresentationContextProviding` and `ASPresentationAnchor`
+# simply do not exist on watchOS, so compiling AgentKit wholesale for
+# `arm64_32-apple-watchos` fails outright. These three were measured to
+# typecheck for that triple and they are the three the watch actually needs:
+# `WatchLink` is the vocabulary it speaks to the phone, and `FleetSnapshot` /
+# `SnapshotStore` are the model it renders and the container it caches into.
+#
+# `AgentActivityAttributes.swift` is deliberately NOT here even though the other
+# two extension lists carry it. It is `#if os(iOS)` guarded end to end, so on
+# watchOS it compiles to an empty translation unit — a build id and a phase
+# entry claiming a dependency the watch does not have. ActivityKit has no
+# watchOS counterpart and the watch renders no Live Activity; listing the file
+# for symmetry would tell the next reader of this list something untrue.
+WATCH_AGENTKIT_SOURCES = [
+    "WatchLink.swift",
+    # The three reachability states. In AgentKit and not in `FarCoolerWatch/`
+    # for one reason: `swift test` cannot build a watchOS app target, so the
+    # rule that a watch must never offer an action it cannot deliver had no
+    # test standing behind it while it lived over there. Compiled by the watch
+    # alone — the phone has no use for it.
+    "WatchState.swift",
+    "FleetSnapshot.swift",
+    "SnapshotStore.swift",
+]
+
+# The subset of the above that no OTHER target compiles.
+#
+# Those files still need a `PBXFileReference` and a place in `agentKitGroup`,
+# and they must NOT join `AGENTKIT_SOURCES` — that list is precisely "what the
+# phone app compiles", and a file the watch needs quietly becoming a file the
+# phone builds is how a target grows sources nobody chose for it.
+#
+# `WatchState.swift` and nothing else, at the time of writing: `WatchLink.swift`
+# is in both lists because the phone genuinely needs to construct the same
+# messages, and the state machine is the one piece the watch alone renders. The
+# derivation is the rule rather than the list — the next file the watch alone
+# needs lands here without anybody remembering to put it here.
+WATCH_ONLY_AGENTKIT_SOURCES = [n for n in WATCH_AGENTKIT_SOURCES if n not in AGENTKIT_SOURCES]
+
+# The watch's complication, in `apps/ios/FarCoolerWatchWidgets/`.
+#
+# A FIFTH target and a fifth binary, and the one that makes the watch app worth
+# having: a complication is what a person sees without raising the app, and the
+# whole premise of the watch here is that you learn an agent is waiting without
+# deciding to go and look.
+#
+# It cannot live inside the watch app for the same structural reason
+# FarCoolerActivity cannot live inside the phone app: WidgetKit renders out of
+# process, so a complication keeps drawing while its app is not running, which
+# is every moment this feature exists for. An app cannot draw its own
+# complication.
+#
+# It is embedded in the WATCH app's PlugIns, never the phone's — see
+# `watchWidgetEmbedPhase`.
+WATCH_WIDGET_SOURCES = ["WatchFleetWidget.swift"]
+
+# AgentKit files the complication compiles.
+#
+# Two, and no more: the extension has no connection, no `WatchLinkClient` and no
+# screens. Its only window onto the fleet is the file the watch app writes into
+# the shared container, so `FleetSnapshot` is the model it renders and
+# `SnapshotStore` is how it opens the file. `WatchLink.swift` is deliberately
+# absent — this target never speaks to the phone, and listing the vocabulary for
+# symmetry would claim a capability it does not have.
+WATCH_WIDGET_AGENTKIT_SOURCES = ["FleetSnapshot.swift", "SnapshotStore.swift"]
 
 UI_TEST_SOURCES = ["KeyboardTabStripTests.swift"]
 
@@ -155,6 +273,35 @@ KEYS = [
     "activityTarget", "activityProduct", "activityGroup", "activitySourcesPhase",
     "activityConfigList", "activityDebug", "activityRelease", "embedPhase",
     "activityDependency", "activityProxy",
+    # The notification service extension: the same nine objects the activity
+    # extension needs, for the same reasons. It is a second .appex embedded in
+    # the same Embed Foundation Extensions phase.
+    "notifyTarget", "notifyProduct", "notifyGroup", "notifySourcesPhase",
+    "notifyConfigList", "notifyDebug", "notifyRelease",
+    "notifyDependency", "notifyProxy",
+    # The watchOS app: the same nine objects again, but `watchEmbedPhase` is a
+    # phase of its OWN rather than a second file in `embedPhase`. A watch app
+    # goes into `Watch/` inside the app bundle, an .appex goes into
+    # `PlugIns/`, and those are two different `dstSubfolderSpec` values — 16 and
+    # 13. Putting the watch app in the extensions' phase builds perfectly and
+    # then fails at install or at launch, which is why it gets its own object
+    # here rather than sharing one.
+    "watchTarget", "watchProduct", "watchGroup", "watchSourcesPhase",
+    "watchConfigList", "watchDebug", "watchRelease", "watchEmbedPhase",
+    "watchDependency", "watchProxy",
+    # The watch's complication: the same nine objects a third time, plus
+    # `watchWidgetEmbedPhase`. That phase is 13/PlugIns like the phone's
+    # `embedPhase` — an .appex is an .appex on either platform — but it belongs
+    # to the WATCH target's `buildPhases` rather than the app's, because the
+    # bundle it goes inside is FarCoolerWatch.app. Put in the phone's phase it
+    # builds, signs, and installs a complication that watchOS never sees.
+    # `watchWidgetDependency` is likewise a dependency of the WATCH target: the
+    # watch app has to be told to build this before embedding it, or it embeds
+    # whatever was there last.
+    "watchWidgetTarget", "watchWidgetProduct", "watchWidgetGroup",
+    "watchWidgetSourcesPhase", "watchWidgetConfigList", "watchWidgetDebug",
+    "watchWidgetRelease", "watchWidgetEmbedPhase", "watchWidgetDependency",
+    "watchWidgetProxy",
     # Real-device interaction regressions. The target depends on the app but is
     # never embedded in it; Xcode installs its runner only for a test action.
     "uiTestTarget", "uiTestProduct", "uiTestGroup", "uiTestSourcesPhase",
@@ -171,7 +318,9 @@ def oid(seed):
 ids = {
     name: oid(name)
     for name in SOURCES + CEREMONY_SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES
-    + UI_TEST_SOURCES + FRAMEWORKS + FONTS + [ASSET_CATALOG]
+    + NOTIFY_SOURCES + WATCH_SOURCES + WATCH_ONLY_AGENTKIT_SOURCES
+    + WATCH_WIDGET_SOURCES + UI_TEST_SOURCES
+    + FRAMEWORKS + FONTS + [ASSET_CATALOG]
 }
 build_ids = {
     name: oid("build/" + name)
@@ -187,23 +336,80 @@ build_ids = {
 # extension's own sources are in here too so the two lists stay symmetrical.
 activity_build_ids = {
     name: oid("activity-build/" + name)
-    for name in ACTIVITY_SOURCES + ["AgentActivityAttributes.swift"]
+    for name in ACTIVITY_SOURCES
+    + ["AgentActivityAttributes.swift", "FleetSnapshot.swift", "SnapshotStore.swift"]
+}
+
+# A third set, on exactly the reasoning above. `FleetSnapshot.swift` and
+# `SnapshotStore.swift` are now compiled into three targets, so they need three
+# build ids over the one file reference — the shared types are the whole reason
+# this extension can write a snapshot the widget will understand.
+notify_build_ids = {
+    name: oid("notify-build/" + name)
+    for name in NOTIFY_SOURCES + ["FleetSnapshot.swift", "SnapshotStore.swift"]
+}
+
+# A fourth set, on exactly the reasoning above. `FleetSnapshot.swift` and
+# `SnapshotStore.swift` are now compiled into FOUR targets over the one file
+# reference each — the watch renders the same snapshot the phone writes, and a
+# second copy of either type on the watch side is a second definition of the
+# file the whole seam is built on.
+watch_build_ids = {
+    name: oid("watch-build/" + name)
+    for name in WATCH_SOURCES + WATCH_AGENTKIT_SOURCES
+}
+
+# A FIFTH set, on exactly the reasoning above. `FleetSnapshot.swift` and
+# `SnapshotStore.swift` are now compiled into five targets over the one file
+# reference each: the app, the widget extension, the notification service
+# extension, the watch app, and the watch's complication. Five build ids, one
+# definition — which is the point, because the complication reads bytes the
+# watch app wrote and a second copy of either type is two answers to what those
+# bytes mean.
+#
+# It has to be a set of its OWN rather than a reuse of `watch_build_ids`: a
+# PBXBuildFile is "this file, compiled into THIS target", so sharing one would
+# put a single object in two sources phases and Xcode fails with "multiple
+# commands produce".
+watch_widget_build_ids = {
+    name: oid("watch-widget-build/" + name)
+    for name in WATCH_WIDGET_SOURCES + WATCH_WIDGET_AGENTKIT_SOURCES
 }
 
 P = {key: oid(key) for key in KEYS}
 
-# The built .appex, copied into the app's PlugIns folder.
+# The built .appex bundles, copied into the app's PlugIns folder.
 #
 # `RemoveHeadersOnCopy` is what Xcode's own template writes here. It is not
 # optional decoration: without it the copy carries headers into the bundle and
 # App Store validation rejects the upload.
+#
+# Two ids and ONE phase. The app embeds two extensions now, and a second copy
+# phase would be a second folder to keep in step rather than a second file in
+# the one that already exists.
 EMBED_BUILD_ID = oid("build/embed-activity")
+EMBED_NOTIFY_BUILD_ID = oid("build/embed-notify")
+
+# The built watch app, copied into the app's `Watch/` folder.
+#
+# A third id but NOT a third file in the phase above, because `Watch/` is not
+# `PlugIns/`. See `watchEmbedPhase` for the two subfolder specs and what
+# picking the wrong one costs.
+EMBED_WATCH_BUILD_ID = oid("build/embed-watch")
+
+# The built complication, copied into the WATCH app's PlugIns folder.
+#
+# A fourth id and a phase of its own — not a fourth file in either phase above,
+# because neither of those phases belongs to the watch app. See
+# `watchWidgetEmbedPhase`.
+EMBED_WATCH_WIDGET_BUILD_ID = oid("build/embed-watch-widgets")
 
 
 def file_refs():
     lines = []
     for name in SOURCES + CEREMONY_SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES \
-            + UI_TEST_SOURCES:
+            + NOTIFY_SOURCES + WATCH_SOURCES + WATCH_ONLY_AGENTKIT_SOURCES \
+            + WATCH_WIDGET_SOURCES + UI_TEST_SOURCES:
         lines.append(
             f"\t\t{ids[name]} /* {name} */ = {{isa = PBXFileReference; "
             f"lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = \"<group>\"; }};"
@@ -233,6 +439,30 @@ def file_refs():
         f"\t\t{P['activityProduct']} /* FarCoolerActivity.appex */ = "
         "{isa = PBXFileReference; explicitFileType = \"wrapper.app-extension\"; "
         "includeInIndex = 0; path = FarCoolerActivity.appex; "
+        "sourceTree = BUILT_PRODUCTS_DIR; };"
+    )
+    lines.append(
+        f"\t\t{P['notifyProduct']} /* FarCoolerNotify.appex */ = "
+        "{isa = PBXFileReference; explicitFileType = \"wrapper.app-extension\"; "
+        "includeInIndex = 0; path = FarCoolerNotify.appex; "
+        "sourceTree = BUILT_PRODUCTS_DIR; };"
+    )
+    # `wrapper.application`, not `wrapper.app-extension`: a watch app is a real
+    # application, which is why it gets an app's product type and an app's
+    # embed slot rather than an extension's.
+    lines.append(
+        f"\t\t{P['watchProduct']} /* FarCoolerWatch.app */ = "
+        "{isa = PBXFileReference; explicitFileType = wrapper.application; "
+        "includeInIndex = 0; path = FarCoolerWatch.app; "
+        "sourceTree = BUILT_PRODUCTS_DIR; };"
+    )
+    # `wrapper.app-extension`, unlike the watch app above it: a complication is
+    # an extension whichever platform it runs on, which is exactly why it goes
+    # into a PlugIns folder rather than a Watch one.
+    lines.append(
+        f"\t\t{P['watchWidgetProduct']} /* FarCoolerWatchWidgets.appex */ = "
+        "{isa = PBXFileReference; explicitFileType = \"wrapper.app-extension\"; "
+        "includeInIndex = 0; path = FarCoolerWatchWidgets.appex; "
         "sourceTree = BUILT_PRODUCTS_DIR; };"
     )
     lines.append(
@@ -270,6 +500,21 @@ def build_files():
             f"\t\t{build_id} /* {name} in Sources */ = {{isa = PBXBuildFile; "
             f"fileRef = {ids[name]}; }};"
         )
+    for name, build_id in notify_build_ids.items():
+        lines.append(
+            f"\t\t{build_id} /* {name} in Sources */ = {{isa = PBXBuildFile; "
+            f"fileRef = {ids[name]}; }};"
+        )
+    for name, build_id in watch_build_ids.items():
+        lines.append(
+            f"\t\t{build_id} /* {name} in Sources */ = {{isa = PBXBuildFile; "
+            f"fileRef = {ids[name]}; }};"
+        )
+    for name, build_id in watch_widget_build_ids.items():
+        lines.append(
+            f"\t\t{build_id} /* {name} in Sources */ = {{isa = PBXBuildFile; "
+            f"fileRef = {ids[name]}; }};"
+        )
     for name in UI_TEST_SOURCES:
         lines.append(
             f"\t\t{build_ids[name]} /* {name} in Sources */ = {{isa = PBXBuildFile; "
@@ -278,6 +523,22 @@ def build_files():
     lines.append(
         f"\t\t{EMBED_BUILD_ID} /* FarCoolerActivity.appex in Embed Foundation Extensions */ = "
         f"{{isa = PBXBuildFile; fileRef = {P['activityProduct']}; "
+        "settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };"
+    )
+    lines.append(
+        f"\t\t{EMBED_NOTIFY_BUILD_ID} /* FarCoolerNotify.appex in Embed Foundation Extensions */ = "
+        f"{{isa = PBXBuildFile; fileRef = {P['notifyProduct']}; "
+        "settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };"
+    )
+    lines.append(
+        f"\t\t{EMBED_WATCH_BUILD_ID} /* FarCoolerWatch.app in Embed Watch Content */ = "
+        f"{{isa = PBXBuildFile; fileRef = {P['watchProduct']}; "
+        "settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };"
+    )
+    lines.append(
+        f"\t\t{EMBED_WATCH_WIDGET_BUILD_ID} "
+        "/* FarCoolerWatchWidgets.appex in Embed Watch Extensions */ = "
+        f"{{isa = PBXBuildFile; fileRef = {P['watchWidgetProduct']}; "
         "settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };"
     )
     return "\n".join(lines)
@@ -295,10 +556,32 @@ source_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in SOURCES)
 framework_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FRAMEWORKS)
 font_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FONTS)
 ceremony_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in CEREMONY_SOURCES)
-agentkit_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in AGENTKIT_SOURCES)
+# The group lists every AgentKit file any iOS-side target compiles, which is a
+# superset of what the phone compiles: `WATCH_ONLY_AGENTKIT_SOURCES` has file
+# references but no place in the app's sources phase. A file with no group is
+# still built; it is just invisible in Xcode's navigator, which is how a source
+# nobody can find gets edited by nobody.
+agentkit_children = "\n".join(
+    f"\t\t\t\t{ids[n]} /* {n} */,"
+    for n in AGENTKIT_SOURCES + WATCH_ONLY_AGENTKIT_SOURCES
+)
 activity_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in ACTIVITY_SOURCES)
 activity_source_list = "\n".join(
     f"\t\t\t\t{activity_build_ids[n]} /* {n} in Sources */," for n in activity_build_ids
+)
+notify_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in NOTIFY_SOURCES)
+notify_source_list = "\n".join(
+    f"\t\t\t\t{notify_build_ids[n]} /* {n} in Sources */," for n in notify_build_ids
+)
+watch_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in WATCH_SOURCES)
+watch_source_list = "\n".join(
+    f"\t\t\t\t{watch_build_ids[n]} /* {n} in Sources */," for n in watch_build_ids
+)
+watch_widget_children = "\n".join(
+    f"\t\t\t\t{ids[n]} /* {n} */," for n in WATCH_WIDGET_SOURCES
+)
+watch_widget_source_list = "\n".join(
+    f"\t\t\t\t{watch_widget_build_ids[n]} /* {n} in Sources */," for n in watch_widget_build_ids
 )
 ui_test_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in UI_TEST_SOURCES)
 ui_test_source_list = "\n".join(
@@ -391,12 +674,27 @@ subprocess.run(
 # people have.
 BUNDLE_ID = "com.farcooler.ios" if CHANNEL == "stable" else f"com.farcooler.ios.{CHANNEL}"
 
+# The App Group the app and its extensions share, one per channel.
+#
+# The keychain names its group `$(PRODUCT_BUNDLE_IDENTIFIER)` and that trick
+# does NOT transfer here. An app extension's identifier is the app's with a
+# component appended, so each target would expand that expression to a
+# DIFFERENT group and the app and its widget would share nothing at all — which
+# presents as a widget that is permanently empty on a device where the app is
+# working fine.
+#
+# So it is a build setting instead, set on every target that needs it and
+# written into each one's Info.plist for `SnapshotStore` to read. One
+# definition, four channels, no second list.
+APP_GROUP = f"group.{BUNDLE_ID}"
+
 TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tFARCOOLER_CHANNEL = {CHANNEL};
 \t\t\t\tFARCOOLER_URL_SCHEME = "{version("scheme")}";
 \t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
 \t\t\t\tFARCOOLER_DISPLAY_VERSION = "{version("display")}";
 \t\t\t\tFARCOOLER_WORKOS_CLIENT_ID = "{WORKOS_CLIENT_ID}";
+\t\t\t\tFARCOOLER_APP_GROUP = {APP_GROUP};
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
 \t\t\t\tPRODUCT_NAME = FarCooler;
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID};
@@ -434,12 +732,200 @@ TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 # The bundle id has to be the app's with one component appended — that is the
 # rule for an app extension, not a convention, and a name that does not nest
 # fails to sign against the app's profile.
+#
+# FARCOOLER_APP_GROUP is repeated here rather than inherited for the same reason
+# it exists as a setting at all: the group has to be the SAME string in both
+# targets, and every expression that derives it from this target's own bundle id
+# would derive `…ios.activity`'s group instead of the app's. A widget pointed at
+# a container nobody writes is permanently empty and says nothing about why.
+#
+# FARCOOLER_URL_SCHEME reaches this target for the first time here. The
+# extension's tap targets deep-link back into the app, and the scheme is per
+# channel — unset, `$(FARCOOLER_URL_SCHEME)` expands to nothing and the link
+# opens no app at all.
+#
+# CODE_SIGN_ENTITLEMENTS: an extension that requests no entitlements gets none,
+# so the App Group grant has to be asked for here too. The app's entitlement
+# does not cover the .appex inside it.
 ACTIVITY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
 \t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
+\t\t\t\tFARCOOLER_APP_GROUP = {APP_GROUP};
+\t\t\t\tFARCOOLER_URL_SCHEME = "{version("scheme")}";
 \t\t\t\tPRODUCT_NAME = FarCoolerActivity;
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID}.activity;
 \t\t\t\tINFOPLIST_FILE = FarCoolerActivity/Info.plist;
+\t\t\t\tCODE_SIGN_STYLE = Manual;
+\t\t\t\tCODE_SIGN_IDENTITY = "-";
+\t\t\t\tCODE_SIGNING_ALLOWED = YES;
+\t\t\t\tCODE_SIGNING_REQUIRED = NO;
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = FarCoolerActivity/FarCoolerActivity.entitlements;
+\t\t\t\tSKIP_INSTALL = YES;"""
+
+# The notification service extension's settings, on the same reasoning as
+# ACTIVITY_COMMON above and deliberately not sharing it either — the two
+# extensions agree on everything except which extension point they are, and
+# folding them into one block would make the next difference invisible.
+#
+# The version pair, SKIP_INSTALL, the nested bundle id and the repeated
+# FARCOOLER_APP_GROUP are all required for exactly the reasons written there.
+# What is NOT here is FARCOOLER_URL_SCHEME: this extension draws nothing and
+# links nothing, so it has no tap target to deep-link from.
+NOTIFY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
+\t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
+\t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
+\t\t\t\tFARCOOLER_APP_GROUP = {APP_GROUP};
+\t\t\t\tPRODUCT_NAME = FarCoolerNotify;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID}.notify;
+\t\t\t\tINFOPLIST_FILE = FarCoolerNotify/Info.plist;
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = FarCoolerNotify/FarCoolerNotify.entitlements;
+\t\t\t\tCODE_SIGN_STYLE = Manual;
+\t\t\t\tCODE_SIGN_IDENTITY = "-";
+\t\t\t\tCODE_SIGNING_ALLOWED = YES;
+\t\t\t\tCODE_SIGNING_REQUIRED = NO;
+\t\t\t\tSKIP_INSTALL = YES;"""
+
+# The watchOS app's settings, sharing neither TARGET_COMMON nor ACTIVITY_COMMON
+# for the reasons written above and one more: this target is not built for the
+# same operating system, so every setting the project level fixes for iOS has to
+# be overridden here or it will be wrong rather than merely unused.
+#
+# SDKROOT / WATCHOS_DEPLOYMENT_TARGET / TARGETED_DEVICE_FAMILY = 4 are that
+# override. The project's COMMON block says `SDKROOT = iphoneos` and
+# `TARGETED_DEVICE_FAMILY = "1,2"`; a target-level setting wins, and without
+# these three the target compiles for the phone and produces something no watch
+# can run.
+#
+# The version pair, SKIP_INSTALL and the nested bundle id are all required for
+# exactly the reasons ACTIVITY_COMMON gives, and the nesting rule is if anything
+# stricter here: a watch app whose identifier is not the phone app's plus one
+# component fails to sign against the app's profile, which is a signing error at
+# install rather than anything a build reports.
+#
+# GENERATE_INFOPLIST_FILE = YES *and* INFOPLIST_FILE, which is not a
+# contradiction: Xcode merges the synthesized keys into the named file rather
+# than replacing it. So almost every key in the built bundle comes from a build
+# setting, and FarCoolerWatch/Info.plist carries exactly one that could not.
+#
+# That one is FarCoolerAppGroup, and the reason is worth stating because it
+# contradicts what a spike concluded. `INFOPLIST_KEY_<key>` is NOT a general
+# mechanism for putting arbitrary keys in a synthesized Info.plist. Xcode
+# honors it only for keys it already knows about; a custom key is dropped with
+# no warning and no error. Measured on the built bundle:
+# INFOPLIST_KEY_WKCompanionAppBundleIdentifier arrived, and an
+# INFOPLIST_KEY_FarCoolerAppGroup set right beside it did not — the synthesized
+# plist did not contain the key at all. `SnapshotStore.groupIdentifier` reads
+# that key by name and returns nil when it is absent, which makes
+# `SnapshotStore.read()` answer "nothing known" — the same answer it gives when
+# no snapshot has ever arrived. A watch that is permanently empty while the
+# phone sends perfectly well, with nothing in any log telling the two apart.
+#
+# INFOPLIST_KEY_WKCompanionAppBundleIdentifier IS one of the keys Xcode knows,
+# and it is what makes this a companion of THIS app rather than a standalone
+# watch app. Wrong or absent, the watch app installs as its own thing and never
+# pairs with the phone app it shipped inside. Xcode synthesizes
+# WKApplication = YES itself from the watchOS application product type — do not
+# add it here.
+#
+# FARCOOLER_APP_GROUP is still a build setting because it is what the
+# entitlement and the Info.plist key BOTH expand; the group the code asks for
+# and the group the signature grants are then one string by construction. Note
+# that the container it resolves to is the WATCH's own — a watch and a phone
+# never share a container, only the identifier that names one on each device.
+#
+# INFOPLIST_KEY_CFBundleDisplayName, because GENERATE_INFOPLIST_FILE otherwise
+# falls back to PRODUCT_NAME and the watch's home screen would read
+# "FarCoolerWatch" while the phone beside it reads "FC Canary". That exact
+# mismatch already happened once with the Live Activity's hardcoded name; see
+# ACTIVITY_COMMON.
+#
+# CODE_SIGN_ENTITLEMENTS: an App Group is granted by an entitlement, not by
+# naming it. Without this file `FileManager.containerURL(for…)` returns nil on a
+# signed build, `SnapshotStore.read()` answers "nothing known", and the watch is
+# permanently empty with nothing anywhere saying why.
+WATCH_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
+\t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
+\t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
+\t\t\t\tFARCOOLER_APP_GROUP = {APP_GROUP};
+\t\t\t\tPRODUCT_NAME = FarCoolerWatch;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID}.watchkitapp;
+\t\t\t\tSDKROOT = watchos;
+\t\t\t\tWATCHOS_DEPLOYMENT_TARGET = 26.0;
+\t\t\t\tTARGETED_DEVICE_FAMILY = 4;
+\t\t\t\tGENERATE_INFOPLIST_FILE = YES;
+\t\t\t\tINFOPLIST_FILE = FarCoolerWatch/Info.plist;
+\t\t\t\tINFOPLIST_KEY_WKCompanionAppBundleIdentifier = {BUNDLE_ID};
+\t\t\t\tINFOPLIST_KEY_CFBundleDisplayName = "{version("app-name-short")}";
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = FarCoolerWatch/FarCoolerWatch.entitlements;
+\t\t\t\tCODE_SIGN_STYLE = Manual;
+\t\t\t\tCODE_SIGN_IDENTITY = "-";
+\t\t\t\tCODE_SIGNING_ALLOWED = YES;
+\t\t\t\tCODE_SIGNING_REQUIRED = NO;
+\t\t\t\tSKIP_INSTALL = YES;"""
+
+# The complication's settings: WATCH_COMMON's platform overrides and
+# ACTIVITY_COMMON's extension rules, and sharing neither, because it is the only
+# target in the project that needs both and folding it into either would make
+# the next difference between them invisible.
+#
+# From the watch side: SDKROOT / WATCHOS_DEPLOYMENT_TARGET /
+# TARGETED_DEVICE_FAMILY = 4. The project's COMMON block fixes `iphoneos` and
+# `"1,2"` for everything, a target-level setting wins, and without these three
+# this compiles for the phone and produces a bundle no watch can load.
+#
+# From the extension side: SKIP_INSTALL, so the .appex is not also copied to the
+# archive root and the upload rejected for a top-level product that is not an
+# application. And the nested identifier, which nests TWICE here —
+# `…watchkitapp.widgets`. The rule is one appended component per containment,
+# and the containment really is two deep: this extension is inside the watch
+# app, which is inside the phone app. A name that does not nest fails to sign
+# against the profile, at install time, with nothing at build time to say so.
+#
+# No FARCOOLER_URL_SCHEME. The complication sets no `widgetURL`: watchOS opens
+# the containing app on a tap, and the watch app registers no scheme to be
+# opened WITH — so a URL here would be a link that resolves to nothing. See
+# `WatchFleetWidget` for what that costs and what it would take to have.
+#
+# GENERATE_INFOPLIST_FILE = YES *and* INFOPLIST_FILE, which is not a
+# contradiction — Xcode merges the synthesized keys into the named file rather
+# than replacing it. FarCoolerWatchWidgets/Info.plist therefore carries only the
+# two keys Xcode does not synthesize: NSExtension, which is what makes this a
+# WidgetKit extension at all, and FarCoolerAppGroup.
+#
+# FarCoolerAppGroup is in that file and NOT set as
+# INFOPLIST_KEY_FarCoolerAppGroup, and the reason is measured rather than
+# guessed: `INFOPLIST_KEY_<key>` is not a general mechanism. Xcode honors it
+# only for keys it already knows and drops a custom one with no warning and no
+# error. It is worse here than for the watch app, where the same thing was
+# found: `Bundle.main` inside an .appex is the EXTENSION's bundle, so this
+# process cannot fall back on the watch app's merged plist even in principle.
+# Missing, `SnapshotStore.groupIdentifier` is nil, `SnapshotStore.read()`
+# answers "nothing known" — the same answer as "no snapshot has ever arrived" —
+# and the complication is permanently empty on a watch receiving the fleet
+# perfectly well.
+#
+# INFOPLIST_KEY_CFBundleDisplayName IS one of the keys Xcode knows, and this
+# target needs it because `WatchFleetWidget.appName` reads CFBundleDisplayName
+# for the one sentence that has to name the app. Without it the synthesized
+# value falls back to PRODUCT_NAME and a canary's complication would say
+# "Open FarCoolerWatchWidgets".
+#
+# CODE_SIGN_ENTITLEMENTS: an extension that requests no entitlements gets none.
+# The watch app's App Group grant does not cover the .appex inside it, and
+# naming a group is not being granted one.
+WATCH_WIDGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
+\t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
+\t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
+\t\t\t\tFARCOOLER_APP_GROUP = {APP_GROUP};
+\t\t\t\tPRODUCT_NAME = FarCoolerWatchWidgets;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID}.watchkitapp.widgets;
+\t\t\t\tSDKROOT = watchos;
+\t\t\t\tWATCHOS_DEPLOYMENT_TARGET = 26.0;
+\t\t\t\tTARGETED_DEVICE_FAMILY = 4;
+\t\t\t\tGENERATE_INFOPLIST_FILE = YES;
+\t\t\t\tINFOPLIST_FILE = FarCoolerWatchWidgets/Info.plist;
+\t\t\t\tINFOPLIST_KEY_CFBundleDisplayName = "{version("app-name-short")}";
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = FarCoolerWatchWidgets/FarCoolerWatchWidgets.entitlements;
 \t\t\t\tCODE_SIGN_STYLE = Manual;
 \t\t\t\tCODE_SIGN_IDENTITY = "-";
 \t\t\t\tCODE_SIGNING_ALLOWED = YES;
@@ -495,6 +981,9 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tchildren = (
 \t\t\t\t{P['sourcesGroup']} /* FarCooler */,
 \t\t\t\t{P['activityGroup']} /* FarCoolerActivity */,
+\t\t\t\t{P['notifyGroup']} /* FarCoolerNotify */,
+\t\t\t\t{P['watchGroup']} /* FarCoolerWatch */,
+\t\t\t\t{P['watchWidgetGroup']} /* FarCoolerWatchWidgets */,
 \t\t\t\t{P['uiTestGroup']} /* FarCoolerUITests */,
 \t\t\t\t{P['agentKitGroup']} /* AgentKit */,
 \t\t\t\t{ids[ASSET_CATALOG]} /* {ASSET_CATALOG} */,
@@ -519,6 +1008,30 @@ PBXPROJ = f"""// !$*UTF8*$!
 {activity_children}
 \t\t\t);
 \t\t\tpath = FarCoolerActivity;
+\t\t\tsourceTree = "<group>";
+\t\t}};
+\t\t{P['notifyGroup']} /* FarCoolerNotify */ = {{
+\t\t\tisa = PBXGroup;
+\t\t\tchildren = (
+{notify_children}
+\t\t\t);
+\t\t\tpath = FarCoolerNotify;
+\t\t\tsourceTree = "<group>";
+\t\t}};
+\t\t{P['watchGroup']} /* FarCoolerWatch */ = {{
+\t\t\tisa = PBXGroup;
+\t\t\tchildren = (
+{watch_children}
+\t\t\t);
+\t\t\tpath = FarCoolerWatch;
+\t\t\tsourceTree = "<group>";
+\t\t}};
+\t\t{P['watchWidgetGroup']} /* FarCoolerWatchWidgets */ = {{
+\t\t\tisa = PBXGroup;
+\t\t\tchildren = (
+{watch_widget_children}
+\t\t\t);
+\t\t\tpath = FarCoolerWatchWidgets;
 \t\t\tsourceTree = "<group>";
 \t\t}};
 \t\t{P['uiTestGroup']} /* FarCoolerUITests */ = {{
@@ -567,6 +1080,9 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tchildren = (
 \t\t\t\t{P['product']} /* FarCooler.app */,
 \t\t\t\t{P['activityProduct']} /* FarCoolerActivity.appex */,
+\t\t\t\t{P['notifyProduct']} /* FarCoolerNotify.appex */,
+\t\t\t\t{P['watchProduct']} /* FarCoolerWatch.app */,
+\t\t\t\t{P['watchWidgetProduct']} /* FarCoolerWatchWidgets.appex */,
 \t\t\t\t{P['uiTestProduct']} /* FarCoolerUITests.xctest */,
 \t\t\t);
 \t\t\tname = Products;
@@ -583,10 +1099,13 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t\t{P['frameworksPhase']},
 \t\t\t\t{P['resourcesPhase']},
 \t\t\t\t{P['embedPhase']},
+\t\t\t\t{P['watchEmbedPhase']},
 \t\t\t);
 \t\t\tbuildRules = ();
 \t\t\tdependencies = (
 \t\t\t\t{P['activityDependency']},
+\t\t\t\t{P['notifyDependency']},
+\t\t\t\t{P['watchDependency']},
 \t\t\t);
 \t\t\tname = FarCooler;
 \t\t\tproductName = FarCooler;
@@ -604,6 +1123,48 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tname = FarCoolerActivity;
 \t\t\tproductName = FarCoolerActivity;
 \t\t\tproductReference = {P['activityProduct']};
+\t\t\tproductType = "com.apple.product-type.app-extension";
+\t\t}};
+\t\t{P['notifyTarget']} /* FarCoolerNotify */ = {{
+\t\t\tisa = PBXNativeTarget;
+\t\t\tbuildConfigurationList = {P['notifyConfigList']};
+\t\t\tbuildPhases = (
+\t\t\t\t{P['notifySourcesPhase']},
+\t\t\t);
+\t\t\tbuildRules = ();
+\t\t\tdependencies = ();
+\t\t\tname = FarCoolerNotify;
+\t\t\tproductName = FarCoolerNotify;
+\t\t\tproductReference = {P['notifyProduct']};
+\t\t\tproductType = "com.apple.product-type.app-extension";
+\t\t}};
+\t\t{P['watchTarget']} /* FarCoolerWatch */ = {{
+\t\t\tisa = PBXNativeTarget;
+\t\t\tbuildConfigurationList = {P['watchConfigList']};
+\t\t\tbuildPhases = (
+\t\t\t\t{P['watchSourcesPhase']},
+\t\t\t\t{P['watchWidgetEmbedPhase']},
+\t\t\t);
+\t\t\tbuildRules = ();
+\t\t\tdependencies = (
+\t\t\t\t{P['watchWidgetDependency']},
+\t\t\t);
+\t\t\tname = FarCoolerWatch;
+\t\t\tproductName = FarCoolerWatch;
+\t\t\tproductReference = {P['watchProduct']};
+\t\t\tproductType = "com.apple.product-type.application";
+\t\t}};
+\t\t{P['watchWidgetTarget']} /* FarCoolerWatchWidgets */ = {{
+\t\t\tisa = PBXNativeTarget;
+\t\t\tbuildConfigurationList = {P['watchWidgetConfigList']};
+\t\t\tbuildPhases = (
+\t\t\t\t{P['watchWidgetSourcesPhase']},
+\t\t\t);
+\t\t\tbuildRules = ();
+\t\t\tdependencies = ();
+\t\t\tname = FarCoolerWatchWidgets;
+\t\t\tproductName = FarCoolerWatchWidgets;
+\t\t\tproductReference = {P['watchWidgetProduct']};
 \t\t\tproductType = "com.apple.product-type.app-extension";
 \t\t}};
 \t\t{P['uiTestTarget']} /* FarCoolerUITests */ = {{
@@ -642,6 +1203,9 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\ttargets = (
 \t\t\t\t{P['target']} /* FarCooler */,
 \t\t\t\t{P['activityTarget']} /* FarCoolerActivity */,
+\t\t\t\t{P['notifyTarget']} /* FarCoolerNotify */,
+\t\t\t\t{P['watchTarget']} /* FarCoolerWatch */,
+\t\t\t\t{P['watchWidgetTarget']} /* FarCoolerWatchWidgets */,
 \t\t\t\t{P['uiTestTarget']} /* FarCoolerUITests */,
 \t\t\t);
 \t\t}};
@@ -654,6 +1218,27 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tproxyType = 1;
 \t\t\tremoteGlobalIDString = {P['activityTarget']};
 \t\t\tremoteInfo = FarCoolerActivity;
+\t\t}};
+\t\t{P['notifyProxy']} = {{
+\t\t\tisa = PBXContainerItemProxy;
+\t\t\tcontainerPortal = {P['project']};
+\t\t\tproxyType = 1;
+\t\t\tremoteGlobalIDString = {P['notifyTarget']};
+\t\t\tremoteInfo = FarCoolerNotify;
+\t\t}};
+\t\t{P['watchProxy']} = {{
+\t\t\tisa = PBXContainerItemProxy;
+\t\t\tcontainerPortal = {P['project']};
+\t\t\tproxyType = 1;
+\t\t\tremoteGlobalIDString = {P['watchTarget']};
+\t\t\tremoteInfo = FarCoolerWatch;
+\t\t}};
+\t\t{P['watchWidgetProxy']} = {{
+\t\t\tisa = PBXContainerItemProxy;
+\t\t\tcontainerPortal = {P['project']};
+\t\t\tproxyType = 1;
+\t\t\tremoteGlobalIDString = {P['watchWidgetTarget']};
+\t\t\tremoteInfo = FarCoolerWatchWidgets;
 \t\t}};
 \t\t{P['uiTestProxy']} = {{
 \t\t\tisa = PBXContainerItemProxy;
@@ -672,8 +1257,31 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tdstSubfolderSpec = 13;
 \t\t\tfiles = (
 \t\t\t\t{EMBED_BUILD_ID} /* FarCoolerActivity.appex in Embed Foundation Extensions */,
+\t\t\t\t{EMBED_NOTIFY_BUILD_ID} /* FarCoolerNotify.appex in Embed Foundation Extensions */,
 \t\t\t);
 \t\t\tname = "Embed Foundation Extensions";
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
+\t\t{P['watchEmbedPhase']} /* Embed Watch Content */ = {{
+\t\t\tisa = PBXCopyFilesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tdstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+\t\t\tdstSubfolderSpec = 16;
+\t\t\tfiles = (
+\t\t\t\t{EMBED_WATCH_BUILD_ID} /* FarCoolerWatch.app in Embed Watch Content */,
+\t\t\t);
+\t\t\tname = "Embed Watch Content";
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
+\t\t{P['watchWidgetEmbedPhase']} /* Embed Watch Extensions */ = {{
+\t\t\tisa = PBXCopyFilesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tdstPath = "";
+\t\t\tdstSubfolderSpec = 13;
+\t\t\tfiles = (
+\t\t\t\t{EMBED_WATCH_WIDGET_BUILD_ID} /* FarCoolerWatchWidgets.appex in Embed Watch Extensions */,
+\t\t\t);
+\t\t\tname = "Embed Watch Extensions";
 \t\t\trunOnlyForDeploymentPostprocessing = 0;
 \t\t}};
 /* End PBXCopyFilesBuildPhase section */
@@ -683,6 +1291,21 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tisa = PBXTargetDependency;
 \t\t\ttarget = {P['activityTarget']};
 \t\t\ttargetProxy = {P['activityProxy']};
+\t\t}};
+\t\t{P['notifyDependency']} = {{
+\t\t\tisa = PBXTargetDependency;
+\t\t\ttarget = {P['notifyTarget']};
+\t\t\ttargetProxy = {P['notifyProxy']};
+\t\t}};
+\t\t{P['watchDependency']} = {{
+\t\t\tisa = PBXTargetDependency;
+\t\t\ttarget = {P['watchTarget']};
+\t\t\ttargetProxy = {P['watchProxy']};
+\t\t}};
+\t\t{P['watchWidgetDependency']} = {{
+\t\t\tisa = PBXTargetDependency;
+\t\t\ttarget = {P['watchWidgetTarget']};
+\t\t\ttargetProxy = {P['watchWidgetProxy']};
 \t\t}};
 \t\t{P['uiTestDependency']} = {{
 \t\t\tisa = PBXTargetDependency;
@@ -716,6 +1339,30 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildActionMask = 2147483647;
 \t\t\tfiles = (
 {activity_source_list}
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
+\t\t{P['notifySourcesPhase']} = {{
+\t\t\tisa = PBXSourcesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+{notify_source_list}
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
+\t\t{P['watchSourcesPhase']} = {{
+\t\t\tisa = PBXSourcesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+{watch_source_list}
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t}};
+\t\t{P['watchWidgetSourcesPhase']} = {{
+\t\t\tisa = PBXSourcesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+{watch_widget_source_list}
 \t\t\t);
 \t\t\trunOnlyForDeploymentPostprocessing = 0;
 \t\t}};
@@ -778,6 +1425,48 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t}};
 \t\t\tname = Release;
 \t\t}};
+\t\t{P['notifyDebug']} /* Debug */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{NOTIFY_COMMON}
+\t\t\t}};
+\t\t\tname = Debug;
+\t\t}};
+\t\t{P['notifyRelease']} /* Release */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{NOTIFY_COMMON}
+\t\t\t}};
+\t\t\tname = Release;
+\t\t}};
+\t\t{P['watchDebug']} /* Debug */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{WATCH_COMMON}
+\t\t\t}};
+\t\t\tname = Debug;
+\t\t}};
+\t\t{P['watchRelease']} /* Release */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{WATCH_COMMON}
+\t\t\t}};
+\t\t\tname = Release;
+\t\t}};
+\t\t{P['watchWidgetDebug']} /* Debug */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{WATCH_WIDGET_COMMON}
+\t\t\t}};
+\t\t\tname = Debug;
+\t\t}};
+\t\t{P['watchWidgetRelease']} /* Release */ = {{
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {{
+{WATCH_WIDGET_COMMON}
+\t\t\t}};
+\t\t\tname = Release;
+\t\t}};
 \t\t{P['uiTestDebug']} /* Debug */ = {{
 \t\t\tisa = XCBuildConfiguration;
 \t\t\tbuildSettings = {{
@@ -818,6 +1507,33 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildConfigurations = (
 \t\t\t\t{P['activityDebug']} /* Debug */,
 \t\t\t\t{P['activityRelease']} /* Release */,
+\t\t\t);
+\t\t\tdefaultConfigurationIsVisible = 0;
+\t\t\tdefaultConfigurationName = Release;
+\t\t}};
+\t\t{P['notifyConfigList']} = {{
+\t\t\tisa = XCConfigurationList;
+\t\t\tbuildConfigurations = (
+\t\t\t\t{P['notifyDebug']} /* Debug */,
+\t\t\t\t{P['notifyRelease']} /* Release */,
+\t\t\t);
+\t\t\tdefaultConfigurationIsVisible = 0;
+\t\t\tdefaultConfigurationName = Release;
+\t\t}};
+\t\t{P['watchConfigList']} = {{
+\t\t\tisa = XCConfigurationList;
+\t\t\tbuildConfigurations = (
+\t\t\t\t{P['watchDebug']} /* Debug */,
+\t\t\t\t{P['watchRelease']} /* Release */,
+\t\t\t);
+\t\t\tdefaultConfigurationIsVisible = 0;
+\t\t\tdefaultConfigurationName = Release;
+\t\t}};
+\t\t{P['watchWidgetConfigList']} = {{
+\t\t\tisa = XCConfigurationList;
+\t\t\tbuildConfigurations = (
+\t\t\t\t{P['watchWidgetDebug']} /* Debug */,
+\t\t\t\t{P['watchWidgetRelease']} /* Release */,
 \t\t\t);
 \t\t\tdefaultConfigurationIsVisible = 0;
 \t\t\tdefaultConfigurationName = Release;

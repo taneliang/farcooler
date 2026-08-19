@@ -121,6 +121,23 @@ jobs:
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
         run: ./scripts/import-ios-certificate.sh
 
+      # Several GB, and NOT optional. The FarCooler scheme embeds FarCoolerWatch
+      # through a target dependency, and xcodebuild refuses to build a scheme
+      # that embeds a watch app unless the watchOS Simulator platform is
+      # installed — even here, where the archive below targets a device and
+      # no simulator is ever launched. Worse, it refuses with no `error:`
+      # line at all, so the failure reads like a project-generation bug and
+      # is not one.
+      #
+      # Its own step, named for what it costs, so those minutes are visible in
+      # the job timing instead of hidden inside a build that merely looks slow.
+      # There is nothing to cache: -downloadPlatform installs into the runner's
+      # system Xcode, outside anything actions/cache can carry between runs. It
+      # is idempotent, so a runner image that already ships the platform pays
+      # seconds rather than minutes.
+      - name: Install the watchOS platform (several GB)
+        run: xcodebuild -downloadPlatform watchOS
+
       # The canary's own bundle identifier — `com.farcooler.ios.canary`, which
       # generate-project.py derives from the channel — so it installs alongside
       # the preview and the stable app rather than replacing either.

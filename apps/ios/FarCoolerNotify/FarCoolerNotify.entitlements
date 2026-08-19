@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- This extension is the only writer of the snapshot other than the app
+         itself. Same group, same file, same channel. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(FARCOOLER_APP_GROUP)</string>
+    </array>
+</dict>
+</plist>

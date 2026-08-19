@@ -37,8 +37,21 @@ import Foundation
             /// daemon shows something sensible instead of nothing.
             public var status: String
 
-            /// The line under the title. May be empty — `Done` has nothing to
-            /// add that the title has not already said.
+            /// The line under the title, in every presentation.
+            ///
+            /// Whatever the runner composed: the question for a blocked card,
+            /// the signal line for a working one — both arrive as the notice's
+            /// `subtitle` and the relay puts both here. May be empty; `Done` has
+            /// nothing to add that the title has not already said.
+            ///
+            /// There is exactly ONE such field on purpose. A second one, `line`,
+            /// stood beside this for a while: read by the widget, declared by
+            /// nothing in `services/relay/src/push.ts`, and therefore never
+            /// written — its own doc comment claimed older relays omitted it,
+            /// which implied newer ones sent it, which was never true. The card
+            /// has room for one line and the runner composes one line, so a
+            /// second field could only ever have been a copy of this one that
+            /// two senders could disagree about.
             public var detail: String
 
             public init(status: String, detail: String) {
@@ -62,10 +75,77 @@ import Foundation
         /// payload by field name — see the note on the type above.
         public var machine: String
 
-        public init(terminal: String, label: String, machine: String) {
+        /// When the turn started, so the card can show its own clock.
+        ///
+        /// On the ATTRIBUTES rather than the state, because it does not change
+        /// for the life of the card and because ActivityKit renders a timer
+        /// from a date natively — no push per tick, and it keeps counting while
+        /// the phone is off the network entirely.
+        ///
+        /// Optional, which here is also what makes it safe to add: an absent
+        /// key decodes to nil rather than throwing, so an activity started by a
+        /// relay that sends no such key still matches this type. A card for an
+        /// agent whose turn clock the runner could not read shows no timer,
+        /// which is better than showing a wrong one.
+        ///
+        /// On the wire it is a NUMBER, not a date string — see `init(from:)`,
+        /// which is where the one part of this contract that cannot be read off
+        /// the field names is written down.
+        public var startedAt: Date?
+
+        public init(terminal: String, label: String, machine: String, startedAt: Date? = nil) {
             self.terminal = terminal
             self.label = label
             self.machine = machine
+            self.startedAt = startedAt
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case terminal, label, machine, startedAt
+        }
+
+        /// Hand-written for one field, and this is why.
+        ///
+        /// `Date` has no wire format of its own. Swift's default is seconds
+        /// since 2001, which nothing on the other side of this seam produces:
+        /// the daemon's turn clock is Unix MILLISECONDS (the phone's
+        /// `Terminal.turnStartedAt`) while every other timestamp in
+        /// `services/relay/src/push.ts` is Unix SECONDS, so this is exactly
+        /// where the two conventions meet. Left to the default, a plausible
+        /// number decodes to a date decades or millennia out and the card
+        /// counts nonsense — a wrong timer, which is the one thing `startedAt`
+        /// being optional was meant to avoid. So both are accepted and told
+        /// apart by magnitude: no second count this side of the year 5000
+        /// reaches 1e11, and no millisecond count since 1973 falls below it.
+        ///
+        /// `try?` on that one field rather than `try`: a value in a shape this
+        /// does not expect — a date STRING, say — must cost the timer and not
+        /// the card. Attributes that fail to decode do not start the activity
+        /// at all, so a strict read here would answer a wrong timestamp format
+        /// with no lock screen card whatsoever.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            terminal = try container.decode(String.self, forKey: .terminal)
+            label = try container.decode(String.self, forKey: .label)
+            machine = try container.decode(String.self, forKey: .machine)
+            let stamp = (try? container.decodeIfPresent(Double.self, forKey: .startedAt)) ?? nil
+            startedAt = stamp.flatMap { value in
+                guard value > 0 else { return nil }
+                return Date(timeIntervalSince1970: value > 1e11 ? value / 1000 : value)
+            }
+        }
+
+        /// The other half of the same decision. Nothing in the app encodes
+        /// these today — attributes only ever arrive from a push — but a
+        /// `Codable` that reads milliseconds and writes seconds-since-2001 is
+        /// a trap set for whoever first round-trips one.
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(terminal, forKey: .terminal)
+            try container.encode(label, forKey: .label)
+            try container.encode(machine, forKey: .machine)
+            try container.encodeIfPresent(
+                startedAt.map { $0.timeIntervalSince1970 * 1000 }, forKey: .startedAt)
         }
     }
 

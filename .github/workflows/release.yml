@@ -436,6 +436,23 @@ jobs:
       - name: Generate the Xcode project
         run: apps/ios/generate-project.py
 
+      # Several GB, and NOT optional. The FarCooler scheme embeds FarCoolerWatch
+      # through a target dependency, and xcodebuild refuses to build a scheme
+      # that embeds a watch app unless the watchOS Simulator platform is
+      # installed — even here, where both builds below target a device and
+      # no simulator is ever launched. Worse, it refuses with no `error:`
+      # line at all, so the failure reads like a project-generation bug and
+      # is not one.
+      #
+      # Its own step, named for what it costs, so those minutes are visible in
+      # the job timing instead of hidden inside a build that merely looks slow.
+      # There is nothing to cache: -downloadPlatform installs into the runner's
+      # system Xcode, outside anything actions/cache can carry between runs. It
+      # is idempotent, so a runner image that already ships the platform pays
+      # seconds rather than minutes.
+      - name: Install the watchOS platform (several GB)
+        run: xcodebuild -downloadPlatform watchOS
+
       # Always, credentials or not. This is the step that catches a release
       # broken for the phone, and a fork with no App Store account still
       # deserves to find that out.

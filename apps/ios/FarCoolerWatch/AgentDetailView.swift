@@ -1,0 +1,293 @@
+import SwiftUI
+
+/// One agent, and what it did while you were away.
+///
+/// The screen the fleet list exists to get somebody to. It re-reads the agent
+/// out of the CURRENT snapshot on every render rather than holding the copy that
+/// was tapped — see `WatchRoute.agent` — so a fleet that changes while this is
+/// open changes what is on it.
+///
+/// Nothing here is composed. `headline`, `line`, `feed` and the glyph are the
+/// host's words; the only string this file writes is how long the agent has held
+/// its state, and it writes that only when the host said when the state began.
+///
+/// **The buttons are disabled unless the phone is reachable.** Not greyed as a
+/// hint — genuinely off, because `WatchState.canAct` is the same rule
+/// `WatchLinkClient.send` enforces at the door. A watch that offers an Allow it
+/// cannot deliver is worse than one that says it cannot reach the phone: the
+/// person taps, sees nothing wrong, walks away believing they answered, and the
+/// agent is still sitting there an hour later.
+struct AgentDetailView<Client: FleetClient>: View {
+    @ObservedObject var client: Client
+    let terminal: String
+
+    /// The agent as of right now, or nil if it has left the fleet.
+    private var agent: FleetSnapshot.Agent? {
+        client.state.snapshot?.agents.first { $0.id == terminal }
+    }
+
+    var body: some View {
+        Group {
+            if let agent, let snapshot = client.state.snapshot {
+                // The same clock the fleet list runs on, for the same reason: a
+                // screen left open must stop asserting `working` at the moment
+                // the snapshot stops vouching for it, and no news will arrive to
+                // prompt that.
+                TimelineView(
+                    .explicit([Date.now] + snapshot.stalenessMoments(after: .now))
+                ) { context in
+                    detail(agent, snapshot.confidence(in: agent, at: context.date))
+                }
+                .navigationTitle(agent.label)
+            } else {
+                // A terminal that closed, or a watch that has never heard from
+                // the phone at all. Said plainly rather than left as an empty
+                // screen, which reads as an agent that has nothing to report.
+                ContentUnavailableView(
+                    "Not in the Fleet",
+                    systemImage: "questionmark",
+                    description: Text("This agent isn’t in the last fleet your iPhone sent."))
+            }
+        }
+    }
+
+    private func detail(
+        _ agent: FleetSnapshot.Agent, _ confidence: FleetSnapshot.Confidence
+    ) -> some View {
+        List {
+            Section {
+                Headline(agent: agent, confidence: confidence)
+            }
+            // The three most recent things the agent said, oldest first, exactly
+            // as the host ordered them. This is the answer to "what did it do
+            // while I was away", and it is the reason to open this screen at all.
+            if !agent.feed.isEmpty {
+                Section("Recent") {
+                    // By offset, because two identical steps are two steps. An
+                    // id of the string itself would collapse a repeated line to
+                    // one row and quietly under-report what happened.
+                    ForEach(Array(agent.feed.enumerated()), id: \.offset) { _, said in
+                        Text(said).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Section {
+                NavigationLink(value: WatchRoute.compose(terminal: agent.id)) {
+                    Label("Reply", systemImage: "text.bubble")
+                }
+                // Offered for every agent, not only a `blocked` one. Status on
+                // this screen can be an hour old — that is the whole premise of
+                // `confidence(in:at:)` — so hiding the button on a `working`
+                // agent would hide it exactly when a stale snapshot is wrong
+                // about the agent that has since blocked. Task 5's screen asks
+                // the phone what is actually pending and says "nothing" when
+                // nothing is, which is the honest place for that question.
+                NavigationLink(value: WatchRoute.permission(terminal: agent.id)) {
+                    Label("Answer", systemImage: "checkmark.circle")
+                }
+            } footer: {
+                // A disabled button with nothing beside it is a dead end. The
+                // fleet list says this once at the top; a person who scrolled
+                // straight in from a notification never saw it.
+                if !client.state.canAct {
+                    Text("Can’t reach your iPhone, so these are off until it’s nearby.")
+                        .font(.caption2)
+                }
+            }
+            .disabled(!client.state.canAct)
+        }
+    }
+}
+
+/// What the agent is doing, how it is doing it, and how long it has been.
+private struct Headline: View {
+    let agent: FleetSnapshot.Agent
+    let confidence: FleetSnapshot.Confidence
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(agent.glyph)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(agent.status == "blocked" ? Color.orange : Color.secondary)
+                // "last seen working" rather than "working", and the qualifier
+                // in front — see `stated`. On this screen there is room for the
+                // whole string, which is exactly why the rule cannot be argued
+                // from here: it is the narrow row on the list behind this one
+                // that a suffix would strand.
+                Text(stated(agent, confidence))
+                    .font(.headline)
+            }
+            if !agent.line.isEmpty, agent.line != agentTitle(agent) {
+                Text(agent.line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            // Only when the host dated it. A nil `activityChangedAt` is "not
+            // told", which is a different thing from "just now" and must never
+            // be rendered as it — an undated agent shown as "0 sec ago" is this
+            // screen vouching for something nobody vouched for.
+            //
+            // It is when the STATE began, not when the snapshot was taken, so it
+            // keeps counting up correctly on a fleet that is polling happily and
+            // reporting no change.
+            if let changedAt = agent.activityChangedAt {
+                Text("Unchanged for \(changedAt, style: .relative)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .opacity(confidence == .lastSeen ? 0.6 : 1)
+    }
+}
+
+// Subagents are deliberately absent from this screen. `FleetSnapshot.Agent`
+// carries no subagent list — the wire has `glyph`, `headline`, `line`, `feed`
+// and the rest, and nothing else — so there is no honest way to name them here.
+// What the host does send is the count, already folded into `line` by
+// `farcooler_core::feed::signal` ("3/7 · Designing test matrix · 2 agents"),
+// which this screen renders unchanged. Adding a field to the snapshot to say
+// more is a change to the projection every surface shares, and it belongs on the
+// host with the rest of the ladder rather than in a watch screen.
+
+#if DEBUG
+    /// A fleet with no phone in the room.
+    ///
+    /// The reason `FleetClient` is a protocol with one shipping conformance:
+    /// there is no other way to look at these screens without a paired watch, a
+    /// paired phone and a runner with agents on it. Every preview below is a
+    /// layout somebody has to be able to check, and the two that matter most —
+    /// a stale row and an unreachable phone — cannot be produced on demand from
+    /// real hardware at all.
+    @MainActor
+    final class PreviewFleetClient: FleetClient {
+        @Published private(set) var state: WatchState
+
+        /// What the phone "answers", and how long it takes to answer it.
+        ///
+        /// Both are parameters because the two states this app is most likely to
+        /// get wrong are the two nobody can produce on demand: a `.failed`
+        /// sentence needs a phone that is present but cannot reach its runner,
+        /// and the in-flight spinner needs a phone that is slow rather than
+        /// absent. `latency` is what makes the second one hold still long enough
+        /// to be looked at — with a zero-latency client the spinner exists for
+        /// one frame and every screenshot of it is a screenshot of the result.
+        private let latency: Duration
+        private let reply: @Sendable (WatchRequest) -> WatchReply
+
+        init(
+            _ state: WatchState,
+            latency: Duration = .zero,
+            reply: @escaping @Sendable (WatchRequest) -> WatchReply = { _ in .sent }
+        ) {
+            self.state = state
+            self.latency = latency
+            self.reply = reply
+        }
+
+        func send(_ request: WatchRequest) async -> WatchReply {
+            if latency > .zero { try? await Task.sleep(for: latency) }
+            return reply(request)
+        }
+    }
+
+    /// The widest strings the host can produce, so a preview shows the worst
+    /// case rather than a comfortable one: `feed::HEADLINE_WIDTH` is 18 and
+    /// `feed::WIDTH` is 40, and both are counted in characters.
+    @MainActor
+    enum PreviewFleet {
+        static func agent(
+            id: String, label: String, status: String, glyph: String,
+            headline: String, line: String, ageMinutes: Double
+        ) -> FleetSnapshot.Agent {
+            FleetSnapshot.Agent(
+                id: id, label: label, machine: "studio", status: status, glyph: glyph,
+                headline: headline, line: line,
+                feed: [
+                    "Read crates/core/src/feed.rs",
+                    "Edit apps/ios/FarCoolerWatch/FleetListView.swift",
+                    "cargo test -p farcooler-core",
+                ],
+                rank: 0, turnFailed: false,
+                activityChangedAt: Date().addingTimeInterval(-60 * ageMinutes))
+        }
+
+        static let snapshot = FleetSnapshot(
+            agents: [
+                agent(
+                    id: "a", label: "claude", status: "blocked", glyph: "?",
+                    headline: "claude needs you", line: "Run cargo test in the workspace root",
+                    ageMinutes: 4),
+                agent(
+                    id: "b", label: "codex", status: "working", glyph: "*",
+                    headline: "codex is working", line: "3/7 · Designing test matrix · 2 agents",
+                    ageMinutes: 2),
+                // Working and older than `staleAfter`, so it renders as
+                // "last seen …" at 60% — the case no live fleet will show you
+                // when you want to look at it.
+                agent(
+                    id: "c", label: "gemini-worktree-two", status: "working", glyph: "*",
+                    headline: "gemini is working", line: "Writing docs/superpowers/plans/x.md",
+                    ageMinutes: 90),
+            ],
+            capturedAt: Date().addingTimeInterval(-90), complete: true)
+
+        /// A permission worded the way Claude Code words one.
+        ///
+        /// The names are `claude/normalize.rs`'s, verbatim: `Allow ` plus
+        /// `tool_title(...)`, and a bare `Deny`. Kept exact because the point
+        /// this fixture exists to prove is that the buttons say what the AGENT
+        /// says — a fixture that quietly used "Allow"/"Deny" would show a
+        /// hardcoded pair passing for the real thing.
+        nonisolated static let claudePermission = WatchPermission(
+            id: "req-1",
+            // An opaque correlation id, which is what every producer actually
+            // puts here and why nothing renders it. See `PermissionView`.
+            toolCall: "toolu_01Q9xk3mBn",
+            options: [
+                WatchPermissionOption(
+                    id: "allow", name: "Allow Bash(cargo test -p farcooler-core)",
+                    kind: "allow_once"),
+                WatchPermissionOption(id: "deny", name: "Deny", kind: "reject_once"),
+            ])
+
+        /// Three options, one of them a policy change — `codex/normalize.rs`'s
+        /// wording, including the `Allow: ` prefix and the command after it.
+        nonisolated static let codexPermission = WatchPermission(
+            id: "req-2",
+            toolCall: "item_7",
+            options: [
+                WatchPermissionOption(
+                    id: "accept", name: "Allow: git push --force-with-lease", kind: "allow_once"),
+                WatchPermissionOption(
+                    id: "acceptForSession", name: "Allow for this session", kind: "allow_always"),
+                WatchPermissionOption(id: "decline", name: "Decline", kind: "reject_once"),
+            ])
+    }
+
+    #Preview("Fleet") {
+        FleetListView(client: PreviewFleetClient(.live(PreviewFleet.snapshot)))
+    }
+
+    #Preview("Fleet, unreachable") {
+        FleetListView(client: PreviewFleetClient(.cached(PreviewFleet.snapshot)))
+    }
+
+    #Preview("Fleet, nothing known") {
+        FleetListView(client: PreviewFleetClient(.nothing))
+    }
+
+    #Preview("Agent") {
+        NavigationStack {
+            AgentDetailView(client: PreviewFleetClient(.live(PreviewFleet.snapshot)), terminal: "a")
+                .watchRoutes(client: PreviewFleetClient(.live(PreviewFleet.snapshot)))
+        }
+    }
+
+    #Preview("Agent, unreachable") {
+        NavigationStack {
+            AgentDetailView(
+                client: PreviewFleetClient(.cached(PreviewFleet.snapshot)), terminal: "c")
+        }
+    }
+#endif

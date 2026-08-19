@@ -45,6 +45,17 @@
          turned the feature off. -->
     <key>NSSupportsLiveActivities</key>
     <true/>
+    <!-- The card follows a whole run, and a run is pushed at every ten seconds:
+         `CARD_REFRESH_MS` in crates/daemon/src/watch.rs. Without this key iOS
+         holds pushed updates to the ordinary budget and simply DROPS the ones
+         past it — APNs accepts the push, the relay counts a delivery, and
+         nothing is logged on the device or reported anywhere. The card freezes
+         part way through the run, which on a lock screen is indistinguishable
+         from an agent that stopped working. It is a declaration, not a
+         permission: the person still has the switch in Settings, and the system
+         still throttles an app that abuses it. -->
+    <key>NSSupportsLiveActivitiesFrequentUpdates</key>
+    <true/>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIApplicationSceneManifest</key>
@@ -159,5 +170,9 @@
     <string>$(FARCOOLER_DISPLAY_VERSION)</string>
     <key>FarCoolerWorkOSClientID</key>
     <string>$(FARCOOLER_WORKOS_CLIENT_ID)</string>
+    <!-- Read by `SnapshotStore`. A build setting rather than a literal so the
+         four channels do not need four copies of this file. -->
+    <key>FarCoolerAppGroup</key>
+    <string>$(FARCOOLER_APP_GROUP)</string>
 </dict>
 </plist>

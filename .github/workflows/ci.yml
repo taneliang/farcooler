@@ -254,6 +254,23 @@ jobs:
       # a keychain to cover it with.
       - run: ./scripts/import-ios-certificate-test.sh
 
+      # What the generated project must be true of, and none of it is something
+      # the build below can catch. A watch app embedded in the extensions' slot,
+      # a bundle identifier that stops nesting, a target that names a different
+      # App Group — each compiles, links and signs, then fails at INSTALL, at
+      # launch, or as a widget that is permanently and silently empty. There is
+      # no `error:` line for any of them.
+      #
+      # Before the xcframeworks, because it needs neither them nor Xcode and
+      # answers in seconds: waiting out a Rust cross-compile to be told a bundle
+      # id stopped nesting is minutes spent learning nothing.
+      #
+      # Here rather than in `wire`: the generator shells out to
+      # scripts/icon-label.swift, which is AppKit, and AppKit does not exist on
+      # the Linux runner that job uses — the same reason icon-test.sh lives in
+      # `swift` instead.
+      - run: ./scripts/generator-test.sh
+
       # The xcframeworks are gitignored — they are build output — so CI has to
       # build them before the project that links them. Without this the app
       # links nothing and fails at the linker, which reads as a Swift error.
@@ -265,6 +282,23 @@ jobs:
       # compiles locally and is missing from the app.
       - name: Generate the Xcode project
         run: apps/ios/generate-project.py
+
+      # Several GB, and NOT optional. The FarCooler scheme embeds FarCoolerWatch
+      # through a target dependency, and xcodebuild refuses to build a scheme
+      # that embeds a watch app unless the watchOS Simulator platform is
+      # installed — even here, where the destination is generic and no
+      # simulator is ever launched. Worse, it refuses with no `error:` line
+      # at all, so the failure reads like a project-generation bug and is
+      # not one.
+      #
+      # Its own step, named for what it costs, so those minutes are visible in
+      # the job timing instead of hidden inside a build that merely looks slow.
+      # There is nothing to cache: -downloadPlatform installs into the runner's
+      # system Xcode, outside anything actions/cache can carry between runs. It
+      # is idempotent, so a runner image that already ships the platform pays
+      # seconds rather than minutes.
+      - name: Install the watchOS platform (several GB)
+        run: xcodebuild -downloadPlatform watchOS
 
       # `ARCHS=arm64` explicitly, and a generic destination rather than a named
       # simulator. The vendored xcframeworks carry no x86_64 simulator slice, so

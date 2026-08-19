@@ -8,10 +8,41 @@ export interface Payload {
   title: string
   subtitle: string
   /// The terminal to open. Enough to make the notification actionable and
-  /// nothing more: no transcript, no command, no output. The relay is a
-  /// delivery service and should not be able to leak a conversation it never
-  /// held.
+  /// nothing more.
+  ///
+  /// What comes with it is one composed line at a time — `subtitle` is the
+  /// agent's question while it is blocked and its composed signal rung while
+  /// it works, redacted and cut to a sidebar's width by the runner before it
+  /// ever leaves. Never the transcript itself, never a command line, never raw
+  /// output.
+  ///
+  /// Repeatedly, though, and that is worth knowing: a `working` notice moves
+  /// the live card for the whole length of a run, so this interface sees a
+  /// slow drip of one agent's headline rather than the two lines a run used to
+  /// send. Nothing here is stored or logged — see `notify` in `index.ts` — so
+  /// the relay stays a delivery service that cannot leak a conversation it
+  /// never held.
   terminal: string
+  /// `working`, `blocked` or `done`, and the agent's name.
+  ///
+  /// Not for display — the title and body already say it in a sentence. These
+  /// are for the phone's notification service extension, which folds them into
+  /// the snapshot its widgets render so that a lock screen widget agrees with
+  /// the banner that just arrived. Optional because a daemon built before them
+  /// sends neither, and gets exactly the behavior it always got.
+  status?: string
+  label?: string
+  /// Whether the turn behind a `done` ended badly.
+  ///
+  /// Beside `status` rather than inside it because the relay's own decision —
+  /// raise a card, move it, dismiss it — is the same either way: a failed turn
+  /// is over exactly as a finished one is. This is only ever forwarded, for the
+  /// extension, which has a status word and nothing else to draw a mark from
+  /// and would otherwise put a `✓` on an agent that died.
+  ///
+  /// Optional forever, like the two above: a daemon built before it sends
+  /// nothing and gets exactly the behavior it always got.
+  failed?: boolean
 }
 
 /// Which of Apple's two push services issued a device's token.
@@ -138,8 +169,17 @@ async function sendApns(
         sound: 'default',
         'interruption-level': 'time-sensitive',
         'thread-id': payload.terminal,
+        // Without this the notification service extension is never invoked,
+        // and the phone's widgets stay on whatever the app last wrote — which
+        // on a phone nobody has opened today is nothing at all. It costs the
+        // extension roughly thirty milliseconds and changes nothing about how
+        // the banner looks.
+        'mutable-content': 1,
       },
       terminal: payload.terminal,
+      status: payload.status,
+      label: payload.label,
+      failed: payload.failed,
     }),
   })
   return response.ok
@@ -168,13 +208,38 @@ export interface ActivityAttributes {
   terminal: string
   label: string
   machine: string
+  /// When the turn began, in Unix milliseconds, so the card can run its own
+  /// clock.
+  ///
+  /// Here rather than in `ActivityState` because it does not change for the
+  /// life of the card, and because the app renders a date as a native timer:
+  /// no push per tick, and it keeps counting on a phone that is off the
+  /// network. Putting it in the state would mean pushing every second to
+  /// animate something iOS animates for free.
+  ///
+  /// A NUMBER on the wire, never a date string. The app's decoder tells Unix
+  /// seconds from Unix milliseconds apart by magnitude and reads this field
+  /// leniently, so a string does not break the card — it silently costs the
+  /// timer, which is a failure nothing reports.
+  ///
+  /// Optional because a daemon older than the field sends none, and because a
+  /// card whose turn clock could not be read should show no timer rather than
+  /// a wrong one.
+  startedAt?: number
 }
 
 interface ActivityBase {
   state: ActivityState
   /// What to show if the activity itself cannot be — a locked Apple Watch, a
   /// device that has never run the app.
-  alert: { title: string; body: string }
+  ///
+  /// Optional, and leaving it off is not a detail. An activity push carrying an
+  /// alert dictionary is PRESENTED to the person; one without it changes the
+  /// card in place and makes no sound. Routine progress must be the second kind
+  /// — a banner every ten seconds for an agent that is merely busy is the thing
+  /// people switch notifications off over, which then costs them the one push
+  /// this product exists to deliver.
+  alert?: { title: string; body: string }
 }
 
 export type Activity =
@@ -231,8 +296,9 @@ export async function sendLiveActivity(
     timestamp: now,
     event: activity.event,
     'content-state': activity.state,
-    alert: activity.alert,
   }
+  // Present only when there is something to interrupt for. See `ActivityBase`.
+  if (activity.alert) aps.alert = activity.alert
   if (activity.event === 'start') {
     aps['attributes-type'] = 'AgentActivityAttributes'
     aps.attributes = activity.attributes
@@ -250,7 +316,11 @@ export async function sendLiveActivity(
       // it, and the plain bundle id here is a 400 rather than a delivery.
       'apns-topic': `${env.APNS_TOPIC}.push-type.liveactivity`,
       'apns-push-type': 'liveactivity',
-      'apns-priority': '10',
+      // Priority 10 consumes the app's Live Activity push budget, and the
+      // budget it consumes is the one the ALERT depends on. Routine progress
+      // therefore goes out at 5: delivered when convenient, which is the right
+      // urgency for a line that will change again in ten seconds.
+      'apns-priority': activity.state.status === 'working' ? '5' : '10',
     },
     body: JSON.stringify({ aps }),
   })

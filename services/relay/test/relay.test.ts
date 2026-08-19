@@ -451,6 +451,107 @@ describe('/v1/notify', () => {
   })
 })
 
+// MARK: - What the phone's extension is handed
+
+/// The three fields that decide whether the widgets are updated at all.
+///
+/// `mutable-content`, and the top-level `status` and `label`. Get any of them
+/// wrong and the notification service extension never runs, or runs and gives
+/// up on its first guard — and NOTHING reports it. The banner still arrives
+/// looking exactly right, the relay still counts the delivery, and the entire
+/// NSE-to-widget half of this feature is off. There is no log to find it in
+/// because nothing failed.
+describe('the alert push body', () => {
+  it('asks iOS to run the notification service extension', async () => {
+    // Without `mutable-content` the extension is not invoked at all, so the
+    // widgets stay on whatever the app last wrote — which on a phone nobody has
+    // opened today is nothing whatsoever.
+    const calls = watchFetch()
+    await register('user_1')
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', subtitle: 'Create haiku.txt?', terminal: 'term-1', status: 'blocked', label: 'claude' },
+      'mine',
+    )
+
+    const [alert] = pushes(calls)
+    expect(alert.headers['apns-push-type']).toBe('alert')
+    expect(alert.body.aps['mutable-content']).toBe(1)
+  })
+
+  it('names the agent and its status beside the banner, not inside it', async () => {
+    // The extension reads these two and nothing else — it has no terminal and
+    // no fleet — so it folds the push into the snapshot by them. Renamed or
+    // dropped, `didReceive` falls through its first guard and returns having
+    // changed nothing, silently. They are top level rather than inside `aps`
+    // because `aps` is Apple's dictionary and custom keys in it are ignored.
+    const calls = watchFetch()
+    await register('user_1')
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', subtitle: 'Create haiku.txt?', terminal: 'term-1', status: 'blocked', label: 'claude' },
+      'mine',
+    )
+
+    const [alert] = pushes(calls)
+    expect(alert.body.terminal).toBe('term-1')
+    expect(alert.body.status).toBe('blocked')
+    expect(alert.body.label).toBe('claude')
+    // And the banner itself is untouched by any of it: the machine composed
+    // that sentence and the extension is told not to rewrite it.
+    expect(alert.body.aps.alert).toEqual({
+      title: 'claude needs you',
+      body: 'Create haiku.txt?',
+    })
+    expect(alert.body.aps['thread-id']).toBe('term-1')
+    // Time-sensitive, so a blocked agent can break a Focus: it has stopped and
+    // stays stopped until answered, which is what that level is for.
+    expect(alert.body.aps['interruption-level']).toBe('time-sensitive')
+    expect(alert.headers['apns-priority']).toBe('10')
+  })
+
+  it('carries how a turn ended, which the status cannot say', async () => {
+    // `done` is "the agent stopped", not "the agent succeeded" — a turn that
+    // died arrives with exactly the same status as one that finished. The
+    // extension picks its mark off the status word and nothing else, and
+    // `accessoryCircular` draws only that mark, so a dropped `failed` is a `✓`
+    // on a lock screen widget for an agent that died.
+    const calls = watchFetch()
+    await register('user_1')
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'cursor failed', subtitle: "Its last turn didn't finish", terminal: 'term-1', status: 'done', label: 'cursor', failed: true },
+      'mine',
+    )
+
+    const [alert] = pushes(calls)
+    expect(alert.body.failed).toBe(true)
+    // And a daemon that sends nothing gets undefined, which the extension reads
+    // as false: the behavior it always had.
+    const older = watchFetch()
+    await post('/v1/notify', { title: 'claude finished', terminal: 'term-2', status: 'done' }, 'mine')
+    expect(pushes(older)[0].body.failed).toBeUndefined()
+  })
+
+  it('leaves status and label off for a daemon that sends neither', async () => {
+    // The compatibility promise, at the field level. An older daemon's push must
+    // still be a valid alert; the extension simply finds no status, gives up on
+    // its first guard, and the banner is delivered exactly as it always was.
+    const calls = watchFetch()
+    await register('user_1')
+    await pair('user_1', 'mine')
+    await post('/v1/notify', { title: 'Agent stopped', terminal: 'term-1' }, 'mine')
+
+    const [alert] = pushes(calls)
+    expect(alert.body.aps['mutable-content']).toBe(1)
+    expect(alert.body.status).toBeUndefined()
+    expect(alert.body.label).toBeUndefined()
+  })
+})
+
 describe('the signed-in routes', () => {
   it('refuse a caller with no session', async () => {
     const paths = [
@@ -675,6 +776,84 @@ describe('/v1/notify and Live Activities', () => {
     expect(aps['dismissal-date']).toBeUndefined()
   })
 
+  it('puts the turn clock in the attributes of the card it starts', async () => {
+    // The card counts elapsed time from this and nothing else: iOS renders a
+    // date as a native timer, so there is no push per tick and no state to
+    // update. Drop it and the timer is simply absent — no error, no failed
+    // delivery, nothing in a log to find.
+    const calls = watchFetch()
+    await ready()
+    await post(
+      '/v1/notify',
+      {
+        title: 'claude needs you',
+        terminal: 'term-1',
+        status: 'blocked',
+        label: 'claude',
+        startedAt: 1_755_000_000_000,
+      },
+      'mine',
+    )
+
+    const [, activity] = pushes(calls)
+    expect(activity.body.aps.event).toBe('start')
+    expect(activity.body.aps.attributes).toEqual({
+      terminal: 'term-1',
+      label: 'claude',
+      machine: 'Studio',
+      startedAt: 1_755_000_000_000,
+    })
+    // A NUMBER, in milliseconds. The app's decoder tells seconds from
+    // milliseconds apart by magnitude and reads a string back as nil, which
+    // costs the timer without costing the card — the one failure mode that
+    // reports itself nowhere.
+    expect(typeof activity.body.aps.attributes.startedAt).toBe('number')
+  })
+
+  it('sends no clock at all for a machine that named none', async () => {
+    // Every field here is optional forever. A daemon older than `startedAt`
+    // must still start a card, and a card with no timer is the intended
+    // outcome — unlike a zero, which would count up from January 1970.
+    const calls = watchFetch()
+    await ready()
+    await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
+
+    const [, activity] = pushes(calls)
+    expect(activity.body.aps.attributes).toEqual({
+      terminal: 'term-1',
+      label: 'claude needs you',
+      machine: 'Studio',
+    })
+    expect('startedAt' in activity.body.aps.attributes).toBe(false)
+  })
+
+  it('never repeats the turn clock on an update or an end', async () => {
+    // Attributes are the activity's identity, fixed for its whole life, and
+    // APNs REJECTS a push that repeats them. A `startedAt` leaking onto either
+    // of these does not move a timer — it costs the update entirely, so the
+    // card freezes on whatever it last said and looks like a dead relay.
+    const calls = watchFetch()
+    await ready()
+    await running('term-1')
+    const clock = { startedAt: 1_755_000_000_000 }
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working', ...clock }, 'mine')
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'blocked', ...clock }, 'mine')
+    await post('/v1/notify', { title: 'Done', terminal: 'term-1', status: 'done', ...clock }, 'mine')
+
+    const events = pushes(calls)
+      .filter(call => call.body.aps.event)
+      .map(call => [call.body.aps.event, call.body.aps.attributes, call.body.aps['content-state']])
+    expect(events.map(([event]) => event)).toEqual(['update', 'update', 'end'])
+    for (const [event, attributes, state] of events) {
+      expect(attributes).toBeUndefined()
+      // Nor smuggled into the state, which is the app's `ContentState` and
+      // has no such property: an extra key there fails to decode and takes
+      // the whole update down with it.
+      expect(state.startedAt).toBeUndefined()
+      expect(event).not.toBe('start')
+    }
+  })
+
   it('updates the activity already running rather than starting a second', async () => {
     const calls = watchFetch()
     await ready()
@@ -774,6 +953,377 @@ describe('/v1/notify and Live Activities', () => {
 
     await post('/v1/notify', { title: 'hi', terminal: 'term-1', status: 'blocked' }, 'mine')
     expect(calls.every(call => !call.url.includes('their-update-token'))).toBe(true)
+  })
+
+  it('refreshes a running card for a working agent and wakes nobody', async () => {
+    // The distinction the whole working tier rests on. A card update is silent
+    // and goes to a card the person already chose to watch; an alert is an
+    // interruption. A working agent is the NORMAL case, so if it ever produced
+    // the second one this feature would be the reason people turn the app's
+    // notifications off — taking the blocked and done ones with them.
+    const calls = watchFetch()
+    await ready()
+    await running('term-1')
+    await post(
+      '/v1/notify',
+      { title: 'claude', subtitle: '3/7 · Designing test matrix', terminal: 'term-1', status: 'working' },
+      'mine',
+    )
+
+    const sent = pushes(calls)
+    expect(sent.length).toBe(1)
+    expect(sent[0].headers['apns-push-type']).toBe('liveactivity')
+    expect(sent[0].url).toContain('/device/update-token')
+    expect(sent[0].body.aps.event).toBe('update')
+    expect(sent[0].body.aps['content-state']).toEqual({
+      status: 'working',
+      detail: '3/7 · Designing test matrix',
+    })
+    // No alert dictionary: an activity push carrying one is PRESENTED, which is
+    // the banner this tier must never produce.
+    expect(sent[0].body.aps.alert).toBeUndefined()
+    // Priority 10 spends the app's Live Activity budget, and it is the same
+    // budget the blocked alert depends on.
+    expect(sent[0].headers['apns-priority']).toBe('5')
+  })
+
+  it('starts a card, silently, for an agent that has begun working', async () => {
+    // The card follows a WHOLE RUN, so it has to exist while the agent is
+    // merely busy — that is the only stretch there is anything to watch. It
+    // starts from the push-to-start token because nothing on the phone is awake
+    // to start it.
+    const calls = watchFetch()
+    await ready()
+    await post(
+      '/v1/notify',
+      { title: 'claude', subtitle: 'Reading watch.rs', terminal: 'term-1', status: 'working' },
+      'mine',
+    )
+
+    // One push, and it is the card. A working state never sends an alert push
+    // either, so there is nothing before it.
+    const [activity, ...rest] = pushes(calls)
+    expect(rest).toEqual([])
+    expect(activity.url).toContain('/device/start-token')
+    expect(activity.headers['apns-push-type']).toBe('liveactivity')
+    expect(activity.body.aps.event).toBe('start')
+    expect(activity.body.aps['content-state']).toEqual({
+      status: 'working',
+      detail: 'Reading watch.rs',
+    })
+
+    // The one thing this must never do. An activity push carrying an alert
+    // dictionary is PRESENTED — lock screen banner, Apple Watch haptic — so a
+    // start that carried one would buzz the wrist every time any agent picked
+    // up work. Silent creation is the whole difference between a card and an
+    // interruption.
+    expect(activity.body.aps.alert).toBeUndefined()
+    // And at the working priority, because priority 10 spends the app's Live
+    // Activity budget — the same budget the blocked alert depends on.
+    expect(activity.headers['apns-priority']).toBe('5')
+  })
+
+  it('gives the card it starts for a working agent its turn clock', async () => {
+    // Attributes are fixed for an activity's life, so this start is the only
+    // push that can carry the timer. A whole-run card without it counts nothing
+    // for as long as it exists.
+    const calls = watchFetch()
+    await ready()
+    await post(
+      '/v1/notify',
+      {
+        title: 'claude',
+        subtitle: 'Writing fruit.txt',
+        terminal: 'term-1',
+        status: 'working',
+        label: 'claude',
+        startedAt: 1_755_000_000_000,
+      },
+      'mine',
+    )
+
+    const [activity] = pushes(calls)
+    expect(activity.body.aps['attributes-type']).toBe('AgentActivityAttributes')
+    expect(activity.body.aps.attributes).toEqual({
+      terminal: 'term-1',
+      label: 'claude',
+      machine: 'Studio',
+      startedAt: 1_755_000_000_000,
+    })
+    // A NUMBER, in milliseconds. A string reads back as nil in the app and
+    // costs the timer without costing the card.
+    expect(typeof activity.body.aps.attributes.startedAt).toBe('number')
+  })
+
+  it('starts ONE card for a run, however many working pushes arrive', async () => {
+    // The failure this row exists to prevent, and the worst one this feature
+    // could ship with. Only the app can report an update token, and the app may
+    // never run for the whole length of a run — so without a row written at
+    // start time, every `working` push finds nothing running and starts ANOTHER
+    // card. The daemon sends one about every ten seconds: a half-hour run would
+    // leave on the order of a hundred and eighty cards stacked on the lock
+    // screen, and the relay holds no token for a single one of them, so nothing
+    // it can ever do will take them back.
+    const calls = watchFetch()
+    await ready()
+    for (const detail of ['Reading watch.rs', 'Editing watch.rs', 'Running tests']) {
+      await post(
+        '/v1/notify',
+        { title: 'claude', subtitle: detail, terminal: 'term-1', status: 'working' },
+        'mine',
+      )
+    }
+
+    const sent = pushes(calls)
+    expect(sent.length).toBe(1)
+    expect(sent[0].body.aps.event).toBe('start')
+    expect(sent[0].url).toContain('/device/start-token')
+
+    // One row, holding the sentinel: a card is running for this agent and
+    // nothing yet knows where. It is what the UNIQUE (account_id, terminal)
+    // constraint refuses the second start against.
+    const rows = await env.DB.prepare(
+      `SELECT terminal, update_token FROM live_activities`,
+    ).all<any>()
+    expect(rows.results).toEqual([{ terminal: 'term-1', update_token: '' }])
+  })
+
+  it('updates the card it started blind once the app reports its token', async () => {
+    // Recovery, and it needs nothing from anybody: iOS replays running
+    // activities to the app at launch, the app files the update token for a card
+    // it never started, and the row the relay wrote blind fills in. From that
+    // moment the card is addressable for the rest of the run.
+    const calls = watchFetch()
+    await ready()
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    await running('term-1')
+    await post(
+      '/v1/notify',
+      { title: 'claude', subtitle: 'Running tests', terminal: 'term-1', status: 'working' },
+      'mine',
+    )
+
+    const [start, update, ...rest] = pushes(calls)
+    expect(rest).toEqual([])
+    expect(start.body.aps.event).toBe('start')
+    expect(update.url).toContain('/device/update-token')
+    expect(update.body.aps.event).toBe('update')
+    expect(update.body.aps['content-state']).toEqual({
+      status: 'working',
+      detail: 'Running tests',
+    })
+    // Still an update, so still no attributes — they are the activity's
+    // identity and APNs rejects a push that repeats them.
+    expect(update.body.aps.attributes).toBeUndefined()
+  })
+
+  it('alerts for a block on a card it cannot reach', async () => {
+    // The tier that matters, on a card the relay cannot yet address. The alert
+    // is the promise and it goes out untouched and first, before anything is
+    // done about the card at all — see `pushActivity`'s placement in `notify`.
+    const calls = watchFetch()
+    await ready()
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    const [start, alert] = pushes(calls)
+    expect(start.body.aps.event).toBe('start')
+    expect(alert.headers['apns-push-type']).toBe('alert')
+    expect(alert.url).toContain('/device/device-token')
+  })
+
+  it('forgets a card it cannot address when the agent finishes', async () => {
+    // There is nowhere to send the end — only the app could have told the relay
+    // where — so it sends nothing rather than pushing at the empty string and
+    // counting a delivery that cannot have happened. The row goes anyway: an
+    // update token dies with its activity, and a row kept past the run would
+    // refuse this terminal a card for every run after it. The abandoned card
+    // clears itself on the `stale-date` its start carried.
+    const calls = watchFetch()
+    await ready()
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    await post('/v1/notify', { title: 'Done', terminal: 'term-1', status: 'done' }, 'mine')
+
+    const activities = pushes(calls).filter(call => call.body.aps?.event)
+    expect(activities.map(call => call.body.aps.event)).toEqual(['start'])
+
+    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    expect(rows.results?.length).toBe(0)
+
+    // And the next run gets its card, because the row it would have collided
+    // with is gone.
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    expect(pushes(calls).filter(call => call.body.aps?.event === 'start').length).toBe(2)
+  })
+
+  it('still alerts and starts a card when the agent goes on to block', async () => {
+    // The tier above working is unchanged: a banner, at priority 10, and a card
+    // started from the push-to-start token.
+    const calls = watchFetch()
+    await ready()
+    await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
+
+    const [alert, activity] = pushes(calls)
+    expect(alert.headers['apns-push-type']).toBe('alert')
+    expect(activity.body.aps.event).toBe('start')
+    expect(activity.headers['apns-priority']).toBe('10')
+    expect(activity.body.aps.alert).toEqual({ title: 'claude needs you', body: '' })
+  })
+
+  it('replaces a card stuck on Working when the agent blocks', async () => {
+    // The product's primary scenario, on a phone whose app has not run. The
+    // working push claimed the row with the sentinel, so the blocked push found
+    // a card it could not address and left it — the lock screen read "Working"
+    // beside a banner saying the agent needed an answer, until the run ended or
+    // the hour-long stale date passed. A card that states the wrong thing there
+    // is worse than a duplicate: the old one is left to expire and the app ends
+    // it the next time it runs.
+    const calls = watchFetch()
+    await ready()
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', subtitle: 'Create haiku.txt?', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    const starts = pushes(calls).filter(call => call.body.aps?.event === 'start')
+    expect(starts.length).toBe(2)
+    expect(starts[1].body.aps['content-state']).toEqual({
+      status: 'blocked',
+      detail: 'Create haiku.txt?',
+    })
+    // And it is presented, unlike the silent start before it.
+    expect(starts[1].body.aps.alert).toEqual({
+      title: 'claude needs you',
+      body: 'Create haiku.txt?',
+    })
+    // The row remembers the tier it is now showing, which is what keeps this to
+    // one replacement.
+    const row = await env.DB.prepare(`SELECT blind_status FROM live_activities`).first<any>()
+    expect(row?.blind_status).toBe('blocked')
+  })
+
+  it('replaces it once, however many times the agent blocks', async () => {
+    // Without the memory on the row, every blocked push while unaddressable
+    // would stack another card — the same failure `TOKEN_UNKNOWN` was written to
+    // prevent, one tier up.
+    const calls = watchFetch()
+    await ready()
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    for (const question of ['Create haiku.txt?', 'Delete build/?', 'Force push?']) {
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', subtitle: question, terminal: 'term-1', status: 'blocked' },
+        'mine',
+      )
+    }
+
+    expect(pushes(calls).filter(call => call.body.aps?.event === 'start').length).toBe(2)
+  })
+
+  it('does not raise a card the person has just swiped away', async () => {
+    // The undismissable card. A working push arrives about every ten seconds, so
+    // a dismissal the relay forgot was a card back on the lock screen before the
+    // phone was back in a pocket — for the length of the run.
+    const calls = watchFetch()
+    await ready()
+    await running('term-1')
+    await post(
+      '/v1/devices/activity',
+      { terminal: 'term-1', updateToken: null, dismissed: true },
+      await sessionFor('user_1'),
+    )
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+
+    expect(pushes(calls).filter(call => call.body.aps?.event).length).toBe(0)
+    // The row outlives the card on purpose: it is the refusal being remembered.
+    const row = await env.DB.prepare(`SELECT update_token, dismissed_at FROM live_activities`)
+      .first<any>()
+    expect(row?.update_token).toBe('')
+    expect(row?.dismissed_at).toBeGreaterThan(0)
+  })
+
+  it('still raises one when the dismissed agent goes on to block', async () => {
+    // A dismissal is a refusal of what the card was saying, not of everything
+    // this agent will ever say. Blocking is news the person has not seen.
+    const calls = watchFetch()
+    await ready()
+    await running('term-1')
+    await post(
+      '/v1/devices/activity',
+      { terminal: 'term-1', updateToken: null, dismissed: true },
+      await sessionFor('user_1'),
+    )
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    const starts = pushes(calls).filter(call => call.body.aps?.event === 'start')
+    expect(starts.length).toBe(1)
+    expect(starts[0].body.aps['content-state'].status).toBe('blocked')
+  })
+
+  it('forgets a dismissal that has outlived the card it was about', async () => {
+    // `done` deletes the row with the run, but a run can end without one — a
+    // daemon killed mid-turn. A row kept forever would refuse this terminal a
+    // card for every run after it, silently and permanently.
+    const calls = watchFetch()
+    await ready()
+    await running('term-1')
+    await post(
+      '/v1/devices/activity',
+      { terminal: 'term-1', updateToken: null, dismissed: true },
+      await sessionFor('user_1'),
+    )
+    await env.DB.prepare(`UPDATE live_activities SET dismissed_at = ?`)
+      .bind(Date.now() - 2 * 60 * 60 * 1000)
+      .run()
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+
+    expect(pushes(calls).filter(call => call.body.aps?.event === 'start').length).toBe(1)
+  })
+
+  it('forgets the card outright when it merely ended', async () => {
+    // Not every ending is a refusal. The relay's own `end`, or a card iOS
+    // retired, leaves nothing to remember — and remembering it would silence the
+    // next run's card for an hour.
+    watchFetch()
+    await ready()
+    await running('term-1')
+    await post(
+      '/v1/devices/activity',
+      { terminal: 'term-1', updateToken: null },
+      await sessionFor('user_1'),
+    )
+
+    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    expect(rows.results?.length).toBe(0)
+  })
+
+  it('clears the memory of a dismissal once the app files a real token', async () => {
+    // A real update token means there is a card, it is up, and it can be moved
+    // in place. Anything the relay remembered about not being able to reach one
+    // is answered by that.
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await ready()
+    await running('term-1')
+    await post('/v1/devices/activity', { terminal: 'term-1', updateToken: null, dismissed: true }, session)
+    await running('term-1', 'fresh-token')
+
+    const row = await env.DB.prepare(
+      `SELECT update_token, blind_status, dismissed_at FROM live_activities`,
+    ).first<any>()
+    expect(row?.update_token).toBe('fresh-token')
+    expect(row?.blind_status).toBe(null)
+    expect(row?.dismissed_at).toBe(null)
   })
 
   it('leaves activities alone when the daemon names no terminal', async () => {

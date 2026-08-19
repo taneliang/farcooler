@@ -529,7 +529,8 @@ const PENDING_LIFETIME_MS = 24 * 60 * 60 * 1000
 /// already running and dies with it. The app has to report it after the fact,
 /// and there is no moment at which both are known together.
 ///
-/// `updateToken: null` is how the app says the activity is over.
+/// `updateToken: null` is how the app says the activity is over, and `dismissed`
+/// says whether the PERSON ended it — see the sentinel handling below.
 async function registerActivity(request: Request, env: Env): Promise<Response> {
   const account = await requireAccount(request, env)
   if (account instanceof Response) return account
@@ -538,6 +539,7 @@ async function registerActivity(request: Request, env: Env): Promise<Response> {
     terminal?: unknown
     updateToken?: unknown
     environment?: unknown
+    dismissed?: unknown
   }>()
   // The row is keyed on the terminal. Without one, every agent on the account
   // would collapse onto a single card that contradicts all of them.
@@ -547,6 +549,32 @@ async function registerActivity(request: Request, env: Env): Promise<Response> {
   if (environment instanceof Response) return environment
 
   if (body.updateToken === null) {
+    // A card the PERSON swiped away is remembered rather than forgotten.
+    //
+    // Deleting the row was how a dismissed card came back: the daemon pushes a
+    // working card about every ten seconds, the next one found nothing running,
+    // and it started the card again — for the rest of the run. Swiping something
+    // away and having it return within ten seconds is not a card that is hard to
+    // dismiss, it is a card that cannot be.
+    //
+    // The row is kept with the sentinel — there is no card to address any more —
+    // and `dismissed_at` set, which `pushActivity` reads as "no card, and the
+    // person meant it". A `blocked` push still raises a fresh one, because that
+    // is news they have not seen; `done` deletes the row with the run.
+    //
+    // Only when the app says the person did it. An activity that merely ENDED —
+    // the relay's own `end` push, iOS retiring a stale card — deletes the row as
+    // before, because there is no refusal to remember there.
+    if (body.dismissed === true) {
+      await env.DB.prepare(
+        `UPDATE live_activities
+         SET update_token = ?, dismissed_at = ?, updated_at = ?
+         WHERE account_id = ? AND terminal = ?`,
+      )
+        .bind(TOKEN_UNKNOWN, Date.now(), Date.now(), account, body.terminal)
+        .run()
+      return json({ ok: true })
+    }
     await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND terminal = ?`)
       .bind(account, body.terminal)
       .run()
@@ -563,12 +591,18 @@ async function registerActivity(request: Request, env: Env): Promise<Response> {
   // The token is assigned rather than coalesced: APNs issues a new one per
   // activity and the previous one is already dead, so keeping it would leave
   // the relay pushing at an address nothing is listening to.
+  //
+  // `blind_status` and `dismissed_at` are cleared with it. Both describe a card
+  // the relay could not reach, and a real update token is the end of that: there
+  // is a card, it is up, and it can be moved in place from here on.
   await env.DB.prepare(
     `INSERT INTO live_activities (id, account_id, terminal, update_token, environment, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (account_id, terminal)
      DO UPDATE SET update_token = excluded.update_token,
                    environment = COALESCE(excluded.environment, live_activities.environment),
+                   blind_status = NULL,
+                   dismissed_at = NULL,
                    updated_at = excluded.updated_at`,
   )
     .bind(crypto.randomUUID(), account, body.terminal, body.updateToken, environment, Date.now())
@@ -741,9 +775,21 @@ const TOKEN_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000
 /// is worth exactly one thing — notifying the phone of the person it was stolen
 /// from.
 ///
-/// The body is deliberately thin. A title and a terminal are enough to get
-/// someone to open the app, and the relay has no business holding a
-/// conversation's contents in transit.
+/// The body is deliberately thin, and thin means one composed line at a time:
+/// `subtitle` is the agent's question while it is blocked and its composed
+/// signal rung while it works, redacted and cut to a sidebar's width by the
+/// runner before it is sent. Never the transcript, never a command line, never
+/// raw output.
+///
+/// It arrives repeatedly, which is newer than it looks. A `working` notice
+/// moves the live card for the whole length of a run — every ten seconds at
+/// most — where a run used to send about two notices in total. So the relay
+/// sees a slow drip of one agent's headline. That is still not something it
+/// holds: this route persists `version` and nothing else off the body,
+/// `live_activities` keeps delivery metadata, and the top-level catch refuses
+/// to log a body at all. The rule stands — the relay has no business holding a
+/// conversation's contents in transit — but it is a rule about a stream now,
+/// not about two lines.
 ///
 /// `status` and `label` are the newest fields and, like every field added here,
 /// optional forever: a daemon built before them sends neither and gets exactly
@@ -755,6 +801,19 @@ interface Notification {
   version?: string
   status?: string
   label?: string
+  /// Whether the turn behind a `done` ended badly, for the notification service
+  /// extension's mark. Forwarded and never acted on here — see `push.ts`.
+  failed?: boolean
+  /// When the turn began, in Unix milliseconds, for the card's own clock.
+  ///
+  /// A timestamp is not content: it says WHEN something started and nothing
+  /// about what it is, so it does not widen what this relay holds in transit —
+  /// which is the rule the thin body above exists to keep.
+  ///
+  /// Only a `start` can carry it onward. Attributes are an activity's identity
+  /// and APNs rejects a push that repeats them, so this reaches the phone on
+  /// the card's first push or not at all.
+  startedAt?: number
 }
 
 interface Device {
@@ -812,27 +871,40 @@ async function notify(request: Request, env: Env): Promise<Response> {
     .bind(daemon.account_id)
     .all<Device>()
 
+  // A working state moves the card and nothing else — it may even create the
+  // card, but it never sends an alert push. The rule that a working agent must
+  // not buzz is unchanged; only the card is new — and an agent being busy is the
+  // normal case, so a banner for it is a banner people switch off, taking the
+  // blocked and done ones with it.
+  //
+  // `delivered` therefore stays 0 for a working notify, which the daemon treats
+  // as a success: the 200 is what it checks, not the count.
   let delivered = 0
-  for (const device of devices.results ?? []) {
-    const ok = await sendPush(
-      env,
-      device.platform,
-      device.push_token,
-      {
-        title: body.title,
-        subtitle: body.subtitle ?? '',
-        terminal: body.terminal ?? '',
-      },
-      device.environment,
-    )
-    if (ok) delivered += 1
-    await record(
-      env.METRICS,
-      env.ANALYTICS_SALT,
-      ok ? 'notification_sent' : 'notification_failed',
-      daemon.account_id,
-      { platform: device.platform, ok },
-    )
+  if (body.status !== 'working') {
+    for (const device of devices.results ?? []) {
+      const ok = await sendPush(
+        env,
+        device.platform,
+        device.push_token,
+        {
+          title: body.title,
+          subtitle: body.subtitle ?? '',
+          terminal: body.terminal ?? '',
+          status: body.status,
+          label: body.label,
+          failed: body.failed,
+        },
+        device.environment,
+      )
+      if (ok) delivered += 1
+      await record(
+        env.METRICS,
+        env.ANALYTICS_SALT,
+        ok ? 'notification_sent' : 'notification_failed',
+        daemon.account_id,
+        { platform: device.platform, ok },
+      )
+    }
   }
 
   // The lock screen comes second, and never at the alert's expense.
@@ -863,6 +935,42 @@ async function notify(request: Request, env: Env): Promise<Response> {
   return json({ delivered })
 }
 
+/// The `update_token` of a card the relay started while the app was not running.
+///
+/// A row HAS to exist the moment a card is push-started, or the next push finds
+/// none and starts another card. The daemon sends `working` about every ten
+/// seconds for the length of a run, so a half-hour run would leave on the order
+/// of a hundred and eighty cards on the lock screen — none of which the relay
+/// holds an update token for, and none of which it can therefore ever end. This
+/// row is what `UNIQUE (account_id, terminal)` refuses the second start against,
+/// which is the invariant the comment on that constraint already claims.
+///
+/// The empty string rather than NULL because `live_activities.update_token` is
+/// declared NOT NULL, the migrations in this service are additive only — see the
+/// header of 0003 for why — and SQLite cannot loosen a column in place.
+///
+/// It is NOT a token and must never reach APNs: an activity push addressed to
+/// the empty string addresses no activity. Every read of `update_token` has to
+/// ask whether it is this first, and the one place that writes a real one,
+/// `/v1/devices/activity`, already 400s an empty `updateToken` — so the app
+/// cannot report this value by accident.
+const TOKEN_UNKNOWN = ''
+
+/// How long a swipe keeps this terminal off the lock screen.
+///
+/// A dismissal is remembered on the row, and `done` deletes the row with the
+/// run — but a run can end without a `done` ever arriving: a daemon killed
+/// mid-turn, a machine that slept. A row kept forever on that path would refuse
+/// this terminal a card for every run that followed, silently and permanently,
+/// which is a worse failure than the undismissable card the memory was added to
+/// fix.
+///
+/// An hour, which is `STALE_AFTER_S` in `services/relay/src/push.ts` and the
+/// same number for the same reason: after that long with no news the relay does
+/// not know anything about this terminal, including whether the card the person
+/// swiped away was about the run still running now.
+const DISMISSAL_MEMORY_MS = 60 * 60 * 1000
+
 /// Put what just happened on the lock screen, if the daemon said enough for it
 /// to mean anything.
 ///
@@ -878,7 +986,7 @@ async function pushActivity(
   devices: Device[],
 ): Promise<void> {
   const status = body.status
-  if (status !== 'blocked' && status !== 'done') return
+  if (status !== 'blocked' && status !== 'done' && status !== 'working') return
 
   // No terminal, no activity. `live_activities` is keyed on it, and a row under
   // the empty string is every agent on the account sharing one card that
@@ -894,35 +1002,102 @@ async function pushActivity(
     // above this line and repeating it is the sort of thing you cannot unsee.
     detail: body.subtitle || (status === 'blocked' ? 'Waiting for your answer' : ''),
   }
-  const alert = { title: body.title, body: body.subtitle ?? '' }
+  // What separates the tiers is the alert, not whether a push goes out at all.
+  // An activity push carrying an alert dictionary is PRESENTED — lock screen
+  // banner, Apple Watch haptic — and one without it changes the card in place
+  // and says nothing. `blocked` has earned that interruption and `done` closes
+  // it out; `working` never earns it, at any point in the card's life. A banner
+  // every ten seconds for an agent that is merely busy is the notification
+  // people switch the app off over, which then costs them the one push this
+  // whole product exists to deliver.
+  const alert = status === 'working' ? undefined : { title: body.title, body: body.subtitle ?? '' }
 
   const running = await env.DB.prepare(
-    `SELECT update_token, environment FROM live_activities
+    `SELECT update_token, environment, blind_status, dismissed_at FROM live_activities
      WHERE account_id = ? AND terminal = ?`,
   )
     .bind(daemon.account_id, terminal)
-    .first<{ update_token: string; environment: string | null }>()
-
-  if (status === 'done') {
-    // Nothing to end, and nothing to start either: a push-to-start announcing
-    // that something already finished leaves a card on the lock screen that the
-    // relay can never take back, because the app never gets an update token for
-    // an activity it did not know was coming.
-    if (!running) return
-
-    await deliverActivity(env, daemon.account_id, running.update_token, running.environment, {
-      event: 'end',
-      state,
-      alert,
-    })
-    await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND terminal = ?`)
-      .bind(daemon.account_id, terminal)
-      .run()
-    return
-  }
+    .first<{
+      update_token: string
+      environment: string | null
+      blind_status: string | null
+      dismissed_at: number | null
+    }>()
 
   if (running) {
-    await deliverActivity(env, daemon.account_id, running.update_token, running.environment, {
+    // There is a card, so every status is a change to it in place — including
+    // `working`, which is the ordinary case and the reason the card moves at
+    // all.
+    //
+    // Null when the relay started this card itself and the app has not run
+    // since. The row proves a card exists; only the app can learn the update
+    // token that addresses it, so until then there is genuinely nowhere to send
+    // anything. See `TOKEN_UNKNOWN`.
+    const address = running.update_token === TOKEN_UNKNOWN ? null : running.update_token
+
+    // `done` is the last status and the row goes with it either way: the update
+    // token dies with the activity it was issued for, and a row left behind
+    // would refuse this terminal a card for every run that follows. An
+    // unaddressed card is left to the `stale-date` its start carried, which is
+    // the bounded hole push-to-start has always had — better than a permanent
+    // one.
+    if (status === 'done') {
+      if (address) {
+        await deliverActivity(env, daemon.account_id, address, running.environment, {
+          event: 'end',
+          state,
+          alert,
+        })
+      }
+      await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND terminal = ?`)
+        .bind(daemon.account_id, terminal)
+        .run()
+      return
+    }
+
+    if (!address) {
+      // The card cannot be moved, so the only question left is whether the
+      // person is looking at something WRONG.
+      //
+      // `blocked` after a blind `working` start is exactly that: the lock screen
+      // reads "Working" while the banner beside it says the agent needs you, and
+      // it reads that way until the run ends or the hour-long stale date passes.
+      // That is the product's primary scenario stating the opposite of the
+      // truth, so a fresh card is started and the old one is left to expire —
+      // briefly two cards, one of them out of date, rather than one card that is
+      // wrong. Also the path for a card the person DISMISSED, where there is no
+      // duplicate at all: a new question is news they have not answered.
+      //
+      // Exactly once. `blind_status` remembers the tier this row's card is
+      // showing, so a second `blocked` push finds its own status here and starts
+      // nothing — without it, every push while unaddressable would stack another
+      // card, which is the failure the row itself exists to prevent.
+      //
+      // `working` never takes this path. It is the silent tier, it has no news
+      // to correct, and re-raising a card the person swiped away is the thing
+      // that made a dismissed card come back within ten seconds.
+      if (status === 'blocked' && running.blind_status !== 'blocked') {
+        await startCard(env, daemon, body, devices, terminal, state, alert)
+        return
+      }
+
+      // A dismissal this row has held long enough. See `DISMISSAL_MEMORY_MS`:
+      // the row is deleted rather than merely ignored, because a run that is
+      // still going an hour later is a run whose card should exist, and leaving
+      // the row would refuse it one for as long as the daemon keeps pushing.
+      if (
+        running.dismissed_at !== null &&
+        Date.now() - running.dismissed_at >= DISMISSAL_MEMORY_MS
+      ) {
+        await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND terminal = ?`)
+          .bind(daemon.account_id, terminal)
+          .run()
+        await startCard(env, daemon, body, devices, terminal, state, alert)
+      }
+      return
+    }
+
+    await deliverActivity(env, daemon.account_id, address, running.environment, {
       event: 'update',
       state,
       alert,
@@ -930,11 +1105,92 @@ async function pushActivity(
     return
   }
 
-  // Nothing running, so create one from the outside. This is the reason the
-  // push-to-start token is stored at all: the agent blocks while the phone is
-  // in a pocket, and there is nothing awake on the device to start a card.
-  for (const device of devices) {
-    if (device.platform !== 'apns' || !device.live_activity_start_token) continue
+  // Nothing to end, and nothing to start either: a push-to-start announcing
+  // that something already finished leaves a card on the lock screen that the
+  // relay can never take back, because the app never gets an update token for
+  // an activity it did not know was coming.
+  if (status === 'done') return
+
+  await startCard(env, daemon, body, devices, terminal, state, alert)
+}
+
+/// Raise a card from the outside, and remember that it is up.
+///
+/// This is the reason the push-to-start token is stored at all: the agent starts
+/// working, or blocks, while the phone is in a pocket, and there is nothing
+/// awake on the device to start a card.
+///
+/// `working` starts a card here, and that is the feature: the card follows a
+/// whole run — busy, then blocked, then finished — rather than appearing only
+/// once something has already gone wrong, and the Dynamic Island is empty for
+/// the entire stretch there is anything to watch otherwise.
+///
+/// It starts SILENTLY for `working`. `alert` is undefined for that status, so
+/// the push creates the card without presenting anything; the interruption stays
+/// the exclusive property of `blocked`. A start that carried an alert would buzz
+/// the wrist every time any agent picked up work, which is the failure every
+/// comment in `pushActivity` exists to prevent.
+async function startCard(
+  env: Env,
+  daemon: { account_id: string; label: string },
+  body: Notification,
+  devices: Device[],
+  terminal: string,
+  state: ActivityState,
+  alert: { title: string; body: string } | undefined,
+): Promise<void> {
+  const starters = devices.filter(
+    (device): device is Device & { live_activity_start_token: string } =>
+      device.platform === 'apns' && !!device.live_activity_start_token,
+  )
+  // Nothing on the account can raise a card, so nothing was started and there is
+  // nothing to remember. Claiming the terminal here would refuse a card for the
+  // rest of the run to a phone that registers its push-to-start token a minute
+  // from now.
+  if (starters.length === 0) return
+
+  // Remember the card BEFORE the first push goes out, and never after.
+  //
+  // Written first because a push that throws is ambiguous — APNs may well have
+  // created the card — and the two ways of being wrong are not comparable. Claim
+  // first and a failed start costs this run its card, silently. Claim last and a
+  // start that really happened is forgotten, and the next `working` ten seconds
+  // later starts another, forever. `TOKEN_UNKNOWN` says the rest.
+  //
+  // The conflict arm updates only a row that is still unaddressable, which is
+  // what makes it safe. The app can file the real update token between the
+  // caller's SELECT and this INSERT — that is exactly what happens when the
+  // phone comes to the foreground — and overwriting it with the sentinel would
+  // throw away the only address the card has. The `WHERE` is what refuses that,
+  // while still letting an escalation record the tier its new card is showing
+  // and clear a dismissal it has just superseded.
+  //
+  // `environment` stays NULL because nothing knows it yet: the start goes to
+  // every phone on the account, and whichever one's app runs next reports its
+  // own environment alongside the token it files.
+  await env.DB.prepare(
+    `INSERT INTO live_activities
+       (id, account_id, terminal, update_token, environment, blind_status, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (account_id, terminal)
+     DO UPDATE SET blind_status = excluded.blind_status,
+                   dismissed_at = NULL,
+                   updated_at = excluded.updated_at
+     WHERE live_activities.update_token = ?`,
+  )
+    .bind(
+      crypto.randomUUID(),
+      daemon.account_id,
+      terminal,
+      TOKEN_UNKNOWN,
+      null,
+      state.status,
+      Date.now(),
+      TOKEN_UNKNOWN,
+    )
+    .run()
+
+  for (const device of starters) {
     await deliverActivity(
       env,
       daemon.account_id,
@@ -948,9 +1204,19 @@ async function pushActivity(
           terminal,
           // The agent's name if the daemon sent one, and the notification's
           // title if it did not. A blank line on the card would be worse than
-          // repeating what the alert already said.
+          // repeating a line the person has already read.
           label: body.label || body.title,
           machine: daemon.label,
+          // The turn's clock, and the only push that can carry it: attributes
+          // are fixed for an activity's life, so a card started without this
+          // shows no elapsed time for as long as it exists.
+          //
+          // Type-checked rather than trusted, the same way `version` is below.
+          // The body is whatever a machine posted, and the app decodes this
+          // field as a number — a string reads back as nil there and costs the
+          // timer silently, so a `null` or a `"1755..."` is dropped here where
+          // it is still visible rather than on a lock screen where it is not.
+          startedAt: typeof body.startedAt === 'number' ? body.startedAt : undefined,
         },
       },
     )

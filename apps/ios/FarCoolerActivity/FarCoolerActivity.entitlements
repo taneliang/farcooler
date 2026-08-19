@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The extension's half of the shared container. It only ever READS: the
+         snapshot is written by the app and by the notification service
+         extension, and a widget that wrote would be a second author of the one
+         file every surface trusts.
+
+         The value has to expand to the SAME string the app's entitlement does,
+         which is why it is `$(FARCOOLER_APP_GROUP)` and not anything derived
+         from this target's bundle identifier — an extension's identifier is the
+         app's with `.activity` appended, so `$(PRODUCT_BUNDLE_IDENTIFIER)` here
+         would name a container the app never writes to. No
+         `$(AppIdentifierPrefix)`: application-groups values are not
+         team-prefixed the way keychain groups are. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(FARCOOLER_APP_GROUP)</string>
+    </array>
+</dict>
+</plist>

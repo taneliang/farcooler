@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- One key, and this file exists only to carry it.
+
+         GENERATE_INFOPLIST_FILE is still YES for this target: every other key
+         in the built bundle — CFBundleIdentifier, WKApplication,
+         WKCompanionAppBundleIdentifier, the version pair, UIDeviceFamily — is
+         synthesized from build settings, and Xcode MERGES those into this file
+         rather than replacing it. That merge is the whole reason this can be
+         two lines instead of the forty the phone's Info.plist carries.
+
+         The key is here rather than as INFOPLIST_KEY_FarCoolerAppGroup because
+         that setting DOES NOT WORK, and does not work quietly.
+         `INFOPLIST_KEY_<key>` is not a general mechanism: Xcode honors it only
+         for keys it already knows, and a custom key is dropped with no warning
+         and no error. Verified against the built bundle — with the setting and
+         no file, `plutil -p` on FarCoolerWatch.app/Info.plist showed
+         WKCompanionAppBundleIdentifier present (a key Xcode knows) and
+         FarCoolerAppGroup absent entirely.
+
+         What that costs if it is ever "simplified" back to a build setting:
+         `SnapshotStore.groupIdentifier` reads this key by name and returns nil
+         when it is missing, so `SnapshotStore.read()` answers "nothing known"
+         — the identical answer it gives when no snapshot has ever arrived. The
+         watch draws its empty state forever on a phone that is sending
+         perfectly well, and nothing in any log distinguishes the two cases.
+
+         `$(FARCOOLER_APP_GROUP)` and not a literal: four channels, four groups,
+         and this is the same expression the entitlement expands, so the
+         container the code asks for and the container the signature grants
+         cannot come to differ. -->
+    <key>FarCoolerAppGroup</key>
+    <string>$(FARCOOLER_APP_GROUP)</string>
+</dict>
+</plist>

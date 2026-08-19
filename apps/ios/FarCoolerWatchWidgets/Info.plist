@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Two keys, and this file exists only to carry them. Both are keys Xcode
+         does NOT synthesize, which is the rule this file is built on.
+
+         GENERATE_INFOPLIST_FILE is YES for this target, exactly as it is for
+         FarCoolerWatch: every other key in the built bundle —
+         CFBundleIdentifier, CFBundleDisplayName, the version pair,
+         UIDeviceFamily — is synthesized from a build setting, and Xcode MERGES
+         those into this file rather than replacing it. A file that defined a
+         key Xcode also synthesizes would be a second answer to one question; a
+         file that defines only keys Xcode knows nothing about cannot collide
+         with the generated set at all. See FarCoolerWatch/Info.plist, where the
+         same shape was measured on a built bundle.
+
+         NSExtension is what makes this a WidgetKit extension rather than any
+         other kind, and there is no INFOPLIST_KEY_ for it — it is a dictionary,
+         and INFOPLIST_KEY_<key> round-trips one scalar string per key. There is
+         deliberately no NSExtensionPrincipalClass and there must not be:
+         WidgetKit finds the @main WidgetBundle itself, and naming a class here
+         makes the extension fail to load with no symptom other than a
+         complication that is missing from the face gallery.
+
+         FarCoolerAppGroup is here rather than as
+         INFOPLIST_KEY_FarCoolerAppGroup because that setting DOES NOT WORK, and
+         does not work quietly: Xcode honors INFOPLIST_KEY_<key> only for keys
+         it already knows, and drops a custom one with no warning and no error.
+         Measured twice on this project — Task 2 saw the synthesized plist come
+         out as literally `{}`.
+
+         It is worse here than it was there. `Bundle.main` inside an .appex is
+         the EXTENSION's own bundle, so this process cannot read the watch app's
+         merged plist even in principle, however well that plist is filled in.
+         What it costs if this is ever "simplified" back to a build setting:
+         `SnapshotStore.groupIdentifier` reads this key by name and returns nil
+         when it is missing, so `SnapshotStore.read()` answers "nothing known" —
+         the identical answer it gives when no snapshot has ever arrived. The
+         complication draws "Open …" forever against a watch whose app is
+         receiving the fleet perfectly well, and nothing in any log tells the
+         two apart.
+
+         `$(FARCOOLER_APP_GROUP)` and not a literal: four channels, four groups,
+         and this is the same expression the entitlement beside it expands, so
+         the container the code asks for and the container the signature grants
+         cannot come to differ. -->
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.widgetkit-extension</string>
+    </dict>
+    <key>FarCoolerAppGroup</key>
+    <string>$(FARCOOLER_APP_GROUP)</string>
+</dict>
+</plist>

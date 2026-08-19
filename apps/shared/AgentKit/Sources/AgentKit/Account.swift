@@ -251,9 +251,16 @@ public final class Account: NSObject, ObservableObject {
     /// `updateToken: nil` says the activity is over and the relay should forget
     /// it. Without that, an ended card leaves a row that the next `done` would
     /// try to end again, pushing to a token APNs has already retired.
+    ///
+    /// `dismissed` says WHO ended it, and only the phone can know. A card the
+    /// person swiped away is a refusal the relay has to remember for a while: it
+    /// pushes a working card every ten seconds, so a dismissal it forgot became
+    /// a card back on the lock screen before the person had put the phone down.
+    /// A card that merely ended — the relay's own `end`, iOS retiring a stale
+    /// one — carries no such refusal and is reported as `false`.
     @discardableResult
     public func registerActivityToken(
-        terminal: String, updateToken: String?, environment: String
+        terminal: String, updateToken: String?, environment: String, dismissed: Bool = false
     ) async -> Bool {
         // NSNull rather than leaving the key out or passing the Optional along:
         // JSONSerialization throws on a bare `Optional.none`, and an absent key
@@ -262,7 +269,10 @@ public final class Account: NSObject, ObservableObject {
         let update: Any = updateToken.map { $0 as Any } ?? NSNull()
         let body = await authenticatedPost(
             "/v1/devices/activity",
-            ["terminal": terminal, "updateToken": update, "environment": environment])
+            [
+                "terminal": terminal, "updateToken": update, "environment": environment,
+                "dismissed": dismissed,
+            ])
         return body != nil
     }
 

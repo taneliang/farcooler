@@ -30,6 +30,16 @@ struct PaneHost: View {
     @ObservedObject var connection: Connection
     let hosts: RunnerStore?
 
+    /// A pane something OUTSIDE this screen has asked to show — today, a tapped
+    /// Live Activity card routed by `FleetView.onOpenURL`.
+    ///
+    /// `terminal` below is only an initial value, so once this view is mounted
+    /// it cannot be pointed anywhere by its arguments; a deep link that arrived
+    /// while a pane was already open would otherwise be silently ignored.
+    /// Cleared here the moment it is honored, so asking twice for the same pane
+    /// works — the second ask is a change again.
+    @Binding var requested: Terminal?
+
     @State private var current: Terminal
     /// Visited panes, oldest first. An array rather than a set so the order is
     /// stable — SwiftUI identity in a `ForEach` is the whole mechanism here.
@@ -51,9 +61,15 @@ struct PaneHost: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    init(terminal: Terminal, connection: Connection, hosts: RunnerStore? = nil) {
+    init(
+        terminal: Terminal,
+        connection: Connection,
+        hosts: RunnerStore? = nil,
+        requested: Binding<Terminal?> = .constant(nil)
+    ) {
         self.connection = connection
         self.hosts = hosts
+        _requested = requested
         _current = State(initialValue: terminal)
         _visited = State(initialValue: [terminal])
     }
@@ -190,7 +206,15 @@ struct PaneHost: View {
         }
         // Which pane is on screen, so a banner about THIS one is suppressed
         // while banners about the others still arrive — see `Notifier`.
-        .onAppear { markVisible() }
+        .onAppear {
+            markVisible()
+            // Also on appear, not only on change: a card tapped at cold launch
+            // sets both the terminal this view is built with and the request,
+            // so the request never changes value after mounting and would sit
+            // there unclaimed, blocking the next tap on the same card.
+            honorRequest()
+        }
+        .onChange(of: requested?.id) { _, _ in honorRequest() }
         .onChange(of: current.id) { _, _ in markVisible() }
         .onDisappear { Notifier.shared.visibleTerminal = nil }
         .onChange(of: scenePhase) { _, phase in
@@ -300,6 +324,15 @@ struct PaneHost: View {
     /// `Equatable` and wants a stable order.
     private var liveTerminalIDs: [String] {
         connection.fleet.workspaces.flatMap(\.terminals).map(\.id).sorted()
+    }
+
+    /// Show the pane a deep link asked for, through the same `select` the tab
+    /// strip and the switcher sheet use — retargeting rather than rebuilding,
+    /// so the panes already mounted keep everything they were holding.
+    private func honorRequest() {
+        guard let terminal = requested else { return }
+        select(terminal)
+        requested = nil
     }
 
     /// Show a pane, mounting it the first time it is asked for.

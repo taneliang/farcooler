@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The watch's own half of the shared container.
+
+         "Shared" means something narrower here than it does on the phone. An
+         App Group container is per DEVICE: this entitlement grants the watch
+         app a container on the watch, and nothing the phone writes ever appears
+         in it. The snapshot reaches the watch over WatchConnectivity and is
+         cached here so the watch has something to draw before the phone
+         answers — and so the watch's own complication, which cannot talk to the
+         phone at all, has a file to read.
+
+         The identifier is nevertheless the SAME string as the phone's, because
+         `SnapshotStore` reads one Info.plist key on every platform and a second
+         spelling would be a second name to keep in step. `$(FARCOOLER_APP_GROUP)`
+         and not anything derived from this target's bundle identifier: a watch
+         app's identifier is the phone app's with `.watchkitapp` appended, so
+         `$(PRODUCT_BUNDLE_IDENTIFIER)` here would name a fifth group.
+
+         Without this key `FileManager.containerURL(forSecurityApplicationGroupIdentifier:)`
+         returns nil, `SnapshotStore.read()` answers "nothing known" exactly as
+         it does when no snapshot has ever arrived, and the watch is empty with
+         nothing anywhere saying why. No `$(AppIdentifierPrefix)`:
+         application-groups values are not team-prefixed the way keychain groups
+         are. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(FARCOOLER_APP_GROUP)</string>
+    </array>
+</dict>
+</plist>

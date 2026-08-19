@@ -32,6 +32,27 @@ struct FleetView: View {
     @State private var landing: Terminal?
     @State private var landingDecided = false
 
+    /// The terminal a tapped Live Activity card asked for, held until a fleet
+    /// arrives that has it.
+    ///
+    /// A card tapped at COLD LAUNCH delivers its URL before the first
+    /// connection has produced a fleet, so looking the id up as it arrives
+    /// finds nothing and the tap opens the app onto whatever it would have
+    /// opened onto anyway. That is indistinguishable from a card that ignored
+    /// the tap, which is the failure this whole task exists to remove — so the
+    /// id is remembered instead and `openRequested` runs again once there is a
+    /// fleet to look in.
+    @State private var pendingTerminal: String?
+
+    /// The terminal to show, handed to `PaneHost` and cleared the moment it
+    /// takes it.
+    ///
+    /// One-shot rather than a record of which terminal the card chose: the tab
+    /// strip moves on afterwards without telling this screen, so a second card
+    /// for the SAME terminal has to read as a new request rather than as the
+    /// value this already holds — which would change nothing and open nothing.
+    @State private var requested: Terminal?
+
     /// Whether to offer a way off the spinner yet. See `waitedLongEnough`.
     @State private var stalled = false
 
@@ -106,6 +127,51 @@ struct FleetView: View {
         .onChange(of: terminalCount) { _, count in
             if count == 0 { landing = nil }
         }
+        // A tapped Live Activity card, arriving as `…://terminal/<id>`.
+        //
+        // Here rather than on the root view, because this is the screen that
+        // owns `landing` and the connection whose fleet the id has to be looked
+        // up in. Routing it from the root would mean a second way to choose a
+        // terminal, threaded down through views that know nothing about one.
+        //
+        // The scheme is deliberately not checked: iOS only delivers URLs whose
+        // scheme this app registered, and each channel registers only its own,
+        // so a canary build cannot be handed a stable link in the first place.
+        .onOpenURL { url in
+            guard url.host() == "terminal" else { return }
+            let terminal = url.lastPathComponent
+            guard !terminal.isEmpty else { return }
+            pendingTerminal = terminal
+            openRequested()
+        }
+    }
+
+    /// Open the terminal a card asked for, if this runner's fleet has it yet.
+    ///
+    /// Runs when the URL arrives and again when a connection has produced a
+    /// fleet, because at a cold launch those are two different moments and the
+    /// first one has nothing to search.
+    private func openRequested() {
+        guard let id = pendingTerminal else { return }
+        let all = connection.fleet.workspaces.flatMap(\.terminals)
+        if let terminal = all.first(where: { $0.id == id }) {
+            pendingTerminal = nil
+            landing = terminal
+            landingDecided = true
+            // Both, and they do different jobs: `landing` is what mounts the
+            // pane host when nothing is on screen yet, and `requested` is what
+            // retargets it when something already is. Setting only the first
+            // would leave a card tapped while another pane was open doing
+            // nothing at all — `PaneHost` reads `landing` once, at init.
+            requested = terminal
+        } else if connection.phase == .connected {
+            // The runner answered and does not have it: the pane is gone, or
+            // the card was about another runner entirely — the URL carries an
+            // id and no host, so there is nothing here to switch to. Dropped
+            // rather than kept waiting, or a pane created much later would be
+            // jumped to long after anyone tapped anything.
+            pendingTerminal = nil
+        }
     }
 
     /// Every screen shown BEFORE a connection exists, wrapped in the ways out of
@@ -170,7 +236,7 @@ struct FleetView: View {
     @ViewBuilder
     private var connected: some View {
         if let landing {
-            PaneHost(terminal: landing, connection: connection, hosts: store)
+            PaneHost(terminal: landing, connection: connection, hosts: store, requested: $requested)
                 // Deliberately NOT keyed on the terminal.
                 //
                 // `TerminalView` owns which terminal it is showing and swaps it
@@ -216,6 +282,10 @@ struct FleetView: View {
         await connection.start(host: target)
         landing = connection.fleet.landingTerminal
         landingDecided = true
+        // After the landing decision, not before: a card tapped at cold launch
+        // is a direct instruction and outranks the guess this screen makes on
+        // its own, and doing it in the other order would let the guess win.
+        openRequested()
     }
 
     // MARK: - Phases
@@ -754,15 +824,21 @@ struct FleetList: View {
             ForEach(shown) { workspace in
                 let numbering = workspace.ordinals()
                 Section {
-                    // Creation order, always. Sorting whatever needs you to the
-                    // top read well until you watched it happen: an agent three
-                    // rows down finishes, every row under it slides, and the tap
-                    // you had already committed to lands on something else. On a
-                    // phone that is worse, not better — the target is smaller
-                    // and the finger is already moving. Attention is a mark on a
-                    // row, and a mark you can find in a list that holds still
-                    // beats one that comes to you by moving the list.
-                    ForEach(workspace.terminals) { terminal in
+                    // The host's order: blocked first, then done, then working,
+                    // oldest first inside each — `farcooler_core::feed::rank`,
+                    // computed once so this list and a widget showing one agent
+                    // cannot disagree about which one matters.
+                    //
+                    // It replaced creation order, and the argument creation
+                    // order won on is still true: a row that moves under a
+                    // finger already travelling toward it is a tap that lands on
+                    // something else. What changed is that the same order now
+                    // has to hold on surfaces with room for ONE agent, where
+                    // "find the marked row" is not an option — and two orders,
+                    // one per surface, is the disagreement the ladder exists to
+                    // prevent. The rank only moves when the agent's own state
+                    // does, so the list still holds still while you read it.
+                    ForEach(workspace.terminals.sorted { $0.sortRank < $1.sortRank }) { terminal in
                         Button { onSelect(terminal) } label: {
                             TerminalRow(terminal: terminal, ordinal: numbering[terminal.id])
                                 // A list row's label otherwise sizes to its
@@ -844,7 +920,11 @@ struct FleetList: View {
                     if hiddenExpanded {
                         ForEach(hidden) { workspace in
                             let numbering = workspace.ordinals()
-                            ForEach(workspace.terminals) { terminal in
+                            // The same host order as the shown workspaces
+                            // above. A hidden workspace sorted differently would
+                            // be a second answer to "which agent matters most"
+                            // living one disclosure triangle away.
+                            ForEach(workspace.terminals.sorted { $0.sortRank < $1.sortRank }) { terminal in
                                 Button { onSelect(terminal) } label: {
                                     TerminalRow(
                                         terminal: terminal, ordinal: numbering[terminal.id])
