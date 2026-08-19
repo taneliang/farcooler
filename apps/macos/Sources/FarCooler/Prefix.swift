@@ -112,6 +112,23 @@ final class PrefixMode: ObservableObject {
             return .handled
         }
 
+        // ⌃⇥ / ⌃⇧⇥: the tab switching every macOS app has, for the thing that
+        // is this app's tab strip — the layout pills across the top of a
+        // worktree. Prefix-less, and before the prefix is considered, for the
+        // same reason `⌃hjkl` is: someone reaching for it is reaching for a
+        // platform convention, and a convention you have to press ⌃B first for
+        // is not the convention.
+        //
+        // Safe to take unconditionally, unlike ⌃hjkl. Those four are real
+        // terminal keys — backspace, newline, kill-line, clear — which is why
+        // they are gated on `tiledPanes`. ⌃⇥ encodes to nothing a program
+        // reads: Tab is 0x09 with or without Control, so intercepting it takes
+        // nothing away from what is running in the pane.
+        if !armed, let command = Self.tabSwitch(event) {
+            command.post()
+            return .handled
+        }
+
         if armed {
             setArmed(false)
             // The prefix again: tmux's escape hatch. Let it through so the
@@ -163,6 +180,20 @@ final class PrefixMode: ObservableObject {
         case "j": return .bottom
         case "k": return .top
         case "l": return .right
+        default: return nil
+        }
+    }
+
+    /// `⌃⇥` forward, `⌃⇧⇥` back, and nothing else.
+    ///
+    /// Matched on the key code rather than the character: ⇥ arrives as 0x09,
+    /// which is also what ⌃I is, and binding this to a character would take
+    /// ⌃I away from every program running in a pane.
+    private static func tabSwitch(_ event: NSEvent) -> TileCommand? {
+        guard event.keyCode == 48 else { return nil }
+        switch event.modifierFlags.intersection(.deviceIndependentFlagsMask) {
+        case .control: return .nextGroup
+        case [.control, .shift]: return .previousGroup
         default: return nil
         }
     }

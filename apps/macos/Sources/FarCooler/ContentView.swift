@@ -414,7 +414,16 @@ struct ContentView: View {
                 guard let client = store.clients[host] else {
                     return "that runner is not connected"
                 }
-                return await client.createWorkspace(repo: repo, task: task, branch: branch, base: base)
+                let created = await client.createWorkspace(
+                    repo: repo, task: task, branch: branch, base: base)
+                if let failure = created.failure { return failure }
+                // Land in the terminal it came up with, exactly as starting a
+                // task does. Creating a worktree is not a filing act — you make
+                // one because you are about to work in it — and `reveal` is the
+                // one place that says what "go to it" means: expand the
+                // workspace in the sidebar, then select its terminal.
+                reveal(created.workspace)
+                return nil
             }
         }
         .sheet(item: $removeWorkspace) { ws in
@@ -1873,6 +1882,7 @@ struct ContentView: View {
                 showQuickCreate = true
             }
         case .addRepository: showAddRepository = true
+        case .openInEditor: openInPreferredEditor()
         case .reload: Task { for client in store.clients.values { await client.refresh() } }
         case .showShortcuts: showShortcuts = true
         case .about: showAbout = true
@@ -1935,6 +1945,39 @@ struct ContentView: View {
                 let target = ws.terminals.first(where: { $0.id == terminal })
             else { return }
             Task { await togglePaneMode(target, in: ws) }
+        }
+    }
+
+    /// Hand the worktree on screen to an editor, from the keyboard.
+    ///
+    /// The same act as clicking the title bar control, routed through the same
+    /// two rules so a click and ⇧⌘E cannot come to different answers: the
+    /// editor is whatever `Editors.preferred` says for THIS worktree's runner,
+    /// and using it does not change the preference — only picking one out of
+    /// the menu does. See `OpenInEditorButton`'s primary action, which this
+    /// mirrors deliberately rather than reimplements.
+    ///
+    /// `refresh()` first, because the menu bar has no `onAppear` to hang it on.
+    /// The control gets its probe when it draws; a shortcut can be the first
+    /// thing pressed after launch, and without this it would report "no editors
+    /// found" on a Mac with four of them installed.
+    private func openInPreferredEditor() {
+        guard let workspace = detailWorkspace else {
+            errorBanner = "Open a worktree first — there is nothing to hand to an editor."
+            return
+        }
+        let editors = Editors.shared
+        editors.refresh()
+        let runner = workspace.host ?? ""
+        guard let editor = editors.preferred(host: runner) else {
+            // Not an error. Nothing is wrong with an app that has never been
+            // told which editor you use — so this opens the place you say so,
+            // exactly as clicking the control with no editor configured does.
+            EditorSettingsLink.open(openSettings)
+            return
+        }
+        Task {
+            if let problem = await editors.open(workspace, with: editor) { editorError = problem }
         }
     }
 

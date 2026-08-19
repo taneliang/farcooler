@@ -15,6 +15,7 @@ enum AppCommand: String {
     case nextAttention
     case newWorkspace
     case addRepository
+    case openInEditor
     case reload
     case showShortcuts
     case about
@@ -80,6 +81,19 @@ struct FarCoolerCommands: Commands {
             // the same two steps is a concept to learn for nothing.
             Button("Close Terminal") { AppCommand.closeTerminal.post() }
                 .keyboardShortcut("w", modifiers: .command)
+            Divider()
+            // The keyboard half of the title bar's editor control, which until
+            // now was the one thing in this app you could only reach with a
+            // mouse. ⇧⌘E rather than a bare ⌘E: this opens another application
+            // on a worktree, which is closer to ⇧⌘R's "act on the project" than
+            // to anything a single-key chord does inside this window.
+            //
+            // Named for the act, not the editor. Which editor it opens is the
+            // one the title bar button would open — see `Editors.preferred` —
+            // and putting "Open in Zed" in the menu bar would make a fixed
+            // string out of a choice that changes per runner.
+            Button("Open in Editor") { AppCommand.openInEditor.post() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
         }
 
         CommandMenu("Terminal") {
@@ -139,8 +153,20 @@ struct FarCoolerCommands: Commands {
             Button("Previous Pane  ⌃B ;") { TileCommand.focusPrevious.post() }
             Divider()
             Button("New Layout  ⌃B c") { TileCommand.newGroup.post() }
-            Button("Next Layout  ⌃B n") { TileCommand.nextGroup.post() }
-            Button("Previous Layout  ⌃B p") { TileCommand.previousGroup.post() }
+            // A layout IS a tab here — the pill bar across the top of a worktree
+            // is a tab strip, and these are the two verbs that walk it. So they
+            // carry what every tabbed app on this machine binds for that:
+            // ⇧⌘] and ⇧⌘[, one shift away from the ⌘]/⌘[ that walk terminals.
+            //
+            // ⌃⇥ and ⌃⇧⇥, the other half of the platform convention, are bound
+            // in `PrefixMode.tabSwitch` instead of here. A ⌃ chord is one the
+            // terminal has a claim on, so it is intercepted where every other
+            // prefix-less ⌃ binding already is, rather than being taken from
+            // the whole app by a menu key equivalent.
+            Button("Next Layout  ⌃B n  ⌃⇥") { TileCommand.nextGroup.post() }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+            Button("Previous Layout  ⌃B p  ⌃⇧⇥") { TileCommand.previousGroup.post() }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
             Divider()
             // Not really a layout verb — nothing about the arrangement
             // changes — but it is scoped to the focused pane exactly the way

@@ -1118,10 +1118,30 @@ final class DaemonClient: ObservableObject {
         _ = await run(["terminal", "send-hex", terminal, "0d"], background: true)
     }
 
-    /// Creates the worktree and branch. Returns the daemon's own message on
-    /// failure, or nil on success — `NewWorkspaceSheet` stays open and shows
-    /// it rather than dismissing as if nothing went wrong.
-    func createWorkspace(repo: String, task: String, branch: String, base: String) async -> String? {
+    /// What creating a worktree came back with.
+    ///
+    /// Both halves, because the caller needs both: the daemon's own message so
+    /// `NewWorkspaceSheet` can stay open and show it rather than dismissing as
+    /// if nothing went wrong, and the workspace that appeared so the window can
+    /// go to it. Returning only the failure meant a worktree was created,
+    /// the sheet closed, and nothing on screen changed — the new work was
+    /// somewhere in the sidebar, collapsed, for you to go and find.
+    struct CreatedWorkspace {
+        let failure: String?
+        /// Nil on failure, and nil in the case where the refresh that followed
+        /// cannot say which workspace is the new one. Callers treat that as
+        /// "created, but do not move the selection" rather than guessing.
+        let workspace: String?
+    }
+
+    func createWorkspace(repo: String, task: String, branch: String, base: String) async
+        -> CreatedWorkspace
+    {
+        // Sampled before the create, and diffed after the refresh — the same
+        // way `startTask` finds the workspace it just made. The daemon does not
+        // report the id it minted, and matching on the name would find the
+        // wrong one the second time a name is reused across projects.
+        let before = Set(fleet.workspaces.map(\.id))
         let failure = await runReportingError([
             "workspace", "create", repo, task, "--branch", branch, "--base", base,
             // A worktree with nothing running in it is a directory. `shell`
@@ -1131,7 +1151,10 @@ final class DaemonClient: ObservableObject {
             "--terminal", "shell",
         ])
         await refresh()
-        return failure
+        guard failure == nil else { return CreatedWorkspace(failure: failure, workspace: nil) }
+        return CreatedWorkspace(
+            failure: nil,
+            workspace: fleet.workspaces.first { !before.contains($0.id) }?.id)
     }
 
     func hideWorkspace(_ workspace: String) async {

@@ -14,7 +14,9 @@ import SwiftUI
 ///   ⌘T / ⌘W   new and close, as in every tabbed app
 ///   ⌘1…⌘9     jump to the nth thing, as in every browser
 ///   ⌘[ / ⌘]   back and forward through them
-///   ⌘R        reload, which for a terminal means restart
+///   ⌃⇥ / ⇧⌘]  next tab, on both spellings the platform uses — and a layout
+///             IS the tab here, which is why these walk the pill bar
+///   ⌘0        reload the fleet
 ///
 /// Tiling is the exception, and deliberately so. It uses a tmux PREFIX — ⌃B, then
 /// a key — for two reasons. The ⌘ chords are gone: a terminal wants nearly all of
@@ -57,6 +59,15 @@ enum Shortcut {
             ]
         ),
         (
+            "Layouts — the tabs across the top",
+            [
+                Item(keys: "⌃⇥", action: "Next layout"),
+                Item(keys: "⌃⇧⇥", action: "Previous layout"),
+                Item(keys: "⇧⌘]", action: "The same, on the other convention"),
+                Item(keys: "⇧⌘[", action: "Previous layout"),
+            ]
+        ),
+        (
             "Tiling — press ⌃B, then",
             [
                 Item(keys: "z", action: "Zoom the focused pane; again to come back"),
@@ -80,6 +91,7 @@ enum Shortcut {
             [
                 Item(keys: "⌘N", action: "New task — describe it and go"),
                 Item(keys: "⇧⌘R", action: "Add repository"),
+                Item(keys: "⇧⌘E", action: "Open this worktree in your editor"),
             ]
         ),
         (
