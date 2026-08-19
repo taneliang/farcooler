@@ -12,6 +12,8 @@ struct AddDeviceView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var store = CeremonyStore()
     @StateObject private var scanner = CodeScanner()
+    /// The ceremony's one precondition on this Mac. See ``toolsFirst``.
+    @StateObject private var tools = CommandLineTools()
     @ObservedObject private var account = Account.shared
     @ObservedObject private var runners = Runners.shared
 
@@ -22,20 +24,88 @@ struct AddDeviceView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            switch store.phase {
-            case .scanning: scanning
-            case .confirming(let confirmation): confirming(confirmation)
-            case .enrolling: working
-            case .showingManifest(let manifest): reply(manifest)
-            case .refused(let refusal): RefusalView(refusal: refusal, retry: retry, done: dismissed)
-            case .done(let sentence): finished(sentence)
-            case .showingOffer: EmptyView()
+            if tools.state == .installed {
+                switch store.phase {
+                case .scanning: scanning
+                case .confirming(let confirmation): confirming(confirmation)
+                case .enrolling: working
+                case .showingManifest(let manifest): reply(manifest)
+                case .refused(let refusal):
+                    RefusalView(refusal: refusal, retry: retry, done: dismissed)
+                case .done(let sentence): finished(sentence)
+                case .showingOffer: EmptyView()
+                }
+            } else {
+                toolsFirst
             }
         }
         .padding(20)
         .frame(width: 460)
         .task { await prepare() }
         .onChange(of: scanner.scanned?.payload) { _, _ in read() }
+        // `prepare` returned without asking for the camera while the tools were
+        // missing, so installing them is what has to start the ceremony.
+        .onChange(of: tools.state) { _, state in
+            if state == .installed { Task { await prepare() } }
+        }
+    }
+
+    // MARK: - The one precondition
+
+    /// Adding a device is refused until this Mac can be reached by the line it
+    /// is about to write.
+    ///
+    /// Key A's line carries a forced command of
+    /// `~/.local/bin/farcoolerd-<channel> --stdio …` — `forced_program` in
+    /// `crates/fence/src/lib.rs`, which names the binary and deliberately has no
+    /// fallback, because an install has one correct answer. Those links are
+    /// this app's to create and they are OPT-IN: the first-launch alert fires at
+    /// most once ever, sets its flag the moment it decides to show, and a "Not
+    /// Now" is therefore permanent.
+    ///
+    /// Enrolling anyway wrote a line naming a path that did not exist. sshd ran
+    /// nothing, the pipe closed, and the new device reported "Far Cooler isn't
+    /// installed" — about THIS Mac, the one machine the person holding the phone
+    /// cannot see and did not think they were configuring. Refusing here is the
+    /// only place that failure can still be named where it lives.
+    private var toolsFirst: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Install the command-line tools first")
+                .font(.headline)
+            Text(
+                "A device you add reaches this Mac by running "
+                    + "\(CommandLineTools.tools.map(\.link).joined(separator: " and ")) over SSH, "
+                    + "so it can’t connect until Far Cooler has added them to ~/.local/bin."
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if let obstacle {
+                Text(obstacle)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: dismissed).keyboardShortcut(.cancelAction)
+                Button("Install") { tools.install() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(obstacle != nil)
+            }
+        }
+    }
+
+    /// What is in the way, when something is — a path this app will not
+    /// overwrite, or a build with no bundle to link into. Both are sentences
+    /// already; neither is anything this screen can fix by trying harder.
+    private var obstacle: String? {
+        switch tools.state {
+        case .conflict(let sentence), .unavailable(let sentence): sentence
+        case .installed, .notInstalled: nil
+        }
     }
 
     // MARK: - Scanning
@@ -240,6 +310,10 @@ struct AddDeviceView: View {
     }
 
     private func prepare() async {
+        // Nothing is resolved and the camera is never asked for while the
+        // ceremony cannot succeed. A permission prompt raised for a scan that
+        // was going to be refused anyway is a prompt people deny for good.
+        guard tools.state == .installed else { return }
         grantable = await Task.detached {
             var rows: [CeremonyStore.RunnerRow] = [
                 // Only the runner being granted from is checked by default.

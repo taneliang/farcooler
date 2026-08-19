@@ -3,6 +3,7 @@
 @preconcurrency import AVFoundation
 import AppKit
 import SwiftUI
+import Vision
 
 /// One lane for every blocking capture-session lifecycle call.
 ///
@@ -30,17 +31,106 @@ final class CaptureSessionQueue: @unchecked Sendable {
     }
 }
 
+/// The first QR payload out of a stream of camera frames.
+///
+/// **The Mac decodes its own frames; the phone does not.** It is tempting to
+/// mirror the iOS scanner, which hands `AVCaptureMetadataOutput` a
+/// `metadataObjectTypes` of `[.qr]` and is done. That output reads
+/// machine-readable codes on iOS ONLY. On macOS the very same class offers
+/// `face`, `humanBody`, `humanHead`, `humanHand`, `catHead`, `dogBody` and
+/// `salientObject` — the whole list, every one of them a body, and not one code
+/// symbology anywhere in it.
+///
+/// Asking it for `.qr` therefore raises `NSInvalidArgumentException`, and that
+/// is worse than it sounds: an Objective-C exception is not a Swift error, no
+/// `catch` here can stop it, it skips every `defer` on the way out — leaving the
+/// session wedged mid-configuration with the camera never started — and AppKit
+/// swallows it at the run loop, so the app dies seconds later somewhere
+/// unrelated with a backtrace pointing at innocent SwiftUI layout. It shipped
+/// once. The fix is not to guard the assignment; it is to not have an API here
+/// that cannot do this job.
+///
+/// Vision reads codes on both platforms, so this end reads its own frames.
+final class FrameReader: NSObject, @unchecked Sendable {
+    /// Called once, on the frame queue, with the payload and the instant it was
+    /// read — the instant belongs to the frame rather than to whenever the main
+    /// actor gets round to it, because every ceremony call is scored on
+    /// `held_ms` by this device's own clock.
+    private let read: @Sendable (String, Date) -> Void
+    private let lock = NSLock()
+    private var claimed = false
+
+    init(read: @escaping @Sendable (String, Date) -> Void) {
+        self.read = read
+        super.init()
+    }
+
+    /// Take the right to report the one code, if it is still going.
+    ///
+    /// Frames arrive faster than the sheet reacts to them, so the decision has
+    /// to be made here, on the frame queue, and not by a `scanned == nil` check
+    /// on the main actor that three frames can pass at once.
+    func claim() -> Bool {
+        lock.withLock {
+            if claimed { return false }
+            claimed = true
+            return true
+        }
+    }
+
+    /// Let this reader report one more code. "Try Again" on a refusal.
+    ///
+    /// Without this a retry re-enters a still-claimed reader, and the camera
+    /// runs forever without ever reporting the code being held up to it.
+    func resume() {
+        lock.withLock { claimed = false }
+    }
+
+    /// The payload of the one QR code in an image, if there is one.
+    ///
+    /// Free of the camera on purpose, so a test can hand it a code this app
+    /// generated and check that this app reads it back.
+    static func payload(in image: CGImage) -> String? {
+        decode(VNImageRequestHandler(cgImage: image, options: [:]))
+    }
+
+    static func payload(in buffer: CVPixelBuffer) -> String? {
+        decode(VNImageRequestHandler(cvPixelBuffer: buffer, options: [:]))
+    }
+
+    private static func decode(_ handler: VNImageRequestHandler) -> String? {
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr]
+        try? handler.perform([request])
+        return request.results?.compactMap(\.payloadStringValue).first
+    }
+}
+
+extension FrameReader: AVCaptureVideoDataOutputSampleBufferDelegate {
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+            let payload = Self.payload(in: buffer),
+            claim()
+        else { return }
+        read(payload, Date())
+    }
+}
+
 /// The camera, pointed at one code.
 ///
 /// Stops after the first payload it reads. A scanner that keeps firing is a
 /// scanner that reads the second code in the frame — and during onboarding
 /// there are frequently two, because the other device is showing one back.
 ///
-/// `@MainActor` throughout, with the AVFoundation delegate hopping onto it: the
+/// `@MainActor` throughout, with the frame reader hopping onto it: the
 /// published value drives a sheet, and a sheet driven from a capture queue is a
 /// crash waiting for a slow frame.
 @MainActor
-final class CodeScanner: NSObject, ObservableObject {
+final class CodeScanner: ObservableObject {
     /// The payload of the one code this scanner read, and when it read it.
     ///
     /// The instant travels WITH the payload because every ceremony call takes
@@ -56,6 +146,12 @@ final class CodeScanner: NSObject, ObservableObject {
 
     let session = AVCaptureSession()
     private let lifecycle = CaptureSessionQueue()
+    /// Decoding is slower than the frame rate and has no business on the main
+    /// thread or on the lane that `startRunning` blocks.
+    private let frames = DispatchQueue(label: "com.farcooler.scanner.frames")
+    /// Held because `setSampleBufferDelegate` does not retain its delegate, and
+    /// because "Try Again" has to re-arm this exact reader.
+    private var reader: FrameReader?
     private var configured = false
 
     /// Ask for the camera, and start if it is granted.
@@ -93,6 +189,7 @@ final class CodeScanner: NSObject, ObservableObject {
     /// at a fresh code.
     func rescan() {
         scanned = nil
+        reader?.resume()
         Task { await start() }
     }
 
@@ -113,45 +210,57 @@ final class CodeScanner: NSObject, ObservableObject {
             return false
         }
 
-        session.beginConfiguration()
-        defer { session.commitConfiguration() }
-        guard session.canAddInput(input) else {
-            problem = "The camera is in use by another app."
-            return false
-        }
-        session.addInput(input)
+        let output = AVCaptureVideoDataOutput()
+        // Decoding a frame takes longer than the next one takes to arrive. A
+        // backlog would have this reading a code off a frame the camera stopped
+        // seeing seconds ago, so late frames are dropped rather than queued.
+        output.alwaysDiscardsLateVideoFrames = true
 
-        let output = AVCaptureMetadataOutput()
-        guard session.canAddOutput(output) else {
-            problem = "The camera can’t scan codes."
+        let reader = FrameReader { [weak self] payload, at in
+            Task { @MainActor in
+                guard let self, self.scanned == nil else { return }
+                self.scanned = (payload, at)
+                self.stop()
+            }
+        }
+        output.setSampleBufferDelegate(reader, queue: frames)
+        self.reader = reader
+
+        if let failure = attach(input, output) {
+            problem = failure
             return false
         }
-        session.addOutput(output)
-        output.setMetadataObjectsDelegate(self, queue: .main)
-        // Set AFTER the output is added. Before it, the list of types the
-        // session supports is empty and assigning `.qr` throws.
-        output.metadataObjectTypes = [.qr]
 
         configured = true
         return true
     }
-}
 
-extension CodeScanner: AVCaptureMetadataOutputObjectsDelegate {
-    nonisolated func metadataOutput(
-        _ output: AVCaptureMetadataOutput,
-        didOutput objects: [AVMetadataObject],
-        from connection: AVCaptureConnection
-    ) {
-        let payloads = objects
-            .compactMap { $0 as? AVMetadataMachineReadableCodeObject }
-            .compactMap(\.stringValue)
-        guard let first = payloads.first else { return }
-        Task { @MainActor in
-            guard self.scanned == nil else { return }
-            self.scanned = (first, Date())
-            self.stop()
+    /// Put the camera and the frame reader on the session, in one transaction.
+    ///
+    /// Returns the sentence to show if either could not be added, and nil if
+    /// both went on.
+    private func attach(
+        _ input: AVCaptureDeviceInput, _ output: AVCaptureVideoDataOutput
+    ) -> String? {
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+
+        guard session.canAddInput(input) else { return "The camera is in use by another app." }
+        session.addInput(input)
+        guard session.canAddOutput(output) else { return "The camera can’t scan codes." }
+        session.addOutput(output)
+
+        // Said out loud rather than left to the default, because a mirrored QR
+        // code does not decode at all — it is not a rotation, it is a different
+        // symbol. The preview layer may still mirror for the person on this
+        // side of the camera; these frames must not.
+        if let connection = output.connection(with: .video),
+            connection.isVideoMirroringSupported
+        {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = false
         }
+        return nil
     }
 }
 

@@ -120,12 +120,38 @@ enum Enrollment {
         key: String, label: String, clientID: String, scope: String, shell: Bool,
         to runner: CeremonyRunner
     ) async -> (ok: Bool, output: String) {
-        var arguments = [
-            "--json", "--runner", runner.id, "client", "enroll",
+        await CLI.run(
+            arguments(
+                key: key, label: label, clientID: clientID, scope: scope, shell: shell,
+                runner: runner.id))
+    }
+
+    /// The command line for one enrollment.
+    ///
+    /// Split out so the one decision in it can be tested without a runner to
+    /// write to: **this Mac takes no `--runner` at all.**
+    ///
+    /// The empty target is how the whole app names this Mac — the local daemon,
+    /// over a Unix socket, no ssh anywhere in it — and every other caller says
+    /// so by OMITTING the flag: `DaemonClient`, `Runners` and
+    /// `RunnerSettingsStore` all spell it `target.isEmpty ? [] : [...]`. This
+    /// was the one place that passed it unconditionally, and `--runner ""` does
+    /// not mean "local" to the CLI. clap hands the command `Some("")`, which is
+    /// a target like any other, so it took the ssh path with an empty
+    /// destination and failed with "Could not reach  over ssh." — the double
+    /// space being the whole of the runner's name, and the phone's key never
+    /// reaching the Mac it was being added to.
+    static func arguments(
+        key: String, label: String, clientID: String, scope: String, shell: Bool, runner: String
+    ) -> [String] {
+        var arguments = ["--json"]
+        if !runner.isEmpty { arguments += ["--runner", runner] }
+        arguments += [
+            "client", "enroll",
             "--key", key, "--label", label, "--client-id", clientID, "--scope", scope,
         ]
         if shell { arguments.append("--shell-access") }
-        return await CLI.run(arguments)
+        return arguments
     }
 
     /// The sentence shown when some runners could not be written to.
