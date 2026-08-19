@@ -609,11 +609,25 @@ struct TerminalRow: View {
     /// `WorkspaceSection.usable`, which this mirrors row by row.
     var usable: Bool = true
 
-    /// The status, and only when it is not the boring case.
-    private var meta: String? {
-        guard status.wantsAttention || status == .working else { return nil }
-        return terminal.displayDuration.map { "\(status.label) \($0)" } ?? status.label
+    /// Whether the status is worth saying at all, which most of the time it
+    /// is not. Asked OUTSIDE the row's clock, because it is a question about
+    /// the status and not about the time — a slot that appears and disappears
+    /// on a timer would take its spacing with it.
+    private var showsMeta: Bool { status.wantsAttention || status == .working }
+
+    /// The status, and how long it has held.
+    ///
+    /// `now` comes from the row's own clock rather than from `Date()` — see
+    /// `Ticking`, and `Terminal.displayDuration(at:)` for what reading the
+    /// wall clock inside a view costs.
+    private func meta(at now: Date) -> String {
+        terminal.displayDuration(at: now).map { "\(status.label) \($0)" } ?? status.label
     }
+
+    /// Whether this row's clock is running. Only these two states have a
+    /// duration to show at all, so every other row is drawn once and left
+    /// alone.
+    private var ticking: Bool { status == .working || status == .blocked }
 
     /// The gap between the status column and the text beside it.
     ///
@@ -647,12 +661,14 @@ struct TerminalRow: View {
                         .layoutPriority(1)
                 }
 
-                if let meta {
-                    Text(meta)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .layoutPriority(1)
+                if showsMeta {
+                    Ticking(paused: !ticking) { now in
+                        Text(meta(at: now))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .layoutPriority(1)
                 }
 
                 Spacer(minLength: 0)
@@ -988,9 +1004,11 @@ struct WorkspaceDetail: View {
 
                 Spacer()
 
-                Text(t.displayDuration.map { "\(t.status.label) \($0)" } ?? t.status.label)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                Ticking(paused: t.status != .working && t.status != .blocked) { now in
+                    Text(t.displayDuration(at: now).map { "\(t.status.label) \($0)" } ?? t.status.label)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))

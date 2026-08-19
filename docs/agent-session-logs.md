@@ -70,6 +70,29 @@ wait for a `turn_duration` that may never arrive.** It is not a version
 difference either: files with and without it span the same CLI versions
 (2.1.220 through 2.1.233).
 
+**Claude narrates while it works too**, and it is most of what it says.
+Counted 2026-08-18 across the 40 largest transcripts on this machine, by
+`stop_reason` and the block types in `message.content`:
+
+| count | `stop_reason` | blocks |
+| --- | --- | --- |
+| 18064 | `tool_use` | `tool_use` |
+| 7025 | `tool_use` | `thinking` |
+| **5623** | **`tool_use`** | **`text`** |
+| 696 | `end_turn` | `text` |
+| 213 | `end_turn` | `thinking` |
+| 30 | `stop_sequence` | `text` |
+| 4 | — | `thinking` / `text` |
+| 2 | `tool_use` | `text` + `thinking` + `tool_use` |
+
+So a `text` block is nearly always mid-turn narration — *"Fails as expected.
+Implementing."*, *"Task 2 landed. Verifying, then removing the shared-file
+contention before the next wave."* — written on its own `assistant` record one
+line before the tool call it describes, and it outnumbers closing prose eight
+to one. Prose and a tool call share a record twice in 31 thousand, so a reader
+that must choose between them is choosing on the 5623 records where there is
+nothing to choose.
+
 **Other record types seen:** `assistant`, `attachment`, `ai-title`,
 `agent-name`, `mode`, `permission-mode`, `last-prompt`, `queue-operation`,
 `file-history-snapshot`, `file-history-delta`, `bridge-session`, `pr-link`.
@@ -193,6 +216,16 @@ old rollouts stay on disk, and a user can downgrade.
 
 `session_meta` flattened at the same time: its fields sit directly on
 `payload` in 0.147.0 where older rollouts nest them under `payload.payload`.
+
+**Codex narrates while it works, in BOTH shapes.** Counted 2026-08-18 across
+324 rollouts: `agent_message` splits 901 `final_answer` to 498 `commentary`,
+and `item_completed`/`AgentMessage` splits 32 to 161. Commentary is a whole
+sentence about what the agent is about to do — *"I'm using the `ios-fix`
+workflow because this is a live-device iOS layout bug: I'll inspect the current
+phone state…"* — written as the turn goes, which is the only prose that exists
+while anyone is watching. The agent's private thinking is **not** this: codex
+writes that as its own `agent_reasoning` payload, 896 records, which the parser
+does not read.
 
 `session_meta.originator` is `codex-tui` for a real interactive session and
 `farcooler`/`vscode` for a programmatic one — useful for ignoring panes that are

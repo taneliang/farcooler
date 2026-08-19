@@ -34,7 +34,27 @@ pub enum TurnEvent {
     /// Prose the agent emitted, verbatim. The only thing that belongs in a
     /// transcript: it is what the agent SENT, in its own words, with no
     /// parser's verb in front of it.
-    Said { text: String },
+    ///
+    /// Both the running narration and the closing answer, because a transcript
+    /// that only ever accepted the answer was EMPTY for the whole time anybody
+    /// was watching — a final answer does not exist while a turn is in
+    /// progress, so a short codex turn said nothing at all until it was over,
+    /// which reads exactly like an integration nobody built.
+    Said {
+        text: String,
+        /// Whether this is the turn's closing answer rather than narration on
+        /// the way there.
+        ///
+        /// The distinction each agent draws in its own words: claude's
+        /// `stop_reason == "end_turn"`, codex's `phase == "final_answer"`.
+        /// Cursor draws none, so nothing it says is marked — see its parser.
+        ///
+        /// It survives because the two are read DIFFERENTLY, not because it
+        /// might be useful later: narration is a stream, so the window takes
+        /// its tail, and an answer is a summary, so the window takes its head.
+        /// See `feed::Feed::conclude`.
+        conclusion: bool,
+    },
     /// A tool action. NOT transcript — a row's fallback "current action" line
     /// for an agent with no task list, which is codex, cursor, and most claude
     /// sessions.

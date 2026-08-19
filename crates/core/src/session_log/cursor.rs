@@ -82,8 +82,8 @@ fn turn_start(record: &Value) -> Option<TurnEvent> {
 }
 
 /// An assistant record's `content` array, one event per block worth naming.
-/// Prose (`type: "text"`) becomes `Said`, matching what codex's
-/// `agent_message`/`final_answer` does for the same thing. A `tool_use`
+/// Prose (`type: "text"`) becomes `Said`, matching what claude's `text` blocks
+/// and codex's `agent_message` do for the same thing. A `tool_use`
 /// block becomes a named action (see `tool_step`). The two can appear in the
 /// SAME record -- the fixture's own line 2 is prose ("Running that command
 /// now.") immediately followed by a `Shell` call -- which is why this
@@ -100,7 +100,13 @@ fn block_step(block: &Value) -> Option<TurnEvent> {
     match block.get("type").and_then(Value::as_str) {
         Some("text") => {
             let text = block.get("text").and_then(Value::as_str)?;
-            Some(TurnEvent::Said { text: text.to_string() })
+            // Nothing marks a conclusion. Cursor writes no `stop_reason` and
+            // no `phase` -- its only turn-terminal record is `turn_ended`, a
+            // LINE later, and `parse_line` reads one line at a time by
+            // contract. So everything cursor says is read as narration, which
+            // costs a finished pane nothing: the last thing it said is still
+            // the last thing in the window.
+            Some(TurnEvent::Said { text: text.to_string(), conclusion: false })
         }
         Some("tool_use") => tool_step(block),
         // `thinking` or anything else undocumented falls through -- only
@@ -225,7 +231,7 @@ mod tests {
         assert_eq!(
             parse_line(line(COMPLETE_TURN, 1)),
             vec![
-                TurnEvent::Said { text: "Running that command now.".to_string() },
+                TurnEvent::Said { text: "Running that command now.".to_string(), conclusion: false },
                 TurnEvent::Did { verb: "shell".to_string(), object: "Write banana to fruit.txt".to_string() },
             ]
         );
@@ -237,7 +243,7 @@ mod tests {
         // tool_use.
         assert_eq!(
             parse_line(line(COMPLETE_TURN, 2)),
-            vec![TurnEvent::Said { text: "Done. `fruit.txt` now contains `banana`.".to_string() }]
+            vec![TurnEvent::Said { text: "Done. `fruit.txt` now contains `banana`.".to_string(), conclusion: false }]
         );
     }
 

@@ -93,3 +93,39 @@ struct AttentionBadge: View {
         }
     }
 }
+
+/// Text that recomputes once a second, and nothing else on the screen with it.
+///
+/// The clock a row shows — `Working 12m` — is a function of the wall clock,
+/// which is the one input SwiftUI cannot observe. Nothing about a working row
+/// changes from one second to the next, so the view is never invalidated, and
+/// the duration froze at whatever it said when some unrelated event last
+/// forced a redraw. Clicking a different pane was that event, which is exactly
+/// how the complaint was phrased. A `TimelineView` keeps a clock of its own
+/// and hands the time in, so the string is a function of an input that moves.
+///
+/// Scoped to ONE label, deliberately. A timeline wrapped around the sidebar
+/// would rebuild every row of every workspace once a second to move a handful
+/// of characters. `WorkingRow` in `AgentRows` already draws the same
+/// distinction, for the same reason.
+///
+/// One second, because that is as often as the string can change: a redraw at
+/// the display's refresh rate would be sixty of them to move a number sixty
+/// times less often.
+///
+/// `paused` is for a row whose clock is not running at all — an idle or
+/// finished terminal has no duration to show, and scheduling a wake-up per
+/// second per resting row would be the sidebar paying for a number that is not
+/// there.
+struct Ticking<Content: View>: View {
+    var paused: Bool = false
+    @ViewBuilder let content: (Date) -> Content
+
+    var body: some View {
+        if paused {
+            content(.now)
+        } else {
+            TimelineView(.periodic(from: .now, by: 1)) { context in content(context.date) }
+        }
+    }
+}

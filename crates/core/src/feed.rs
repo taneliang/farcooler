@@ -4,10 +4,11 @@
 //! say what. The session logs know exactly what, and this is where that becomes
 //! two things a person can read at a glance, kept apart on purpose:
 //!
-//! * **The transcript** — a [`Feed`] of what the agent SAID, in its own words,
-//!   with no verb in front of it. Only prose reaches it. Tool calls used to,
-//!   prefixed with the tool's own lowercased name, which is how a lock screen
-//!   came to read `taskupdate` and `says Done.`
+//! * **The transcript** — a [`Feed`], which is a WINDOW onto what the agent
+//!   has been saying, in its own words, with no verb in front of it. Only
+//!   prose reaches it. Tool calls used to, prefixed with the tool's own
+//!   lowercased name, which is how a lock screen came to read `taskupdate`
+//!   and `says Done.`
 //! * **The signal line** — one line saying where the agent IS: the question it
 //!   is blocked on, or its position in its own task list, or what it is doing
 //!   right now. See [`signal`] for the priority and [`line`] for the rung that
@@ -16,21 +17,27 @@
 //! Four decisions live here rather than in each client, and each one is a
 //! disagreement waiting to happen if it moves:
 //!
-//! * **Three steps.** A sidebar row is about forty characters wide and a Live
-//!   Activity is smaller. The fourth step evicts the first, so what is shown is
-//!   always the most recent thing the agent said.
+//! * **Three LINES, not three messages.** A sidebar row is about forty
+//!   characters wide and a Live Activity is smaller, so three lines is what
+//!   there is room for. What fills them is the tail of the prose, wrapped —
+//!   new text pushes old text up, the way watching a terminal does. It used to
+//!   be the last three MESSAGES, each cut to its first forty characters, which
+//!   is a different thing wearing the same shape: three fragments, none of
+//!   them a sentence, and the complaint that named this stage.
 //! * **Redaction, on the way in.** These strings are tool arguments and
 //!   agent-authored prose — a shell command, a file path, a task's phrase — and
 //!   a shell command is exactly where a token lives. They reach a phone's lock
 //!   screen through the relay, so they pass through [`crate::redact::redact`]
 //!   BEFORE they are stored, not before they are displayed. [`Step`] and
-//!   [`Phrase`] have private fields and [`cleaned`] is the only way through,
-//!   which is what makes that unbypassable rather than merely conventional.
+//!   [`Phrase`] have private fields, and [`Feed::append`] and [`cleaned`] are
+//!   the only ways to make one — which is what makes that unbypassable rather
+//!   than merely conventional.
 //! * **Paths narrowed to their last segment, in that same place and for that
 //!   same reason.** See [`narrow_paths`].
-//! * **Truncation, here in the daemon.** A Mac, a phone and a watch must not
-//!   each decide where the ellipsis goes, so the string that goes on the wire is
-//!   already the string that goes in the row.
+//! * **Wrapping and truncation, here in the daemon.** A Mac, a phone and a
+//!   watch must not each decide where the line breaks or where the ellipsis
+//!   goes, so the strings that go on the wire are already the strings that go
+//!   in the rows.
 //!
 //! Nothing here clears a feed. A finished agent KEEPS what it said: "what did
 //! it do while I was away" is exactly when the summary is worth most.
@@ -63,19 +70,34 @@ use farcooler_protocol::v1::AgentActivity;
 use crate::activity::exit_wants_attention;
 use crate::redact;
 
-/// How many steps a feed holds.
+/// How many display lines the window shows.
 ///
 /// Three. A row is one line of a sidebar and a Live Activity is smaller; a
 /// fourth would either shrink the other three or push one off a screen that
 /// never had room for it.
 pub const CAPACITY: usize = 3;
 
-/// How wide one step's line may be, in CHARACTERS.
+/// How wide one display line is, in CHARACTERS.
 ///
 /// Roughly the width of a sidebar row. Counted in characters rather than bytes
 /// because that is what a person reads and what a layout is measured in — and
 /// because slicing a byte count would land inside a multi-byte character.
 pub const WIDTH: usize = 40;
+
+/// The most of one message that can reach the window, in characters.
+///
+/// The bound on everything here, and it is worth being explicit about why it
+/// is enough. Only [`CAPACITY`] lines are ever kept, each holding at most
+/// [`WIDTH`] characters plus the space a break eats, so no more than
+/// `CAPACITY * (WIDTH + 1)` characters of a message can ever be on screen —
+/// twice that is generous by a factor of two, which is what makes the wrap
+/// fall where it would have fallen if the whole message had been wrapped, and
+/// leaves a part-word at the cut with nowhere to land.
+///
+/// This matters because it runs per pane on a loop, and an agent writes a lot
+/// of prose: a `Feed` holds three short strings whatever it is fed, and the
+/// work per message is linear in the message rather than in the turn.
+const WINDOW: usize = 2 * CAPACITY * (WIDTH + 1);
 
 /// `text` fit for a row: redacted, flattened, narrowed and cut to `max`.
 ///
@@ -87,26 +109,32 @@ pub const WIDTH: usize = 40;
 /// first would hand it one very long line instead. [`narrow_paths`] comes after
 /// that flattening, because it reads the tokens of exactly one line.
 ///
-/// Every user-visible string this module produces goes through here, and the
-/// types that hold one ([`Step`], [`Phrase`]) keep their fields private so
-/// there is no other way in. That is what makes the guarantee unbypassable
-/// rather than conventional — and the guarantee is about what those types
-/// CONTAIN, not about which argument a caller happened to put a string in.
+/// Every user-visible string this module produces goes through these three
+/// passes, and the types that hold one ([`Step`], [`Phrase`]) keep their
+/// fields private so there is no other way in. A [`Phrase`] is one row, so it
+/// takes them here and ends in a cut; a [`Step`] is one line of several, so it
+/// takes them in [`Feed::append`] and ends in a wrap. Two callers, one order,
+/// no third way. That is what makes the guarantee unbypassable rather than
+/// conventional — and the guarantee is about what those types CONTAIN, not
+/// about which argument a caller happened to put a string in.
 fn cleaned(text: &str, max: usize) -> String {
     clipped(&narrow_paths(&one_line(&redact::redact(text))), max)
 }
 
-/// One thing an agent said, already redacted and already short.
+/// One display line of the window, already redacted and already a row wide.
 ///
-/// Prose, verbatim, with no verb in front of it — the transcript is only what
-/// the agent SENT. A tool call is not one of these: it is a [`Phrase`] on the
-/// signal line, which is where "what it is doing" belongs.
+/// A line of the agent's prose, verbatim, with no verb in front of it — the
+/// transcript is only what the agent SENT. It is a LINE and not a message:
+/// long prose spans several of these, and a short sentence is one. A tool call
+/// is neither: it is a [`Phrase`] on the signal line, which is where "what it
+/// is doing" belongs.
 ///
 /// The field is private on purpose. Every string in here is bound for a lock
 /// screen, and a public field would let a caller construct a `Step` that never
-/// passed through [`cleaned`] — which is the failure this module exists to
-/// prevent, not a style preference. [`Feed::push`] is the only constructor
-/// there is.
+/// passed through redaction — which is the failure this module exists to
+/// prevent, not a style preference. [`Feed::append`] is the only constructor
+/// there is, and it is private too: [`Feed::push`] and [`Feed::conclude`] both
+/// go through it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Step {
     text: String,
@@ -257,7 +285,17 @@ pub fn signal(plan: Option<&Plan>, subagents: usize, action: Option<&Phrase>) ->
     action.filter(|action| !action.is_empty()).map(|action| action.as_str().to_string())
 }
 
-/// The last [`CAPACITY`] steps, oldest first.
+/// The last [`CAPACITY`] display lines of what the agent has been saying.
+///
+/// A window, not a list. Prose arrives, is wrapped to [`WIDTH`], and the lines
+/// join the end of the window; the fourth line from the bottom falls off the
+/// top. Watching it is watching a terminal scroll.
+///
+/// Nothing clears it. A finished agent KEEPS what it said, because "what did
+/// it do while I was away" is exactly when the summary is worth most — which
+/// is also why a row never changes HEIGHT when a turn ends: three lines stay
+/// three lines, and a sidebar that rearranges itself while it is being read is
+/// worse than a long one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Feed {
     /// A `Vec` rather than a `VecDeque`: it holds three elements, so shifting
@@ -265,27 +303,83 @@ pub struct Feed {
     steps: Vec<Step>,
 }
 
+/// Which end of a message survives when it is longer than the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Keep {
+    /// Its opening. An answer is a summary, and a summary says what it did in
+    /// its first sentence; what follows is the detail and the offer to do more.
+    Head,
+    /// Its ending. Narration is a stream being watched, and the newest thing
+    /// in it is the whole reason to look.
+    Tail,
+}
+
 impl Feed {
-    /// Record one thing the agent said, evicting the oldest when full.
+    /// Record narration — prose the agent wrote on its way through a turn.
     ///
-    /// Cleaning happens in [`cleaned`] and nowhere else; see it for the order
-    /// the passes run in and why.
+    /// The window takes its tail, so a long paragraph reads as the sentence it
+    /// is on now rather than as the sentence it opened with.
     pub fn push(&mut self, text: &str) {
-        self.steps.push(Step { text: cleaned(text, WIDTH) });
+        self.append(text, Keep::Tail);
+    }
+
+    /// Record the turn's closing answer.
+    ///
+    /// Same window, one difference: a long answer enters from its START. It is
+    /// a summary rather than a stream, and an agent's summary opens with what
+    /// it did — "I've added the tail window and fixed the stale action" — then
+    /// runs on into detail and into offers of further work, which is exactly
+    /// what three lines have no room for. This is the only thing the
+    /// narration/conclusion distinction is kept for; see
+    /// `session_log::TurnEvent::Said`.
+    ///
+    /// Nothing is cleared first. The narration above an answer is what the
+    /// agent was doing to reach it, and it reads as a small transcript rather
+    /// than as clutter — and clearing would shrink the row at the moment the
+    /// turn ended.
+    pub fn conclude(&mut self, text: &str) {
+        self.append(text, Keep::Head);
+    }
+
+    /// The one door in, and the only place a [`Step`] is made.
+    ///
+    /// Redaction runs on the WHOLE message, before anything is thrown away:
+    /// `redact` reads whitespace-separated tokens, so cutting first could
+    /// present it half a token and hide the shape it was looking for. Only
+    /// then is the message cut to [`WINDOW`] — from whichever end will be
+    /// shown — and wrapped.
+    ///
+    /// See [`cleaned`] for why the passes run in the order they do; this is
+    /// the same order with the final cut replaced by a wrap.
+    fn append(&mut self, text: &str, keep: Keep) {
+        let text = narrow_paths(&one_line(&redact::redact(text)));
+        if text.is_empty() {
+            return;
+        }
+        let mut lines = wrapped(&windowed(&text, keep), WIDTH);
+        if keep == Keep::Head && lines.len() > CAPACITY {
+            // The answer ran past what a row can hold, and a reader who is not
+            // told that reads the third line as the end of the sentence.
+            lines.truncate(CAPACITY);
+            if let Some(last) = lines.last_mut() {
+                *last = clipped(&format!("{last}…"), WIDTH);
+            }
+        }
+        self.steps.extend(lines.into_iter().map(|text| Step { text }));
         if self.steps.len() > CAPACITY {
-            self.steps.remove(0);
+            self.steps.drain(..self.steps.len() - CAPACITY);
         }
     }
 
-    /// The steps, oldest first.
+    /// The lines, oldest first.
     pub fn steps(&self) -> &[Step] {
         &self.steps
     }
 
-    /// The steps as the lines a client renders, oldest first.
+    /// The window as the lines a client renders, oldest first.
     ///
     /// What goes on the wire. A client receives finished lines and decides
-    /// nothing about them, which is the whole point of truncating here.
+    /// nothing about them, which is the whole point of wrapping here.
     pub fn lines(&self) -> Vec<String> {
         self.steps.iter().map(|step| step.text.clone()).collect()
     }
@@ -293,6 +387,64 @@ impl Feed {
     pub fn is_empty(&self) -> bool {
         self.steps.is_empty()
     }
+}
+
+/// The end of `text` the window could possibly show, and no more.
+///
+/// A cut lands mid-word, and that is fine at both ends: the mangled word is
+/// beyond the [`CAPACITY`] lines that survive the wrap either way, because
+/// [`WINDOW`] is twice what those lines can hold. See [`WINDOW`].
+fn windowed(text: &str, keep: Keep) -> String {
+    let length = text.chars().count();
+    if length <= WINDOW {
+        return text.to_string();
+    }
+    match keep {
+        Keep::Head => text.chars().take(WINDOW).collect(),
+        Keep::Tail => text.chars().skip(length - WINDOW).collect(),
+    }
+}
+
+/// `text` broken into lines of at most `width` CHARACTERS, at the spaces.
+///
+/// Greedy, which is what a terminal does and what a reader expects: a word
+/// goes on the current line if it fits and starts the next one if it does not.
+///
+/// A word LONGER than the width is broken rather than allowed to overhang. A
+/// token with no space in it that runs past forty characters is a URL, a hash
+/// or a base64 blob, and a line that refuses to break it is a line that either
+/// overflows the row or vanishes into the truncation whole.
+fn wrapped(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    let mut len = 0usize;
+    // Split on a single space rather than on whitespace because `one_line` has
+    // already run: every separator left is exactly one space.
+    for word in text.split(' ').filter(|word| !word.is_empty()) {
+        if len > 0 && len + 1 + word.chars().count() > width {
+            lines.push(std::mem::take(&mut line));
+            len = 0;
+        }
+        if len > 0 {
+            line.push(' ');
+            len += 1;
+        }
+        for c in word.chars() {
+            if len == width {
+                lines.push(std::mem::take(&mut line));
+                len = 0;
+            }
+            line.push(c);
+            len += 1;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 /// `text` with every run of whitespace — newlines included — as one space.
@@ -706,12 +858,16 @@ mod tests {
     /// The transcript a fixture's lines produce: what the agent SAID, in order.
     ///
     /// Only `Said`. A tool call is not transcript any more — it is the signal
-    /// line's fallback, which is what `Phrase::action` builds.
+    /// line's fallback, which is what `Phrase::action` builds. The routing of
+    /// a conclusion is the daemon's, and this mirrors it deliberately: the
+    /// fixtures are what prove the two ends meet.
     fn feed_of(fixture: &str, parse: fn(&str) -> Vec<TurnEvent>) -> Feed {
         let mut feed = Feed::default();
         for event in fixture.lines().flat_map(parse) {
-            if let TurnEvent::Said { text } = event {
-                feed.push(&text);
+            match event {
+                TurnEvent::Said { text, conclusion: true } => feed.conclude(&text),
+                TurnEvent::Said { text, conclusion: false } => feed.push(&text),
+                _ => {}
             }
         }
         feed
@@ -739,14 +895,103 @@ mod tests {
         assert_eq!(feed.steps().len(), CAPACITY, "a feed never grows past its capacity");
     }
 
-    /// The daemon decides where the ellipsis goes, once, for every client.
+    /// The daemon decides where every line breaks, once, for every client.
+    ///
+    /// A token with no space in it — a hash, a URL, a base64 blob — is broken
+    /// rather than left to overhang a row that is forty characters wide.
     #[test]
-    fn a_long_step_is_cut_here_rather_than_on_three_clients() {
+    fn a_word_too_long_for_a_row_is_broken_rather_than_left_to_overhang() {
         let mut feed = Feed::default();
         feed.push(&"x".repeat(200));
-        let line = &feed.lines()[0];
-        assert_eq!(line.chars().count(), WIDTH, "the line is cut to the row's width");
-        assert!(line.ends_with('…'), "and says it was cut: {line}");
+        let lines = feed.lines();
+        assert_eq!(lines.len(), CAPACITY, "a window is a window: {lines:?}");
+        for line in &lines {
+            assert_eq!(line.chars().count(), WIDTH, "a line wider than the row: {line}");
+        }
+    }
+
+    /// The window is a window: text arrives, and what does not fit scrolls off
+    /// the top.
+    ///
+    /// This is the complaint that named the stage, stated as an assertion. The
+    /// old feed kept the last three MESSAGES and cut each to forty characters,
+    /// so one long sentence read as one fragment with two blank rows under it.
+    #[test]
+    fn one_long_sentence_fills_the_window_and_scrolls_it() {
+        let mut feed = Feed::default();
+        feed.push(
+            "I'm going to read the watcher first, then the parser it calls, \
+             and only then change anything, because the fold is the part that \
+             has been wrong.",
+        );
+        assert_eq!(
+            feed.lines(),
+            vec![
+                "then the parser it calls, and only then",
+                "change anything, because the fold is the",
+                "part that has been wrong.",
+            ],
+            "the tail of the sentence, wrapped, with the start of it pushed off the top"
+        );
+    }
+
+    /// Narration is watched at its tail; an answer is read from its head.
+    ///
+    /// The only thing the narration/conclusion distinction is kept for, and
+    /// the reason it survived stage 4 rather than being erased with the gate
+    /// that used to drop narration entirely.
+    #[test]
+    fn an_answer_enters_from_its_start_and_narration_from_its_end() {
+        let long = "Alpha bravo charlie delta echo foxtrot golf hotel india \
+                    juliet kilo lima mike november oscar papa quebec romeo \
+                    sierra tango";
+
+        let mut narrating = Feed::default();
+        narrating.push(long);
+        assert!(narrating.lines()[2].ends_with("tango"), "{:?}", narrating.lines());
+
+        let mut concluding = Feed::default();
+        concluding.conclude(long);
+        assert!(concluding.lines()[0].starts_with("Alpha bravo"), "{:?}", concluding.lines());
+        assert!(
+            concluding.lines()[2].ends_with('…'),
+            "an answer cut short says so: {:?}",
+            concluding.lines()
+        );
+    }
+
+    /// A finished agent reads as what it did, which was the explicit ask.
+    ///
+    /// The narration it wrote getting there stays above the answer rather than
+    /// being cleared by it: it reads as a small transcript, and a row that
+    /// shrank from three lines to one the moment a turn ended would rearrange
+    /// the sidebar under whoever was reading it.
+    #[test]
+    fn a_short_answer_keeps_the_narration_above_it() {
+        let mut feed = Feed::default();
+        feed.push("Reading the watcher.");
+        feed.push("Running the tests.");
+        feed.conclude("Both pass.");
+        assert_eq!(
+            feed.lines(),
+            vec!["Reading the watcher.", "Running the tests.", "Both pass."]
+        );
+    }
+
+    /// However much prose an agent writes, a `Feed` is three short strings.
+    ///
+    /// It runs per pane on a loop, and an agent can produce a great deal of
+    /// text in one message; nothing here may grow with it. See `WINDOW`.
+    #[test]
+    fn a_very_long_message_does_not_grow_the_window() {
+        let mut feed = Feed::default();
+        feed.push(&"lorem ipsum dolor sit amet ".repeat(4_000));
+        feed.conclude(&"consectetur adipiscing elit ".repeat(4_000));
+        let lines = feed.lines();
+        assert_eq!(lines.len(), CAPACITY);
+        for line in &lines {
+            assert!(line.chars().count() <= WIDTH, "a line wider than the row: {line}");
+        }
     }
 
     #[test]
@@ -896,10 +1141,22 @@ mod tests {
 
     /// Claude's fixture carries one tool call and one closing answer. Only the
     /// answer is transcript; the call becomes the action line beside it.
+    ///
+    /// Three lines of it, from the start, where the old feed showed the first
+    /// forty characters and stopped — `Written to `haiku.txt`. **"esc to
+    /// inter…`, which cuts off inside the word the sentence is about. Same
+    /// answer, three times the sentence.
     #[test]
     fn a_real_claude_turn_says_what_it_concluded() {
         let feed = feed_of(CLAUDE_TURN, claude::parse_line);
-        assert_eq!(feed.lines(), vec!["Written to `haiku.txt`. **\"esc to inter…"]);
+        assert_eq!(
+            feed.lines(),
+            vec![
+                "Written to `haiku.txt`. **\"esc to",
+                "interrupt\"** is a hint line a terminal",
+                "UI shows while busy; pressing Escape…",
+            ]
+        );
     }
 
     // ---------------------------------------------------------------------

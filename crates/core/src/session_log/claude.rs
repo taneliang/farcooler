@@ -59,19 +59,27 @@ fn turn_start(record: &Value) -> Option<TurnEvent> {
     Some(TurnEvent::Started { at_ms: at_ms(record) })
 }
 
-/// What an assistant line did: the first `tool_use` block in its content --
-/// or, when the message ENDS the turn, its closing prose.
+/// What an assistant line said, and what it did: every `text` block in its
+/// content, and the first `tool_use`.
 ///
 /// One `assistant` line can carry `thinking` alone, `text` alone, or a
-/// `tool_use`. A `tool_use` is always a `Did`. `text` is `Said` only under
-/// `stop_reason == "end_turn"`, and that gate is the whole design: a `text`
-/// block that PRECEDES a tool call is the agent narrating what it is about to
-/// do, and a transcript fills up with intent instead of with what was said.
-/// `end_turn` is the same distinction codex draws with `phase:
-/// "final_answer"` and, without it, claude was the only one of the three
-/// agents whose finished pane could not say what it had done -- a row that
-/// reads `write fruit.txt` where codex's reads `Created fruit.txt containing
-/// banana.`
+/// `tool_use`. A `tool_use` is always a `Did`; `text` is always a `Said`.
+///
+/// **It used to be `Said` only under `stop_reason == "end_turn"`, and that
+/// gate is what left a claude row silent while anybody was watching it.**
+/// Counted across the 40 largest transcripts on this machine: 5623 assistant
+/// records carry a `text` block under `stop_reason == "tool_use"` -- the agent
+/// saying what it is about to do, one line before it does it -- against 696
+/// under `end_turn`. Eight narrating lines in nine were dropped, so the only
+/// prose a transcript ever accepted was one that arrives when the turn is
+/// already over. Correct for a list of the three most recent DISCRETE
+/// messages, which is what the feed was; wrong for a window that is meant to
+/// move.
+///
+/// The distinction is kept rather than erased: the LAST `text` block of an
+/// `end_turn` message is the turn's answer and is marked as one, because a
+/// summary is read from its start where narration is watched at its tail. See
+/// `TurnEvent::Said`.
 ///
 /// Only the FIRST `tool_use` becomes a `Did`, which is what this has always
 /// done: an action line names one action, and a message carrying three
@@ -83,12 +91,9 @@ fn turn_start(record: &Value) -> Option<TurnEvent> {
 fn assistant_record(record: &Value) -> Vec<TurnEvent> {
     let Some(message) = record.get("message") else { return Vec::new() };
     let Some(content) = message.get("content").and_then(Value::as_array) else { return Vec::new() };
-    let mut tool_uses =
-        content.iter().filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use")).peekable();
-    if tool_uses.peek().is_none() {
-        return final_answer(message, content).into_iter().collect();
-    }
-    let mut events = Vec::new();
+    let mut events = said(message, content);
+    let tool_uses =
+        content.iter().filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"));
     for (n, tool_use) in tool_uses.enumerate() {
         if n == 0 {
             events.extend(did(tool_use));
@@ -107,26 +112,35 @@ fn did(tool_use: &Value) -> Option<TurnEvent> {
     Some(TurnEvent::Did { verb, object })
 }
 
-/// The closing prose of a turn, verbatim.
+/// Every `text` block on the record, in the order it was written.
 ///
-/// The LAST `text` block, not the first: a message that ends a turn can open
-/// with a preamble and close with the answer, and the answer is what a person
-/// checking a finished pane wants. Whitespace-only prose yields nothing rather
-/// than an empty `Said`, which would evict a real line from a three-deep
-/// transcript to say nothing at all.
-fn final_answer(message: &Value, content: &[Value]) -> Option<TurnEvent> {
-    if message.get("stop_reason").and_then(Value::as_str) != Some("end_turn") {
-        return None;
-    }
-    let text = content
+/// The LAST one is the conclusion when the message ends the turn, and only
+/// then. A message that ends a turn can open with a preamble and close with
+/// the answer, and the answer is the half a person checking a finished pane
+/// wants -- so the preamble goes in as narration ahead of it, which is exactly
+/// where a reader would find it.
+///
+/// Whitespace-only prose yields nothing rather than an empty `Said`, which
+/// would push a real line out of a three-line window to say nothing at all.
+/// `thinking` is not read at all, here or anywhere: it is the agent talking to
+/// itself, and it is not what it SENT.
+fn said(message: &Value, content: &[Value]) -> Vec<TurnEvent> {
+    let ends_turn = message.get("stop_reason").and_then(Value::as_str) == Some("end_turn");
+    let texts: Vec<&str> = content
         .iter()
-        .rev()
         .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-        .find_map(|block| block.get("text").and_then(Value::as_str))?;
-    if text.trim().is_empty() {
-        return None;
-    }
-    Some(TurnEvent::Said { text: text.to_string() })
+        .filter_map(|block| block.get("text").and_then(Value::as_str))
+        .filter(|text| !text.trim().is_empty())
+        .collect();
+    let last = texts.len().saturating_sub(1);
+    texts
+        .into_iter()
+        .enumerate()
+        .map(|(n, text)| TurnEvent::Said {
+            text: text.to_string(),
+            conclusion: ends_turn && n == last,
+        })
+        .collect()
 }
 
 /// The object of a step, from whichever of `file_path` (basename only --
@@ -540,58 +554,81 @@ mod tests {
         // pane's transcript ended on `write haiku.txt` and never said what the
         // agent concluded, while codex and cursor panes both did.
         match parse_line(line(COMPLETE_TURN, 4)).as_slice() {
-            [TurnEvent::Said { text }] => {
+            [TurnEvent::Said { text, conclusion }] => {
                 assert!(text.starts_with("Written to `haiku.txt`."), "{text}");
+                assert!(*conclusion, "an end_turn message's last prose is the answer");
             }
             other => panic!("expected [Said], got {other:?}"),
         }
     }
 
+    /// The finding this whole stage exists for, pinned on the shape claude
+    /// really writes it in.
+    ///
+    /// This is the agent saying what it is ABOUT to do, one line before it
+    /// does it -- `stop_reason: "tool_use"`, because a tool call follows in
+    /// the next record. It outnumbers closing prose eight to one, and dropping
+    /// it is what left a row with nothing to say for the entire time somebody
+    /// was watching it work.
     #[test]
-    fn mid_turn_narration_is_not_a_step() {
-        // The reason the gate is `end_turn` and not "any text block". This is
-        // the agent saying what it is ABOUT to do, one line before it does it
-        // -- `stop_reason: "tool_use"`, because a tool call follows. Three
-        // rows of a feed spent on intent are three rows not spent on what
-        // actually happened.
+    fn mid_turn_narration_is_what_the_agent_said_too() {
         let synthetic = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Now I'll run the tests."}],"stop_reason":"tool_use"}}"#;
-        assert_eq!(parse_line(synthetic), Vec::new());
+        assert_eq!(
+            parse_line(synthetic),
+            vec![TurnEvent::Said { text: "Now I'll run the tests.".to_string(), conclusion: false }],
+            "narration reaches the transcript, and is not mistaken for the answer"
+        );
     }
 
     #[test]
-    fn a_text_block_with_no_stop_reason_at_all_is_not_a_step() {
+    fn a_text_block_with_no_stop_reason_at_all_is_narration() {
         // Streaming records and older CLI versions write `content` with no
-        // `stop_reason` beside it. Absent is not `end_turn`, and reading it as
-        // one would put every mid-turn sentence in the feed.
+        // `stop_reason` beside it. Absent is not `end_turn` -- the prose is
+        // still what the agent said, but nothing has claimed it concludes
+        // anything, so nothing here claims it either.
         let synthetic = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Looking into it."}]}}"#;
-        assert_eq!(parse_line(synthetic), Vec::new());
+        assert_eq!(
+            parse_line(synthetic),
+            vec![TurnEvent::Said { text: "Looking into it.".to_string(), conclusion: false }]
+        );
     }
 
     #[test]
-    fn the_last_text_block_wins_when_a_closing_message_has_several() {
+    fn the_last_text_block_is_the_answer_when_a_closing_message_has_several() {
         // A message that ends a turn can open with a preamble and close with
-        // the answer. The answer is the half worth a row.
+        // the answer. Both are what the agent said, in that order; only the
+        // second is the conclusion.
         let synthetic = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me summarize."},{"type":"text","text":"Both tests pass."}],"stop_reason":"end_turn"}}"#;
-        assert_eq!(parse_line(synthetic), vec![TurnEvent::Said { text: "Both tests pass.".to_string() }]);
+        assert_eq!(
+            parse_line(synthetic),
+            vec![
+                TurnEvent::Said { text: "Let me summarize.".to_string(), conclusion: false },
+                TurnEvent::Said { text: "Both tests pass.".to_string(), conclusion: true },
+            ]
+        );
     }
 
     #[test]
     fn empty_closing_prose_yields_nothing_rather_than_an_empty_line() {
-        // A `Said` with no text would still evict a real line from a
-        // three-deep transcript, to say nothing.
+        // A `Said` with no text would still push a real line out of a
+        // three-line window, to say nothing.
         let synthetic = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"   "}],"stop_reason":"end_turn"}}"#;
         assert_eq!(parse_line(synthetic), Vec::new());
     }
 
     #[test]
-    fn a_tool_use_still_wins_over_prose_in_the_same_message() {
-        // Contradictory in practice -- a message carrying a tool call ends
-        // with `stop_reason: "tool_use"`, never `end_turn` -- but the tool
-        // call is the concrete thing that happened, so it stays the step.
-        let synthetic = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Running it."},{"type":"tool_use","name":"Bash","input":{"command":"git status"}}],"stop_reason":"end_turn"}}"#;
+    fn prose_and_a_tool_use_in_one_message_are_both_read() {
+        // Rare -- 2 records in the 40 largest transcripts on this machine put
+        // both in one message -- but the two facts are independent, and the
+        // parser that had to choose between them chose the tool call and threw
+        // the sentence away.
+        let synthetic = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Running it."},{"type":"tool_use","name":"Bash","input":{"command":"git status"}}],"stop_reason":"tool_use"}}"#;
         assert_eq!(
             parse_line(synthetic),
-            vec![TurnEvent::Did { verb: "bash".to_string(), object: "git status".to_string() }]
+            vec![
+                TurnEvent::Said { text: "Running it.".to_string(), conclusion: false },
+                TurnEvent::Did { verb: "bash".to_string(), object: "git status".to_string() },
+            ]
         );
     }
 

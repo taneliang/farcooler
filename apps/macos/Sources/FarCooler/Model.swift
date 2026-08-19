@@ -199,7 +199,8 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var turnStartedAt: Double?
     /// What the agent is asking, when it is blocked.
     var blockedQuestion: String?
-    /// The last few things the agent SAID, oldest first, at most three.
+    /// The last three DISPLAY LINES of what the agent has been saying, oldest
+    /// first.
     ///
     /// A transcript, and only a transcript: the agent's own prose, verbatim,
     /// with no verb in front of it. What it DID is not here — a tool call is
@@ -207,10 +208,16 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// `line` instead. This field used to carry both, prefixed with the tool's
     /// own lowercased name, which is how a row came to read `taskupdate`.
     ///
+    /// Lines rather than messages, and that is the whole of it: a long
+    /// sentence spans two or three of these, and new prose pushes old prose
+    /// off the top the way watching a terminal does. It used to be the last
+    /// three MESSAGES with each cut to forty characters, which read as three
+    /// fragments and none of them a sentence.
+    ///
     /// Finished lines, not structured steps: the daemon reads the agent's own
-    /// session log, redacts each one and cuts it to the width of a row before
-    /// it ever reaches here, so a Mac, a phone and a watch cannot each put the
-    /// ellipsis somewhere different. This app renders them and decides nothing
+    /// session log, redacts each one and wraps it to the width of a row before
+    /// it ever reaches here, so a Mac, a phone and a watch cannot each break a
+    /// line somewhere different. This app renders them and decides nothing
     /// about them.
     ///
     /// Optional because a daemon from before this existed sends no key at all,
@@ -424,11 +431,11 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Only for the two where duration changes what you do: an agent blocked
     /// for twenty minutes is a different situation from one blocked for ten
     /// seconds. "Idle for three days" is noise.
-    var statusDuration: String? {
+    func statusDuration(at now: Date) -> String? {
         guard status == .blocked || status == .working, let since = activitySince else {
             return nil
         }
-        return Self.brief(secondsSince: since)
+        return Self.brief(secondsSince: since, at: now)
     }
 
     /// How long the whole turn has been running.
@@ -436,13 +443,13 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Distinct from `statusDuration`, and the one a person means by "how long
     /// has this been going". It does not restart when a permission prompt is
     /// approved, because saying yes to a tool call does not begin a new turn.
-    var turnDuration: String? {
+    func turnDuration(at now: Date) -> String? {
         guard let since = turnStartedAt else { return nil }
-        return Self.brief(secondsSince: since)
+        return Self.brief(secondsSince: since, at: now)
     }
 
-    private static func brief(secondsSince millis: Double) -> String? {
-        let seconds = Date().timeIntervalSince1970 - millis / 1000
+    private static func brief(secondsSince millis: Double, at now: Date) -> String? {
+        let seconds = now.timeIntervalSince1970 - millis / 1000
         guard seconds >= 5 else { return nil }
         if seconds < 60 { return "\(Int(seconds))s" }
         if seconds < 3600 { return "\(Int(seconds / 60))m" }
@@ -457,8 +464,17 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// long has this been going"; `Blocked` wants the state clock, because a
     /// permission prompt held for twenty minutes is the thing to notice, not
     /// how long the turn around it has run.
-    var displayDuration: String? {
-        status == .working ? turnDuration : statusDuration
+    ///
+    /// `now` is an ARGUMENT rather than a `Date()` read inside, and that is
+    /// what makes the string tick. Read inside, it is a value SwiftUI has no
+    /// way to observe: nothing about a working row changes from one second to
+    /// the next, so the view is never invalidated and the duration freezes
+    /// until some unrelated event forces a redraw — clicking another pane,
+    /// which is exactly how the complaint was phrased. Taken as an argument it
+    /// is an input like any other, and a `TimelineView` supplying it once a
+    /// second is a row that keeps its own time. See `Ticking`.
+    func displayDuration(at now: Date) -> String? {
+        status == .working ? turnDuration(at: now) : statusDuration(at: now)
     }
 
     /// The one line that says where this agent is.

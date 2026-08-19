@@ -338,7 +338,12 @@ private struct SwitcherTile: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if let duration = entry.terminal?.displayDuration {
+                // A snapshot, not a clock. This row exists for as long as the
+                // palette is open, and a `Ticking` here would have to hold a
+                // slot for a duration that is not there yet — see the sidebar,
+                // where the same number does tick because the row outlives the
+                // question.
+                if let duration = entry.terminal?.displayDuration(at: .now) {
                     Text(duration)
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)

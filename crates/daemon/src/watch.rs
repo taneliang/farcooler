@@ -856,10 +856,12 @@ struct Spawn {
 /// contract — so the tally is assembled across ticks, on this side of the
 /// mutex, beside the turn state the watcher already folds.
 ///
-/// Cleared at a turn boundary, both ends of it. A plan belongs to the turn that
-/// wrote it: carrying one into the next turn would report a row as `3/7`
-/// through work that has nothing to do with those seven tasks. The transcript
-/// is deliberately NOT cleared with it — see `Observed::feed`.
+/// The plan and the spawns are cleared at a turn boundary, both ends of it. A
+/// plan belongs to the turn that wrote it: carrying one into the next turn
+/// would report a row as `3/7` through work that has nothing to do with those
+/// seven tasks. The action is cleared at the START of a turn only, and the
+/// transcript at neither — see `saw` for the one, and `Observed::feed` for the
+/// other.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Signals {
     tasks: Vec<Task>,
@@ -868,9 +870,9 @@ struct Signals {
     /// the one it moved to most recently is the one it is doing.
     active: Option<String>,
     spawns: Vec<Spawn>,
-    /// The last tool call, as a line: `Writing fruit.txt`. The signal line's
-    /// fallback for an agent with no task list, which is codex, cursor, and
-    /// most claude sessions.
+    /// The last tool call of THIS turn, as a line: `Writing fruit.txt`. The
+    /// signal line's fallback for an agent with no task list, which is codex,
+    /// cursor, and most claude sessions.
     action: Option<farcooler_core::feed::Phrase>,
 }
 
@@ -890,13 +892,33 @@ impl Signals {
             // Both ends of a turn, not only the end. A turn that begins while a
             // previous plan is still on the row would otherwise show the old
             // count until the new list's first create.
-            TurnEvent::Started { .. } | TurnEvent::Ended { .. } => {
-                self.tasks.clear();
-                self.active = None;
-                self.spawns.clear();
+            //
+            // The action is cleared at the START only, and the asymmetry is
+            // the point. Driven live, a new turn wore the PREVIOUS turn's
+            // action — `Running test "$(< fruit.txt)" = banana` — for the
+            // first nine seconds of its life, until its own first tool call
+            // replaced it; nine seconds is most of a short turn, and a row
+            // confidently naming work that finished before the question was
+            // asked is worse than a row saying nothing. But a turn ENDING does
+            // not make that line untrue: a plan is where the agent IS, and a
+            // finished turn has no position, while `Writing haiku.txt` is what
+            // it DID — which is the one thing a finished row is read for. It
+            // stays for the same reason the transcript stays.
+            TurnEvent::Started { .. } => {
+                self.forget_the_turn();
+                self.action = None;
             }
+            TurnEvent::Ended { .. } => self.forget_the_turn(),
             TurnEvent::Said { .. } | TurnEvent::Title(_) | TurnEvent::BackgroundAgents(_) => {}
         }
+    }
+
+    /// Forget where the agent was, which a turn boundary makes untrue at
+    /// either end of it. What it last DID is not in here — see `saw`.
+    fn forget_the_turn(&mut self) {
+        self.tasks.clear();
+        self.active = None;
+        self.spawns.clear();
     }
 
     /// One task fact, joined to the task it is about.
@@ -1188,8 +1210,16 @@ impl Observed {
             // Only prose reaches the transcript. Everything else — a tool call,
             // a task moving, an agent spawning — is where the agent IS, which
             // is the signal line's business and not history's.
-            if let TurnEvent::Said { text } = event {
-                self.feed.push(text);
+            //
+            // A conclusion enters the window from its start and narration from
+            // its end; see `farcooler_core::feed::Feed::conclude` for why the
+            // two are read differently.
+            if let TurnEvent::Said { text, conclusion } = event {
+                if *conclusion {
+                    self.feed.conclude(text);
+                } else {
+                    self.feed.push(text);
+                }
             }
             self.signals.saw(event);
         }
@@ -2292,7 +2322,7 @@ mod tests {
             TurnEvent::Started { at_ms: None },
             TurnEvent::Did { verb: "write".to_string(), object: "haiku.txt".to_string() },
             TurnEvent::Title("Write a haiku".to_string()),
-            TurnEvent::Said { text: "Written to haiku.txt.".to_string() },
+            TurnEvent::Said { text: "Written to haiku.txt.".to_string(), conclusion: true },
         ];
         assert!(entry.saw_events(&events), "the row moved");
         assert_eq!(entry.feed.lines(), vec!["Written to haiku.txt."]);
@@ -2311,7 +2341,7 @@ mod tests {
                 verb: "bash".to_string(),
                 object: "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI make deploy".to_string(),
             },
-            TurnEvent::Said { text: "Deployed with AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI".to_string() },
+            TurnEvent::Said { text: "Deployed with AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI".to_string(), conclusion: false },
             // Agent-authored text, on the two paths that are new: a task's own
             // phrase and a subagent's description travel exactly as far.
             TurnEvent::TaskState {
@@ -2474,6 +2504,35 @@ mod tests {
         signals.saw(&TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Finished });
         assert_eq!(signals.line(), None, "the plan ended with the turn that wrote it");
         assert!(signals.subagents().is_empty());
+    }
+
+    /// A new turn does not wear the last turn's work.
+    ///
+    /// Found by driving it, not by reading it: for the first NINE SECONDS of a
+    /// new turn the row still read `Running test "$(< fruit.txt)" = banana` —
+    /// the command the previous turn had finished with — because the plan and
+    /// the spawns were cleared at a turn boundary and the action was not. Nine
+    /// seconds is most of a short turn, so a person watching a row saw it
+    /// confidently report work that was over before they had asked for
+    /// anything.
+    ///
+    /// The end of a turn is deliberately NOT the same case: see `Signals::saw`.
+    #[test]
+    fn a_new_turn_does_not_wear_the_last_turns_action() {
+        let mut signals = Signals::default();
+        signals.saw(&TurnEvent::Did {
+            verb: "bash".into(),
+            object: "test \"$(< fruit.txt)\" = banana".into(),
+        });
+        signals.saw(&TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Finished });
+        assert_eq!(
+            signals.line().as_deref(),
+            Some("Running test \"$(< fruit.txt)\" = banana"),
+            "a finished row still says what it did"
+        );
+
+        signals.saw(&TurnEvent::Started { at_ms: None });
+        assert_eq!(signals.line(), None, "and a new turn starts from nothing");
     }
 
     /// A background spawn's result arrives at LAUNCH, not at the end.

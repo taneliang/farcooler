@@ -92,15 +92,15 @@ fn turn_aborted(_record: &Value) -> Option<TurnEvent> {
     Some(TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Aborted })
 }
 
-/// The agent's own words are `event_msg`/`agent_message` with `phase:
-/// "final_answer"` -- the only phase the reference doc names. Anything else (a
-/// different phase, or none at all) falls through rather than being guessed at.
+/// The agent's own words are `event_msg`/`agent_message`. `phase:
+/// "final_answer"` is the conclusion; every other phase is narration on the
+/// way to it, and both are what the agent said.
+///
+/// A missing `message` is nothing to say, not an empty line.
 fn agent_message(payload: &Value) -> Option<TurnEvent> {
-    if payload.get("phase").and_then(Value::as_str) != Some("final_answer") {
-        return None;
-    }
-    let message = payload.get("message")?.as_str()?.to_string();
-    Some(TurnEvent::Said { text: message })
+    let conclusion = payload.get("phase").and_then(Value::as_str) == Some("final_answer");
+    let message = payload.get("message")?.as_str()?.trim().to_string();
+    (!message.is_empty()).then_some(TurnEvent::Said { text: message, conclusion })
 }
 
 /// An event from `event_msg`/`item_completed`, the shape codex 0.147.0 writes.
@@ -124,11 +124,19 @@ fn item_completed(payload: &Value) -> Option<TurnEvent> {
     match item.get("type").and_then(Value::as_str)? {
         "AgentMessage" => {
             // `commentary` is the running narration and `final_answer` the
-            // conclusion. Only the conclusion is kept, matching what the
-            // `agent_message` path above has always done.
-            if item.get("phase").and_then(Value::as_str) != Some("final_answer") {
-                return None;
-            }
+            // conclusion. Both are what the agent said, and dropping the
+            // narration is what left a codex row's transcript empty for the
+            // whole of every turn: counted across the 324 rollouts on this
+            // machine, 161 of the 193 `AgentMessage` items written in this
+            // shape are commentary -- five in six -- and every one of them
+            // arrives while somebody could still be watching. The conclusion
+            // is still told apart, and read differently -- see
+            // `TurnEvent::Said`.
+            //
+            // The agent's private thinking is NOT this: codex writes that as
+            // its own `agent_reasoning` payload (896 records), which this
+            // parser never reaches.
+            let conclusion = item.get("phase").and_then(Value::as_str) == Some("final_answer");
             let text = item
                 .get("content")?
                 .as_array()?
@@ -136,7 +144,8 @@ fn item_completed(payload: &Value) -> Option<TurnEvent> {
                 .filter_map(|block| block.get("text").and_then(Value::as_str))
                 .collect::<Vec<_>>()
                 .join(" ");
-            (!text.is_empty()).then_some(TurnEvent::Said { text })
+            let text = text.trim().to_string();
+            (!text.is_empty()).then_some(TurnEvent::Said { text, conclusion })
         }
         "FileChange" => {
             // `changes` maps an absolute path to what happened to it. The
@@ -227,7 +236,10 @@ mod tests {
     fn a_final_answer_agent_message_is_what_the_agent_said() {
         // Line 8: `event_msg`/`agent_message`, `phase: "final_answer"`,
         // `message: "Hi."`.
-        assert_eq!(parse_line(line(COMPLETE_TURN, 7)), vec![TurnEvent::Said { text: "Hi.".to_string() }]);
+        assert_eq!(
+            parse_line(line(COMPLETE_TURN, 7)),
+            vec![TurnEvent::Said { text: "Hi.".to_string(), conclusion: true }]
+        );
     }
 
     // -----------------------------------------------------------------
@@ -265,16 +277,30 @@ mod tests {
         // Line 8: `item.type: "AgentMessage"`, `phase: "final_answer"`.
         assert_eq!(
             parse_line(line(ITEM_COMPLETED_TURN, 7)),
-            vec![TurnEvent::Said { text: "Created `fruit.txt` containing `banana`.".to_string() }]
+            vec![TurnEvent::Said {
+                text: "Created `fruit.txt` containing `banana`.".to_string(),
+                conclusion: true
+            }]
         );
     }
 
+    /// The complaint "when using codex, there's no transcript" reduces to this
+    /// line, and to nothing else.
+    ///
+    /// Line 5 is an `AgentMessage` whose phase is `commentary` -- the agent
+    /// narrating, four seconds into a turn, while a person is watching the
+    /// row. Rejecting it meant a codex pane's transcript gained its first
+    /// entry when the turn ENDED, so a short turn said nothing at all from
+    /// start to finish.
     #[test]
-    fn a_commentary_item_is_not_a_step() {
-        // Line 5 is an `AgentMessage` whose phase is `commentary` -- running
-        // narration. Keeping it would fill the feed with the agent talking
-        // about what it is about to do instead of what it did.
-        assert_eq!(parse_line(line(ITEM_COMPLETED_TURN, 4)), Vec::new());
+    fn a_commentary_item_is_what_the_agent_said_and_is_not_the_answer() {
+        assert_eq!(
+            parse_line(line(ITEM_COMPLETED_TURN, 4)),
+            vec![TurnEvent::Said {
+                text: "I\u{2019}ll create `fruit.txt` in the workspace with the requested word, then verify it.".to_string(),
+                conclusion: false
+            }]
+        );
     }
 
     #[test]
@@ -304,14 +330,30 @@ mod tests {
     /// the old fixture produces.
     #[test]
     fn reading_the_new_shape_did_not_disturb_the_old_one() {
-        assert_eq!(parse_line(line(COMPLETE_TURN, 7)), vec![TurnEvent::Said { text: "Hi.".to_string() }]);
+        assert_eq!(
+            parse_line(line(COMPLETE_TURN, 7)),
+            vec![TurnEvent::Said { text: "Hi.".to_string(), conclusion: true }]
+        );
     }
 
+    /// The older shape narrates too, and 498 of the 1399 `agent_message`
+    /// records on this machine are that narration. It reaches the transcript
+    /// on the same terms the new shape's does.
     #[test]
-    fn an_agent_message_without_final_answer_phase_is_not_a_step() {
-        // A different (or absent) phase is not the documented shape -- fall
-        // through rather than guess at what an intermediate phase means.
-        let synthetic = r#"{"timestamp":"2026-06-14T18:47:06.340Z","type":"event_msg","payload":{"type":"agent_message","message":"thinking out loud","phase":"reasoning"}}"#;
+    fn a_commentary_agent_message_is_narration_not_the_answer() {
+        let synthetic = r#"{"timestamp":"2026-06-14T18:47:06.340Z","type":"event_msg","payload":{"type":"agent_message","message":"Checking the tests first.","phase":"commentary"}}"#;
+        assert_eq!(
+            parse_line(synthetic),
+            vec![TurnEvent::Said { text: "Checking the tests first.".to_string(), conclusion: false }]
+        );
+    }
+
+    /// The agent's private thinking is not prose it sent, and it never was:
+    /// codex writes it as its own `agent_reasoning` payload -- 896 records
+    /// against 1399 `agent_message`s -- which this parser does not read at all.
+    #[test]
+    fn agent_reasoning_is_not_a_step() {
+        let synthetic = r#"{"timestamp":"2026-06-14T18:47:06.340Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"thinking out loud"}}"#;
         assert_eq!(parse_line(synthetic), Vec::new());
     }
 
