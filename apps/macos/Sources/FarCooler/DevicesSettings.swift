@@ -17,25 +17,30 @@ import SwiftUI
 /// gap `Enrollment` names. When the rows arrive, a Mac is TWO of them: one line
 /// per key, told apart by `shellAccess`, removed together.
 struct DevicesSettings: View {
-    @ObservedObject private var account = Account.shared
     @State private var adding = false
-    @State private var joining = false
 
     var body: some View {
         Form {
             Section {
-                Button("Add Device…") { adding = true }
-                    .disabled(!account.isSignedIn)
-                Button("Add This Mac to Another Account…") { joining = true }
-                    .disabled(!account.isSignedIn)
+                // One button, where there were two — and the two were opposite
+                // directions of one ceremony, named "Add Device…" and "Add This
+                // Mac to Another Account…", which share no words and so read as
+                // unrelated features. Both were greyed out when signed out,
+                // with the reason in a footer directing you to a third tab.
+                //
+                // `AddView` carries both directions, says which is which, and
+                // signs you in where you are rather than sending you away. It
+                // also carries the third thing that was never here at all:
+                // adding a runner, which lived as a bare text field under
+                // Runners and is the answer when there is no other device to
+                // scan.
+                Button("Add…") { adding = true }
             } header: {
                 Text("Devices")
             } footer: {
                 Text(
-                    account.isSignedIn
-                        ? "New devices can access only the runners you select. Runners you add "
-                            + "later aren’t shared automatically."
-                        : "Sign in first in Settings › Account."
+                    "New devices can access only the runners you select. Runners you add "
+                        + "later aren’t shared automatically."
                 )
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -45,7 +50,6 @@ struct DevicesSettings: View {
             }
         }
         .formStyle(.grouped)
-        .sheet(isPresented: $adding) { AddDeviceView() }
-        .sheet(isPresented: $joining) { JoinView() }
+        .sheet(isPresented: $adding) { AddView() }
     }
 }

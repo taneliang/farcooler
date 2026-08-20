@@ -36,6 +36,7 @@ struct ContentView: View {
     /// so where it sits is tmux's answer like every other pane's.
     @State private var changesStores: [String: ChangesStore] = [:]
     @State private var showAddRepository = false
+    @State private var showAdd = false
     @State private var showShortcuts = false
     @State private var showAbout = false
     @State private var query = ""
@@ -362,6 +363,9 @@ struct ContentView: View {
         ) { _ in
             // The user may have approved the login item in System Settings
             // while we were in the background; nothing tells us but this.
+        }
+        .sheet(isPresented: $showAdd) {
+            AddView()
         }
         .sheet(isPresented: $showAddRepository) {
             AddRepositorySheet(
@@ -850,19 +854,14 @@ struct ContentView: View {
                     // Here as well as in the picker, because this is the menu
                     // people open looking for "add a thing" — and a runner is
                     // a thing you add.
-                    SidebarMenuItem(title: "Add a runner…") {
-                        // Not a word anyone reads: `"machines"` is the tab
-                        // value already stored on disk — see `SettingsView`.
-                        Preferences.shared.settingsTab = "machines"
-                        // `NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil,
-                        // from: nil)` was here before, and never worked: nil-target
-                        // sendAction walks the responder chain, and nothing in it
-                        // implements that selector. The real "Settings…" menu item and
-                        // its ⌘, equivalent don't go through that search at all — AppKit
-                        // invokes their own bound target directly. `openSettings` is the
-                        // actual supported way to trigger the same thing from code.
-                        openSettings()
-                    },
+                    // Straight to the thing, rather than to the tab that
+                    // contains a field that does it. This opened Settings on
+                    // the Runners tab and left you to find the text field at
+                    // the bottom of a list of existing runners — and it offered
+                    // only the typing road, when the shorter one is to scan a
+                    // code from a device that already knows the address, the
+                    // user, the port and the host key.
+                    SidebarMenuItem(title: "Add…") { showAdd = true },
                 ])
             }
         }
