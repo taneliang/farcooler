@@ -179,11 +179,47 @@ public final class Account: NSObject, ObservableObject {
         {
             return access
         }
-        return await Self.refreshingAccessToken(
-            refreshToken: refresh,
-            request: { try await self.post("/v1/auth/refresh", ["refreshToken": $0]) },
-            store: { self.store($0) })
+        // One refresh at a time, however many callers want one.
+        //
+        // A WorkOS refresh token is SINGLE USE: the response to
+        // `/v1/auth/refresh` carries a new one and retires the token that was
+        // sent. So two callers arriving together — which is the normal way this
+        // is reached, since a screen appearing fires several relay calls at
+        // once and an expired token fails all of them — both read the same
+        // stored token and both spend it. The first wins; the rest get an
+        // error for a token that was valid when they read it. Observed live as
+        // three `/v1/auth/refresh` inside two seconds.
+        //
+        // `@MainActor` is not enough on its own to prevent that, and it is
+        // worth being clear why: it serializes the synchronous stretches, not
+        // the awaits. Both callers can pass the expiry check above and both
+        // suspend inside the request. What it DOES give is that the check and
+        // the assignment below happen with no suspension between them, so this
+        // needs no lock — the slot cannot be read as empty by two callers.
+        if let inFlight = refreshInFlight {
+            return await inFlight.value
+        }
+        let task = Task { @MainActor [self] () -> String? in
+            // Cleared by the task itself rather than by whoever created it, so
+            // the slot is empty the moment the answer exists. A later caller
+            // that genuinely needs a NEW refresh — a `forceRefresh` after a 401
+            // — must not join a task that has already finished with the token
+            // the relay just rejected.
+            defer { refreshInFlight = nil }
+            return await Self.refreshingAccessToken(
+                refreshToken: refresh,
+                request: { try await self.post("/v1/auth/refresh", ["refreshToken": $0]) },
+                store: { self.store($0) })
+        }
+        refreshInFlight = task
+        return await task.value
     }
+
+    /// The refresh in progress, if there is one. See ``accessToken(forceRefresh:)``.
+    ///
+    /// Not `@Published`: nothing draws it, and publishing it would send the
+    /// object through `objectWillChange` twice per refresh for no reader.
+    private var refreshInFlight: Task<String?, Never>?
 
     /// Refresh without inferring anything destructive from failure.
     ///
