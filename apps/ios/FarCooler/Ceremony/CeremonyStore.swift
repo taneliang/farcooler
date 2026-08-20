@@ -341,6 +341,27 @@ enum ConfirmingTap {
     }
 }
 
+// MARK: - Enrolling
+
+/// Putting a device's key into `~/.ssh/authorized_keys` on the runners a
+/// ceremony grants.
+///
+/// **The daemon owns the write.** Not a shell command appending a line, and
+/// emphatically not anything in Swift: that file is the one whose corruption
+/// costs somebody SSH access to their own machine, so the write is
+/// descriptor-anchored, `O_NOFOLLOW`, locked, atomic and `fsync`ed twice in
+/// `crates/daemon/src/enrollment.rs`. The app's part is to ask.
+///
+/// A closure rather than a protocol because there is one implementation and one
+/// call site, and what a test needs to replace is a behavior, not an object.
+/// It answers with what became of each runner, keyed by `CeremonyRunner.id`; a
+/// runner with NO entry was never asked, which on a phone is most of them —
+/// see `CeremonyStore.throughTheLiveConnection`. Both of those become `pending`
+/// in the reply, because both mean the same thing about the file.
+typealias Enroller = @MainActor (
+    _ publicKey: String, _ label: String, _ clientId: String, _ runners: [CeremonyRunner]
+) async -> [String: Connection.Enrollment]
+
 // MARK: - The state machine
 
 /// One runner, as a row someone can tick.
@@ -399,6 +420,25 @@ final class CeremonyStore: ObservableObject {
     /// was broken — so it is an alert over the confirmation rather than a
     /// screen that replaces it.
     @Published var declined = false
+    /// What to say about the runners whose `authorized_keys` this device did
+    /// not write to, or nil when every granted runner took the key.
+    ///
+    /// A sentence rather than a flag because this file is where the ceremony's
+    /// copy lives — `Refusal` above owns every other sentence in the flow for
+    /// the same reason — and because the two cases have different answers for a
+    /// person. Never a cause where the cause is not knowable: a runner asleep,
+    /// a daemon not installed and a fence that could not be rewritten look
+    /// identical from here, and a screen that guesses is how an app ends up
+    /// telling somebody to loosen an sshd setting that was never the problem.
+    @Published private(set) var pendingNote: String?
+
+    /// Where a grant actually lands.
+    ///
+    /// Injected so `confirm()` can be driven with no SSH session anywhere near
+    /// it, and defaulted so the two screens that build this store keep working
+    /// without having to know that the ceremony writes keys at all — neither of
+    /// them is handed a `Connection` to pass on.
+    var enroller: Enroller = CeremonyStore.throughTheLiveConnection
 
     /// Who this device is, so it can build an offer and recognize one.
     let account: String
@@ -586,7 +626,42 @@ final class CeremonyStore: ObservableObject {
             rescanned = data
         }
 
-        switch CeremonyCore.reply(offer: rescanned, runners: picked()) {
+        // The keys go in BEFORE the reply is built, which is what makes
+        // `pending` a fact rather than a hope: a runner named in that code is
+        // claimed as granted, and a claim no line was written for is the one
+        // lie in this flow that a person could not detect. It is also what
+        // makes `.enrolling` — already on screen — name what is happening,
+        // rather than a step this app skipped and said nothing about.
+        let wanted = picked()
+        // The id this device will be enrolled under, derived in Rust from the
+        // key in the code rather than invented here. See `clientId(of:)`: the
+        // daemon's "already enrolled" arm compares client ids, so an id
+        // invented per platform means one device enrolls twice under two names.
+        // No id means nothing to enroll under, so nothing is enrolled and every
+        // runner travels pending — which is a true statement about the file.
+        let outcomes: [String: Connection.Enrollment]
+        if let clientId = Self.clientId(of: rescanned) {
+            outcomes = await enroller(offer.key_a, offer.name, clientId, wanted)
+        } else {
+            outcomes = [:]
+        }
+
+        let granting = wanted.map { runner in
+            CeremonyRunner(
+                id: runner.id,
+                label: runner.label,
+                alias: runner.alias,
+                address: runner.address,
+                user: runner.user,
+                port: runner.port,
+                host_key: runner.host_key,
+                // The FILE's state, not this app's intention: pending unless
+                // that runner answered that the line is there.
+                pending: outcomes[runner.id] != .written)
+        }
+        pendingNote = Self.note(about: granting, outcomes: outcomes)
+
+        switch CeremonyCore.reply(offer: rescanned, runners: granting) {
         case .refused(let refusal):
             phase = .refused(refusal)
         case .payload(let data):
@@ -595,15 +670,75 @@ final class CeremonyStore: ObservableObject {
         }
     }
 
+    /// The runners this device can actually write to: at most one of them.
+    ///
+    /// A Mac reaches every granted runner, because its `Enrollment` shells out
+    /// to `farcooler --runner <target> client enroll` and inherits the agent,
+    /// the passphrase prompt, `ProxyJump` and everything else ssh already
+    /// knows. **A phone has no ssh at all.** What it has is one `Connection` —
+    /// the session `FleetView` is running, to the runner whose fleet is on
+    /// screen — so for every other granted runner the honest answer is no entry
+    /// at all, and `confirm()` marks those pending. That is not a shortfall
+    /// being hidden: pending is exactly "the trusted device has not yet written
+    /// this key into that runner's `authorized_keys`", and it is what the new
+    /// device's screen reads.
+    ///
+    /// Matched by id, and by the ceremony's spelling of one: these records came
+    /// from this device's own runner list a moment ago in `picked()`, so the id
+    /// in the manifest IS the id of the connection that reaches it.
+    @MainActor
+    private static func throughTheLiveConnection(
+        publicKey: String, label: String, clientId: String, runners: [CeremonyRunner]
+    ) async -> [String: Connection.Enrollment] {
+        guard let connection = Connection.current,
+            let reachable = connection.hostId?.uuidString,
+            runners.contains(where: { $0.id == reachable })
+        else { return [:] }
+        return [
+            reachable: await connection.enroll(
+                publicKey: publicKey, label: label, clientId: clientId)
+        ]
+    }
+
+    /// What to say about the runners that did not take the key, or nil when
+    /// they all did.
+    ///
+    /// The too-old case is named because it is the one cause this device
+    /// actually knows — the capability list arrives in the handshake — and
+    /// because it is the one with a different answer: updating Far Cooler over
+    /// there, rather than trying again from somewhere else. Everything else
+    /// gets the sentence that promises nothing. It deliberately does NOT say
+    /// the key will be written later: nothing in this app retries an
+    /// enrollment, and a sentence saying otherwise would leave somebody waiting
+    /// for a write that is never attempted.
+    private static func note(
+        about granting: [CeremonyRunner], outcomes: [String: Connection.Enrollment]
+    ) -> String? {
+        guard granting.contains(where: \.pending) else { return nil }
+        if let old = granting.first(where: { outcomes[$0.id] == .tooOld }) {
+            return "Far Cooler on \(old.label) is too old to add devices. "
+                + "Update it there, then add this device again."
+        }
+        return "Some runners don’t have this device’s key yet. You can add it later "
+            + "from a device that can reach them."
+    }
+
     /// The ticked runners, as the reply's records.
     ///
-    /// `pending` is true for every one of them, and that is not a placeholder:
-    /// it is what "the trusted device has not yet written this key into that
-    /// runner's `~/.ssh/authorized_keys`" means, and nothing has, because
-    /// `client.enroll` is not reachable from the client core yet — the daemon
-    /// serves it, `crates/client`'s dispatch does not route it. A runner
-    /// claimed as granted when no line was written would be the one lie in this
-    /// flow that a person could not detect.
+    /// `pending` is true for every one of them here, and that is not a
+    /// placeholder: it is what "the trusted device has not yet written this key
+    /// into that runner's `~/.ssh/authorized_keys`" means, and at this point
+    /// nothing has. `confirm()` corrects each one against what that runner
+    /// answered, and only a runner that answered loses the flag.
+    ///
+    /// It used to be left true for every runner unconditionally, because
+    /// `client.enroll` was unrouted in the client core — the daemon served it
+    /// and `crates/client`'s dispatch had no arm — so the confirmation screen's
+    /// promise that Far Cooler adds this device's key was false and no key was
+    /// ever written. `ffi.rs` routes all three of `client.list`,
+    /// `client.enroll` and `client.revoke` now, with
+    /// `crates/client/tests/every_method_is_routed.rs` as the guard against a
+    /// repeat.
     private func picked() -> [CeremonyRunner] {
         rows.filter(\.picked).map { row in
             CeremonyRunner(
@@ -621,6 +756,7 @@ final class CeremonyStore: ObservableObject {
                 // fingerprint, rather than being handed a pin nobody verified.
                 host_key: row.runner.fingerprint == "accept-any"
                     ? "" : (row.runner.fingerprint ?? ""),
+                // Corrected in `confirm()`, once the enrollment has answered.
                 pending: true)
         }
     }
@@ -647,6 +783,7 @@ final class CeremonyStore: ObservableObject {
         rows = []
         granted = []
         declined = false
+        pendingNote = nil
     }
 }
 

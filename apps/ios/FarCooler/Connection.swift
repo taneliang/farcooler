@@ -135,6 +135,34 @@ final class Connection: ObservableObject {
     /// be able to title itself with the runner it is editing.
     var hostLabel: String { host?.label ?? "This runner" }
 
+    /// The same runner, as everything that is not a screen spells one.
+    ///
+    /// A ceremony's records carry `Runner.id.uuidString`, and this connection
+    /// can enroll a key on exactly one runner: the one it is connected to.
+    /// Deciding WHICH granted runner that is has to be an id comparison —
+    /// labels are chosen by people, two runners may share one, and enrolling a
+    /// device on the wrong machine because two of them are called "mini" is not
+    /// a mistake a person could see from either screen. Read-only for the same
+    /// reason `hostLabel` is: what leaves here is a reading of the host, never
+    /// a handle on it.
+    var hostId: UUID? { host?.id }
+
+    /// The connection the app is currently running, if it is running one.
+    ///
+    /// Weak, exactly as `WatchLinkHost` holds the same thing and for the same
+    /// reason: `Connection` is a `@StateObject` owned by `FleetView`, switching
+    /// runners replaces it, and a strong reference here would keep the old
+    /// runner's SSH session alive forever — while still answering as though it
+    /// were the runner the person is looking at.
+    ///
+    /// It exists because the enrollment ceremony has no other way to reach a
+    /// session. `SettingsView` builds `AddDeviceView` from a `RunnerStore`
+    /// alone; it holds a `Connection` and does not pass it on, so a
+    /// `CeremonyStore` that took one as an argument would be a `CeremonyStore`
+    /// nothing ever hands one to. See `CeremonyStore.throughTheLiveConnection`,
+    /// which is the only reader.
+    private(set) static weak var current: Connection?
+
     /// The armed retry, or the attempt in flight. One slot, so a second
     /// request to reconnect replaces the first rather than running alongside
     /// it — the same rule the Mac's `DaemonClient.retryTask` follows.
@@ -177,6 +205,12 @@ final class Connection: ObservableObject {
         // phase itself, and registering only on success would answer "open the
         // app" to somebody who is holding it open while it reconnects.
         WatchLinkHost.shared.adopt(self)
+        // The same handover, for the enrollment ceremony, and in the same
+        // place so the two cannot disagree about which connection is current.
+        // Also before connecting: `enroll` checks the phase itself, and the
+        // ceremony is reached from a settings screen that a person can open
+        // while this is still reconnecting.
+        Connection.current = self
         attempt += 1
         let mine = attempt
         phase = .connecting
@@ -757,6 +791,94 @@ final class Connection: ObservableObject {
                 "terminal": "shell", "adopt": adopt,
             ])
         await refresh()
+    }
+
+    // MARK: - Enrolling another device
+
+    /// What became of one runner's half of a grant.
+    ///
+    /// Three outcomes rather than a Bool because two of them are different
+    /// sentences: a runner whose Far Cooler predates device keys is fixed by
+    /// updating it, and everything else is fixed by trying again from
+    /// somewhere that can reach it. The Mac's `Enrollment` collapses its
+    /// failures into one line on purpose — from the far side of an `ssh` a
+    /// sleeping runner, an unloaded key and a damaged fence look identical —
+    /// and this keeps the one distinction that IS knowable here, because the
+    /// capability list arrived in the handshake rather than being guessed at.
+    enum Enrollment: Equatable {
+        /// The key is in that runner's `authorized_keys`.
+        ///
+        /// Answered at all is answered yes: `alreadyEnrolled` comes back in the
+        /// daemon's result and is not a failure — it is the ordinary outcome of
+        /// granting a runner the device can already reach — and the line is in
+        /// the file either way, which is what was asked for.
+        case written
+        /// That runner's Far Cooler is older than device enrollment. Nothing
+        /// was written, and no amount of retrying writes it.
+        case tooOld
+        /// Nothing was written, and the reason is not knowable from here: a
+        /// runner that went away mid-ceremony, a daemon that refused because
+        /// this device's own key is not enrolled with `host_admin` there
+        /// (`crates/daemon/src/rpc.rs` requires it for `client.enroll`), and a
+        /// fence that could not be rewritten all arrive as the same silence.
+        case couldNotWrite
+    }
+
+    /// Put a device's key into this runner's `~/.ssh/authorized_keys`.
+    ///
+    /// **The daemon owns the write**, and that is the whole reason this is one
+    /// call: that file is the one whose corruption costs somebody SSH access to
+    /// their own machine, so the write is descriptor-anchored, `O_NOFOLLOW`,
+    /// locked, atomic and `fsync`ed twice in `crates/daemon/src/enrollment.rs`.
+    /// Nothing in this app appends a line to anything.
+    ///
+    /// `scope` is `control` per the design — `read` is a narrowing done
+    /// afterwards in Settings › Devices — and there is deliberately no argument
+    /// for the options, the forced command, or a `shellAccess` of true.
+    /// `ClientEnroll` has no field for the first two, and the third is what
+    /// asks for the PLAIN line Zed, git and Terminal need behind a shell; the
+    /// FFI reads its absence as false, which is the restricted Key A line, and
+    /// the absence of a way to ask for more from a phone is the guard rail. A
+    /// phone granting to another phone is the `control` case, always.
+    func enroll(publicKey: String, label: String, clientId: String) async -> Enrollment {
+        guard phase == .connected else { return .couldNotWrite }
+
+        // Asked BEFORE the call, the order `crates/cli/src/clients.rs` asks in
+        // and for its reason: a runner too old to serve this answers "unknown
+        // method", which is true and tells a person nothing they can act on —
+        // and by then somebody has already scanned a code. The list arrived in
+        // the handshake, so asking costs no round trip, and `loadDaemonBuild`
+        // is a no-op once it has an answer.
+        //
+        // `"enrollment"` is `farcooler_protocol::capability::ENROLLMENT`, which
+        // covers `client.list`, `client.enroll` and `client.revoke`. A daemon
+        // that answered no capabilities at all predates the question entirely,
+        // and `DaemonBuild.can` reads that as the two features that existed
+        // then — so an ancient runner lands on `.tooOld` rather than on a call
+        // it cannot serve.
+        await loadDaemonBuild()
+        guard let daemon else { return .couldNotWrite }
+        guard daemon.can("enrollment") else { return .tooOld }
+
+        // The keys are camelCase because that is what `crates/client/src/ffi.rs`
+        // reads, and it checks the required three for PRESENCE by name rather
+        // than defaulting them: a `public_key` sent here would come back as
+        // "your key does not parse", which is a true statement about the empty
+        // string and the wrong place to start looking.
+        //
+        // The client id is the caller's, and it is what the forced command will
+        // carry — so it is what closing this device's sessions later will name.
+        guard
+            (try? await core.call(
+                "client.enroll",
+                [
+                    "publicKey": publicKey,
+                    "label": label,
+                    "clientId": clientId,
+                    "scope": "control",
+                ])) != nil
+        else { return .couldNotWrite }
+        return .written
     }
 
     // MARK: - Quick Task

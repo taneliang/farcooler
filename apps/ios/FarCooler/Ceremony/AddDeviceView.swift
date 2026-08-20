@@ -149,9 +149,16 @@ struct AddDeviceView: View {
                     }
                 }
 
+                // "Will try" rather than "adds", which is what it said while
+                // writing nothing at all. It writes now — but only where this
+                // phone is connected AND its own key carries `host_admin`, and
+                // a phone is normally enrolled at `control` precisely so a
+                // device cannot widen its own access. Runners it could not
+                // write to still travel, and the next screen names them.
                 Text(
-                    "Far Cooler adds this device’s key to ~/.ssh/authorized_keys on each selected "
-                        + "runner. You can change its access later in Settings › Devices."
+                    "Far Cooler will try to add this device’s key to ~/.ssh/authorized_keys on "
+                        + "each selected runner. You can change its access later in "
+                        + "Settings › Devices."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -196,6 +203,20 @@ struct AddDeviceView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
+
+            // The half that did not happen, named on the screen where it still
+            // matters. A runner whose key was not written hands the new device
+            // an address it cannot log in to, and finding that out later — as a
+            // connection refused, on the other device — is the worst place to
+            // find it out. `pending` has always carried this fact on the wire;
+            // nothing on this side had ever said it out loud.
+            if let note = store.pendingNote {
+                Text(note)
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Button {
                 dismiss()
