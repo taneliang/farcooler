@@ -419,7 +419,25 @@ pub unsafe extern "C" fn farcooler_client_generate_key(
 /// because a stream is not an answer to anything. A client feeds the bytes to
 /// its own emulator, which is the same one the daemon would have used.
 ///
-/// Returns false if the client is not connected over ssh.
+/// Returns false if the terminal could not be read, or if the session slot is
+/// empty at the moment this is asked. It used to say that and always answer
+/// true, which is the worst of the three possible answers: a stream started
+/// against an empty slot reported success, its task returned on the very first
+/// `guard.as_mut()` without pushing a line, and the caller sat holding a
+/// handler for a stream that would never deliver a byte and never end. On the
+/// phone that is a pane frozen on a spinner — `TerminalSession.attach` takes a
+/// true here as "the stream is live, stop polling", so the ONE path that would
+/// have recovered was the one this turned off.
+///
+/// The empty slot is not hypothetical. Any call anywhere in the app that hits
+/// an ssh failure empties it (see `farcooler_client_call`), so every stream
+/// started between that call and a reconnect starts against nothing.
+///
+/// `try_lock` rather than blocking, for the reason `farcooler_client_connected`
+/// gives: this is called from a UI thread and a call in flight holds the
+/// session for as long as the runner takes to answer. A slot that is merely
+/// busy is treated as connected — the task below is the one that finds out for
+/// certain, and it now says so.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_stream_start(
     handle: *mut c_void,
@@ -429,6 +447,9 @@ pub unsafe extern "C" fn farcooler_client_stream_start(
         let Some(h) = (unsafe { as_handle(handle) }) else { return false };
         let Some(terminal) = (unsafe { read_str(terminal) }) else { return false };
         let Ok(id) = terminal.parse::<uuid::Uuid>() else { return false };
+        if h.session.try_lock().map(|guard| guard.is_none()).unwrap_or(false) {
+            return false;
+        }
 
         let session = h.session.clone();
         let finished = h.finished.clone();
@@ -440,7 +461,26 @@ pub unsafe extern "C" fn farcooler_client_stream_start(
 
             let reader = {
                 let mut guard = session.lock().await;
-                let Some(session) = guard.as_mut() else { return };
+                let Some(session) = guard.as_mut() else {
+                    // The slot emptied between the check above and this lock —
+                    // it was busy with the very call that found the link dead,
+                    // which is the likeliest way to arrive here rather than an
+                    // unlucky one.
+                    //
+                    // Saying so costs one line and is the difference between a
+                    // pane that recovers and a pane that does not: this is the
+                    // only end signal a stream has, `deliver` treats any
+                    // non-chunk line as the end, and without it the client's
+                    // `onEnd` never fires and `streamEnded` never falls back to
+                    // polling. The message matches `Lost::Already` deliberately
+                    // — one empty slot, one wording, whichever entry point
+                    // happens to notice it.
+                    push_line(
+                        &finished,
+                        json!({ "stream": key, "error": "not connected" }).to_string(),
+                    );
+                    return;
+                };
                 match session.open_stream(id).await {
                     Ok(reader) => reader,
                     Err(e) => {
@@ -1870,6 +1910,65 @@ mod tests {
         assert!(answer.contains("\"ok\":false"));
         assert!(answer.contains("\"disconnected\":true"), "got {answer}");
         assert!(!unsafe { farcooler_client_connected(handle) });
+        unsafe { farcooler_client_free(handle) };
+    }
+
+    #[test]
+    fn a_stream_on_a_handle_that_never_connected_does_not_claim_to_have_started() {
+        // The doc comment promised this and the code did the opposite: it
+        // always returned true, and the task behind it returned on the empty
+        // slot without pushing anything. A caller was told the stream was live,
+        // heard nothing, and was never told it had ended — so the pane it was
+        // drawing had no reason to fall back to polling and no reason to try
+        // again. That is the frozen pane.
+        let handle = farcooler_client_new();
+        let id = c"9f1c7d2e-0b4a-4f3d-9c11-2a6b8e5d4c30";
+        assert!(!unsafe { farcooler_client_stream_start(handle, id.as_ptr()) });
+        unsafe { farcooler_client_free(handle) };
+    }
+
+    #[test]
+    fn a_stream_that_finds_the_slot_empty_says_so_instead_of_going_quiet() {
+        // The same hole from the other side, and the side that actually bites.
+        //
+        // Whether the empty slot is seen by the check before the spawn or by
+        // the lock inside it is a race nothing here can control — and the
+        // likeliest way to lose it is the ONE that matters, because the call
+        // holding the session is usually the very call that just found the link
+        // dead and is about to empty it. So the check is arranged to lose here:
+        // the lock is held across `stream_start`, `try_lock` cannot see the
+        // slot, and the task behind it is left to be honest on its own.
+        //
+        // It has to be. One non-chunk line is the only end signal a stream has
+        // — `ClientCore.deliver` turns exactly that into `onEnd`, which is what
+        // `streamEnded` needs to fall back to polling. Before this, that line
+        // was never pushed and the pane simply stopped.
+        let handle = farcooler_client_new();
+
+        // The Arc alone, not a borrow of the handle held across the call below.
+        let session = {
+            let h = unsafe { as_handle(handle) }.unwrap();
+            Arc::clone(&h.session)
+        };
+        let held = session.blocking_lock();
+
+        let id = c"9f1c7d2e-0b4a-4f3d-9c11-2a6b8e5d4c30";
+        assert!(
+            unsafe { farcooler_client_stream_start(handle, id.as_ptr()) },
+            "a busy slot is not a known-empty one, so this cannot answer false"
+        );
+        drop(held);
+
+        // Answered on the runtime's thread, so wait for it rather than assuming
+        // it has landed by now.
+        let line = loop {
+            if let Some(line) = unsafe { farcooler_client_poll(handle).as_ref() } {
+                break unsafe { CStr::from_ptr(line) }.to_str().unwrap().to_string();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert!(line.contains("\"error\":\"not connected\""), "got {line}");
+
         unsafe { farcooler_client_free(handle) };
     }
 

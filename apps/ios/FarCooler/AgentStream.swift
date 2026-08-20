@@ -138,7 +138,24 @@ final class AgentStream: ObservableObject {
             transcript.apply(decoded)
             connectionError = nil
         } catch {
-            connectionError = String(describing: error)
+            // `String(describing:)` on a Swift error prints the CASE, not the
+            // message: what reached the chat pane was the literal text
+            // `disconnected("not connected")` — a Rust-side word for the FFI's
+            // empty session slot, wrapped in Swift enum syntax, shown to
+            // somebody who wanted to read a conversation. `localizedDescription`
+            // is the half of it that was meant to be read.
+            //
+            // And a dropped link gets a sentence of its own, because it is the
+            // one that happens: any ssh hiccup anywhere in the app empties that
+            // slot, so every poll afterwards lands here until something
+            // reconnects. `refresh` on `Connection` is what does the
+            // reconnecting; this pane's job is to say so and then be quiet
+            // about it, which is what clearing on the next good batch does.
+            if let core = error as? ClientCore.CoreError, case .disconnected = core {
+                connectionError = "The connection to this runner dropped. Reconnecting…"
+            } else {
+                connectionError = error.localizedDescription
+            }
         }
     }
 

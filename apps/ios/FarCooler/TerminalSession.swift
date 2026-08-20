@@ -446,7 +446,35 @@ final class TerminalSession: ObservableObject {
         // believes it is streaming attached to nothing, which is a screen that
         // stops updating and never says why.
         await stopStream(terminalID)
-        guard let screen = await prime() else { return }
+        guard let screen = await prime() else {
+            // A screen call that failed leaves nothing running that would ever
+            // look again, and that was the bug: this returned here, so the pane
+            // kept whatever `report` had just set and kept it forever.
+            //
+            // Which matters far more than one unlucky call suggests, because
+            // the failure is not local to this pane. An ssh hiccup on ANY call
+            // anywhere in the app empties the core's session slot — see
+            // `farcooler_client_call` — and every call after it is answered
+            // "not connected" until something reconnects. So the pane that
+            // happened to be opening during that window showed "Could not
+            // load", stopped asking, and stayed there even once the link was
+            // back.
+            //
+            // The poll loop IS the retry, and it already behaves correctly for
+            // this: `poll` reports its own failures and backs off to
+            // `slowInterval`, so a host that has genuinely said no is not
+            // hammered, and the first answer that does arrive calls `render`,
+            // which returns the pane to `.live` on its own. No tap, no
+            // `relink`, and no dependence on this pane being the visible one at
+            // the moment `Connection` notices the drop.
+            //
+            // Only for `.failed`. A `.notLive` pane is not a pane that could
+            // not be reached, it is a pane the host says is not running, and
+            // polling one of those every second forever would spend a round
+            // trip per second to be told the same true thing.
+            if case .failed = phase { startLoop() }
+            return
+        }
         if await attach() { return watchGeometry() }
         render(screen)
         startLoop()
@@ -545,7 +573,7 @@ final class TerminalSession: ObservableObject {
         streaming = false
         failedAttaches += 1
         guard failedAttaches < 3 else {
-            if let error { phase = .failed(error) }
+            if let error { phase = .failed(Self.humanFailure(error)) }
             // Everything the streaming path set up goes before the polling path
             // starts, and that is the whole fix for a screen that flashed a
             // wrong layout once a second. Falling back used to start the poll
@@ -812,7 +840,31 @@ final class TerminalSession: ObservableObject {
     /// "come back later", the other is "something is wrong".
     private func report(_ error: Error) {
         let message = error.localizedDescription
-        phase = message == "resource not found" ? .notLive : .failed(message)
+        phase = message == "resource not found" ? .notLive : .failed(Self.humanFailure(message))
+    }
+
+    /// What actually goes under "Could not load".
+    ///
+    /// The core's word for a dead link is "not connected", which is right for a
+    /// log and wrong for a screen: it is lowercase, it is a fragment, and it
+    /// describes the FFI's session slot rather than anything the person holding
+    /// the phone did or can do about it. It is also the line they saw — one ssh
+    /// hiccup anywhere empties that slot and every call afterwards is answered
+    /// with it, so this is the most common failure text there is, not an edge.
+    ///
+    /// Matched on the string rather than on `ClientCore.CoreError`, which the
+    /// call path could have offered, because the OTHER caller could not: a
+    /// stream reports its end as a bare JSON string with no type left on it
+    /// (see `farcooler_client_stream_start`). One rule both paths can use beats
+    /// a typed check here and an untyped one six lines away that drift apart.
+    ///
+    /// Everything else is passed through. A message from the host is the
+    /// host's to word, and rewriting all of them into one apology would throw
+    /// away the only clue a real failure carries.
+    private static func humanFailure(_ message: String) -> String {
+        message == "not connected"
+            ? "The connection to this runner dropped. Reconnecting…"
+            : message
     }
 
     /// Send typed text. Each scalar is encoded on its own so a Ctrl modifier —
