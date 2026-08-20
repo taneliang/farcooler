@@ -1578,14 +1578,30 @@ final class DaemonClient: ObservableObject {
     /// One file's diff. `context` is lines of unchanged context around each
     /// hunk; zero leaves git's own default of three, and a large number is how
     /// the lines a diff omits are recovered.
+    /// One file's diff, under whichever comparison is on screen.
+    ///
+    /// `commit` is the sha when the comparison is a single commit, and nil for
+    /// the two that need no argument. It is a separate parameter rather than an
+    /// associated value on `DiffScope` because that type is the tag of a
+    /// segmented control and has to stay `CaseIterable` and `RawRepresentable`;
+    /// the sha travels beside it, from `ChangesStore.selectedCommit`.
+    ///
+    /// Passing it here rather than having the caller assemble its own
+    /// invocation keeps ONE reader of a diff: the commit path briefly went out
+    /// through `changesJSON`, which republishes this client's error state as a
+    /// side effect of asking for a patch.
     func changesDiff(
-        workspace: String, path: String, scope: DiffScope, context: Int = 0
+        workspace: String, path: String, scope: DiffScope, context: Int = 0,
+        commit: String? = nil
     ) async -> [DiffComputation.Line] {
         var args = ["changes", "diff", workspace, path]
         // `--local`, not `--unstaged`: everything uncommitted. Asking for the
         // unstaged half alone meant a file went blank the moment it was staged,
         // which reads as the work having been undone.
         if scope == .local { args.append("--local") }
+        // `--commit` and `--context` do not conflict, so expanding a collapsed
+        // section works inside a commit exactly as it does on the branch.
+        if let commit, scope == .commit { args += ["--commit", commit] }
         if context > 0 { args += ["--context", "\(context)"] }
         guard let data = await run(args, background: true),
             let text = String(data: data, encoding: .utf8)

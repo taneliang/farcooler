@@ -40,6 +40,16 @@ struct ChangeSet: Decodable, Equatable {
     }
 }
 
+/// One commit on this branch, as the history picker draws it.
+///
+/// Four fields and no counts, which is not an oversight and cannot be fixed
+/// here: `ChangeCommit` in the proto carries `files_changed`, `insertions` and
+/// `deletions`, but `commits_since` in the daemon writes 0 into all three, and
+/// `change_set_json` in the CLI does not serialize them at all. So a row says
+/// what is actually known — who, when, and what they called it — and the `+N
+/// -M` for a commit appears once it is SELECTED, summed from the file list that
+/// selection fetches. A number invented from two zeroes would be worse than no
+/// number.
 struct ChangeCommit: Decodable, Equatable, Identifiable {
     var sha: String
     var subject: String
@@ -48,6 +58,33 @@ struct ChangeCommit: Decodable, Equatable, Identifiable {
 
     var id: String { sha }
     var short: String { String(sha.prefix(8)) }
+
+    /// How long ago this commit was made, in the same shorthand a branch row
+    /// and a running turn already use: `12m`, `3h`, `2d`.
+    ///
+    /// `now` is an ARGUMENT rather than a `Date()` read in here, for the reason
+    /// `Terminal.turnDuration` spells out — a clock read inside a property is
+    /// an input SwiftUI cannot observe, so the string freezes until something
+    /// unrelated forces a redraw. Nothing drives this one on a timer, and
+    /// nothing needs to: the picker computes `now` when it opens, which is the
+    /// only moment anybody reads it.
+    func age(at now: Date) -> String {
+        let seconds = now.timeIntervalSince1970 - Double(timestamp)
+        // A commit dated in the future is a clock that disagrees, not a
+        // negative age. Saying "now" is the smallest honest thing to say.
+        guard seconds >= 60 else { return "now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m" }
+        if seconds < 86_400 { return "\(Int(seconds / 3600))h" }
+        return "\(Int(seconds / 86_400))d"
+    }
+
+    /// The full date, for the tooltip. `2d` is what you scan; this is what you
+    /// check when `2d` is the thing you are trying to remember. It takes no
+    /// clock because it is not relative to one.
+    var made: String {
+        Date(timeIntervalSince1970: Double(timestamp))
+            .formatted(date: .abbreviated, time: .shortened)
+    }
 }
 
 struct ChangedFile: Decodable, Equatable, Identifiable {
@@ -140,12 +177,33 @@ struct InboxRow: Decodable, Equatable, Identifiable {
 
 /// Which comparison the diff tile is showing.
 ///
-/// `Commit` is deliberately absent: it needs a commit picker, and the PR tile
-/// already has to draw a commit list. Adding a second way to reach the same view
-/// before that tile exists would mean guessing at the picker twice.
+/// `commit` used to be absent, on the grounds that it needed a picker the PR
+/// tile would have to draw first. That tile never arrived and the wait was
+/// unnecessary: the change set has carried `commits` the whole time — decoded
+/// here since the beginning and rendered by nothing — so the picker had nothing
+/// left to guess at. It lives in the diff strip, beside the file jumper.
+///
+/// The sha is NOT an associated value of this case, and that is the one
+/// decision here worth defending. This enum is the tag type of the segmented
+/// comparison control in the pane header, which needs `allCases`, a stable
+/// `rawValue` and `Codable`; a payload takes all three away and rewrites a
+/// control that is not this feature's to rewrite. Which commit is being shown
+/// is a second question, so it is a second property — `ChangesStore.selectedCommit`.
 enum DiffScope: String, CaseIterable, Identifiable, Codable {
     case branch
     case local
+    case commit
+
+    /// The two the comparison control offers, which is not every case.
+    ///
+    /// A `Commit` segment would be a control that cannot answer its own
+    /// question: clicking it says nothing about WHICH commit, so it would have
+    /// to open something, and the thing it would open is already one control to
+    /// the right. While a commit is on screen this control shows no segment
+    /// selected — the truth of it, since neither the whole branch nor the
+    /// uncommitted work is what is being drawn — and clicking either segment is
+    /// one of the two ways back.
+    static var allCases: [DiffScope] { [.branch, .local] }
 
     var id: String { rawValue }
 
@@ -153,6 +211,7 @@ enum DiffScope: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .branch: return "Branch"
         case .local: return "Uncommitted"
+        case .commit: return "Commit"
         }
     }
 }
@@ -243,9 +302,48 @@ final class ChangesStore: ObservableObject {
 
     /// The file the jump bar last went to. Highlights it; hides nothing.
     @Published var selectedFile: String?
-    @Published var scope: DiffScope = .branch
+    @Published var scope: DiffScope = .branch {
+        didSet {
+            // Leaving the commit view forgets WHICH commit, because every way
+            // out of it means the same thing: the reader is done with that
+            // commit. Without this, clicking `Branch` in the header control —
+            // which this file does not own and cannot ask to clear anything —
+            // would leave a sha behind, and the next commit chosen from the
+            // picker would be silently compared against a stale file list.
+            guard scope != .commit, oldValue == .commit else { return }
+            selectedCommit = nil
+            commitFiles = []
+            commitUnreadable = false
+        }
+    }
     @Published var loading = false
     @Published var error: String?
+
+    /// Which commit is on screen, when the scope is `.commit`. Nil otherwise,
+    /// and kept nil by `scope`'s own `didSet` rather than by every caller.
+    @Published private(set) var selectedCommit: String?
+
+    /// What that commit touched, from `changes files` — a separate call,
+    /// because the change set deliberately carries no per-commit file lists.
+    @Published private(set) var commitFiles: [ChangedFile] = []
+
+    /// Set when that call failed, so the pane can say which nothing it is
+    /// showing. A commit can genuinely stop being readable while the pane is
+    /// open — a rebase or an amend rewrites the branch under it — and "Nothing
+    /// changed here" is the wrong sentence for a commit that could not be read.
+    @Published private(set) var commitUnreadable = false
+
+    /// Bumped every time the cached diffs are thrown away.
+    ///
+    /// Two jobs, both of which were bugs before it existed. It is part of the
+    /// id each file heading's `task` is keyed on, so a reload re-asks for the
+    /// files on screen: keyed on the path alone, a heading that stayed realized
+    /// across a scope change never ran its task again, and the file sat at `…`
+    /// forever because nothing else asks. And every read compares the
+    /// generation it started in against the current one before storing what it
+    /// got, so a diff still in flight when the reader switches commits is
+    /// dropped rather than filed under the new commit's identical path.
+    @Published private(set) var generation = 0
 
     let client: DaemonClient
     let workspace: Workspace
@@ -267,10 +365,18 @@ final class ChangesStore: ObservableObject {
     /// only kind of file Local exists to show, never appeared in the list at
     /// all, and the files that did appear showed an empty local diff. The
     /// working tree already travels in the same response; this reads it.
+    ///
+    /// Commit is one commit against its FIRST parent, which is what the daemon
+    /// diffs and what `changes files` counts — never `git show`, whose combined
+    /// diff for a merge an ordinary parser reads as nonsense. Both halves of
+    /// this view come from that same first-parent comparison, so the file list
+    /// and the patches under it cannot disagree about what the commit did.
     var files: [ChangedFile] {
         switch scope {
         case .branch:
             return changeSet.files
+        case .commit:
+            return commitFiles
         case .local:
             return dirtyPaths.map { path in
                 // Counted from the diff once it has been read, because nothing
@@ -297,7 +403,13 @@ final class ChangesStore: ObservableObject {
     /// created is the most interesting thing in a local change set — so the
     /// row says which kind of nothing it is showing.
     func isUntracked(_ path: String) -> Bool {
-        changeSet.workingTree?.untracked.contains(path) ?? false
+        // Nothing in a commit is untracked — committing is what tracking IS —
+        // and the working tree's list is about right now, not about then. Left
+        // to speak, it would refuse to fetch the diff of a file that a commit
+        // changed and somebody has since deleted and rewritten, and the row
+        // would claim git had never seen a file the commit demonstrably had.
+        guard scope != .commit else { return false }
+        return changeSet.workingTree?.untracked.contains(path) ?? false
     }
 
     /// Every path git calls dirty, in one order: staged, then unstaged, then
@@ -351,21 +463,162 @@ final class ChangesStore: ObservableObject {
             error = client.changesError
         }
 
-        // Read again rather than kept: these are diffs against a base that may
-        // have just moved, and a stale hunk is worse than a missing one. The
-        // expanded gaps go with them for the same reason — context recovered
-        // from a diff that no longer exists is not context.
+        // Before the reset below, because everything after it asks `files`
+        // what is on screen and, in this scope, `files` IS this list.
+        if scope == .commit, let sha = selectedCommit {
+            await readCommitFiles(sha)
+        }
+
+        reset()
+        if let open = selectedFile, !files.contains(where: { $0.path == open }) {
+            selectedFile = nil
+        }
+        let live = Set(files.map(\.path))
+        collapsedFiles = collapsedFiles.intersection(live)
+    }
+
+    /// Throw away every diff read so far, and say so.
+    ///
+    /// Read again rather than kept: these are diffs against a base that may
+    /// have just moved, and a stale hunk is worse than a missing one. The
+    /// expanded gaps go with them for the same reason — context recovered from
+    /// a diff that no longer exists is not context.
+    ///
+    /// The generation bump is what makes the emptying visible. Nothing in the
+    /// view asks for a file's diff a second time on its own: the heading does
+    /// it once, from a `task` keyed on a path that has not changed. So clearing
+    /// the cache under a heading that is still on screen used to leave that
+    /// file reading `…` until somebody scrolled it away and back — which is
+    /// exactly what switching between two commits that touch the same file
+    /// does.
+    private func reset() {
         fileDiffs = [:]
         fullDiffs = [:]
         fullContext = [:]
         openGaps = []
         tooWide = []
         widestLine = 0
-        if let open = selectedFile, !files.contains(where: { $0.path == open }) {
-            selectedFile = nil
+        generation &+= 1
+    }
+
+    /// Show one commit, against its first parent.
+    ///
+    /// The file list is a second call and not a filter over the branch's: the
+    /// change set carries per-file counts for the WHOLE branch and nothing
+    /// per-commit, on purpose — a branch that regenerated a lockfile touches
+    /// thousands of files, and shipping that per commit to draw a picker is the
+    /// cost this product does not pay.
+    func select(commit sha: String) async {
+        // Already showing it. Re-reading would cost a round trip to arrive at
+        // the same list, and would take the reader's scroll position and every
+        // gap they had opened with it.
+        guard scope != .commit || selectedCommit != sha else { return }
+        scope = .commit
+        selectedCommit = sha
+        // The same flag a full load raises, and for the same reason: arriving
+        // from the branch, this scope's file list is empty until the call
+        // below answers, and an empty list with nothing to say about why is a
+        // pane asserting that the commit changed nothing.
+        loading = true
+        defer { loading = false }
+        // Read BEFORE anything is thrown away, which is what makes going from
+        // one commit to the next look like a switch rather than a reload: the
+        // previous commit's files and patches stay on screen until there is a
+        // whole new set to put in their place.
+        await readCommitFiles(sha)
+        guard selectedCommit == sha else { return }
+        reset()
+        selectedFile = nil
+        collapsedFiles = []
+    }
+
+    /// Back to the whole branch: merge base to HEAD, every commit at once.
+    ///
+    /// No round trip. The change set never stopped being read — the poll keeps
+    /// it current while the pane is open — so the branch's file list is already
+    /// here and only the commit's patches have to go.
+    func showWholeBranch() {
+        guard scope == .commit else { return }
+        scope = .branch
+        reset()
+        selectedFile = nil
+    }
+
+    /// Which files one commit touched, from `changes files <workspace> <sha>`.
+    ///
+    /// That command has no `--json`: it prints `+12    -3     path`, one file to
+    /// a line, and this reads it back. Which is why a row from here has no
+    /// status letter — see `parseCommitFiles`.
+    private func readCommitFiles(_ sha: String) async {
+        let data = await client.changesJSON(["changes", "files", workspace.short, sha])
+        // The reader moved on while this was in flight. Filing an older
+        // commit's list under the newer one's sha is the whole reason this is
+        // checked: both answers are well-formed, and the wrong one is
+        // indistinguishable from the right one once it has landed.
+        guard selectedCommit == sha, scope == .commit else { return }
+        guard let data, let text = String(data: data, encoding: .utf8) else {
+            commitFiles = []
+            commitUnreadable = true
+            return
         }
-        let live = Set(files.map(\.path))
-        collapsedFiles = collapsedFiles.intersection(live)
+        commitFiles = Self.parseCommitFiles(text)
+        commitUnreadable = false
+    }
+
+    /// `+12    -3     some/path.swift`, one file per line.
+    ///
+    /// Fields are padded to a fixed width rather than delimited, so this reads
+    /// the two counts off the front and takes ALL of the rest as the path —
+    /// splitting on whitespace instead would lose the second half of every file
+    /// whose name contains a space.
+    ///
+    /// The status is deliberately nil, not a guess. The daemon builds this list
+    /// from `git diff --numstat`, which counts lines and never says added or
+    /// deleted; it fills in `Modified` for everything that is not a rename, and
+    /// the CLI does not print even that. Defaulting to `M` here would put
+    /// "Modified" beside a file the commit created, so the badge says only that
+    /// the file changed.
+    nonisolated static func parseCommitFiles(_ text: String) -> [ChangedFile] {
+        var out: [ChangedFile] = []
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            var rest = raw[...]
+            guard rest.hasPrefix("+") else { continue }
+            rest = rest.dropFirst()
+            let insertions = rest.prefix(while: \.isNumber)
+            rest = rest.dropFirst(insertions.count).drop(while: { $0 == " " })
+            guard rest.hasPrefix("-") else { continue }
+            rest = rest.dropFirst()
+            let deletions = rest.prefix(while: \.isNumber)
+            rest = rest.dropFirst(deletions.count).drop(while: { $0 == " " })
+            let path = String(rest)
+            guard !path.isEmpty else { continue }
+            out.append(
+                ChangedFile(
+                    path: path,
+                    status: nil,
+                    oldPath: nil,
+                    insertions: Int(insertions) ?? 0,
+                    deletions: Int(deletions) ?? 0,
+                    binary: false))
+        }
+        return out
+    }
+
+    /// The commits this branch made, newest first.
+    ///
+    /// The daemon logs them with `--reverse` so `changes status` reads as a
+    /// story from the base forward, which is right for a transcript and wrong
+    /// for a picker: the commit somebody wants to look at is almost always the
+    /// one they just made.
+    var commitsNewestFirst: [ChangeCommit] { changeSet.commits.reversed() }
+
+    /// What the change set knows about the commit on screen, if it still knows
+    /// anything. Nil for a commit that has left the branch — an amend or a
+    /// rebase during a review does exactly that — while the diff itself stays
+    /// readable, because the object it names is still in the repository.
+    var selectedCommitInfo: ChangeCommit? {
+        guard let selectedCommit else { return nil }
+        return changeSet.commits.first { $0.sha == selectedCommit }
     }
 
     /// Read one file's diff, if it has not been read already.
@@ -382,10 +635,15 @@ final class ChangesStore: ObservableObject {
     }
 
     private func read(_ path: String) async {
+        let asked = generation
         loadingFiles.insert(path)
-        let lines = await client.changesDiff(
-            workspace: workspace.short, path: path, scope: scope)
+        let lines = await diff(path)
         loadingFiles.remove(path)
+        // What was being compared changed while this was in flight, so these
+        // lines answer a question nobody is asking any more. Keyed on the path
+        // alone they would file perfectly, under a heading now showing a
+        // different commit — a wrong diff that looks exactly like a right one.
+        guard asked == generation else { return }
         fileDiffs[path] = lines
         // The expanded copy described the file as it was a moment ago, and its
         // line numbers no longer line up with the hunks around them. Dropped
@@ -396,6 +654,23 @@ final class ChangesStore: ObservableObject {
         openGaps = openGaps.filter { !$0.hasPrefix("\(path)#") }
         tooWide = tooWide.filter { !$0.hasPrefix("\(path)#") }
         widestLine = max(widestLine, lines.map(\.text.count).max() ?? 0)
+    }
+
+    /// One file's patch, for whatever is being compared.
+    ///
+    /// Every scope goes through the client's own `changesDiff`, including the
+    /// commit one — it takes the sha as a parameter beside the scope, because
+    /// `DiffScope` is the tag of a segmented control and cannot carry an
+    /// associated value without losing `CaseIterable`.
+    ///
+    /// This briefly assembled the commit invocation itself and went out through
+    /// `changesJSON`, which republishes the client's error state as a side
+    /// effect of asking for a patch — so a per-file read inside a commit
+    /// repainted rather more than the file it was for.
+    private func diff(_ path: String, context: Int = 0) async -> [DiffComputation.Line] {
+        await client.changesDiff(
+            workspace: workspace.short, path: path, scope: scope, context: context,
+            commit: selectedCommit)
     }
 
     /// Open one of the gaps a diff leaves between its hunks.
@@ -414,8 +689,12 @@ final class ChangesStore: ObservableObject {
     func open(gap: Int, of size: Int, in path: String) async {
         let need = min(size + 4, 2_000)
         if (fullContext[path] ?? 0) < need {
-            let lines = await client.changesDiff(
-                workspace: workspace.short, path: path, scope: scope, context: need)
+            let asked = generation
+            let lines = await diff(path, context: need)
+            // The same in-flight check `read` makes, for the same reason: these
+            // are the unchanged lines of a file as some OTHER comparison saw
+            // it, and they would slot into the gap without looking wrong.
+            guard asked == generation else { return }
             guard !lines.isEmpty else {
                 // The daemon refused to render a diff that wide. Recorded, so
                 // the row can say so rather than being a control that does
@@ -496,12 +775,19 @@ final class ChangesStore: ObservableObject {
         // says nothing at all about its contents, so every dirty file that has
         // been read is re-read. That set is small by construction: it is the
         // files git already calls dirty, intersected with the ones scrolled to.
+        //
+        // A commit is finished. Its patch is the difference between two
+        // objects that already exist and cannot change, so there is nothing for
+        // a poll to find — and re-reading it every three seconds would spend a
+        // round trip per file on screen to fetch the bytes already on screen.
         let stale: [String]
         switch scope {
         case .branch:
             stale = next.files.filter { before[$0.path] != $0 }.map(\.path)
         case .local:
             stale = files.map(\.path)
+        case .commit:
+            stale = []
         }
 
         let live = Set(files.map(\.path))

@@ -41,6 +41,7 @@ struct ChangesPane: View {
     private static let scrollSpace = "diff.scroll"
 
     @State private var picking = false
+    @State private var pickingCommit = false
     @State private var query = ""
     @FocusState private var filtering: Bool
     @State private var lastHunkJump: String?
@@ -207,6 +208,14 @@ struct ChangesPane: View {
     /// label. Hunk movement remains available at either width.
     private func diffNavigator(compact: Bool) -> some View {
         HStack(spacing: 4) {
+            // First, because it is the outermost question: which comparison,
+            // then which file in it, then which hunk in that. The header's
+            // segmented control asks the same question one level up — whole
+            // branch or uncommitted — and this is the third answer it has no
+            // room for.
+            commitPicker(compact: compact)
+            Divider().frame(height: 14).padding(.horizontal, 2)
+
             if compact {
                 navButton("chevron.up", help: "Previous file") { moveFile(-1) }
                 filePicker
@@ -360,6 +369,200 @@ struct ChangesPane: View {
                 highlighted = 0
             }
         }
+    }
+
+    /// Which commit, or all of them.
+    ///
+    /// A popover rather than a menu, and for the same reason the file jumper is
+    /// one: a branch with thirty commits on it is a list you READ, and a menu
+    /// makes you read it inside a strip of chrome that is one line tall.
+    ///
+    /// The label carries the sha because that is what a person copies out of
+    /// this view and pastes into a terminal, and the subject because a sha is
+    /// not something anybody recognizes. At compact widths the subject goes and
+    /// the sha stays: eight monospaced characters still identify the commit,
+    /// where the first four words of a subject line usually do not.
+    private func commitPicker(compact: Bool) -> some View {
+        Button { pickingCommit = true } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 10))
+                    .foregroundStyle(changes.scope == .commit ? Color.accentColor : .secondary)
+                if let sha = changes.selectedCommit {
+                    // The sha never shrinks. It is the part of this label that
+                    // identifies anything, and half a sha identifies nothing —
+                    // where half a subject line still reads.
+                    Text(String(sha.prefix(8)))
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .fixedSize()
+                    if !compact, let subject = changes.selectedCommitInfo?.subject {
+                        Text(subject)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            // Capped so a commit whose subject runs to eighty
+                            // characters cannot push the file name and the hunk
+                            // controls off the end of the strip.
+                            .frame(maxWidth: 160, alignment: .leading)
+                    }
+                } else {
+                    Text("History")
+                        .font(.system(size: 10.5))
+                        .fixedSize()
+                }
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(commitPickerHelp)
+        .popover(isPresented: $pickingCommit, arrowEdge: .bottom) { commitList }
+    }
+
+    /// Three states and three sentences. The middle one is the case a rebase or
+    /// an amend creates while somebody is reading: the commit is no longer part
+    /// of the branch, its diff is still perfectly readable because the object it
+    /// names is still in the repository, and saying nothing about that would
+    /// leave the pane quietly describing a commit the branch has forgotten.
+    private var commitPickerHelp: String {
+        guard changes.scope == .commit else { return "Look at one commit" }
+        if changes.selectedCommitInfo == nil {
+            return "This commit isn't on the branch anymore. It's still readable."
+        }
+        return "One commit, against its first parent"
+    }
+
+    private var commitList: some View {
+        // Read once, here, so every row in this list ages against the same
+        // instant — and read at all only because the popover is opening. See
+        // `ChangeCommit.age(at:)`.
+        let now = Date()
+        let commits = changes.commitsNewestFirst
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                changes.showWholeBranch()
+                pickingCommit = false
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .opacity(changes.scope == .commit ? 0 : 1)
+                        .frame(width: 11)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Whole Branch")
+                            .font(.system(size: 11, weight: .medium))
+                        Text("Every commit at once")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(5)
+
+            Divider()
+
+            if commits.isEmpty {
+                // Not a failure, and it must not read as one. A branch cut a
+                // minute ago has no commits of its own and can still be full of
+                // uncommitted work, which the two segments in the header show.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("No commits yet")
+                        .font(.system(size: 11, weight: .medium))
+                    Text(noCommitsDetail)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(9)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(commits) { c in commitRow(c, now: now) }
+                    }
+                    .padding(5)
+                }
+                // A branch is allowed to be long. Capped and scrolled, a
+                // hundred commits is a list; uncapped, it is a popover taller
+                // than the display it opened on.
+                .frame(maxHeight: 280)
+            }
+
+            Divider()
+
+            // Said once, here, rather than worked out per commit — the client
+            // cannot tell a merge from an ordinary commit anyway, since the
+            // change set carries no parent counts. It is true of every row: the
+            // daemon diffs a commit against its FIRST parent, never with `git
+            // show`, whose combined diff for a merge an ordinary parser reads
+            // as nonsense. For a merge that means what the merged branch
+            // brought, which is not everything the merge contains.
+            Text("A commit is shown against its first parent.")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+        }
+        .frame(width: 380)
+    }
+
+    private var noCommitsDetail: String {
+        let base = changes.changeSet.baseRef
+        return base.isEmpty
+            ? "There's nothing to compare this branch against yet."
+            : "Nothing has been committed here since \(base)."
+    }
+
+    private func commitRow(_ c: ChangeCommit, now: Date) -> some View {
+        Button {
+            Task { await changes.select(commit: c.sha) }
+            pickingCommit = false
+        } label: {
+            HStack(alignment: .top, spacing: 7) {
+                Text(c.short)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(c.subject)
+                        .font(.system(size: 11))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(byline(c, now: now))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(
+                changes.selectedCommit == c.sha
+                    ? WorkspaceStyle.navigatorSelection : .clear,
+                in: RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .help(c.made)
+    }
+
+    /// Author and age on one line. A commit with no author name is not worth a
+    /// separator and a gap where a name should be.
+    private func byline(_ c: ChangeCommit, now: Date) -> String {
+        let age = c.age(at: now)
+        return c.author.isEmpty ? age : "\(c.author) · \(age)"
     }
 
     private var filterList: some View {
@@ -570,14 +773,35 @@ struct ChangesPane: View {
 
     // MARK: - The diff
 
-    /// Empty means two different things, and saying the wrong one is a wrong
-    /// answer: a branch that matches its base is finished work, and a worktree
-    /// with nothing uncommitted is work that has been committed.
+    /// Empty means several different things, and saying the wrong one is a
+    /// wrong answer: a branch that matches its base is finished work, a
+    /// worktree with nothing uncommitted is work that has been committed, and a
+    /// commit that could not be read is not an empty commit at all.
+    private var nothingTitle: String {
+        changes.commitUnreadable ? "Couldn't read this commit" : "Nothing changed here"
+    }
+
     private var nothingDetail: String {
-        if changes.scope == .local { return "Everything here is committed." }
-        return changes.changeSet.baseRef.isEmpty
-            ? "There's nothing to compare this branch against yet."
-            : "This branch matches \(changes.changeSet.baseRef)."
+        if changes.commitUnreadable {
+            // The case that puts this here: an amend or a rebase during a
+            // review rewrites the branch, and the sha in hand stops being one
+            // this worktree can answer for. Never the daemon's own words —
+            // they are about a subprocess, and this is about a commit.
+            return "It might not be on this branch anymore. Choose another, or go back to the whole branch."
+        }
+        switch changes.scope {
+        case .local:
+            return "Everything here is committed."
+        case .commit:
+            // Against its FIRST parent, which is the only wording that stays
+            // true for a merge: a merge whose branch brought nothing new is
+            // empty by this comparison and very far from empty by any other.
+            return "This commit changed nothing against its first parent."
+        case .branch:
+            return changes.changeSet.baseRef.isEmpty
+                ? "There's nothing to compare this branch against yet."
+                : "This branch matches \(changes.changeSet.baseRef)."
+        }
     }
 
     @ViewBuilder
@@ -586,8 +810,15 @@ struct ChangesPane: View {
             // The banner above already said what went wrong, and "Nothing
             // changed here" underneath it would contradict it.
             Color.clear
+        } else if changes.files.isEmpty && changes.loading {
+            // A read in progress is not an answer. Without this the pane
+            // asserted "Nothing changed here" for the length of every round
+            // trip — on first arrival, and again each time a commit was
+            // chosen — which is a sentence about the worktree, not about the
+            // wait.
+            Color.clear
         } else if changes.files.isEmpty {
-            PaneNotice(title: "Nothing changed here", detail: nothingDetail)
+            PaneNotice(title: nothingTitle, detail: nothingDetail)
         } else {
             ScrollViewReader { proxy in
                 // ONE scroll axis here, and the horizontal one lives inside each
@@ -815,7 +1046,14 @@ struct ChangesPane: View {
                 // Read when the heading comes into view, not when the branch
                 // loads: forty files would otherwise be forty round trips
                 // before anything drew.
-                .task(id: f.path) {
+                //
+                // Keyed on the generation as well as the path, because the path
+                // alone does not change when the COMPARISON does. A heading
+                // that stays on screen across a switch from one commit to
+                // another keeps its identity, so this task never ran again
+                // while the diff under it had just been thrown away — and the
+                // file sat at `…` until it was scrolled out of view and back.
+                .task(id: "\(changes.generation)\u{1}\(f.path)") {
                     guard !changes.collapsedFiles.contains(f.path) else { return }
                     await changes.ensure(f.path)
                 }
@@ -1061,12 +1299,20 @@ private struct FileStatusBadge: View {
         }
     }
 
+    /// No status is its own state, and it used to be spelled `M`.
+    ///
+    /// The file list for one commit comes from `git diff --numstat`, which
+    /// counts lines and never says added, deleted or renamed — the daemon fills
+    /// in `Modified` for everything it does not detect as a rename, and the CLI
+    /// prints only the counts and the path. So "Modified" beside a file the
+    /// commit CREATED is not a default, it is a wrong answer; a dot says the
+    /// file changed, which is the whole of what is known.
     var body: some View {
-        Text(binary ? "B" : (status?.mark ?? "M"))
+        Text(binary ? "B" : (status?.mark ?? "•"))
             .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
             .foregroundStyle(color)
             .frame(width: 12, alignment: .center)
-            .help(binary ? "Binary file" : (status?.label ?? "Modified"))
+            .help(binary ? "Binary file" : (status?.label ?? "Changed"))
     }
 }
 
