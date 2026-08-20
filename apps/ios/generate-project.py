@@ -19,6 +19,9 @@ from pathlib import Path
 
 SOURCES = [
     "FarCoolerApp.swift",
+    # Every add-shaped screen in one place, and the hub the five old entry
+    # points collapsed into. See its own doc comment.
+    "AddFlow.swift",
     "ClientCore.swift",
     "Connection.swift",
     "FleetSnapshotWriter.swift",

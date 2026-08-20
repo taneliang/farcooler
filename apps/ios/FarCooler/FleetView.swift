@@ -633,7 +633,7 @@ struct HostSwitcherBar: View {
     /// and needs to close itself. Nil where the bar is part of the screen.
     var onSwitch: (() -> Void)?
 
-    @State private var showAddRunner = false
+    @State private var showAdd = false
     /// The host being edited, rather than a bare flag: a flag plus a separate
     /// `hosts.selected` lookup can present a sheet with nothing in it if the
     /// selection changes between the tap and the presentation.
@@ -660,7 +660,13 @@ struct HostSwitcherBar: View {
                     }
                 }
                 Divider()
-                Button("Add a Runner…") { showAddRunner = true }
+                // One entry, not one per kind of adding. This said "Add a
+                // Runner…" and went straight to the address form, which is the
+                // long road — the ceremony that would have picked up a runner's
+                // address, user, port and host key without anybody typing was
+                // reachable only from a screen this device stopped showing the
+                // moment it had its first runner.
+                Button("Add…") { showAdd = true }
                 if let selected = hosts.selected {
                     // Editing and removing were unreachable from anywhere in the
                     // app: `RunnerStore.remove` existed and had no caller, so a
@@ -692,8 +698,8 @@ struct HostSwitcherBar: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
-        .sheet(isPresented: $showAddRunner) {
-            HostEditorView { hosts.add($0) }
+        .sheet(isPresented: $showAdd) {
+            AddView(runners: hosts)
         }
         .sheet(item: $editingRunner) { host in
             HostEditorView(
@@ -703,12 +709,12 @@ struct HostSwitcherBar: View {
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
+                // No "Authorize" in the toolbar any more. It was the fifth way
+                // into add-shaped territory and the least explicable — a verb
+                // with no object, in a bar, next to a title — and what it
+                // actually offered was this device's public key. That is a row
+                // in the Devices section now, beside the rest of it.
                 SettingsView(connection: connection, runners: hosts)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            NavigationLink("Authorize") { AuthorizeView(runners: hosts) }
-                        }
-                    }
             }
         }
     }

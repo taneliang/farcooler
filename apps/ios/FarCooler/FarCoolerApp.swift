@@ -117,22 +117,28 @@ struct RootView: View {
 
 /// The first-run screen: no runners yet, so there is nothing else to show.
 ///
-/// One statement and two actions, the more important one loud. It used to be a
-/// list — a prose card that looked like a row but did nothing, then two rows
-/// under "First" and "Then" headers — which was the same idea said three times
-/// in three shapes, crammed into the top third of the screen.
+/// One statement and ONE action. It carried two — "Authorize This Device" loud
+/// and "Add a Runner" quiet — and choosing between them is a question nobody
+/// arriving here can answer, because it is really a question about which road
+/// they are about to take. Authorizing first is required on the manual road and
+/// meaningless on the ceremony, which does both at once; the loud button was
+/// therefore right half the time, with nothing on screen to say which half.
 ///
-/// The order those steps go in is not a preference. The screen used to say "Add
-/// one, then authorize this device on it", a sequence that cannot work: a
-/// runner that has never seen this device's key refuses the very first
-/// connection, so anyone who followed the instructions ended onboarding on a
-/// failure screen. Authorizing first costs nothing and makes the first
-/// connection the one that succeeds — which is why it is the prominent button
-/// and adding a runner is the quiet one.
+/// So the ordering decision moves inside `ConnectThisDeviceStep`, where each
+/// road states its own, and this screen stops asking. What is left is the only
+/// thing a runner-less device can do.
+///
+/// The gear stays and stops being load-bearing. Sign-in used to live down there
+/// and nowhere else, while the ceremony was gated on it — so the shortest road
+/// out of this screen ran through an unlabeled toolbar glyph. It is a step of
+/// the flow that needs it now.
 struct HostOnboardingView: View {
     @ObservedObject var hosts: RunnerStore
 
-    @State private var showAddRunner = false
+    @State private var showAdd = false
+    /// Which of the two the sheet opens on, so the loud button can go straight
+    /// to the wizard while the quiet one offers both.
+    @State private var addStep: AddStep?
     @State private var showSettings = false
 
     var body: some View {
@@ -153,8 +159,8 @@ struct HostOnboardingView: View {
                     .padding(.bottom, 8)
 
                 Text(
-                    "Far Cooler runs coding agents on machines you connect to over SSH. "
-                        + "Authorize this device, then add the runner’s address."
+                    "Far Cooler runs coding agents on machines you reach over SSH. "
+                        + "Connect this device to one to get started."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -163,21 +169,25 @@ struct HostOnboardingView: View {
 
                 Spacer()
 
-                // The order is carried by which button is the loud one, which
-                // is the only place it needs to be carried. Authorizing first
-                // is not a preference: a runner that has never seen this
-                // phone's key refuses the very first connection, so the other
-                // order ends onboarding on a failure screen.
+                // One road out, and the other way in underneath it rather than
+                // beside it: a device with no runners has exactly one thing it
+                // can do, and the second button existed only to choose the
+                // order in which to do that one thing.
                 VStack(spacing: 18) {
-                    NavigationLink {
-                        AuthorizeView(runners: hosts)
+                    Button {
+                        addStep = .connectThisDevice
+                        showAdd = true
                     } label: {
-                        Text("Authorize This Device").frame(maxWidth: .infinity)
+                        Text("Connect This Device").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
 
-                    Button("Add a Runner") { showAddRunner = true }
+                    Button("More Ways to Add…") {
+                        addStep = nil
+                        showAdd = true
+                    }
+                    .font(.callout)
                 }
                 .padding(.horizontal, 40)
                 .padding(.bottom, 40)
@@ -185,16 +195,16 @@ struct HostOnboardingView: View {
             .frame(maxWidth: .infinity)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // No "+" beside these. A third way to add a runner on a screen
-                // whose whole purpose is two ordered steps is one more thing to
-                // weigh up, and it is the step that must not come first.
+                // No "+" beside these. Adding is what the whole screen is, and a
+                // toolbar shortcut would be a third control competing with two
+                // that already say it in words.
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("Settings")
                 }
             }
-            .sheet(isPresented: $showAddRunner) {
-                HostEditorView { hosts.add($0) }
+            .sheet(isPresented: $showAdd) {
+                AddView(runners: hosts, initial: addStep)
             }
             .sheet(isPresented: $showSettings) {
                 NavigationStack { SettingsView(runners: hosts) }

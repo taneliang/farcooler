@@ -57,29 +57,39 @@ does, and never both on one screen without a label:
 
 Plus the plumbing verb, kept but demoted: **add a runner by address**.
 
-## One hub, three entry points
+## One hub, two rows
 
 Everything add-shaped goes through one screen, `AddView`. It is reached from
 exactly three places, and they all land on the same thing:
 
 | Surface | Control | Opens |
 | --- | --- | --- |
-| iOS empty state | **Set Up Far Cooler** (primary) | Wizard A, directly |
-| iOS empty state | *I already have a runner* (quiet) | the hub |
+| iOS empty state | **Connect This Device** (primary) | Wizard A, directly |
+| iOS empty state | *More Ways to Add…* (quiet) | the hub |
 | iOS fleet, runner switcher | **Add…** | the hub |
 | iOS Settings | **Add…** | the hub |
 | macOS Settings → Devices | **Add…** | the hub, as a sheet |
 | macOS sidebar `+` | **Add…** | the hub, as a sheet |
 | Android | same three | the hub |
 
-The hub lists the three destinations with one line each. A destination that is
-not available yet says why **and offers the fix inline** — a signed-out user
-sees a working **Sign In** button on that row, not a disabled row and not a
-dead-end screen.
+The hub carries exactly the two verbs, one line each:
 
-Retired: the Devices *section* of Settings as the only route to granting; the
+1. **Connect This Device** — this phone gets onto a runner, by code or address.
+2. **Add Another Device** — another phone or Mac gets onto mine.
+
+"Add a runner by address" is not a third row. It is the second road inside the
+first verb, which is what it always was; giving it a row of its own is what made
+the old screen ask an ordering question nobody arriving could answer.
+
+A row that cannot be used yet says why **and carries the fix** — a signed-out
+user gets a working **Sign In** button on the row itself, not a disabled row and
+not a dead-end screen.
+
+Retired: the Devices *section* of Settings as the route to granting; the
+`Authorize` link in the Settings toolbar, a verb with no object whose actual
+subject was this device's public key (now a **This Device's Key** row); and the
 nested `AuthorizeView` reached from `HostEditorView` without a `runners`
-argument, which silently hides the code path.
+argument, which silently hid the code path. `HostEditorView` is edit-only now.
 
 ## Wizard A — Connect This Device
 

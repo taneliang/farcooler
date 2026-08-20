@@ -149,6 +149,7 @@ struct SettingsView: View {
     @AppStorage(NotificationSettings.onAttentionKey) private var notifyOnAttention = true
     @AppStorage(NotificationSettings.onDoneKey) private var notifyOnDone = true
     @Environment(\.dismiss) private var dismiss
+    @State private var showAdd = false
 
     var body: some View {
         Form {
@@ -157,17 +158,31 @@ struct SettingsView: View {
             // where a grant can be changed later. It has to be called that and
             // it has to be here, or that sentence sends someone looking for a
             // screen that does not exist.
-            if Account.shared.isSignedIn {
-                Section {
-                    if let runners {
-                        NavigationLink("Add a Device") { AddDeviceView(runners: runners) }
-                    }
-                    NavigationLink("Devices and runners") { AccountDevicesView() }
-                } header: {
-                    Text("Devices")
-                } footer: {
-                    Text("New devices can access only the runners you select.")
+            //
+            // What is no longer here is the way IN to adding one. That row was
+            // this section's other job, and it made Settings the fourth place
+            // add-shaped things lived — visible only once you were signed in,
+            // which is exactly backwards for the screen someone reaches when
+            // they are not. Adding goes through `AddView` now, from a row that
+            // is always present and explains itself when it cannot be used.
+            Section {
+                if let runners {
+                    Button("Add…") { showAdd = true }
                 }
+                if Account.shared.isSignedIn {
+                    NavigationLink("Devices and runners") { AccountDevicesView() }
+                }
+                // This device's own key, which is what the toolbar's
+                // "Authorize" used to mean. Constructed WITHOUT a store, on
+                // purpose: that argument is what makes `AuthorizeView` offer
+                // the ceremony as well, and the ceremony is one row up. Here
+                // the question is only ever "what do I paste into
+                // authorized_keys".
+                NavigationLink("This Device's Key") { AuthorizeView() }
+            } header: {
+                Text("Devices")
+            } footer: {
+                Text("New devices can access only the runners you select.")
             }
 
             Section {
@@ -262,6 +277,15 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .task { await connection?.loadDaemonBuild() }
+        // A sheet rather than a push, because `AddView` brings its own
+        // `NavigationStack`: its wizard has to skip steps, which needs a path
+        // it owns, and pushing it would leave two stacks fighting over the
+        // back button.
+        .sheet(isPresented: $showAdd) {
+            if let runners {
+                AddView(runners: runners)
+            }
+        }
         .toolbar {
             // Presented as a sheet (see `RootView`), which gets no back
             // button of its own — without an explicit dismiss there would be
