@@ -166,6 +166,35 @@ mod tests {
         );
     }
 
+    /// Drain until the backend has stopped producing, or the deadline passes.
+    ///
+    /// **One write is not one event.** Linux inotify reports a create AND a
+    /// modify for a single `fs::write`, and each reaches the watcher thread
+    /// separately; macOS coalesces differently again. `drain` is a set, so it
+    /// collapses duplicates INSIDE one batch and cannot collapse across two —
+    /// which means the first non-empty drain can return while the rest of that
+    /// same write is still in flight, and the next drain hands back the same
+    /// path having invented nothing.
+    ///
+    /// Half a second of continuous quiet, not one empty drain: a single empty
+    /// drain only says nothing arrived in the last 50ms, which is also true in
+    /// the gap between a create and its modify. The gap is what has to be
+    /// outlasted, and on a loaded CI runner it is not small — this test began
+    /// failing on ubuntu EVERY run once enough sibling tests in this binary
+    /// started spawning `git`, having passed for months before that.
+    fn wait_until_quiet(watcher: &LogWatcher, deadline: Duration) {
+        let start = Instant::now();
+        let mut empties = 0;
+        while empties < 10 && start.elapsed() < deadline {
+            if watcher.drain().is_empty() {
+                empties += 1;
+            } else {
+                empties = 0;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     #[test]
     fn drain_is_idempotent() {
         let root = scratch("idempotent");
@@ -175,8 +204,14 @@ mod tests {
         let first = wait_for_drain(&watcher, Duration::from_secs(5));
         assert!(!first.is_empty(), "the write should have surfaced first");
 
-        // No writes since. The second call must not repeat what the first
-        // already reported.
+        // Asserted against a QUIET watcher rather than against the tick after
+        // the first drain. What this test is about is that `drain` clears what
+        // it hands back; a straggling inotify event for the write above is the
+        // OS speaking a second time, which is a different thing entirely and
+        // was failing this test on ubuntu perhaps one run in several.
+        wait_until_quiet(&watcher, Duration::from_secs(10));
+
+        // Nothing written since. Drain must not produce one.
         let second = watcher.drain();
         assert!(second.is_empty(), "a second drain with nothing new must return nothing: {second:?}");
     }
