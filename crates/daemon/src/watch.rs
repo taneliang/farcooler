@@ -888,6 +888,12 @@ fn fold_asks(asked: Option<Ask>, events: &[TurnEvent]) -> Option<Ask> {
 /// anything observes: it is what `activity::advance` makes of a `Working` that
 /// went `Idle`, and it is created and destroyed by that fold alone. Returning it
 /// from here would fold it twice — see `agent_observation` for what that costs.
+///
+/// Eight arguments, which is one past clippy's taste and is the shape of the
+/// thing: each one is a rung, the doc above is about the ORDER they are
+/// consulted in, and bundling four of them into a struct would hide exactly
+/// what a reader comes here to check.
+#[allow(clippy::too_many_arguments)]
 fn resolved_activity(
     screen: AgentActivity,
     log: Option<LogTurn>,
