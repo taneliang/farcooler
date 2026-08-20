@@ -86,7 +86,26 @@ final class Notifier {
                 content.body = "\(workspace) — its last turn didn't finish"
             } else {
                 content.title = "\(terminal.label) finished"
-                content.body = workspace
+                // What it finished, where there is an answer to that.
+                //
+                // The body was the workspace name alone, which the title's
+                // label had very nearly already said — so the whole
+                // notification was "claude finished / add auth", a sentence
+                // about Far Cooler rather than about the work. The agent's own
+                // last words are already on the row by the time this fires,
+                // redacted and cut to a window by the daemon, and they are the
+                // difference between knowing something ended and knowing
+                // whether to go and look.
+                //
+                // The workspace stays in front of it: several panes finish in a
+                // day and which worktree this was is what tells them apart.
+                // Falls back to the workspace alone when the turn was all tool
+                // calls and no prose, which is a real case.
+                if let said = terminal.recentSteps.last, !said.isEmpty {
+                    content.body = "\(workspace) — \(said)"
+                } else {
+                    content.body = workspace
+                }
             }
         default:
             return

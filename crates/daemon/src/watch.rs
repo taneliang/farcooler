@@ -169,19 +169,44 @@ struct Notice {
 /// from today. A `Done` turn has no clock to run and arrives as `None` on its
 /// own, so there is nothing to special-case — and a tier that dropped the field
 /// would be a card started from it with the timer silently missing.
+/// What a notice can say beyond naming a state, taken off the record that
+/// produced it.
+///
+/// A struct rather than two more parameters because both of these travel
+/// together from `push_if_paired` down, and the two functions they cross were
+/// already at clippy's argument limit — but mostly because they are one idea:
+/// the agent's own words, whichever kind it currently has to offer.
+#[derive(Debug, Clone, Copy, Default)]
+struct Said<'a> {
+    /// What the agent is asking, while it is asking it. Read off the screen.
+    question: Option<&'a str>,
+    /// The last thing the agent said. Read out of its own log — see
+    /// `farcooler_core::feed::Feed::latest`.
+    summary: Option<&'a str>,
+}
+
+impl Said<'_> {
+    /// The text, or nothing when it is absent or blank. Both fields arrive
+    /// from places that can legitimately hand over an empty string, and an
+    /// empty subtitle is a blank second line on a lock screen.
+    fn worth_saying(text: Option<&str>) -> Option<&str> {
+        text.map(str::trim).filter(|t| !t.is_empty())
+    }
+}
+
 fn notification(
     activity: AgentActivity,
     label: &str,
-    question: Option<&str>,
+    said: Said<'_>,
     failed: bool,
     started_at: Option<i64>,
 ) -> Option<Notice> {
     match activity {
         AgentActivity::Blocked => Some(Notice {
             title: format!("{label} needs you"),
-            subtitle: match question {
-                Some(q) if !q.trim().is_empty() => q.to_string(),
-                _ => "Waiting for your answer".to_string(),
+            subtitle: match Said::worth_saying(said.question) {
+                Some(q) => q.to_string(),
+                None => "Waiting for your answer".to_string(),
             },
             status: "blocked",
             failed: false,
@@ -194,9 +219,23 @@ fn notification(
             failed: true,
             started_at,
         }),
+        // The last thing the agent SAID, which is very nearly always its
+        // closing answer — `Feed::conclude` keeps the opening of one, and an
+        // agent's summary opens with what it did.
+        //
+        // This subtitle was empty, so the whole notification was "claude
+        // finished": a sentence about Far Cooler, arriving on a lock screen,
+        // saying nothing about the work it is reporting on. The sentence
+        // underneath it now is the agent's own, already redacted and already
+        // cut to a window by the daemon, and it is the difference between
+        // knowing something ended and knowing whether to go and look.
+        //
+        // Empty when the agent said nothing this turn, which is a real case —
+        // a turn can be all tool calls — and reads as the old behavior rather
+        // than as a blank line pretending to be content.
         AgentActivity::Done => Some(Notice {
             title: format!("{label} finished"),
-            subtitle: String::new(),
+            subtitle: Said::worth_saying(said.summary).unwrap_or_default().to_string(),
             status: "done",
             failed: false,
             started_at,
@@ -218,7 +257,7 @@ fn notification(
         // what the agent asked.
         AgentActivity::Working => Some(Notice {
             title: label.to_string(),
-            subtitle: question.unwrap_or("").to_string(),
+            subtitle: said.question.unwrap_or("").to_string(),
             status: "working",
             failed: false,
             started_at,
@@ -1585,11 +1624,11 @@ impl Watcher {
         terminal: Uuid,
         activity: AgentActivity,
         label: &str,
-        question: Option<&str>,
+        said: Said<'_>,
         turn_failed: bool,
         started_at: Option<i64>,
     ) {
-        let Some(notice) = notification(activity, label, question, turn_failed, started_at) else {
+        let Some(notice) = notification(activity, label, said, turn_failed, started_at) else {
             return;
         };
         self.push_notice(terminal, label, notice);
@@ -1628,7 +1667,14 @@ impl Watcher {
         // Outside the lock on principle rather than necessity — this spawns
         // rather than awaits — so that nothing about the push path can ever
         // become something the sampling loop waits on. See `push_notice`.
-        self.push_if_paired(terminal, AgentActivity::Working, label, Some(line), false, started_at);
+        self.push_if_paired(
+            terminal,
+            AgentActivity::Working,
+            label,
+            Said { question: Some(line), summary: None },
+            false,
+            started_at,
+        );
     }
 
     /// Push a failed exit to the owner's devices, if this runner is paired.
@@ -2418,7 +2464,14 @@ impl Watcher {
                     id,
                     next,
                     &command,
-                    record.blocked_question.as_deref(),
+                    Said {
+                        question: record.blocked_question.as_deref(),
+                        // Off the same record as everything else here, for the
+                        // reason the comment above gives: the card, the row and
+                        // the banner must be quoting one read of this pane, not
+                        // three.
+                        summary: record.feed.latest(),
+                    },
                     record.turn_failed,
                     record.turn_started_at,
                 );
@@ -2668,6 +2721,52 @@ mod tests {
         log.asked = Some(Ask { id: "a".to_string(), question: "Which base?".to_string() });
         log.adopt(Some((std::path::PathBuf::from("/tmp/two.jsonl"), LogFormat::Claude)));
         assert_eq!(log.asked, None);
+    }
+
+    /// A finished agent says what it finished, not merely that it did.
+    ///
+    /// "claude finished" is a sentence about Far Cooler. The subtitle was
+    /// empty, so that was the whole of what arrived on a lock screen — and the
+    /// agent's own account of the turn was already sitting on the record that
+    /// produced the notice.
+    #[test]
+    fn a_finished_agent_says_what_it_did() {
+        let said = Said {
+            question: None,
+            summary: Some("I've added the tail window and fixed the stale action"),
+        };
+        let notice = notification(AgentActivity::Done, "claude", said, false, None).expect("done");
+        assert_eq!(notice.title, "claude finished");
+        assert_eq!(notice.subtitle, "I've added the tail window and fixed the stale action");
+    }
+
+    /// A turn can be all tool calls and no prose. That reads as the old
+    /// behavior rather than as a blank line pretending to be content.
+    #[test]
+    fn a_finished_agent_that_said_nothing_says_nothing() {
+        for quiet in [None, Some(""), Some("   ")] {
+            let said = Said { question: None, summary: quiet };
+            let notice =
+                notification(AgentActivity::Done, "claude", said, false, None).expect("done");
+            assert_eq!(notice.subtitle, "", "{quiet:?}");
+        }
+    }
+
+    /// The summary belongs to the turn that ended, not to the question in
+    /// front of it: a blocked agent is asking, and what it said before asking
+    /// is not the answer to "what does it need".
+    #[test]
+    fn a_blocked_agent_still_quotes_its_question() {
+        let said = Said { question: Some("Overwrite fruit.txt?"), summary: Some("Almost there") };
+        let notice =
+            notification(AgentActivity::Blocked, "claude", said, false, None).expect("blocked");
+        assert_eq!(notice.subtitle, "Overwrite fruit.txt?");
+    }
+
+    /// A `Said` carrying only a question, which is what these tests are about.
+    /// The summary half arrives from the agent's log and has its own tests.
+    fn just_asking(question: &str) -> Said<'_> {
+        Said { question: Some(question), summary: None }
     }
 
     /// `resolved_activity` for the tests that predate questions, which is most
@@ -3337,7 +3436,7 @@ mod tests {
         let mut entry = Observed::begin(AgentActivity::Working, now);
         let published = entry.observe(resolved, now + 1_000);
         let notice =
-            notification(resolved, "claude", Some("Do you want to create haiku.txt?"), false, None);
+            notification(resolved, "claude", just_asking("Do you want to create haiku.txt?"), false, None);
 
         println!("screen said      : {screen:?}");
         println!("log said         : {log:?}  (a turn still open, written this instant)");
@@ -3805,7 +3904,7 @@ mod tests {
         assert_eq!(message.headline, "cursor failed");
         // And the phone is told the same thing the sidebar shows.
         assert_eq!(
-            notification(folded, "cursor", None, died.failed, None).map(|n| n.title),
+            notification(folded, "cursor", Said::default(), died.failed, None).map(|n| n.title),
             Some("cursor failed".to_string())
         );
     }
@@ -4032,13 +4131,13 @@ mod tests {
         // card goes up and moves silently. So what this test guards is the
         // status, which is what the relay switches on — never `blocked` or
         // `done` for an agent that is merely busy.
-        let asking = Some("Do you want to create haiku.txt?");
+        let asking = just_asking("Do you want to create haiku.txt?");
         assert_eq!(
-            notification(AgentActivity::Working, "claude", None, false, None).map(|n| n.status),
+            notification(AgentActivity::Working, "claude", Said::default(), false, None).map(|n| n.status),
             Some("working")
         );
-        assert!(notification(AgentActivity::Idle, "claude", None, false, None).is_none());
-        assert!(notification(AgentActivity::Unspecified, "claude", None, false, None).is_none());
+        assert!(notification(AgentActivity::Idle, "claude", Said::default(), false, None).is_none());
+        assert!(notification(AgentActivity::Unspecified, "claude", Said::default(), false, None).is_none());
         // Not even with a question in hand: a question is what a card SAYS, not
         // what decides there is one.
         assert_eq!(
@@ -4050,10 +4149,10 @@ mod tests {
         // mid-flight is still a turn in flight, and a phone buzzing about an
         // agent that is busy is the noise this rule exists to refuse.
         assert_eq!(
-            notification(AgentActivity::Working, "claude", None, true, None).map(|n| n.status),
+            notification(AgentActivity::Working, "claude", Said::default(), true, None).map(|n| n.status),
             Some("working")
         );
-        assert!(notification(AgentActivity::Idle, "claude", None, true, None).is_none());
+        assert!(notification(AgentActivity::Idle, "claude", Said::default(), true, None).is_none());
     }
 
     /// A working agent gets a CARD, and never a banner.
@@ -4066,7 +4165,7 @@ mod tests {
         let notice = notification(
             AgentActivity::Working,
             "claude",
-            Some("3/7 · Designing test matrix"),
+            just_asking("3/7 · Designing test matrix"),
             false,
             None,
         )
@@ -4099,7 +4198,7 @@ mod tests {
         let working = notification(
             AgentActivity::Working,
             "claude",
-            Some("3/7 · Designing"),
+            just_asking("3/7 · Designing"),
             false,
             Some(STARTED),
         )
@@ -4109,7 +4208,7 @@ mod tests {
         // Blocked matters most: it is the only tier the relay ever STARTS a
         // card from, and attributes are fixed for an activity's life, so a
         // clock missing here can never be sent again for that card.
-        let blocked = notification(AgentActivity::Blocked, "claude", None, false, Some(STARTED))
+        let blocked = notification(AgentActivity::Blocked, "claude", Said::default(), false, Some(STARTED))
             .expect("blocked");
         assert_eq!(blocked.started_at, Some(STARTED));
 
@@ -4117,7 +4216,7 @@ mod tests {
         // `None` when no request is running, and zero is a decodable instant:
         // a card given one counts up from January 1970 on the lock screen,
         // which is worse than the missing timer this test exists to prevent.
-        let quiet = notification(AgentActivity::Working, "claude", Some("waiting"), false, None)
+        let quiet = notification(AgentActivity::Working, "claude", just_asking("waiting"), false, None)
             .expect("working");
         assert_eq!(quiet.started_at, None, "no turn is running, so there is no clock to show");
     }
@@ -4139,7 +4238,7 @@ mod tests {
     #[test]
     fn a_blocked_agent_says_what_it_wants() {
         let notice =
-            notification(AgentActivity::Blocked, "claude", None, false, None).expect("blocked");
+            notification(AgentActivity::Blocked, "claude", Said::default(), false, None).expect("blocked");
         assert_eq!(notice.title, "claude needs you");
         assert_eq!(notice.subtitle, "Waiting for your answer");
         // What raises the live card. The relay is deliberately not in the
@@ -4159,7 +4258,7 @@ mod tests {
         let notice = notification(
             AgentActivity::Blocked,
             "claude",
-            Some("Do you want to create haiku.txt?"),
+            just_asking("Do you want to create haiku.txt?"),
             false,
             None,
         )
@@ -4172,17 +4271,25 @@ mod tests {
         // blank second line — see `registry.blocked_question`, which returns
         // None for a trust gate whose '?' is mid-line.
         for absent in [None, Some(""), Some("   ")] {
-            let notice = notification(AgentActivity::Blocked, "claude", absent, false, None)
+            let said = Said { question: absent, summary: None };
+            let notice = notification(AgentActivity::Blocked, "claude", said, false, None)
                 .expect("blocked");
             assert_eq!(notice.subtitle, "Waiting for your answer", "{absent:?}");
         }
     }
 
+    /// A finished agent's second line is its own account of the turn, and
+    /// nothing else — least of all the question it has just finished
+    /// answering.
+    ///
+    /// Renamed from `a_finished_agent_needs_no_second_line`, which stopped
+    /// being true when the summary arrived: it now has one whenever the agent
+    /// said anything. What survived the rename is the half that still holds,
+    /// and it is the more important half.
     #[test]
-    fn a_finished_agent_needs_no_second_line() {
-        let notice = notification(AgentActivity::Done, "claude", None, false, None).expect("done");
+    fn a_finished_agent_does_not_inherit_the_question_it_answered() {
+        let notice = notification(AgentActivity::Done, "claude", Said::default(), false, None).expect("done");
         assert_eq!(notice.title, "claude finished");
-        assert!(notice.subtitle.is_empty());
         // And what takes the card back down. An empty subtitle is fine; an
         // empty status would leave a live card up on the lock screen until the
         // system expired it hours later.
@@ -4194,7 +4301,7 @@ mod tests {
         let notice = notification(
             AgentActivity::Done,
             "claude",
-            Some("Do you want to create haiku.txt?"),
+            just_asking("Do you want to create haiku.txt?"),
             false,
             None,
         )
@@ -4211,7 +4318,7 @@ mod tests {
     /// person reads one vocabulary for both.
     #[test]
     fn a_turn_that_died_says_so_rather_than_saying_it_finished() {
-        let notice = notification(AgentActivity::Done, "cursor", None, true, None).expect("done");
+        let notice = notification(AgentActivity::Done, "cursor", Said::default(), true, None).expect("done");
         assert_eq!(notice.title, "cursor failed");
         assert_eq!(notice.subtitle, "Its last turn didn't finish");
         // Still "done": there is no live card to hold open for a turn that is
@@ -4233,12 +4340,12 @@ mod tests {
     /// wrong in both is simply not believed.
     #[test]
     fn a_finished_turn_is_not_reported_as_a_failed_one() {
-        let done = notification(AgentActivity::Done, "claude", None, false, None).expect("done");
+        let done = notification(AgentActivity::Done, "claude", Said::default(), false, None).expect("done");
         assert!(!done.failed);
         // Neither tier has ended at all, so neither can have ended badly.
-        let blocked = notification(AgentActivity::Blocked, "claude", None, true, None);
+        let blocked = notification(AgentActivity::Blocked, "claude", Said::default(), true, None);
         assert_eq!(blocked.map(|n| n.failed), Some(false));
-        let working = notification(AgentActivity::Working, "claude", Some("x"), true, None);
+        let working = notification(AgentActivity::Working, "claude", just_asking("x"), true, None);
         assert_eq!(working.map(|n| n.failed), Some(false));
     }
 

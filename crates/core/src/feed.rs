@@ -431,6 +431,24 @@ impl Feed {
         self.steps.iter().map(|step| step.text.clone()).collect()
     }
 
+    /// The most recent thing the agent said, or nothing when it has said
+    /// nothing.
+    ///
+    /// One step is one line — see [`lines`](Self::lines) — so this is a whole
+    /// message rather than a fragment of one, already redacted and already cut
+    /// to the window by whichever of [`push`](Self::push) or
+    /// [`conclude`](Self::conclude) recorded it. Which end it was cut from is
+    /// the point: a turn that ended with an answer went through `conclude`,
+    /// which keeps the OPENING, and an agent's summary opens with what it did.
+    ///
+    /// That is what makes this worth putting in a notification. "claude
+    /// finished" is a sentence about Far Cooler; "I've added the tail window
+    /// and fixed the stale action" is a sentence about the work, and it is
+    /// already sitting here by the time the turn is over.
+    pub fn latest(&self) -> Option<&str> {
+        self.steps.last().map(|step| step.text.as_str())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.steps.is_empty()
     }

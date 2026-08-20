@@ -104,7 +104,20 @@ final class Notifier {
                 content.body = "\(workspace) — its last turn didn't finish"
             } else {
                 content.title = "\(terminal.title) finished"
-                content.body = workspace
+                // What it finished, where there is an answer to that. The body
+                // was the workspace alone, which the title had very nearly said
+                // already — so the whole notification was a sentence about Far
+                // Cooler rather than about the work. `recentSteps` is the
+                // agent's own last words, already redacted and cut to a window
+                // by the daemon.
+                //
+                // The same change as the phone's, in the same words, because
+                // the two notifications are read by one person about one pane.
+                if let said = terminal.recentSteps.last, !said.isEmpty {
+                    content.body = "\(workspace) — \(said)"
+                } else {
+                    content.body = workspace
+                }
             }
         default:
             return
