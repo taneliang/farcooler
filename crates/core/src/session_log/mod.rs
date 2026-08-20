@@ -5,9 +5,15 @@
 //! `docs/agent-session-logs.md` for what each agent actually writes — observed,
 //! not documented, and the only thing to trust about these formats.
 //!
-//! None of them records that the agent is WAITING for a human. That state stays
-//! with the footer-scoped screen matching, which is the one place it can be
-//! seen at all.
+//! None of them records that it is waiting on a PERMISSION decision. That state
+//! stays with the footer-scoped screen matching, which is the one place it can
+//! be seen at all.
+//!
+//! One narrower wait IS written down, and only claude writes it: a tool call
+//! whose result can arrive from nowhere but a human. `AskUserQuestion` is that
+//! tool, and an outstanding one is not an inference about a quiet log — it is
+//! the agent stating which question it is holding, in its own file, before it
+//! stops. See [`TurnEvent::Asked`].
 
 pub mod claude;
 
@@ -59,6 +65,41 @@ pub enum TurnEvent {
     /// for an agent with no task list, which is codex, cursor, and most claude
     /// sessions.
     Did { verb: String, object: String },
+    /// A question only a human can answer, and the agent is holding for it.
+    ///
+    /// The one wait an agent writes down. Everything else in this vocabulary
+    /// describes a turn that is moving; this one says it has stopped, and why —
+    /// which is the sentence the whole notification path exists to send.
+    ///
+    /// Claude's `AskUserQuestion`, and today nothing else. Counted across every
+    /// transcript on this machine: 197 calls in 28 sessions, and all 197 are
+    /// closed by a `tool_result` carrying the call's own `id` — so the pair is
+    /// total, and an `Asked` with no `Answered` after it is the agent waiting
+    /// rather than a shape this parser failed to read. The wait is real and
+    /// long: a median of 101 seconds, 10% of them over 13 minutes, and the
+    /// longest 21 hours. That is a row that read `working` for 21 hours.
+    ///
+    /// This does NOT reopen permission prompts. Those are still written down
+    /// nowhere — claude records the OUTCOME of a decision and never the pending
+    /// state — and the screen remains the only place they can be seen. The
+    /// distinction that matters is not "the log knows the agent is blocked", it
+    /// is "the agent called a tool that no machine can answer".
+    Asked {
+        /// The `tool_use` id, which the closing `tool_result` names as its
+        /// `tool_use_id`. The join key, so a second question asked after the
+        /// first was answered does not clear itself.
+        id: String,
+        /// The question, in the agent's own words, for the notification to
+        /// carry. Empty when the call stated none.
+        question: String,
+    },
+    /// A tool call coming back, by the id it was made under.
+    ///
+    /// Emitted for every `tool_result`, not only a question's, because a result
+    /// block does not name the tool it came from (see `claude::tool_result`) —
+    /// so the id is the only thing that can close an [`Asked`], and the fold
+    /// that holds one is the only thing that cares which ids these are.
+    Answered { id: String },
     /// One task in the agent's list, as ONE line stated it.
     ///
     /// Not a tally, though the stage-3 plan asked for `{ done, total,

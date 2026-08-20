@@ -1,0 +1,40 @@
+  LINE 22
+  LINE 23
+  LINE 24
+  LINE 25
+  LINE 26
+  LINE 27
+  LINE 28
+  LINE 29
+  LINE 30
+  LINE 31
+  LINE 32
+  LINE 33
+  LINE 34
+  LINE 35
+  LINE 36
+  LINE 37
+  LINE 38
+  LINE 39
+  LINE 40
+  LINE 41
+  LINE 42
+  LINE 43
+  LINE 44
+  LINE 45
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Planning: /Users/e-liang/.claude/plans/use-your-askuserquestion-tool-vivid-ember.md
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Indentation
+
+Should x.txt use tabs or spaces for indentation?
+
+❯ 1. Spaces
+     Indent x.txt using space characters (your earlier answer).
+  2. Tabs
+     Indent x.txt using tab characters.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

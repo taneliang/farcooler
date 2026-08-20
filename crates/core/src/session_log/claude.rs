@@ -41,8 +41,35 @@ pub fn parse_line(line: &str) -> Vec<TurnEvent> {
 /// ends, and there is nothing to gain from making that choice again here.
 fn user_record(record: &Value) -> Vec<TurnEvent> {
     let mut events: Vec<TurnEvent> = turn_start(record).into_iter().collect();
+    events.extend(answered(record));
     events.extend(tool_result(record));
     events
+}
+
+/// Every `tool_use` id coming back on this line.
+///
+/// Read from the content blocks and not from `toolUseResult`, which is where
+/// `tool_result` reads: a question's result has a `toolUseResult` today, but
+/// nothing about closing a call depends on that sibling field existing, and an
+/// `Asked` that never closes is a row stuck on "needs you" forever. The id is
+/// on the block itself, which is the half of the record that must be there for
+/// the result to mean anything at all.
+///
+/// Emitted for every result rather than only a question's, because a result
+/// block does not name the tool it came from -- see `tool_result`. The fold
+/// holding one id is what makes these cheap: every other `Answered` is compared
+/// against it and dropped.
+fn answered(record: &Value) -> Vec<TurnEvent> {
+    let Some(content) = record.get("message").and_then(|m| m.get("content")).and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    content
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
+        .filter_map(|block| block.get("tool_use_id").and_then(Value::as_str))
+        .map(|id| TurnEvent::Answered { id: id.to_string() })
+        .collect()
 }
 
 /// A turn start is `type: "user"` carrying `promptSource`. A tool result is
@@ -98,10 +125,43 @@ fn assistant_record(record: &Value) -> Vec<TurnEvent> {
         if n == 0 {
             events.extend(did(tool_use));
         }
+        events.extend(asked(tool_use));
         events.extend(spawned(tool_use));
         events.extend(task_state(tool_use));
     }
     events
+}
+
+/// A call that can only be answered by a person.
+///
+/// Read from every `tool_use` on the line rather than the first alone, unlike
+/// `did`: a question is not a row's action line competing for one slot, it is
+/// the turn stopping, and a question asked second on its line stops it just as
+/// hard. `AskUserQuestion` has never been observed sharing a line -- claude
+/// stops emitting when it asks -- so this is a guard against a shape that would
+/// otherwise be silently dropped, not a case anyone has seen.
+///
+/// The question is the FIRST one's text. 196 of the 197 calls on this machine
+/// carry a `header` too, a two-or-three word label -- but the text is what a
+/// person woken by a notification needs, and `feed` is where anything gets cut
+/// to a width. A call carrying no question at all yields an empty string rather
+/// than no event: the turn has still stopped, and "claude needs you" with no
+/// detail is the true half of the sentence.
+fn asked(tool_use: &Value) -> Option<TurnEvent> {
+    if tool_use.get("name").and_then(Value::as_str)? != "AskUserQuestion" {
+        return None;
+    }
+    let id = tool_use.get("id")?.as_str()?.to_string();
+    let question = tool_use
+        .get("input")
+        .and_then(|input| input.get("questions"))
+        .and_then(Value::as_array)
+        .and_then(|questions| questions.first())
+        .and_then(|question| question.get("question"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Some(TurnEvent::Asked { id, question })
 }
 
 /// A tool call as an action: the tool's name lowercased, and the object of
@@ -158,7 +218,19 @@ fn step_object(input: &Value) -> Option<String> {
             return Some(s.to_string());
         }
     }
-    None
+    // A question names none of those four, so it used to reach the row with no
+    // object at all and render as its bare verb. Its `header` is what it has:
+    // the two-or-three word label the tool asks for precisely so a question can
+    // be named in passing, present on 196 of the 197 calls on this machine.
+    // Read from the first question, the same one `asked` takes its text from,
+    // so a row and the notification beside it name the same question.
+    input
+        .get("questions")
+        .and_then(Value::as_array)
+        .and_then(|questions| questions.first())
+        .and_then(|question| question.get("header"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 /// A `tool_use` named `Agent` spawns one, and its `id` is how everything else
@@ -478,7 +550,12 @@ mod tests {
         assert_eq!(record["type"], "user");
         assert_eq!(record["message"]["content"][0]["type"], "tool_result");
         assert!(record.get("promptSource").is_none());
-        assert_eq!(parse_line(line(COMPLETE_TURN, 3)), Vec::new());
+        // An `Answered` and no `Started`, which is the distinction itself: the
+        // line closes a call rather than opening a turn.
+        match parse_line(line(COMPLETE_TURN, 3)).as_slice() {
+            [TurnEvent::Answered { .. }] => {}
+            other => panic!("expected [Answered] alone, got {other:?}"),
+        }
     }
 
     #[test]
@@ -691,7 +768,10 @@ mod tests {
         assert_eq!(record["toolUseResult"]["task"]["id"], "1", "the fixture really does state the id");
         assert_eq!(
             parse_line(line(TASK_LIST, 1)),
-            vec![TurnEvent::TaskState { id: Some("1".to_string()), active_form: None, status: None }]
+            vec![
+                TurnEvent::Answered { id: "toolu_01WQ3NL8CUkkgN3jVetjxRJx".to_string() },
+                TurnEvent::TaskState { id: Some("1".to_string()), active_form: None, status: None },
+            ]
         );
     }
 
@@ -724,7 +804,8 @@ mod tests {
         // Line 9: the `TaskList` result, five tasks, all completed. The
         // fixture keeps only the first two creates (see the fixtures README),
         // which is what an excerpt of a longer session looks like.
-        let events = parse_line(line(TASK_LIST, 8));
+        // The `Answered` ahead of them names the `TaskList` call itself.
+        let events = &parse_line(line(TASK_LIST, 8))[1..];
         assert_eq!(events.len(), 5, "one per listed task: {events:?}");
         assert!(
             events.iter().all(|event| matches!(
@@ -811,11 +892,11 @@ mod tests {
         // "completed"`. The id is the SAME `tool_use_id`, which is what lets a
         // fold that never saw the two lines together pair them.
         match parse_line(line(SUBAGENTS, 1)).as_slice() {
-            [TurnEvent::Subagent { id, running, .. }] => {
+            [TurnEvent::Answered { .. }, TurnEvent::Subagent { id, running, .. }] => {
                 assert_eq!(id, "toolu_01V5MTb3GuRtNbUVUSkSgWDz");
                 assert!(!*running);
             }
-            other => panic!("expected [Subagent], got {other:?}"),
+            other => panic!("expected [Answered, Subagent], got {other:?}"),
         }
     }
 
@@ -837,12 +918,12 @@ mod tests {
             other => panic!("expected [Did, Subagent], got {other:?}"),
         }
         match parse_line(line(SUBAGENTS, 3)).as_slice() {
-            [TurnEvent::Subagent { id, description, running }] => {
+            [TurnEvent::Answered { .. }, TurnEvent::Subagent { id, description, running }] => {
                 assert_eq!(id, "toolu_015abdB6hcuQYTnrL45JDDYm");
                 assert!(*running, "the agent is still going; only its launch came back");
                 assert_eq!(description, "Document the native backend", "restated on an async launch");
             }
-            other => panic!("expected [Subagent], got {other:?}"),
+            other => panic!("expected [Answered, Subagent], got {other:?}"),
         }
     }
 
@@ -853,18 +934,25 @@ mod tests {
         let synthetic = r#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_x","type":"tool_result","content":"failed"}]},"toolUseResult":{"status":"errored","agentId":"a000000000000000c"}}"#;
         assert_eq!(
             parse_line(synthetic),
-            vec![TurnEvent::Subagent { id: "toolu_x".to_string(), description: String::new(), running: false }]
+            vec![
+                TurnEvent::Answered { id: "toolu_x".to_string() },
+                TurnEvent::Subagent { id: "toolu_x".to_string(), description: String::new(), running: false },
+            ]
         );
     }
 
-    /// Every other tool result stays silent. `Write`'s result is the one in
-    /// the complete-turn fixture, and it carries neither `agentId` nor
-    /// `tasks` -- the two shapes `tool_result` reads.
+    /// Every other tool result says only which call it answers. `Write`'s
+    /// result is the one in the complete-turn fixture, and it carries neither
+    /// `agentId` nor `tasks` -- the two shapes `tool_result` reads -- so the
+    /// `Answered` is the whole of it.
     #[test]
     fn an_ordinary_tool_result_is_not_a_subagent() {
         let record: Value = serde_json::from_str(line(COMPLETE_TURN, 3)).unwrap();
         assert!(record["toolUseResult"].is_object(), "the fixture line really has one");
-        assert_eq!(parse_line(line(COMPLETE_TURN, 3)), Vec::new());
+        match parse_line(line(COMPLETE_TURN, 3)).as_slice() {
+            [TurnEvent::Answered { .. }] => {}
+            other => panic!("expected [Answered] alone, got {other:?}"),
+        }
     }
 
     #[test]
@@ -920,5 +1008,74 @@ mod tests {
     fn a_malformed_timestamp_is_none_rather_than_zero() {
         assert_eq!(parse_iso8601_millis("not a date"), None);
         assert_eq!(parse_iso8601_millis(""), None);
+    }
+
+    #[test]
+    fn a_question_is_the_one_wait_an_agent_writes_down() {
+        // Shape verbatim from a real call: `questions` is the only input key,
+        // and neither `file_path` nor `command` nor `pattern` nor `description`
+        // appears -- which is why this used to reach a row as a bare verb.
+        let synthetic = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01FeAV","name":"AskUserQuestion","input":{"questions":[{"question":"Track the upstream, or match git switch?","header":"Branch policy","multiSelect":false,"options":[]}]}}],"stop_reason":"tool_use"}}"#;
+        assert_eq!(
+            parse_line(synthetic),
+            vec![
+                TurnEvent::Did {
+                    verb: "askuserquestion".to_string(),
+                    object: "Branch policy".to_string(),
+                },
+                TurnEvent::Asked {
+                    id: "toolu_01FeAV".to_string(),
+                    question: "Track the upstream, or match git switch?".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_question_with_no_text_still_stops_the_turn() {
+        // "claude needs you" with no detail is the true half of the sentence.
+        // Dropping the event because the detail was missing would lose the
+        // half that matters.
+        let synthetic = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"AskUserQuestion","input":{}}],"stop_reason":"tool_use"}}"#;
+        assert_eq!(
+            parse_line(synthetic),
+            vec![
+                TurnEvent::Did { verb: "askuserquestion".to_string(), object: String::new() },
+                TurnEvent::Asked { id: "toolu_02".to_string(), question: String::new() },
+            ]
+        );
+    }
+
+    #[test]
+    fn every_tool_result_names_the_call_it_answers() {
+        // Emitted for every result and not only a question's, because a result
+        // block does not say which tool it came back from. All 197 questions on
+        // this machine are closed by a result carrying the call's own id, which
+        // is what makes the id the only usable join.
+        let synthetic = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01FeAV","content":"Branch policy: Match git switch"}]},"toolUseResult":{"questions":[]}}"#;
+        assert_eq!(
+            parse_line(synthetic),
+            vec![TurnEvent::Answered { id: "toolu_01FeAV".to_string() }]
+        );
+    }
+
+    #[test]
+    fn a_result_with_no_sibling_record_still_answers() {
+        // `answered` reads the content block, where `tool_result` reads the
+        // sibling `toolUseResult`. A question left un-closed because a field
+        // beside it was absent is a row stuck on "needs you" forever, so the
+        // two deliberately read different halves of the record.
+        let synthetic = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_02","content":"ok"}]}}"#;
+        assert_eq!(parse_line(synthetic), vec![TurnEvent::Answered { id: "toolu_02".to_string() }]);
+    }
+
+    #[test]
+    fn a_turn_start_is_not_an_answer() {
+        // Both are `type: "user"`. A turn start carries `promptSource` and no
+        // tool_result block, and must not clear a question by being one.
+        match parse_line(line(COMPLETE_TURN, 0)).as_slice() {
+            [TurnEvent::Started { .. }] => {}
+            other => panic!("expected [Started] alone, got {other:?}"),
+        }
     }
 }

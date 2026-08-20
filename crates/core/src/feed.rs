@@ -240,6 +240,11 @@ fn humanized(verb: &str) -> String {
         "webfetch" | "fetch" => Some("Fetching"),
         "agent" | "task" => Some("Delegating"),
         "taskcreate" | "taskupdate" | "tasklist" | "todowrite" | "update_plan" => Some("Planning"),
+        // Not "Askuserquestion", which is what the fallback below made of it:
+        // a lowercased tool name with its first letter pushed back up, on the
+        // one row a person is most likely to be reading. The agent is not doing
+        // this to the user, it is stopped in front of them.
+        "askuserquestion" | "exitplanmode" => Some("Asking"),
         _ => None,
     };
     if let Some(known) = known {
@@ -275,6 +280,7 @@ fn past(verb: &str) -> String {
         "grep" | "glob" | "search" | "websearch" | "codebase_search" => Some("Searched"),
         "webfetch" | "fetch" => Some("Fetched"),
         "agent" | "task" => Some("Delegated"),
+        "askuserquestion" | "exitplanmode" => Some("Asked"),
         "taskcreate" | "taskupdate" | "tasklist" | "todowrite" | "update_plan" => Some("Planned"),
         _ => None,
     };

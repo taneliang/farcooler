@@ -604,6 +604,30 @@ struct LogTurn {
     last_event_at: i64,
 }
 
+/// A question the agent asked and is holding for, as its log stated it.
+///
+/// Kept beside `LogTurn` rather than on it, and that separation is the point.
+/// `LogTurn` is a reading of a TURN — running, ended, ended badly — and its
+/// doc explains why `Blocked` must stay inexpressible there: a quiet log is not
+/// a waiting agent, and the first thing anyone would do with a settable
+/// `Blocked` is set it from silence.
+///
+/// This is not read off silence. It is a `tool_use` the agent wrote down, whose
+/// result can come from nowhere but a person, still outstanding — so it says
+/// what no amount of quiet ever could. See `session_log::TurnEvent::Asked` for
+/// the corpus behind that claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Ask {
+    /// The `tool_use` id, so the answer to THIS question is what clears it. A
+    /// second question asked after the first was answered gets its own id, and
+    /// an `Answered` naming the old one leaves it standing.
+    id: String,
+    /// The question in the agent's own words. Empty when the call stated none,
+    /// which the notification path renders as its own sentence rather than a
+    /// blank line.
+    question: String,
+}
+
 /// Which of the three formats a pane's log is written in.
 ///
 /// A pane's preset names the agent; the parser is chosen once, when the file is
@@ -660,6 +684,14 @@ struct PaneLog {
     /// been found but has not been appended to since is not evidence about the
     /// turn either way, and must fall through rather than assert idleness.
     turn: Option<LogTurn>,
+    /// The question this pane is holding for, if its log says it asked one and
+    /// has not yet recorded an answer.
+    ///
+    /// Survives ticks, like `turn` and for the same reason: the line that asked
+    /// was read once, minutes or hours before the tick that has to say the row
+    /// is blocked, and a batch of events is only ever what arrived SINCE the
+    /// last read.
+    asked: Option<Ask>,
 }
 
 /// Everything it takes to find one pane's session log.
@@ -682,7 +714,7 @@ impl PaneLog {
     fn new() -> PaneLog {
         // Zero, not `now`: a pane seen for the first time should be looked up
         // on this tick and not in five seconds.
-        PaneLog { tail: None, attempted_at: 0, turn: None }
+        PaneLog { tail: None, attempted_at: 0, turn: None, asked: None }
     }
 
     /// Take what the join just answered, keeping the current file when the
@@ -714,6 +746,12 @@ impl PaneLog {
         }
         self.tail = found.map(|(path, format)| (Tail::new(path), format));
         self.turn = None;
+        // With the turn, and for a sharper version of the same reason: an
+        // outstanding question belongs to the session that asked it. A pane
+        // re-joined to a new file — `/clear`, a restarted agent — has nothing
+        // waiting on it, and carrying one across would pin the row on "needs
+        // you" for a question nobody can answer any more.
+        self.asked = None;
     }
 }
 
@@ -755,25 +793,73 @@ fn fold_log_events(turn: Option<LogTurn>, events: &[TurnEvent], now: i64) -> Opt
     folded
 }
 
+/// Fold a batch of newly appended log events into the question a pane is held
+/// on, if any.
+///
+/// Three things clear one, and each is the agent saying so rather than this
+/// giving up on it:
+///
+/// - the matching `Answered`, which is the question being answered;
+/// - a turn `Ended`, because a turn cannot both be over and be waiting. An
+///   abandoned question — the user pressed escape, or answered in a way that
+///   ended the turn — closes here even if its own result never arrives;
+/// - a turn `Started`, which is a question from a previous turn that outlived
+///   its answer in this fold rather than in the file.
+///
+/// An `Answered` naming a DIFFERENT id changes nothing. That is the whole
+/// reason the id is carried: an agent that asks, is answered, and then runs
+/// nine more tools would otherwise be cleared nine times over and, worse, a
+/// question asked while an older result was still in flight would be cleared by
+/// it on arrival.
+fn fold_asks(asked: Option<Ask>, events: &[TurnEvent]) -> Option<Ask> {
+    let mut held = asked;
+    for event in events {
+        match event {
+            TurnEvent::Asked { id, question } => {
+                held = Some(Ask { id: id.clone(), question: question.clone() });
+            }
+            TurnEvent::Answered { id } => {
+                if held.as_ref().is_some_and(|ask| &ask.id == id) {
+                    held = None;
+                }
+            }
+            TurnEvent::Started { .. } | TurnEvent::Ended { .. } => held = None,
+            _ => {}
+        }
+    }
+    held
+}
+
 /// The one decision this stage exists for: who gets to say what an agent is
 /// doing, and in what order.
 ///
 /// Highest first, and each layer wins only where what it knows still holds:
 ///
 /// 1. **The screen keeps `Blocked`, outright.** NO AGENT WRITES DOWN THAT IT IS
-///    WAITING FOR A HUMAN — claude records the OUTCOME of a permission decision
-///    and never the pending state, codex has nothing approval-shaped in 183
-///    files, cursor shows none in the four that exist
+///    WAITING ON A PERMISSION DECISION — claude records the OUTCOME of one and
+///    never the pending state, codex has nothing approval-shaped in 183 files,
+///    cursor shows none in the four that exist
 ///    (`docs/agent-session-logs.md`). So a log saying the turn is still running
 ///    is not disagreeing with a footer that has a question on it; it is saying
 ///    the only thing it CAN say about a turn that is, in fact, still open. If
 ///    this order is ever inverted a permission prompt stops being reported, and
 ///    "this agent needs you" is the one sentence this product exists to say.
-/// 2. **The log.** It is the agent's own account of its own turn, written by
+/// 2. **A question the log says is outstanding, also `Blocked`.** The narrow
+///    exception to the rung above, and it is not a weakening of it. An
+///    `AskUserQuestion` whose result has not arrived is the agent naming, in
+///    its own file, a tool that no machine can answer — see `Ask`. It sits
+///    below the screen because the two never disagree in practice and the
+///    screen carries the better sentence when it has one, and ABOVE the turn
+///    rung because that is the bug this closes: the log says the turn is still
+///    running, which was read as `Working`, so a claude sitting on a question
+///    for 21 hours reported "working" and then "finished" — never once "needs
+///    you". A row on this rung is blocked no matter how long the file has been
+///    quiet, because quiet is exactly what waiting looks like.
+/// 3. **The log.** It is the agent's own account of its own turn, written by
 ///    the agent for itself, and it does not care whether the footer was
 ///    mid-redraw when `capture-pane` ran. `STALE_LOG_MS` bounds one half of
 ///    what it can say and not the other — see below.
-/// 3. **The title**, then the **screen**, exactly as stage 1 left them — see
+/// 4. **The title**, then the **screen**, exactly as stage 1 left them — see
 ///    `promoted_by_title`. A pane with no log reaches this having been touched
 ///    by nothing above.
 ///
@@ -805,6 +891,7 @@ fn fold_log_events(turn: Option<LogTurn>, events: &[TurnEvent], now: i64) -> Opt
 fn resolved_activity(
     screen: AgentActivity,
     log: Option<LogTurn>,
+    asked: bool,
     now: i64,
     title: &str,
     command: &str,
@@ -812,6 +899,15 @@ fn resolved_activity(
     title_repeats: u8,
 ) -> AgentActivity {
     if screen == AgentActivity::Blocked {
+        return AgentActivity::Blocked;
+    }
+    // No staleness bound, deliberately, and it is the one rung that must not
+    // have one. `STALE_LOG_MS` exists because a running agent keeps writing, so
+    // a quiet file is a turn we have stopped being able to see — but an agent
+    // holding for an answer writes NOTHING until it gets one, by construction.
+    // A bound here would expire the state at the exact moment it became true,
+    // and the median wait is 101 seconds against a 30-second bound.
+    if asked {
         return AgentActivity::Blocked;
     }
     if let Some(turn) = log {
@@ -956,6 +1052,7 @@ fn advance_log(
     let events: Vec<TurnEvent> =
         tail.read_new_lines().iter().flat_map(|line| format.parse_line(line)).collect();
     log.turn = fold_log_events(log.turn, &events, now);
+    log.asked = fold_asks(log.asked.take(), &events);
 
     // Asked AFTER the read, and never instead of it. A line arriving on this
     // tick is the strongest evidence there is that the file is still the pane's
@@ -1064,7 +1161,16 @@ impl Signals {
                 self.action = None;
             }
             TurnEvent::Ended { .. } => self.forget_the_turn(),
-            TurnEvent::Said { .. } | TurnEvent::Title(_) | TurnEvent::BackgroundAgents(_) => {}
+            // Folded by `fold_asks`, into the pane's log rather than into its
+            // signals: what a question changes is whether the row is BLOCKED,
+            // which is decided before this fold runs and on the other side of
+            // the state mutex. The action line for a question is already
+            // carried by the `Did` that arrived with it — `Asking · End state`.
+            TurnEvent::Asked { .. }
+            | TurnEvent::Answered { .. }
+            | TurnEvent::Said { .. }
+            | TurnEvent::Title(_)
+            | TurnEvent::BackgroundAgents(_) => {}
         }
     }
 
@@ -1803,7 +1909,7 @@ impl Watcher {
         now: i64,
         churn: bool,
         working: bool,
-    ) -> (Option<LogTurn>, Vec<TurnEvent>) {
+    ) -> (Option<LogTurn>, Option<Ask>, Vec<TurnEvent>) {
         // Taken together, under one lock, and in this order: the entry for
         // THIS pane comes out first, so what is left is exactly the files
         // other panes hold. Without the removal a pane would find its own
@@ -1843,10 +1949,14 @@ impl Watcher {
         // the end of the file. That costs whatever was written in between,
         // which is the right trade against putting an entry back that a
         // panicking task may have left half-advanced.
-        let Ok((log, steps)) = log else { return (None, Vec::new()) };
+        let Ok((log, steps)) = log else { return (None, None, Vec::new()) };
         let turn = log.turn;
+        // Cloned rather than moved out: the pane goes on holding the question
+        // until its own log says otherwise, and this call is a reading of that
+        // state and not a hand-off of it.
+        let asked = log.asked.clone();
         self.logs.lock().unwrap_or_else(|e| e.into_inner()).insert(id, log);
-        (turn, steps)
+        (turn, asked, steps)
     }
 
     async fn sample(&self) {
@@ -2157,7 +2267,7 @@ impl Watcher {
                         // what stage 2 exists to read. It cannot see a
                         // permission prompt, and `resolved_activity` is where
                         // that is enforced.
-                        let (turn, read) = self
+                        let (turn, held, read) = self
                             .turn_from_log(
                                 id,
                                 PaneJoin {
@@ -2184,6 +2294,7 @@ impl Watcher {
                         let activity = resolved_activity(
                             screen_says,
                             turn,
+                            held.is_some(),
                             now,
                             &title,
                             &command,
@@ -2193,7 +2304,17 @@ impl Watcher {
                         // Only while blocked, and derived here rather than on a
                         // client for the same reason activity is: a phone has
                         // no screen to read.
-                        question = registry.blocked_question(&command, &screen);
+                        //
+                        // The screen first, where it has one: a permission
+                        // prompt is only ever visible there, and its footer
+                        // states the question better than any log could. The
+                        // held question is what answers for the case the screen
+                        // cannot see at all — an `AskUserQuestion` draws none of
+                        // claude's usual furniture, so the footer match finds
+                        // nothing to quote.
+                        question = registry.blocked_question(&command, &screen).or_else(|| {
+                            held.filter(|ask| !ask.question.trim().is_empty()).map(|ask| ask.question)
+                        });
                         (
                             registry.describe_pane(&command, &screen, &title, purpose.as_deref(), &hostname),
                             activity,
@@ -2431,6 +2552,135 @@ fn now_millis() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    /// A pane holding a question is blocked, however long its log has been
+    /// quiet.
+    ///
+    /// The bug this closes, end to end: claude calls `AskUserQuestion` and
+    /// stops writing. `STALE_LOG_MS` expires 30 seconds later, the turn rung
+    /// stops answering, and the row fell through to a screen showing none of
+    /// claude's furniture. The median real wait is 101 seconds and the longest
+    /// measured is 21 hours.
+    #[test]
+    fn a_held_question_is_blocked_however_stale_the_log_is() {
+        let now = 1_000_000;
+        let open = log_said(true, now - STALE_LOG_MS * 100, 0);
+        assert_eq!(
+            resolved_activity(AgentActivity::Idle, open, true, now, "", "claude", "Mac", 0),
+            AgentActivity::Blocked
+        );
+        // And with no log verdict at all, which is what a pane that attached
+        // mid-question looks like.
+        assert_eq!(
+            resolved_activity(AgentActivity::Idle, None, true, now, "", "claude", "Mac", 0),
+            AgentActivity::Blocked
+        );
+    }
+
+    /// The screen still outranks it, because a permission prompt is visible
+    /// only there and its footer states the question better.
+    #[test]
+    fn a_screen_that_says_blocked_still_wins() {
+        let now = 1_000_000;
+        assert_eq!(
+            resolved_activity(AgentActivity::Blocked, None, true, now, "", "claude", "Mac", 0),
+            AgentActivity::Blocked
+        );
+    }
+
+    /// A question outranks the turn rung, which is the whole of the fix: the
+    /// log says the turn is open, and open is exactly what a turn is while it
+    /// waits for you.
+    #[test]
+    fn a_question_beats_a_running_turn() {
+        let now = 1_000_000;
+        let fresh = log_said(true, now, 0);
+        assert_eq!(
+            resolved_without_a_question(AgentActivity::Idle, fresh, now, "", "claude", "Mac", 0),
+            AgentActivity::Working,
+            "without one, a fresh running turn is working"
+        );
+        assert_eq!(
+            resolved_activity(AgentActivity::Idle, fresh, true, now, "", "claude", "Mac", 0),
+            AgentActivity::Blocked
+        );
+    }
+
+    #[test]
+    fn a_question_is_held_until_its_own_answer_arrives() {
+        let asked = |id: &str, q: &str| TurnEvent::Asked { id: id.to_string(), question: q.to_string() };
+        let answered = |id: &str| TurnEvent::Answered { id: id.to_string() };
+
+        let held = fold_asks(None, &[asked("a", "Which base?")]);
+        assert_eq!(held, Some(Ask { id: "a".to_string(), question: "Which base?".to_string() }));
+
+        // Somebody else's result changes nothing. Every tool result emits an
+        // `Answered`, so this is the common case rather than the exotic one.
+        let held = fold_asks(held, &[answered("b"), answered("c")]);
+        assert!(held.is_some(), "a question is not cleared by another call coming back");
+
+        assert_eq!(fold_asks(held, &[answered("a")]), None);
+    }
+
+    #[test]
+    fn a_second_question_replaces_the_first() {
+        let events = vec![
+            TurnEvent::Asked { id: "a".to_string(), question: "First?".to_string() },
+            TurnEvent::Answered { id: "a".to_string() },
+            TurnEvent::Asked { id: "b".to_string(), question: "Second?".to_string() },
+        ];
+        let held = fold_asks(None, &events);
+        assert_eq!(held, Some(Ask { id: "b".to_string(), question: "Second?".to_string() }));
+        // The first question's answer must not clear the second, which is why
+        // the id is carried at all.
+        assert_eq!(fold_asks(held.clone(), &[TurnEvent::Answered { id: "a".to_string() }]), held);
+    }
+
+    /// A rejected question never gets a result shaped like an answer -- 5 of
+    /// the 200 on this machine came back as `"User rejected tool use"` -- and a
+    /// turn boundary is what closes those.
+    #[test]
+    fn a_turn_boundary_clears_a_question_nobody_answered() {
+        let held = Some(Ask { id: "a".to_string(), question: "Which base?".to_string() });
+        assert_eq!(
+            fold_asks(held.clone(), &[TurnEvent::Ended {
+                at_ms: None,
+                duration_ms: None,
+                outcome: TurnOutcome::Aborted
+            }]),
+            None
+        );
+        assert_eq!(fold_asks(held, &[TurnEvent::Started { at_ms: None }]), None);
+    }
+
+    /// A pane re-joined to a different file has nothing waiting on it. The old
+    /// question belonged to a session that is over, and keeping it would pin
+    /// the row on "needs you" for a question nobody can answer.
+    #[test]
+    fn a_new_session_file_drops_the_question_with_the_turn() {
+        let mut log = PaneLog::new();
+        log.tail = Some((Tail::new(std::path::PathBuf::from("/tmp/one.jsonl")), LogFormat::Claude));
+        log.asked = Some(Ask { id: "a".to_string(), question: "Which base?".to_string() });
+        log.adopt(Some((std::path::PathBuf::from("/tmp/two.jsonl"), LogFormat::Claude)));
+        assert_eq!(log.asked, None);
+    }
+
+    /// `resolved_activity` for the tests that predate questions, which is most
+    /// of them: they are about the screen, the title and the turn, and a pane
+    /// holding a question is a rung above all three. Spelling `false` at every
+    /// call site would say nothing at each of them and bury the handful of
+    /// tests where the flag is the whole point.
+    fn resolved_without_a_question(
+        screen: AgentActivity,
+        log: Option<LogTurn>,
+        now: i64,
+        title: &str,
+        command: &str,
+        hostname: &str,
+        title_repeats: u8,
+    ) -> AgentActivity {
+        resolved_activity(screen, log, false, now, title, command, hostname, title_repeats)
+    }
+
     use super::*;
     use farcooler_core::session_log::TurnOutcome;
 
@@ -2985,7 +3235,7 @@ mod tests {
     fn a_log_that_says_the_turn_started_beats_a_screen_that_says_idle() {
         let now = 1_000_000;
         assert_eq!(
-            resolved_activity(AgentActivity::Idle, log_said(true, now, 0), now, "", "claude", "Mac", 0),
+            resolved_without_a_question(AgentActivity::Idle, log_said(true, now, 0), now, "", "claude", "Mac", 0),
             AgentActivity::Working
         );
     }
@@ -3006,7 +3256,7 @@ mod tests {
             AgentActivity::Working
         );
         assert_eq!(
-            resolved_activity(
+            resolved_without_a_question(
                 AgentActivity::Idle,
                 log_said(false, now, 0),
                 now,
@@ -3032,7 +3282,7 @@ mod tests {
     #[test]
     fn a_log_that_says_the_turn_ended_folds_a_stale_working_footer_into_done() {
         let now = 1_000_000;
-        let observed = resolved_activity(
+        let observed = resolved_without_a_question(
             AgentActivity::Working,
             log_said(false, now, 0),
             now,
@@ -3072,7 +3322,7 @@ mod tests {
         let now = 1_000_000;
         let log = log_said(true, now, 0);
         let screen = AgentActivity::Blocked;
-        let resolved = resolved_activity(screen, log, now, "◐ Write tmux haiku", "claude", "Mac", 0);
+        let resolved = resolved_without_a_question(screen, log, now, "◐ Write tmux haiku", "claude", "Mac", 0);
         assert_eq!(resolved, AgentActivity::Blocked);
 
         // Through the fold and the announce gate, from a row that was Working
@@ -3102,7 +3352,7 @@ mod tests {
         // when the log happens to agree that something is happening.
         for log in [None, log_said(true, now, 0), log_said(false, now, 0), log_said(true, now, 999_999)] {
             assert_eq!(
-                resolved_activity(AgentActivity::Blocked, log, now, "", "claude", "Mac", 0),
+                resolved_without_a_question(AgentActivity::Blocked, log, now, "", "claude", "Mac", 0),
                 AgentActivity::Blocked,
                 "{log:?}"
             );
@@ -3127,7 +3377,7 @@ mod tests {
             for title in ["◐ Write tmux haiku", "✳ Write tmux haiku", "Echo Banana", ""] {
                 for repeats in [0, STALE_TITLE_SAMPLES] {
                     assert_eq!(
-                        resolved_activity(screen, None, now, title, "claude", "Mac", repeats),
+                        resolved_without_a_question(screen, None, now, title, "claude", "Mac", repeats),
                         promoted_by_title(screen, title, "claude", "Mac", repeats),
                         "{screen:?} / {title} / {repeats}"
                     );
@@ -3166,7 +3416,7 @@ mod tests {
         for tick in 1..=i64::from(CONFIRMATIONS) {
             let now = start + tick * 1_000;
             let resolved =
-                resolved_activity(stale_footer, ended, now, "", "claude", "Mac", 0);
+                resolved_without_a_question(stale_footer, ended, now, "", "claude", "Mac", 0);
             published = entry.observe(resolved, now);
         }
         assert_eq!(published, Some(AgentActivity::Done), "the turn ended, and the row said so");
@@ -3178,7 +3428,7 @@ mod tests {
         // no second passing makes that less true.
         for tick in 0..=120 {
             let now = start + STALE_LOG_MS + tick * 1_000;
-            let resolved = resolved_activity(stale_footer, ended, now, "", "claude", "Mac", 0);
+            let resolved = resolved_without_a_question(stale_footer, ended, now, "", "claude", "Mac", 0);
             let moved = entry.observe(resolved, now);
             assert_eq!(moved, None, "nothing changed {tick}s past the staleness bound");
             assert_eq!(entry.activity, AgentActivity::Done, "at {tick}s");
@@ -3211,7 +3461,7 @@ mod tests {
 
         // The agent is gone: nothing on the screen identifies one.
         assert_eq!(
-            resolved_activity(AgentActivity::None, ended, now, "", "zsh", "Mac", 0),
+            resolved_without_a_question(AgentActivity::None, ended, now, "", "zsh", "Mac", 0),
             AgentActivity::None,
             "a pane running a shell reported as an agent"
         );
@@ -3219,7 +3469,7 @@ mod tests {
         // Still on screen, between turns: that IS an idle agent, and the
         // finished log is exactly how it is known.
         assert_eq!(
-            resolved_activity(AgentActivity::Idle, ended, now, "", "claude", "Mac", 0),
+            resolved_without_a_question(AgentActivity::Idle, ended, now, "", "claude", "Mac", 0),
             AgentActivity::Idle,
             "an agent between turns stopped reading as one"
         );
@@ -3229,7 +3479,7 @@ mod tests {
         // simply not have redrawn yet.
         let open = Some(LogTurn { running: true, failed: false, last_event_at: now });
         assert_eq!(
-            resolved_activity(AgentActivity::None, open, now, "", "claude", "Mac", 0),
+            resolved_without_a_question(AgentActivity::None, open, now, "", "claude", "Mac", 0),
             AgentActivity::Working,
             "an open turn stopped being believed over an unredrawn screen"
         );
@@ -3248,7 +3498,7 @@ mod tests {
         let now = 1_000_000;
         // Just inside the bound: still believed, and the screen is overruled.
         assert_eq!(
-            resolved_activity(
+            resolved_without_a_question(
                 AgentActivity::Idle,
                 log_said(true, now, STALE_LOG_MS - 1),
                 now,
@@ -3263,7 +3513,7 @@ mod tests {
         // is what lets the row reach Idle and fold to Done.
         for age in [STALE_LOG_MS, STALE_LOG_MS + 1, STALE_LOG_MS * 60] {
             assert_eq!(
-                resolved_activity(AgentActivity::Idle, log_said(true, now, age), now, "", "claude", "Mac", 0),
+                resolved_without_a_question(AgentActivity::Idle, log_said(true, now, age), now, "", "claude", "Mac", 0),
                 AgentActivity::Idle,
                 "age {age}"
             );
@@ -3418,7 +3668,7 @@ mod tests {
         assert_eq!(
             activity::advance(
                 AgentActivity::Working,
-                resolved_activity(AgentActivity::Working, log.turn, 7_000, "", "claude", "Mac", 0)
+                resolved_without_a_question(AgentActivity::Working, log.turn, 7_000, "", "claude", "Mac", 0)
             ),
             AgentActivity::Done
         );
@@ -3470,7 +3720,7 @@ mod tests {
         // Which is the whole point: the row can now say the pane is working
         // during its first turn, not only from its second.
         assert_eq!(
-            resolved_activity(AgentActivity::Idle, log.turn, 5_000, "", "codex", "Mac", 0),
+            resolved_without_a_question(AgentActivity::Idle, log.turn, 5_000, "", "codex", "Mac", 0),
             AgentActivity::Working
         );
     }
@@ -3534,7 +3784,7 @@ mod tests {
         // to travel beside it, and this is where it becomes a `✗`.
         let folded = activity::advance(
             AgentActivity::Working,
-            resolved_activity(AgentActivity::Working, Some(died), 6_000, "", "cursor", "Mac", 0),
+            resolved_without_a_question(AgentActivity::Working, Some(died), 6_000, "", "cursor", "Mac", 0),
         );
         assert_eq!(folded, AgentActivity::Done, "Done is still created by the fold alone");
         let mut message = farcooler_protocol::v1::Terminal {

@@ -225,6 +225,19 @@ impl Registry {
                         "Claude Code",
                         "auto-accept edits",
                         "esc to interrupt",
+                        // The question box, which is the ONE claude screen with
+                        // none of the four above on it — see
+                        // `captures/claude-asking.txt`. Its banner has scrolled
+                        // away, its footer is the question's own, and its
+                        // process name is `2.1.237`, so without this the pane is
+                        // not claude at all: it is labeled `shell` and
+                        // classified as a non-agent, which is how "claude needs
+                        // you" went out reading "shell finished".
+                        //
+                        // `Enter to select` is the more obvious half of that
+                        // line to take, and it is cursor's trust gate verbatim.
+                        // The arrows are the part no other agent here draws.
+                        "↑/↓ to navigate",
                     ]),
                     blocked: s(&[
                         "Do you want to",
@@ -235,6 +248,11 @@ impl Registry {
                         "Esc to cancel · Tab to amend",
                         "[y/n]",
                         "(y/N)",
+                        // `AskUserQuestion`, which shares no wording with a
+                        // permission prompt: no "Do you want", no "Yes", and
+                        // its `Esc to cancel` sits beside `Enter to select`
+                        // rather than `Tab to amend`.
+                        "↑/↓ to navigate",
                     ]),
                     working: s(&["esc to interrupt", "Thinking…"]),
                     footer_lines: DEFAULT_FOOTER_LINES,
@@ -469,10 +487,7 @@ impl Registry {
             return command.trim().to_string();
         }
         let name = command.rsplit('/').next().unwrap_or(command).trim();
-        // A process whose name is a version number tells a user nothing. Better to
-        // say "shell" than to label a row `2.1.220`.
-        let meaningless = name.is_empty() || name.chars().all(|c| c.is_ascii_digit() || c == '.');
-        if meaningless {
+        if nameless(command) {
             "shell".to_string()
         } else {
             name.to_string()
@@ -635,6 +650,23 @@ pub fn strip_ansi(screen: &str) -> String {
 /// width, and a signature spanning a wrap would otherwise never match.
 pub fn plain_text(screen: &str) -> String {
     strip_ansi(screen).split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether a process name says nothing about what is running.
+///
+/// Empty, or nothing but digits and dots. A process whose name is a version
+/// number tells a user nothing, and `2.1.237` is not a hypothetical: it is what
+/// `pane_current_command` reports for Claude Code on the machine these rules
+/// were measured on, because claude renames itself to its own version.
+///
+/// Named and shared rather than written twice, because two places now turn on
+/// it and they must agree: `describe` falls back to "shell" here, and
+/// `describe` falls back to "shell" here, and the fallback must not fire for a
+/// name that says something — `zsh`, `node`, `cargo` — which is the pane
+/// answering for itself.
+fn nameless(command: &str) -> bool {
+    let name = command.rsplit('/').next().unwrap_or(command).trim();
+    name.is_empty() || name.chars().all(|c| c.is_ascii_digit() || c == '.')
 }
 
 /// How much of a pane's bottom is furniture rather than conversation.
@@ -1427,6 +1459,34 @@ Do you want to allow this command?
             r.classify("claude", include_str!("../captures/claude-trust-gate.txt")),
             AgentActivity::Blocked
         );
+    }
+
+    /// The screen that reported "shell finished" while claude sat waiting.
+    ///
+    /// Captured against a real `AskUserQuestion` at the second turn of a
+    /// session, so the welcome banner has scrolled off — which is what makes it
+    /// the interesting one. It carries NONE of the identity markers the first
+    /// three fixtures have, and `pane_current_command` for it is `2.1.237`, so
+    /// before the question box was added to `identity` this pane was not
+    /// recognized as claude by either route.
+    ///
+    /// Both halves are asserted because the label and the state failed
+    /// together: `classify` returns `None` for a pane it cannot identify, so
+    /// the same gap that produced `shell` also produced silence where the one
+    /// notification worth sending should have been.
+    #[test]
+    fn a_claude_holding_a_question_is_claude_and_is_blocked() {
+        let r = Registry::built_in();
+        let asking = include_str!("../captures/claude-asking.txt");
+
+        assert!(
+            !asking.contains("? for shortcuts")
+                && !asking.contains("auto-accept edits")
+                && !asking.contains("esc to interrupt"),
+            "the fixture really is the screen where claude's usual furniture is absent"
+        );
+        assert_eq!(r.describe("2.1.237", asking), "claude");
+        assert_eq!(r.classify("2.1.237", asking), AgentActivity::Blocked);
     }
 
     /// What the agent is asking, so a row can say more than "Needs you".
