@@ -84,6 +84,9 @@ final class TerminalSession: ObservableObject {
     private var inbox: Inbox?
     /// Watches for someone else resizing this pane. See `checkGeometry`.
     private var geometry: Task<Void, Never>?
+    /// Watches for a stream that opened and then said nothing. See
+    /// ``waitForTheFirstByte()``.
+    private var silence: Task<Void, Never>?
     /// The size the emulator was built at, which is the pane's size as of the
     /// last time anything looked.
     private var paneSize: (columns: Int, rows: Int)?
@@ -385,21 +388,30 @@ final class TerminalSession: ObservableObject {
             ["terminal": id, "columns": shape.columns, "rows": shape.rows])
     }
 
-    /// Stop everything that paints, and everything that feeds what paints.
+    /// Stop everything on THIS side that paints, and everything that feeds
+    /// what paints. The ssh channel is not one of them.
     ///
-    /// The stream is stopped whether or not this object believes it is
-    /// streaming. It used to be conditional, which read as an optimization and
-    /// was a leak: `streamEnded` sets the flag false before anything tears
-    /// down, so the one path that most needed the stream stopped was the one
-    /// path that skipped it, and an ssh channel went on delivering into an
-    /// emulator nothing was showing. `stopStream` is documented as safe when
-    /// nothing is running, which is what makes the unconditional version the
-    /// simpler one as well as the correct one.
+    /// Stopping the stream is the caller's, and it has to be: the stop is
+    /// async and every caller needs it sequenced differently. `switchTo` and
+    /// `stop` stop a named terminal and then hand its pane back; `open` awaits
+    /// the stop so it cannot land after the start it is about to make — the
+    /// hazard `stopStream` documents. A fire-and-forget stop in here would put
+    /// that hazard back into `open`, which is the one path that must not have
+    /// it.
+    ///
+    /// This comment used to claim the opposite, and the two fallback paths
+    /// believed it: `streamEnded` and `streamSaidNothing` tore down and went to
+    /// polling while their ssh channel stayed open, delivering into an
+    /// emulator nothing was showing. Ten of those is `MaxSessions` on a default
+    /// sshd, after which no stream opens at all — see the stop each of them now
+    /// makes for itself.
     private func teardown() {
         poller?.cancel()
         poller = nil
         geometry?.cancel()
         geometry = nil
+        silence?.cancel()
+        silence = nil
         resizeDebounce?.cancel()
         resizeDebounce = nil
         pendingResizeSize = nil
@@ -475,8 +487,62 @@ final class TerminalSession: ObservableObject {
             if case .failed = phase { startLoop() }
             return
         }
-        if await attach() { return watchGeometry() }
+        if await attach() {
+            watchGeometry()
+            return waitForTheFirstByte()
+        }
         render(screen)
+        startLoop()
+    }
+
+    /// A stream that opened, was accepted, and then never said anything.
+    ///
+    /// `streamEnded` is the recovery for a channel that DROPS, and it was the
+    /// only recovery there was. So a channel that opens and then goes quiet had
+    /// nothing watching it at all: `attach` returning true is read as "the
+    /// stream is live, stop polling", the capture is deliberately not painted
+    /// because the stream's own replay is about to arrive, and `phase` only
+    /// leaves `.connecting` when the first bytes reach `consume`. No bytes, no
+    /// end, no timeout anywhere — a spinner reading "Loading shell…" for as
+    /// long as anybody cared to watch it.
+    ///
+    /// Nothing in the protocol promises a first byte. The daemon's replay is
+    /// what normally arrives at once, and a daemon too old to send one, an
+    /// sshd with no channels left, and a pane whose replay is genuinely empty
+    /// all look identical from this side: open, and silent.
+    ///
+    /// So silence gets a deadline, and the answer to it is the handover
+    /// `streamEnded` already performs for a channel that cannot carry a stream
+    /// — stop everything the streaming path set up, then poll. Polling is
+    /// slower and it works, which beats a spinner that is neither.
+    ///
+    /// Two seconds because the normal case never reaches it: the replay is one
+    /// round trip, and a stream still saying nothing after two seconds is not
+    /// one worth waiting on. It costs nothing when it does not fire, and the
+    /// first byte cancels it — see `consume`.
+    private func waitForTheFirstByte() {
+        silence?.cancel()
+        silence = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await self?.streamSaidNothing()
+        }
+    }
+
+    /// The deadline passed with the screen still blank.
+    private func streamSaidNothing() {
+        // Only while nothing has been painted. A stream that delivered and then
+        // went quiet is an idle pane, which is the ordinary state of most of
+        // them, and tearing that down would swap a working stream for polling
+        // every two seconds of quiet.
+        guard streaming, phase == .connecting else { return }
+        teardown()
+        // Fire and forget, safely: this path goes to polling and never reopens,
+        // so there is no start for a late stop to arrive after. A channel that
+        // opened and said nothing is the likeliest one to be wedged, and
+        // leaving it held is how the next pane finds no channels left.
+        let id = terminalID
+        Task { await stopStream(id) }
         startLoop()
     }
 
@@ -550,6 +616,13 @@ final class TerminalSession: ObservableObject {
         guard let inbox, let vt else { return }
         let bytes = inbox.take()
         guard !bytes.isEmpty else { return }
+        // The stream spoke, so the deadline on its silence is spent. Cancelled
+        // rather than left to fire and find `phase` already `.live`, because a
+        // task sleeping for two seconds per pane per open is a real cost on a
+        // tab strip, and because the guard it would rely on is a second place
+        // to get this right.
+        silence?.cancel()
+        silence = nil
         failedAttaches = 0
         vt.feed(bytes)
         // From here on the emulator's own caret is the true one: these bytes
@@ -583,6 +656,12 @@ final class TerminalSession: ObservableObject {
             // them every second. A fallback has to be a handover, not an
             // addition.
             teardown()
+            // See `teardown`: it stops nothing on the host, and this is the
+            // path its comment wrongly promised it did. Three dead attaches is
+            // three channels, and the pane that inherits an sshd with none left
+            // gets a stream that opens and never speaks.
+            let id = terminalID
+            Task { await stopStream(id) }
             startLoop()
             return
         }
