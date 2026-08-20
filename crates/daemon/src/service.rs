@@ -694,8 +694,13 @@ impl Service {
         let repo_path = self.repository_worktree(&repo);
         let dest = self.worktree_dest(&repo, name)?;
 
-        let base_commit = git::resolve_revision(&repo_path, base_revision).await?;
-        git::create_worktree(&repo_path, branch, base_revision, &dest).await?;
+        // The commit comes back from the creation rather than being resolved
+        // ahead of it, because the two can differ: a branch that already exists
+        // on exactly one remote is checked out from there instead of forked
+        // from the base. Rolling back compares this against the worktree's
+        // HEAD, so a second `resolve_revision` here would refuse to remove the
+        // very worktree it had just made.
+        let base_commit = git::create_worktree(&repo_path, branch, base_revision, &dest).await?;
         // Claim it before anyone can adopt it. Another install sharing this
         // host sees the same worktree in `git worktree list` and would
         // otherwise take it for its own fleet.

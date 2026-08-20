@@ -146,26 +146,96 @@ pub async fn resolve_revision(repo: &Path, revision: &str) -> Result<String> {
     Ok(r.stdout.trim().to_string())
 }
 
+/// Every remote that already carries a branch of this name.
+///
+/// A list rather than an `Option`, because the COUNT is the decision: git
+/// refuses to guess when two remotes both have the name, and so does the caller
+/// — anyone with a fork plus an upstream has two, and picking one for them is
+/// how a workspace quietly starts from the wrong person's work.
+pub async fn remotes_with_branch(repo: &Path, branch: &str) -> Result<Vec<String>> {
+    let out = git(repo, &["for-each-ref", "--format", "%(refname)", "refs/remotes"]).await?;
+    if !out.ok {
+        return Err(DomainError::OperationFailed);
+    }
+    let mut remotes: Vec<String> = Vec::new();
+    for line in out.stdout.lines() {
+        let Some(rest) = line.trim().strip_prefix("refs/remotes/") else { continue };
+        // `origin/feat/x` splits into remote `origin`, branch `feat/x` — the
+        // branch keeps its slashes, so this splits once and only once.
+        let mut parts = rest.splitn(2, '/');
+        let (Some(remote), Some(name)) = (parts.next(), parts.next()) else { continue };
+        if name == branch && !remotes.iter().any(|seen| seen == remote) {
+            remotes.push(remote.to_string());
+        }
+    }
+    Ok(remotes)
+}
+
 /// The worktree transaction.
 ///
 /// Validates, refuses collisions, then creates branch and worktree in one git
 /// operation so a half-made branch cannot outlive a failed worktree.
+///
+/// Returns the commit the worktree was actually started at, which the caller
+/// needs and used to compute for itself. It has to come from here now that the
+/// answer is not always the base it asked for — and resolving it here rather
+/// than twice also closes the window where `HEAD` moved between the two calls
+/// and a rollback then refused to remove its own worktree.
+///
+/// **A branch that already exists on a remote is checked out, not forked.**
+/// `git switch feat-branch` creates a local branch from `origin/feat-branch`
+/// and tracks it, and this now does the same. Before, a colleague's pushed
+/// branch was invisible here: `branch_exists` only reads `refs/heads`, so a
+/// remote-only name passed straight through and a fresh branch was cut from
+/// `HEAD` — same name as theirs, none of their commits, no upstream, and no
+/// sign that any of that had happened.
+///
+/// Only when the caller asked for the default base. `HEAD` means "wherever this
+/// repository is", which is a statement about the repository and not about this
+/// branch; naming a base explicitly is a statement about this branch, and it
+/// wins. `git switch -c feat origin/main` does not DWIM to `origin/feat`
+/// either.
 pub async fn create_worktree(
     repo: &Path,
     branch: &str,
     base_revision: &str,
     destination: &Path,
-) -> Result<()> {
+) -> Result<String> {
     if branch_exists(repo, branch).await? {
         return Err(DomainError::BranchExists);
     }
     if destination.exists() {
         return Err(DomainError::WorktreeExists);
     }
-    let base = resolve_revision(repo, base_revision).await?;
+
+    let tracking = if base_revision == "HEAD" {
+        match remotes_with_branch(repo, branch).await?.as_slice() {
+            [only] => Some(format!("{only}/{branch}")),
+            // None, or too many to choose between. Both fall back to the base
+            // that was asked for, which is what this always did.
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    // Resolved either way, and before the mutation either way: a typo in a base
+    // must still fail before anything is created, and the commit is what the
+    // caller rolls back against.
+    let start = tracking.clone().unwrap_or_else(|| base_revision.to_string());
+    let commit = resolve_revision(repo, &start).await?;
 
     let dest = destination.to_string_lossy().to_string();
-    let r = git(repo, &["worktree", "add", "-b", branch, &dest, &base]).await?;
+    let r = match &tracking {
+        // `--track -b` sets `branch.<name>.remote` and `.merge`, so pushing
+        // goes back where the branch came from with nothing further to set. The
+        // symbolic ref is passed rather than the commit deliberately: git reads
+        // tracking off the START POINT, and a 40-hex SHA is not a
+        // remote-tracking branch, so passing the resolved commit here would
+        // create the right content with no upstream at all.
+        Some(start) => git(repo, &["worktree", "add", "--track", "-b", branch, &dest, start]).await?,
+        None => git(repo, &["worktree", "add", "-b", branch, &dest, &commit]).await?,
+    };
 
     if !r.ok {
         tracing::warn!(stderr = %r.stderr, "worktree add failed");
@@ -173,7 +243,7 @@ pub async fn create_worktree(
         // worktree together, so a failure leaves neither.
         return Err(DomainError::OperationFailed);
     }
-    Ok(())
+    Ok(commit)
 }
 
 /// A branch you could resume work on.
@@ -443,6 +513,140 @@ mod tests {
 
         assert!(dest.join("README.md").exists(), "worktree checked out");
         assert!(branch_exists(&d, "feature/x").await.unwrap());
+
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Give `dir` a real remote, at `name`, carrying `branch` with one commit
+    /// of its own on it.
+    ///
+    /// A second repository on disk and a genuine `fetch`, rather than a
+    /// hand-written `refs/remotes` ref: what is being tested is that git treats
+    /// the result as a remote-tracking branch it will set upstream from, and a
+    /// forged ref would test the parsing and none of that.
+    fn add_remote_branch(dir: &Path, name: &str, branch: &str, marker: &str) {
+        let remote = sibling(&format!("remote-{marker}"));
+        std::fs::create_dir_all(&remote).unwrap();
+        init_repo(&remote);
+        for args in [
+            vec!["checkout", "-q", "-b", branch],
+            vec!["commit", "-q", "--allow-empty", "-m", "theirs"],
+        ] {
+            let status = SyncCommand::new("git").current_dir(&remote).args(&args).status().unwrap();
+            assert!(status.success(), "git {args:?} failed in the remote");
+        }
+        for args in [
+            vec!["remote", "add", name, remote.to_str().unwrap()],
+            vec!["fetch", "-q", name],
+        ] {
+            let status = SyncCommand::new("git").current_dir(dir).args(&args).status().unwrap();
+            assert!(status.success(), "git {args:?} failed in {}", dir.display());
+        }
+    }
+
+    fn head_of(dir: &Path, rev: &str) -> String {
+        let out = SyncCommand::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", rev])
+            .output()
+            .unwrap();
+        // Asserted rather than trusted: `rev-parse` prints nothing and exits
+        // non-zero for a ref it cannot resolve, and an empty string compared
+        // against another empty string is a test that passes for the wrong
+        // reason.
+        assert!(out.status.success(), "rev-parse {rev} failed in {}", dir.display());
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    /// Someone else pushed the branch; checking it out must get THEIR commits.
+    ///
+    /// The reported bug, exactly: a colleague creates `origin/feat-branch`, you
+    /// make a workspace for it, and you get an empty branch of the same name cut
+    /// from `main`. `branch_exists` reads only `refs/heads`, so nothing noticed.
+    #[tokio::test]
+    async fn a_branch_that_exists_on_a_remote_is_checked_out_rather_than_forked() {
+        let d = scratch("dwim");
+        init_repo(&d);
+        add_remote_branch(&d, "origin", "feat-branch", "dwim");
+        let dest = sibling("dwim");
+
+        let commit = create_worktree(&d, "feat-branch", "HEAD", &dest).await.unwrap();
+
+        assert_eq!(commit, head_of(&d, "refs/remotes/origin/feat-branch"), "started from theirs");
+        assert_ne!(commit, head_of(&d, "refs/heads/main"), "and not from HEAD");
+        assert_eq!(
+            head_of(&dest, "HEAD"),
+            head_of(&d, "refs/remotes/origin/feat-branch"),
+            "the worktree really is on their commit"
+        );
+        // And it tracks, so pushing goes back where it came from.
+        assert_eq!(
+            head_of(&d, "feat-branch@{upstream}"),
+            head_of(&d, "refs/remotes/origin/feat-branch"),
+        );
+
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// An explicitly named base is a statement about THIS branch and wins.
+    /// `git switch -c feat origin/main` does not DWIM to `origin/feat` either.
+    #[tokio::test]
+    async fn an_explicit_base_is_not_overruled_by_a_remote_of_the_same_name() {
+        let d = scratch("dwimbase");
+        init_repo(&d);
+        add_remote_branch(&d, "origin", "feat-branch", "dwimbase");
+        let dest = sibling("dwimbase");
+
+        let commit = create_worktree(&d, "feat-branch", "main", &dest).await.unwrap();
+
+        assert_eq!(commit, head_of(&d, "refs/heads/main"));
+        assert_ne!(commit, head_of(&d, "refs/remotes/origin/feat-branch"));
+
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Two remotes carrying the name is git's own refusal to guess, and anyone
+    /// with a fork plus an upstream has two.
+    #[tokio::test]
+    async fn an_ambiguous_branch_name_falls_back_to_the_base() {
+        let d = scratch("dwimamb");
+        init_repo(&d);
+        add_remote_branch(&d, "origin", "feat-branch", "dwimamb-a");
+        add_remote_branch(&d, "upstream", "feat-branch", "dwimamb-b");
+        let dest = sibling("dwimamb");
+
+        assert_eq!(
+            remotes_with_branch(&d, "feat-branch").await.unwrap(),
+            vec!["origin".to_string(), "upstream".to_string()]
+        );
+        let commit = create_worktree(&d, "feat-branch", "HEAD", &dest).await.unwrap();
+        assert_eq!(commit, head_of(&d, "HEAD"), "neither remote was chosen");
+
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A branch nobody else has is still cut from the base, with no upstream —
+    /// which is what `git switch -c` does, and what this always did.
+    #[tokio::test]
+    async fn a_name_no_remote_carries_is_still_a_fresh_branch() {
+        let d = scratch("dwimnew");
+        init_repo(&d);
+        add_remote_branch(&d, "origin", "feat-branch", "dwimnew");
+        let dest = sibling("dwimnew");
+
+        let commit = create_worktree(&d, "something-else", "HEAD", &dest).await.unwrap();
+
+        assert_eq!(commit, head_of(&d, "HEAD"));
+        let upstream = SyncCommand::new("git")
+            .current_dir(&d)
+            .args(["rev-parse", "refs/heads/something-else@{upstream}"])
+            .output()
+            .unwrap();
+        assert!(!upstream.status.success(), "no upstream invented for a branch nobody has");
 
         let _ = std::fs::remove_dir_all(&dest);
         let _ = std::fs::remove_dir_all(&d);
