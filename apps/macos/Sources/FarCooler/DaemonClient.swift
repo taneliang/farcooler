@@ -534,6 +534,15 @@ final class DaemonClient: ObservableObject {
             let terminal = fleet.workspaces[w].terminals[t]
             Notifier.shared.report(terminal: terminal, workspace: fleet.workspaces[w].task)
             reapIfExited(terminal)
+            // The one thing on a workspace row that is NOT in this event.
+            //
+            // Everything above came off the wire; the sidebar's `+N -M` did
+            // not, because no event carries it and none exists to carry it.
+            // An agent working in this pane is the best evidence the app has
+            // that this runner's worktrees may have moved, so it is what asks.
+            // See `refreshChangesInboxSoon()` for why this is a request rather
+            // than a call.
+            refreshChangesInboxSoon()
             return
         }
 
@@ -1419,6 +1428,11 @@ final class DaemonClient: ObservableObject {
     /// worktree in the sidebar, which is exactly what makes a fleet view
     /// expensive to leave open.
     func refreshChangesInbox() async {
+        // Every caller's read counts against the coalescing floor, including
+        // `ChangesStore.poll()`'s: a worktree with its diff open is already
+        // being read on a three-second clock, and the sidebar has no reason to
+        // ask again on its own tick a moment later. See `changesInboxFloor`.
+        changesInboxReadAt = Date()
         let (maybe, message) = await runRaw(["changes", "inbox", "--json"], background: true)
         guard let data = maybe else {
             // Only a CONNECTED runner refusing the call proves it cannot do it.
@@ -1436,7 +1450,124 @@ final class DaemonClient: ObservableObject {
         guard let rows = try? JSONDecoder().decode([InboxRow].self, from: data) else { return }
         var byWorkspace: [String: InboxRow] = [:]
         for r in rows { byWorkspace[r.workspaceId] = r }
-        changesInbox = byWorkspace
+        // Assigned only when it actually differs.
+        //
+        // `@Published` fires on assignment regardless of the value, and this
+        // client's `objectWillChange` is wired straight into
+        // `FleetStore.remerge()`, which rebuilds `fleet` unconditionally — so
+        // an identical inbox assigned back over itself re-evaluates the whole
+        // view tree, terminal surface included. That was affordable when this
+        // ran only on a full fleet read; now that a working agent asks for it
+        // every few seconds, a fleet where nobody has committed anything would
+        // otherwise repaint the app on a timer to show the same numbers.
+        if byWorkspace != changesInbox { changesInbox = byWorkspace }
+    }
+
+    /// When the inbox was last asked for, successfully or not.
+    ///
+    /// Stamped at the START of the call rather than the end, and stamped even
+    /// when the call fails: a runner that refuses this in ten milliseconds must
+    /// not thereby be asked ten times as often as one that answers it in a
+    /// hundred. The floor is a floor on ATTEMPTS.
+    private var changesInboxReadAt: Date = .distantPast
+    /// Whether a coalesced read is already waiting or in flight.
+    private var changesInboxArmed = false
+
+    /// The shortest gap between two fleet-wide inbox reads.
+    ///
+    /// Three seconds, which is the cadence `ChangesStore.follow()` already
+    /// re-reads one open worktree's change set at — and shared with it, since
+    /// `refreshChangesInbox()` stamps `changesInboxReadAt` wherever it is
+    /// called from, so a worktree whose diff pane is open does not pay for both
+    /// clocks. Matching it also means the sidebar and the diff beside it can
+    /// never be more than one tick apart, which is the same complaint the base
+    /// fix was about: one worktree described two ways.
+    private static let changesInboxFloor: TimeInterval = 3
+
+    /// Re-read this runner's diff counts shortly, coalescing a burst into one
+    /// call.
+    ///
+    /// The `+N -M` on a sidebar row was the one fact in this app that nothing
+    /// ever refreshed on its own. `refreshChangesInbox()` has exactly two
+    /// callers: `refresh()`, which runs on a full fleet read, and
+    /// `ChangesStore.poll()`, which runs every three seconds but only for the
+    /// single worktree whose diff pane is open and only when that worktree's
+    /// change set moved. A full fleet read happens when the set of workspaces
+    /// changes — `EventStream`'s `fleet` line means a worktree appeared,
+    /// vanished, or was hidden — or when the user does one of the roughly
+    /// thirty things that call `refresh()`. An agent committing for twenty
+    /// minutes in a pane does neither, so the counts sat at whatever they were
+    /// when the fleet last changed shape, which for a long-lived window is
+    /// effectively forever. The row beside the numbers updated every second.
+    ///
+    /// There is nothing better to hang this on today. The daemon does have a
+    /// "this worktree's change set moved" broadcast — `announce_change_set` in
+    /// `crates/daemon/src/watch.rs` — but it has no callers, and `farcooler
+    /// events` would not print it if it did: the printer handles `terminal`,
+    /// `workspace`, `layout` and `fleet` and drops everything else. Wiring that
+    /// through is daemon work, and it is the right end state; this is the Mac
+    /// side of it, and it goes away cleanly when that event arrives.
+    ///
+    /// A request rather than a call, and no timer of its own. A timer is the
+    /// thing this app deliberately deleted — see `EventStream`'s own note — and
+    /// every read here is a `farcooler` subprocess, over ssh for a remote
+    /// runner. Terminal events are the closest available signal to "a worktree
+    /// on this runner may have moved", and the daemon sends them only when
+    /// something genuinely changed, so a fleet where nothing is happening still
+    /// costs exactly nothing. A fleet where an agent is working pays one extra
+    /// subprocess per runner per floor interval.
+    ///
+    /// What that buys, per call, is cheap on the daemon and worth stating
+    /// because the number of worktrees is the thing that grows: `review_ops::
+    /// inbox` walks every workspace and answers each from
+    /// `ReviewCache::shortstat`, which is keyed by the mtimes of `HEAD` and the
+    /// index, so a worktree nobody committed in costs three `stat`s and one
+    /// SQLite row and runs no git at all. `git diff --shortstat` runs only for
+    /// the worktrees whose gate actually moved — which is to say, for the ones
+    /// whose numbers are about to change on screen.
+    private func refreshChangesInboxSoon() {
+        // One armed read absorbs every event that lands before it runs. This is
+        // the whole coalescer: a working agent pushes a `line` change roughly
+        // every second, and without this each one would be its own subprocess.
+        guard !changesInboxArmed else { return }
+        // A daemon that ANSWERED and refused knows nothing about review, and
+        // will refuse identically every time — see `changesSupported`. Arming
+        // off every terminal event for such a runner would put a failing
+        // subprocess on a three-second loop for as long as an agent works
+        // there, each one overwriting `changesError` with the same words.
+        // `refresh()` still tries it unconditionally, so a runner that gets
+        // upgraded is picked up on its next full read rather than being written
+        // off for the lifetime of the app.
+        guard changesSupported != false else { return }
+        // Nothing armed for a client that was told to be quiet. `.onDisappear`
+        // and a retired runner both come through `stopEvents()`, and a buffered
+        // event decoded after it — which `EventStream.stop()` cannot prevent,
+        // see its own note — reaches `apply(_:)` and would otherwise launch a
+        // subprocess on behalf of a window that is gone.
+        guard !isStopped else { return }
+
+        changesInboxArmed = true
+        let wait = max(
+            0, Self.changesInboxFloor - Date().timeIntervalSince(changesInboxReadAt))
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard let self else { return }
+            // Stopped WHILE waiting, which the guard above cannot see. Disarmed
+            // on the way out rather than left set, so a client that comes back
+            // through `startEvents()` can arm again.
+            guard !self.isStopped else {
+                self.changesInboxArmed = false
+                return
+            }
+            await self.refreshChangesInbox()
+            // Disarmed only once the call has RETURNED, not before it. Clearing
+            // this first would let an event landing mid-call arm a second read
+            // measured against a `changesInboxReadAt` the first has already
+            // written — so the floor would read as satisfied and two `changes
+            // inbox` subprocesses would be in flight at once for one runner,
+            // racing to assign the same dictionary.
+            self.changesInboxArmed = false
+        }
     }
 
     /// One file's diff, as lines the diff tile draws directly.
