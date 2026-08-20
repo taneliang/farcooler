@@ -1,6 +1,11 @@
 import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// The deployment configuration, as text, so one test below can check what the
+// four relays are actually configured to accept. Raw rather than parsed by a
+// library: see `varsByEnvironment`.
+import wranglerToml from '../wrangler.toml?raw'
+
 import worker from '../src/index'
 import { fingerprintOf, parseEd25519 } from '../src/keys'
 import { topicMismatch } from '../src/push'
@@ -198,6 +203,98 @@ describe('the shape of the API', () => {
 
   it('does not invent routes', async () => {
     expect((await post('/v1/nope', {})).status).toBe(404)
+  })
+})
+
+// MARK: - The issuer the relays are configured to accept
+
+/// The `iss` a real AuthKit access token from these WorkOS projects carries.
+///
+/// A LITERAL, and that is the whole point of it. It was recorded on 2026-08-19
+/// by decoding a live canary access token — base64url the middle segment of the
+/// JWT and read `iss` out of the JSON — so it comes from a token WorkOS minted
+/// and from nothing this repository believes.
+///
+/// Everything else in this file mints its tokens with `iss: ISSUER`, where
+/// `ISSUER` is the same binding `verifySession` compares against. That is
+/// circular: it agrees with the right value, with the bare host, and with
+/// `https://example.invalid` alike. It is not a flaw in those tests — they are
+/// about the verifier, and the verifier should be handed the configured issuer
+/// — but it does mean nothing here could ever notice a wrong CONFIGURATION.
+/// Something did go wrong there: `WORKOS_ISSUER` was `https://api.workos.com`
+/// in all four blocks of wrangler.toml from eb56857 (Aug 17) until 2026-08-19,
+/// which 401'd every session-authenticated route on every channel, and this
+/// suite was green for both of those days.
+///
+/// If WorkOS ever changes the form, this test is supposed to fail: somebody
+/// decodes a fresh token and updates the line below, deliberately, rather than
+/// the suite quietly following the configuration wherever it goes.
+const RECORDED_CANARY_ISSUER =
+  'https://api.workos.com/user_management/client_01M03MZKRH5ZPR160DATT149WX'
+
+/// Which is to say: the host, `/user_management/`, and the client id.
+const ISSUER_PREFIX = 'https://api.workos.com/user_management/'
+
+/// The `[vars]` of each environment in wrangler.toml, keyed by channel.
+///
+/// Twelve lines rather than a TOML dependency, because what is wanted is two
+/// string values out of four flat blocks, and a parser in devDependencies to
+/// read them is a supply chain in exchange for a regular expression. The
+/// environment names are asserted below, so a parse that matched nothing fails
+/// loudly instead of passing every remaining expectation vacuously.
+function varsByEnvironment(): Record<string, Record<string, string>> {
+  const blocks: Record<string, Record<string, string>> = {}
+  let current: Record<string, string> | null = null
+  for (const line of wranglerToml.split('\n')) {
+    const header = line.match(/^\[(?:env\.([A-Za-z0-9_]+)\.)?vars\]\s*$/)
+    if (header) {
+      current = blocks[header[1] ?? 'stable'] = {}
+    } else if (line.startsWith('[')) {
+      current = null
+    } else {
+      const pair = line.match(/^([A-Z_]+)\s*=\s*"([^"]*)"\s*$/)
+      if (current && pair) current[pair[1]] = pair[2]
+    }
+  }
+  return blocks
+}
+
+describe('the issuer this relay accepts', () => {
+  const environments = varsByEnvironment()
+
+  it('is configured for all four channels', () => {
+    // Guards every expectation below: if the parse stopped matching, each
+    // `for` over an empty object would pass without checking anything.
+    expect(Object.keys(environments).sort()).toEqual(['canary', 'local', 'preview', 'stable'])
+    for (const [channel, vars] of Object.entries(environments)) {
+      expect(vars.WORKOS_CLIENT_ID, channel).toMatch(/^client_[A-Z0-9]+$/)
+      expect(vars.WORKOS_ISSUER, channel).toBeTypeOf('string')
+    }
+  })
+
+  it('matches, on canary, the issuer a real canary token carries', () => {
+    // The one comparison against evidence. Everything else in this describe is
+    // consistency; this is the anchor.
+    expect(environments.canary.WORKOS_ISSUER).toBe(RECORDED_CANARY_ISSUER)
+    expect(RECORDED_CANARY_ISSUER).toBe(
+      `${ISSUER_PREFIX}${environments.canary.WORKOS_CLIENT_ID}`,
+    )
+  })
+
+  it("is each channel's own client id, not a bare host and not another channel's", () => {
+    // Per environment because the path segment IS the client id, so there is no
+    // one right answer to share — and `vars` are not inherited by wrangler
+    // environments, so a channel that omitted this would deploy with none.
+    for (const [channel, vars] of Object.entries(environments)) {
+      expect(vars.WORKOS_ISSUER, channel).toBe(`${ISSUER_PREFIX}${vars.WORKOS_CLIENT_ID}`)
+    }
+  })
+
+  it('is the shape every fixture in this file is minted with', () => {
+    // So the tokens the rest of the suite signs are the shape of a real one. A
+    // fixture in a shape production never sends is how a verifier that refuses
+    // production traffic passes its own suite.
+    expect(ISSUER).toBe(`${ISSUER_PREFIX}${CLIENT_ID}`)
   })
 })
 

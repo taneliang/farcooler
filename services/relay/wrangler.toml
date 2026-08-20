@@ -53,20 +53,37 @@ dataset = "farcooler_events"
 WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
 # The only issuer whose tokens this deployment accepts.
 #
-# A BARE HOST, and this is the trap. An AuthKit access token's `iss` is
-# `https://api.workos.com` — not `https://api.workos.com/user_management/<client
-# id>`, which is the path the SDKs and the docs' JWKS URLs make it look like it
-# should be. People lose afternoons to that mismatch; see
-# https://github.com/workos/authkit-tanstack-start/issues/45. Verified against
-# the decoded token in workos.com/docs/reference/authkit/session-tokens.
+# THE PATH FORM, `https://api.workos.com/user_management/<client id>`, and so a
+# DIFFERENT VALUE IN EVERY ENVIRONMENT: the path segment is that environment's
+# WORKOS_CLIENT_ID, the line directly above this one. It is not a bare host, and
+# the comment that used to stand here said at length that it was.
 #
-# In a var rather than a constant in code because it is not always this: a
-# custom AuthKit domain makes the issuer `https://auth.<domain>`, and a relay
-# that hard-coded the host would refuse every real token with no way to correct
-# it short of a deploy. It is the same value for every channel today only
-# because no channel has a custom domain yet — repeated per environment rather
-# than shared so the one that gets a domain can say so alone.
-WORKOS_ISSUER = "https://api.workos.com"
+# How that was established, because the docs will tell you otherwise: a live
+# canary access token was decoded — base64url the middle segment of the JWT,
+# `iss` is in the resulting JSON — and it read
+# `https://api.workos.com/user_management/client_01M03MZKRH5ZPR160DATT149WX`,
+# which is exactly canary's client id below. A real token from the deployment in
+# question beats a sample in a docs page and beats a GitHub thread about
+# somebody else's setup, and it is a thirty-second check anyone can repeat
+# against any channel before touching this line.
+#
+# What the wrong value did, so the cost of getting it wrong is on the record.
+# `verifySession` compares `claims.iss` against this var and the comparison
+# landed in the same commit as the wrong value (eb56857, Aug 17), so from that
+# commit every session-authenticated route on every channel returned 401:
+# /v1/devices refused to register a phone, /v1/daemons refused to pair a runner
+# — the Mac said "The relay wouldn't issue a token" — and /v1/account could load
+# neither. /v1/notify authenticates with a daemon token rather than a session,
+# so it went on answering 200 while delivering to zero devices, which is how two
+# days passed with no push notifications and nothing red anywhere.
+#
+# In a var rather than a constant in code because the issuer is not derivable
+# from the client id forever: a channel that takes a custom AuthKit domain gets
+# an issuer on that domain instead, and a relay with the host compiled in would
+# refuse every real token with no way to correct it short of a deploy. Per
+# environment rather than shared for the same reason it has to be per
+# environment today — the value genuinely differs, and `vars` are not inherited.
+WORKOS_ISSUER = "https://api.workos.com/user_management/client_01M03MXEFY8BCKCEJCXARCHMMX"
 # Which channel this deployment IS.
 #
 # Only so the relay can check that APNS_TOPIC belongs to it. That secret must
@@ -134,8 +151,9 @@ dataset = "farcooler_events_preview"
 
 [env.preview.vars]
 WORKOS_CLIENT_ID = "client_01M03MXE27CHCZJJ0TMY7KCMAH"
-# The bare host, for the reason the stable block gives at length.
-WORKOS_ISSUER = "https://api.workos.com"
+# The path form, carrying THIS environment's client id — the line above, again.
+# The stable block says why at length, and what the bare host cost.
+WORKOS_ISSUER = "https://api.workos.com/user_management/client_01M03MXE27CHCZJJ0TMY7KCMAH"
 CHANNEL = "preview"
 
 # A separate namespace, so a burst against preview cannot spend the stable
@@ -168,8 +186,9 @@ dataset = "farcooler_events_canary"
 
 [env.canary.vars]
 WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
-# The bare host, for the reason the stable block gives at length.
-WORKOS_ISSUER = "https://api.workos.com"
+# The path form, carrying THIS environment's client id — the line above, again.
+# The stable block says why at length, and what the bare host cost.
+WORKOS_ISSUER = "https://api.workos.com/user_management/client_01M03MZKRH5ZPR160DATT149WX"
 CHANNEL = "canary"
 
 [[env.canary.unsafe.bindings]]
@@ -204,8 +223,9 @@ dataset = "farcooler_events_local"
 
 [env.local.vars]
 WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD"
-# The bare host, for the reason the stable block gives at length.
-WORKOS_ISSUER = "https://api.workos.com"
+# The path form, carrying THIS environment's client id — the line above, again.
+# The stable block says why at length, and what the bare host cost.
+WORKOS_ISSUER = "https://api.workos.com/user_management/client_01M03N3DFQNDCK819XSRTK2FJD"
 CHANNEL = "local"
 
 [[env.local.unsafe.bindings]]

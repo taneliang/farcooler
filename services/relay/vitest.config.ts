@@ -34,10 +34,20 @@ export default defineWorkersConfig(async () => {
             bindings: {
               TEST_MIGRATIONS: migrations,
               WORKOS_CLIENT_ID: 'client_test',
-              // The `iss` every token in this suite carries — the bare host a
-              // real AuthKit token carries, not the `/user_management/<client
-              // id>` path it is so often mistaken for.
-              WORKOS_ISSUER: 'https://api.workos.com',
+              // The `iss` every token in this suite carries, in the shape a real
+              // AuthKit access token carries it: the path form, ending in this
+              // environment's client id. It said `https://api.workos.com` here
+              // and in all four blocks of wrangler.toml until 2026-08-19, on the
+              // strength of a docs sample, and every session route 401'd on
+              // every channel for two days. A decoded live token settled it; see
+              // the WORKOS_ISSUER comment in wrangler.toml.
+              //
+              // The suite does not take this on trust — `the issuer this relay
+              // accepts` in relay.test.ts reads wrangler.toml and checks all
+              // four values against a literal recorded from that token, because
+              // fixtures minted from the same binding the verifier compares
+              // against agree with any value at all, including the wrong one.
+              WORKOS_ISSUER: 'https://api.workos.com/user_management/client_test',
               WORKOS_API_KEY: 'sk_test_do_not_use',
               ANALYTICS_SALT: 'salt',
               // A throwaway P-256 key, generated for this file and used nowhere
