@@ -233,6 +233,41 @@ final class TerminalSession: ObservableObject {
     /// itself changes. The id is the same, and the outgoing pane is not handed
     /// its old size back — that pane is on the far side of a link that is
     /// gone, so asking it anything is a request into the void.
+    /// Come back to a pane that was hidden, keeping what it looked like.
+    ///
+    /// `PaneHost` mounts every visited pane and hides the ones you are not
+    /// looking at, precisely so their state survives — and the pane's state
+    /// includes its screen. So coming back is not `relink`: nothing about the
+    /// link changed, the terminal id is the same, and the only thing that
+    /// actually stopped is the stream, which `stop` closed on the way out.
+    ///
+    /// Using `relink` here defeated the whole mechanism, and did it by a race.
+    /// Two `.task` modifiers fire when a pane becomes visible: this one, and
+    /// the geometry one that calls `configure`. `relink` bails on `!started`
+    /// and `configure` sets `started` — so when `configure` won, `relink` no
+    /// longer bailed, wiped `grid`, `vt` and `phase`, and the pane a person
+    /// had just tapped back to went to "Loading…" and rebuilt itself from
+    /// nothing. When `relink` won, it bailed and the switch was instant. Same
+    /// two lines of code, two behaviors, decided by scheduling.
+    ///
+    /// Guarding on `started` from the OTHER side settles it whichever way the
+    /// race lands: whoever arrives first opens, the second finds it open and
+    /// does nothing, and neither ever throws the screen away.
+    ///
+    /// What stays on screen meanwhile is the pane as it was when you left it,
+    /// which is what it is: the stream's replay repaints it within a round
+    /// trip, and a screen one switch out of date beats a spinner that has
+    /// nothing to say at all.
+    func resume() {
+        guard !started else { return }
+        started = true
+        // A fresh visit deserves fresh strikes: three dead attaches from an
+        // earlier visit must not send this one straight to polling.
+        failedAttaches = 0
+        Task { await open() }
+        scheduleResize()
+    }
+
     func relink() {
         guard started else { return }
         teardown()

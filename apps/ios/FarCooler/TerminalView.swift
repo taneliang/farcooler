@@ -231,7 +231,12 @@ struct TerminalView: View {
         // pane is hidden, not removed, and that is what keeps its grid.
         .task(id: isVisible) {
             if isVisible {
-                session.relink()
+                // `resume`, not `relink`. Relinking rebuilt the pane from
+                // nothing every time it won its race with `configure`, which
+                // is the "Loading…" on a tab you had already opened — and the
+                // exact opposite of what mounting hidden panes is for. See
+                // `TerminalSession.resume`.
+                session.resume()
                 Notifier.shared.visibleTerminal = terminal.id
                 await connection.markVisibleSeen()
             } else {
