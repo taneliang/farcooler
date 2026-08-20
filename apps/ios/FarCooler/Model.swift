@@ -77,6 +77,23 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var title: String
     var preset: String
     var state: String
+    /// How the process ENDED: the code it exited with, and the signal that
+    /// killed it.
+    ///
+    /// Both have been on the wire beside `state` all along — see `exitCode` and
+    /// `exitSignal` in the fleet JSON, `crates/client/src/session.rs:297-298` — and
+    /// both were dropped on the way in here, so an `exited` row on a phone said
+    /// only that the process was gone. A shell somebody closed and a `cargo
+    /// build` that broke are the same word to `state`, and they are not the
+    /// same news. The Mac has read them since terminals learned to report one.
+    ///
+    /// Optional for the reason every field added to this type is optional: a
+    /// daemon built before exit status existed sends no key, and a key this
+    /// decoder required would fail the WHOLE fleet rather than cost one row its
+    /// ending. Absent means "nobody said", never "it exited cleanly" — see
+    /// `runDidFail`, which refuses to read one as the other.
+    var exitCode: Int?
+    var exitSignal: Int?
     /// What the agent is doing, derived on the HOST. A phone has no screen to
     /// inspect, so this arriving over the wire is the only way it can know —
     /// and it is why the same badge means the same thing here as on the Mac.
@@ -172,6 +189,31 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// that DRAW a state need to know, and they ask for it here.
     var turnDidFail: Bool { agent == .done && turnFailed == true }
 
+    /// Whether the PROCESS ended badly, as opposed to the turn that ran inside
+    /// it.
+    ///
+    /// The companion to `turnDidFail`, and deliberately a separate question:
+    /// that one is about the agent's last turn, read from its session log; this
+    /// one is about the command, read from how its process exited. A `cargo
+    /// build` that returned 101 has no turns at all.
+    ///
+    /// The Mac's rule, verbatim — see the `.exited` branch of the `Status`
+    /// derivation in `apps/macos/Sources/FarCooler/Model.swift:408-416`. A
+    /// signal or a non-zero code is a failure worth seeing; a clean exit is
+    /// not; and an ABSENT code is not a failure either. That last clause is the
+    /// one that matters, because an older daemon sends no exit status at all,
+    /// and reading nothing as broken would mark every finished terminal on the
+    /// runner as failed.
+    ///
+    /// Gated on `exited` on the same terms the Mac gates it, so the two apps
+    /// cannot disagree about which terminals ended badly: `state` is the
+    /// daemon's word for whether the process is gone, and how it ended is a
+    /// question only a process that HAS ended can answer.
+    var runDidFail: Bool {
+        guard StateKind.parse(state) == .exited else { return false }
+        return exitSignal != nil || (exitCode.map { $0 != 0 } ?? false)
+    }
+
     /// What this agent's state is called in a row, failure included.
     var activityLabel: String { turnDidFail ? "Failed" : agent.label }
 
@@ -215,6 +257,77 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// the present would vouch for an agent nobody has heard from.
     var activityChangedAt: Date? {
         activitySince.map { Date(timeIntervalSince1970: $0 / 1000) }
+    }
+
+    /// The last few things the agent said, trimmed and capped at three.
+    ///
+    /// Ported from the Mac's `recentSteps` verbatim, including the cap: the
+    /// daemon already keeps only three, and repeating the limit here means a
+    /// host that ever sent four could not make one row twice the height of
+    /// every other row in the list.
+    ///
+    /// Kept when the agent goes idle rather than cleared. "What did this do
+    /// while I was away" is exactly when the summary is worth most, and a row
+    /// that shed its lines on going idle would also mean the list rearranging
+    /// itself under somebody reading it.
+    var recentSteps: [String] {
+        let steps = (feed ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(steps.suffix(3))
+    }
+
+    /// The subagents still running, named, at most three.
+    ///
+    /// Their COUNT is already inside `line`; these are the names, and three is
+    /// what fits beside a row on a phone.
+    var runningSubagents: [String] {
+        Array((subagents ?? []).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.prefix(3))
+    }
+
+    /// How long the current state has been the state, for the two states where
+    /// the answer changes what you do.
+    ///
+    /// An agent blocked for twenty minutes is a different situation from one
+    /// blocked for ten seconds. "Idle for three days" is noise, so it is nil.
+    func statusDuration(at now: Date) -> String? {
+        guard agent == .blocked || agent == .working, let since = activitySince else { return nil }
+        return Self.brief(secondsSince: since, at: now)
+    }
+
+    /// How long the whole turn has run. Does not restart when a permission
+    /// prompt is approved, because saying yes to a tool call does not begin a
+    /// new turn.
+    func turnDuration(at now: Date) -> String? {
+        guard let since = turnStartedAt else { return nil }
+        return Self.brief(secondsSince: since, at: now)
+    }
+
+    private static func brief(secondsSince millis: Double, at now: Date) -> String? {
+        let seconds = now.timeIntervalSince1970 - millis / 1000
+        guard seconds >= 5 else { return nil }
+        if seconds < 60 { return "\(Int(seconds))s" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m" }
+        return "\(Int(seconds / 3600))h"
+    }
+
+    /// The one duration worth putting beside the status label.
+    ///
+    /// The two clocks answer different questions and conflating them is the bug
+    /// they exist to fix. `Working` is only ever mid-turn, so the TURN clock is
+    /// the honest answer to "how long has this been going". `Blocked` wants the
+    /// STATE clock, because a prompt held for twenty minutes is the thing to
+    /// notice, not how long the turn around it has run.
+    ///
+    /// `now` is an ARGUMENT rather than a `Date()` read inside, and that is
+    /// what makes the string tick. Read inside, it is a value SwiftUI cannot
+    /// observe: nothing about a working row changes from one second to the
+    /// next, so the view is never invalidated and the duration freezes until
+    /// something unrelated forces a redraw. Taken as an argument it is an input
+    /// like any other, and a `TimelineView` supplying it once a second is a row
+    /// that keeps its own time.
+    func displayDuration(at now: Date) -> String? {
+        agent == .working ? turnDuration(at: now) : statusDuration(at: now)
     }
 
     /// Where this terminal sorts. Absent `rank` sorts last: a daemon too old to

@@ -104,6 +104,28 @@ final class Connection: ObservableObject {
     @Published private(set) var fleet: Fleet = .empty
     @Published private(set) var repositories: [Repository] = []
 
+    /// What each worktree has changed, by workspace id, or empty until the
+    /// first read.
+    ///
+    /// The `+N -M` the Mac's sidebar has shown per row since the review surface
+    /// landed — `DaemonClient.refreshChangesInbox`, which builds the same
+    /// dictionary from the same rows — and the one part of that surface a phone
+    /// never asked for. Nothing was missing: `changes.inbox` is routed at
+    /// `crates/client/src/ffi.rs:1400`, answered at
+    /// `crates/client/src/session.rs:968`, and `InboxRow` was already sitting
+    /// in `Changes.swift` with no caller.
+    ///
+    /// Keyed rather than kept as the list the wire sends, because every reader
+    /// arrives with one workspace in hand and wants that workspace's row: a
+    /// fleet of twenty rows each scanning a twenty-entry array is quadratic
+    /// work to answer a question a dictionary answers once.
+    ///
+    /// Held from the last successful read when a read fails, on the same terms
+    /// as the fleet itself — see `refresh()`. A count that vanishes reads as
+    /// "this worktree has no changes any more", which is a claim, and a call
+    /// that failed is not entitled to make one.
+    @Published private(set) var inbox: [String: InboxRow] = [:]
+
     /// Bumped every time a session is replaced by a new one.
     ///
     /// What a live terminal stream watches. A stream is a second SSH channel
@@ -530,6 +552,23 @@ final class Connection: ObservableObject {
             }
             return
         }
+
+        // The diff counts, on the same poll as the rows they belong to.
+        //
+        // Here rather than on a timer of its own: `+120 -4` next to a row is a
+        // statement about that row, and two clocks reading the same fleet is
+        // how a count from a worktree's previous state ends up sitting beside a
+        // fresh one. This is also the only loop a phone should be waking its
+        // radio for — see `startPolling`.
+        //
+        // OUTSIDE the `do` above, deliberately. `refresh` treats a throw as
+        // possible evidence the link is gone, and this call must never be able
+        // to supply that evidence: an old daemon refusing `changes.inbox`
+        // would otherwise reconnect a working session every three seconds.
+        // `loadInbox` cannot throw at all, and a failed poll returns above
+        // without reaching it, so a fleet nobody could read is never followed
+        // by counts describing it.
+        await loadInbox()
     }
 
     // MARK: - Attention
@@ -576,6 +615,59 @@ final class Connection: ObservableObject {
     private func loadRepositories() async {
         guard let data = try? await core.call("repositories") else { return }
         repositories = (try? JSONDecoder().decode(RepositoryList.self, from: data))?.repositories ?? []
+        // Rebuilt here because this is the only place `repositories` is ever
+        // written, so the two cannot drift apart. See `repositoryName(for:)`.
+        repositoryNames = Dictionary(
+            repositories.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The display names, by repository id. Derived from `repositories`, which
+    /// is a list because that is what the picker draws and what the wire sends.
+    private var repositoryNames: [String: String] = [:]
+
+    /// What to call the repository a worktree belongs to, or nil when this
+    /// connection cannot say yet.
+    ///
+    /// `Workspace.repository` is a UUID string on a phone — `uuid_of(&w
+    /// .repository_id).to_string()`, `crates/client/src/session.rs:274` —
+    /// where the Mac's model carries a name it can print. So anything here that
+    /// wanted to group or label rows by repository had 36 characters of hex and
+    /// nothing else, while the names themselves were already in hand: they
+    /// arrive on the `repositories` call this connection makes once per link,
+    /// and this is the join between the two.
+    ///
+    /// Nil rather than the id when the name is not known, which is a real state
+    /// and not an edge case: `loadRepositories` runs AFTER the first `refresh`
+    /// in both `start` and `reconnect`, so the first fleet a person sees is
+    /// drawn before any name exists — and that call swallows its own errors, so
+    /// "not yet" and "not at all" look the same from here. A caller shows
+    /// nothing in either case. Showing the UUID instead would put an internal
+    /// identifier in front of somebody as though it were the name of their
+    /// repository, and it would be the widest thing on the row.
+    func repositoryName(for workspace: Workspace) -> String? {
+        guard let id = workspace.repository else { return nil }
+        return repositoryNames[id]
+    }
+
+    /// Read what every worktree on this runner has changed, in one call.
+    ///
+    /// One call rather than one per row, which is what the RPC exists for: the
+    /// daemon answers from counts it already holds plus a cheap two-syscall
+    /// gate — see `InboxWorkspace.changed_since_reviewed` in
+    /// proto/farcooler.proto — so a quiet fleet costs almost nothing, while a
+    /// call per worktree would put a `git` on the three-second timer for every
+    /// row on screen. The Mac made the same choice for the same reason.
+    ///
+    /// Errors swallowed with `try?`, as `loadRepositories` and `loadThemes`
+    /// beside it do, and with more reason than either: these numbers decorate
+    /// rows that are already correct without them. A runner whose daemon
+    /// predates `changes.inbox` fails this call on every poll forever, and
+    /// neither that nor one dropped packet may cost the fleet its screen.
+    func loadInbox() async {
+        guard let data = try? await core.call("changes.inbox") else { return }
+        guard let reply = try? JSONDecoder().decode(InboxResponse.self, from: data) else { return }
+        inbox = Dictionary(
+            reply.items.map { ($0.workspaceId, $0) }, uniquingKeysWith: { _, latest in latest })
     }
 
     /// Merge whatever this runner defines into the picker.

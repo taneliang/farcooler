@@ -868,12 +868,49 @@ struct FleetList: View {
                     }
                     .font(.callout)
                 } header: {
-                    HStack {
+                    HStack(spacing: 6) {
                         Text(workspace.task)
+                        // Something under here wants you, said once at the top
+                        // rather than left to be inferred from a row further
+                        // down that may be scrolled off.
+                        if workspace.terminals.contains(where: { $0.agent.wantsAttention }) {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(width: 6, height: 6)
+                                .accessibilityLabel("Needs you")
+                        }
+                        // The worktree this workspace names is not on disk any
+                        // more. Said on the header because every row under it
+                        // is about a pane in a directory that is gone, and
+                        // "Removed" beats twenty terminals failing separately.
+                        if workspace.worktreeMissing {
+                            Text("worktree gone")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
                         Spacer()
-                        Text(workspace.branch)
+                        // What this worktree has changed, which is the fact the
+                        // Mac's sidebar puts here and the one that says whether
+                        // a workspace is worth opening. Monospaced so the
+                        // columns line up down the list, and absent entirely
+                        // when there is nothing — a row of `+0 -0` on every
+                        // clean worktree is noise in the shape of information.
+                        if let counts = connection.inbox[workspace.id], counts.hasDiff {
+                            HStack(spacing: 4) {
+                                Text("+\(counts.insertions)").foregroundStyle(.green)
+                                Text("-\(counts.deletions)").foregroundStyle(.red)
+                            }
+                            .font(.caption2.monospaced())
+                        }
+                        // The main checkout has a branch like everything else,
+                        // but WHICH branch is not the useful fact about it —
+                        // that it is the repository itself, and so cannot be
+                        // removed, is. The Mac says the same thing here.
+                        Text(workspace.isMainCheckout ? "Primary checkout" : workspace.branch)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         Menu {
                             Button {
                                 Task { await connection.createTerminal(workspace: workspace) }
@@ -1026,9 +1063,40 @@ struct TerminalRow: View {
     private var kind: StateKind { StateKind.parse(terminal.state) }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle().fill(processColor(kind)).frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
+        // Once a second, and only for the rows that have a clock to run. A
+        // `TimelineView` is how the elapsed string ticks at all — see
+        // `Terminal.displayDuration(at:)` for why the time has to arrive as an
+        // argument rather than be read inside the row.
+        //
+        // Wrapped around the whole row rather than around the one `Text`,
+        // because the schedule is what decides how often SwiftUI re-evaluates
+        // this subtree — and a row with no clock must not be re-evaluated
+        // every second to display nothing new. Both branches are `.periodic`
+        // because a ternary has to produce one type, and an hour is "never" at
+        // the scale of a list somebody is looking at; a row whose agent starts
+        // working gets its new schedule from the state change itself rather
+        // than by waiting out the hour.
+        TimelineView(.periodic(from: .now, by: hasClock ? 1 : 3600)) { tick in
+            content(at: tick.date)
+        }
+    }
+
+    /// Whether anything in this row changes with the passing of time.
+    private var hasClock: Bool {
+        terminal.agent == .working || terminal.agent == .blocked
+    }
+
+    private func content(at now: Date) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(processColor(kind))
+                .frame(width: 8, height: 8)
+                // The dot sits on the first line's baseline rather than in the
+                // middle of a row that is now up to four lines tall.
+                .padding(.top, 6)
+
+            VStack(alignment: .leading, spacing: 3) {
+                // Band 1: what it is, and how long it has been that.
                 HStack(spacing: 4) {
                     Text(terminal.label).font(.body)
                     if let ordinal {
@@ -1036,24 +1104,79 @@ struct TerminalRow: View {
                             .font(.caption2.monospaced())
                             .foregroundStyle(.tertiary)
                     }
+                    if let status = statusText(at: now) {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    // The reason to have opened the app. Only the two states
+                    // worth acting on get color, so a list of twenty still
+                    // reads at a glance.
+                    if terminal.agent.isAgent && terminal.agent != .unknown {
+                        Label(terminal.activityLabel, systemImage: terminal.activitySymbol)
+                            .labelStyle(.iconOnly)
+                            .font(.system(size: 13, weight: terminal.agent.wantsAttention ? .semibold : .regular))
+                            .foregroundStyle(attentionColor(terminal))
+                            .accessibilityLabel(terminal.activityLabel)
+                    }
                 }
-                Text(terminal.state.lowercased())
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
 
-            // The reason to have opened the app. Only the two states worth
-            // acting on get color, so a list of twenty still reads at a glance.
-            if terminal.agent.isAgent && terminal.agent != .unknown {
-                Label(terminal.activityLabel, systemImage: terminal.activitySymbol)
-                    .labelStyle(.iconOnly)
-                    .font(.system(size: 13, weight: terminal.agent.wantsAttention ? .semibold : .regular))
-                    .foregroundStyle(attentionColor(terminal))
-                    .accessibilityLabel(terminal.activityLabel)
+                // Band 2: where the agent IS — the question it is blocked on,
+                // its position in its own task list, or what it is doing. One
+                // line, composed on the host so a Mac, a phone and a watch
+                // cannot disagree about which of those three to show.
+                //
+                // This is what replaced `terminal.state.lowercased()`, which
+                // spent the most valuable line of the row restating the dot
+                // immediately to its left.
+                if !terminal.signalLine.isEmpty {
+                    Text(terminal.signalLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                // Band 3: the agent's own last words, oldest first. Already
+                // redacted and cut to a row's width by the daemon, so this
+                // renders them and decides nothing about them.
+                ForEach(Array(terminal.recentSteps.enumerated()), id: \.offset) { _, step in
+                    Text(step)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                // Band 4: what it spawned and has not finished with.
+                ForEach(terminal.runningSubagents, id: \.self) { name in
+                    Text("\u{2442} \(name)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
         }
         .contentShape(Rectangle())
+    }
+
+    /// "Working 12m", "Needs you 2m", or just the state for a pane that is not
+    /// an agent.
+    ///
+    /// A duration only where one exists: `displayDuration` returns nil under
+    /// five seconds, so a row does not flicker "1s" on its way to saying
+    /// something useful.
+    private func statusText(at now: Date) -> String? {
+        guard terminal.agent.isAgent, terminal.agent != .unknown else {
+            // A plain shell still says whether it is alive, which is the whole
+            // of what is known about it. Exited is worth saying; running is
+            // what the green dot already said.
+            return kind == .running ? nil : terminal.state.lowercased()
+        }
+        guard let elapsed = terminal.displayDuration(at: now) else { return terminal.activityLabel }
+        return "\(terminal.activityLabel) \(elapsed)"
     }
 }
 
