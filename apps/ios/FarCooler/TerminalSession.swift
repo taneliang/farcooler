@@ -127,6 +127,49 @@ final class TerminalSession: ObservableObject {
     /// "still 80×24, still unchanged".
     private static let geometryInterval: Double = 2.0
 
+    /// How long a stream may stay silent before this screen gives up on it and
+    /// polls instead. See ``waitForTheFirstByte()``.
+    ///
+    /// Measured against what the first byte is actually waiting for, which is
+    /// not a round trip. `open_stream` execs `farcoolerd --stream <id>` on the
+    /// runner (`crates/client/src/session.rs:184`), and that is a cold process:
+    /// it opens a `Service` — a second SQLite handle, migrations included — and
+    /// refreshes the whole tmux inventory before it looks at this pane at all
+    /// (`crates/daemon/src/main.rs:304`). Only then does the replay begin, and
+    /// the replay's first act is four concurrent `tmux` subprocesses, the
+    /// largest of which is `capture-pane -e -p -J -S - -E -1` — the pane's
+    /// ENTIRE scrollback, escape sequences and all, up to
+    /// `farcooler_vt::SCROLLBACK_LINES` of it (`crates/tmux/src/windows.rs:365`,
+    /// `crates/daemon/src/runtime.rs:205`). Nothing reaches this device until
+    /// all of that has finished and the result has crossed the link.
+    ///
+    /// Two seconds could not cover that, and the pane it could not cover is the
+    /// agent that has been working all night — the one with the most scrollback
+    /// to capture and the one anybody actually opens. Every one of those tripped
+    /// the deadline on its FIRST open, when `phase` is still `.connecting` and
+    /// the guard in `streamSaidNothing` therefore lets it through, and was
+    /// handed to the poll loop while its stream was still perfectly healthy.
+    ///
+    /// That handover is not the cheap downgrade it reads as. A poll carries
+    /// `capture-pane -e -p` — the visible screen and NO history
+    /// (`crates/tmux/src/windows.rs:250`) — into a `VTCore` that `render`
+    /// rebuilds from scratch on every changed capture. So a pane on the poll
+    /// path has nothing for `scroll` to move through and could not hold a
+    /// scrolled-back view for longer than one interval even if it had: a swipe
+    /// on any program that has not claimed the mouse does nothing whatsoever,
+    /// silently, forever. The daemon says the same thing from its own side of
+    /// the wire, about the same missing scrollback, in
+    /// `crates/daemon/src/runtime.rs:161` — "That is the bug, and it looked
+    /// like a scroll bug."
+    ///
+    /// So the deadline is generous rather than eager, and deliberately so. It
+    /// exists for a channel that is wedged, and a wedged channel is still wedged
+    /// twelve seconds later; what it must never do is outrun a stream that is
+    /// merely doing the work its first byte requires. The cost of firing late is
+    /// a spinner held longer on a pane that was going to fail anyway. The cost
+    /// of firing early is a working terminal that quietly stops scrolling.
+    private static let firstByteDeadline: Duration = .seconds(12)
+
     // MARK: - Adaptive polling (fallback only)
     //
     // Reached when there is no ssh session to stream over. "Adaptive" means
@@ -264,8 +307,35 @@ final class TerminalSession: ObservableObject {
         // A fresh visit deserves fresh strikes: three dead attaches from an
         // earlier visit must not send this one straight to polling.
         failedAttaches = 0
-        Task { await open() }
-        scheduleResize()
+        // AFTER `open`, which is not where the other openers put it, and has to
+        // be here.
+        //
+        // `scheduleResize` compares `lastRequestedSize` against `lastResizeSent`
+        // and does nothing when they agree — and on a return visit they always
+        // agree at this instant, wrongly. `lastRequestedSize` still holds the
+        // shape this phone asked for last time, `lastResizeSent` still holds the
+        // shape it was told it got, and neither survived contact with what `stop`
+        // did on the way out: `releasePane` handed the pane back to whatever the
+        // Mac had it at. So the pane is genuinely 200×50 again, both of those
+        // variables still say 45×40, and a `scheduleResize` run here decides
+        // there is nothing to ask for.
+        //
+        // `prime` is what corrects it, by seeding `lastResizeSent` from the
+        // host's own answer — and `prime` is inside `open`. Running the schedule
+        // after it means the comparison is made against the pane's real shape
+        // rather than against this device's memory of a shape it gave back.
+        //
+        // `configure`'s own `scheduleResize` cannot cover for this, because
+        // `configure` only awaits `open` when IT is the one opening. `resume`
+        // sets `started` synchronously, so the geometry task finds the pane
+        // already open, skips the await, and schedules against the same stale
+        // pair. That is why the size stuck: before `resume` existed, `configure`
+        // opened the pane and its schedule therefore ran after `prime` — the
+        // ordering this restores.
+        Task {
+            await open()
+            scheduleResize()
+        }
     }
 
     func relink() {
@@ -397,6 +467,15 @@ final class TerminalSession: ObservableObject {
         let id = terminalID
         let handBack = shapeBeforeUs
         shapeBeforeUs = nil
+        // The shape this device imposed has just been handed back, so this
+        // device has not reshaped the pane any more — and `prime` gates
+        // recording a new `shapeBeforeUs` on exactly that. Left true, the next
+        // visit reshapes the pane to phone width with nothing remembered to
+        // restore, and whoever else is watching keeps the phone's column for
+        // good. It only mattered once `resume` started re-asserting the size on
+        // a return visit at all; before that, a returned-to pane was never
+        // reshaped, so there was never anything to give back.
+        hasResized = false
         Task {
             await stopStream(id)
             await releasePane(id, to: handBack)
@@ -551,14 +630,14 @@ final class TerminalSession: ObservableObject {
     /// — stop everything the streaming path set up, then poll. Polling is
     /// slower and it works, which beats a spinner that is neither.
     ///
-    /// Two seconds because the normal case never reaches it: the replay is one
-    /// round trip, and a stream still saying nothing after two seconds is not
-    /// one worth waiting on. It costs nothing when it does not fire, and the
-    /// first byte cancels it — see `consume`.
+    /// How long it waits is `firstByteDeadline`, and that number is the whole
+    /// difference between this being a safety net and being the thing that
+    /// breaks scrolling — the constant says why. It costs nothing when it does
+    /// not fire, and the first byte cancels it: see `consume`.
     private func waitForTheFirstByte() {
         silence?.cancel()
         silence = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: Self.firstByteDeadline)
             guard !Task.isCancelled else { return }
             await self?.streamSaidNothing()
         }
