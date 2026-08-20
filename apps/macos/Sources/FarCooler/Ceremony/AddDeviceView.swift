@@ -21,6 +21,14 @@ struct AddDeviceView: View {
     /// Resolving costs an `ssh -G` each, and doing it while somebody is holding
     /// a phone up to a camera is the wrong moment.
     @State private var grantable: [CeremonyStore.RunnerRow] = []
+    /// How far each runner's address travels, and what it was swapped for,
+    /// keyed by the runner id the ceremony rows carry.
+    ///
+    /// Held beside the rows rather than folded into `CeremonyRunner`, because
+    /// the wire record is what the other device stores forever and this is a
+    /// note about how it was chosen — true only on this Mac, at this moment,
+    /// and of no use to anybody reading it later.
+    @State private var addressing: [String: RunnerFacts.Addressing] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -178,10 +186,13 @@ struct AddDeviceView: View {
 
                 fingerprint(confirmation.offer)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 10) {
                     ForEach(confirmation.rows) { row in
-                        Toggle(isOn: grant(row)) {
-                            Text(row.note.map { "\(row.runner.label) · \($0)" } ?? row.runner.label)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Toggle(isOn: grant(row)) {
+                                Text(row.note.map { "\(row.runner.label) · \($0)" } ?? row.runner.label)
+                            }
+                            reachNote(for: row)
                         }
                     }
                 }
@@ -303,6 +314,63 @@ struct AddDeviceView: View {
 
     // MARK: - Wiring
 
+    /// The address this runner will actually be granted under, and whether it
+    /// travels.
+    ///
+    /// On the row rather than in one paragraph at the bottom, because the fact
+    /// is per runner: a fleet is routinely a Mac on the desk and a Linux box
+    /// with a real name, and one sentence covering both would be false about
+    /// one of them.
+    ///
+    /// Shown for every runner, not only the bad ones. The address the other
+    /// device is about to keep forever has never appeared on this screen at
+    /// all, and "which machine is `cosmo` actually" is the question somebody
+    /// asks a week later when it stops answering.
+    @ViewBuilder
+    private func reachNote(for row: CeremonyStore.RunnerRow) -> some View {
+        let verdict = addressing[row.runner.id]
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(row.runner.address)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+            switch verdict?.reach {
+            case .anywhere:
+                Text("Works anywhere").font(.caption).foregroundStyle(.secondary)
+            case .thisNetwork where verdict?.betterAddress != nil:
+                // The swap already happened in `prepare`; this says so, because
+                // a name somebody recognizes being replaced by one they do not
+                // is exactly the moment to explain rather than to be clever.
+                Text("Reachable anywhere over Tailscale")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .thisNetwork:
+                Text("Only on this network")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            case .unknown, .none:
+                EmptyView()
+            }
+        }
+        .padding(.leading, 20)
+
+        if verdict?.reach == .thisNetwork, verdict?.betterAddress == nil {
+            // Named once, under the rows it is about. Tailscale is the answer
+            // this product already recommends everywhere else — `runners.md`
+            // says an SSH route to a MagicDNS name gets NAT traversal and
+            // stable addressing — and it is the only one that does not require
+            // the person to own a domain or a static lease.
+            Text(
+                "This device will only reach it on your current network. "
+                    + "Install Tailscale on both, or give the runner an address that "
+                    + "resolves anywhere, in Settings › Runners."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 20)
+        }
+    }
+
     private func grant(_ row: CeremonyStore.RunnerRow) -> Binding<Bool> {
         Binding(
             get: { row.granted },
@@ -314,7 +382,11 @@ struct AddDeviceView: View {
         // ceremony cannot succeed. A permission prompt raised for a scan that
         // was going to be refused anyway is a prompt people deny for good.
         guard tools.state == .installed else { return }
-        grantable = await Task.detached {
+        let prepared = await Task.detached { () -> ([CeremonyStore.RunnerRow], [String: RunnerFacts.Addressing]) in
+            // Once, above the loop: it spawns a process and the answer is the
+            // same for every runner. Nil is the ordinary case — most people
+            // have no Tailscale — and costs nothing beyond the one lookup.
+            let tailnet = await Tailnet.current()
             var rows: [CeremonyStore.RunnerRow] = [
                 // Only the runner being granted from is checked by default.
                 // Everything else is a decision somebody makes on purpose.
@@ -326,8 +398,32 @@ struct AddDeviceView: View {
                 else { continue }
                 rows.append(.init(runner: facts, granted: false, note: nil))
             }
-            return rows
+
+            // The substitution, and the whole reason this exists. `thisMac()`
+            // reports `ProcessInfo.hostName`, which is normally the `.local`
+            // mDNS name — so a phone paired at a desk was handed an address
+            // that stops resolving the moment it leaves the building, and this
+            // Mac has no way to tell it the new one afterwards. The runner's
+            // tailnet name is the same machine reachable from anywhere.
+            //
+            // Applied rather than offered. There is no reading under which the
+            // LAN-only name is the better answer when a travelling one exists
+            // for the same host, and a dialog asking which of two addresses a
+            // phone should use is a question about DNS asked of somebody who
+            // wanted to add a phone. What it does instead is SAY so, per row.
+            var judged: [String: RunnerFacts.Addressing] = [:]
+            for (index, row) in rows.enumerated() {
+                let verdict = RunnerFacts.addressing(of: row.runner, in: tailnet)
+                judged[row.runner.id] = verdict
+                guard let better = verdict.betterAddress else { continue }
+                var swapped = row.runner
+                swapped.address = better
+                rows[index] = .init(runner: swapped, granted: row.granted, note: row.note)
+            }
+            return (rows, judged)
         }.value
+        grantable = prepared.0
+        addressing = prepared.1
         await scanner.start()
     }
 
