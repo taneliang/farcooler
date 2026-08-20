@@ -13,18 +13,38 @@ struct ContentView: View {
     /// point of hiding, so absence means collapsed.
     @State private var hiddenExpanded: Set<String> = []
 
-    @State private var showNewWorkspace = false
-    /// Which repository the new-workspace sheet should open on, when it was
-    /// reached from a project header rather than the sidebar's own `+`.
-    @State private var newWorkspaceRepository = ""
-    /// The runner `newWorkspaceRepository` lives on, when the sheet was
-    /// reached from a project header. `nil` means "no header was clicked" —
-    /// the sidebar's own `+` and the empty-state button both mean "no host
-    /// named yet," and the sheet's own picker is left to choose one. A
-    /// header's `+` is never that ambiguous: the group key it was clicked on
-    /// already says which runner, and preselecting anything else would put
-    /// the worktree on a runner other than the one the row named.
-    @State private var newWorkspaceHost: String?
+    /// What a `+` meant, carried whole from the control that was clicked to
+    /// the sheet it opens — or nil when no sheet is up.
+    ///
+    /// One value rather than the three pieces of state this was. Those had to
+    /// be kept in step by hand and two of the three call sites did not: the
+    /// empty-state button and the placeholder button cleared the HOST and left
+    /// the repository behind, so after using a project header's `+` once, both
+    /// of them silently inherited that project forever.
+    ///
+    /// Being `Identifiable` is the other half, and it is what fixes the
+    /// reported bug. The sheet keeps its picked repository in `@State` and
+    /// seeds it once, guarded on being unset — so a sheet whose state SwiftUI
+    /// reused across presentations kept the first project it was ever opened
+    /// on, and clicking `+` on the second repository re-opened the first.
+    /// `sheet(item:)` presents a new value as a new presentation, so each `+`
+    /// gets a view that has never chosen anything.
+    private struct NewWorkspaceIntent: Identifiable {
+        /// The project whose header was clicked, by display name — which is
+        /// what the sidebar groups by and what the sheet matches on. Empty
+        /// when the control named no project at all.
+        var project: String = ""
+        /// The runner that project is on. Only meaningful beside `project`:
+        /// two runners can share a display name, and only one of them is the
+        /// project the header actually named. Empty means "none was named",
+        /// which is the sidebar's own `+` and the empty-state buttons — the
+        /// one case where letting the sheet choose a default is legitimate
+        /// rather than the picker again in disguise.
+        var host: String = ""
+        var id: String { "\(host)\u{1}\(project)" }
+    }
+
+    @State private var newWorkspace: NewWorkspaceIntent?
     /// Each worktree's change state, kept across selection changes: a review is
     /// a session, not a mode. Coming back to a worktree should still be showing
     /// the file you were reading.
@@ -401,15 +421,15 @@ struct ContentView: View {
                 }
             )
         }
-        .sheet(isPresented: $showNewWorkspace) {
+        .sheet(item: $newWorkspace) { intent in
             NewWorkspaceSheet(
                 repositories: store.repositories,
-                preselected: newWorkspaceRepository,
-                // `newWorkspaceHost` is the runner the header's `+` was
-                // clicked on; nil is the sidebar's own `+` and the
-                // empty-state button, neither of which named a runner, so
-                // the sheet's own picker is left to choose one.
-                preselectedHost: newWorkspaceHost ?? "",
+                preselected: intent.project,
+                // Both halves off the one intent, so they cannot disagree
+                // about which project this is. An empty host is the sidebar's
+                // own `+` and the empty-state buttons, none of which named a
+                // runner, so the sheet's own picker is left to choose one.
+                preselectedHost: intent.host,
                 branchPrefix: { host in store.clients[host]?.fleet.branchPrefix ?? "" }
             ) { host, repo, task, branch, base in
                 if let why = store.refusal(for: host) {
@@ -614,9 +634,7 @@ struct ContentView: View {
     /// advance, because someone clicking `+` on a project header has already
     /// said which one.
     private func newWorktree(host: String, project: String) {
-        newWorkspaceRepository = project
-        newWorkspaceHost = host
-        showNewWorkspace = true
+        newWorkspace = NewWorkspaceIntent(project: project, host: host)
     }
 
     /// A terminal in the repository's own checkout.
@@ -846,9 +864,7 @@ struct ContentView: View {
                 help: "Add a workspace, a repository, or a runner",
                 items: [
                     SidebarMenuItem(title: "New workspace…") {
-                        newWorkspaceRepository = ""
-                        newWorkspaceHost = nil
-                        showNewWorkspace = true
+                        newWorkspace = NewWorkspaceIntent()
                     },
                     SidebarMenuItem(title: "Add repository…") { showAddRepository = true },
                     // Here as well as in the picker, because this is the menu
@@ -930,8 +946,7 @@ struct ContentView: View {
                 Button("Add repository…") { showAddRepository = true }.padding(.top, 4)
             } else {
                 Button("New workspace") {
-                    newWorkspaceHost = nil
-                    showNewWorkspace = true
+                    newWorkspace = NewWorkspaceIntent()
                 }.padding(.top, 4)
             }
         }
@@ -1306,8 +1321,7 @@ struct ContentView: View {
         } actions: {
             if !store.repositories.isEmpty {
                 Button("New workspace") {
-                    newWorkspaceHost = nil
-                    showNewWorkspace = true
+                    newWorkspace = NewWorkspaceIntent()
                 }
             }
         }

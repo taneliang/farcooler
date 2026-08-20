@@ -159,6 +159,14 @@ struct NewWorkspaceSheet: View {
             .formStyle(.grouped)
         }
         .onAppear {
+            // Guards a second `onAppear` within ONE presentation, and nothing
+            // more. It used to be load-bearing across presentations too, and
+            // that is exactly what made this sheet reopen on the first project
+            // it had ever been shown: SwiftUI reused the state, `choice` was
+            // already set, and the project the `+` actually named was thrown
+            // away here. What makes each `+` a fresh view now is
+            // `ContentView.NewWorkspaceIntent` and `sheet(item:)`; this line no
+            // longer decides anything about which project is picked.
             guard choice == nil else { return }
             // The project whose header was clicked, if there was one. Matching
             // on display name because that is what the sidebar groups by, and
