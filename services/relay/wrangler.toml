@@ -22,6 +22,9 @@
 # `compatibility_date` but not vars, databases or bindings, so each block below
 # repeats the full set. An environment missing one does not fail to deploy — it
 # fails at runtime, on a request, which is a much worse place to find out.
+#
+# `[observability]` is the one exception and it is deliberate — see the block
+# under `routes`, which explains why it is declared once and inherited.
 
 name = "farcooler-relay"
 main = "src/index.ts"
@@ -37,6 +40,38 @@ compatibility_date = "2026-01-15"
 #
 # Safe to re-declare: wrangler treats an already-bound custom domain as a no-op.
 routes = [{ pattern = "relay.farcooler.com", custom_domain = true }]
+
+# Workers Logs, on, for all four relays.
+#
+# THE ONE KEY IN THIS FILE THAT IS INHERITED, which is why it appears once at
+# the top and in no environment block — the exact opposite of the rule the
+# header above sets out. Checked against the wrangler this repo pins (3.114.17,
+# see package-lock.json): `vars`, `d1_databases` and `unsafe.bindings` go
+# through `notInheritable()`, which is why each environment below repeats them,
+# while `observability` goes through `inheritable()`, which falls back to the
+# top-level value when an environment does not set one. Repeating it per
+# environment would work and would be four places to forget.
+#
+# Not a dashboard toggle, because a dashboard toggle does not survive. Every
+# `wrangler deploy` PATCHes script-settings with
+# `observability: worker.observability ?? { enabled: false }` — absent from this
+# file means "the operator wants it off", not "leave it alone" — so switching it
+# on by hand lasts exactly until the next push to main.
+#
+# Without it `console.error` is write-only. The relay logs four things that
+# exist for after the fact: the top-level 500 handler, the WorkOS authenticate
+# failure, the live-activity push failure, and `relay misconfigured` — which is
+# the one that names an APNS_TOPIC belonging to another channel, a fault whose
+# entire symptom is notifications that never arrive. `wrangler tail` catches
+# none of it unless someone happened to be attached at the time.
+#
+# head_sampling_rate = 1 keeps every invocation. This is one relay per channel
+# serving pushes for a handful of paired devices, not a service where sampling
+# is a cost question, and a sampled log is worthless for the failures here:
+# every one of them is a single request that somebody is asking about by name.
+[observability]
+enabled = true
+head_sampling_rate = 1
 
 # Identity, devices, and pairings. Small and relational.
 [[d1_databases]]
