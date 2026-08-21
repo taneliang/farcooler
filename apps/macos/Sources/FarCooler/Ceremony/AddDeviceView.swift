@@ -287,11 +287,19 @@ struct AddDeviceView: View {
                     .frame(maxWidth: .infinity)
             }
 
-            if let transcript = store.transcript {
-                Text(Enrollment.couldNotReachAll)
+            // The sentence comes from what the writes DID — see
+            // `Enrollment.note(about:outcome:)` — rather than from the
+            // transcript merely existing. A Mac that took Key A everywhere and
+            // lost Key B on one runner has a transcript and no pending runner,
+            // and "some runners don't have the key" would be false about every
+            // runner in the code being shown.
+            if let note = store.note {
+                Text(note)
                     .font(.callout)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if let transcript = store.transcript {
                 DetailBox(text: transcript)
             }
 
@@ -486,8 +494,12 @@ struct AddDeviceView: View {
                 // version of it, landing lines in somebody's `authorized_keys`
                 // under an id nothing can revoke by name while looking like it
                 // worked. iOS takes the same branch in `CeremonyStore.confirm()`
-                // and leaves every runner pending.
-                guard let clientID else { return Enrollment.unreadableKey }
+                // and leaves every runner pending. So does this: an outcome
+                // with nothing written is what makes every runner in the reply
+                // travel pending, which is a true statement about those files.
+                guard let clientID else {
+                    return .nothingWritten(Enrollment.unreadableKey)
+                }
                 return await Enrollment.enroll(
                     keyA: keyA, keyB: keyB, label: name, clientID: clientID,
                     // `control`, per the design, and it applies to Key A only:

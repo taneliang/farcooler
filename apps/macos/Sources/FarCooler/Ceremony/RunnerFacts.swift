@@ -45,7 +45,13 @@ enum RunnerFacts {
             user: user,
             port: port,
             host_key: await hostKey(for: address) ?? "",
-            pending: false)
+            // True here, and true of every record this file makes: `pending`
+            // means "this runner does not have the new device's key", and at
+            // the moment a runner is resolved nothing has been written to it.
+            // ``Enrollment/Outcome/granting(_:)`` clears it for the runners
+            // that answered, and only for those. It was hardcoded false, which
+            // made every unreachable runner announce itself as ready.
+            pending: true)
     }
 
     /// This Mac, as something another device can reach.
@@ -59,6 +65,16 @@ enum RunnerFacts {
     /// A phone reaching it still needs Remote Login turned on, which macOS
     /// keeps off. That is the one screen this app cannot do for somebody, and
     /// ``RemoteLoginView`` is it.
+    ///
+    /// **And it starts pending like every other runner.** Reaching the local
+    /// daemon over a Unix socket is not the same as having written to
+    /// `~/.ssh/authorized_keys` on this Mac — that write is a `client enroll`
+    /// with no `--runner`, and it fails whenever the daemon is not installed,
+    /// not running, or refuses. That failure is not hypothetical: the bug
+    /// ``Enrollment/arguments(key:label:clientID:scope:shell:runner:)``
+    /// documents was exactly this write failing, and a hardcoded `pending:
+    /// false` here is what let the phone be told its key had landed on the very
+    /// Mac it was being added from.
     static func thisMac() -> CeremonyRunner {
         CeremonyRunner(
             id: "",
@@ -68,7 +84,7 @@ enum RunnerFacts {
             user: NSUserName(),
             port: 22,
             host_key: localHostKey() ?? "",
-            pending: false)
+            pending: true)
     }
 
     /// The fingerprint of the key this Mac's sshd presents.

@@ -311,6 +311,10 @@ final class CeremonyStore: ObservableObject {
     /// that could not be granted. Shown in a `DetailBox`, the way an install's
     /// output already is — it is the thing that talked to the runner.
     @Published private(set) var transcript: String?
+    /// The sentence above that transcript, chosen from what the enrollment
+    /// actually did — see ``Enrollment/note(about:outcome:)``. Nil when every
+    /// selected runner took the key, which is the ordinary case.
+    @Published private(set) var note: String?
 
     private var alreadyTaken = false
 
@@ -408,9 +412,17 @@ final class CeremonyStore: ObservableObject {
     /// window bounds how long a confirmation may sit open — not how old the
     /// photograph was. A sheet left open over lunch refuses rather than
     /// enrolling.
-    func confirm(reason: String, enroll: @Sendable @escaping ([CeremonyRunner]) async -> String?)
-        async
-    {
+    /// The keys go in BEFORE the reply is built, and the reply is built FROM
+    /// what they did. That ordering is what makes `pending` a fact rather than
+    /// a hope: a runner named in that code as ready is one the new device will
+    /// try to connect to, and a claim no line was written for is the one lie in
+    /// this flow that a person cannot detect — the phone simply fails to
+    /// connect, with nothing anywhere saying why. iOS states the same rule in
+    /// its own `confirm()`.
+    func confirm(
+        reason: String,
+        enroll: @Sendable @escaping ([CeremonyRunner]) async -> Enrollment.Outcome
+    ) async {
         guard case .confirming(let confirmation) = phase else { return }
 
         // A fingerprint, at the moment of the tap. This is what someone
@@ -431,8 +443,14 @@ final class CeremonyStore: ObservableObject {
         if let refusal = Refusal.from(rechecked) { return refuse(refusal) }
 
         phase = .enrolling
-        let granted = confirmation.rows.filter(\.granted).map(\.runner)
-        transcript = await enroll(granted)
+        let wanted = confirmation.rows.filter(\.granted).map(\.runner)
+        let outcome = await enroll(wanted)
+        // The FILE's state, not this Mac's intention. Every record arrives here
+        // pending — see `RunnerFacts` — and only a runner that answered loses
+        // the flag.
+        let granted = outcome.granting(wanted)
+        transcript = outcome.transcript
+        note = Enrollment.note(about: granted, outcome: outcome)
 
         guard
             let answer = CeremonyFFI.reply(
@@ -456,6 +474,7 @@ final class CeremonyStore: ObservableObject {
     /// arguing with the freshness rule.
     func scanAgain() {
         transcript = nil
+        note = nil
         phase = .scanning
     }
 
