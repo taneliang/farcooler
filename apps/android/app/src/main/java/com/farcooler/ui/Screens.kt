@@ -144,15 +144,29 @@ fun OnboardingScreen(
  *
  * The manual path, and it stays. There is a ceremony now — two codes and a
  * camera, through [JoinScreen] — but this is what works when there is no trusted
- * device to scan with, and it is what is left the day every device is lost. Its
- * wording is unchanged apart from "runner".
+ * device to scan with, and it is what is left the day every device is lost.
+ *
+ * With no key there is neither path, and the screen says so once rather than
+ * offering half of each.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    val publicKey = remember { Identity.publicKey ?: "could not generate a key" }
+
+    // Null when there is none, and the screen says so rather than standing a
+    // sentence in where a key goes. It used to substitute "could not generate a
+    // key", two rows above `echo '<paste>' >> ~/.ssh/authorized_keys` and beside
+    // an enabled Copy public key, so the obvious next move put that sentence in
+    // a runner's `authorized_keys`. The Apple apps had the same bug on their
+    // two key-bearing screens; `776d3e0` fixed both.
+    val publicKey = remember { Identity.publicKey }
+
+    // Read after the key, and that order is what makes it worth reading:
+    // deriving the key is what records the trouble, so asking first would
+    // always find none.
+    val trouble = Identity.lastError
 
     Scaffold(
         topBar = {
@@ -176,29 +190,79 @@ fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
         ) {
             // Above the key, because it is the shorter road: someone holding a
             // device that already has runners never needs to paste anything.
-            Button(onClick = onJoin, modifier = Modifier.fillMaxWidth()) {
+            //
+            // Both roads off this screen carry the same key — the code
+            // [JoinScreen] shows IS this device's public key, and
+            // `CeremonyStore.showOffer` refuses without one — so with no key
+            // this button pushes a screen that lands immediately on
+            // "Couldn't add this device / Try again.", a dead end that accounts
+            // for nothing. Stopped at the door instead, with the reason in the
+            // sentence under it, because a disabled button cannot give one.
+            Button(
+                onClick = onJoin,
+                enabled = publicKey != null,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Text("Add this device with a code")
             }
             Text(
-                "Show a code to a device you’ve already added, and it picks which runners this " +
-                    "one may reach. Or add the key by hand:",
+                if (publicKey == null) {
+                    "The code carries this device’s key, so it can’t be shown without one."
+                } else {
+                    "Show a code to a device you’ve already added, and it picks which runners " +
+                        "this one may reach. Or add the key by hand:"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text("Add this device’s public key to the runner:")
-            Mono(publicKey)
-            Button(
-                onClick = { scope.launch { clipboard.writeText("Far Cooler device key", publicKey) } },
-            ) {
-                Icon(Icons.Filled.ContentCopy, contentDescription = null, Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Copy public key")
-            }
-            Text("On the runner, run:")
-            Mono("echo '<paste>' >> ~/.ssh/authorized_keys")
             Text(
-                "The private key never leaves this device. Revoke it by deleting that line " +
-                    "from authorized_keys.",
+                if (publicKey == null) "No key to add to the runner."
+                else "Add this device’s public key to the runner:"
+            )
+            // All of this is about ONE key, so all of it is behind the key
+            // existing: the copy button and the `echo` line are a pair, and
+            // offering either without a key to put in it invites the paste this
+            // guard is here to prevent.
+            if (publicKey != null) {
+                Mono(publicKey)
+                Button(
+                    onClick = {
+                        scope.launch { clipboard.writeText("Far Cooler device key", publicKey) }
+                    },
+                ) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Copy public key")
+                }
+                Text("On the runner, run:")
+                Mono("echo '<paste>' >> ~/.ssh/authorized_keys")
+            } else {
+                // One sentence where the key would have been, and the platform's
+                // words under it — the shape the foot of this screen already
+                // uses. [Identity] usually holds the more exact account, so it
+                // speaks first; the general sentence is for the one path that
+                // records nothing, a stored private key the core cannot derive a
+                // public half from.
+                //
+                // No cause invented and no retry promised past what [Identity]
+                // itself recorded: this side knows only that no key came back.
+                // Plain text rather than [Mono] — that box is where key material
+                // goes, and prose inside it reads as a key.
+                Text(
+                    trouble?.sentence ?: "Far Cooler couldn’t make a key for this device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                trouble?.transcript?.let { DetailBox(it) }
+            }
+            Text(
+                if (publicKey == null) {
+                    "A runner can only let this device in by its key, so there’s nothing to " +
+                        "authorize until there is one."
+                } else {
+                    "The private key never leaves this device. Revoke it by deleting that line " +
+                        "from authorized_keys."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -206,13 +270,20 @@ fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
             // the platform's own words below it rather than inside it. Two of
             // the three things [Identity] can report name their own cause and
             // carry no transcript, so no empty box appears under them.
-            Identity.lastError?.let { trouble ->
-                Text(
-                    trouble.sentence,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                trouble.transcript?.let { DetailBox(it) }
+            //
+            // Only where there IS a key. With none it has already been said in
+            // the key's own place above, which is where somebody looking for a
+            // key is looking, and one screen carrying two spellings of one fact
+            // is how they come to disagree.
+            if (publicKey != null) {
+                trouble?.let {
+                    Text(
+                        it.sentence,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    it.transcript?.let { transcript -> DetailBox(transcript) }
+                }
             }
         }
     }
