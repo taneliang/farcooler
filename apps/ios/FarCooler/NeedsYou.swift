@@ -287,6 +287,16 @@ struct NeedsYouView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
+            // One element saying one thing, because read aloud the parts are
+            // "plus 82" and "minus 13" — two numbers with nothing attaching
+            // them to a diff. The row this replaced carried exactly this label
+            // and lost it in the merge; the words are `ChangesChip`'s, so the
+            // counts are spoken the same way on the row and on the tab they
+            // open. The blocked agents below are left to speak for themselves:
+            // what they said is the larger half of reviewing their work, and
+            // folding them in here would silence it.
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(spoken(item))
 
             // `TerminalRow` and nothing new. It is four bands — the label with
             // a ticking clock, the signal line the host composed, the agent's
@@ -323,6 +333,17 @@ struct NeedsYouView: View {
     /// something and does not say what.
     private func overflow(_ count: Int) -> String {
         count == 1 ? "1 more agent needs you" : "\(count) more agents need you"
+    }
+
+    /// The workspace's own line, said rather than spelled: its name, and what
+    /// the branch changed when the runner has answered and there is a diff.
+    ///
+    /// The branch is deliberately not in it. A VoiceOver reader gets
+    /// `feat/add-auth` letter by letter for a fact that is not why this row is
+    /// on the screen.
+    private func spoken(_ item: Item) -> String {
+        guard let counts = item.counts, counts.hasDiff else { return item.workspace.task }
+        return "\(item.workspace.task), \(counts.insertions) added, \(counts.deletions) removed"
     }
 
     /// The most common state, and it is doing a job rather than filling a gap.
@@ -410,6 +431,6 @@ struct NeedsYouView: View {
         if connection.fleet.workspaces.isEmpty {
             return "No workspaces on \(runner.label) yet. This is where you start one."
         }
-        return "Every workspace on \(runner.label) is hidden. They’re still in here."
+        return "Every workspace on \(runner.label) is hidden. They’re still in there."
     }
 }

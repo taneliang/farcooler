@@ -1508,7 +1508,10 @@ struct FleetList: View {
                     Text(
                         fleet.runtimeHealthy
                             ? "\(fleet.livePanes) live"
-                            : "tmux unavailable on this host"
+                            // The same three words the Mac and Android show. This one
+                            // said "on this host" — the wrong noun for a runner, and
+                            // redundant on a screen that speaks for one already.
+                            : "tmux unavailable"
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1754,7 +1757,7 @@ struct RemoveWorktreeConfirmSheet: View {
                                 dismiss()
                             case .confirmationRequired:
                                 working = false
-                                errorMessage = "That name didn't match — try again."
+                                errorMessage = "That name didn’t match — try again."
                             case .failed(let message):
                                 working = false
                                 errorMessage = message
