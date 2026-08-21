@@ -562,50 +562,41 @@ private struct SubagentBlockView: View {
 private struct GapRow: View {
     let reason: GapReason
 
-    // `.loadEmpty` is news, not a failure — a fresh chat pane has nothing to
-    // restore because nothing happened yet, and dressing that in the same
-    // orange "something broke" language as a real gap would tell the user the
-    // opposite of the truth. It still gets a row, because "nothing was lost"
-    // is exactly the kind of thing this row exists to say plainly rather than
-    // leave the user to infer from silence — see the type doc above.
-    private var isInformational: Bool {
-        if case .loadEmpty = reason { return true }
-        return false
-    }
-
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: isInformational ? "info.circle" : "scissors")
-                .font(.system(size: 11))
-            Text(sentence)
-                .font(.system(size: 11.5, weight: .medium))
-            Spacer(minLength: 0)
+        // The sentence, then — where there is one — the adapter's account of
+        // the refusal beneath it. `reason.sentence` and `reason.detail` are
+        // AgentKit's, shared with the phone's row: the two used to hold the
+        // same `switch` twice, byte for byte, and one gap read on two devices
+        // is the only way that drift ever shows itself.
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: reason.isInformational ? "info.circle" : "scissors")
+                    .font(.system(size: 11))
+                Text(reason.sentence)
+                    .font(.system(size: 11.5, weight: .medium))
+                Spacer(minLength: 0)
+            }
+            // Tinted here rather than on the whole row, so the box below keeps
+            // its own voice: that text is the adapter's, and coloring it like
+            // this row's sentence is this app appearing to have said it.
+            //
+            // `Color.secondary`, not `.secondary` — that shorthand resolves to
+            // `HierarchicalShapeStyle`, a different type from `Color.orange`,
+            // and a ternary needs both branches to agree.
+            .foregroundStyle(reason.isInformational ? Color.secondary : Color.orange)
+
+            if let detail = reason.detail, !detail.isEmpty {
+                // No fill of its own: it is already inside one, the same call
+                // `ToolRow` makes a few hundred lines up.
+                DetailBox(text: detail, chrome: false)
+            }
         }
-        // `Color.secondary`, not `.secondary` — that shorthand resolves to
-        // `HierarchicalShapeStyle`, a different type from `Color.orange`, and
-        // a ternary needs both branches to agree.
-        .foregroundStyle(isInformational ? Color.secondary : Color.orange)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            isInformational ? Color.secondary.opacity(0.08) : Color.orange.opacity(0.10),
+            reason.isInformational ? Color.secondary.opacity(0.08) : Color.orange.opacity(0.10),
             in: RoundedRectangle(cornerRadius: 6))
-    }
-
-    private var sentence: String {
-        switch reason {
-        case .ringTrimmed:
-            return "Some earlier history was trimmed and is not shown here."
-        case .loadUnsupported:
-            return "This session could not be loaded from where it left off."
-        case .loadEmpty:
-            return "This session has no recorded turns yet — there is nothing to restore."
-        case .loadFailed(let detail):
-            return "This session could not be loaded from where it left off: \(detail)"
-        case .unparsed:
-            return "Something happened here that this version cannot show."
-        }
     }
 }
 

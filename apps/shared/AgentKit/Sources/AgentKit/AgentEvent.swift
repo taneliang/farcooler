@@ -107,6 +107,79 @@ extension GapReason: Decodable {
     }
 }
 
+/// What a gap says to a person, in one place.
+///
+/// Both apps drew this from a `switch` of their own, byte-identical down to
+/// the punctuation, in `AgentRows.swift` and `AgentView.swift`. Two copies of
+/// one sentence is the bug `f9f37eb` fixed for the notification strings and
+/// `776d3e0` fixed for `DeviceKind`: nobody sees the drift, because nobody
+/// reads the same gap on a Mac and a phone at the same moment. The copy lives
+/// here, beside the type it describes; each app keeps its own row, because the
+/// two rows differ in type sizes and corner radii and always should.
+///
+/// A `GapReason` case name is an internal identifier and never reaches a
+/// person — these sentences are the whole of what does.
+extension GapReason {
+    /// This app's own account of what is missing.
+    ///
+    /// Written here, never assembled from anything the adapter said. Where
+    /// there is adapter text, it is `detail`, and it is shown as output.
+    public var sentence: String {
+        switch self {
+        case .ringTrimmed:
+            return "Some earlier history was trimmed and isn’t shown here."
+        // Cause and consequence, both knowable: the agent said at
+        // `initialize` that it has no `session/load`, so nothing before this
+        // point was ever going to be here. This used to say, word for word,
+        // what `.loadFailed` said — so the only thing telling a refusal apart
+        // from an agent that cannot reopen sessions at all was the adapter
+        // text spliced onto the end of one of them, which is exactly the text
+        // that had to stop being part of the sentence.
+        case .loadUnsupported:
+            return "This agent can’t reopen an earlier session, so the conversation starts here."
+        case .loadEmpty:
+            return "This session has no recorded turns yet — there’s nothing to restore."
+        case .loadFailed:
+            return "This session couldn’t be reopened from where it left off."
+        case .unparsed:
+            return "Something happened here that this version can’t show."
+        }
+    }
+
+    /// The adapter's own words about a refusal, to be shown as output.
+    ///
+    /// `nil` for every case that has nothing to show, so a row can ask before
+    /// it reserves the space — an empty box under a sentence reads as output
+    /// that failed to arrive. Only `.loadFailed` carries any: it is the one
+    /// case where this side knows a load was refused and cannot know why, and
+    /// the adapter's message is then the only account anyone has of it.
+    ///
+    /// The other four name their own cause, and `776d3e0` and `c42c352` both
+    /// scoped their boxes the same way: a transcript under a sentence that
+    /// already answers the question is noise.
+    public var detail: String? {
+        switch self {
+        case .loadFailed(let detail):
+            return detail
+        // Listed rather than defaulted, so a case added later has to say.
+        case .ringTrimmed, .loadUnsupported, .loadEmpty, .unparsed:
+            return nil
+        }
+    }
+
+    /// News, not a failure — so a row can say so in its color and its icon.
+    ///
+    /// A fresh chat pane has nothing to restore because nothing happened yet,
+    /// and dressing that in the same orange "something broke" language as a
+    /// real gap would tell the user the opposite of the truth. It still gets a
+    /// row: "nothing was lost" is exactly what that row exists to say plainly
+    /// rather than leave the user to infer from silence.
+    public var isInformational: Bool {
+        if case .loadEmpty = self { return true }
+        return false
+    }
+}
+
 public struct Diff: Decodable, Sendable, Equatable {
     public let path: String
     public let oldText: String?

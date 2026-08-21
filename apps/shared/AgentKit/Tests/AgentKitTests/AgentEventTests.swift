@@ -105,6 +105,73 @@ import Testing
     #expect(event == .gap(.loadEmpty))
 }
 
+// MARK: - What a gap says
+
+// These pin the copy itself, not just the decode. Both apps used to hold this
+// `switch` privately and byte-identically, so a one-word edit on one side
+// would have shipped two spellings of one sentence with nothing failing. Now
+// there is one implementation, and changing what a gap says has to come
+// through here.
+
+@Test func everyGapSaysSomethingWrittenForAPerson() {
+    // No case may render as nothing: this row exists precisely to refuse to be
+    // quiet. And no case may render its own name — a `GapReason` case name is
+    // an internal identifier and never belongs on screen.
+    let all: [GapReason] = [
+        .ringTrimmed, .loadUnsupported, .loadEmpty,
+        .loadFailed(detail: "permission denied"), .unparsed,
+    ]
+    for reason in all {
+        #expect(!reason.sentence.isEmpty)
+        #expect(reason.sentence.first?.isUppercase == true)
+        #expect(reason.sentence.hasSuffix("."))
+        for name in ["ringTrimmed", "loadUnsupported", "loadEmpty", "loadFailed", "unparsed"] {
+            #expect(!reason.sentence.contains(name))
+        }
+    }
+}
+
+@Test func aRefusedLoadKeepsTheAdaptersWordsOutOfTheSentence() {
+    // The defect: `"…from where it left off: \(detail)"`, an adapter's message
+    // colon-spliced onto this app's sentence — the join `e0f72df` and
+    // `c42c352` took out elsewhere. The words must still reach a person,
+    // because they are the only account of why the load was refused; they
+    // reach one as output, in a `DetailBox`, not as this app's own voice.
+    let reason = GapReason.loadFailed(detail: "permission denied")
+    #expect(!reason.sentence.contains("permission denied"))
+    #expect(!reason.sentence.contains(":"))
+    #expect(reason.detail == "permission denied")
+}
+
+@Test func aGapWithNothingToShowReservesNoRoomForABox() {
+    // A row asks `detail` before it draws a box, so an empty one never appears
+    // under a sentence looking like output that failed to arrive. Only the
+    // undiagnosed case has anything to put there.
+    #expect(GapReason.ringTrimmed.detail == nil)
+    #expect(GapReason.loadUnsupported.detail == nil)
+    #expect(GapReason.loadEmpty.detail == nil)
+    #expect(GapReason.unparsed.detail == nil)
+}
+
+@Test func anAgentThatCannotReopenSessionsReadsDifferentlyFromOneThatRefused() {
+    // These two said the same sentence word for word, and the only thing
+    // telling them apart was the adapter text spliced onto the end of one.
+    // Take the splice out without separating them and the app says the same
+    // thing about two different situations.
+    #expect(GapReason.loadUnsupported.sentence != GapReason.loadFailed(detail: "x").sentence)
+}
+
+@Test func onlyAnEmptySessionIsToldAsNews() {
+    // Everything else is a real gap and is drawn as one. Dressing "nothing
+    // happened yet" in the same orange as lost history tells the user the
+    // opposite of the truth.
+    #expect(GapReason.loadEmpty.isInformational)
+    #expect(!GapReason.ringTrimmed.isInformational)
+    #expect(!GapReason.loadUnsupported.isInformational)
+    #expect(!GapReason.loadFailed(detail: "x").isInformational)
+    #expect(!GapReason.unparsed.isInformational)
+}
+
 @Test func anEventFromALaterDaemonBecomesAGapRatherThanAThrow() throws {
     // A client one release behind its daemon must still render the session.
     // Throwing would blank the whole transcript over one unknown event;
