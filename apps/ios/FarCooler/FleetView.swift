@@ -761,6 +761,21 @@ struct FleetView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: 320)
 
+            // Only where the app has no diagnosis of its own — the same
+            // scoping the Mac's `ChangesPane` uses, and for the same reason: a
+            // transcript under a sentence that already names the cause and the
+            // fix is noise.
+            //
+            // Nothing is discarded. For a runner nobody can reach, this text is
+            // the only diagnosis that exists, and somebody debugging one needs
+            // it. It just goes where output goes rather than where prose does,
+            // so the app stops appearing to have said it.
+            if kind == .other, !message.isEmpty {
+                DetailBox(text: message)
+                    .frame(maxWidth: 320)
+                    .padding(.top, 14)
+            }
+
             Spacer()
 
             VStack(spacing: 18) {
@@ -877,8 +892,24 @@ struct FleetView: View {
                 + "or the address may be wrong."
         case .daemonMissing:
             return "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
-        case .hostKeyChanged, .noIdentity, .keyNotTrusted, .stopped, .other:
+        // Sentences somebody wrote, each naming both what happened and what to
+        // do about it — three of them in `Connection`, `hostKeyChanged` in
+        // `crates/client/src/ssh.rs`. They are the core's words only in the
+        // sense that the core is where they are stored.
+        case .hostKeyChanged, .noIdentity, .keyNotTrusted, .stopped:
             return message
+        // The undiagnosed arm, and the only one where `message` is whatever
+        // came back rather than something written to be read. Those words go
+        // into a `DetailBox` in `failure(_:)` instead of standing here as the
+        // app's own account of the runner.
+        //
+        // No cause named, deliberately: from this side the cause is unknowable,
+        // and a guess sends somebody to loosen an sshd setting that was never
+        // the problem. See `Enrollment.note(about:outcome:)`. Nor any retry
+        // promised — whether one is under way is `retryOrGiveUp`'s business,
+        // and the button below is the only offer this screen makes.
+        case .other:
+            return "The attempt to reach it didn’t finish."
         }
     }
 
@@ -1754,6 +1785,41 @@ func attentionColor(_ terminal: Terminal) -> Color {
     terminal.turnDidFail ? .red : attentionColor(terminal.agent)
 }
 
+/// What a sheet says when the thing it asked for did not happen: the app's own
+/// sentence, and — when the app has no account of its own — the daemon's words
+/// underneath it.
+///
+/// Two fields rather than one string, because the two are read differently and
+/// must never be concatenated. `sentence` is Far Cooler talking; `transcript`
+/// is what came back from the runner, and a runner's words set as body text
+/// under a heading this app wrote is the app appearing to have said them.
+struct SheetFailure {
+    let sentence: String
+    var transcript: String?
+}
+
+/// One failure, drawn the way this codebase already draws them: a written
+/// sentence, then a `DetailBox` holding the transcript.
+///
+/// One view rather than a copy in each sheet, so two sheets reporting the same
+/// kind of failure cannot come to render it differently — the principle
+/// `f9f37eb` and `776d3e0` both turned on. `DetailBox` itself is AgentKit's and
+/// the Mac's; see `DaemonUpdateCard`, `RunnersSettings` and `ChangesPane`.
+private struct SheetFailureSection: View {
+    let failure: SheetFailure
+
+    var body: some View {
+        Section {
+            Text(failure.sentence)
+                .foregroundStyle(.red)
+                .font(.footnote)
+            if let transcript = failure.transcript, !transcript.isEmpty {
+                DetailBox(text: transcript)
+            }
+        }
+    }
+}
+
 /// The second phase: the worktree has uncommitted work, so removal needs its
 /// name typed exactly. Also where any other refusal surfaces, since there is
 /// no room for an error message inside a confirmationDialog.
@@ -1764,7 +1830,7 @@ struct RemoveWorktreeConfirmSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var typed = ""
     @State private var working = false
-    @State private var errorMessage: String?
+    @State private var failure: SheetFailure?
 
     private var matches: Bool { typed == workspace.task }
 
@@ -1779,10 +1845,8 @@ struct RemoveWorktreeConfirmSheet: View {
                 TextField("Type \(workspace.task) to confirm", text: $typed)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage).foregroundStyle(.red).font(.footnote)
-                    }
+                if let failure {
+                    SheetFailureSection(failure: failure)
                 }
             }
             .navigationTitle("Remove worktree")
@@ -1799,12 +1863,25 @@ struct RemoveWorktreeConfirmSheet: View {
                             case .ok:
                                 working = false
                                 dismiss()
+                            // The app's own diagnosis, and it is a complete
+                            // one: the name typed is not the name on file.
+                            // Nothing came back from the runner to show, and
+                            // nothing needs to.
                             case .confirmationRequired:
                                 working = false
-                                errorMessage = "That name didn’t match — try again."
+                                failure = SheetFailure(
+                                    sentence: "That name didn’t match — try again.")
+                            // `message` is whatever the call came back with,
+                            // and this side has no idea why. It used to be set
+                            // into the very same red line the sentence above
+                            // uses, which made a runner's words read as Far
+                            // Cooler's. Kept — it is the only account of what
+                            // happened — and put in the box instead.
                             case .failed(let message):
                                 working = false
-                                errorMessage = message
+                                failure = SheetFailure(
+                                    sentence: "Removing this worktree didn’t finish.",
+                                    transcript: message)
                             }
                         }
                     }
@@ -1827,7 +1904,7 @@ struct AddRepositorySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var path = ""
     @State private var working = false
-    @State private var errorMessage: String?
+    @State private var failure: SheetFailure?
 
     private var canConfirm: Bool { !path.trimmingCharacters(in: .whitespaces).isEmpty && !working }
 
@@ -1842,10 +1919,8 @@ struct AddRepositorySheet: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage).foregroundStyle(.red).font(.footnote)
-                    }
+                if let failure {
+                    SheetFailureSection(failure: failure)
                 }
             }
             .navigationTitle("Add repository")
@@ -1857,7 +1932,7 @@ struct AddRepositorySheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         working = true
-                        errorMessage = nil
+                        failure = nil
                         Task {
                             do {
                                 try await connection.addRepositoryRoot(path: path)
@@ -1866,8 +1941,15 @@ struct AddRepositorySheet: View {
                                 onRegistered(id)
                                 dismiss()
                             } catch {
+                                // Either of the two calls, and this side cannot
+                                // tell which — nor what the runner made of the
+                                // path. So one sentence about the step, and the
+                                // runner's answer below it rather than in place
+                                // of it.
                                 working = false
-                                errorMessage = error.localizedDescription
+                                failure = SheetFailure(
+                                    sentence: "Adding this repository didn’t finish.",
+                                    transcript: error.localizedDescription)
                             }
                         }
                     }

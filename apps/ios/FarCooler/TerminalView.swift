@@ -292,8 +292,10 @@ struct TerminalView: View {
             status(
                 symbol: "moon.zzz", title: "Not live",
                 message: "\(currentName) has no running pane right now.")
-        case .failed(let message):
-            status(symbol: "exclamationmark.triangle", title: "Could not load", message: message)
+        case .failed(let message, let transcript):
+            status(
+                symbol: "exclamationmark.triangle", title: "Could not load", message: message,
+                transcript: transcript)
         case .live:
             if let grid = session.grid {
                 live(grid: grid, size: size)
@@ -303,8 +305,18 @@ struct TerminalView: View {
         }
     }
 
+    /// `message` is prose this app wrote; `transcript` is what the host said.
+    ///
+    /// They are drawn as two different kinds of thing on purpose. The host's
+    /// answer used to arrive as `message` and be set in the same callout, so a
+    /// lowercase fragment from an ssh channel read as Far Cooler's own account
+    /// of the pane. Nothing is dropped — those words are the whole diagnosis of
+    /// a runner that cannot be reached — they just go in the box that means
+    /// "output", the one `DaemonUpdateCard`, `RunnersSettings` and
+    /// `ChangesPane` already use for exactly this.
     private func status(
-        spinner: Bool = false, symbol: String? = nil, title: String, message: String? = nil
+        spinner: Bool = false, symbol: String? = nil, title: String, message: String? = nil,
+        transcript: String? = nil
     ) -> some View {
         VStack(spacing: 12) {
             if spinner {
@@ -318,6 +330,14 @@ struct TerminalView: View {
                     .font(.callout)
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+            // Semantic colors rather than the hardcoded whites above, and they
+            // resolve correctly here: `WorkspaceView` puts this whole pane in
+            // the terminal theme's own color scheme.
+            if let transcript, !transcript.isEmpty {
+                DetailBox(text: transcript)
+                    .frame(maxWidth: 420)
                     .padding(.horizontal, 32)
             }
         }

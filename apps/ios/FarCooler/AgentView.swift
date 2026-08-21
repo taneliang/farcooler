@@ -274,7 +274,8 @@ struct AgentView: View {
     @ViewBuilder
     private var transcriptBody: some View {
         if transcript.rows.isEmpty {
-            // The error goes ABOVE the empty state, not inside the transcript.
+            // The error goes with the empty state, not inside a transcript
+            // that does not exist.
             //
             // The banner used to live in the scroll view, which only exists
             // once there are rows — so a session that never loaded at all
@@ -282,17 +283,16 @@ struct AgentView: View {
             // hidden behind the very condition that made it empty. The one
             // moment the message is worth reading is the one moment it could
             // not be seen.
-            VStack(spacing: 12) {
-                if let error = stream.connectionError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                }
-                emptyState
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            //
+            // And one copy of it, not two. A second banner sat here, above
+            // `emptyState`, which has an error arm of its own — a triangle, a
+            // headline and the same string — so with nothing loaded the reason
+            // was drawn twice on one screen, once as an orange caption and
+            // again a few points lower under a heading. The arm that draws it
+            // with a headline is the one that reads as an explanation, so it is
+            // the one that stayed.
+            emptyState
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 // Lazy, and ANCHORED — the pair that makes it work.
@@ -309,10 +309,20 @@ struct AgentView: View {
                     // failed poll is not a disconnection, the same rule
                     // `Connection.refresh()` follows — the last known
                     // transcript stays up while this device tries again.
-                    if let error = stream.connectionError {
-                        Text(error)
+                    if let trouble = stream.connectionError {
+                        Text(trouble.sentence)
                             .font(.caption)
                             .foregroundStyle(.orange)
+                        // Rare by construction, and that is what makes it
+                        // bearable here: the failure that actually happens on a
+                        // phone is a dropped link, which carries a written
+                        // sentence and no transcript. A box appears only for
+                        // the failures nothing on this side can account for,
+                        // and it sits at the head of a transcript that is
+                        // already scrolled to its tail.
+                        if let words = trouble.transcript, !words.isEmpty {
+                            DetailBox(text: words)
+                        }
                     }
                     ForEach(transcript.rows) { row in
                         AgentRowView(
@@ -445,17 +455,27 @@ struct AgentView: View {
     private var emptyState: some View {
         VStack(spacing: 10) {
             Spacer()
-            if let error = stream.connectionError {
+            if let trouble = stream.connectionError {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.largeTitle)
                     .foregroundStyle(.orange)
                 Text("Could not load this session")
                     .font(.headline)
-                Text(error)
+                Text(trouble.sentence)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
+                // The core's own words, below a sentence rather than standing
+                // in for one. Under this headline, in this face, they used to
+                // read as Far Cooler's account of the runner; they are not, and
+                // they are also the only account anybody debugging an
+                // unreachable runner is going to get, so they stay.
+                if let words = trouble.transcript, !words.isEmpty {
+                    DetailBox(text: words)
+                        .frame(maxWidth: 360)
+                        .padding(.horizontal, 32)
+                }
             } else {
                 Text("Say something to begin.")
                     .font(.callout)

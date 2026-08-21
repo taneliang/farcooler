@@ -38,7 +38,17 @@ struct TaskComposerView: View {
         case startingAgent
         case sending
         case done(String)
-        case failed(String)
+        /// A sentence this screen wrote, and — for the steps whose failure it
+        /// cannot account for — what came back from the runner.
+        ///
+        /// Two payloads rather than one string, because these used to be
+        /// concatenated: `"Could not create the worktree: " +
+        /// error.localizedDescription` put the runner's words inside Far
+        /// Cooler's own sentence, joined by a colon, where nothing marked where
+        /// one stopped and the other began. Kept, since a worktree that would
+        /// not be created is diagnosed from those words and nothing else — just
+        /// no longer spoken in this app's voice.
+        case failed(String, transcript: String?)
     }
 
     private var isWorking: Bool {
@@ -164,10 +174,18 @@ struct TaskComposerView: View {
         case .done(let title):
             Label("Started \(title)", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-        case .failed(let message):
+        case .failed(let message, let transcript):
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
                 .font(.callout)
+            // Only the steps this screen has no diagnosis for. The two arms
+            // that say an agent is waiting on a question, or was not ready
+            // within a minute, already name what happened and what to do next,
+            // and a transcript under either would be noise — the same scoping
+            // the Mac's `ChangesPane` uses.
+            if let transcript, !transcript.isEmpty {
+                DetailBox(text: transcript)
+            }
         }
     }
 
@@ -202,7 +220,9 @@ struct TaskComposerView: View {
                 workspaceID = try await connection.createWorkspace(
                     repository: repository.id, name: name, branch: branch, base: "")
             } catch {
-                phase = .failed("Could not create the worktree: \(error.localizedDescription)")
+                phase = .failed(
+                    "Couldn’t create the worktree.",
+                    transcript: error.localizedDescription)
                 return
             }
             await connection.refresh()
@@ -214,8 +234,8 @@ struct TaskComposerView: View {
                     workspace: workspaceID, title: agentID, preset: preset)
             } catch {
                 phase = .failed(
-                    "Created the worktree, but could not start \(agentName): "
-                    + error.localizedDescription)
+                    "Created the worktree, but couldn’t start \(agentName).",
+                    transcript: error.localizedDescription)
                 return
             }
 
@@ -240,7 +260,8 @@ struct TaskComposerView: View {
                 // description into a question it hasn't finished asking.
                 case .blocked:
                     phase = .failed(
-                        "\(agentName) is waiting on a question. Open \(title) to answer it.")
+                        "\(agentName) is waiting on a question. Open \(title) to answer it.",
+                        transcript: nil)
                     return
                 default:
                     continue
@@ -254,7 +275,8 @@ struct TaskComposerView: View {
                 // screen exists to avoid, so it says so instead.
                 phase = .failed(
                     "\(agentName) was not ready within a minute. Nothing was sent — "
-                    + "open \(title) to check on it.")
+                        + "open \(title) to check on it.",
+                    transcript: nil)
                 return
             }
 
@@ -268,8 +290,8 @@ struct TaskComposerView: View {
                 try await connection.writeRaw(terminal: terminalID, hex: "0d")
             } catch {
                 phase = .failed(
-                    "Started \(agentName), but could not send the task: "
-                    + error.localizedDescription)
+                    "Started \(agentName), but couldn’t send the task.",
+                    transcript: error.localizedDescription)
                 return
             }
 

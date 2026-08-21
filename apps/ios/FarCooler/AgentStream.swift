@@ -15,7 +15,23 @@ import Foundation
 @MainActor
 final class AgentStream: ObservableObject {
     @Published private(set) var transcript = Transcript()
-    @Published private(set) var connectionError: String?
+
+    /// Why this pane is not showing a conversation: a sentence this app wrote,
+    /// and — only where it has no account of its own — the core's own words.
+    ///
+    /// Two fields rather than one string, because one string is how the core's
+    /// words came to be rendered as the app's. Every assignment below but one
+    /// is a sentence somebody wrote; the last is `localizedDescription`, and it
+    /// went into the same `Text` under the same headline as the others, so
+    /// there was no way to read it as anything but Far Cooler talking. Kept,
+    /// because for a runner that cannot be reached it is the only diagnosis
+    /// there is — it goes in a `DetailBox` now, where output goes.
+    struct Trouble: Equatable {
+        let sentence: String
+        var transcript: String?
+    }
+
+    @Published private(set) var connectionError: Trouble?
 
     private let terminal: String
     private let core: ClientCore
@@ -107,8 +123,10 @@ final class AgentStream: ObservableObject {
             // is not: it is a pane that has no shim behind it, and the two want
             // different words.
             if batch.epoch == 0 && batch.events.isEmpty && transcript.rows.isEmpty {
-                connectionError =
-                    "No agent session on pane \(terminal.prefix(8)) yet. It may still be starting."
+                connectionError = Trouble(
+                    sentence:
+                        "No agent session on pane \(terminal.prefix(8)) yet. "
+                        + "It may still be starting.")
                 return
             }
 
@@ -153,9 +171,18 @@ final class AgentStream: ObservableObject {
             // reconnecting; this pane's job is to say so and then be quiet
             // about it, which is what clearing on the next good batch does.
             if let core = error as? ClientCore.CoreError, case .disconnected = core {
-                connectionError = "The connection to this runner dropped. Reconnecting…"
+                connectionError = Trouble(
+                    sentence: "The connection to this runner dropped. Reconnecting…")
             } else {
-                connectionError = error.localizedDescription
+                // The one arm with nothing written about it, so the sentence
+                // says only what is known — that the read did not finish — and
+                // the words themselves go in the box below it. Naming a cause
+                // here would be inventing one: from this side of an ssh link
+                // the cause is unknowable, and a guess sends somebody to change
+                // a setting that was never the problem. See `Enrollment.note`.
+                connectionError = Trouble(
+                    sentence: "The request that reads it didn’t finish.",
+                    transcript: error.localizedDescription)
             }
         }
     }

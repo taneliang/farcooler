@@ -30,7 +30,9 @@ final class TerminalSession: ObservableObject {
     enum Phase: Equatable {
         case connecting
         case notLive
-        case failed(String)
+        /// A sentence this app wrote, and — where it has none of its own — the
+        /// host's answer to put under it. See `humanFailure(_:)`.
+        case failed(String, transcript: String?)
         case live
     }
 
@@ -1213,7 +1215,11 @@ final class TerminalSession: ObservableObject {
     private func render(_ response: ScreenResponse) {
         revision = response.revision
         guard let bytes = Data(base64Encoded: response.contents) else {
-            phase = .failed("The host sent a screen this device could not decode.")
+            // This app's own finding, not the host's: the base64 did not
+            // decode here. There is no transcript, because nothing said
+            // anything — the bytes simply were not what they claimed to be.
+            phase = .failed(
+                "The host sent a screen this device could not decode.", transcript: nil)
             return
         }
         let emulator = VTCore(columns: response.columns, rows: response.rows)
@@ -1322,7 +1328,7 @@ final class TerminalSession: ObservableObject {
     /// "come back later", the other is "something is wrong".
     private func report(_ error: Error) {
         let message = error.localizedDescription
-        phase = message == "resource not found" ? .notLive : .failed(Self.humanFailure(message))
+        phase = message == "resource not found" ? .notLive : Self.humanFailure(message)
     }
 
     /// What actually goes under "Could not load".
@@ -1340,13 +1346,26 @@ final class TerminalSession: ObservableObject {
     /// (see `farcooler_client_stream_start`). One rule both paths can use beats
     /// a typed check here and an untyped one six lines away that drift apart.
     ///
-    /// Everything else is passed through. A message from the host is the
-    /// host's to word, and rewriting all of them into one apology would throw
-    /// away the only clue a real failure carries.
-    private static func humanFailure(_ message: String) -> String {
+    /// Everything else is KEPT, whole. A message from the host is the host's
+    /// to word, and rewriting all of them into one apology would throw away
+    /// the only clue a real failure carries.
+    ///
+    /// It is no longer kept in the sentence's place, though. Passing it through
+    /// as the phase's only string put the host's fragment under a headline this
+    /// app wrote, in the app's own face, with nothing to mark where Far Cooler
+    /// stopped speaking — see `TerminalView.phaseContent`, which now draws the
+    /// sentence as prose and the transcript in a `DetailBox`. The Mac's
+    /// `ChangesPane` made the same move for the same string.
+    ///
+    /// The sentence says only what this side knows: the read did not finish. No
+    /// cause is named, because from here the cause is unknowable and a guess
+    /// sends somebody to change a setting that was never the problem — see
+    /// `Enrollment.note(about:outcome:)` — and no retry is promised, because
+    /// nothing here performs one.
+    private static func humanFailure(_ message: String) -> Phase {
         message == "not connected"
-            ? "The connection to this runner dropped. Reconnecting…"
-            : message
+            ? .failed("The connection to this runner dropped. Reconnecting…", transcript: nil)
+            : .failed("The request that reads this pane didn’t finish.", transcript: message)
     }
 
     /// Send typed text. Each scalar is encoded on its own so a Ctrl modifier —
