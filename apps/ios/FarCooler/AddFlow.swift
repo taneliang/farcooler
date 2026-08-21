@@ -176,9 +176,11 @@ struct AddView: View {
 
     /// "iPhone" or "iPad", because the sentence is about the object in the
     /// reader's hand and "device" is what a protocol calls it.
-    static var deviceKind: String {
-        UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
-    }
+    ///
+    /// Forwarded, not computed. `DeviceKind` lives in AgentKit because the
+    /// widget extension writes the same sentences and cannot see this file; a
+    /// second idiom check here would be the second spelling waiting to happen.
+    static var deviceKind: String { DeviceKind.current }
 }
 
 /// One screen of the add flow. `Hashable` because the stack is driven by value.
@@ -408,36 +410,67 @@ private struct RunnerAddressStep: View {
     @State private var port = "22"
     @State private var copied = false
 
-    private var publicKey: String {
-        Identity.publicKey ?? "Far Cooler couldn’t make a key for this \(AddView.deviceKind)."
-    }
+    /// Nil when there is none, and the step says so instead of standing in a
+    /// sentence for one.
+    ///
+    /// It used to substitute an apology, which put English prose exactly where
+    /// a public key goes — two rows above
+    /// `echo '<paste>' >> ~/.ssh/authorized_keys` and beside an enabled **Copy
+    /// Public Key**. The obvious next move copied that apology into a runner’s
+    /// `authorized_keys`.
+    private var publicKey: String? { Identity.publicKey }
 
     private var isValid: Bool {
-        !address.trimmingCharacters(in: .whitespaces).isEmpty
+        // A missing key is not a form waiting to be filled in. The runner has
+        // no way to let this device in, so an address buys nothing — it would
+        // only add a runner that every connection is refused by.
+        publicKey != nil
+            && !address.trimmingCharacters(in: .whitespaces).isEmpty
             && !user.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
         Form {
             Section {
-                Text(publicKey)
-                    .font(.system(.footnote, design: .monospaced))
-                    .textSelection(.enabled)
-                Button {
-                    UIPasteboard.general.string = publicKey
-                    copied = true
-                } label: {
-                    Label(copied ? "Copied" : "Copy Public Key", systemImage: copied ? "checkmark" : "doc.on.doc")
+                // Everything in here is about ONE key, so all of it is behind
+                // the key existing: the copy button and the `echo` line are a
+                // pair, and offering either without a key to put in it invites
+                // the paste that this whole guard exists to prevent.
+                if let publicKey {
+                    Text(publicKey)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                    Button {
+                        UIPasteboard.general.string = publicKey
+                        copied = true
+                    } label: {
+                        Label(copied ? "Copied" : "Copy Public Key", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                    Text("echo '<paste>' >> ~/.ssh/authorized_keys")
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                } else {
+                    // No cause and no promised retry, deliberately: this side
+                    // knows only that key derivation returned nothing.
+                    Text("Far Cooler couldn’t make a key for this \(AddView.deviceKind).")
+                        .foregroundStyle(.secondary)
                 }
-                Text("echo '<paste>' >> ~/.ssh/authorized_keys")
-                    .font(.system(.footnote, design: .monospaced))
-                    .textSelection(.enabled)
             } header: {
-                Text("1. Put this key on the runner")
-            } footer: {
                 Text(
-                    "The private key never leaves this \(AddView.deviceKind). "
-                        + "To revoke access later, delete the line from authorized_keys."
+                    publicKey == nil
+                        ? "1. No key to put on the runner"
+                        : "1. Put this key on the runner"
+                )
+            } footer: {
+                // The second half is why **Add Runner** is off, said where the
+                // reason is rather than beside a button that cannot explain
+                // itself.
+                Text(
+                    publicKey == nil
+                        ? "A runner can only let this \(AddView.deviceKind) in by its key, "
+                            + "so there’s nothing to add until there is one."
+                        : "The private key never leaves this \(AddView.deviceKind). "
+                            + "To revoke access later, delete the line from authorized_keys."
                 )
             }
 

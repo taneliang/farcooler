@@ -1,6 +1,36 @@
 #if os(iOS)
     import AppIntents
     import Foundation
+    import UIKit
+
+    /// "iPhone" or "iPad" — the object in the reader’s hand, named, because
+    /// "device" is what a protocol calls it.
+    ///
+    /// In AgentKit rather than in the app because this file is compiled into
+    /// TWO binaries and both write sentences about the device: the app, through
+    /// `WatchLinkHost`, and the widget extension, through the fallback in
+    /// `AnswerPermissionDelivery` below, which is the one that runs when a card
+    /// is tapped somewhere that cannot deliver it. The extension can see
+    /// nothing under `apps/ios/FarCooler/`.
+    ///
+    /// **`AddView.deviceKind` forwards to this rather than checking the idiom
+    /// again.** One implementation, so the add flow and a lock screen card
+    /// cannot come to call the same object two things. That is the bug class
+    /// the three copies of "Its last turn didn’t finish" were unified for:
+    /// one person is on the receiving end of both surfaces, and a disagreement
+    /// between them is one you only see by being there.
+    ///
+    /// `@MainActor` because `UIDevice` is — the SDK marks the class
+    /// `NS_SWIFT_UI_ACTOR`, so this is not a choice made here. Every sentence
+    /// that needs it is written on the main actor already, with one exception
+    /// named where it is: `WatchLinkHost`’s `WCSessionDelegate` methods, which
+    /// are `nonisolated` and speak only to a watch.
+    @MainActor
+    public enum DeviceKind {
+        public static var current: String {
+            UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        }
+    }
 
     /// Answering one permission with one of the answers the agent offered,
     /// from a surface that cannot reach a runner.
@@ -122,7 +152,8 @@
                     .settling(
                         terminal: intent.terminal, request: intent.request,
                         outcome: .nothingSent,
-                        message: "Your iPhone couldn’t take that, so nothing was sent.",
+                        message:
+                            "Your \(DeviceKind.current) couldn’t take that, so nothing was sent.",
                         at: Date())
                 }
                 return

@@ -171,6 +171,13 @@ final class WatchLinkHost: NSObject {
 
     /// The three requests, each performed through the code path the phone's own
     /// UI uses.
+    ///
+    /// Its sentences are read on a WRIST and still name the device by
+    /// `DeviceKind` rather than by a literal. On this path the two are the same
+    /// answer — `WCSession.isSupported()` is false on iPad, so `start()` never
+    /// activates a session there and nothing below ever runs on one — and
+    /// resolving it keeps ONE spelling of the device across the watch link and
+    /// the lock screen card, which `answerFromGlance` also feeds from here.
     private func perform(_ request: WatchRequest) async -> WatchReply {
         guard let connection else {
             // No `FleetView` on screen means no `Connection` object at all —
@@ -180,7 +187,7 @@ final class WatchLinkHost: NSObject {
             // Cooler" sends them looking for an app that is not on their
             // phone, the same mistake already fixed once in the Live
             // Activity and once in the widget.
-            return .failed("Open \(appName) on your iPhone, then try again.")
+            return .failed("Open \(appName) on your \(DeviceKind.current), then try again.")
         }
         guard await ready(connection, within: Self.connectBudget) else {
             // Named apart because it is the one unreachable state a person can
@@ -188,9 +195,9 @@ final class WatchLinkHost: NSObject {
             // to check their Wi-Fi instead of to the fingerprint waiting on
             // their phone.
             if case .needsApproval = connection.phase {
-                return .failed("Approve this runner on your iPhone first.")
+                return .failed("Approve this runner on your \(DeviceKind.current) first.")
             }
-            return .failed("Your iPhone can’t reach that runner right now.")
+            return .failed("Your \(DeviceKind.current) can’t reach that runner right now.")
         }
 
         switch request {
@@ -348,7 +355,8 @@ final class WatchLinkHost: NSObject {
             // so an agent that IS waiting is the likely case here rather than
             // the edge one. `.permission(nil)` is kept for what it means — the
             // replay finished and there was nothing pending.
-            return .failed("Couldn’t read that agent in time. Open it on your iPhone.")
+            return .failed(
+                "Couldn’t read that agent in time. Open it on your \(DeviceKind.current).")
         } catch {
             return .failed(Self.reason(error, doing: "check that agent"))
         }
@@ -501,14 +509,20 @@ final class WatchLinkHost: NSObject {
             // `appName`, not a literal: a canary build is named "FC Canary" and
             // telling somebody running it to open "Far Cooler" sends them
             // looking for an app that is not on their phone.
-            await settle(intent, .nothingSent, "Open \(appName) on your iPhone, then try again.")
+            await settle(
+                intent, .nothingSent,
+                "Open \(appName) on your \(DeviceKind.current), then try again.")
             return
         }
         guard await ready(connection, within: Self.glanceConnectBudget) else {
             if case .needsApproval = connection.phase {
-                await settle(intent, .nothingSent, "Approve this runner on your iPhone first.")
+                await settle(
+                    intent, .nothingSent,
+                    "Approve this runner on your \(DeviceKind.current) first.")
             } else {
-                await settle(intent, .nothingSent, "Your iPhone can’t reach that runner right now.")
+                await settle(
+                    intent, .nothingSent,
+                    "Your \(DeviceKind.current) can’t reach that runner right now.")
             }
             return
         }
@@ -552,7 +566,8 @@ final class WatchLinkHost: NSObject {
             // contradicting itself. It establishes nothing about what the agent
             // is waiting on, so it must not be treated as a match.
             await settle(
-                intent, .nothingSent, "Your iPhone couldn’t read that agent’s conversation.")
+                intent, .nothingSent,
+                "Your \(DeviceKind.current) couldn’t read that agent’s conversation.")
             return
         }
 
@@ -639,7 +654,10 @@ final class WatchLinkHost: NSObject {
         if let core = error as? ClientCore.CoreError {
             switch core {
             case .notStarted:
-                return (.nothingSent, "Your iPhone couldn’t start its connection. Nothing was sent.")
+                return (
+                    .nothingSent,
+                    "Your \(DeviceKind.current) couldn’t start its connection. Nothing was sent."
+                )
             case let .rejected(message):
                 // The daemon answers `NotFound` for a terminal it no longer has,
                 // which is worth its own sentence: nothing is wrong with the
@@ -656,8 +674,8 @@ final class WatchLinkHost: NSObject {
         }
         return (
             .unsure,
-            "Your iPhone lost touch with the runner. It may still have gone through — "
-                + "check before trying again."
+            "Your \(DeviceKind.current) lost touch with the runner. It may still have "
+                + "gone through — check before trying again."
         )
     }
 
@@ -794,12 +812,12 @@ final class WatchLinkHost: NSObject {
     /// chose. So it says what is known — no answer — and what to do about it.
     private static func reason(_ error: Error, doing what: String) -> String {
         if error is Timeout {
-            return "Your iPhone took too long. It may still have gone through — "
+            return "Your \(DeviceKind.current) took too long. It may still have gone through — "
                 + "check before trying again."
         }
         let text = error.localizedDescription.lowercased()
         if text.contains("not found") { return "That agent isn’t running anymore." }
-        return "Couldn’t \(what). Your iPhone lost touch with the runner."
+        return "Couldn’t \(what). Your \(DeviceKind.current) lost touch with the runner."
     }
 }
 
@@ -839,6 +857,15 @@ extension WatchLinkHost: WCSessionDelegate {
             // phone. Answered rather than dropped, and answered as a failure
             // rather than as a success for something that did not happen.
             // `appName`, not a literal — see `perform`'s `.failed` above.
+            //
+            // "iPhone" IS a literal here, and it is the one place in this file
+            // that keeps one. This method is `nonisolated` and `UIDevice` is
+            // main-actor-isolated in the SDK, so `DeviceKind` cannot be read
+            // from it — and `replyHandler` has a watch holding a continuation
+            // open, so hopping actors to read a noun is not a trade worth
+            // making. It is also the one sentence that is provably about an
+            // iPhone: a `WCSessionDelegate` callback only arrives on a device
+            // where `WCSession.isSupported()` was true, which iPad is not.
             replyHandler(WatchReply.failed("Update \(appName) on your iPhone.").dictionary)
             return
         }

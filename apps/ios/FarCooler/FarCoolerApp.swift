@@ -225,7 +225,14 @@ struct AuthorizeView: View {
     /// its answer — so the route to it only appears with one.
     var runners: RunnerStore?
 
-    private var publicKey: String { Identity.publicKey ?? "could not generate a key" }
+    /// Nil when there is none, and the screen says so rather than standing a
+    /// sentence in where a key goes.
+    ///
+    /// It used to substitute one, two rows above
+    /// `echo '<paste>' >> ~/.ssh/authorized_keys` and beside an enabled **Copy
+    /// Public Key**. The obvious next move copied that sentence into a
+    /// runner’s `authorized_keys`.
+    private var publicKey: String? { Identity.publicKey }
 
     var body: some View {
         ScrollView {
@@ -241,45 +248,74 @@ struct AuthorizeView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    // Both roads off this screen carry the same key — the code
+                    // this device shows IS its public key — so with none there
+                    // is nothing to enroll, and following this would only push a
+                    // refusal. The reason is in the sentence under it, since a
+                    // disabled button cannot give one.
+                    .disabled(publicKey == nil)
 
                     Text(
-                        "Use a device you’ve already added to choose which runners this device "
-                        + "can access. Or add its public key manually:"
+                        publicKey == nil
+                            ? "The code carries this \(AddView.deviceKind)’s key, so it can’t be "
+                                + "shown without one."
+                            : "Use a device you’ve already added to choose which runners this device "
+                                + "can access. Or add its public key manually:"
                     )
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 }
 
-                Text("Add this device’s public key to the runner:")
-                    .font(.callout)
+                Text(
+                    publicKey == nil
+                        ? "No key to add to the runner."
+                        : "Add this device’s public key to the runner:"
+                )
+                .font(.callout)
 
-                Text(publicKey)
-                    .font(.system(.footnote, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(12)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                // All of this is about ONE key, so all of it is behind the key
+                // existing: the copy button and the `echo` line are a pair, and
+                // offering either without a key to put in it invites the paste
+                // this guard is here to prevent.
+                if let publicKey {
+                    Text(publicKey)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                Button {
-                    UIPasteboard.general.string = publicKey
-                } label: {
-                    Label("Copy Public Key", systemImage: "doc.on.doc")
+                    Button {
+                        UIPasteboard.general.string = publicKey
+                    } label: {
+                        Label("Copy Public Key", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Text("On the runner, run:")
+                        .font(.callout)
+                        .padding(.top, 8)
+                    Text("echo '<paste>' >> ~/.ssh/authorized_keys")
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                } else {
+                    // No cause and no promised retry, deliberately: this side
+                    // knows only that key derivation returned nothing. Plain
+                    // text, not the monospaced box — the box is where key
+                    // material goes, and prose in it reads as a key.
+                    Text("Far Cooler couldn’t make a key for this \(AddView.deviceKind).")
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderedProminent)
-
-                Text("On the runner, run:")
-                    .font(.callout)
-                    .padding(.top, 8)
-                Text("echo '<paste>' >> ~/.ssh/authorized_keys")
-                    .font(.system(.footnote, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(12)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
 
                 Text(
-                    "The private key stays on this device. To revoke access, delete the line "
-                    + "from authorized_keys."
+                    publicKey == nil
+                        ? "A runner can only let this \(AddView.deviceKind) in by its key, "
+                            + "so there’s nothing to authorize until there is one."
+                        : "The private key stays on this device. To revoke access, delete the line "
+                            + "from authorized_keys."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)

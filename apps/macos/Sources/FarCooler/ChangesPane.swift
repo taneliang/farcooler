@@ -90,6 +90,14 @@ struct ChangesPane: View {
 
     /// An older runner cannot do this at all, and that is worth saying rather
     /// than rendering as a worktree with no changes.
+    ///
+    /// The other case says a sentence of its own and puts the CLI’s words in a
+    /// `DetailBox` underneath — the shape `DaemonUpdateCard` and
+    /// `RunnersSettings` already use for exactly this. `changes.error` is
+    /// `farcooler`’s stderr, and stderr set as body text under a heading the
+    /// app wrote is the app appearing to say it. Not dropped: an unreachable
+    /// runner is diagnosed from those words and from nothing else. Just put
+    /// where output goes rather than where prose does.
     private var problem: some View {
         let old = changes.client.changesSupported == false
         return VStack(alignment: .leading, spacing: 3) {
@@ -98,11 +106,17 @@ struct ChangesPane: View {
             Text(
                 old
                     ? "Its copy of Far Cooler is older than this. Update it in Settings › Runners."
-                    : (changes.error ?? "")
+                    : "The command that reads it didn’t finish."
             )
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            // Only where the app has no diagnosis of its own. The old-runner
+            // case names both the cause and the fix, and a transcript under a
+            // sentence that already answers the question is noise.
+            if !old, let words = changes.error, !words.isEmpty {
+                DetailBox(text: words)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(9)
