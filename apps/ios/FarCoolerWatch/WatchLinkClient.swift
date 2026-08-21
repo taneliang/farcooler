@@ -58,11 +58,12 @@ extension FleetClient {
 ///     if it is not running, and which carries a reply. Nothing here is
 ///     fire-and-forget: a prompt that did not arrive has to say so.
 ///
-/// Every context received is written through `SnapshotStore` before it is
-/// published, so the complication reads the same bytes this screen does. Two
-/// copies of the fleet on one watch is two answers to "what is that agent
-/// doing", and the whole point of a projection computed once on the host is
-/// that there is only ever one.
+/// Every context received is written through `SnapshotStore`, so the
+/// complication reads the same bytes this screen does. Two copies of the fleet
+/// on one watch is two answers to "what is that agent doing", and the whole
+/// point of a projection computed once on the host is that there is only ever
+/// one. The write happens in `SnapshotSink`, off this actor — see `receive`
+/// for what that changed and what it deliberately did not.
 @MainActor
 final class WatchLinkClient: NSObject, ObservableObject, FleetClient {
     /// One per app. `WCSession.default` is a singleton with ONE delegate, so a
@@ -78,6 +79,15 @@ final class WatchLinkClient: NSObject, ObservableObject, FleetClient {
 
     private let session = WCSession.default
     private var started = false
+
+    /// Where an arriving snapshot is written to disk and where the
+    /// complication is reloaded from — neither on this actor. See
+    /// `SnapshotSink`.
+    private let sink = SnapshotSink()
+
+    /// How many snapshots have been handed to `sink`. It is what keeps them in
+    /// order once they leave this actor; see `SnapshotSink.store`.
+    private var received: UInt64 = 0
 
     private override init() { super.init() }
 
@@ -228,17 +238,66 @@ final class WatchLinkClient: NSObject, ObservableObject, FleetClient {
     /// `isReachable` — which no test can fake, and which is the one thing this
     /// file is uniquely able to know.
     private func recompute() {
-        state = .resolve(snapshot: snapshot, reachable: session.isReachable)
+        let next = WatchState.resolve(snapshot: snapshot, reachable: session.isReachable)
+        // Assigned only when it differs, because two of the three callers
+        // routinely call this with nothing having changed.
+        // `sessionReachabilityDidChange` is the plain case: WatchConnectivity
+        // fires it whenever it re-evaluates reachability, including when the
+        // answer is the same one as before, and a `@Published` assignment is a
+        // change as far as SwiftUI is concerned whether or not the VALUE
+        // changed. Every screen observing this client then rebuilds its body —
+        // `FleetListView`, the detail screen behind it, and the `TimelineView`
+        // schedules both of them now derive from the snapshot — for a
+        // reachability callback that said what the last one said.
+        //
+        // `WatchState` is `Equatable` and its equality is the snapshot's, so
+        // this is a deep compare of the fleet. That is the same compare
+        // `WatchLinkHost.send` already makes on the phone before every push,
+        // and it is bounded by the fleet's size; a body evaluation is not.
+        guard next != state else { return }
+        state = next
     }
 
-    /// A received snapshot, stored where every watch surface reads it.
+    /// A received snapshot, published to the screens and handed to the sink
+    /// that stores it.
     ///
-    /// The write happens before `state` is published, so the complication and
-    /// the app can never be one update apart — and `reloadAllTimelines` is
-    /// here because a complication does not poll. Without it the widget keeps
-    /// drawing the previous snapshot until the system next decides to refresh
-    /// it, which can be an hour: a wrist that says "working" long after the
-    /// agent blocked. It is a no-op until Task 6 adds a widget to reload.
+    /// **Neither the disk write nor the complication reload happens here any
+    /// more.** Both used to run inline on this actor, on every context that
+    /// landed, and `WatchLinkHost.send` lands one every three seconds for as
+    /// long as any agent is working — its own comment says why, and says the
+    /// cadence is right: `line` and `feed` are part of `Agent`'s equality and
+    /// churn on nearly every poll, so the "unchanged agents are not resent"
+    /// guard buys an idle fleet and nothing else. What that cadence landed on
+    /// was a JSON encode, an `.atomic` file replace, and a cross-process
+    /// `reloadAllTimelines`, three seconds apart, on the actor drawing the
+    /// fleet list. The cadence stays; `SnapshotSink` is where the three now
+    /// run.
+    ///
+    /// One ordering claim moved and one was dropped, and the difference
+    /// matters:
+    ///
+    ///   - **Kept: the file is written before the complication is asked to
+    ///     reload.** `SnapshotSink.store` does the two in that order on one
+    ///     serialized executor. Reversed, the extension opens the file, finds
+    ///     the PREVIOUS snapshot, and draws it — a reload that spends a
+    ///     watchOS budget to render exactly what was already on the face.
+    ///   - **Dropped: that the write precedes the publish.** This used to say
+    ///     "the complication and the app can never be one update apart",
+    ///     which was a true description of two adjacent lines rather than a
+    ///     rule anything depended on. It cannot survive moving the write off
+    ///     the drawing actor, and nothing needs it to: the complication is a
+    ///     separate process that reads the file only when it is reloaded, so
+    ///     the window this opens is between a screen that is on and a face
+    ///     that is not being redrawn. `reloadAllTimelines` is throttled now in
+    ///     any case, so the two surfaces are already allowed to be a moment
+    ///     apart — see `SnapshotSink.Complication`.
+    ///
+    /// `seq` is assigned here, on the actor where the deliveries are already
+    /// in order, because the sink is not that actor: two `Task`s awaiting the
+    /// same actor are not promised to run in the order they were created, and
+    /// a stale snapshot landing in the file after a fresh one would leave the
+    /// face an update behind until the next context, up to thirty seconds
+    /// later.
     ///
     /// Takes a decoded `FleetSnapshot` rather than the raw context, and that is
     /// not only tidiness: `[String: Any]` is not `Sendable`, so handing the
@@ -247,8 +306,9 @@ final class WatchLinkClient: NSObject, ObservableObject, FleetClient {
     /// decoding on the delegate's own queue is both sound and less work for the
     /// actor that is drawing.
     private func receive(_ snapshot: FleetSnapshot) {
-        SnapshotStore.write(snapshot)
-        WidgetCenter.shared.reloadAllTimelines()
+        received += 1
+        let seq = received
+        Task { await sink.store(snapshot, seq: seq) }
         adopt(snapshot)
     }
 
@@ -277,6 +337,150 @@ final class WatchLinkClient: NSObject, ObservableObject, FleetClient {
     private nonisolated static func decode(_ context: [String: Any]) -> FleetSnapshot? {
         guard let data = context[snapshotKey] as? Data else { return nil }
         return try? JSONDecoder().decode(FleetSnapshot.self, from: data)
+    }
+}
+
+/// The two things an arriving snapshot costs, done off the actor that is
+/// drawing.
+///
+/// An `actor` rather than a detached task per snapshot, because both jobs carry
+/// state that has to be consistent with the other: what is in the file, and
+/// what the complication was last reloaded for. A task per snapshot would give
+/// each of them a copy of that state.
+///
+/// It is deliberately not `@MainActor`. `SnapshotStore.write` JSON-encodes the
+/// fleet and does a `.atomic` replace — a temporary file, a write, and a rename
+/// — and `reloadAllTimelines` is a cross-process call into the widget daemon.
+/// Neither is a computation the screen needs the answer to, and both used to
+/// run on the actor drawing the fleet list at `WatchLinkHost`'s three-second
+/// push cadence.
+///
+/// The atomic write is kept exactly as it was. A half-written snapshot is a
+/// surface showing a state that was never true, which is the one thing none of
+/// these surfaces may do — `SnapshotStore`'s own comment makes the same point,
+/// and moving the call to another executor does not change what it has to be.
+private actor SnapshotSink {
+    /// The highest `seq` written so far, and the whole of the ordering
+    /// guarantee. See `store`.
+    private var stored: UInt64 = 0
+
+    /// What the complication was last reloaded FOR, or nil before the first
+    /// reload of this launch.
+    private var reloaded: Complication?
+
+    /// Write the fleet, then reload the complication if it would draw
+    /// something different.
+    ///
+    /// Ordered by `seq` rather than by arrival. Jobs enqueued on an actor are
+    /// not promised to run in the order they were enqueued, and this one is
+    /// enqueued from `WatchLinkClient.receive` where the deliveries genuinely
+    /// are ordered. An older snapshot overwriting a newer one leaves a file
+    /// that is not broken but is a whole fleet out of date, and nothing would
+    /// correct it until the next context arrives — up to thirty seconds
+    /// later, and longer than that once the phone goes out of range.
+    ///
+    /// `capturedAt` is deliberately NOT the thing compared. It comes off the
+    /// phone's clock, and a clock that stepped backwards would block every
+    /// write until it caught up — a complication frozen for as long as the
+    /// skew lasts. A counter this process assigns cannot do that.
+    func store(_ snapshot: FleetSnapshot, seq: UInt64) {
+        guard seq > stored else { return }
+        stored = seq
+        SnapshotStore.write(snapshot)
+
+        // Before the reload, and that order is the one rule this file inherited
+        // from the two lines it replaced: the extension opens the file when it
+        // is reloaded, so a reload asked for first draws the previous snapshot
+        // and spends a watchOS refresh budget rendering what was already there.
+        let complication = Complication(snapshot)
+        guard complication != reloaded else { return }
+        reloaded = complication
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// Everything `WatchFleetWidget` can actually put on a face, and nothing
+    /// else off the snapshot.
+    ///
+    /// **This is the throttle, and it is a change test rather than a clock.**
+    /// The two candidates were "reload when what the complication draws
+    /// changes" and "reload at most every thirty seconds"; this is the first,
+    /// and the reason is what the surface is for. A `blocked` agent is the one
+    /// thing somebody wants off a wrist without asking, and a floor would hold
+    /// that back by up to thirty seconds on the one transition the whole
+    /// feature exists to deliver. A change test costs that nothing: the reload
+    /// still goes out the instant the top agent changes, and the case it
+    /// removes — an agent working away with `line` and `feed` churning under a
+    /// headline that has not moved — is precisely the one with nothing to show
+    /// for it.
+    ///
+    /// No periodic reload is needed underneath it. The complication's timeline
+    /// carries one entry per moment in `stalenessMoments`, so it stops
+    /// asserting `working` on its own with nothing arriving — that is what
+    /// `WatchFleetProvider.getTimeline` builds and why its policy is `.never`.
+    ///
+    /// The fields are listed one at a time instead of comparing `Agent`
+    /// values, and that IS the throttle rather than fussiness: `feed` and
+    /// `rank` are part of `Agent`'s equality and `feed` churns on nearly every
+    /// poll, so comparing agents would find a difference every three seconds
+    /// and suppress nothing. `feed` reaches no watch face — no family here
+    /// draws it — so a change to it is not a change to this surface.
+    private struct Complication: Equatable {
+        /// `ranked.first`'s fields — the one agent every family renders. The
+        /// four text fields are all of `agentTitle`'s fallback ladder, kept as
+        /// raw fields so this does not become a fourth copy of the ladder
+        /// itself.
+        let id: String?
+        let glyph: String
+        let headline: String
+        let line: String
+        let label: String
+        let status: String
+
+        /// The number `Circular` draws.
+        let needingYou: Int
+
+        /// `WatchFleetEntry.hasSnapshot`'s epoch test, which changes what the
+        /// text families SAY: "Open <app>" before anything has ever been
+        /// written, "No agents" after a real capture came back empty. Needed
+        /// on its own because that is the one transition every other field
+        /// here can sit through unchanged — a first snapshot with no agents in
+        /// it leaves all of them empty and the count at zero.
+        let hasSnapshot: Bool
+
+        /// When this snapshot stops vouching for each agent, which is what the
+        /// timeline's entries are. A snapshot whose expiries have moved has to
+        /// reload even when the top agent reads identically, or the face keeps
+        /// a timeline built for the previous one.
+        ///
+        /// Measured from `capturedAt` rather than from `Date()` so that one
+        /// snapshot always yields one answer here — a wall clock would make
+        /// this differ from itself between two calls and defeat the compare.
+        ///
+        /// It is also the one field that can churn: a daemon too old to send
+        /// `activitySince` leaves `activityChangedAt` nil, and
+        /// `stalenessMoments` then falls back to `capturedAt`, which moves on
+        /// every poll. That fleet reloads at the push cadence, exactly as it
+        /// did before this throttle existed. Nothing is lost, and the fix is
+        /// on the host rather than here.
+        let moments: [Date]
+
+        init(_ snapshot: FleetSnapshot) {
+            // The host's order, not ours — `rank` with the id breaking ties,
+            // which is the same `ranked.first` the complication itself asks
+            // for. Sorting here is not a second definition of urgency; it is
+            // the same call, made once per snapshot on this executor instead
+            // of on the one that draws.
+            let top = snapshot.ranked.first
+            id = top?.id
+            glyph = top?.glyph ?? ""
+            headline = top?.headline ?? ""
+            line = top?.line ?? ""
+            label = top?.label ?? ""
+            status = top?.status ?? ""
+            needingYou = snapshot.needingYou
+            hasSnapshot = snapshot.capturedAt.timeIntervalSince1970 > 0
+            moments = snapshot.stalenessMoments(after: snapshot.capturedAt)
+        }
     }
 }
 

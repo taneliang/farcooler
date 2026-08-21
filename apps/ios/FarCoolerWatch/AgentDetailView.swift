@@ -26,6 +26,23 @@ struct AgentDetailView<Client: FleetClient>: View {
         client.state.snapshot?.agents.first { $0.id == terminal }
     }
 
+    /// When this screen must redraw, computed when a snapshot lands rather than
+    /// while one is being drawn.
+    ///
+    /// This was `.explicit([Date.now] + snapshot.stalenessMoments(after: .now))`
+    /// inline in `body`, which is a schedule the `TimelineView` has never seen
+    /// before on every single body evaluation: it drops the timeline it is
+    /// running, starts the new one, and that renders the body again. Navigating
+    /// into this screen is where that was worst, because pushing it evaluates
+    /// the body while the transition is animating.
+    ///
+    /// The list behind it holds the identical schedule for the identical
+    /// reason, and now literally the identical one — `refreshes(for:from:)` in
+    /// `FleetListView.swift`, which is where the rule that `now` must lead is
+    /// written down. Two screens that have to stop vouching for an agent at one
+    /// instant should not each carry their own spelling of when that is.
+    @State private var schedule: [Date] = [.now]
+
     var body: some View {
         Group {
             if let agent, let snapshot = client.state.snapshot {
@@ -33,9 +50,7 @@ struct AgentDetailView<Client: FleetClient>: View {
                 // screen left open must stop asserting `working` at the moment
                 // the snapshot stops vouching for it, and no news will arrive to
                 // prompt that.
-                TimelineView(
-                    .explicit([Date.now] + snapshot.stalenessMoments(after: .now))
-                ) { context in
+                TimelineView(.explicit(schedule)) { context in
                     detail(agent, snapshot.confidence(in: agent, at: context.date))
                 }
                 .navigationTitle(agent.label)
@@ -48,6 +63,9 @@ struct AgentDetailView<Client: FleetClient>: View {
                     systemImage: "questionmark",
                     description: Text("This agent isn’t in the last fleet your iPhone sent."))
             }
+        }
+        .onChange(of: client.state.snapshot, initial: true) { _, snapshot in
+            schedule = refreshes(for: snapshot, from: .now)
         }
     }
 

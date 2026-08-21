@@ -18,17 +18,50 @@ import SwiftUI
 struct FleetListView<Client: FleetClient>: View {
     @ObservedObject var client: Client
 
+    /// When this screen must redraw, and the fleet in the order it draws them.
+    ///
+    /// **Both are derived from the snapshot and never from a render**, which is
+    /// the entire reason they are `@State` rather than expressions in `body`.
+    ///
+    /// The schedule was `.explicit(refreshes(for:from: .now))` written inline,
+    /// so every body evaluation built a schedule whose leading entry was a new
+    /// `.now`. A `TimelineView` handed a schedule it has not seen before
+    /// invalidates the one it was running and starts the next one, which
+    /// evaluates the body, which produces another new schedule: a loop with a
+    /// three-second push cadence feeding it. Computed once per snapshot, the
+    /// schedule holds still between snapshots, which is what an explicit
+    /// schedule is for.
+    ///
+    /// `rows` is `ranked`, which sorts the whole fleet and copies it into a new
+    /// array — every time `body` ran, for an order that can only change when a
+    /// snapshot does. `FleetSnapshot.ranked`'s own comment explains why the
+    /// sort is `(rank, id)` and why it must stay that; this changes how OFTEN
+    /// it is asked for and nothing about the answer.
+    ///
+    /// Seeded with `initial: true` so the first render has both, and updated
+    /// from `onChange`, which SwiftUI runs after the body that observed the
+    /// change. So a snapshot's first frame can draw the previous fleet's rows
+    /// against the new snapshot. That costs nothing that lasts — the state
+    /// write schedules another pass in the same update — and every row carries
+    /// its own text, so the worst a frame can show is an agent that was in the
+    /// fleet a moment ago.
+    @State private var schedule: [Date] = [.now]
+    @State private var rows: [FleetSnapshot.Agent] = []
+
     var body: some View {
         NavigationStack {
             // Every confidence question below is asked at `context.date` rather
             // than at `Date()`. See `refreshes(for:from:)` for why this screen
             // needs a clock of its own at all.
-            TimelineView(.explicit(Self.refreshes(for: client.state.snapshot, from: .now))) {
-                context in
+            TimelineView(.explicit(schedule)) { context in
                 content(at: context.date)
             }
             .navigationTitle("Agents")
             .watchRoutes(client: client)
+        }
+        .onChange(of: client.state.snapshot, initial: true) { _, snapshot in
+            schedule = refreshes(for: snapshot, from: .now)
+            rows = snapshot?.ranked ?? []
         }
     }
 
@@ -66,39 +99,21 @@ struct FleetListView<Client: FleetClient>: View {
             // Only when a real capture came back with nothing, which on this
             // surface is the only kind of capture there is. The widget's words,
             // deliberately.
-            if snapshot.agents.isEmpty {
+            //
+            // Asked of `rows` rather than of `snapshot.agents` so that the two
+            // cannot disagree on the one frame `rows` is a snapshot behind —
+            // see its declaration. They hold the same agents; this is only
+            // about which of the two a single render reads.
+            if rows.isEmpty {
                 Text("No agents").font(.headline).foregroundStyle(.secondary)
             }
-            ForEach(snapshot.ranked) { agent in
+            ForEach(rows) { agent in
                 NavigationLink(value: WatchRoute.agent(terminal: agent.id)) {
                     AgentRow(agent: agent, confidence: snapshot.confidence(in: agent, at: now))
                 }
             }
             if !snapshot.complete { PartialFooter() }
         }
-    }
-
-    /// When this screen must redraw with no news arriving.
-    ///
-    /// A watch app is not a widget, but it has the widget's problem: a screen
-    /// that re-renders only when a snapshot lands would keep asserting `working`
-    /// for an agent nobody has heard from in an hour, and the case this exists
-    /// for is precisely the one with no news in it — a phone out of range sends
-    /// nothing, so nothing would ever move this screen off what it last drew.
-    /// `stalenessMoments(after:)` is the same list `FleetProvider` builds its
-    /// timeline from, so a wrist and a lock screen stop vouching for an agent at
-    /// the same instant rather than at two definitions of it.
-    ///
-    /// `now` leads, always, so the schedule is never empty and always carries an
-    /// entry that has already arrived — an explicit schedule with no past date
-    /// has nothing to draw. Past the last moment nothing changes again, and the
-    /// schedule ending there is correct rather than a gap.
-    ///
-    /// No cap, unlike the widget's twelve. That cap is about serializing a whole
-    /// snapshot per entry into a process with a hard memory ceiling; this is an
-    /// array of dates inside the app that is already holding the fleet.
-    private static func refreshes(for snapshot: FleetSnapshot?, from now: Date) -> [Date] {
-        [now] + (snapshot?.stalenessMoments(after: now) ?? [])
     }
 }
 
@@ -212,6 +227,38 @@ extension View {
             }
         }
     }
+}
+
+/// When a screen must redraw with no news arriving.
+///
+/// A watch app is not a widget, but it has the widget's problem: a screen
+/// that re-renders only when a snapshot lands would keep asserting `working`
+/// for an agent nobody has heard from in an hour, and the case this exists
+/// for is precisely the one with no news in it — a phone out of range sends
+/// nothing, so nothing would ever move this screen off what it last drew.
+/// `stalenessMoments(after:)` is the same list `FleetProvider` builds its
+/// timeline from, so a wrist and a lock screen stop vouching for an agent at
+/// the same instant rather than at two definitions of it.
+///
+/// `now` leads, always, so the schedule is never empty and always carries an
+/// entry that has already arrived — an explicit schedule with no past date has
+/// nothing to draw. That is what makes it safe to compute this once per
+/// snapshot and hold it: the leading entry only gets further into the past,
+/// and a `TimelineView` wants exactly one of those. Past the last moment
+/// nothing changes again, and the schedule ending there is correct rather than
+/// a gap.
+///
+/// No cap, unlike the widget's twelve. That cap is about serializing a whole
+/// snapshot per entry into a process with a hard memory ceiling; this is an
+/// array of dates inside the app that is already holding the fleet.
+///
+/// At file scope rather than on `FleetListView`, alongside `agentTitle` and
+/// `stated` below and for their reason: `AgentDetailView` runs the same clock
+/// on the same snapshot, and it used to say so by rewriting the expression.
+/// Two screens that must go stale at one instant should not be two statements
+/// of when that is.
+func refreshes(for snapshot: FleetSnapshot?, from now: Date) -> [Date] {
+    [now] + (snapshot?.stalenessMoments(after: now) ?? [])
 }
 
 /// The one string a row uses to name an agent.

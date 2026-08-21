@@ -178,6 +178,24 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// agent every time the timeline reloads. Ranks do collide: two agents that
     /// entered the same tier in the same second get the same number, and so does
     /// every agent a push ranked while the app was closed.
+    ///
+    /// **It sorts and copies the fleet on every access, so a caller on a render
+    /// path holds the result rather than asking again.** A computed property
+    /// and not a cache, because the alternative is a stored one, and a stored
+    /// one on this type is a mutable box inside a `Sendable`, `Codable`,
+    /// `Equatable` value that crosses process and actor boundaries — with a
+    /// `didSet` on `agents` to invalidate it, a `CodingKeys` list to keep it
+    /// off the wire, and a hand-written `==` to keep it out of equality. That
+    /// is a great deal of machinery guarding a sort of at most a few dozen
+    /// agents, and every piece of it is a way for two surfaces to end up
+    /// ordering the fleet differently, which is the one thing `rank` is on the
+    /// wire to prevent.
+    ///
+    /// The answer changes only when `agents` does, so the place to hold it is
+    /// wherever a snapshot is adopted. `FleetListView` does that — its `rows`
+    /// is this list, recomputed when a snapshot lands instead of on every body
+    /// evaluation — and `SnapshotSink.Complication` asks for `ranked.first`
+    /// once per snapshot off the drawing actor.
     public var ranked: [Agent] {
         agents.sorted { ($0.rank, $0.id) < ($1.rank, $1.id) }
     }
