@@ -115,7 +115,7 @@ fun OnboardingScreen(
             Spacer(Modifier.height(8.dp))
             Text(
                 "Far Cooler runs coding agents on runners you already reach over SSH. " +
-                    "Put this device's key on one, then add its address.",
+                    "Put this device’s key on one, then add its address.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -185,7 +185,7 @@ fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text("Add this device's public key to the runner:")
+            Text("Add this device’s public key to the runner:")
             Mono(publicKey)
             Button(
                 onClick = { scope.launch { clipboard.writeText("Far Cooler device key", publicKey) } },
@@ -353,7 +353,7 @@ fun SettingsScreen(
             HorizontalDivider()
             SectionTitle("Theme")
             Text(
-                "Sets the terminal's colors and the app's.",
+                "Sets the terminal’s colors and the app’s.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

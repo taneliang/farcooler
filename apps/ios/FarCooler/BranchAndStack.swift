@@ -122,10 +122,10 @@ struct StackView: View {
                         Text("Reading…").foregroundStyle(.secondary)
                     }
                 } else if let response, response.links.isEmpty {
-                    Text("This branch isn't part of a stack.")
+                    Text("This branch isn’t part of a stack.")
                         .foregroundStyle(.secondary)
                 } else if response == nil {
-                    Text("This runner's Far Cooler is too old to answer.")
+                    Text("This runner’s Far Cooler is too old to answer.")
                         .foregroundStyle(.secondary)
                 }
 

@@ -107,9 +107,18 @@ data class CeremonyManifest(
  * Why a code was refused, and what a person is told about it.
  *
  * The cases are the FFI's stable words. THE APP OWNS THE SENTENCE: the core
- * answers `malformed`, and what belongs on a screen is "That isn't a Far Cooler
+ * answers `malformed`, and what belongs on a screen is "This isn't a Far Cooler
  * code" — never a `serde_json` message, and never advice about an sshd setting
  * that was not the problem.
+ *
+ * The sentences are the phone's and the Mac's, word for word — `Refusal.title`
+ * and `Refusal.message` in `apps/ios/FarCooler/Ceremony/CeremonyStore.swift`,
+ * and `Refusal.title`/`Refusal.detail` on the Mac. One person holds both
+ * devices during this ceremony and reads the refusal on whichever one scanned,
+ * so two spellings of one refusal is a bug only that person ever sees, and
+ * only by being refused twice. These read as sentences on all three platforms,
+ * so Android's own sentence case and Apple's agree here with nothing to
+ * reconcile.
  */
 sealed interface Refusal {
     data class Version(val made: Int) : Refusal
@@ -139,17 +148,17 @@ sealed interface Refusal {
     val title: String
         get() = when (this) {
             is Version ->
-                if (made > 1) "That code is from a newer Far Cooler"
-                else "That code is from an older Far Cooler"
-            is Channel -> "That code is from a different Far Cooler"
-            Malformed -> "That isn’t a Far Cooler code"
-            WrongCeremony -> "That code answers a different device"
-            WrongAccount -> "That code is for a different account"
-            WrongTarget -> "That code is meant for another device"
-            Stale -> "That code expired"
-            AlreadyTaken -> "That code has already been used"
-            TooLarge -> "Too many runners for one code"
-            Unknown -> "Something went wrong"
+                if (made > 1) "This code requires a newer version of Far Cooler"
+                else "This code is from an older version of Far Cooler"
+            is Channel -> "This code is from a different version of Far Cooler"
+            Malformed -> "This isn’t a Far Cooler code"
+            WrongCeremony -> "This code is for a different request"
+            WrongAccount -> "This code is for a different account"
+            WrongTarget -> "This code is for another device"
+            Stale -> "This code expired"
+            AlreadyTaken -> "This code was already used"
+            TooLarge -> "Too many runners selected"
+            Unknown -> "Couldn’t add this device"
         }
 
     val message: String
@@ -161,16 +170,18 @@ sealed interface Refusal {
                 val which =
                     if (named.isEmpty()) "a different version"
                     else "Far Cooler ${named.replaceFirstChar { it.uppercase() }}"
-                "That device is running $which. Both devices have to be running the same one."
+                "The other device is using $which. Both devices must use the same version."
             }
-            Malformed -> "Point the camera at the code the other device is showing."
-            WrongCeremony -> "Show this device’s code again, then scan the reply it gets."
-            WrongAccount -> "Both devices have to be signed into the same account."
-            WrongTarget -> "Show this device’s code again, then scan the reply it gets."
-            Stale -> "A code is good for two minutes. Show a new one and scan it again."
-            AlreadyTaken -> "Show a new code to add this device again."
-            TooLarge -> "Pick fewer runners. You can grant the rest by adding this device again."
-            Unknown -> "Far Cooler couldn’t finish adding this device. Try again."
+            Malformed -> "Scan the code shown in Far Cooler on the other device."
+            WrongCeremony ->
+                "Show a new code on this device, then scan the code on the other device."
+            WrongAccount -> "Both devices must be signed in to the same account."
+            WrongTarget ->
+                "Show a new code on this device, then scan the code on the other device."
+            Stale -> "Show a new code, then scan it within two minutes."
+            AlreadyTaken -> "Show a new code, then try again."
+            TooLarge -> "Select fewer runners. You can add the others later."
+            Unknown -> "Try again."
         }
 
     companion object {
@@ -713,7 +724,7 @@ class CeremonyStore(
         }
 
         val outcome = gate(
-            "Add ${asking.name}?",
+            "Add “${asking.name}”?",
             "Confirm adding ${asking.name} to your runners",
         )
         when (outcome) {

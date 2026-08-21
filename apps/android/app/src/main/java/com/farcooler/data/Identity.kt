@@ -146,7 +146,7 @@ object Identity {
             .putString(IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
             .commit()
     }.getOrElse {
-        lastError = "This device's SSH key could not be stored: ${it.message}"
+        lastError = "This device’s SSH key could not be stored: ${it.message}"
         false
     } == true
 

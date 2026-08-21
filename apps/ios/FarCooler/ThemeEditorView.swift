@@ -62,7 +62,7 @@ struct ThemeEditorView: View {
                     + "automatically.")
             }
         }
-        .navigationTitle(original.name.isEmpty ? "New theme" : original.name)
+        .navigationTitle(original.name.isEmpty ? "New Theme" : original.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

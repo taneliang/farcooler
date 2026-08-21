@@ -523,8 +523,8 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
             )
 
             Text(
-                "A workspace is one git worktree and one branch. Its name is the worktree's " +
-                    "folder, so it can't be changed later.",
+                "A workspace is one git worktree and one branch. Its name is the worktree’s " +
+                    "folder, so it can’t be changed later.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

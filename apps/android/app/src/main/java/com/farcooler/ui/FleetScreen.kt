@@ -461,13 +461,13 @@ private fun RunnerStatusRow(
 
 private fun failureHeadline(kind: Connection.Failure, connection: Connection): String = when (kind) {
     Connection.Failure.KEY_REJECTED -> "Not authorized yet"
-    Connection.Failure.HOST_KEY_CHANGED -> "This host's key changed"
-    Connection.Failure.UNREACHABLE -> "Can't reach ${connection.host.address}"
-    Connection.Failure.DAEMON_MISSING -> "Far Cooler isn't installed there"
+    Connection.Failure.HOST_KEY_CHANGED -> "This host’s key changed"
+    Connection.Failure.UNREACHABLE -> "Can’t reach ${connection.host.address}"
+    Connection.Failure.DAEMON_MISSING -> "Far Cooler isn’t installed there"
     Connection.Failure.NO_IDENTITY -> "This device has no key"
     Connection.Failure.KEY_NOT_TRUSTED -> "Key not trusted"
     Connection.Failure.STOPPED -> "Stopped waiting"
-    Connection.Failure.OTHER -> "Can't connect"
+    Connection.Failure.OTHER -> "Can’t connect"
 }
 
 /**
@@ -485,14 +485,14 @@ private fun failureDetail(
     message: String,
 ): String = when (kind) {
     Connection.Failure.KEY_REJECTED ->
-        "${connection.host.user}@${connection.host.address} hasn't been given this device's key."
+        "${connection.host.user}@${connection.host.address} hasn’t been given this device’s key."
 
     Connection.Failure.UNREACHABLE ->
         "Nothing answered on port ${connection.host.port}. The runner may be asleep, " +
             "or the address may be wrong."
 
     Connection.Failure.DAEMON_MISSING ->
-        "SSH connected, but the Far Cooler daemon didn't answer. Install it there."
+        "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
 
     else -> message
 }

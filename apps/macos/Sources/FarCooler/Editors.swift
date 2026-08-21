@@ -364,7 +364,7 @@ extension Editor {
     /// broken and one that is honest.
     func unavailability(host: String) -> String? {
         if !host.trimmingCharacters(in: .whitespaces).isEmpty, !opensRemote {
-            return "\(name) can't open worktrees on another runner"
+            return "\(name) can’t open worktrees on another runner"
         }
         if let bundle, bundle.resolve() == nil {
             return "\(name) is not installed"

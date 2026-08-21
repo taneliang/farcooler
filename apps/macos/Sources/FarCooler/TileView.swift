@@ -547,7 +547,7 @@ private struct TilePane: View {
                     )
                     .help(
                         native
-                            ? "Native: driven through \(paneBackend)'s own protocol, with no adapter and no npx"
+                            ? "Native: driven through \(paneBackend)’s own protocol, with no adapter and no npx"
                             : "ACP: driven through an Agent Client Protocol adapter"
                     )
             }

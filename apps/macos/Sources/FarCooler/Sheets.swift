@@ -112,7 +112,7 @@ struct NewWorkspaceSheet: View {
 
     var body: some View {
         SheetFrame(
-            title: "New workspace",
+            title: "New Workspace",
             subtitle: "A worktree and branch for one task.",
             confirmTitle: "Create",
             canConfirm: canCreate,
@@ -239,9 +239,9 @@ struct RemoveWorkspaceSheet: View {
 
     var body: some View {
         SheetFrame(
-            title: "Remove worktree",
+            title: "Remove Worktree",
             subtitle: workspace.task,
-            confirmTitle: "Remove worktree",
+            confirmTitle: "Remove Worktree",
             confirmRole: .destructive,
             // No longer gated on running terminals: removal closes them, so
             // disabling the button over one meant refusing to do the thing the
@@ -713,9 +713,9 @@ struct AddRepositorySheet: View {
 
     var body: some View {
         SheetFrame(
-            title: "Add repository",
+            title: "Add Repository",
             subtitle: "Choose an existing repository for the new worktree.",
-            confirmTitle: "Add repository",
+            confirmTitle: "Add Repository",
             canConfirm: canConfirm,
             working: working,
             failure: failure,

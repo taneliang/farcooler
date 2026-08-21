@@ -263,7 +263,7 @@ struct WorkspaceSection: View {
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.orange)
                             .help(
-                                "This worktree's directory is gone. If you moved it with git worktree "
+                                "This worktree’s directory is gone. If you moved it with git worktree "
                                     + "move, the directory it moved to is a separate workspace now — this "
                                     + "row keeps the terminals and agent transcripts from before the move.")
                     }
@@ -496,14 +496,14 @@ struct ProjectHeader: View {
                             help: "Add to \(name)",
                             items: [
                                 onNewWorktree.map {
-                                    SidebarMenuItem(title: "New worktree in \(name)…", action: $0)
+                                    SidebarMenuItem(title: "New Worktree in \(name)…", action: $0)
                                 },
                                 // The main checkout is a place people work — a quick
                                 // build, a look at main while a worktree is
                                 // mid-changes — and it was the one directory this app
                                 // could not open a terminal in.
                                 onNewTerminal.map {
-                                    SidebarMenuItem(title: "New terminal in \(name)", action: $0)
+                                    SidebarMenuItem(title: "New Terminal in \(name)", action: $0)
                                 },
                             ].compactMap { $0 })
                         // Shown on hover, like every other per-row control in a

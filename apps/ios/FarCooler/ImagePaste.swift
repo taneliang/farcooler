@@ -45,7 +45,7 @@ final class ImagePasteQueue: ObservableObject {
     func send(_ image: UIImage, name: String = "", terminal: String, core: ClientCore) {
         guard let (data, mime) = encode(image) else {
             let job = ImagePasteJob(thumbnail: image, total: 0)
-            job.failure = "Far Cooler couldn't prepare that image to send."
+            job.failure = "Far Cooler couldn’t prepare that image to send."
             jobs.append(job)
             return
         }
@@ -106,15 +106,15 @@ final class ImagePasteQueue: ObservableObject {
         // to know the method, or a pane that closed before the path
         // could be typed. Named together rather than guessed.
         if text.contains("predates this") {
-            return "That terminal may have closed, or this runner's Far Cooler may be too old."
+            return "That terminal may have closed, or this runner’s Far Cooler may be too old."
         }
         if text.contains("file size") {
             return "That file is too large to send. Files up to 16 MB work."
         }
         if text.contains("not found") {
-            return "That terminal isn't running anymore."
+            return "That terminal isn’t running anymore."
         }
-        return "Couldn't reach this runner."
+        return "Couldn’t reach this runner."
     }
 
     /// PNG for anything with sharp edges, JPEG for a photograph.

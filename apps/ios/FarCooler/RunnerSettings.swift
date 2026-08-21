@@ -42,7 +42,7 @@ final class RunnerSettingsModel: ObservableObject {
 
     func removeRoot(_ root: RepositoryRoot) async {
         guard await connection.removeRepositoryRoot(root.id) else {
-            failure = "That runner wouldn't stop watching that folder."
+            failure = "That runner wouldn’t stop watching that folder."
             return
         }
         roots.removeAll { $0.id == root.id }
@@ -50,7 +50,7 @@ final class RunnerSettingsModel: ObservableObject {
 
     func setBranchPrefix(_ prefix: String) async {
         guard let stored = await connection.setBranchPrefix(prefix) else {
-            failure = "That runner didn't accept the change."
+            failure = "That runner didn’t accept the change."
             return
         }
         branchPrefix = stored

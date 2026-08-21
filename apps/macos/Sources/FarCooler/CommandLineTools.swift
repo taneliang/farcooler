@@ -110,7 +110,7 @@ final class CommandLineTools: ObservableObject {
         }
 
         if let path = conflicts.first {
-            state = .conflict("\(path) already exists and isn't managed by Far Cooler.")
+            state = .conflict("\(path) already exists and isn’t managed by Far Cooler.")
         } else if slots.allSatisfy({ $0 == .ours }) {
             state = .installed
         } else {

@@ -704,7 +704,7 @@ final class DaemonClient: ObservableObject {
         let (maybeData, failureMessage) = await runRaw(
             ["workspace", "list", "--json"], background: true)
         guard let data = maybeData else {
-            let reason = failureMessage ?? "Couldn't reach this runner."
+            let reason = failureMessage ?? "Couldn’t reach this runner."
             lastError = reason
             if looksNotInstalled(reason) {
                 state = .notInstalled

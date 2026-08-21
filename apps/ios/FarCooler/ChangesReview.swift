@@ -365,13 +365,13 @@ final class ReviewCommentQueue: ObservableObject {
     private static func message(for error: Error) -> String {
         if let core = error as? ClientCore.CoreError, case .disconnected = core {
             return "The connection to this runner dropped, so these are still here. "
-                + "Try again once it's back."
+                + "Try again once it’s back."
         }
         let text = error.localizedDescription.lowercased()
         if text.contains("not found") || text.contains("unknown method") {
-            return "That pane isn't running an agent anymore, so there was nothing to send to."
+            return "That pane isn’t running an agent anymore, so there was nothing to send to."
         }
-        return "Couldn't send these. They're still here."
+        return "Couldn’t send these. They’re still here."
     }
 
     // MARK: Storage

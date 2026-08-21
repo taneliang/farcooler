@@ -239,9 +239,9 @@ final class AgentStream: ObservableObject {
             return "That was too large to send. Try a smaller image."
         }
         if text.contains("not found") {
-            return "That agent isn't running anymore."
+            return "That agent isn’t running anymore."
         }
-        return "Couldn't reach this runner. Your message wasn't sent."
+        return "Couldn’t reach this runner. Your message wasn’t sent."
     }
 
     /// Rewrite a message that has not gone out yet.

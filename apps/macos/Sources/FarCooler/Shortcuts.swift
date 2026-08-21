@@ -78,7 +78,7 @@ enum Shortcut {
                 Item(keys: "1 … 9", action: "Focus pane by number"),
                 Item(keys: "%  /  \"", action: "Split right / down — a new pane here"),
                 Item(keys: "!", action: "Move the focused pane out of the layout"),
-                Item(keys: "x", action: "Close the focused pane's terminal"),
+                Item(keys: "x", action: "Close the focused pane’s terminal"),
                 Item(keys: "c", action: "New group — several layouts per worktree"),
                 Item(keys: "n  /  p", action: "Next / previous group"),
                 Item(keys: "&", action: "Close this group"),
@@ -90,7 +90,7 @@ enum Shortcut {
             "Tasks",
             [
                 Item(keys: "⌘N", action: "New task — describe it and go"),
-                Item(keys: "⇧⌘R", action: "Add repository"),
+                Item(keys: "⇧⌘R", action: "Add Repository"),
                 Item(keys: "⇧⌘E", action: "Open this worktree in your editor"),
             ]
         ),

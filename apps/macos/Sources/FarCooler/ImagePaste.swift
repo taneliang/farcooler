@@ -114,7 +114,7 @@ final class ImagePasteQueue: ObservableObject {
         hostArguments: [String]
     ) async {
         guard let binary else {
-            job.failure = "Far Cooler couldn't find its command line tool."
+            job.failure = "Far Cooler couldn’t find its command line tool."
             return
         }
 
@@ -180,7 +180,7 @@ final class ImagePasteQueue: ObservableObject {
             try data.write(to: url)
             return .success(url)
         } catch {
-            return .failure(PasteFailure(message: "Far Cooler couldn't prepare that file to send."))
+            return .failure(PasteFailure(message: "Far Cooler couldn’t prepare that file to send."))
         }
     }
 
@@ -315,15 +315,15 @@ enum ImagePasteProcess {
         // to know the method, or a pane that closed before the path
         // could be typed. Named together rather than guessed.
         if text.contains("predates this") {
-            return "That terminal may have closed, or this runner's Far Cooler may be too old."
+            return "That terminal may have closed, or this runner’s Far Cooler may be too old."
         }
         if text.contains("file size") {
             return "That file is too large to send. Files up to 16 MB work."
         }
         if text.contains("not found") {
-            return "That terminal isn't running anymore."
+            return "That terminal isn’t running anymore."
         }
-        return "Couldn't reach this runner."
+        return "Couldn’t reach this runner."
     }
 }
 

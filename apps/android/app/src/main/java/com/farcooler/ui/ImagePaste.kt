@@ -117,11 +117,11 @@ class ImagePasteQueue {
             // know the method, or a pane that closed before the path could be
             // typed. Named together rather than guessed at.
             text.contains("predates this") ->
-                "That terminal may have closed, or this runner's Far Cooler may be too old."
+                "That terminal may have closed, or this runner’s Far Cooler may be too old."
             text.contains("file size") ->
                 "That file is too large to send. Files up to 16 MB work."
-            text.contains("not found") -> "That terminal isn't running anymore."
-            else -> "Couldn't reach this runner."
+            text.contains("not found") -> "That terminal isn’t running anymore."
+            else -> "Couldn’t reach this runner."
         }
     }
 }

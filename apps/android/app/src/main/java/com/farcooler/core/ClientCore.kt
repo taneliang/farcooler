@@ -208,7 +208,7 @@ class ClientCore {
         if (h == 0L) {
             throw CoreException(
                 if (NativeLibrary.loaded) "The client core could not be started."
-                else "This build has no Far Cooler core for this device's processor."
+                else "This build has no Far Cooler core for this device’s processor."
             )
         }
         startPumping()

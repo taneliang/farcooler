@@ -132,7 +132,7 @@ struct AdapterEditorView: View {
                 }
             }
         }
-        .navigationTitle(isNew ? "New agent" : draft.preset)
+        .navigationTitle(isNew ? "New Agent" : draft.preset)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

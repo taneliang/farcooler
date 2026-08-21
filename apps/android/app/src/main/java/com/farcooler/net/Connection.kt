@@ -428,7 +428,7 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
     fun declineHostKey() {
         abandon(
             "The key ${host.address} presented has not been trusted on this device. " +
-                "Far Cooler won't connect until it is."
+                "Far Cooler won’t connect until it is."
         )
     }
 
@@ -739,7 +739,7 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
     /** Prove an adapter works, without saving it first. */
     suspend fun testAdapter(adapter: AdapterInfo): AdapterTestOutcome {
         val data = attempt { core.call("adapter.test", adapter.toJson()) }.getOrNull()
-            ?: return AdapterTestOutcome.Failed("That runner couldn't be reached.")
+            ?: return AdapterTestOutcome.Failed("That runner couldn’t be reached.")
         return if (data["ok"]?.jsonPrimitive?.booleanOrNull == true) {
             AdapterTestOutcome.Worked(
                 data["reported"]?.jsonPrimitive?.contentOrNull ?: "answered")

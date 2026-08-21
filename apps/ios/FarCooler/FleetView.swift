@@ -1849,7 +1849,7 @@ struct RemoveWorktreeConfirmSheet: View {
                     SheetFailureSection(failure: failure)
                 }
             }
-            .navigationTitle("Remove worktree")
+            .navigationTitle("Remove Worktree")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1923,7 +1923,7 @@ struct AddRepositorySheet: View {
                     SheetFailureSection(failure: failure)
                 }
             }
-            .navigationTitle("Add repository")
+            .navigationTitle("Add Repository")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -2077,7 +2077,7 @@ struct NewWorkspaceView: View {
                     }
                 }
             }
-            .navigationTitle("New workspace")
+            .navigationTitle("New Workspace")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -94,7 +94,7 @@ final class Runners: ObservableObject {
             // The CLI's own words. It is the thing that talked to ssh, and its
             // message names what to fix — a refused connection, a missing key,
             // an unknown host — where anything written here would be a guess.
-            record(error: result.output.isEmpty ? "Couldn't reach this runner." : result.output,
+            record(error: result.output.isEmpty ? "Couldn’t reach this runner." : result.output,
                    for: target)
             return
         }
@@ -137,7 +137,7 @@ final class Runners: ObservableObject {
         }
         let label = target.isEmpty ? "This Mac" : target
         guard let token = await Account.shared.pairDaemon(label: label) else {
-            return "The relay wouldn't issue a token. Try signing in again."
+            return "The relay wouldn’t issue a token. Try signing in again."
         }
 
         var arguments = target.isEmpty ? [] : ["--host", target]

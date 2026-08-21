@@ -91,7 +91,7 @@ struct ChangesView: View {
                         ChangesNotice(
                             symbol: "exclamationmark.triangle",
                             tint: .orange,
-                            text: "Couldn't read this commit. An amend or a rebase may have "
+                            text: "Couldn’t read this commit. An amend or a rebase may have "
                                 + "replaced it while you were reading.")
                     } else if store.files.isEmpty && !store.loading {
                         ChangesNotice(
@@ -247,7 +247,7 @@ struct ChangesView: View {
     /// Which nothing this is, when the list is empty.
     private var nothingHere: String {
         switch store.scope {
-        case .branch: return "This branch hasn't committed anything yet."
+        case .branch: return "This branch hasn’t committed anything yet."
         case .local: return "Nothing uncommitted. The worktree is clean."
         case .commit:
             // Not "this commit is empty". A commit is compared against its
@@ -256,7 +256,7 @@ struct ChangesView: View {
             // genuinely changed nothing against that side while changing
             // plenty against the other. Naming the comparison is the
             // difference between a fact and a claim this screen cannot make.
-            return "Nothing changed against this commit's first parent, "
+            return "Nothing changed against this commit’s first parent, "
                 + "which is also what a clean merge looks like."
         }
     }
@@ -570,7 +570,7 @@ struct ChangesView: View {
         // the pane.
         if known == nil {
             Label(
-                "This commit isn't on the branch anymore. It was probably amended "
+                "This commit isn’t on the branch anymore. It was probably amended "
                     + "or rebased while you were reading.",
                 systemImage: "exclamationmark.triangle")
                 .font(.caption2)
@@ -853,8 +853,8 @@ private struct FileIndexSheet: View {
                         // Says what the split is FOR, at the one place somebody
                         // is looking at both halves at once.
                         Text(
-                            "Counted apart from the branch's totals, so a lockfile "
-                                + "doesn't make a branch look bigger than it is.")
+                            "Counted apart from the branch’s totals, so a lockfile "
+                                + "doesn’t make a branch look bigger than it is.")
                     }
                 }
             }
@@ -1633,7 +1633,7 @@ private struct CommentOutboxSheet: View {
                         sendControl
                     } footer: {
                         Text(
-                            "Far Cooler can't tell whether an agent received a prompt, "
+                            "Far Cooler can’t tell whether an agent received a prompt, "
                                 + "so nothing is ever resent on its own.")
                     }
                 }
@@ -1647,7 +1647,7 @@ private struct CommentOutboxSheet: View {
                         Text("Sent")
                     } footer: {
                         // The receipt, and why it is the only one there can be.
-                        Text("What went, and when. There's no delivery receipt to show.")
+                        Text("What went, and when. There’s no delivery receipt to show.")
                     }
                 }
             }
@@ -1676,7 +1676,7 @@ private struct CommentOutboxSheet: View {
                 Text("Sending…").foregroundStyle(.secondary)
             }
         } else if agents.isEmpty {
-            Text("No agent is running in this worktree, so there's nowhere to send these yet.")
+            Text("No agent is running in this worktree, so there’s nowhere to send these yet.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } else if agents.count == 1, let only = agents.first {
@@ -1804,7 +1804,7 @@ private struct CommitHistorySheet: View {
                         // state of a worktree an agent has only just started in
                         // — not a failure, and not the same as a filter that
                         // matched nothing.
-                        Text("This branch hasn't committed anything yet.")
+                        Text("This branch hasn’t committed anything yet.")
                             .foregroundStyle(.secondary)
                     } else if shown.isEmpty {
                         Text("No commits match that.")

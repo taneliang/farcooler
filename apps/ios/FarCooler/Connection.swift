@@ -999,7 +999,7 @@ final class Connection: ObservableObject {
     func testAdapter(_ adapter: AdapterInfo) async -> AdapterTestOutcome {
         guard let data = try? await core.call("adapter.test", adapter.arguments),
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return .failed("That runner couldn't be reached.") }
+        else { return .failed("That runner couldn’t be reached.") }
         if body["ok"] as? Bool == true {
             return .worked(body["reported"] as? String ?? "answered")
         }

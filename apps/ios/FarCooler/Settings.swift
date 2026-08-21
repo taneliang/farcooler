@@ -178,7 +178,7 @@ struct SettingsView: View {
                 // the ceremony as well, and the ceremony is one row up. Here
                 // the question is only ever "what do I paste into
                 // authorized_keys".
-                NavigationLink("This Device's Key") { AuthorizeView() }
+                NavigationLink("This Device’s Key") { AuthorizeView() }
             } header: {
                 Text("Devices")
             } footer: {

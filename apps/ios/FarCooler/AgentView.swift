@@ -1731,7 +1731,7 @@ private struct AgentComposer: View {
             guard let (payload, payloadMime) = PromptImageBudget.fit(
                 image, original: data, mime: mime)
             else {
-                attachmentError = "That photo couldn't be prepared to send."
+                attachmentError = "That photo couldn’t be prepared to send."
                 photoPickerItem = nil
                 return
             }

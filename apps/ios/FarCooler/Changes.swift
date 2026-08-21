@@ -845,7 +845,7 @@ final class ChangesStore: ObservableObject {
                 // an agent-authored branch is not an edge case. The branch as a
                 // whole still contains its work, so that is where this lands.
                 resumeNote =
-                    "That commit isn't on the branch anymore — it was amended or rebased. "
+                    "That commit isn’t on the branch anymore — it was amended or rebased. "
                     + "This is the whole branch instead."
                 showWholeBranch()
                 jump = Jump(path: Self.topAnchor)
@@ -862,7 +862,7 @@ final class ChangesStore: ObservableObject {
         if let file = saved.file {
             guard live.contains(file) else {
                 resumeNote =
-                    "\((file as NSString).lastPathComponent) isn't in this diff anymore, "
+                    "\((file as NSString).lastPathComponent) isn’t in this diff anymore, "
                     + "so this is the top."
                 jump = Jump(path: Self.topAnchor)
                 return
@@ -1328,9 +1328,9 @@ final class ChangesStore: ObservableObject {
     private static func message(for error: Error) -> String {
         let text = error.localizedDescription.lowercased()
         if text.contains("not found") || text.contains("unknown method") {
-            return "This runner's Far Cooler is too old to review changes."
+            return "This runner’s Far Cooler is too old to review changes."
         }
-        return "Couldn't read what this worktree changed."
+        return "Couldn’t read what this worktree changed."
     }
 }
 

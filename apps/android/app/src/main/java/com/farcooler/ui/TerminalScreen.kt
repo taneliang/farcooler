@@ -174,7 +174,7 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
         scope.launch {
             val picked = withContext(Dispatchers.IO) { readPickedImage(resolver, uri) }
             if (picked == null) {
-                pastes.reject("Far Cooler couldn't read that image.")
+                pastes.reject("Far Cooler couldn’t read that image.")
                 return@launch
             }
             pastes.send(

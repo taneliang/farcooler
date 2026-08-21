@@ -414,21 +414,21 @@ enum SshConfigError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .writerUnavailable:
-            return "Far Cooler couldn't update ~/.ssh/config on this Mac. "
-                + "The keys were enrolled; Zed and git won't find the runners until it can."
+            return "Far Cooler couldn’t update ~/.ssh/config on this Mac. "
+                + "The keys were enrolled; Zed and git won’t find the runners until it can."
         case .keyAInConfig:
-            return "Far Cooler couldn't update ~/.ssh/config on this Mac."
+            return "Far Cooler couldn’t update ~/.ssh/config on this Mac."
         case .damaged:
             // Refuses rather than repairs, and says which file, because the way
             // out is a person looking at it. Never a suggestion to delete it.
-            return "Far Cooler's block in ~/.ssh/config isn't the shape it wrote. "
+            return "Far Cooler’s block in ~/.ssh/config isn’t the shape it wrote. "
                 + "Nothing was changed. Open the file and check the two Far Cooler comment lines."
         case .missing:
-            return "Far Cooler couldn't find the folder ~/.ssh/config belongs in. "
-                + "The keys were enrolled; Zed and git won't find the runners until it's there."
+            return "Far Cooler couldn’t find the folder ~/.ssh/config belongs in. "
+                + "The keys were enrolled; Zed and git won’t find the runners until it’s there."
         case .io:
-            return "Far Cooler couldn't write ~/.ssh/config on this Mac. Nothing was changed. "
-                + "The keys were enrolled; Zed and git won't find the runners until it can."
+            return "Far Cooler couldn’t write ~/.ssh/config on this Mac. Nothing was changed. "
+                + "The keys were enrolled; Zed and git won’t find the runners until it can."
         }
     }
 }

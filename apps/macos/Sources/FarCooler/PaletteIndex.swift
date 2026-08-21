@@ -199,7 +199,7 @@ enum PaletteIndex {
                 PaletteEntry(
                     id: "new-terminal:\(target.id)",
                     action: .newTerminal(workspace: target.id),
-                    title: "New terminal in \(target.task)",
+                    title: "New Terminal in \(target.task)",
                     // The target is a worktree, not a project, because that is
                     // what a terminal is actually created in — a shell has to
                     // open somewhere, and a project is several somewheres.
@@ -212,7 +212,7 @@ enum PaletteIndex {
             PaletteEntry(
                 id: "new-task",
                 action: .newTask(described),
-                title: described.isEmpty ? "New task…" : "New task “\(described)”",
+                title: described.isEmpty ? "New Task…" : "New Task “\(described)”",
                 detail: "Describe it and go",
                 symbol: "sparkle",
                 kind: "action"))

@@ -184,7 +184,7 @@ final class RunnerSettingsStore: ObservableObject {
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty && !$0.hasPrefix("Usage:") }
-        guard let line, !line.isEmpty else { return "That runner couldn't be reached." }
+        guard let line, !line.isEmpty else { return "That runner couldn’t be reached." }
         return line.replacingOccurrences(of: "error: ", with: "")
     }
 }

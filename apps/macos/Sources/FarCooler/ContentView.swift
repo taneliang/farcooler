@@ -470,7 +470,7 @@ struct ContentView: View {
                 }.count
             ) { typed in
                 let result = await act(
-                    on: ws, default: .failed("This runner can't be reached right now.")
+                    on: ws, default: .failed("This runner can’t be reached right now.")
                 ) { c in
                     await c.removeWorktree(ws.short, confirm: typed)
                 }
@@ -510,7 +510,7 @@ struct ContentView: View {
         .sheet(item: $pendingPaneModeSwitch) { pending in
             PaneModeConfirmSheet(message: pending.message) {
                 await act(
-                    on: pending.workspace, default: .failed("This runner can't be reached right now.")
+                    on: pending.workspace, default: .failed("This runner can’t be reached right now.")
                 ) { c in
                     await c.setPaneMode(pending.terminal, mode: pending.mode, force: true)
                 }
@@ -888,10 +888,10 @@ struct ContentView: View {
                 systemImage: "plus",
                 help: "Add a workspace, a repository, or a runner",
                 items: [
-                    SidebarMenuItem(title: "New workspace…") {
+                    SidebarMenuItem(title: "New Workspace…") {
                         newWorkspace = NewWorkspaceIntent()
                     },
-                    SidebarMenuItem(title: "Add repository…") { showAddRepository = true },
+                    SidebarMenuItem(title: "Add Repository…") { showAddRepository = true },
                     // Here as well as in the picker, because this is the menu
                     // people open looking for "add a thing" — and a runner is
                     // a thing you add.
@@ -983,9 +983,9 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
-                Button("Add repository…") { showAddRepository = true }.padding(.top, 4)
+                Button("Add Repository…") { showAddRepository = true }.padding(.top, 4)
             } else {
-                Button("New workspace") {
+                Button("New Workspace") {
                     newWorkspace = NewWorkspaceIntent()
                 }.padding(.top, 4)
             }
@@ -1373,7 +1373,7 @@ struct ContentView: View {
             Text("Each workspace is one worktree and branch for one task.")
         } actions: {
             if !store.repositories.isEmpty {
-                Button("New workspace") {
+                Button("New Workspace") {
                     newWorkspace = NewWorkspaceIntent()
                 }
             }
@@ -1383,8 +1383,8 @@ struct ContentView: View {
     // MARK: - Routing
 
     /// A repository to default the project picker to, when nothing was
-    /// chosen yet — the empty state's "New workspace" button, the sidebar's
-    /// own `+`, and the palette's "new task" all reach this with no project
+    /// chosen yet — the empty state's "New Workspace" button, the sidebar's
+    /// own `+`, and the palette's "New Task" all reach this with no project
     /// and therefore no host in hand at all, which is the one case where a
     /// default runner is legitimate rather than the picker again in
     /// disguise. This Mac's own repositories come first: it is the runner
@@ -1780,7 +1780,7 @@ struct ContentView: View {
                         + "~/.config/farcooler/config.toml, then restart the daemon "
                         + "(farcooler daemon ensure) — it only reads the file at startup."
                 } else {
-                    errorBanner = "Nothing here to chat with — this pane isn't running an agent."
+                    errorBanner = "Nothing here to chat with — this pane isn’t running an agent."
                 }
                 return
             }
