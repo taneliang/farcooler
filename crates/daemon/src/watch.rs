@@ -591,6 +591,25 @@ struct Observed {
     /// can miss it, and one such sample used to be enough to fire a Done and
     /// the notification behind it.
     pending: Option<(AgentActivity, u8)>,
+    /// Whether this daemon has yet said anything about the live card the relay
+    /// may be holding for this terminal.
+    ///
+    /// False for every terminal on the first tick after the daemon starts, and
+    /// that is the whole reason it exists. A card outlives the process that
+    /// raised it — the relay keeps it, and tmux keeps the agent — so a runner
+    /// coming back up inherits cards it has no memory of, and a first sighting
+    /// is not a transition: the agent that was blocked before the restart is
+    /// simply the agent it first sees, and nothing ever pushes the `done` that
+    /// would take the card down. Every runner update orphaned every card that
+    /// was up, which is a thing about to happen far more often than it does now.
+    ///
+    /// It settles on the first tick that can answer for the terminal ONE WAY OR
+    /// THE OTHER — see `card_still_earned`, whose `None` is "could not tell" and
+    /// settles nothing. Not simply the first tick: a daemon that starts while
+    /// the tmux server is stalled reads every pane as unknown, and a sweep that
+    /// counted that as having looked would skip the entire fleet exactly once,
+    /// permanently, on the run where it mattered.
+    card_settled: bool,
     /// The pane title as last sampled, and how many samples running it has been
     /// byte-identical. See `promoted_by_title`.
     title: String,
@@ -1492,6 +1511,10 @@ impl Observed {
             feed: farcooler_core::feed::Feed::default(),
             signals: Signals::default(),
             pending: None,
+            // Nothing has been said about this terminal's card yet, whether it
+            // is a pane that opened a second ago or one this daemon has just
+            // inherited from its own previous life. See `card_settled`.
+            card_settled: false,
             title: String::new(),
             title_repeats: 0,
         }
@@ -1680,6 +1703,90 @@ fn exited_into_failure(
         && activity::exit_wants_attention(exit_code, exit_signal)
 }
 
+/// Whether a live card on this terminal still has a run behind it.
+///
+/// `Some(false)` is the whole point: it is the daemon saying "whatever the relay
+/// is showing for this terminal, there is nothing here for it to be about". Only
+/// the relay knows which cards exist, so this is the half of the answer the
+/// runner can supply — see `crate::push::retire`.
+///
+/// `None` is "could not tell", and it is not a weaker "no". A failed
+/// `capture-pane` reads as `Unspecified`, and retiring a blocked agent's card on
+/// one would take the single notification this product exists for off the lock
+/// screen — and nothing would put it back, because `Blocked` to `Blocked` is not
+/// a transition and pushes nothing. The same distinction `advance_to` already
+/// makes when it refuses to hold a turn clock open across these.
+///
+/// The pane's own state is read FIRST and outranks the screen, because it is
+/// evidence of a different kind. `Exited` and `Lost` are findings — the live
+/// inventory was read and this terminal is not in it, or its pane is a retained
+/// corpse — where the activity beside them is whatever a failed screen read made
+/// of the same pane, which is nothing. `Unknown` is the case that used to be
+/// reported as `Lost`: nobody got to ask, usually because one pane's blocked
+/// write has the single-threaded tmux server stalled, and answering "no card" to
+/// that would retire every card on the runner in one tick. See
+/// `farcooler_core::derive::derive_terminal`, which is where that distinction is
+/// made and why it exists.
+fn card_still_earned(state: TerminalState, activity: AgentActivity) -> Option<bool> {
+    match state {
+        // The pane is gone or dead, and no reading of its screen can outvote
+        // that. `Error` is a terminal whose runtime was never established at
+        // all, which is the same answer arrived at earlier.
+        TerminalState::Exited | TerminalState::Lost | TerminalState::Error => Some(false),
+        // "We could not look, so we are not saying."
+        TerminalState::Unknown => None,
+        _ => match activity {
+            // A turn is in progress. Blocked is part of one, not the end of it,
+            // and its card is the one thing here that must never be taken down
+            // on a guess.
+            AgentActivity::Working | AgentActivity::Blocked => Some(true),
+            // Idle is a pane between turns, `Done` is a turn that has ended, and
+            // `None` is a pane that is not an agent at all — somebody quit
+            // claude and got their shell back, which leaves a card reading
+            // "Working" with no process left to finish. None of the three has a
+            // run behind it for a card to be about.
+            AgentActivity::Idle | AgentActivity::Done | AgentActivity::None => Some(false),
+            // `Unspecified` is a screen that could not be read and `Unknown` is
+            // one that matched nothing recognized. Neither is evidence.
+            _ => None,
+        },
+    }
+}
+
+/// Whether THIS tick is the moment a live card became an orphan.
+///
+/// Split out of `sample`'s loop for the reason `exited_into_failure` and
+/// `should_announce` are: the condition has to be the exact thing a test
+/// exercises rather than a copy of it that can drift, and this one decides
+/// whether a card comes off somebody's lock screen.
+///
+/// Three moments, and they are three because a card can be orphaned by three
+/// different things going away. `!settled` is the daemon's own restart: it has
+/// just met a terminal the relay may already be holding a card for, and being
+/// met is not a transition anything can fire on. `state_moved` is the pane
+/// dying. `activity_moved` is the agent inside a living pane going away —
+/// somebody quits claude, and `Working` becomes `None` with no notice to send.
+///
+/// `Done` is excepted, and it is the one exception. It carries its own notice,
+/// that notice is what ends the card, and it deliberately leaves a minute of
+/// "Finished" up for whoever picks the phone up because of the alert beside it —
+/// see `DISMISSAL_DELAY_S` in the relay. Retiring here as well would race that
+/// end and win, and the person who came to look would find nothing there.
+fn card_orphaned(
+    settled: bool,
+    state_moved: bool,
+    activity_moved: Option<AgentActivity>,
+    earned: Option<bool>,
+) -> bool {
+    if earned != Some(false) {
+        return false;
+    }
+    if activity_moved == Some(AgentActivity::Done) {
+        return false;
+    }
+    !settled || state_moved || activity_moved.is_some()
+}
+
 impl Watcher {
     pub fn new(service: Arc<Service>) -> Arc<Self> {
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
@@ -1829,6 +1936,34 @@ impl Watcher {
                 },
             )
             .await;
+        });
+    }
+
+    /// Ask the relay to take down cards this runner can no longer account for,
+    /// detached from the sampling loop.
+    ///
+    /// Not async, and spawned, for the identical reason `push_notice` is not:
+    /// this is called from the sampling loop, an HTTP round trip is not
+    /// something that loop can afford to wait on, and a relay that is slow or
+    /// unreachable must cost a card its retirement rather than cost the whole
+    /// fleet its next sample. Reading the pairing file happens inside the
+    /// spawned task, being blocking I/O.
+    ///
+    /// Silent on the phone, unlike everything else this module sends. A card
+    /// coming down is not news — the person closed the pane themselves, or
+    /// updated their runner — and the relay is what enforces that: see
+    /// `/v1/notify/retire`, which pushes no alert and wakes nobody.
+    fn retire_cards(&self, terminals: Vec<Uuid>) {
+        if terminals.is_empty() {
+            return;
+        }
+        let terminals: Vec<String> = terminals.iter().map(Uuid::to_string).collect();
+        // Cheap: a `reqwest::Client` is a handle to a shared pool. Same clone,
+        // same pool, same reason as `push_notice`.
+        let client = self.push.clone();
+        tokio::spawn(async move {
+            let Some(pairing) = crate::push::Pairing::load() else { return };
+            crate::push::retire(&client, &pairing, &terminals).await;
         });
     }
 
@@ -2293,12 +2428,36 @@ impl Watcher {
             self.announce_fleet_changed();
         }
 
+        // The live cards this pass has decided nothing is left to say about,
+        // sent once at the end. See `card_orphaned` for the three ways a card
+        // gets here and `retire_cards` for why they travel together.
+        let mut orphaned: Vec<Uuid> = Vec::new();
+
         // Terminals that are gone stop being tracked, or a restarted one would
         // inherit the activity of the process it replaced.
         {
             let mut state = self.state.lock().await;
             let ids: std::collections::HashSet<Uuid> = live.iter().map(|s| s.id).collect();
-            state.retain(|id, _| ids.contains(id));
+            state.retain(|id, _| {
+                if ids.contains(id) {
+                    return true;
+                }
+                // Its card goes with it, and this is the only moment anything
+                // can say so. Dropping the state was all this did, so a pane
+                // closed while its agent was blocked left a card on the lock
+                // screen reading "Waiting for your answer" with nothing left in
+                // this process that had ever heard of the terminal — no
+                // transition to observe, and so no `done` to end it with.
+                //
+                // Unconditionally, whatever the entry last observed. A record
+                // that has been removed has no run behind it by construction,
+                // and the relay does nothing at all for a terminal it holds no
+                // card for — so naming one costs a `SELECT` that finds nothing,
+                // where deciding here which ones "probably had a card" would be
+                // this daemon guessing at a table it cannot see.
+                orphaned.push(*id);
+                false
+            });
             // The file offset goes with it, for the same reason: a terminal
             // that came back would otherwise resume reading a log at the byte
             // the terminal it replaced had reached.
@@ -2517,6 +2676,36 @@ impl Watcher {
             let previous_state = entry.state;
 
             let activity_moved = entry.observe(observed, now);
+
+            // Whether the relay is holding a card for a run that has gone.
+            //
+            // Before the announce gate below, and deliberately: the gate asks
+            // whether a CLIENT would see anything new, and a card the daemon can
+            // no longer account for has to come down whether or not a sidebar
+            // row moved. A daemon that has just started is the case that makes
+            // the difference — it inherits terminals whose rows read exactly as
+            // they did a second ago, and every one of their cards is from a
+            // previous life.
+            let earned = card_still_earned(terminal_state, entry.activity);
+            if card_orphaned(
+                entry.card_settled,
+                // `just_appeared` excluded for the reason it is excluded from
+                // `exited_into_failure`: `Observed::begin` says `Running`
+                // whatever was sampled, so a first sighting is not a crossing.
+                // It does not need to be one — an unsettled entry is already
+                // swept by the first arm of `card_orphaned`.
+                !just_appeared && previous_state != terminal_state,
+                activity_moved,
+                earned,
+            ) {
+                orphaned.push(id);
+            }
+            // "Could not tell" settles nothing, and the sweep comes round again
+            // next tick. See `card_settled`.
+            if earned.is_some() {
+                entry.card_settled = true;
+            }
+
             // Folded before the gate is consulted, not after: a line that
             // arrived is what makes this tick worth announcing, and folding it
             // afterwards would hold every line back until something ELSE moved
@@ -2619,6 +2808,12 @@ impl Watcher {
             );
             self.announce(id, record).await;
         }
+
+        // Last, and together. A sweep on the first tick after a restart can
+        // name every pane on the runner, and one request per idle pane would be
+        // a fleet's worth of round trips in the first second of every runner
+        // update — on a loop that must not wait for any of them.
+        self.retire_cards(orphaned);
     }
 
     /// Broadcast one terminal's current state.
@@ -4694,6 +4889,88 @@ mod tests {
         // it: restarting the daemon must not buzz for every failed build in
         // the fleet's history.
         assert!(!exited_into_failure(true, Running, Exited, Some(101), None));
+    }
+
+    /// What the runner is willing to say about a card it cannot see.
+    ///
+    /// The relay holds the cards and this holds the only half of the answer a
+    /// runner has. Three outcomes, and the third is the one that matters most:
+    /// "could not tell" must never be spelled as "no", because a card taken
+    /// down on a failed screen read is the one notification this product exists
+    /// for, deleted, with nothing able to put it back — `Blocked` to `Blocked`
+    /// is not a transition and pushes nothing.
+    #[test]
+    fn a_card_is_only_retired_on_evidence() {
+        use AgentActivity::{Blocked, Done, Idle, Unknown, Unspecified, Working};
+        use TerminalState::{Error, Exited, Lost, Running, Starting};
+
+        // A turn is in progress: the card is exactly right and must not move.
+        assert_eq!(card_still_earned(Running, Working), Some(true));
+        assert_eq!(card_still_earned(Running, Blocked), Some(true));
+
+        // No turn behind it. `None` is the case that has no notice of its own:
+        // somebody quit claude and got their shell back, leaving a card reading
+        // "Working" for a process that no longer exists.
+        assert_eq!(card_still_earned(Running, Idle), Some(false));
+        assert_eq!(card_still_earned(Running, Done), Some(false));
+        assert_eq!(card_still_earned(Running, AgentActivity::None), Some(false));
+
+        // The pane's state outranks the screen, because a dead pane's screen
+        // read is not a reading of anything. Blocked here is what the last live
+        // sample made of it, and it does not save the card.
+        assert_eq!(card_still_earned(Exited, Blocked), Some(false));
+        assert_eq!(card_still_earned(Lost, Blocked), Some(false));
+        assert_eq!(card_still_earned(Error, Working), Some(false));
+
+        // And the abstentions. `TerminalState::Unknown` is tmux not answering —
+        // one stalled server would otherwise retire every card on the runner in
+        // a single tick — and the two unreadable activities are a failed
+        // `capture-pane` and a screen matching nothing recognized.
+        assert_eq!(card_still_earned(TerminalState::Unknown, Blocked), None);
+        assert_eq!(card_still_earned(Running, Unspecified), None);
+        assert_eq!(card_still_earned(Running, Unknown), None);
+        // A terminal whose pane has not appeared yet is judged on its activity
+        // like any other, which for a shell that has not started is nothing.
+        assert_eq!(card_still_earned(Starting, Unspecified), None);
+    }
+
+    /// When a card becomes an orphan, which is the whole of this fix.
+    ///
+    /// Two of these are the bug as reported: a card that outlived the state
+    /// that raised it, on a runner where nothing was stuck at all.
+    #[test]
+    fn an_orphaned_card_is_found_the_moment_it_is_orphaned() {
+        // The daemon restarted. Every terminal is unsettled, nothing has moved
+        // — the row reads exactly as it did a second ago — and the card the
+        // relay is holding is from a previous life. This is the case that
+        // makes every runner update orphan every card that was up.
+        assert!(card_orphaned(false, false, None, Some(false)));
+        // Same tick, an agent that is genuinely still blocked: tmux owns the
+        // pane and the agent kept waiting across the restart. Its card is
+        // correct and is left exactly as it is — not ended, and not re-raised
+        // either, which would alert twice for one question.
+        assert!(!card_orphaned(false, false, None, Some(true)));
+        // Same tick again, a pane nobody could read. Nothing is claimed, and
+        // the sweep comes round on the next tick — see `card_settled`.
+        assert!(!card_orphaned(false, false, None, None));
+
+        // The pane died under a card that was up. A state crossing, which is
+        // not an activity change, so nothing else in this loop would fire.
+        assert!(card_orphaned(true, true, None, Some(false)));
+        // The agent went away inside a living pane: `Working` becomes `None`
+        // when somebody quits claude, and there is no notice for that tier.
+        assert!(card_orphaned(true, false, Some(AgentActivity::None), Some(false)));
+
+        // A settled terminal with nothing moving is not re-retired every
+        // second. A retirement is cheap, but a runner that sent one per idle
+        // pane per tick would be a fleet's worth of requests a second, forever.
+        assert!(!card_orphaned(true, false, None, Some(false)));
+
+        // And the exception. `Done` carries its own notice, that notice is what
+        // ends the card, and it leaves a minute of "Finished" up for whoever
+        // picks the phone up because of the alert beside it. Retiring here as
+        // well would race that end and win.
+        assert!(!card_orphaned(true, true, Some(AgentActivity::Done), Some(false)));
     }
 
     /// The gate that keeps this off the hot path.

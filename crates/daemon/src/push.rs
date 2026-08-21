@@ -267,6 +267,68 @@ pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoin
     }
 }
 
+/// The terminals whose live cards this runner can no longer account for.
+///
+/// A list rather than one id per request, because the case that matters sends
+/// many at once: a daemon that has just started sweeps every terminal it can
+/// see, and one request per idle pane would be a fleet's worth of round trips
+/// in the first second of every runner update.
+#[derive(Debug, serde::Serialize)]
+struct Retirement<'a> {
+    terminals: &'a [String],
+}
+
+/// How many terminals one retirement request may name.
+///
+/// The relay's own `RETIRE_LIMIT`, stated here because the wire contract has two
+/// ends and a sweep that quietly lost everything past the bound would lose it
+/// permanently: the daemon marks a terminal settled once it has decided about
+/// it, so a card dropped on the floor here is a card nothing mentions again.
+/// Sending the remainder as a second request costs one round trip on a path
+/// nothing waits for.
+const RETIRE_BATCH: usize = 100;
+
+/// Ask the relay to take down cards for runs that are over.
+///
+/// The daemon does not know which cards exist — the relay does, in its
+/// `live_activities` table — so this says what the runner knows instead: these
+/// terminals have no run behind them any more. What the relay does about a
+/// terminal it holds no card for is nothing, which is what makes it safe to
+/// name every terminal a sweep is unsure about rather than only the ones a card
+/// was pushed for.
+///
+/// Carries NO destination and no content, the same as `notify` and for the same
+/// reason: a stolen daemon token can end the cards of the account it was stolen
+/// from and nothing else.
+///
+/// Failure is logged and swallowed, again like `notify`. A retirement that does
+/// not arrive leaves a card up until its stale date, which is where it was
+/// before this existed; a retirement that took the watcher down with it would
+/// cost every future notification as well.
+///
+/// A relay too old to know this route answers 404, and that is the whole of the
+/// compatibility story: the runner has done what it can, the card is bounded by
+/// the same stale date it always was, and nobody is buzzed by the attempt.
+pub async fn retire(client: &reqwest::Client, pairing: &Pairing, terminals: &[String]) {
+    let url = format!("{}/v1/notify/retire", pairing.relay.trim_end_matches('/'));
+    for batch in terminals.chunks(RETIRE_BATCH) {
+        let result = client
+            .post(&url)
+            .bearer_auth(&pairing.token)
+            .json(&Retirement { terminals: batch })
+            .send()
+            .await;
+
+        match result {
+            Ok(response) if response.status().is_success() => {}
+            Ok(response) => {
+                tracing::warn!(status = %response.status(), "relay refused a card retirement")
+            }
+            Err(e) => tracing::warn!(error = %e, "could not reach the relay"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,6 +415,21 @@ mod tests {
             quiet.get("startedAt").is_none(),
             "no turn is running, so the card must be given no clock: {quiet}"
         );
+    }
+
+    #[test]
+    fn a_retirement_names_terminals_and_nothing_else() {
+        // The other end 400s a body whose `terminals` is not an array, and this
+        // is the only place on this side that spells the key — so a rename here
+        // would show up as cards that never come down, on a route whose whole
+        // job is that they do. It carries no content for the same reason
+        // `Notification` explains at length: the relay is a delivery service,
+        // and a payload it does not hold is a payload it cannot leak. A
+        // terminal id is a UUID this runner minted and says nothing about the
+        // work in the pane.
+        let terminals = vec!["term-1".to_string(), "term-2".to_string()];
+        let sent = serde_json::to_value(Retirement { terminals: &terminals }).expect("serialize");
+        assert_eq!(sent, serde_json::json!({ "terminals": ["term-1", "term-2"] }));
     }
 
     #[test]

@@ -1434,6 +1434,190 @@ describe('/v1/notify and Live Activities', () => {
   })
 })
 
+// MARK: - Cards nothing is left to end
+
+/// The rule this whole route exists for: a card outlives whatever raised it.
+///
+/// It is held by the relay and ended by a `done` that only the runner can send,
+/// so anything that stops the runner from sending one strands the card — and
+/// what it strands is the worst possible sentence to strand, because a blocked
+/// card with no question of its own reads "Waiting for your answer" when nothing
+/// is waiting. Two ways it happened, both reported live: the terminal went away
+/// while its card was up, and the daemon restarted with its memory of what each
+/// terminal was doing rebuilt empty. The second means every runner update
+/// orphaned every card that was up.
+describe('/v1/notify/retire', () => {
+  async function ready() {
+    await register('user_1', { liveActivityStartToken: 'start-token' })
+    await pair('user_1', 'mine')
+  }
+
+  /// A card that is up and addressable, the way the app reports one.
+  async function running(terminal: string, token = 'update-token') {
+    await post(
+      '/v1/devices/activity',
+      { terminal, updateToken: token },
+      await sessionFor('user_1'),
+    )
+  }
+
+  it('ends the card and forgets the row', async () => {
+    const calls = watchFetch()
+    await ready()
+    await running('term-1')
+
+    const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ retired: 1 })
+
+    const [activity] = pushes(calls)
+    expect(activity.url).toContain('/device/update-token')
+    expect(activity.body.aps.event).toBe('end')
+    // At once, not after the minute a FINISHED card gets. There is no last word
+    // to leave up — the runner has just said it cannot account for the run — so
+    // every second the card stays is a second of the lock screen stating
+    // something that stopped being true.
+    expect(activity.body.aps['dismissal-date']).toBe(activity.body.aps.timestamp)
+
+    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    expect(rows.results?.length).toBe(0)
+  })
+
+  it('wakes nobody', async () => {
+    // The reason this is not a `done`. A card coming down is not news: the
+    // person closed the pane themselves, or updated their runner. A buzz per
+    // orphaned card would be this feature interrupting somebody to announce its
+    // own housekeeping — and on a restart it would do it once per terminal.
+    const calls = watchFetch()
+    await ready()
+    await running('term-1')
+    await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+
+    expect(pushes(calls).length).toBe(1)
+    expect(pushes(calls)[0].headers['apns-push-type']).toBe('liveactivity')
+    expect(pushes(calls)[0].body.aps.alert).toBeUndefined()
+  })
+
+  it('forgets a card it cannot address, and lets the next run have one', async () => {
+    // The same bounded hole `done` has always had, and no worse: an update
+    // token exists only once the app has run and reported it, so a card the
+    // relay started blind has no address and never will until somebody opens
+    // the app. Nothing is pushed at the sentinel — see `TOKEN_UNKNOWN` — the
+    // row goes anyway, and the abandoned card clears itself on the `stale-date`
+    // its start carried.
+    const calls = watchFetch()
+    await ready()
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+
+    expect(pushes(calls).map(call => call.body.aps?.event)).toEqual(['start'])
+    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    expect(rows.results?.length).toBe(0)
+
+    // Which is the point of deleting it: the row is what a second start would
+    // collide with, so a terminal whose card was retired is not refused a card
+    // for every run that follows.
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    expect(pushes(calls).filter(call => call.body.aps?.event === 'start').length).toBe(2)
+  })
+
+  it('leaves the cards it was not asked about alone', async () => {
+    // A runner names the terminals it cannot account for, and an agent that is
+    // still working — or still blocked, which is the case that matters — is not
+    // among them. Its card is left exactly as it is: not ended, and not
+    // re-raised either, which would alert twice for one question.
+    const calls = watchFetch()
+    await ready()
+    await running('term-1', 'first-token')
+    await running('term-2', 'second-token')
+
+    await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+
+    expect(pushes(calls).length).toBe(1)
+    expect(pushes(calls)[0].url).toContain('/device/first-token')
+    const rows = await env.DB.prepare(`SELECT terminal FROM live_activities`).all<any>()
+    expect(rows.results?.map((row: any) => row.terminal)).toEqual(['term-2'])
+  })
+
+  it('will not end an activity belonging to another account', async () => {
+    // The same rule as the alert: a machine says which terminals, never whose.
+    // Two runners cannot mint the same UUID, but the account clause is what
+    // makes that a fact about the query rather than a fact about UUIDs.
+    const calls = watchFetch()
+    await ready()
+    await env.DB.prepare(
+      `INSERT INTO accounts (id, created_at) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`,
+    )
+      .bind('user_2', Date.now())
+      .run()
+    await env.DB.prepare(
+      `INSERT INTO live_activities (id, account_id, terminal, update_token, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+      .bind(crypto.randomUUID(), 'user_2', 'term-1', 'their-update-token', Date.now())
+      .run()
+
+    const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+    expect(await response.json()).toEqual({ retired: 0 })
+    expect(calls.every(call => !call.url.includes('their-update-token'))).toBe(true)
+    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    expect(rows.results?.length).toBe(1)
+  })
+
+  it('says nothing happened for terminals that never had a card', async () => {
+    // Which is what makes the sweep safe to write the way it is. A runner names
+    // every terminal it cannot account for — most of which are idle shells that
+    // never had a card — rather than guessing at a table it cannot see.
+    const calls = watchFetch()
+    await ready()
+    const response = await post('/v1/notify/retire', { terminals: ['term-1', 'term-2'] }, 'mine')
+
+    expect(await response.json()).toEqual({ retired: 0 })
+    expect(pushes(calls).length).toBe(0)
+  })
+
+  it('refuses a machine token nobody issued', async () => {
+    watchFetch()
+    await ready()
+    expect((await post('/v1/notify/retire', { terminals: ['term-1'] }, 'theirs')).status).toBe(401)
+    expect((await post('/v1/notify/retire', { terminals: ['term-1'] })).status).toBe(401)
+  })
+
+  it('needs a list of terminals', async () => {
+    // A 400 rather than the shrug an unknown `status` gets on `/v1/notify`:
+    // there is no forward-compatibility story to protect here, because a
+    // request that names no terminals is asking for nothing at all.
+    watchFetch()
+    await ready()
+    expect((await post('/v1/notify/retire', {}, 'mine')).status).toBe(400)
+    expect((await post('/v1/notify/retire', { terminals: 'term-1' }, 'mine')).status).toBe(400)
+    const empty = await post('/v1/notify/retire', { terminals: [] }, 'mine')
+    expect(empty.status).toBe(200)
+    expect(await empty.json()).toEqual({ retired: 0 })
+  })
+
+  it('takes only as many terminals as one request may name', async () => {
+    // `RETIRE_LIMIT`. The largest honest sweep is one id per pane on the
+    // machine, and the bound is what stops this loop becoming a way to make the
+    // worker spend a minute in D1 on one caller's behalf. A real runner never
+    // trips it: it sends its sweep in requests of that size, so the terminal
+    // past the bound here arrives in the next one rather than being forgotten.
+    watchFetch()
+    await ready()
+    await running('term-late')
+    const flood = [...Array(200)].map((_, index) => `term-${index}`)
+    const response = await post(
+      '/v1/notify/retire',
+      { terminals: [...flood, 'term-late'] },
+      'mine',
+    )
+
+    expect(await response.json()).toEqual({ retired: 0 })
+    const rows = await env.DB.prepare(`SELECT terminal FROM live_activities`).all<any>()
+    expect(rows.results?.map((row: any) => row.terminal)).toEqual(['term-late'])
+  })
+})
+
 // MARK: - Proving possession of a key
 
 /// The two strings a registration carries to prove it holds Key A.

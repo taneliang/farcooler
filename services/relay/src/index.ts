@@ -2,9 +2,10 @@
 ///
 /// Three groups, and the asymmetry between them is the whole security model.
 /// Signing in exchanges a WorkOS code for a session. Registering a device and
-/// pairing a machine are done BY A SIGNED-IN PERSON. Sending a notification is
+/// pairing a machine are done BY A SIGNED-IN PERSON. The `/v1/notify` pair is
 /// done by a machine holding a token that person issued — so a machine can only
-/// ever notify the account that paired it. See `/v1/notify`.
+/// ever notify the account that paired it, and only ever take down that
+/// account's cards. Neither of the two names a destination; see `/v1/notify`.
 ///
 /// The apps hold a WorkOS client id, which is public by design, and never an API
 /// key. The code exchange happens here because that is the one step that needs
@@ -95,6 +96,8 @@ export default {
           return await revokeOwned(request, env, 'daemons')
         case '/v1/notify':
           return await notify(request, env)
+        case '/v1/notify/retire':
+          return await retireActivities(request, env)
         default:
           return json({ error: 'not found' }, 404)
       }
@@ -823,18 +826,29 @@ interface Device {
   live_activity_start_token: string | null
 }
 
-async function notify(request: Request, env: Env): Promise<Response> {
+/// The machine holding this token, or the response to send instead.
+///
+/// The daemon half of `requireAccount`, and deliberately shaped the same way:
+/// the two credentials in this service are not interchangeable — a session says
+/// WHO, a daemon token says WHICH MACHINE, and it names an account only because
+/// a signed-in person once paired it. Every route that trusts a machine goes
+/// through here, so there is one place that decides what a machine is.
+///
+/// Expiry checked in the WHERE clause, not after: a token that has run out is a
+/// token that does not exist. NULL means a pairing issued before expiries
+/// existed, which keeps working — logging those machines out to introduce a
+/// policy would break a feature people had just set up.
+///
+/// `label` comes along because it is the machine's name, which is one of the
+/// three things a Live Activity's card says.
+async function requireDaemon(
+  request: Request,
+  env: Env,
+): Promise<{ id: string; account_id: string; label: string } | Response> {
   const header = request.headers.get('authorization') ?? ''
   const token = header.startsWith('Bearer ') ? header.slice(7) : ''
   if (!token) return json({ error: 'unauthorized' }, 401)
 
-  // Expiry checked in the WHERE clause, not after: a token that has run out is
-  // a token that does not exist. NULL means a pairing issued before expiries
-  // existed, which keeps working — logging those machines out to introduce a
-  // policy would break a feature people had just set up.
-  //
-  // `label` comes along because it is the machine's name, which is one of the
-  // three things a Live Activity's card says.
   const daemon = await env.DB.prepare(
     `SELECT id, account_id, label FROM daemons
      WHERE token_hash = ? AND (expires_at IS NULL OR expires_at > ?)`,
@@ -842,6 +856,12 @@ async function notify(request: Request, env: Env): Promise<Response> {
     .bind(await sha256(token), Date.now())
     .first<{ id: string; account_id: string; label: string }>()
   if (!daemon) return json({ error: 'unauthorized' }, 401)
+  return daemon
+}
+
+async function notify(request: Request, env: Env): Promise<Response> {
+  const daemon = await requireDaemon(request, env)
+  if (daemon instanceof Response) return daemon
 
   const body = await request.json<Notification>()
   if (!body.title) return json({ error: 'title' }, 400)
@@ -935,6 +955,119 @@ async function notify(request: Request, env: Env): Promise<Response> {
   return json({ delivered })
 }
 
+/// How many cards one request may retire.
+///
+/// A runner sweeps its whole fleet the first time it can account for each
+/// terminal after starting, so the largest honest request is one id per pane on
+/// the machine. A hundred is several times the biggest fleet anyone runs and
+/// still small enough that the loop below cannot become a way to make this
+/// worker spend a minute in D1 on one caller's behalf.
+///
+/// It is a bound and not a truncation the caller has to notice: the runner sends
+/// its sweep in requests of this size — see `push::RETIRE_BATCH` — so a fleet
+/// past the bound arrives as two requests rather than as a card nobody mentions
+/// again.
+const RETIRE_LIMIT = 100
+
+/// Take down the cards a runner can no longer account for.
+///
+/// The counterpart to `/v1/notify`, under the same path because it carries the
+/// same credential and no other route does: a machine token, which names an
+/// account and nothing else. It is a different VERB on the same table — notify
+/// says what happened, this says what is no longer happening — and it exists
+/// because only one side of this pair knows each half of the answer. The relay
+/// knows which cards are up, in `live_activities`; only the runner knows whether
+/// there is still a run behind one, and a card whose run has gone has nobody
+/// left to end it.
+///
+/// Two ways that used to happen, both of which left a card on the lock screen
+/// reading "Waiting for your answer" for an agent that was not waiting:
+///
+///   - the terminal went away while its card was up. `Watcher::sample` drops
+///     the state it holds for a terminal that has left the fleet, and the
+///     transition that would have sent `done` can no longer be observed, because
+///     there is nothing left to observe it on.
+///   - the daemon restarted. Its map of what each terminal was doing is rebuilt
+///     empty, so the SAME transition never happens: the agent that was blocked
+///     before the restart is simply the agent it first sees, and a first sighting
+///     is not a change. Every runner update orphaned every card that was up.
+///
+/// Silent, and that is the point of not folding it into `/v1/notify`. Nothing
+/// here alerts: no device push goes out, and the activity push carries no alert
+/// dictionary. A card coming down is not news — the person either closed the
+/// pane themselves or updated their runner — and a buzz per orphaned card on a
+/// restart would be this feature interrupting somebody to announce its own
+/// housekeeping.
+///
+/// A card it cannot ADDRESS is deleted and left to the `stale-date` its start
+/// carried, exactly as `done` does, and for the same reason: an update token
+/// exists only once the app has run and reported it, and no amount of asking
+/// makes one out of a card that has never been addressable. The row goes either
+/// way, because the row's whole meaning is "a card the relay believes is up" —
+/// and keeping one for a card nothing can reach would refuse this terminal a
+/// card for every run that followed.
+async function retireActivities(request: Request, env: Env): Promise<Response> {
+  const daemon = await requireDaemon(request, env)
+  if (daemon instanceof Response) return daemon
+
+  const body = await request.json<{ terminals?: unknown }>()
+  // A 400 rather than a shrug, unlike the unknown `status` in `pushActivity`:
+  // there is no forward-compatibility story to protect here, because a request
+  // that names no terminals is asking for nothing at all.
+  if (!Array.isArray(body.terminals)) return json({ error: 'terminals' }, 400)
+  const terminals = body.terminals
+    .filter((terminal): terminal is string => typeof terminal === 'string' && terminal !== '')
+    .slice(0, RETIRE_LIMIT)
+  if (terminals.length === 0) return json({ retired: 0 })
+
+  // One terminal at a time, the same as every other card path in this file, and
+  // not a single `terminal IN (...)`. Two reasons, and neither is style: a list
+  // that long has to be spliced into the SQL text as placeholders, which is the
+  // one thing no query in this service does; and D1 takes at most a hundred
+  // bound parameters per statement — measured, not assumed: a hundred binds and
+  // a hundred and one is `D1_ERROR: too many SQL variables` — so a batched form
+  // whose first parameter is the account id would have a silent cliff at
+  // ninety-nine terminals, a few panes past the biggest fleet anyone runs. A
+  // sweep happens once when a runner starts and once when a pane closes — where
+  // `pushActivity` spends three statements every ten seconds for every working
+  // agent — so the statement count here is not the one worth optimizing.
+  let retired = 0
+  for (const terminal of terminals) {
+    // Scoped to the account the token names, the same as every read a machine
+    // can reach: a runner says which terminals, never whose. Two runners cannot
+    // mint the same UUID, but the account clause is what makes that a fact about
+    // this query rather than a fact about UUIDs.
+    const running = await env.DB.prepare(
+      `SELECT update_token, environment FROM live_activities
+       WHERE account_id = ? AND terminal = ?`,
+    )
+      .bind(daemon.account_id, terminal)
+      .first<{ update_token: string; environment: string | null }>()
+    if (!running) continue
+
+    if (running.update_token !== TOKEN_UNKNOWN) {
+      await deliverActivity(env, daemon.account_id, running.update_token, running.environment, {
+        event: 'end',
+        // Nothing to say, because nothing is being reported: the card comes
+        // down at once — see `Dismissal` — so this state exists only because
+        // the app's `ContentState` has to decode, and a detail line would be a
+        // sentence about a run the runner has just said it cannot account for.
+        state: { status: 'done', detail: '' },
+        dismissal: 'immediate',
+      })
+    }
+    await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND terminal = ?`)
+      .bind(daemon.account_id, terminal)
+      .run()
+    retired += 1
+  }
+
+  // What was actually taken down, not what was asked about. A runner sweeps
+  // every terminal it cannot account for and most of them never had a card, so
+  // the count the caller gets back is the one worth logging.
+  return json({ retired })
+}
+
 /// The `update_token` of a card the relay started while the app was not running.
 ///
 /// A row HAS to exist the moment a card is push-started, or the next push finds
@@ -959,11 +1092,17 @@ const TOKEN_UNKNOWN = ''
 /// How long a swipe keeps this terminal off the lock screen.
 ///
 /// A dismissal is remembered on the row, and `done` deletes the row with the
-/// run — but a run can end without a `done` ever arriving: a daemon killed
-/// mid-turn, a machine that slept. A row kept forever on that path would refuse
-/// this terminal a card for every run that followed, silently and permanently,
-/// which is a worse failure than the undismissable card the memory was added to
-/// fix.
+/// run — but a run can end without a `done` ever arriving. A row kept forever on
+/// that path would refuse this terminal a card for every run that followed,
+/// silently and permanently, which is a worse failure than the undismissable
+/// card the memory was added to fix.
+///
+/// One of the two ways that used to happen is now closed from the other end: a
+/// daemon killed mid-turn sweeps every terminal it cannot account for on its way
+/// back up, and `/v1/notify/retire` deletes those rows with the cards. What is
+/// left is the runner that does not come back — a machine that slept, one that
+/// was unpaired, one that is simply off — and no message from it is what this
+/// bound is for.
 ///
 /// An hour, which is `STALE_AFTER_S` in `services/relay/src/push.ts` and the
 /// same number for the same reason: after that long with no news the relay does

@@ -242,10 +242,25 @@ interface ActivityBase {
   alert?: { title: string; body: string }
 }
 
+/// When a card that is ending should leave the lock screen.
+///
+/// `delayed` is what a FINISHED agent gets, and is the default because it is
+/// what every end push meant before there was another kind: the last state
+/// stays up for `DISMISSAL_DELAY_S` so that somebody who picks the phone up
+/// because of the alert beside it has something to read when they get there.
+///
+/// `immediate` is for a card being RETIRED rather than finished — see
+/// `/v1/notify/retire`. There the runner has said it can no longer account for
+/// the run behind the card, so there is no last word to leave up, and every
+/// second it stays is a second of the lock screen stating something that stopped
+/// being true. A minute of "Finished" for an agent whose pane the person closed
+/// themselves is not a courtesy, it is the same wrong card for a shorter time.
+export type Dismissal = 'delayed' | 'immediate'
+
 export type Activity =
   | (ActivityBase & { event: 'start'; attributes: ActivityAttributes })
   | (ActivityBase & { event: 'update' })
-  | (ActivityBase & { event: 'end' })
+  | (ActivityBase & { event: 'end'; dismissal?: Dismissal })
 
 /// How long the finished state stays up before the card clears itself.
 ///
@@ -305,7 +320,11 @@ export async function sendLiveActivity(
     aps['stale-date'] = now + STALE_AFTER_S
   }
   if (activity.event === 'end') {
-    aps['dismissal-date'] = now + DISMISSAL_DELAY_S
+    // `now` rather than an omitted date for a retirement: a dismissal date that
+    // has already passed takes the card off the lock screen at once, which is
+    // exactly what is being asked for, where omitting the field leaves it there
+    // for hours. See `Dismissal`.
+    aps['dismissal-date'] = activity.dismissal === 'immediate' ? now : now + DISMISSAL_DELAY_S
   }
 
   const response = await fetch(`https://${apnsHost(environment)}/3/device/${token}`, {
