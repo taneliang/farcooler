@@ -368,6 +368,84 @@ async fn shortstat_gives_the_three_numbers_a_sidebar_row_needs() {
 }
 
 #[tokio::test]
+async fn shortstat_counts_work_that_has_not_been_committed_yet() {
+    // The whole point of the sidebar's `+N -M`: it must climb as an agent edits,
+    // not only when it commits. `git diff <base> HEAD` answered the second
+    // question, so a row sat still through a twenty-minute turn and then jumped.
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    write(p, "a.txt", "one\ntwo\nthree\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "add a"]);
+
+    // Committed only, so far.
+    let committed = farcooler_daemon::change_set::shortstat(p, "main").await.expect("shortstat");
+    assert_eq!(committed, (1, 3, 0));
+
+    // An edit nobody has committed, and a file nobody has staged.
+    write(p, "a.txt", "one\ntwo\nthree\nfour\n");
+    let dirty = farcooler_daemon::change_set::shortstat(p, "main").await.expect("shortstat");
+    assert_eq!(dirty, (1, 4, 0), "an uncommitted line counts the moment it lands");
+
+    // And staged-but-uncommitted, which `git diff <base>` already sees because
+    // the file is in the index. It must not be counted a second time.
+    run(p, &["add", "a.txt"]);
+    let staged = farcooler_daemon::change_set::shortstat(p, "main").await.expect("shortstat");
+    assert_eq!(staged, (1, 4, 0), "staging changes nothing about the count");
+}
+
+#[tokio::test]
+async fn shortstat_counts_a_file_that_has_only_just_been_created() {
+    // The failure that would be worse than the committed-only number this
+    // replaces: a count that climbs while an agent edits an existing file and
+    // sits still while it writes a new one. It LOOKS live, so nobody checks it.
+    // `git diff` cannot see an untracked file at all; `untracked_lines` is why
+    // this passes.
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["checkout", "-q", "-b", "feature"]);
+
+    write(p, "brand-new.rs", "fn main() {}\n");
+    let (files, ins, del) =
+        farcooler_daemon::change_set::shortstat(p, "main").await.expect("shortstat");
+    assert_eq!((files, ins, del), (1, 1, 0), "a created file is one file and its lines");
+
+    // A last line with no newline after it is still a line — git reports it as
+    // an insertion and marks the hunk `\ No newline at end of file`.
+    write(p, "no-eol.txt", "one\ntwo");
+    let (files, ins, _) =
+        farcooler_daemon::change_set::shortstat(p, "main").await.expect("shortstat");
+    assert_eq!((files, ins), (2, 3));
+
+    // Ignored files are not work in progress, and a `target/` full of build
+    // output must never land in a sidebar row.
+    write(p, ".gitignore", "ignored/\n");
+    run(p, &["add", ".gitignore"]);
+    run(p, &["commit", "-q", "-m", "ignore"]);
+    write(p, "ignored/huge.txt", "a\nb\nc\nd\ne\n");
+    let (files, ins, _) =
+        farcooler_daemon::change_set::shortstat(p, "main").await.expect("shortstat");
+    assert_eq!((files, ins), (3, 4), "the gitignore commit itself, and nothing under it");
+}
+
+#[tokio::test]
+async fn shortstat_does_not_count_the_lines_of_a_new_binary_file() {
+    // git prints `-` rather than a count for a file it calls binary, and those
+    // lines appear in no total it reports. An agent that drops a 2MB PNG into a
+    // worktree must not read as fifty thousand insertions.
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    std::fs::write(p.join("icon.png"), [0x89, b'P', b'N', b'G', 0x00, 0x0a, 0x0a, 0x00])
+        .expect("write");
+
+    let (files, ins, del) =
+        farcooler_daemon::change_set::shortstat(p, "main").await.expect("shortstat");
+    assert_eq!((files, ins, del), (1, 0, 0), "counted as a file, never as lines");
+}
+
+#[tokio::test]
 async fn shortstat_works_in_a_linked_worktree_which_is_the_only_kind_this_product_makes() {
     // Every workspace is a `git worktree add`, never the main checkout, so the
     // main-worktree case above is the one that never happens in production.

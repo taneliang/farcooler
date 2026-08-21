@@ -462,6 +462,16 @@ final class DaemonClient: ObservableObject {
                     await self.refresh()
                 }
             },
+            onChangeSet: { [weak self] in
+                Task { @MainActor in
+                    // Stale-guarded like every other arm here, and for the
+                    // reason `onEvent` states: a line already in the pipe when
+                    // `stopEvents()` ran is still decoded, and this one would
+                    // otherwise launch a subprocess for a runner nobody holds.
+                    guard let self, self.streamGeneration == generation else { return }
+                    self.refreshChangesInboxSoon()
+                }
+            },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     // Stale: either this stream was deliberately stopped, or
@@ -620,15 +630,6 @@ final class DaemonClient: ObservableObject {
             let terminal = fleet.workspaces[w].terminals[t]
             Notifier.shared.report(terminal: terminal, workspace: fleet.workspaces[w].task)
             reapIfExited(terminal)
-            // The one thing on a workspace row that is NOT in this event.
-            //
-            // Everything above came off the wire; the sidebar's `+N -M` did
-            // not, because no event carries it and none exists to carry it.
-            // An agent working in this pane is the best evidence the app has
-            // that this runner's worktrees may have moved, so it is what asks.
-            // See `refreshChangesInboxSoon()` for why this is a request rather
-            // than a call.
-            refreshChangesInboxSoon()
             return
         }
 
@@ -1805,62 +1806,48 @@ final class DaemonClient: ObservableObject {
     /// Re-read this runner's diff counts shortly, coalescing a burst into one
     /// call.
     ///
-    /// The `+N -M` on a sidebar row was the one fact in this app that nothing
-    /// ever refreshed on its own. `refreshChangesInbox()` has exactly two
-    /// callers: `refresh()`, which runs on a full fleet read, and
-    /// `ChangesStore.poll()`, which runs every three seconds but only for the
-    /// single worktree whose diff pane is open and only when that worktree's
-    /// change set moved. A full fleet read happens when the set of workspaces
-    /// changes — `EventStream`'s `fleet` line means a worktree appeared,
-    /// vanished, or was hidden — or when the user does one of the roughly
-    /// thirty things that call `refresh()`. An agent committing for twenty
-    /// minutes in a pane does neither, so the counts sat at whatever they were
-    /// when the fleet last changed shape, which for a long-lived window is
-    /// effectively forever. The row beside the numbers updated every second.
+    /// Driven by the daemon's `change_set` event, which is the runner saying a
+    /// worktree's diff actually moved — a commit, an agent's write, a checkout.
+    /// This used to be driven off terminal events instead, as a stand-in for
+    /// exactly that event before anything sent it, and the stand-in is gone: an
+    /// agent thinking for twenty minutes produced a terminal event a second and
+    /// no change to count, while an edit made in a pane that had gone quiet
+    /// produced none at all.
     ///
-    /// There is nothing better to hang this on today. The daemon does have a
-    /// "this worktree's change set moved" broadcast — `announce_change_set` in
-    /// `crates/daemon/src/watch.rs` — but it has no callers, and `farcooler
-    /// events` would not print it if it did: the printer handles `terminal`,
-    /// `workspace`, `layout` and `fleet` and drops everything else. Wiring that
-    /// through is daemon work, and it is the right end state; this is the Mac
-    /// side of it, and it goes away cleanly when that event arrives.
+    /// A request rather than a call, and still no timer of its own. A timer is
+    /// the thing this app deliberately deleted — see `EventStream`'s own note —
+    /// and every read here is a `farcooler` subprocess, over ssh for a remote
+    /// runner. One armed read absorbs a whole probe pass: the daemon walks its
+    /// worktrees together and can announce for several of them in the same
+    /// breath, and every one of those wants the same single `changes inbox`
+    /// call.
     ///
-    /// A request rather than a call, and no timer of its own. A timer is the
-    /// thing this app deliberately deleted — see `EventStream`'s own note — and
-    /// every read here is a `farcooler` subprocess, over ssh for a remote
-    /// runner. Terminal events are the closest available signal to "a worktree
-    /// on this runner may have moved", and the daemon sends them only when
-    /// something genuinely changed, so a fleet where nothing is happening still
-    /// costs exactly nothing. A fleet where an agent is working pays one extra
-    /// subprocess per runner per floor interval.
-    ///
-    /// What that buys, per call, is cheap on the daemon and worth stating
-    /// because the number of worktrees is the thing that grows: `review_ops::
-    /// inbox` walks every workspace and answers each from
-    /// `ReviewCache::shortstat`, which is keyed by the mtimes of `HEAD` and the
-    /// index, so a worktree nobody committed in costs three `stat`s and one
-    /// SQLite row and runs no git at all. `git diff --shortstat` runs only for
-    /// the worktrees whose gate actually moved — which is to say, for the ones
-    /// whose numbers are about to change on screen.
+    /// A fleet where nothing is happening costs nothing at all, on both ends.
+    /// The daemon spends no `git` on a worktree that nothing free says has moved
+    /// — see `Watcher::probe_change_sets` — so it announces nothing, so this is
+    /// never armed. A fleet where an agent is working pays one subprocess per
+    /// runner per floor interval, and the daemon answers it from counts it
+    /// computed once for every client rather than once per client.
     private func refreshChangesInboxSoon() {
         // One armed read absorbs every event that lands before it runs. This is
-        // the whole coalescer: a working agent pushes a `line` change roughly
-        // every second, and without this each one would be its own subprocess.
+        // the whole coalescer: one probe pass on the runner can announce for
+        // every worktree an agent touched, and without this each announcement
+        // would be its own subprocess asking the same question.
         guard !changesInboxArmed else { return }
         // A daemon that ANSWERED and refused knows nothing about review, and
-        // will refuse identically every time — see `changesSupported`. Arming
-        // off every terminal event for such a runner would put a failing
-        // subprocess on a three-second loop for as long as an agent works
-        // there, each one overwriting `changesError` with the same words.
-        // `refresh()` still tries it unconditionally, so a runner that gets
-        // upgraded is picked up on its next full read rather than being written
-        // off for the lifetime of the app.
+        // will refuse identically every time — see `changesSupported`. Such a
+        // runner is also too old to send this event at all, so this guard is
+        // belt and braces rather than the load-bearing one it was; it stays
+        // because a failing subprocess on a three-second loop, each one
+        // overwriting `changesError` with the same words, is not a thing to
+        // leave one version away. `refresh()` still tries it unconditionally, so
+        // a runner that gets upgraded is picked up on its next full read rather
+        // than being written off for the lifetime of the app.
         guard changesSupported != false else { return }
         // Nothing armed for a client that was told to be quiet. `.onDisappear`
         // and a retired runner both come through `stopEvents()`, and a buffered
         // event decoded after it — which `EventStream.stop()` cannot prevent,
-        // see its own note — reaches `apply(_:)` and would otherwise launch a
+        // see its own note — reaches this and would otherwise launch a
         // subprocess on behalf of a window that is gone.
         guard !isStopped else { return }
 

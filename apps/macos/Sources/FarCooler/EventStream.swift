@@ -119,17 +119,31 @@ final class EventStream {
     /// can both create and delete rows in one pass, and a client re-reads the
     /// fleet rather than applying this as a delta.
     private let onFleet: @Sendable () -> Void
+    /// One worktree's diff moved: a commit landed, an agent wrote a file, a
+    /// branch was checked out.
+    ///
+    /// Carries nothing either, for a different reason. The daemon deliberately
+    /// sends the workspace and a version and never the change set itself — most
+    /// clients are not showing a diff, and a lockfile regeneration would fan
+    /// thousands of file records out to every connected device. So there is
+    /// nothing here to apply as a delta, and the one thing worth doing with it is
+    /// re-reading the counts for the whole runner in one call. Which worktree it
+    /// was does not narrow that: `changes inbox` answers every row at once and is
+    /// the only call the sidebar makes.
+    private let onChangeSet: @Sendable () -> Void
     private let onEnd: @Sendable () -> Void
 
     init(
         onEvent: @escaping @Sendable (TerminalEvent) -> Void,
         onLayout: @escaping @Sendable (LayoutEvent) -> Void = { _ in },
         onFleet: @escaping @Sendable () -> Void = {},
+        onChangeSet: @escaping @Sendable () -> Void = {},
         onEnd: @escaping @Sendable () -> Void = {}
     ) {
         self.onEvent = onEvent
         self.onLayout = onLayout
         self.onFleet = onFleet
+        self.onChangeSet = onChangeSet
         self.onEnd = onEnd
     }
 
@@ -155,7 +169,7 @@ final class EventStream {
         let buffer = LineBuffer()
         let handle = out.fileHandleForReading
         outputHandle = handle
-        handle.readabilityHandler = { [onEvent, onLayout, onFleet] h in
+        handle.readabilityHandler = { [onEvent, onLayout, onFleet, onChangeSet] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
             let decoder = JSONDecoder()
@@ -176,6 +190,8 @@ final class EventStream {
                     }
                 case "fleet":
                     onFleet()
+                case "change_set":
+                    onChangeSet()
                 // Resources this app does not track yet are skipped, not an error.
                 default: continue
                 }

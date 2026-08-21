@@ -60,6 +60,17 @@ const BACKSTOP_INTERVAL: Duration = Duration::from_secs(60);
 /// long anyone would stare at a stale sidebar and far above what the scan costs.
 const RECONCILE_BACKSTOP: Duration = Duration::from_secs(30);
 
+/// How often the sidebar's `+N -M` is re-derived for a worktree that moved.
+///
+/// Three seconds, chosen against the clients rather than against this loop. The
+/// Mac coalesces its inbox reads to one every three seconds
+/// (`DaemonClient.changesInboxFloor`) and the phone polls on the same three, so
+/// a number computed faster than this is a `git diff` nobody will ever draw.
+/// Slower, and the count would visibly lag the pane beside it, which moves every
+/// second — a row whose agent is live while its numbers are minutes old is the
+/// whole complaint these counts exist to answer.
+const CHANGE_SET_INTERVAL: Duration = Duration::from_secs(3);
+
 /// How long a client's word that it is looking at a pane stays good for.
 ///
 /// The freshness bound on `terminal.watching`, and the whole reason a claim of
@@ -469,6 +480,30 @@ pub struct Watcher {
     ///
     /// A std mutex: held only across a map lookup, never across an await.
     worktree_marks: std::sync::Mutex<HashMap<Uuid, std::time::SystemTime>>,
+    /// When each workspace's `+N -M` was last computed.
+    ///
+    /// A std mutex on the same terms as `worktree_marks`. Absent for a worktree
+    /// nothing has probed, which is what makes the first pass after a daemon
+    /// start reach all of them.
+    change_set_probes: std::sync::Mutex<HashMap<Uuid, i64>>,
+    /// When an agent was last seen working in each workspace.
+    ///
+    /// The signal that makes live counts possible at all. An agent edits files
+    /// with its own tools in its own pane — not through this daemon — so
+    /// `review::cheap_gate` sits still through an entire turn and
+    /// `ReviewCache::touched_at` never hears about it. What this process DOES
+    /// know, because it is already reading every pane once a second for the
+    /// fleet rows, is which panes have an agent working in them. Stamped in
+    /// `sample()` where that is decided, and spent in `probe_change_sets`.
+    ///
+    /// A std mutex, and written under the `state` lock without ever being held
+    /// across an await — a map insert of two words.
+    change_set_activity: std::sync::Mutex<HashMap<Uuid, i64>>,
+    /// Whether a change-set pass is still running.
+    ///
+    /// See `spawn_change_set_probe`, which is the only thing that reads or
+    /// writes it.
+    change_set_probing: std::sync::atomic::AtomicBool,
     /// Each pane's attachment to its own session log.
     ///
     /// A std mutex for the same reason `worktree_marks` is one, and with the
@@ -580,6 +615,12 @@ struct Sampled {
     /// a path is `host_admin` only — see this module's rule about which fields
     /// carry one — and `add-auth` is the string a person recognizes anyway.
     workspace: String,
+    /// The same worktree, by id, for the things that key off one rather than
+    /// name one. Carried here for the same reason the name above is: the outer
+    /// loop is already holding the workspace row this terminal was reached
+    /// through, and a lookup taken later in the tick could answer about a
+    /// different fleet than the one this pass is describing.
+    workspace_id: Uuid,
     state: TerminalState,
     pane_mode: farcooler_store::models::PaneMode,
     preset: String,
@@ -2027,6 +2068,9 @@ impl Watcher {
             events,
             state: tokio::sync::Mutex::new(HashMap::new()),
             worktree_marks: std::sync::Mutex::new(HashMap::new()),
+            change_set_probes: std::sync::Mutex::new(HashMap::new()),
+            change_set_activity: std::sync::Mutex::new(HashMap::new()),
+            change_set_probing: std::sync::atomic::AtomicBool::new(false),
             logs: std::sync::Mutex::new(HashMap::new()),
             log_watcher: crate::log_watch::LogWatcher::start(crate::log_watch::roots()),
             watched: std::sync::Mutex::new(HashMap::new()),
@@ -2417,6 +2461,155 @@ impl Watcher {
         });
     }
 
+    /// Start a change-set pass, unless one is still going.
+    ///
+    /// Detached rather than awaited inside the tick loop, because this is the
+    /// one pass there that can wait on something the loop must never wait on:
+    /// resolving a base falls through to `gh repo view` for a repository nobody
+    /// has read a default branch for, bounded at `stack::GH_TIMEOUT` — fifteen
+    /// seconds, once per repository, and every one of them on the first pass
+    /// after a daemon start. Awaiting that here would hold `sample()` off for as
+    /// long as it took, and a fleet whose rows stop moving is a worse failure
+    /// than counts that arrive late. A worktree on a stalled mount buys the same
+    /// stall out of `GIT_TIMEOUT`.
+    ///
+    /// A flag rather than a queue. If a pass is still running, the next tick has
+    /// nothing to add: it would gate on exactly the same facts and probe exactly
+    /// the same worktrees, and two of them racing would spend the git twice.
+    fn spawn_change_set_probe(self: &Arc<Self>) {
+        use std::sync::atomic::Ordering;
+        if self.change_set_probing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let watcher = Arc::clone(self);
+        tokio::spawn(async move {
+            watcher.probe_change_sets().await;
+            watcher.change_set_probing.store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// Re-derive the sidebar's `+N -M` for every worktree that could have moved.
+    ///
+    /// The expensive half of the review surface — three git processes per
+    /// worktree, a `merge-base`, a `diff --shortstat` and a
+    /// `status --porcelain=v2` — and what makes it affordable is everything this
+    /// refuses to do before spending them. A worktree is probed only when one of
+    /// these says it might have changed, and all three are free:
+    ///
+    /// - `review::cheap_gate` moved: a commit, a rebase, a checkout, a `git add`.
+    ///   Two `stat`s.
+    /// - The cache was marked stale by something this daemon did itself — a base
+    ///   change, or a change set recomputed for a client. The second matters more
+    ///   than it sounds: that computation hashes the CONTENTS of every dirty
+    ///   file, so a worktree whose diff someone has open is already proving edits
+    ///   the gate cannot see. A map lookup.
+    /// - An agent has been active in one of its panes since the last probe —
+    ///   observed working, or its own session log advanced. A map lookup, off an
+    ///   observation `sample()` already made this second.
+    ///
+    /// The third is the one that earns the feature. Agents write files with their
+    /// own tools, so nothing about an edit in place moves the first, and a count
+    /// gated on it alone is the committed-only count this replaces. It is also
+    /// what catches an edit that came from no agent at all in a pane this runner
+    /// is sampling anyway — someone's own editor, an agent shelling out to `sed`.
+    ///
+    /// And it is what keeps the property this module is built around: a fleet
+    /// where nothing is happening passes none of the three, so it spawns no git
+    /// at all, however many worktrees it holds. That is deliberately not a clock.
+    /// A timed backstop over every worktree — the shape `reconcile_worktrees`
+    /// uses, where the cost is one `git worktree list` per REPOSITORY — would
+    /// here be those three per WORKTREE forever, on a runner whose whole job is
+    /// to be left alone overnight. The cost of not having one is a real
+    /// gap and worth naming: an edit made in a worktree with NO pane open and NO
+    /// diff on screen, by something this daemon never saw, is not noticed until
+    /// the next commit or the next time anyone works or looks there. Every case
+    /// this product is actually about passes one of the three.
+    async fn probe_change_sets(&self) {
+        let Ok(workspaces) = self.service.store.list_all_workspaces() else { return };
+
+        let live: HashSet<Uuid> = workspaces.iter().map(|ws| ws.id).collect();
+        self.service.review_cache.retain_counts(&live);
+        self.change_set_probes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id, _| live.contains(id));
+        self.change_set_activity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id, _| live.contains(id));
+
+        for ws in workspaces {
+            let worktree = std::path::PathBuf::from(&ws.worktree_path);
+            // A worktree whose directory is gone is not a worktree that changed
+            // nothing; it is one git will refuse, loudly, ten seconds at a time.
+            if !worktree.is_dir() {
+                continue;
+            }
+
+            let probed_at = self
+                .change_set_probes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&ws.id)
+                .copied();
+            let worked = self
+                .change_set_activity
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&ws.id)
+                .copied();
+            // Newer than the probe, not merely present: an agent that stopped an
+            // hour ago has already had its last edit counted, and re-reading it
+            // every three seconds for the rest of the night is the fleet-wide
+            // `git` loop this is built to avoid.
+            let worked_since = match (worked, probed_at) {
+                (Some(w), Some(p)) => w > p,
+                (Some(_), None) => true,
+                (None, _) => false,
+            };
+            if !worked_since && self.service.review_cache.counts_current(ws.id, &worktree) {
+                continue;
+            }
+
+            // The SAME base the change set uses, not a cheaper guess at one.
+            //
+            // The inbox once asked `default_base_for`, which lands on
+            // `origin/HEAD`, while the change set resolves through the recorded
+            // base, the PR's base ref and the repository's default branch. The
+            // two disagree the moment local `main` is ahead of `origin/main`, and
+            // every worktree was then charged with every unpushed commit on main:
+            // a branch that added 8,821 lines was reported as 44,691, and a main
+            // checkout with nothing to say at all was reported as 35,870. The
+            // sidebar and the panel beside it described the same worktree with
+            // different numbers.
+            //
+            // Resolved here rather than above the gate because it is not free:
+            // for a repository whose default branch has never been read it falls
+            // through to `guess_base`, which is two more git processes. Behind
+            // the gate it runs only for a worktree that already moved.
+            let base = crate::review_ops::resolve_base(&self.service, &ws).await.ok();
+            let version = self
+                .service
+                .review_cache
+                .recompute_counts(ws.id, &worktree, base.as_ref().map(|(b, _)| b.as_str()))
+                .await;
+
+            // Stamped whether or not the numbers moved, and whether or not the
+            // computation succeeded. This records that we LOOKED, which is what
+            // the activity gate above is asking about; stamping only on success
+            // would put a worktree git cannot answer for into a three-second
+            // retry loop for as long as an agent works in it.
+            self.change_set_probes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(ws.id, now_millis());
+
+            if let Some(version) = version {
+                self.announce_change_set(ws.id, version);
+            }
+        }
+    }
+
     /// Reconcile repositories whose worktrees moved, or all of them if forced.
     ///
     /// Broadcasts only when something actually changed, for the same reason
@@ -2465,6 +2658,8 @@ impl Watcher {
         backstop.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut worktrees = tokio::time::interval(RECONCILE_BACKSTOP);
         worktrees.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut change_sets = tokio::time::interval(CHANGE_SET_INTERVAL);
+        change_sets.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // The first tick of an interval completes immediately, and comparing
         // the inventory against itself before anything has had a chance to
         // diverge would only ever report a false alarm.
@@ -2481,6 +2676,10 @@ impl Watcher {
                 }
                 _ = backstop.tick() => self.service.backstop_reconcile().await,
                 _ = worktrees.tick() => self.reconcile_worktrees(true).await,
+                // Its first tick is immediate and that is wanted: every worktree
+                // is unprobed at startup, so this pass is what puts a number
+                // beside a row before anybody asks for one.
+                _ = change_sets.tick() => self.spawn_change_set_probe(),
             }
         }
     }
@@ -2700,6 +2899,7 @@ impl Watcher {
                     // `task_name`, off the same row, so a notification and the
                     // sidebar row it is about name the worktree identically.
                     workspace: workspace.workspace.name(),
+                    workspace_id: workspace.workspace.id,
                     state: terminal.state(),
                     pane_mode: terminal.terminal.pane_mode,
                     preset: terminal.terminal.command_preset.clone(),
@@ -2766,6 +2966,7 @@ impl Watcher {
             pid,
             cwd,
             workspace,
+            workspace_id,
             state: terminal_state,
             pane_mode,
             preset,
@@ -2970,6 +3171,32 @@ impl Watcher {
             let previous_state = entry.state;
 
             let activity_moved = entry.observe(observed, now);
+
+            // The one thing this loop knows that the review cache cannot: files
+            // under this worktree are probably moving right now.
+            //
+            // Three readings of that, because one is not enough. The raw sample
+            // is the direct one. The folded `activity` is read as well so the
+            // tail of a turn still counts — it holds `Working` until the fold is
+            // sure the agent has stopped, and an agent's last write of a turn
+            // lands inside exactly that window. And a non-empty batch of log
+            // steps says the agent's own session log advanced this tick, which
+            // is the one that carries a pane whose activity this runner cannot
+            // classify at all: `Unspecified` is a common honest answer, and a
+            // worktree whose counts depended on a screen match would simply
+            // never move.
+            //
+            // See `probe_change_sets`, which spends a `git diff` on this and on
+            // nothing else that is not free.
+            if observed == AgentActivity::Working
+                || entry.activity == AgentActivity::Working
+                || !events.is_empty()
+            {
+                self.change_set_activity
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(workspace_id, now);
+            }
 
             // Whether the relay is holding a card for a run that has gone.
             //

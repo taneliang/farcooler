@@ -1772,6 +1772,17 @@ async fn events(runner: Option<&str>) -> Fallible {
             farcooler_protocol::v1::event::Payload::FleetChanged(_) => serde_json::json!({
                 "kind": "fleet",
             }),
+            // One worktree's diff moved. The set itself is not here on purpose —
+            // see `announce_change_set` on the daemon side: most clients are not
+            // showing a diff, and a lockfile regeneration would otherwise fan
+            // thousands of file records out to every connected device. A client
+            // re-reads `changes inbox`, or this worktree's change set.
+            farcooler_protocol::v1::event::Payload::ChangeSetChanged(c) => serde_json::json!({
+                "kind": "change_set",
+                "workspace": uuid_of(&c.workspace_id).to_string(),
+                "short": short_bytes(&c.workspace_id),
+                "version": c.version,
+            }),
             // Other resources have no events yet. Skipping is right: a client
             // that reacts to a line it cannot read would be worse.
             _ => continue,

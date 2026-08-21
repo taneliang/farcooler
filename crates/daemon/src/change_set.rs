@@ -561,17 +561,86 @@ pub async fn current_branch(repo: &Path) -> Option<String> {
 /// `--shortstat` rather than the full change set: a fleet-wide glance needs
 /// files-changed and +/- for every worktree, and computing a whole change set
 /// per row would put a `git log` and a `git status` on a timer across the fleet.
-/// One `git diff --shortstat` is a fraction of that, and behind the cheap gate it
-/// only runs when something actually moved.
+///
+/// ## Against the working tree, not against `HEAD`
+///
+/// `git diff <base> HEAD` answers "what has been COMMITTED", which is why the
+/// sidebar's `+N -M` used to sit still for the twenty minutes an agent spent
+/// editing and then jump when it committed. Dropping `HEAD` compares the base
+/// against what is on disk, so committed and uncommitted work arrive together —
+/// out of the same single call, at the same cost. A file that has been staged
+/// but not committed is in the index and therefore already in this answer;
+/// nothing is counted twice.
+///
+/// ## Why there is a second call
+///
+/// `git diff` reads the index, and a file an agent has just CREATED is not in
+/// it. Agents create files constantly, so a number that climbed while one
+/// edited an existing file and sat still while it wrote a new one would be a
+/// worse lie than the honest committed-only number it replaces — it LOOKS live.
+/// `untracked_lines` is the other half. It is the expensive call `watch.rs` is
+/// built to avoid, which is why nothing here runs on a timer: see
+/// `Watcher::probe_change_sets`, which spends this only on a worktree something
+/// free has already said may have moved.
 pub async fn shortstat(repo: &Path, base_ref: &str) -> Result<(u32, u32, u32)> {
     let base = merge_base(repo, base_ref).await?;
-    let r = git(repo, &["diff", "--shortstat", &base, "HEAD"]).await?;
+    let r = git(repo, &["diff", "--shortstat", &base]).await?;
     if !r.ok {
         return Err(DomainError::OperationFailed);
     }
     // The same line `commits_since` reads per commit, and the same parse — see
     // `parse_shortstat`.
-    Ok(parse_shortstat(&r.stdout))
+    let (files, insertions, deletions) = parse_shortstat(&r.stdout);
+    let (new_files, new_lines) = untracked_lines(repo).await?;
+    Ok((files + new_files, insertions + new_lines, deletions))
+}
+
+/// The files git has never heard of, and the lines in them.
+///
+/// The half `git diff` cannot report, counted here rather than made visible to
+/// diff with `git add -N`. That would write the index — fighting whatever git
+/// the agent is running itself, and moving the index mtime that
+/// `review::cheap_gate` reads, which is the gate every cheap thing in this
+/// product is built on.
+///
+/// Reading each new file is the cost `worktree_digest` beside this already pays
+/// over the same list, and it is bounded by the same thing: what git calls
+/// untracked, which excludes everything `.gitignore` covers. So this is the size
+/// of the work in progress, not the size of the repository.
+async fn untracked_lines(repo: &Path) -> Result<(u32, u32)> {
+    let untracked = working_tree(repo).await?.untracked;
+
+    let mut files = 0;
+    let mut lines = 0;
+    for path in &untracked {
+        // Created and deleted again between the status call and this read. Not
+        // an error, and not a file to count.
+        let Ok(bytes) = tokio::fs::read(repo.join(path)).await else { continue };
+        files += 1;
+        // git prints `-` rather than a count for a file it calls binary, and
+        // those lines appear in no total it reports. Same test it uses: a NUL
+        // byte in the first 8000.
+        if bytes.iter().take(8000).any(|b| *b == 0) {
+            continue;
+        }
+        lines += new_file_lines(&bytes);
+    }
+    Ok((files, lines))
+}
+
+/// Lines in a file, counted the way git counts them when the whole file is an
+/// addition.
+///
+/// A final line with no newline after it still counts — git reports it as an
+/// insertion and marks the hunk `\ No newline at end of file`. An empty file is
+/// zero, which is also what git says.
+fn new_file_lines(bytes: &[u8]) -> u32 {
+    if bytes.is_empty() {
+        return 0;
+    }
+    let newlines = bytes.iter().filter(|b| **b == b'\n').count();
+    let unterminated = usize::from(bytes.last() != Some(&b'\n'));
+    (newlines + unterminated) as u32
 }
 
 /// The whole summary for one branch.

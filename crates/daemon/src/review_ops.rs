@@ -153,7 +153,7 @@ async fn locate(svc: &Service, workspace_id: Uuid) -> Result<(String, String, St
 ///
 /// Every step degrades to the next, so a runner with no `gh`, no network and no
 /// remote still reviews.
-async fn resolve_base(
+pub(crate) async fn resolve_base(
     svc: &Service,
     ws: &farcooler_store::models::Workspace,
 ) -> Result<(String, BaseSource)> {
@@ -327,6 +327,13 @@ pub async fn mark_read(svc: &Service, req: &pb::ChangesMarkRead) -> Result<()> {
 /// Resolving every entry's anchor here would need a change set per workspace,
 /// which is one `git status` per worktree per call — exactly what `watch.rs` was
 /// built to avoid.
+///
+/// Nothing here runs git, which is the whole reason a client may poll it. The
+/// `+N -M` used to be computed in this loop, behind a gate that made it free for
+/// a worktree nobody had committed in; once the numbers included uncommitted
+/// work that gate stopped holding, and a fleet-wide `git diff` on every client's
+/// three-second timer is not a thing to build. `Watcher::probe_change_sets` owns
+/// the probe now and this reads what it left.
 pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
     let mut items = Vec::new();
 
@@ -357,24 +364,17 @@ pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
             None => true,
         };
 
-        // The SAME base the change set uses, not a cheaper guess at one.
-        //
-        // This asked `default_base_for`, which lands on `origin/HEAD`, while the
-        // change set resolves through the recorded base, the PR's base ref and
-        // the repository's default branch. The two disagree the moment local
-        // `main` is ahead of `origin/main`, and every worktree was then charged
-        // with every unpushed commit on main: a branch that added 8,821 lines
-        // was reported as 44,691, and a main checkout with nothing to say at all
-        // was reported as 35,870. The sidebar and the panel beside it described
-        // the same worktree with different numbers.
-        let base = match resolve_base(svc, &ws).await {
-            Ok((base, _)) => base,
+        let (ins, del) = match svc.review_cache.counts(ws.id) {
+            review::Counts::Known(_, ins, del) => (ins, del),
             // A worktree with no base to compare against has nothing to report,
             // which is not the same as a worktree that changed nothing.
-            Err(_) => continue,
+            review::Counts::NoBase => continue,
+            // The watch loop has not reached it yet, which lasts one tick after
+            // the daemon starts. Zero rather than a guess, on the same terms a
+            // failed `shortstat` was always treated: the row can still be worth
+            // showing because it is unread, and no number beats an invented one.
+            review::Counts::Unknown => (0, 0),
         };
-        let (_, ins, del) =
-            svc.review_cache.shortstat(ws.id, worktree, &base).await.unwrap_or((0, 0, 0));
 
         // A worktree with nothing changed and nothing moved has nothing to say.
         if ins == 0 && del == 0 && !changed {
