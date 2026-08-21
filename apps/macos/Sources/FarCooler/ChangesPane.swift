@@ -1290,30 +1290,33 @@ private struct FileStatusBadge: View {
     let status: ChangedFileStatus?
     let binary: Bool
 
+    /// Inside a diff surface green and red already mean added and removed
+    /// lines, so a created or deleted FILE wearing them reads without being
+    /// learned. Orange is spoken for: everywhere else in this app it means
+    /// something wants you — a blocked agent, an unreachable runner, an adapter
+    /// that will not load. A rename is not an alarm, so it is gray like a
+    /// modification, and the letter is what tells them apart. Renamed and
+    /// copied were orange here until commit rows started carrying them, which
+    /// is when a moved file first read as a warning; the phone had them gray
+    /// all along.
     private var color: Color {
         switch status {
         case .added, .untracked: return .green
         case .deleted, .conflicted: return .red
-        case .renamed, .copied: return .orange
-        case .modified, .typeChanged, .none: return .secondary
+        case .modified, .renamed, .copied, .typeChanged, .none: return .secondary
         }
     }
 
-    /// No status is its own state, and it used to be spelled `M`.
+    /// No status is its own state, and it is now rare rather than usual.
     ///
-    /// Branch and Local rows carry a real letter: the daemon determines both
-    /// from git — `change_set::numstat` merges `--name-status` onto the counts,
-    /// and the working tree's rows carry porcelain codes.
-    ///
-    /// A COMMIT's rows carry none, and the reason is this client's transport,
-    /// not the daemon's. `changes.commit_files` has determined added, deleted
-    /// and renamed since crates/daemon/src/file_diff.rs gained its
-    /// `--name-status` pass, but this pane reads the CLI, and `changes files`
-    /// in crates/cli/src/changes.rs prints `+ins -del path` and nothing else —
-    /// the status never survives the pipe. Defaulting to `M` would put
-    /// "Modified" beside a file the commit CREATED, so a dot says the file
-    /// changed, which is the whole of what reached us. Teaching that command to
-    /// print the letter is what would retire this.
+    /// Every scope carries a real letter: the daemon determines them from git
+    /// for all three — `change_set::numstat` for a branch, porcelain codes for
+    /// the working tree, and `--name-status` for one commit — and `changes
+    /// files --json` carries a commit's letter the last hop to this pane. What
+    /// is left is a runner whose `farcooler` predates that flag, for which
+    /// `ChangesStore.readCommitFiles` falls back to the human table and gets
+    /// counts and a path. A dot says the file changed, which is the whole
+    /// of what such a runner said; `M` would be a guess reading as a verdict.
     var body: some View {
         Text(binary ? "B" : (status?.mark ?? "•"))
             .font(.system(size: 9.5, weight: .semibold, design: .monospaced))

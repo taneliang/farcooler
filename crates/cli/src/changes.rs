@@ -201,6 +201,11 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
             else {
                 return Err("the daemon returned the wrong resource".into());
             };
+            if json {
+                let files: Vec<_> = l.items.iter().map(file_change_json).collect();
+                println!("{}", serde_json::to_string(&serde_json::json!({ "files": files }))?);
+                return Ok(());
+            }
             for f in &l.items {
                 println!("+{:<5} -{:<5} {}", f.insertions, f.deletions, f.path);
             }
@@ -332,12 +337,7 @@ fn change_set_json(cs: &pb::ChangeSet) -> serde_json::Value {
             "insertions": c.insertions,
             "deletions": c.deletions,
         })).collect::<Vec<_>>(),
-        "files": cs.files.iter().map(|f| serde_json::json!({
-            "path": f.path, "insertions": f.insertions, "deletions": f.deletions,
-            "binary": f.binary,
-            "status": file_status_name(f.status),
-            "old_path": f.old_path,
-        })).collect::<Vec<_>>(),
+        "files": cs.files.iter().map(file_change_json).collect::<Vec<_>>(),
         "working_tree": cs.working_tree.as_ref().map(|w| serde_json::json!({
             "staged": w.staged.iter().map(|f| &f.path).collect::<Vec<_>>(),
             "unstaged": w.unstaged.iter().map(|f| &f.path).collect::<Vec<_>>(),
@@ -349,6 +349,23 @@ fn change_set_json(cs: &pb::ChangeSet) -> serde_json::Value {
                 "old_path": f.old_path,
             })).collect::<Vec<_>>(),
         })),
+    })
+}
+
+/// One changed file, in the shape both clients already decode.
+///
+/// Shared by `changes status --json` and `changes files --json` rather than
+/// written twice, and deliberately identical to `file_change_json` in
+/// crates/client/src/session.rs — the phone reaches `changes.commit_files`
+/// through the FFI and the Mac reaches it through this command, so a field
+/// that appears in one and not the other is a difference between platforms
+/// that nothing in the daemon justifies.
+fn file_change_json(f: &pb::FileChange) -> serde_json::Value {
+    serde_json::json!({
+        "path": f.path, "insertions": f.insertions, "deletions": f.deletions,
+        "binary": f.binary,
+        "status": file_status_name(f.status),
+        "old_path": f.old_path,
     })
 }
 

@@ -135,6 +135,16 @@ enum ChangedFileStatus: String, Decodable {
     }
 }
 
+/// What `changes files <workspace> <sha> --json` answers.
+///
+/// A wrapper around one list because the CLI prints an object rather than a
+/// bare array, which is what `changes.commit_files` hands the phone through the
+/// FFI too. One shape for both clients is the point: the file rows here are the
+/// same `ChangedFile` the change set's own files decode into.
+struct CommitFiles: Decodable, Equatable {
+    var files: [ChangedFile]
+}
+
 struct WorkingTree: Decodable, Equatable {
     var staged: [String]
     var unstaged: [String]
@@ -544,45 +554,61 @@ final class ChangesStore: ObservableObject {
         selectedFile = nil
     }
 
-    /// Which files one commit touched, from `changes files <workspace> <sha>`.
+    /// Which files one commit touched, from
+    /// `changes files <workspace> <sha> --json`.
     ///
-    /// That command has no `--json`: it prints `+12    -3     path`, one file to
-    /// a line, and this reads it back. Which is why a row from here has no
-    /// status letter — see `parseCommitFiles`.
+    /// JSON rather than the human table, so a row arrives with the status git
+    /// gave it. The table carries only the two counts and the path, and this
+    /// pane badged every file in a commit with a dot for as long as that was
+    /// the only thing it could ask for.
     private func readCommitFiles(_ sha: String) async {
-        let data = await client.changesJSON(["changes", "files", workspace.short, sha])
+        let data = await client.changesJSON(["changes", "files", workspace.short, sha, "--json"])
         // The reader moved on while this was in flight. Filing an older
         // commit's list under the newer one's sha is the whole reason this is
         // checked: both answers are well-formed, and the wrong one is
         // indistinguishable from the right one once it has landed.
         guard selectedCommit == sha, scope == .commit else { return }
-        guard let data, let text = String(data: data, encoding: .utf8) else {
+        guard let data else {
             commitFiles = []
             commitUnreadable = true
             return
         }
-        commitFiles = Self.parseCommitFiles(text)
-        commitUnreadable = false
+        if let answer = try? JSONDecoder().decode(CommitFiles.self, from: data) {
+            commitFiles = answer.files
+            commitUnreadable = false
+            return
+        }
+        // A runner whose `farcooler` predates `--json` on this command ignores
+        // the flag and prints the table anyway. Reading it back is the
+        // difference between such a runner showing a commit's files without
+        // their letters — which is what it always did — and showing a warning
+        // triangle where a file list used to be.
+        guard let text = String(data: data, encoding: .utf8) else {
+            commitFiles = []
+            commitUnreadable = true
+            return
+        }
+        let rows = Self.parseCommitFiles(text)
+        // Not `rows.isEmpty` on its own: a commit really can touch nothing.
+        // Text that parsed to nothing while carrying something is the case
+        // that has to read as unreadable.
+        commitFiles = rows
+        let sawSomething = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        commitUnreadable = rows.isEmpty && sawSomething
     }
 
     /// `+12    -3     some/path.swift`, one file per line.
     ///
-    /// Fields are padded to a fixed width rather than delimited, so this reads
-    /// the two counts off the front and takes ALL of the rest as the path —
-    /// splitting on whitespace instead would lose the second half of every file
-    /// whose name contains a space.
+    /// The fallback path only, for a runner too old to answer `changes files`
+    /// in JSON. Fields are padded to a fixed width rather than delimited, so
+    /// this reads the two counts off the front and takes ALL of the rest as the
+    /// path — splitting on whitespace instead would lose the second half of
+    /// every file whose name contains a space.
     ///
-    /// The status is deliberately nil, not a guess — and nil because of the
-    /// format above, not because the answer is untrustworthy. The daemon knows:
-    /// `changes.commit_files` merges `git diff --name-status --find-renames`
-    /// onto the counts, so added, deleted and renamed are git's own verdicts
-    /// (crates/daemon/src/file_diff.rs). `changes files` in
-    /// crates/cli/src/changes.rs prints only the two counts and the path, so
-    /// the letter is lost in the pipe and there is nothing here to read.
-    /// Defaulting to `M` would put "Modified" beside a file the commit created,
-    /// so the badge says only that the file changed. The phone does not go
-    /// through the CLI and does show the real letter; teaching this command to
-    /// print it is what would close the gap.
+    /// A row from here carries no status because this format has none to carry,
+    /// and `M` would be a guess that reads as a verdict: "Modified" beside a
+    /// file the commit created. The badge says only that the file changed,
+    /// which is the whole of what this text says.
     nonisolated static func parseCommitFiles(_ text: String) -> [ChangedFile] {
         var out: [ChangedFile] = []
         for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {

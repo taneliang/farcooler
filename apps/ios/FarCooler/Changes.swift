@@ -310,12 +310,23 @@ enum ChangedFileStatus: String, Decodable {
         }
     }
 
+    /// Green and red are the diff's own colors — added and removed lines — so
+    /// a created or deleted FILE wearing them needs no learning. Orange is
+    /// spoken for: across this app it means something wants you, from a blocked
+    /// agent to a runner that will not connect, and a conflict is exactly that.
+    /// A rename is not, so it is gray like a modification and the letter is
+    /// what separates them.
+    ///
+    /// Written out rather than left to a `default:` arm. Renamed and copied
+    /// reached commit rows only once the daemon started merging
+    /// `--name-status`, and the Mac was tinting both orange in the meantime —
+    /// a divergence nobody could see while the phone never drew one.
     var tint: Color {
         switch self {
         case .added, .untracked: return .green
         case .deleted: return .red
         case .conflicted: return .orange
-        default: return .secondary
+        case .modified, .renamed, .copied, .typeChanged: return .secondary
         }
     }
 }
