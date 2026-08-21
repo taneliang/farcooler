@@ -117,6 +117,122 @@ async fn a_multi_line_commit_body_does_not_break_the_record_split() {
 }
 
 #[tokio::test]
+async fn a_commit_carries_its_own_counts_and_not_the_branch_total() {
+    // The bug this exists for: `files_changed`, `insertions` and `deletions`
+    // were hardcoded zeroes, so a history row could say nothing about its own
+    // size and both clients summed the file list of whichever commit was open.
+    // A branch of two commits is the smallest shape that catches a fix which
+    // fills the fields with the BRANCH total instead of each commit's own.
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["checkout", "-q", "-b", "feature"]);
+
+    write(p, "a.txt", "one\ntwo\nthree\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "adds three lines"]);
+
+    write(p, "README.md", "rewritten\n");
+    write(p, "b.txt", "only line\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "two files, one of them a rewrite"]);
+
+    let base = merge_base(p, "main").await.expect("merge base");
+    let commits = commits_since(p, &base).await.expect("log");
+    assert_eq!(commits.len(), 2);
+
+    assert_eq!(
+        (commits[0].files_changed, commits[0].insertions, commits[0].deletions),
+        (1, 3, 0)
+    );
+    assert_eq!(
+        (commits[1].files_changed, commits[1].insertions, commits[1].deletions),
+        (2, 2, 1),
+        "the README rewrite is one line in and one line out, plus the new file"
+    );
+}
+
+#[tokio::test]
+async fn a_merge_is_counted_against_its_first_parent_and_never_as_a_combined_diff() {
+    // A merge prints NO stat under a plain `git log`, which is how these counts
+    // would silently stay zero for exactly the commits a reviewer most wants
+    // sized. First parent is also what `DiffSelector` documents and what the
+    // file list for this commit is computed against, so the row and the list it
+    // opens have to agree.
+    let dir = repo();
+    let p = dir.path();
+
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    write(p, "feature.txt", "mine\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "a commit the branch made"]);
+
+    run(p, &["checkout", "-q", "main"]);
+    write(p, "theirs.txt", "one\ntwo\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "a commit only main made"]);
+
+    run(p, &["checkout", "-q", "feature"]);
+    run(p, &["merge", "-q", "--no-ff", "-m", "merge main", "main"]);
+
+    let base = merge_base(p, "main").await.expect("merge base");
+    let commits = commits_since(p, &base).await.expect("log");
+    let merge = commits.last().expect("the merge is the newest commit");
+    assert_eq!(merge.subject, "merge main");
+    assert_eq!(
+        (merge.files_changed, merge.insertions, merge.deletions),
+        (1, 2, 0),
+        "what the merge brought in against its first parent: main's two lines"
+    );
+}
+
+#[tokio::test]
+async fn a_root_commit_reports_everything_it_added_rather_than_nothing() {
+    // A parentless commit has nothing to diff against, and elsewhere in the
+    // daemon that is handled by naming the empty tree explicitly. `git log`
+    // already does it, and this test is what says so — a fix that assumed a
+    // parent would report zeroes here and look right everywhere else.
+    let dir = repo();
+    let p = dir.path();
+
+    run(p, &["checkout", "-q", "--orphan", "fresh-start"]);
+    run(p, &["rm", "-q", "-rf", "."]);
+    write(p, "first.txt", "one\ntwo\n");
+    write(p, "second.txt", "three\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "the first commit of an orphan branch"]);
+
+    // Unrelated histories, so `main..HEAD` is the whole orphan branch and there
+    // is no merge base to resolve.
+    let commits = commits_since(p, "main").await.expect("log");
+    assert_eq!(commits.len(), 1);
+    assert_eq!(
+        (commits[0].files_changed, commits[0].insertions, commits[0].deletions),
+        (2, 3, 0)
+    );
+}
+
+#[tokio::test]
+async fn a_commits_body_survives_the_stat_that_now_follows_it() {
+    // The record separator moved to the FRONT of the format so that git's stat
+    // block lands in a field of its own. Read the old way, a commit's diffstat
+    // would be glued to the next commit's sha; read carelessly the new way, it
+    // would be glued to this commit's body.
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    write(p, "x.txt", "x\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "subject", "-m", "one\n\ntwo"]);
+
+    let base = merge_base(p, "main").await.expect("merge base");
+    let commits = commits_since(p, &base).await.expect("log");
+    assert_eq!(commits.len(), 1);
+    assert!(commits[0].sha.chars().all(|c| c.is_ascii_hexdigit()), "a sha and nothing else");
+    assert_eq!(commits[0].body, "one\n\ntwo", "no diffstat in the body");
+    assert_eq!(commits[0].files_changed, 1);
+}
+
+#[tokio::test]
 async fn an_unresolvable_base_is_refused_rather_than_guessed() {
     let dir = repo();
     assert!(

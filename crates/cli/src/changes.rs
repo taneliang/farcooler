@@ -319,8 +319,17 @@ fn change_set_json(cs: &pb::ChangeSet) -> serde_json::Value {
         "head_commit": cs.head_commit,
         "insertions": cs.insertions,
         "deletions": cs.deletions,
+        // The three counts are the commit's OWN, against its first parent, and
+        // a merge's are its first-parent counts rather than a combined diff.
+        // They were zeroes in the daemon until `commits_since` learned to read
+        // `--shortstat`, and were left off the wire because of it; a client that
+        // sums a selected commit's file list to get `+N -M` is now summing to
+        // reach a number it was sent.
         "commits": cs.commits.iter().map(|c| serde_json::json!({
             "sha": c.sha, "subject": c.subject, "author": c.author, "timestamp": c.timestamp,
+            "files_changed": c.files_changed,
+            "insertions": c.insertions,
+            "deletions": c.deletions,
         })).collect::<Vec<_>>(),
         "files": cs.files.iter().map(|f| serde_json::json!({
             "path": f.path, "insertions": f.insertions, "deletions": f.deletions,
