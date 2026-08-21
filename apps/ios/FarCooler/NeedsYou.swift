@@ -28,8 +28,8 @@ import SwiftUI
 /// actually read. Listing the agent as well would put two rows on the front door
 /// for one piece of work, and the second of them would open a transcript rather
 /// than the change. A `done` agent whose worktree is clean — one that answered a
-/// question or investigated something — is reachable through Working, which is
-/// where the whole fleet still is.
+/// question or investigated something — is reachable through Workspaces, which
+/// is where the whole fleet still is.
 ///
 /// ## Ordering
 ///
@@ -56,7 +56,7 @@ import SwiftUI
 /// behind a disclosure triangle and marks the triangle when something under it
 /// wants attention; the front door does neither, because a front door that
 /// shows what you hid is not honoring the hiding. They are one tap away, in
-/// Working, exactly where they were.
+/// Workspaces, exactly where they were.
 @MainActor
 struct NeedsYouView: View {
     @ObservedObject var connection: Connection
@@ -68,10 +68,6 @@ struct NeedsYouView: View {
     /// must not silently change meaning when that lands.
     let runner: Runner
     let store: RunnerStore
-    /// Open a terminal. Routed up to `FleetView` rather than pushed from here,
-    /// because that is where `landing` lives and `landing` is the app's ONE
-    /// terminal destination — see the comment on it.
-    let onOpen: (Terminal) -> Void
 
     /// One entry in the list.
     ///
@@ -134,11 +130,16 @@ struct NeedsYouView: View {
         return blocked.map(\.item) + reviews
     }
 
-    /// How many agents are mid-turn, which is what the Working row counts.
+    /// How many agents are mid-turn.
     ///
-    /// Non-hidden only, so it agrees with the screen it leads to: `FleetList`
-    /// draws hidden workspaces behind a disclosure triangle, and a count here
-    /// that included them would be a number you cannot find by counting rows.
+    /// This used to label the row at the bottom of this screen, which is the
+    /// bug `workspacesRow` records. It now says exactly one thing, in exactly
+    /// one place: the sentence under "Nothing Needs You", where it is a
+    /// statement about the runner rather than a label on a door.
+    ///
+    /// Non-hidden only, to agree with the rest of this screen: `FleetList`
+    /// draws hidden workspaces behind a disclosure triangle, and a count that
+    /// included them would be a number you cannot find by counting rows.
     private var workingCount: Int {
         visible.flatMap(\.terminals).filter { $0.agent == .working }.count
     }
@@ -172,7 +173,16 @@ struct NeedsYouView: View {
             }
 
             Section {
-                NavigationLink { working } label: { workingRow }
+                // A value link, so the tap APPENDS `.workspaces` to
+                // `FleetView.path`. A terminal opened from that list appends
+                // again and lands at depth 2, ON the list rather than in place
+                // of it — which is the whole of the Back bug this row was the
+                // reported route into.
+                NavigationLink(value: Route.workspaces) { workspacesRow }
+            } footer: {
+                if let sentence = workspacesFooter {
+                    Text(sentence)
+                }
             }
         }
         // Let the theme's ground show through; a List paints an opaque
@@ -196,37 +206,28 @@ struct NeedsYouView: View {
     private func row(for item: Item) -> some View {
         switch item {
         case .blocked(let workspace, let terminal, let ordinal):
-            // A Button and not a NavigationLink, because the terminal has one
-            // destination in this stack and it is `FleetView`'s — a second one
-            // declared here would let a Live Activity tapped while a pane is
-            // open push a second `PaneHost` on top of the first. The chevron is
-            // drawn by hand for the same reason: the row still has to read as
-            // something that opens.
-            Button { onOpen(terminal) } label: {
-                HStack(spacing: 6) {
-                    blockedRow(workspace: workspace, terminal: terminal, ordinal: ordinal)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
+            // A value link: the tap appends `.terminal` to `FleetView.path`,
+            // and appending is the whole navigation model here — see `Route`.
+            //
+            // This was a Button with a hand-drawn chevron, because the pane had
+            // exactly ONE destination in the stack and a second
+            // `navigationDestination` declared on this screen would have fought
+            // it. A path has one destination per route TYPE, declared once at
+            // the stack's root and usable from any depth, so neither worry
+            // survives and the system draws the chevron again.
+            NavigationLink(value: Route.terminal(id: terminal.id)) {
+                blockedRow(workspace: workspace, terminal: terminal, ordinal: ordinal)
             }
-            .buttonStyle(.plain)
             .accessibilityIdentifier("needs-you-terminal-\(terminal.id)")
 
         case .review(let workspace, let counts):
-            NavigationLink {
-                // The store comes from `Connection`, so this is the SAME
-                // review the workspace's `changes` pane would show if there is
-                // one: the scroll position, the folds, the diffs already read
-                // and the notes written are one per worktree, not one per way
-                // in. See `ChangesStores`.
-                ReviewScreen(
-                    store: connection.changesStores.store(for: workspace.id),
-                    workspaceName: workspace.task,
-                    agents: workspace.reviewAgentTargets())
-            } label: {
+            // By value for the same reason, and by workspace ID rather than by
+            // building the screen here: a route has to survive being written to
+            // disk and read back into a different launch. `FleetView` resolves
+            // it — and keeps this exactly the same review a `changes` pane in
+            // that worktree would show, because the store is keyed by workspace
+            // on `Connection`. See `ChangesStores`.
+            NavigationLink(value: Route.review(workspace: workspace.id)) {
                 reviewRow(workspace: workspace, counts: counts)
             }
             .accessibilityIdentifier("needs-you-review-\(workspace.id)")
@@ -353,43 +354,51 @@ struct NeedsYouView: View {
         }
     }
 
-    private var workingRow: some View {
+    /// The door to the whole fleet, counting the thing that is actually behind
+    /// it.
+    ///
+    /// This said "Working" over a count of agents mid-turn, and led to a screen
+    /// listing every workspace, every terminal — idle, exited and hidden — and
+    /// the two buttons that start new work. The number described a strict
+    /// subset of the destination, so at 3am with nothing running it read
+    /// `Working 0` on the only way in: a label telling you not to open the one
+    /// door you needed.
+    ///
+    /// So it counts what the destination lists, and the destination is titled
+    /// with the same word. Nothing is lost by dropping the old number, because
+    /// the app was already saying it one line above, better: `reassuranceDetail`
+    /// gives it as a sentence naming the runner, which is what a count of
+    /// working agents is actually for.
+    ///
+    /// Hidden workspaces are left out, so this is a number you can find by
+    /// counting rows — `FleetList` keeps them behind a disclosure triangle.
+    private var workspacesRow: some View {
         HStack {
-            Text("Working")
+            Text("Workspaces")
             Spacer()
-            Text("\(workingCount)")
+            Text("\(visible.count)")
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
     }
 
-    /// Below the fold: the fleet list, unchanged.
+    /// Why a count of zero is still worth a tap.
     ///
-    /// The same `WorkspaceListView` that used to be `FleetView`'s empty-state
-    /// fallback, with the same worktree sections, the same swipe actions, the
-    /// same quick-task and new-workspace buttons and the same pull to refresh.
-    /// Nothing about it moved; what changed is that it is now the second screen
-    /// rather than the first.
+    /// A count can say "there is nothing behind this" and be right about the
+    /// list while being wrong about the screen: the quick task and the
+    /// new-workspace form live in that screen's toolbar and nowhere else on the
+    /// phone, so an empty fleet is the state in which going there matters most.
+    /// One sentence, and only in the state that needs it — a footer under a
+    /// number that already speaks for itself is noise.
     ///
-    /// Titled "Worktrees" and not "Working", because that is what it lists. The
-    /// row that leads here counts working agents, which is the reason to go —
-    /// but a screen that also shows the idle, the exited and the hidden should
-    /// not be titled as though it did not.
-    ///
-    /// Its `onSelect` is the SAME `onOpen` the blocked rows use, so choosing a
-    /// terminal here assigns `FleetView.landing` and this screen goes away
-    /// underneath it. Back from that terminal is the inbox, not this list, and
-    /// that is deliberate rather than an oversight: the terminal has exactly one
-    /// destination in the stack and one meaning for Back. A second push from
-    /// here would put a pane at two different depths, which is the shape of the
-    /// bug the comment on that `navigationDestination` records — and it would
-    /// also break `openRequested`'s test for whether a pane is already open,
-    /// which is how a tapped Live Activity card avoids stacking a second host
-    /// on top of the first.
-    private var working: some View {
-        WorkspaceListView(connection: connection, onSelect: onOpen, hosts: store)
-            .navigationTitle("Worktrees")
-            .navigationBarTitleDisplayMode(.inline)
+    /// Two sentences rather than one, because "no workspaces" over a list with
+    /// rows in it would be the same kind of lie the count used to tell.
+    private var workspacesFooter: String? {
+        guard visible.isEmpty else { return nil }
+        if connection.fleet.workspaces.isEmpty {
+            return "No workspaces on \(runner.label) yet. This is where you start one."
+        }
+        return "Every workspace on \(runner.label) is hidden. They’re still in here."
     }
 }
 

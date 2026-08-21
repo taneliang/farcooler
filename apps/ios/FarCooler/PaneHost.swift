@@ -200,7 +200,7 @@ struct PaneHost: View {
                     onDismiss: { showWorkspaceList = false },
                     hosts: hosts
                 )
-                .navigationTitle("Worktrees")
+                .navigationTitle("Workspaces")
                 .navigationBarTitleDisplayMode(.inline)
             }
         }

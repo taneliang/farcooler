@@ -1,5 +1,44 @@
 import SwiftUI
 
+/// Where the phone is, as a value.
+///
+/// Every screen this stack can push is a case here, and `FleetView` renders
+/// `[Route]` as its navigation path. That is what turns "what does Back mean"
+/// into a question about the path rather than about which view happened to
+/// declare a destination: appending never truncates, so a screen reached two
+/// ways sits at two different depths and Back is the screen you came from in
+/// both. The shape this replaced, and the bug it had, are on `FleetView.path`.
+///
+/// Ids and not values, because the path is `Codable` and persisted — see
+/// `FleetView.savedPath`. A `Terminal` is a snapshot of what the daemon said a
+/// moment ago; persisting one would restore a screen built from a description
+/// of the world that has since moved on. An id either still names something on
+/// this runner or it does not, and the second answer is one this screen can act
+/// on.
+///
+/// The next stage of this design collapses `.review` and `.terminal` into a
+/// single `case workspace(id:focus:)` — one screen per worktree, with the diff
+/// and each of its agents as tabs. See
+/// `.claude/agent/done/phone-workspace-review-sketch.md`. That is one case
+/// added and two removed; nothing about the path, its storage, its restoration
+/// or its pruning changes with it.
+enum Route: Hashable, Codable {
+    /// Every workspace on this runner, and the toolbar that starts new work.
+    case workspaces
+    /// One worktree's diff, read without going through a pane.
+    case review(workspace: String)
+    /// One pane, by terminal id.
+    case terminal(id: String)
+
+    /// Whether this route is a pane. Asked by the two places that care about
+    /// panes specifically: a deep link arriving while one is open, and a fleet
+    /// that emptied underneath one.
+    var isTerminal: Bool {
+        if case .terminal = self { return true }
+        return false
+    }
+}
+
 /// One runner, and everything the phone shows of it.
 ///
 /// This used to be the screen between a host and a terminal, and then mostly a
@@ -21,19 +60,52 @@ struct FleetView: View {
 
     @StateObject private var connection = Connection()
 
-    /// The terminal on screen, or nil when the inbox is.
+    /// Where this screen is, as an explicit list of pushes.
     ///
-    /// The app's ONE terminal destination. Non-nil pushes `PaneHost` onto this
-    /// screen and nil is what a back-swipe writes here, so this is a faithful
-    /// answer to "is a pane open" rather than a wish that one were — see the
-    /// `navigationDestination` in `body`.
+    /// This was `@State private var landing: Terminal?`, drawn by a
+    /// `.navigationDestination(item:)` declared on the ROOT of the stack, and
+    /// that shape is what put Back on the wrong screen. SwiftUI resolves a
+    /// destination at the depth where it is declared, so assigning `landing`
+    /// from the workspace list did not COVER that list — it truncated the
+    /// implicit path to depth 0 and pushed the pane as the single element, and
+    /// backing out of it landed on Needs You.
     ///
-    /// It is no longer decided on connect. Everything that opens a terminal —
-    /// a blocked row in the inbox, a row in the worktree list, a tapped Live
-    /// Activity card — assigns this and nothing else, which is what makes the
-    /// terminal reachable at exactly one stack depth with exactly one meaning
-    /// for Back.
-    @State private var landing: Terminal?
+    /// The comment that stood here defended that single root destination as the
+    /// thing giving Back one meaning, and the bug it guarded against was real:
+    /// an earlier build had the pane reachable both as the stack root and as a
+    /// push, so whether a terminal had a back button at all depended on whether
+    /// the fleet happened to be empty when this screen connected, and backing
+    /// out of a pushed terminal landed on a list that usually had a terminal to
+    /// go straight back into. One screen at two depths is one screen with two
+    /// answers to "what does Back mean here".
+    ///
+    /// An explicit path buys a stronger invariant than that fix did, and buys
+    /// it without making either answer wrong. Every navigation is an APPEND or
+    /// a system pop; appending never truncates; so a pane is at depth 1 when it
+    /// was opened from the inbox and at depth 2 when it was opened from the
+    /// workspace list, and Back is the screen you came from by construction
+    /// rather than by special case. One destination TYPE at any depth, in place
+    /// of one destination at one depth.
+    @State private var path: [Route] = []
+
+    /// The path this scene was last on, as JSON, so being interrupted does not
+    /// cost you your place.
+    ///
+    /// `docs/jobs-to-be-done.md` F4 is the owner saying the phone has to
+    /// survive being put down every ninety seconds. `landing` restored nothing
+    /// at all, and could not: a decoded `Terminal` is a value with no identity
+    /// anything could write down. A path of ids has one.
+    ///
+    /// The runner is stored beside the routes because `@SceneStorage` is keyed
+    /// by the scene rather than by this view, so one value outlives the
+    /// `.id(host)` rebuild that switching runners performs — and terminal ids
+    /// are per-runner, so a path saved on one names nothing on another. A
+    /// string rather than `Data` only so it is legible when this misbehaves.
+    @SceneStorage("fleet.path") private var savedPath = ""
+
+    /// Whether the saved path has had its one chance to come back. See
+    /// `restorePath` for why it gets exactly one.
+    @State private var restoredPath = false
 
     /// Whether the runner has told us what it has, at least once.
     ///
@@ -80,112 +152,181 @@ struct FleetView: View {
     @State private var editing = false
 
     var body: some View {
-        Group {
-            switch connection.phase {
-            case .connecting:
-                escapable { connecting }
-
-            case .needsApproval(let fingerprint):
-                escapable { approval(fingerprint) }
-
-            case .failed(let message):
-                escapable { failure(message) }
-
-            // Reconnecting renders exactly what connected renders. The fleet on
-            // screen is the last one this runner sent, and it is a better
-            // answer than a spinner while the link comes back — see
-            // `Connection.Phase.reconnecting`. The status chip in the bar is
-            // where the difference shows.
-            case .connected, .reconnecting:
-                connected
+        // The stack lives here rather than in `RootView`, and that is not
+        // tidying. `path` and `Connection` have to be the same view's state:
+        // every route is an id that means something only against THIS runner's
+        // fleet, and resolving one, validating a restored one, and popping a
+        // pane when the fleet empties are all reads of `connection`. A stack a
+        // level up would have put the path above the only data that can say
+        // what it names.
+        //
+        // `RootView`'s stated reason for owning it is not lost, because it was
+        // never a reason for owning it — it was a reason for the stack to
+        // EXIST. `FleetView` was previously pushed from the host list and
+        // inherited that screen's stack; opening straight onto it left no
+        // navigation bar, so no title, no terminal/chat switch, and nothing for
+        // a destination to push into. Declaring the stack here satisfies that
+        // in full. The `.id(host)` that rebuilds everything below on a runner
+        // change stays one level up, and now rebuilds this stack and its path
+        // along with the connection — which is right, since a path naming
+        // terminals on one runner names nothing on another.
+        NavigationStack(path: $path) {
+            phases
+            // Every screen this stack can push, declared once.
+            //
+            // On the stack's ROOT content, which is where a
+            // `navigationDestination(for:)` belongs: it is inherited by every
+            // depth below, so a route appended from Needs You and the same
+            // route appended from the workspace list resolve to the same view
+            // at different depths. That is precisely what the
+            // `navigationDestination(item:)` this replaced could not do — see
+            // `path`.
+            //
+            // Attached outside the phase switch rather than inside
+            // `connected`, so the destinations exist in every phase. A Live
+            // Activity card tapped while this screen is still connecting sets
+            // `pendingTerminal`, and `openRequested` runs again the moment a
+            // fleet arrives; a destination declared inside the connected branch
+            // would not be there to receive it.
+            //
+            // Changing pane while one is open does NOT come through here — the
+            // tab strip and the switcher sheet retarget `PaneHost` in place,
+            // and a deep link arriving while a pane is open goes to `requested`
+            // for the same reason. Appending a second `.terminal` would mount a
+            // second `PaneHost` on top of the first and leave every pane
+            // underneath it holding a stream nobody can see.
+            .navigationDestination(for: Route.self) { destination($0) }
+            .sheet(isPresented: $editing) {
+                HostEditorView(
+                    existing: host,
+                    onSave: { store.update($0) },
+                    onRemove: { store.remove($0) })
+            }
+            .task { await connect(host) }
+            // The app coming back is the moment a backoff timer cannot predict.
+            //
+            // Here rather than in `RootView`, because this is where the
+            // connection is: the same reason the host switcher moved down out
+            // of the connected screen. `.background` is passed on too, so a
+            // phone in a pocket stops polling — which is both a battery
+            // question and one plausible way the session died in the first
+            // place.
+            .onChange(of: scenePhase) { _, phase in
+                connection.setActive(phase == .active)
+            }
+            // A fleet that empties has nothing for the terminal screen to show,
+            // so the pane comes off the path.
+            //
+            // Removing the last worktree used to leave this sitting on a pane
+            // that no longer exists, with the switcher sheet as the only way
+            // out and nothing in it. Deliberately keyed on the fleet being
+            // EMPTY rather than on the route's own terminal still being
+            // present: `PaneHost` moves on from the terminal it opened with
+            // whenever the tab strip is used, so "the terminal we opened is
+            // gone" is a routine, correct state and must not yank anyone
+            // anywhere. `TerminalRoute` carries the other half of that
+            // argument.
+            //
+            // Truncated at the FIRST pane rather than emptied outright, so
+            // someone who reached it through the workspace list lands back on
+            // that list — which still has its toolbar, and is the one screen
+            // that can start the work that would refill the fleet.
+            .onChange(of: terminalCount) { _, count in
+                guard count == 0, let pane = path.firstIndex(where: \.isTerminal)
+                else { return }
+                path.removeSubrange(pane...)
+            }
+            // The saved path's one chance, taken the moment there is a fleet to
+            // check it against. See `restorePath`.
+            .onChange(of: hasFleet) { _, arrived in
+                if arrived { restorePath() }
+            }
+            // And the other direction: every push and every pop is written
+            // down. Cheap — a couple of hundred bytes of JSON on a navigation,
+            // not on a poll — because `path` only changes when someone
+            // navigates.
+            .onChange(of: path) { _, routes in savePath(routes) }
+            // A tapped Live Activity card, arriving as `…://terminal/<id>`.
+            //
+            // Here rather than on the root view, because this is the screen
+            // that owns `path` and the connection whose fleet the id has to be
+            // looked up in. Routing it from the root would mean a second way to
+            // choose a terminal, threaded down through views that know nothing
+            // about one.
+            //
+            // The scheme is deliberately not checked: iOS only delivers URLs
+            // whose scheme this app registered, and each channel registers only
+            // its own, so a canary build cannot be handed a stable link in the
+            // first place.
+            .onOpenURL { url in
+                guard url.host() == "terminal" else { return }
+                let terminal = url.lastPathComponent
+                guard !terminal.isEmpty else { return }
+                pendingTerminal = terminal
+                openRequested()
             }
         }
-        // The one place a terminal opens, and it is a push again.
-        //
-        // The history is worth keeping, because the bug it fixed can come
-        // back. The worktree list used to PUSH a terminal while the landing
-        // terminal was rendered as the stack ROOT — so whether the terminal
-        // screen had a back button at all depended on whether the fleet
-        // happened to be empty at the moment this screen connected, and backing
-        // out of a pushed terminal landed on a list that by then usually had a
-        // terminal to go straight back into. One screen at two stack depths is
-        // one screen with two different answers to "what does Back mean here".
-        // The fix at the time was to make the terminal the root and have the
-        // list replace itself.
-        //
-        // That fix rested on the list being a fallback nobody was meant to sit
-        // on. It is the front door now, and a front door you cannot get back to
-        // is worse than the problem: the only way out of a terminal would be
-        // the switcher sheet. So the terminal is pushed — and the invariant is
-        // kept, from the other side. `NeedsYouView` is the root
-        // unconditionally, this is the only `navigationDestination` for a
-        // terminal in the stack, and every route into one assigns `landing`.
-        // The terminal is therefore always at depth one and Back always means
-        // the inbox, whether you arrived from a blocked row, from the worktree
-        // list, or from a tapped Live Activity card at cold launch.
-        //
-        // Attached to the outer `Group` rather than inside `connected`, so the
-        // destination exists in every phase. A card tapped while this screen is
-        // still connecting sets `pendingTerminal`, and `openRequested` runs
-        // again the moment a fleet arrives; a destination declared inside the
-        // connected branch would not be there to receive it.
-        //
-        // Changing pane while one is open does NOT come through here — the tab
-        // strip and the switcher sheet retarget `PaneHost` in place, and a deep
-        // link arriving while a pane is open goes to `requested` for the same
-        // reason. Reassigning `landing` would rebuild the host and throw away
-        // every pane it has mounted.
-        .navigationDestination(item: $landing) { terminal in
-            PaneHost(
-                terminal: terminal, connection: connection, hosts: store,
-                requested: $requested)
+    }
+
+    /// The stack's root, one branch per connection phase.
+    ///
+    /// Split out of `body` rather than written inline, for the compiler's sake:
+    /// a `switch` over an associated-value enum inside a long modifier chain is
+    /// the shape Swift's type checker gives up on, and it did.
+    @ViewBuilder
+    private var phases: some View {
+        switch connection.phase {
+        case .connecting:
+            escapable { connecting }
+
+        case .needsApproval(let fingerprint):
+            escapable { approval(fingerprint) }
+
+        case .failed(let message):
+            escapable { failure(message) }
+
+        // Reconnecting renders exactly what connected renders. The fleet on
+        // screen is the last one this runner sent, and it is a better answer
+        // than a spinner while the link comes back — see
+        // `Connection.Phase.reconnecting`. The status chip in the bar is where
+        // the difference shows.
+        case .connected, .reconnecting:
+            connected
         }
-        .sheet(isPresented: $editing) {
-            HostEditorView(
-                existing: host,
-                onSave: { store.update($0) },
-                onRemove: { store.remove($0) })
-        }
-        .task { await connect(host) }
-        // The app coming back is the moment a backoff timer cannot predict.
-        //
-        // Here rather than in `RootView`, because this is where the connection
-        // is: the same reason the host switcher moved down out of the
-        // connected screen. `.background` is passed on too, so a phone in a
-        // pocket stops polling — which is both a battery question and one
-        // plausible way the session died in the first place.
-        .onChange(of: scenePhase) { _, phase in
-            connection.setActive(phase == .active)
-        }
-        // A fleet that empties has nothing for the terminal screen to show, so
-        // it pops back to the inbox.
-        //
-        // Removing the last worktree used to leave this sitting on a pane that
-        // no longer exists, with the switcher sheet as the only way out and
-        // nothing in it. Deliberately keyed on the fleet being EMPTY rather
-        // than on `landing` still being present: `TerminalView` moves on from
-        // the terminal it opened with whenever the tab strip is used, so "the
-        // terminal we opened is gone" is a routine, correct state and must not
-        // yank anyone anywhere.
-        .onChange(of: terminalCount) { _, count in
-            if count == 0 { landing = nil }
-        }
-        // A tapped Live Activity card, arriving as `…://terminal/<id>`.
-        //
-        // Here rather than on the root view, because this is the screen that
-        // owns `landing` and the connection whose fleet the id has to be looked
-        // up in. Routing it from the root would mean a second way to choose a
-        // terminal, threaded down through views that know nothing about one.
-        //
-        // The scheme is deliberately not checked: iOS only delivers URLs whose
-        // scheme this app registered, and each channel registers only its own,
-        // so a canary build cannot be handed a stable link in the first place.
-        .onOpenURL { url in
-            guard url.host() == "terminal" else { return }
-            let terminal = url.lastPathComponent
-            guard !terminal.isEmpty else { return }
-            pendingTerminal = terminal
-            openRequested()
+    }
+
+    /// What each route draws.
+    ///
+    /// Two of the three go through a small wrapper rather than being built
+    /// straight out of the fleet here, and that indirection is load-bearing —
+    /// see `TerminalRoute`.
+    @ViewBuilder
+    private func destination(_ route: Route) -> some View {
+        switch route {
+        case .workspaces:
+            // Titled for what it lists, and for the word the owner uses. It was
+            // "Worktrees" under a row labeled "Working", which was two names
+            // for one screen and neither of them what the screen is. See
+            // `NeedsYouView.workspacesRow`.
+            //
+            // `onSelect` appends, so a terminal opened from here sits ON this
+            // list at depth 2 and Back returns to it. That is the whole of the
+            // Back bug: the same callback used to assign `landing`, and
+            // assigning `landing` replaced this screen with the pane.
+            WorkspaceListView(
+                connection: connection,
+                onSelect: { path.append(.terminal(id: $0.id)) },
+                hosts: store
+            )
+            .navigationTitle("Workspaces")
+            .navigationBarTitleDisplayMode(.inline)
+
+        case .review(let workspace):
+            ReviewRoute(workspace: workspace, connection: connection)
+
+        case .terminal(let id):
+            TerminalRoute(
+                id: id, connection: connection, hosts: store, requested: $requested)
         }
     }
 
@@ -200,23 +341,32 @@ struct FleetView: View {
         if let terminal = all.first(where: { $0.id == id }) {
             pendingTerminal = nil
             // One or the other, never both, and which one depends on whether a
-            // pane is already open. They do different jobs: `landing` PUSHES
-            // the pane host when the inbox is what is on screen, and
-            // `requested` retargets a host that is already mounted —
-            // `PaneHost` reads its `terminal` argument once, at init, so a card
-            // tapped while another pane was open would otherwise do nothing at
-            // all.
+            // pane is already open. They do different jobs: appending PUSHES a
+            // pane host when the inbox or the workspace list is what is on
+            // screen, and `requested` retargets a host that is already mounted
+            // — `PaneHost` reads its `terminal` argument once, at init, so a
+            // card tapped while another pane was open would otherwise do
+            // nothing at all.
             //
-            // Assigning both, which is what this did while the terminal was the
-            // stack root, is now the damaging option: writing `landing` while
-            // the destination is already showing rebuilds `PaneHost` from
-            // scratch and drops every pane it had mounted, along with their
-            // scroll positions, half-typed messages and open ssh streams. That
-            // is the one thing `PaneHost` exists to prevent.
-            if landing == nil {
-                landing = terminal
-            } else {
+            // Doing both is the damaging option, and the reasoning survives the
+            // move from `landing` to a path unchanged: appending a second
+            // `.terminal` stacks a second `PaneHost` on the first, and each
+            // host holds its own mounted panes with their scroll positions,
+            // half-typed messages and open ssh streams. Retargeting in place is
+            // what keeps every one of those.
+            //
+            // The path deliberately goes on naming the terminal the pane was
+            // OPENED with, exactly as `landing` did. `PaneHost` moves on
+            // without telling this screen — the tab strip, the switcher sheet
+            // and this retarget all do it — and rewriting the path to follow
+            // would be a push, which is the one thing that must not happen
+            // here. The cost is that a restored path reopens the pane you
+            // arrived at rather than the one you ended on; the workspace route
+            // that replaces `.terminal` carries a focus and closes that gap.
+            if path.last?.isTerminal == true {
                 requested = terminal
+            } else {
+                path.append(.terminal(id: terminal.id))
             }
         } else if connection.phase == .connected {
             // The runner answered and does not have it: the pane is gone, or
@@ -226,6 +376,73 @@ struct FleetView: View {
             // jumped to long after anyone tapped anything.
             pendingTerminal = nil
         }
+    }
+
+    /// Put the phone back where it was, once there is a fleet to check that
+    /// against.
+    ///
+    /// Deliberately not applied at launch, when `@SceneStorage` hands the value
+    /// back. At that moment there is no fleet, so a `.terminal` route names
+    /// something this app cannot resolve, and installing it would push a screen
+    /// with nothing in it over the connecting, approval and failure screens —
+    /// the three that most need to be visible. Held instead until the runner
+    /// has answered, which is the first moment the question "does this still
+    /// exist" has an answer.
+    ///
+    /// Truncated at the first route that no longer resolves rather than
+    /// filtered, because a path is a sequence of pushes: keeping depth 2 after
+    /// dropping depth 1 would put a screen on top of a screen nobody navigated
+    /// through. A path that resolves to nothing simply leaves you at the root,
+    /// which is where a cold launch has always landed.
+    ///
+    /// Once, and only once. After this the path is whatever the person holding
+    /// the phone has done with it, and a second pass on a later reconnect would
+    /// be the app steering them somewhere they had already left.
+    private func restorePath() {
+        guard !restoredPath else { return }
+        restoredPath = true
+        guard path.isEmpty, let data = savedPath.data(using: .utf8),
+            let saved = try? JSONDecoder().decode(SavedPath.self, from: data),
+            saved.runner == host.id.uuidString
+        else { return }
+
+        let usable = Array(saved.routes.prefix(while: resolves))
+        guard !usable.isEmpty else { return }
+        // No push animation for a screen you never left. Restoring where you
+        // were should look like the app remembering, not like it navigating.
+        var silent = Transaction()
+        silent.disablesAnimations = true
+        withTransaction(silent) { path = usable }
+    }
+
+    /// Whether this runner still has the thing a route names.
+    private func resolves(_ route: Route) -> Bool {
+        switch route {
+        case .workspaces:
+            // Always. The screen lists whatever there is, including nothing.
+            return true
+        case .review(let workspace):
+            return connection.fleet.workspaces.contains { $0.id == workspace }
+        case .terminal(let id):
+            return connection.fleet.workspaces.contains { workspace in
+                workspace.terminals.contains { $0.id == id }
+            }
+        }
+    }
+
+    private func savePath(_ routes: [Route]) {
+        let saved = SavedPath(runner: host.id.uuidString, routes: routes)
+        guard let data = try? JSONEncoder().encode(saved),
+            let json = String(data: data, encoding: .utf8)
+        else { return }
+        savedPath = json
+    }
+
+    /// The path and the runner it was walked on, which is the whole of what
+    /// `savedPath` holds. See it for why the runner has to travel with it.
+    private struct SavedPath: Codable {
+        var runner: String
+        var routes: [Route]
     }
 
     /// Every screen shown BEFORE a connection exists, wrapped in the ways out of
@@ -289,15 +506,18 @@ struct FleetView: View {
 
     /// The root of the stack, in every phase that has a fleet behind it.
     ///
-    /// Always the inbox, never a terminal. A terminal is a `PaneHost` pushed on
-    /// top of this — see the `navigationDestination` in `body` — which is what
-    /// gives Back one meaning.
+    /// Always the inbox, never a terminal. Everything else this stack shows is
+    /// appended to `path` on top of it — see the `navigationDestination` in
+    /// `body` — which is what makes Back the screen you came from.
+    ///
+    /// Nothing is handed down to open a terminal any more. The rows push a
+    /// `Route` value themselves, which is an append; the callback that used to
+    /// come back up here existed only so that one assignment to `landing` could
+    /// be the app's single terminal destination.
     @ViewBuilder
     private var connected: some View {
         if hasFleet {
-            NeedsYouView(
-                connection: connection, runner: host, store: store,
-                onOpen: { landing = $0 })
+            NeedsYouView(connection: connection, runner: host, store: store)
         } else {
             // Not the inbox with nothing in it. Until the runner has answered,
             // "Nothing needs you" would be a claim made from `Fleet.empty` —
@@ -457,6 +677,16 @@ struct FleetView: View {
             // one line to paste on the machine. It was already in the app and
             // unreachable from the only screen that ever sends you looking for
             // it.
+            //
+            // The one link in this stack that is a view rather than a `Route`,
+            // and the exception is deliberate. It is a leaf with nothing under
+            // it, reachable only from the failure screen — a phase with no
+            // fleet, so nothing can be appended to the path underneath it:
+            // `openRequested` appends only for a terminal the runner has
+            // answered with, and the only calls to `connect` that could produce
+            // one are the buttons on the screen this covers. Nothing here is
+            // worth persisting either, which is the other half of what a route
+            // is for.
             NavigationLink {
                 AuthorizeView(runners: store)
             } label: {
@@ -561,17 +791,117 @@ struct FleetView: View {
     }
 }
 
-/// The worktree list plus what it takes to act on it: quick task, new
+/// One pane, resolved from an id exactly once.
+///
+/// The wrapper exists for a single reason, and removing it puts back the worst
+/// bug this screen can have. `PaneHost` needs a `Terminal` value, the path
+/// holds an id, and the obvious thing — looking the id up in the fleet every
+/// time this destination is evaluated — makes the host's very existence
+/// conditional on that lookup going on succeeding. It routinely stops
+/// succeeding: the pane you opened can be killed, dismissed or removed while
+/// you are reading a different tab in the same host, which is an ordinary state
+/// `PaneHost` already handles by pruning it out of `visited`. If the lookup
+/// drove the view structure, that same moment would swap the whole host for a
+/// placeholder and throw away every mounted pane — the exact loss `PaneHost`
+/// exists to prevent, and the same argument `FleetView`'s empty-fleet rule
+/// makes from the other side.
+///
+/// So the terminal is latched the first time it resolves and never unlatched.
+/// After that this view's structure is fixed and the host is left alone; who is
+/// on screen inside it is `PaneHost`'s business, not the path's. `FleetView`
+/// still pops the pane when the fleet empties entirely, which is the one case
+/// where there is genuinely nothing left to show.
+///
+/// The unresolved branch is close to unreachable — the path is only appended to
+/// for a terminal the fleet just produced, and a restored path is checked
+/// against the fleet before it is installed — but "close to" is not "never", so
+/// it waits rather than crashing, and takes the fleet's next answer.
+@MainActor
+private struct TerminalRoute: View {
+    let id: String
+    @ObservedObject var connection: Connection
+    let hosts: RunnerStore
+    @Binding var requested: Terminal?
+
+    @State private var opened: Terminal?
+
+    var body: some View {
+        Group {
+            if let opened {
+                PaneHost(
+                    terminal: opened, connection: connection, hosts: hosts,
+                    requested: $requested)
+            } else {
+                ProgressView()
+            }
+        }
+        .onAppear { resolve() }
+        .onChange(of: liveTerminalIDs) { _, _ in resolve() }
+    }
+
+    /// Sorted rather than a set, because `onChange` wants `Equatable` and a
+    /// stable order. The same shape `PaneHost` uses to prune.
+    private var liveTerminalIDs: [String] {
+        connection.fleet.workspaces.flatMap(\.terminals).map(\.id).sorted()
+    }
+
+    private func resolve() {
+        guard opened == nil else { return }
+        opened = connection.fleet.workspaces.flatMap(\.terminals).first { $0.id == id }
+    }
+}
+
+/// One worktree's changes, opened from the inbox rather than from a pane.
+///
+/// Latches the workspace's NAME for the same reason `TerminalRoute` latches its
+/// terminal: `ChangesView` holds a scroll position and a set of open files that
+/// a structural change would discard, and a workspace can leave the fleet while
+/// somebody is still reading its diff. The agents a comment can be sent to are
+/// read live, because that list is a fact about the runner right now and
+/// nothing is destroyed by it changing.
+@MainActor
+private struct ReviewRoute: View {
+    let workspace: String
+    @ObservedObject var connection: Connection
+
+    @State private var name: String?
+
+    private var live: Workspace? {
+        connection.fleet.workspaces.first { $0.id == workspace }
+    }
+
+    var body: some View {
+        Group {
+            if let name {
+                // The store comes from `Connection`, so this is the SAME review
+                // the workspace's `changes` pane would show if there is one:
+                // the scroll position, the folds, the diffs already read and
+                // the notes written are one per worktree, not one per way in.
+                // See `ChangesStores`.
+                ReviewScreen(
+                    store: connection.changesStores.store(for: workspace),
+                    workspaceName: name,
+                    agents: live?.reviewAgentTargets() ?? [])
+            } else {
+                ProgressView()
+            }
+        }
+        .onAppear { if name == nil { name = live?.task } }
+    }
+}
+
+/// The workspace list plus what it takes to act on it: quick task, new
 /// workspace, pull-to-refresh. Shown two places — pushed from the inbox's
-/// Working row, and inside the sheet `TerminalView` opens to switch terminals
-/// — so a task started from either one works the same way and neither loses a
+/// Workspaces row, and inside the sheet `PaneHost` opens to switch terminals —
+/// so a task started from either one works the same way and neither loses a
 /// capability the other has.
 ///
 /// It was `FleetView`'s fallback for a runner with no terminal to land on,
 /// which is why the two toolbar buttons live here: they were on the only screen
 /// a runner with nothing running could show. That makes this the one place to
-/// start work, and it is now a tap below the front door rather than at it. See
-/// `NeedsYouView.working`.
+/// start work, and it is now a tap below the front door rather than at it —
+/// which is why the row that leads here counts WORKSPACES and not working
+/// agents. See `NeedsYouView.workspacesRow`.
 struct WorkspaceListView: View {
     @ObservedObject var connection: Connection
     let onSelect: (Terminal) -> Void

@@ -60,14 +60,6 @@ struct RootView: View {
     var body: some View {
         Group {
             if let host = hosts.selected {
-                // The stack `FleetView` and everything under it assume.
-                //
-                // `FleetView` was previously PUSHED from the host list, so it
-                // inherited that screen's `NavigationStack`. Opening straight
-                // onto it left no stack at all: no navigation bar, so no title,
-                // no terminal/chat switch, and `navigationDestination` had
-                // nothing to push into.
-                //
                 // Keyed on the host, so switching runners rebuilds everything
                 // below rather than handing one host's screen the other's
                 // connection. The same rule the Mac follows for a pane whose
@@ -79,10 +71,21 @@ struct RootView: View {
                 // connection running while the screen showed the new details.
                 // `RunnerStore.trust` deliberately does not write through to
                 // `selected`, so approving a host key is not mistaken for one.
-                NavigationStack {
-                    FleetView(host: host, store: hosts)
-                }
-                .id(host)
+                //
+                // The `NavigationStack` used to be here, wrapped around this.
+                // The reason it was needed has not changed — `FleetView` was
+                // previously PUSHED from the host list and inherited that
+                // screen's stack, so opening straight onto it left no stack at
+                // all: no navigation bar, so no title, no terminal/chat switch,
+                // and nothing for a `navigationDestination` to push into. What
+                // changed is that the stack now has an explicit path, and that
+                // path is a list of ids that only this runner's fleet can
+                // resolve. So the stack moved DOWN into `FleetView`, beside the
+                // `Connection` it has to be read against; see the comment on
+                // `FleetView.body`. This `.id` still rebuilds it, along with
+                // everything else, when the runner changes.
+                FleetView(host: host, store: hosts)
+                    .id(host)
             } else {
                 HostOnboardingView(hosts: hosts)
             }
