@@ -246,4 +246,182 @@ struct FleetSnapshotTests {
             capturedAt: Date(), complete: true)
         #expect(snapshot.needingYou == 2)
     }
+
+    // MARK: - Reviews
+
+    /// The compatibility rule the whole optional exists for. A snapshot written
+    /// by a build that predates review counts — or by a phone whose runner is
+    /// too old to answer `changes.inbox` — must still decode, and must read as
+    /// "not told" rather than as a confident zero. Swift's synthesized
+    /// `Decodable` throws on a missing key for a non-optional, so getting this
+    /// wrong does not cost a review line: it costs the whole widget.
+    @Test func aSnapshotWithoutReviewCountsStillDecodes() throws {
+        let json = """
+        {"agents":[{"id":"t1","label":"claude","machine":"orchard",
+        "status":"working","glyph":"●","headline":"claude 4m","line":"x",
+        "feed":[],"rank":0,"turnFailed":false}],
+        "capturedAt":1000000,"complete":true}
+        """
+        let snapshot = try JSONDecoder().decode(FleetSnapshot.self, from: Data(json.utf8))
+        #expect(snapshot.agents.count == 1)
+        #expect(snapshot.needsReview == nil)
+        // And it still renders: the fleet has something to say, and what it says
+        // is about the working agent rather than about reviews it knows nothing
+        // of.
+        #expect(snapshot.glance(at: Date(timeIntervalSince1970: 1_000_010)) == .working(1))
+    }
+
+    /// Nil and zero are different answers, and every surface branches on the
+    /// difference. Zero is "nothing is waiting"; nil is "nobody told me".
+    @Test func anAbsentReviewCountIsNotZero() {
+        let base = FleetSnapshot(agents: [], capturedAt: Date(), complete: true)
+        #expect(base.needsReview == nil)
+        let told = FleetSnapshot(
+            agents: [], capturedAt: Date(), complete: true, reviewsWaiting: 0)
+        #expect(told.needsReview == 0)
+    }
+
+    /// A review count survives a JSON round trip, so the file a widget reads
+    /// says what the app wrote.
+    @Test func aReviewCountRoundTripsThroughJson() throws {
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "working")],
+            capturedAt: Date(timeIntervalSince1970: 1_000_000),
+            complete: true, reviewsWaiting: 3)
+        let data = try JSONEncoder().encode(snapshot)
+        #expect(try JSONDecoder().decode(FleetSnapshot.self, from: data) == snapshot)
+    }
+
+    /// A push is about ONE agent's turn ending and says nothing about whether
+    /// some other worktree's diff moved. Clearing the count on every push would
+    /// take the review line off every surface each time an unrelated agent
+    /// notified — a worse answer than a count that is a poll or two old.
+    @Test func mergingKeepsTheReviewCountItWasNotToldAbout() {
+        let before = FleetSnapshot(
+            agents: [agent("t1", status: "working")], capturedAt: Date(),
+            complete: true, reviewsWaiting: 3)
+        #expect(before.merging(agent("t2", status: "blocked"), at: Date()).needsReview == 3)
+    }
+
+    /// And a snapshot that never knew stays not-knowing: `merging` has nothing
+    /// to learn a count from either.
+    @Test func mergingIntoASnapshotWithoutReviewCountsTellsItNothing() {
+        let after = FleetSnapshot.empty.merging(agent("t1", status: "blocked"), at: Date())
+        #expect(after.needsReview == nil)
+    }
+
+    // MARK: - The glance
+
+    /// Blocked outranks everything. An agent that cannot continue is the one
+    /// thing a surface with room for one number is for.
+    @Test func blockedLeadsOverReviewsAndWork() {
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "blocked"), agent("t2", status: "working")],
+            capturedAt: Date(), complete: true, reviewsWaiting: 9)
+        #expect(snapshot.glance(at: Date()) == .blocked(1))
+    }
+
+    /// The user's specific ask: with nothing blocked, the reviews are what the
+    /// circular slot shows — and `.review` rather than `.working` is what makes
+    /// the two tellable apart, because the case carries the glyph and the tint.
+    @Test func reviewsLeadWhenNothingIsBlocked() {
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "working"), agent("t2", status: "working")],
+            capturedAt: Date(), complete: true, reviewsWaiting: 3)
+        #expect(snapshot.glance(at: Date()) == .review(3))
+    }
+
+    /// Work is the last rung, and it is reached both by a fleet told there is
+    /// nothing to review and by one never told anything.
+    @Test func workLeadsWhenNothingIsBlockedOrWaiting() {
+        let agents = [agent("t1", status: "working"), agent("t2", status: "done")]
+        let told = FleetSnapshot(
+            agents: agents, capturedAt: Date(), complete: true, reviewsWaiting: 0)
+        #expect(told.glance(at: Date()) == .working(1))
+        let untold = FleetSnapshot(agents: agents, capturedAt: Date(), complete: true)
+        #expect(untold.glance(at: Date()) == .working(1))
+    }
+
+    /// The working rung is the only volatile one, so it obeys the same rule
+    /// every row does: an agent this snapshot can no longer vouch for is not
+    /// counted. Past that point the fleet-wide claim stops being made at all
+    /// rather than degrading into a reassuring "0 working".
+    @Test func workIsNotCountedOnceItCannotBeAsserted() {
+        let began = Date(timeIntervalSince1970: 0)
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "working", activityChangedAt: began)],
+            capturedAt: began, complete: true)
+        #expect(snapshot.glance(at: began.addingTimeInterval(60)) == .working(1))
+        #expect(snapshot.glance(at: began.addingTimeInterval(FleetSnapshot.staleAfter + 1)) == nil)
+    }
+
+    /// Blocked and waiting-to-be-reviewed are LATCHED: an agent stopped an hour
+    /// ago is still stopped, and a diff nobody reviewed is still unreviewed. Age
+    /// must not take either of them off a surface.
+    @Test func theLatchedRungsSurviveAnOldSnapshot() {
+        let began = Date(timeIntervalSince1970: 0)
+        let old = began.addingTimeInterval(FleetSnapshot.staleAfter * 5)
+        let blocked = FleetSnapshot(
+            agents: [agent("t1", status: "blocked", activityChangedAt: began)],
+            capturedAt: began, complete: true, reviewsWaiting: 2)
+        #expect(blocked.glance(at: old) == .blocked(1))
+        let reviews = FleetSnapshot(
+            agents: [agent("t1", status: "done", activityChangedAt: began)],
+            capturedAt: began, complete: true, reviewsWaiting: 2)
+        #expect(reviews.glance(at: old) == .review(2))
+    }
+
+    /// An empty fleet is about nothing, and a nil glance is what lets each
+    /// surface keep the sentence it already had for that — "No agents", "Open
+    /// <app>", or the top agent in the past tense.
+    @Test func aFleetWithNothingToSayHasNoGlance() {
+        #expect(FleetSnapshot.empty.glance(at: Date()) == nil)
+        let quiet = FleetSnapshot(
+            agents: [agent("t1", status: "done")], capturedAt: Date(),
+            complete: true, reviewsWaiting: 0)
+        #expect(quiet.glance(at: Date()) == nil)
+    }
+
+    // MARK: - The rendering rule
+
+    /// The table itself, asserted. These three symbols and these three words are
+    /// the whole cross-surface contract: a widget, a lock screen accessory and a
+    /// complication draw them from here so they cannot come to differ, and a
+    /// change to any of them is a change to what four surfaces mean.
+    @Test func eachStateHasItsOwnMarkAndWords() {
+        #expect(FleetSnapshot.Glance.blocked(2).symbol == "exclamationmark.triangle.fill")
+        #expect(FleetSnapshot.Glance.review(3).symbol == "plus.forwardslash.minus")
+        #expect(FleetSnapshot.Glance.working(4).symbol == "checkmark")
+        #expect(FleetSnapshot.Glance.blocked(2).phrase == "2 need you")
+        #expect(FleetSnapshot.Glance.review(3).phrase == "3 to review")
+        #expect(FleetSnapshot.Glance.working(4).phrase == "4 working")
+    }
+
+    /// One agent is not "1 need you". These lines are read as sentences on a
+    /// lock screen, and a surface that cannot conjugate reads as broken.
+    @Test func oneOfSomethingIsSaidInTheSingular() {
+        #expect(FleetSnapshot.Glance.blocked(1).phrase == "1 needs you")
+        #expect(FleetSnapshot.Glance.blocked(1).caption == "agent needs you")
+        #expect(FleetSnapshot.Glance.review(1).caption == "worktree to review")
+        #expect(FleetSnapshot.Glance.working(1).caption == "agent working")
+    }
+
+    /// Reviews are counted in WORKTREES and blocked agents in agents, because
+    /// they are counts of different things — `changes.inbox` answers per
+    /// worktree. A caption that called both of them agents would make "2 need
+    /// you" and "3 to review" look like five agents.
+    @Test func theTwoCountsAreCountsOfDifferentThings() {
+        #expect(FleetSnapshot.Glance.blocked(2).caption == "agents need you")
+        #expect(FleetSnapshot.Glance.review(3).caption == "worktrees to review")
+        #expect(FleetSnapshot.Glance.working(4).caption == "agents working")
+    }
+
+    /// `count` is the number a one-number family draws, whichever rung it came
+    /// from. It has to come off the same value the glyph and the tint do, or a
+    /// circular slot ends up with an amber triangle over a review count.
+    @Test func theNumberComesOffTheSameAnswerAsTheMark() {
+        #expect(FleetSnapshot.Glance.blocked(2).count == 2)
+        #expect(FleetSnapshot.Glance.review(3).count == 3)
+        #expect(FleetSnapshot.Glance.working(4).count == 4)
+    }
 }

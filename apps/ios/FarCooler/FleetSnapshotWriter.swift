@@ -19,11 +19,13 @@ enum FleetSnapshotWriter {
     /// worth hopping off it, and hopping would let two polls' snapshots land
     /// out of order.
     @MainActor
-    static func write(fleet: Fleet, machine: String) {
+    static func write(fleet: Fleet, inbox: [String: InboxRow]?, machine: String) {
         let agents = fleet.workspaces.flatMap(\.terminals).compactMap { terminal in
             snapshotAgent(terminal, machine: machine)
         }
-        let snapshot = FleetSnapshot(agents: agents, capturedAt: Date(), complete: true)
+        let snapshot = FleetSnapshot(
+            agents: agents, capturedAt: Date(), complete: true,
+            reviewsWaiting: reviewsWaiting(inbox))
         SnapshotStore.write(snapshot)
         // The surfaces are out of process and do not poll. Without this they
         // keep drawing the previous snapshot until the system next decides to
@@ -36,6 +38,49 @@ enum FleetSnapshotWriter {
         // round trip; it is called on every poll precisely so that it, and not
         // this file, holds that rule.
         WatchLinkHost.shared.send(snapshot: snapshot)
+    }
+
+    /// How many worktrees are waiting to be looked at, or nil when this
+    /// connection has never been told.
+    ///
+    /// **The rows are already in hand and cost nothing to read here.**
+    /// `Connection.refresh` has called `changes.inbox` on every poll since the
+    /// phone's review surface landed — it is what draws `+120 -4` beside a row
+    /// in `FleetView` — so carrying its answer into the snapshot adds no RPC,
+    /// no round trip and no work on the runner. Measured against a live daemon
+    /// on this machine, `changes inbox` costs about 0.3 ms over the process
+    /// start it shares with `farcooler --version`, and roughly a fortieth of
+    /// what `status` costs; on the runner it is `review::cheap_gate`, two
+    /// `stat`s per worktree, plus lookups that are already memoized in
+    /// `ReviewCache` and a base resolution that is documented never to touch
+    /// the network. A second RPC per poll was the cost worth measuring before
+    /// building this, and the measurement is that there is not one.
+    ///
+    /// **Nil when nothing has been read.** An empty dictionary is ambiguous —
+    /// it is both "every worktree is reviewed" and "this runner's daemon
+    /// predates `changes.inbox` and refuses the call on every poll forever" —
+    /// so the caller passes nil for the second, and nil travels all the way to
+    /// the surfaces as "not told". See `FleetSnapshot.needsReview`.
+    ///
+    /// **`changedSinceReviewed` AND a diff to show.** Both halves are needed.
+    /// The daemon marks a worktree it has never seen marked read as changed —
+    /// `None => true` in `review_ops::inbox` — so counting the flag alone would
+    /// greet a freshly set-up runner with a review count equal to its worktree
+    /// list, including the ones that changed nothing. Requiring a diff drops
+    /// those and leaves the number meaning what the word says: something to
+    /// look at, that moved since you looked.
+    ///
+    /// The known cost of that choice is an UNDERCOUNT, and it is upstream
+    /// rather than ours to compensate for: `insertions`/`deletions` are
+    /// committed-only today, so a worktree whose only work is uncommitted
+    /// reports `0/0` and drops out of this count even though the daemon's
+    /// `touched_at` signal knows it moved. `.claude/agent/done/live-diff-counts.md`
+    /// is the approved fix and it belongs in the daemon; when it lands this
+    /// count improves with no change here. Undercounting is also the safe
+    /// direction — the surface says less rather than something untrue.
+    private static func reviewsWaiting(_ inbox: [String: InboxRow]?) -> Int? {
+        guard let inbox else { return nil }
+        return inbox.values.filter { $0.changedSinceReviewed && $0.hasDiff }.count
     }
 
     private static func snapshotAgent(

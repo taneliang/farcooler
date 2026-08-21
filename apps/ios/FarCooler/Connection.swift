@@ -102,6 +102,14 @@ final class Connection: ObservableObject {
 
     @Published private(set) var phase: Phase = .connecting
     @Published private(set) var fleet: Fleet = .empty
+
+    /// Whether `fleet` is an answer or merely the absence of one.
+    ///
+    /// Set by the first successful `refresh` and never cleared, on the same
+    /// terms as `fleet` and `inbox` themselves: a link that dropped does not
+    /// un-know what the runner last said, and the screens that render this hold
+    /// their contents through a reconnect rather than emptying. See `refresh`.
+    @Published private(set) var hasFleet = false
     @Published private(set) var repositories: [Repository] = []
 
     /// What each worktree has changed, by workspace id, or empty until the
@@ -125,6 +133,22 @@ final class Connection: ObservableObject {
     /// "this worktree has no changes any more", which is a claim, and a call
     /// that failed is not entitled to make one.
     @Published private(set) var inbox: [String: InboxRow] = [:]
+
+    /// Whether `changes.inbox` has ever answered, on any link this app has had.
+    ///
+    /// `inbox` alone cannot say. An empty dictionary is both "every worktree on
+    /// this runner is reviewed" and "this runner's daemon predates
+    /// `changes.inbox`, so the call is refused on every poll and always will
+    /// be", and those are the two things the glance surfaces exist to tell
+    /// apart: one is a review count of zero, the other is no review count at
+    /// all. See `FleetSnapshot.needsReview`, which carries the same distinction
+    /// out to a widget that has no connection to ask.
+    ///
+    /// Never reset. A read that succeeded once proves the runner can answer,
+    /// and a single dropped packet afterwards is not evidence that it cannot —
+    /// the same reasoning that makes `loadInbox` hold the last good rows rather
+    /// than blanking them.
+    @Published private(set) var inboxRead = false
 
     /// Bumped every time a session is replaced by a new one.
     ///
@@ -530,13 +554,39 @@ final class Connection: ObservableObject {
         do {
             let data = try await core.call("fleet")
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
+            // The runner has now told us what it has, at least once.
+            //
+            // `fleet` alone cannot answer this: `Fleet.empty` and a real fleet
+            // from a runner with no worktrees are the same value, and the
+            // difference between them is the difference between "we have not
+            // asked" and "there is nothing". The inbox needs it — see
+            // `FleetView.firstFleetArrived` — because "Nothing needs you" said
+            // over a fleet nobody has read yet is the one sentence on that
+            // screen that must never be transiently wrong, and `phase` cannot
+            // stand in for it: `start` and `reconnect` both set `.connected`
+            // and THEN await this call, so there is a whole round trip during
+            // which the app is connected and knows nothing.
+            hasFleet = true
 
             // The glance surfaces render from this and cannot fetch it
             // themselves. Written on every poll rather than on change, because
             // `capturedAt` is what makes the widget able to say how old it is,
             // and a snapshot only rewritten on change would claim to be as old
             // as the last state change rather than as old as the last look.
-            FleetSnapshotWriter.write(fleet: fleet, machine: hostLabel)
+            //
+            // The review count comes from the inbox read at the END of the
+            // previous poll rather than from one taken here, and that is the
+            // cheaper half of a deliberate trade. Reading it here would mean
+            // moving `loadInbox` inside this `do`, where a throw is treated as
+            // possible evidence the link is gone — see the note on the call
+            // below, which is outside this block precisely so an old daemon
+            // refusing the method cannot reconnect a working session every
+            // three seconds. The cost is that the count is one poll, three
+            // seconds, behind the agents beside it; the count is latched and
+            // these surfaces are minutes to hours old by construction, so three
+            // seconds buys nothing worth that.
+            FleetSnapshotWriter.write(
+                fleet: fleet, inbox: inboxRead ? inbox : nil, machine: hostLabel)
 
             // Announce anything worth announcing, from the fleet we just read.
             //
@@ -763,6 +813,11 @@ final class Connection: ObservableObject {
     func loadInbox() async {
         guard let data = try? await core.call("changes.inbox") else { return }
         guard let reply = try? JSONDecoder().decode(InboxResponse.self, from: data) else { return }
+        // Set here and not before the call: what this records is that the
+        // runner ANSWERED, which is the fact the surfaces need. A daemon too
+        // old to know the method never reaches this line, so its review count
+        // stays "not told" rather than becoming a confident zero.
+        inboxRead = true
         inbox = Dictionary(
             reply.items.map { ($0.workspaceId, $0) }, uniquingKeysWith: { _, latest in latest })
     }

@@ -120,7 +120,16 @@ final class WatchLinkHost: NSObject {
         // worth a log line — most people running this app own no Apple Watch.
         guard session.isPaired, session.isWatchAppInstalled else { return }
 
-        let changed = snapshot.agents != lastSent?.agents
+        // The agents AND the review count, because either can move without the
+        // other. A worktree gaining an unreviewed diff changes no agent — the
+        // count is per worktree and an agent is per terminal — so comparing
+        // agents alone left the wrist up to thirty seconds behind on exactly
+        // the number the glance was added to show. The thirty-second ceiling
+        // below still bounds it; this is about not spending that ceiling on a
+        // change we already know about.
+        let changed =
+            snapshot.agents != lastSent?.agents
+            || snapshot.reviewsWaiting != lastSent?.reviewsWaiting
         guard changed || Date().timeIntervalSince(lastSentAt) >= Self.refreshInterval else {
             return
         }

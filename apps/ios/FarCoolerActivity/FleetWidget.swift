@@ -197,6 +197,54 @@ private var appName: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Far Cooler"
 }
 
+/// The one color rule this feature turns on.
+///
+/// **Amber means "needs you", and nothing else may wear it.** A blocked agent
+/// is stopped until a person answers it; a worktree with an unreviewed diff is
+/// merely waiting, and nothing is worse for having waited another hour. The
+/// moment reviews are amber too, amber stops meaning anything and the glance
+/// this widget exists to support becomes a thing to be read rather than seen.
+///
+/// A second copy of this switch is in `WatchFleetWidget`, and it has to be a
+/// copy: that is a separate binary, a color is a SwiftUI type, and
+/// `FleetSnapshot` — the file both targets compile and where the glyph, the
+/// words and the precedence do live — is the wire's shape and has no business
+/// importing SwiftUI. Three cases is the whole rule, and it is stated in both.
+///
+/// `AnyShapeStyle` because the three tints are not all colors: tertiary is a
+/// hierarchical style, which is what makes the all-clear rung recede against
+/// whatever wallpaper or watch face is behind it rather than sitting at a fixed
+/// gray that is invisible on one and shouting on another.
+private func glanceTint(_ glance: FleetSnapshot.Glance) -> AnyShapeStyle {
+    switch glance {
+    case .blocked: AnyShapeStyle(Color.orange)
+    case .review: AnyShapeStyle(Color.accentColor)
+    case .working: AnyShapeStyle(HierarchicalShapeStyle.tertiary)
+    }
+}
+
+/// One count, said in full: the mark, the number and the words.
+///
+/// `Label` rather than an `HStack`, so the mark and the text keep the system's
+/// own spacing and stay together when the type size grows — these lines are
+/// drawn at accessibility sizes on a lock screen, where a hand-spaced icon and
+/// its text drift apart.
+///
+/// Never dimmed by `confidence`. Both counts this draws are latched: an agent
+/// that was blocked an hour ago is still blocked, and a diff nobody has
+/// reviewed is still unreviewed. Dimming them would make the two facts a person
+/// opens this widget for look like the doubtful part of it.
+private struct GlanceLabel: View {
+    let glance: FleetSnapshot.Glance
+
+    var body: some View {
+        Label(glance.phrase, systemImage: glance.symbol)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(glanceTint(glance))
+            .lineLimit(1)
+    }
+}
+
 struct FleetWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: FleetEntry
@@ -231,6 +279,21 @@ struct FleetWidgetView: View {
             if case .rows = self { return true }
             return false
         }
+
+        /// Whether this family can state BOTH counts at once, or has to pick
+        /// the higher-precedence one.
+        ///
+        /// On the enum beside `hasRows` rather than in a switch of its own, for
+        /// the reason `hasRows` is: a family added to `supportedFamilies` later
+        /// falls into a `default:` arm here once, and a second switch on
+        /// `family` somewhere else is how it ends up drawn as a rows widget
+        /// that also thinks it has room for one number only.
+        var statesBothCounts: Bool {
+            switch self {
+            case .rectangular, .rows: true
+            case .inline, .circular, .count: false
+            }
+        }
     }
 
     private var layout: Layout {
@@ -256,42 +319,101 @@ struct FleetWidgetView: View {
     @ViewBuilder private var content: some View {
         switch layout {
         case .inline:
-            // No styling channel at all: the system draws this line in the
-            // clock's own tint and ignores color and opacity, so the "last
-            // seen" prefix is not a supplement to the dimming the other
-            // families do — it is the entire degradation, and dropping it would
-            // leave this surface with no way to be less than certain.
-            Text(headline)
+            // The QUALIFIER LEADS, which on this family is the whole design.
+            // There is no styling channel here at all — the system draws this
+            // line in the clock's own tint and ignores color and opacity — so
+            // amber cannot do any of the work, and the word has to. Truncation
+            // eats the tail, so a line that put the agent's name first and
+            // "needs you" after would drop the only part that says what to do.
+            //
+            // The agent's own headline is what this says when there is nothing
+            // to lead with, which includes the case a stale snapshot creates:
+            // once no working agent can still be asserted, `glance(at:)`
+            // returns nil and this falls back to "last seen claude 4m" — the
+            // prefix that is this surface's entire degradation, kept intact.
+            if let glance = entry.snapshot.glance(at: entry.date) {
+                Label(glance.phrase, systemImage: glance.symbol)
+            } else {
+                Text(headline)
+            }
         case .circular:
+            // The mark and the number are ONE fact, so they come from one
+            // answer. A glyph belonging to the top agent above a number
+            // counting blocked agents was two facts stacked, and the pair
+            // "▲ 2" / "± 3" is only tellable apart at a glance if the mark and
+            // the count are about the same thing.
+            //
+            // Nothing here dims. Both rungs that can reach this surface with a
+            // number are latched — an agent blocked an hour ago is still
+            // blocked, a diff nobody reviewed is still unreviewed — and the
+            // volatile rung is already gone by then: `glance(at:)` drops
+            // working agents this snapshot can no longer vouch for, and returns
+            // nil once none is left.
             VStack(spacing: 0) {
-                Text(top?.glyph ?? "·")
-                    .font(.title3)
-                    // Only the glyph dims. The number under it counts `blocked`,
-                    // which is latched — an agent that was waiting on a person
-                    // an hour ago is still waiting on them — so it is exactly
-                    // as true now as when it was written and must not be made
-                    // to look doubtful. The glyph belongs to the top agent and
-                    // can be a `working` mark that has expired.
-                    .opacity(confidence == .lastSeen ? 0.6 : 1)
-                // A dash, not a zero, before anything has been written. "0"
-                // under a lock screen clock is a statement that nothing needs
-                // you, and this surface has no footer to qualify it with.
-                Text(entry.hasSnapshot ? "\(entry.snapshot.needingYou)" : "–")
-                    .font(.caption2.monospacedDigit())
+                if let glance = entry.snapshot.glance(at: entry.date) {
+                    Image(systemName: glance.symbol)
+                        .font(.title3)
+                        .foregroundStyle(glanceTint(glance))
+                    Text("\(glance.count)")
+                        .font(.caption2.monospacedDigit())
+                } else {
+                    Text(top?.glyph ?? "·")
+                        .font(.title3)
+                        // The top agent's own mark, which CAN be a `working`
+                        // one that has expired — so this one does dim.
+                        .opacity(confidence == .lastSeen ? 0.6 : 1)
+                    // A dash, not a zero, before anything has been written. "0"
+                    // under a lock screen clock is a statement that nothing
+                    // needs you, and this surface has no footer to qualify it
+                    // with.
+                    Text(entry.hasSnapshot ? "\(entry.snapshot.needingYou)" : "–")
+                        .font(.caption2.monospacedDigit())
+                }
             }
         case .rectangular:
+            // Three lines: who, and then each count that has something to say.
+            // This family has room for BOTH, and showing both is the point —
+            // "2 need you" and "3 to review" are different work in different
+            // places, and a surface that collapsed them into one number would
+            // send somebody to the wrong screen.
+            let blocked = entry.snapshot.needingYou
+            // `?? 0` here and not in the snapshot: nil means this build was
+            // never told about reviews, and zero lines is exactly what "not
+            // told" should draw. What must never happen is the reverse — a
+            // rendered "0 to review" asserting something nobody said.
+            let reviews = entry.snapshot.needsReview ?? 0
             VStack(alignment: .leading, spacing: 1) {
-                Text(headline).font(.headline)
-                if let top, !top.line.isEmpty, top.line != agentTitle(top) {
-                    Text(top.line).font(.caption).lineLimit(1)
+                Text(headline)
+                    .font(.headline)
+                    .lineLimit(1)
+                    // Only the agent's own words dim. The counts below are
+                    // latched and must not be made to look doubtful.
+                    .opacity(confidence == .lastSeen ? 0.6 : 1)
+                if layout.statesBothCounts {
+                    if blocked > 0 { GlanceLabel(glance: .blocked(blocked)) }
+                    if reviews > 0 { GlanceLabel(glance: .review(reviews)) }
+                }
+                if blocked == 0, reviews == 0, let top, !top.line.isEmpty,
+                    top.line != agentTitle(top)
+                {
+                    // What the agent is actually doing, which is worth the line
+                    // only when no count wants it. Skipped when it is already
+                    // the line above: an agent pushed before the app has ever
+                    // seen it has no `headline`, so `agentTitle` falls back to
+                    // this very string.
+                    Text(top.line)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .opacity(confidence == .lastSeen ? 0.6 : 1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .opacity(confidence == .lastSeen ? 0.6 : 1)
         case .count:
             SmallFleet(entry: entry)
         case let .rows(limit, feed):
-            RowsFleet(entry: entry, limit: limit, showFeed: feed)
+            RowsFleet(
+                entry: entry, limit: limit, showFeed: feed,
+                statesBothCounts: layout.statesBothCounts)
         }
     }
 
@@ -317,17 +439,30 @@ private struct SmallFleet: View {
     let entry: FleetEntry
 
     var body: some View {
-        let waiting = entry.snapshot.needingYou
+        // One number, by precedence: blocked, then reviews, then working. This
+        // family has room for exactly one, and which one it picks is decided in
+        // `FleetSnapshot.glance(at:)` so that this widget and the complication
+        // on a wrist beside it cannot pick differently.
+        let glance = entry.snapshot.glance(at: entry.date)
         VStack(alignment: .leading, spacing: 6) {
             // Gated on having a snapshot at all: a large "0" over "agents need
             // you" is a confident answer to a question this phone has never
             // asked anyone. With nothing known the footer's sentence is the
             // whole widget, which is sparse and true.
-            if entry.hasSnapshot {
-                Text("\(waiting)")
+            //
+            // And gated on there being something to say, which is new and is
+            // the same rule pointed at a different failure. This used to draw
+            // "0 · agents need you" for every fleet with nobody blocked in it,
+            // including a fleet whose four working agents this snapshot had
+            // stopped vouching for an hour ago — a reassuring zero standing in
+            // for "I have not heard anything in a while". A nil glance is
+            // exactly that state, and the agent line and the footer below say
+            // it properly.
+            if entry.hasSnapshot, let glance {
+                Text("\(glance.count)")
                     .font(.system(size: 44, weight: .semibold, design: .rounded))
-                    .foregroundStyle(waiting > 0 ? Color.orange : Color.secondary)
-                Text(waiting == 1 ? "agent needs you" : "agents need you")
+                    .foregroundStyle(glanceTint(glance))
+                Text(glance.caption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -346,14 +481,36 @@ private struct RowsFleet: View {
     let entry: FleetEntry
     let limit: Int
     let showFeed: Bool
+    /// Whether this family may state both counts at once. See
+    /// `FleetWidgetView.Layout.statesBothCounts`.
+    let statesBothCounts: Bool
 
     var body: some View {
+        let blocked = entry.snapshot.needingYou
+        // `?? 0` here and not in the snapshot: nil is "this build was never
+        // told about reviews", and no line at all is what that should draw. The
+        // reverse — rendering "0 to review" — would assert something no host
+        // said.
+        let reviews = entry.snapshot.needsReview ?? 0
         VStack(alignment: .leading, spacing: 6) {
             // Only when a real capture came back with nothing. Before the first
             // one, the footer says which of the two this is; "No agents" here
             // as well would answer the question wrongly in the larger type.
             if entry.snapshot.agents.isEmpty, entry.hasSnapshot {
                 Text("No agents").font(.headline).foregroundStyle(.secondary)
+            }
+            // Both counts, above the rows, whenever both have something to say.
+            // Side by side rather than stacked because these families are wide
+            // and their rows are the expensive part of the layout; the rule the
+            // narrow accessory keeps — show BOTH, never collapse them into one
+            // number — is the same one, since "2 need you" and "3 to review"
+            // are different work in different places.
+            if statesBothCounts, blocked > 0 || reviews > 0 {
+                HStack(spacing: 10) {
+                    if blocked > 0 { GlanceLabel(glance: .blocked(blocked)) }
+                    if reviews > 0 { GlanceLabel(glance: .review(reviews)) }
+                    Spacer(minLength: 0)
+                }
             }
             ForEach(entry.snapshot.ranked.prefix(limit)) { agent in
                 if let url = terminalURL(agent) {
@@ -443,3 +600,128 @@ private struct StaleFooter: View {
         }
     }
 }
+
+#if DEBUG
+    /// The four states every family here has to be looked at in.
+    ///
+    /// One timeline per family rather than four previews per family. The canvas
+    /// steps through a timeline, so this is 6 canvases instead of 24 — and the
+    /// question worth answering is whether "2 need you" and "3 to review" are
+    /// tellable apart WITHOUT reading them, which is a question about two
+    /// renders of one slot and is easiest to see by stepping one family through
+    /// all four.
+    ///
+    /// The fourth state is the one that is easy to forget and expensive to get
+    /// wrong: a snapshot whose `reviewsWaiting` is nil, written by an older
+    /// build or by a phone whose runner cannot answer `changes.inbox`. It must
+    /// draw as the widget always did — no review line anywhere, and never a
+    /// "0 to review".
+    private enum PreviewFleet {
+        static let now = Date()
+
+        static func agent(
+            _ id: String, _ status: String, _ headline: String, _ line: String,
+            _ glyph: String, rank: UInt32
+        ) -> FleetSnapshot.Agent {
+            FleetSnapshot.Agent(
+                id: id, label: "claude", machine: "orchard", status: status,
+                glyph: glyph, headline: headline, line: line,
+                feed: [
+                    "Reading crates/daemon/src/review_ops.rs.",
+                    "Ran cargo test — 214 passed.",
+                    "Writing the inbox gate.",
+                ],
+                rank: rank, turnFailed: false, activityChangedAt: now)
+        }
+
+        /// Two stopped, two getting on with it. `rank` ascending puts the
+        /// blocked pair first, exactly as the host would.
+        static let blocked: [FleetSnapshot.Agent] = [
+            agent("t1", "blocked", "claude asks", "Run the migration?", "▲", rank: 10),
+            agent("t2", "blocked", "codex asks", "Overwrite fruit.txt?", "▲", rank: 20),
+            agent("t3", "working", "claude 4m", "Writing review_ops.rs", "●", rank: 300),
+            agent("t4", "working", "claude 1m", "Reading watch.rs", "●", rank: 310),
+        ]
+
+        /// Nobody stopped. Whether anything is waiting is the review count's
+        /// business, which is the whole point of the middle two states.
+        static let quiet: [FleetSnapshot.Agent] = [
+            agent("t3", "working", "claude 4m", "Writing review_ops.rs", "●", rank: 300),
+            agent("t4", "working", "claude 1m", "Reading watch.rs", "●", rank: 310),
+            agent("t5", "working", "codex 12m", "Running cargo test", "●", rank: 320),
+            agent("t6", "working", "claude 2m", "Reading FleetWidget.swift", "●", rank: 330),
+        ]
+
+        static func snapshot(_ agents: [FleetSnapshot.Agent], reviews: Int?) -> FleetSnapshot {
+            FleetSnapshot(
+                agents: agents, capturedAt: now, complete: true, reviewsWaiting: reviews)
+        }
+
+        /// The four entries, one per state, a minute apart so the canvas can be
+        /// stepped through them.
+        /// The four entries, one per state, a minute apart so the canvas can
+        /// be stepped through them. Named separately because the `timeline:`
+        /// builder takes entries and not an array of them.
+        static let blockedState = FleetEntry(date: now, snapshot: snapshot(blocked, reviews: 3))
+        static let reviewsOnlyState = FleetEntry(
+            date: now.addingTimeInterval(60), snapshot: snapshot(quiet, reviews: 3))
+        static let allClearState = FleetEntry(
+            date: now.addingTimeInterval(120), snapshot: snapshot(quiet, reviews: 0))
+        static let reviewsUnknownState = FleetEntry(
+            date: now.addingTimeInterval(180), snapshot: snapshot(quiet, reviews: nil))
+    }
+
+    #Preview("Small · blocked, reviews, clear, unknown", as: .systemSmall) {
+        FleetWidget()
+    } timeline: {
+        PreviewFleet.blockedState
+        PreviewFleet.reviewsOnlyState
+        PreviewFleet.allClearState
+        PreviewFleet.reviewsUnknownState
+    }
+
+    #Preview("Medium · blocked, reviews, clear, unknown", as: .systemMedium) {
+        FleetWidget()
+    } timeline: {
+        PreviewFleet.blockedState
+        PreviewFleet.reviewsOnlyState
+        PreviewFleet.allClearState
+        PreviewFleet.reviewsUnknownState
+    }
+
+    #Preview("Large · blocked, reviews, clear, unknown", as: .systemLarge) {
+        FleetWidget()
+    } timeline: {
+        PreviewFleet.blockedState
+        PreviewFleet.reviewsOnlyState
+        PreviewFleet.allClearState
+        PreviewFleet.reviewsUnknownState
+    }
+
+    #Preview("Circular · blocked, reviews, clear, unknown", as: .accessoryCircular) {
+        FleetWidget()
+    } timeline: {
+        PreviewFleet.blockedState
+        PreviewFleet.reviewsOnlyState
+        PreviewFleet.allClearState
+        PreviewFleet.reviewsUnknownState
+    }
+
+    #Preview("Rectangular · blocked, reviews, clear, unknown", as: .accessoryRectangular) {
+        FleetWidget()
+    } timeline: {
+        PreviewFleet.blockedState
+        PreviewFleet.reviewsOnlyState
+        PreviewFleet.allClearState
+        PreviewFleet.reviewsUnknownState
+    }
+
+    #Preview("Inline · blocked, reviews, clear, unknown", as: .accessoryInline) {
+        FleetWidget()
+    } timeline: {
+        PreviewFleet.blockedState
+        PreviewFleet.reviewsOnlyState
+        PreviewFleet.allClearState
+        PreviewFleet.reviewsUnknownState
+    }
+#endif
