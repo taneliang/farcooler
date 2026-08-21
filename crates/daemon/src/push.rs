@@ -118,7 +118,7 @@ impl Pairing {
 ///
 /// A wider exposure than it was, and still not a leak, because nothing is
 /// kept: `/v1/notify` persists a `version` and nothing else off this body,
-/// `live_activities` holds delivery metadata, and the worker refuses to log a
+/// `install_cards` holds delivery metadata, and the worker refuses to log a
 /// body at all. The rule has not been relaxed — the relay is a delivery
 /// service, and a payload it does not keep is a payload it cannot leak — but
 /// it has to be stated about what actually crosses.
@@ -291,11 +291,22 @@ const RETIRE_BATCH: usize = 100;
 /// Ask the relay to take down cards for runs that are over.
 ///
 /// The daemon does not know which cards exist — the relay does, in its
-/// `live_activities` table — so this says what the runner knows instead: these
+/// `install_cards` table — so this says what the runner knows instead: these
 /// terminals have no run behind them any more. What the relay does about a
 /// terminal it holds no card for is nothing, which is what makes it safe to
 /// name every terminal a sweep is unsure about rather than only the ones a card
 /// was pushed for.
+///
+/// TERMINALS and not cards, and that survived the relay going to one card per
+/// app install unchanged, because it was never a statement about cards: this
+/// side knows which runs are over and the other side knows what is on the lock
+/// screen. What changed is on the far end. There is one card now, it leads with
+/// one agent, and at most one id in this list can be the agent it is leading
+/// with — so a sweep takes down the card only when the run behind its LEADER is
+/// the one that ended. Naming a terminal the card was never about does nothing,
+/// which is the same answer as before and now matters more: ending on any named
+/// id would clear the lock screen of a running agent because a different one
+/// stopped.
 ///
 /// Carries NO destination and no content, the same as `notify` and for the same
 /// reason: a stolen daemon token can end the cards of the account it was stolen

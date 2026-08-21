@@ -194,28 +194,50 @@ async function sendApns(
 /// set, and the app cannot decode the push at all — the activity then freezes
 /// on whatever it last showed, which looks exactly like the relay never sent
 /// anything.
-export interface ActivityState {
-  status: 'working' | 'blocked' | 'done'
-  detail: string
-}
-
-/// What an activity is about, fixed for its whole life.
 ///
-/// Only a `start` carries these. They are the activity's identity rather than
-/// its state, so APNs rejects a push that repeats them on an update or an end —
-/// which is why the union below makes it impossible to attach them to one.
-export interface ActivityAttributes {
+/// **This is the card's LEADER**, and it used to be the card's identity. There
+/// is one card per app install now rather than one per terminal, and the agent
+/// it leads with changes over the card's life as different agents block and
+/// finish — so `terminal`, `label`, `machine` and `startedAt` all moved here
+/// from `ActivityAttributes` below. They had to: attributes are fixed for an
+/// activity's whole life and APNs rejects a push that repeats them, so a leader
+/// living there could only ever be changed by ending the card and starting
+/// another, which is two cards on the lock screen for the moment in between.
+///
+/// Nothing here says how many OTHER agents there are, and that is deliberate.
+/// The relay stores no fleet and a daemon knows only its own runner, so neither
+/// end of this contract can count one honestly; the card reads its own tail from
+/// the fleet snapshot in the phone's App Group, which is the only thing that has
+/// ever seen every runner. A count field here would be a number nothing writes,
+/// which this contract has been burned by once already — see the note on
+/// `detail` in `AgentActivityAttributes.swift`.
+export interface ActivityState {
+  /// The leading agent's terminal, so a tap on the card opens the pane it is
+  /// about. Rebuilt into the card's `widgetURL` on every render, which is what
+  /// lets the tap target follow a change of leader.
   terminal: string
+  /// The leading agent's name, and the runner it is on. Both plain strings
+  /// rather than ids: the widget extension has no connection to look anything
+  /// up with.
+  ///
+  /// `machine` keeps that spelling because the app decodes this payload by
+  /// field name. It is **runner** in every word a person reads.
   label: string
   machine: string
-  /// When the turn began, in Unix milliseconds, so the card can run its own
-  /// clock.
+  status: 'working' | 'blocked' | 'done'
+  detail: string
+  /// When the LEADER's turn began, in Unix milliseconds, so the card can run
+  /// its own clock.
   ///
-  /// Here rather than in `ActivityState` because it does not change for the
-  /// life of the card, and because the app renders a date as a native timer:
-  /// no push per tick, and it keeps counting on a phone that is off the
-  /// network. Putting it in the state would mean pushing every second to
-  /// animate something iOS animates for free.
+  /// Here rather than in `ActivityAttributes` because it is part of the leader
+  /// and the leader changes: a card that kept the first agent's start would
+  /// count the second agent's work from the wrong moment. It was on the
+  /// attributes precisely because it did NOT change, and that stopped being
+  /// true when the card stopped being about one terminal.
+  ///
+  /// The app still renders it as a native timer, which is the reason it is a
+  /// date and not a rendered string: no push per tick, and it keeps counting on
+  /// a phone that is off the network.
   ///
   /// A NUMBER on the wire, never a date string. The app's decoder tells Unix
   /// seconds from Unix milliseconds apart by magnitude and reads this field
@@ -227,6 +249,29 @@ export interface ActivityAttributes {
   /// a wrong one.
   startedAt?: number
 }
+
+/// What is fixed for the life of an install's card, which is now almost nothing.
+///
+/// Only a `start` carries these. They are the activity's identity rather than
+/// its state, so APNs rejects a push that repeats them on an update or an end —
+/// which is why the union below makes it impossible to attach them to one.
+export interface ActivityAttributes {
+  /// Which SHAPE the card was started in, and the only thing left here.
+  ///
+  /// `1` is a card started before the per-install restructure: terminal-scoped,
+  /// with its leader in the attributes. `2` is this one. The app uses it to
+  /// decide which card survives when both are in flight after an upgrade — see
+  /// `LiveActivities.precedence` — and it has to be TOLD rather than inferred,
+  /// because both shapes are the same ActivityKit type under the same
+  /// `attributes-type` string and the app decodes an old card's state leniently.
+  ///
+  /// Must equal `AgentActivityAttributes.fleetVersion` in
+  /// `apps/shared/AgentKit/Sources/AgentKit/AgentActivityAttributes.swift`.
+  version: number
+}
+
+/// The shape this relay starts cards in. See `ActivityAttributes.version`.
+export const ACTIVITY_VERSION = 2
 
 interface ActivityBase {
   state: ActivityState
@@ -277,6 +322,16 @@ const DISMISSAL_DELAY_S = 60
 /// person next opens the app — so the relay has a live card it cannot end. If
 /// the agent then finishes, or is answered from the Mac, `done` arrives to find
 /// no row and the card sits there saying "Needs You" forever.
+///
+/// One card per install made that hole SMALLER, which is worth writing down
+/// because it was the thing to check. It is one row per install now rather than
+/// one per terminal, so a phone left in a pocket while four agents start work
+/// ends up with one unaddressable card instead of four: the first push claims
+/// the row, every later push finds it and either moves the card or is refused as
+/// not the leader, and the single token the app files when it next opens
+/// addresses the single card that exists. The blind window is unchanged in
+/// LENGTH — it is still "until the app runs" — but what accumulates inside it no
+/// longer scales with the fleet.
 ///
 /// A stale date does not dismiss it. It marks the content as out of date so the
 /// system can present it as stale rather than as current truth, which is the

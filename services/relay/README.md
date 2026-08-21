@@ -28,7 +28,7 @@ can guess or steal.
 
     account ──owns──> devices          (apns / fcm token, + push-to-start token)
             ├─owns──> daemons          (hashed bearer token, scoped to the account)
-            └─has───> live_activities  (one update token per terminal)
+            └─has───> install_cards    (one update token, one card, per install)
 
 - **Identity** is WorkOS. The relay verifies a WorkOS session JWT and never
   stores a password, an email/password flow, or a session of its own.
@@ -38,9 +38,8 @@ can guess or steal.
 
 ## Live Activities
 
-A `/v1/notify` that carries a `status` also drives the lock-screen card for that
-terminal, on top of the alert. Three tokens are involved and none is
-interchangeable:
+A `/v1/notify` that carries a `status` also drives the lock-screen card, on top
+of the alert. Three tokens are involved and none is interchangeable:
 
 - the **device token**, for the alert;
 - the **push-to-start token**, one per app install, which is the only way to
@@ -49,6 +48,16 @@ interchangeable:
 - the **update token**, issued per running activity and dead when it ends, which
   the app reports to `/v1/devices/activity` and withdraws with `updateToken:
   null`.
+
+**One card per install, not per terminal.** Four running agents used to mean
+four stacked cards, and a Dynamic Island that can present exactly one picking
+between them. The card now LEADS with a single agent — `install_cards` remembers
+which, because this worker holds nothing between requests — and the phone counts
+the rest off the fleet snapshot it already keeps in its App Group. Blocked
+outranks working, an agent that is not the leader never moves the card, and only
+the leader's `done` ends it. `/v1/notify/retire` still names terminals, because
+the runner is the side that knows whether a run is still behind one; at most one
+of them can be the leader, and only that one takes the card down.
 
 The alert is the guarantee and the card is the enhancement: an activity push
 that fails is logged and dropped, never allowed to cost anyone the
@@ -62,6 +71,14 @@ start payload therefore carries a `stale-date` an hour out, which marks the card
 as out of date without removing it. Deliberately not a `dismissal-date`: a card
 that disappears on a timer while the agent is genuinely still blocked deletes
 the one notification this product exists to deliver.
+
+One card per install made that hole smaller rather than larger. A phone left in
+a pocket while four agents start work now ends up with ONE unaddressable card
+instead of four, because there is one row to claim and every later push either
+moves that card or is refused as not the leader — so the single token the app
+files when it next opens addresses the single card that exists. The window is
+still "until the app runs"; what accumulates inside it no longer scales with the
+fleet.
 
 ## Sandbox and production
 

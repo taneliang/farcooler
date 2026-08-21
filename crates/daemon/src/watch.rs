@@ -1952,6 +1952,14 @@ enum Attention {
 /// row off `Done` on the client's next poll, as it always has — this changes
 /// what the owner is TOLD, never what the runner believes.
 ///
+/// "The card" is one card per app install rather than one per terminal, and this
+/// instruction did not have to change for that. The runner names a terminal and
+/// the relay answers about the card it holds: if this agent is the one the card
+/// is LEADING with, the card comes down silently, exactly as intended; if it is
+/// not, the card is about somebody else who is still running and is left alone,
+/// which is also exactly as intended. Either way no `done` push goes out, so
+/// nothing buzzes and nothing is left claiming a run that has ended.
+///
 /// `Blocked` raises nothing, and takes nothing down. Nothing, because you are
 /// looking at the question — that is the whole request. And nothing DOWN because
 /// a blocked agent is mid-turn: `card_still_earned` says a run is still behind

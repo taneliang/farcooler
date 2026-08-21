@@ -19,6 +19,11 @@ import Foundation
 /// Both are handed over as they arrive rather than fetched when needed, because
 /// there is no "when needed" — by the time the relay wants to end a card the app
 /// may not have run for hours.
+///
+/// **There is exactly one card per install.** Everything below is written to
+/// that invariant rather than to a per-terminal one: the relay keeps one row per
+/// install to address, and a second live activity here is a second card on the
+/// lock screen that the relay does not know it has and can therefore never end.
 @MainActor
 final class LiveActivities {
     static let shared = LiveActivities()
@@ -31,12 +36,17 @@ final class LiveActivities {
     /// leave six token loops racing to file the same tokens.
     private var watched: Set<String> = []
 
-    /// Cards this app ended itself as duplicates, by activity id.
+    /// Cards this app ended itself as extras, by activity id.
     ///
     /// Their ending is not news the relay can use. The row it keeps is keyed on
-    /// the TERMINAL, and the card that survived has the same one — so reporting
-    /// `updateToken: nil` for a duplicate would throw away the surviving card's
+    /// the INSTALL, and the card that survived shares it — so reporting
+    /// `updateToken: nil` for an extra would throw away the surviving card's
     /// only address and leave it on the lock screen with nothing able to end it.
+    ///
+    /// The hazard got sharper with one card per install, not milder. When the
+    /// row was keyed on a terminal this only mattered for two cards about the
+    /// SAME agent; now every card on the phone points at the one row, so any
+    /// extra reporting its own death takes the survivor's address with it.
     private var reaped: Set<String> = []
 
     private init() {}
@@ -59,9 +69,9 @@ final class LiveActivities {
         // app next launches that activity is already there with an update token
         // the relay has never been told about.
         //
-        // Duplicates are cleared before any of them is watched, because two
-        // cards for one terminal both file their token against the same row and
-        // the loser becomes a card nothing can ever end.
+        // Extras are cleared before any of them is watched, because every card
+        // files its token against the same row and the loser becomes a card
+        // nothing can ever end.
         reapDuplicates()
         for activity in Activity<AgentActivityAttributes>.activities { watch(activity) }
         Task {
@@ -74,12 +84,11 @@ final class LiveActivities {
 
     private func watch(_ activity: Activity<AgentActivityAttributes>) {
         guard watched.insert(activity.id).inserted else { return }
-        let terminal = activity.attributes.terminal
 
         Task {
             for await token in activity.pushTokenUpdates {
                 await Account.shared.registerActivityToken(
-                    terminal: terminal,
+                    terminal: Self.leader(of: activity),
                     updateToken: Self.hex(token),
                     environment: PushRegistration.environment)
             }
@@ -97,9 +106,9 @@ final class LiveActivities {
                     // Ended or dismissed — and anything a later iOS adds that
                     // is neither active nor stale, which is the safe way to
                     // guess for a non-frozen enum. Telling the relay to forget
-                    // the token matters: keeping it means the next `done` for
-                    // this terminal pushes to a token APNs has retired, and the
-                    // relay counts a delivery that cannot have happened.
+                    // the token matters: keeping it means the next `done`
+                    // pushes to a token APNs has retired, and the relay counts
+                    // a delivery that cannot have happened.
                     //
                     // Which of the two it was is the phone's to report, and only
                     // the phone can: `.dismissed` is a person swiping the card
@@ -111,7 +120,7 @@ final class LiveActivities {
                     // one.
                     if !reaped.contains(activity.id) {
                         await Account.shared.registerActivityToken(
-                            terminal: terminal,
+                            terminal: Self.leader(of: activity),
                             updateToken: nil,
                             environment: PushRegistration.environment,
                             dismissed: state == .dismissed)
@@ -124,9 +133,38 @@ final class LiveActivities {
         }
     }
 
-    /// Which of two cards for one terminal to keep. Larger wins.
+    /// The terminal this card is currently leading with.
     ///
-    /// `blocked` first, and that is the load-bearing part. The duplicate exists
+    /// Read off the CONTENT STATE at the moment of reporting rather than
+    /// captured when the watcher started, because the leader changes over the
+    /// card's life — a card that opened on one agent and now leads with another
+    /// would otherwise file its token under the agent it has stopped being
+    /// about.
+    ///
+    /// The relay no longer keys anything on it: `/v1/devices/activity` holds one
+    /// row per install and ignores this field. It is still sent because a relay
+    /// deployed before that rekey REQUIRES it — a missing `terminal` is a 400
+    /// there — and the app and its relay are one deployment per channel but not
+    /// one atomic one. Sending the leader costs nothing and is the most truthful
+    /// thing the phone can put in a field whose meaning has moved on.
+    private static func leader(of activity: Activity<AgentActivityAttributes>) -> String {
+        activity.content.state.terminal
+    }
+
+    /// Which of two cards to keep. Larger wins.
+    ///
+    /// **Fleet-shaped first.** An upgrade lands with terminal-scoped cards from
+    /// the old build still in flight, and those are the ones to end: they lead
+    /// with an agent they cannot re-lead, they draw from a content state this
+    /// build fills differently, and there may be one per running agent. A
+    /// legacy card winning this comparison would end the live fleet card and
+    /// leave the lock screen showing whichever single agent happened to have a
+    /// card up when the app was updated. `AgentActivityAttributes.version` is
+    /// what answers this, and it has to be asked rather than inferred — both
+    /// shapes are the same ActivityKit type, and `ContentState` decodes an old
+    /// card leniently, so an empty label is a guess and not an answer.
+    ///
+    /// Then `blocked`, and that is the load-bearing part. The extra card exists
     /// because a `blocked` push replaced a card stuck on "Working", so ending
     /// the wrong one puts the lock screen back to saying the opposite of what
     /// the banner beside it says — the failure the replacement exists to fix.
@@ -142,52 +180,68 @@ final class LiveActivities {
     /// not documented and is not stable.
     private static func precedence(
         _ card: Activity<AgentActivityAttributes>
-    ) -> (Int, Date, String) {
+    ) -> (Int, Int, Date, String) {
         (
+            card.attributes.isFleetShaped ? 1 : 0,
             AgentStatus(card.content.state.status) == .blocked ? 1 : 0,
             card.content.staleDate ?? .distantPast,
             card.id
         )
     }
 
-    /// Leave one card per terminal, and end the rest.
+    /// Leave exactly ONE card, and end every other.
     ///
-    /// The relay can start a card it cannot address — the app was not running to
-    /// report an update token — and when the agent then blocks it starts a
-    /// corrected one rather than leave the lock screen reading "Working" beside
-    /// a banner that says otherwise. That is the right trade, and this is what
-    /// keeps its cost to a moment: the loser is ended the next time the app
-    /// runs, which is almost always the tap on that very banner.
+    /// Not one per terminal any more — one, full stop. Four running agents used
+    /// to mean four stacked cards on the lock screen while the Dynamic Island,
+    /// which can present a single activity, showed whichever it picked; the card
+    /// now leads with one agent and counts the rest, so a second card is a
+    /// second answer to a question that has one.
+    ///
+    /// Two things arrive here, and the grouping that used to separate them is
+    /// gone because both have the same remedy:
+    ///
+    ///   - **Extras the relay raised.** It can start a card it cannot address —
+    ///     the app was not running to report an update token — and when an agent
+    ///     then blocks it starts a corrected one rather than leave the lock
+    ///     screen reading "Working" beside a banner that says otherwise. That is
+    ///     the right trade, and this is what keeps its cost to a moment: the
+    ///     loser is ended the next time the app runs, which is almost always the
+    ///     tap on that very banner.
+    ///   - **In-flight cards from the build before this one.** Those are
+    ///     terminal-scoped, there may be several, and nothing else will ever
+    ///     take them down: the relay's rekey means it no longer holds a row per
+    ///     terminal to end them with, so left alone they sit out their hour-long
+    ///     stale date beside the new card. `precedence` refuses to let one of
+    ///     them be the survivor.
     ///
     /// Which card loses is `precedence`, and it is not simply the older one.
     private func reapDuplicates() {
-        let live = Activity<AgentActivityAttributes>.activities
-        for (_, cards) in Dictionary(grouping: live, by: { $0.attributes.terminal }) {
-            guard cards.count > 1 else { continue }
-            let keep = cards.max { Self.precedence($0) < Self.precedence($1) }
-            for card in cards where card.id != keep?.id {
-                // Marked before it is ended, and in both sets on purpose.
-                //
-                // `watched` refuses this card a watcher: `watch` starts a token
-                // loop as well as a state loop, and filing a dying card's push
-                // token would overwrite the surviving card's address on the
-                // relay's row, which is keyed on the terminal they share.
-                //
-                // `reaped` is for a loop that is ALREADY running, which cannot
-                // be called off — it tells that loop not to report this ending,
-                // for the same reason, and removes both ids on its way out.
-                // Nothing removes them for a card nobody was watching: there is
-                // no loop to notice it went. That leak is one string per
-                // duplicate per launch — duplicates are rare and at most one per
-                // terminal — and the only way to collect it would be to watch
-                // the card, which is precisely what must not happen.
-                reaped.insert(card.id)
-                watched.insert(card.id)
-                // Immediately, not on a delay. This card is a duplicate of one
-                // the person is looking at right now, and a duplicate that
-                // lingers a minute is the second card this exists to avoid.
-                Task { await card.end(nil, dismissalPolicy: .immediate) }
-            }
+        let cards = Activity<AgentActivityAttributes>.activities
+        guard cards.count > 1 else { return }
+        let keep = cards.max { Self.precedence($0) < Self.precedence($1) }
+        for card in cards where card.id != keep?.id {
+            // Marked before it is ended, and in both sets on purpose.
+            //
+            // `watched` refuses this card a watcher: `watch` starts a token
+            // loop as well as a state loop, and filing a dying card's push
+            // token would overwrite the surviving card's address on the relay's
+            // row, which is keyed on the install they share.
+            //
+            // `reaped` is for a loop that is ALREADY running, which cannot be
+            // called off — it tells that loop not to report this ending, for
+            // the same reason, and removes both ids on its way out. Nothing
+            // removes them for a card nobody was watching: there is no loop to
+            // notice it went. That leak is one string per extra card per
+            // launch — extras are rare, and the largest burst is the one-off
+            // sweep of an upgrade's terminal-scoped leftovers — and the only
+            // way to collect it would be to watch the card, which is precisely
+            // what must not happen.
+            reaped.insert(card.id)
+            watched.insert(card.id)
+            // Immediately, not on a delay. This card is beside one the person
+            // is looking at right now, and one that lingers a minute is the
+            // second card this exists to avoid.
+            Task { await card.end(nil, dismissalPolicy: .immediate) }
         }
     }
 

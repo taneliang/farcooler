@@ -184,7 +184,7 @@ async function register(account: string, fields: Record<string, unknown> = {}) {
 }
 
 beforeEach(async () => {
-  for (const table of ['live_activities', 'devices', 'daemons', 'accounts']) {
+  for (const table of ['install_cards', 'live_activities', 'devices', 'daemons', 'accounts']) {
     await env.DB.prepare(`DELETE FROM ${table}`).run()
   }
   vi.restoreAllMocks()
@@ -730,21 +730,28 @@ describe('/v1/devices/activity', () => {
     )
     expect(response.status).toBe(200)
 
-    const row = await env.DB.prepare(`SELECT * FROM live_activities`).first<any>()
-    expect(row?.terminal).toBe('term-1')
+    const row = await env.DB.prepare(`SELECT * FROM install_cards`).first<any>()
     expect(row?.update_token).toBe('update-token')
     expect(row?.environment).toBe('development')
+    // Nothing is remembered about which agent this card is about, because the
+    // app is not the side that knows: the leader is whatever the relay last
+    // pushed, and a token filed for a card the relay holds no history of leaves
+    // it NULL for the next push to adopt.
+    expect(row?.leader_terminal).toBe(null)
+    expect(row?.leader_status).toBe(null)
   })
 
-  it('replaces the token when the same terminal starts another activity', async () => {
+  it('replaces the token when the install starts another activity', async () => {
     // APNs issues a fresh update token per activity and the old one is dead, so
-    // a second row would be a card nobody can reach.
+    // a second row would be a card nobody can reach. There is one card per
+    // install now, so the terminals below are two agents on one card rather than
+    // two cards — and either way this is the same one row.
     watchFetch()
     const session = await sessionFor('user_1')
     await post('/v1/devices/activity', { terminal: 'term-1', updateToken: 'first' }, session)
-    await post('/v1/devices/activity', { terminal: 'term-1', updateToken: 'second' }, session)
+    await post('/v1/devices/activity', { terminal: 'term-2', updateToken: 'second' }, session)
 
-    const rows = await env.DB.prepare(`SELECT update_token FROM live_activities`).all<any>()
+    const rows = await env.DB.prepare(`SELECT update_token FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(1)
     expect(rows.results?.[0].update_token).toBe('second')
   })
@@ -755,17 +762,26 @@ describe('/v1/devices/activity', () => {
     await post('/v1/devices/activity', { terminal: 'term-1', updateToken: 'update' }, session)
     await post('/v1/devices/activity', { terminal: 'term-1', updateToken: null }, session)
 
-    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(0)
   })
 
-  it('needs to know which terminal', async () => {
-    // The row is keyed on it. Without one, every agent on the account collapses
-    // into a single card that disagrees with all of them.
+  it('no longer needs to be told which terminal', async () => {
+    // The row was keyed on it and is keyed on the install now, so the field this
+    // route once 400'd for is one it has nothing to do with. Accepted and
+    // ignored rather than refused, because an app talking to a relay that
+    // predates the rekey still has to send it and this relay still has to take
+    // it from an app that does — ignoring a field is the only compatible way to
+    // retire one.
     watchFetch()
-    expect(
-      (await post('/v1/devices/activity', { updateToken: 'u' }, await sessionFor('user_1'))).status,
-    ).toBe(400)
+    const response = await post(
+      '/v1/devices/activity',
+      { updateToken: 'u' },
+      await sessionFor('user_1'),
+    )
+    expect(response.status).toBe(200)
+    const row = await env.DB.prepare(`SELECT update_token FROM install_cards`).first<any>()
+    expect(row?.update_token).toBe('u')
   })
 
   it('refuses an environment it does not know', async () => {
@@ -853,17 +869,23 @@ describe('/v1/notify and Live Activities', () => {
     // in the fifty-seven thousands.
     expect(aps.timestamp).toBeLessThan(2_000_000_000)
     expect(aps.timestamp).toBeGreaterThan(1_600_000_000)
+    // The whole card, leader and all. Everything that used to be the activity's
+    // IDENTITY is here instead, because the card is per install now and the
+    // agent it leads with changes over its life — attributes are fixed for an
+    // activity's whole life and APNs rejects a push that repeats them.
     expect(aps['content-state']).toEqual({
+      terminal: 'term-1',
+      label: 'refactor-auth',
+      machine: 'Studio',
       status: 'blocked',
       detail: 'Waiting for your answer',
     })
     // A fixed contract with the app: this string names the Swift type.
     expect(aps['attributes-type']).toBe('AgentActivityAttributes')
-    expect(aps.attributes).toEqual({
-      terminal: 'term-1',
-      label: 'refactor-auth',
-      machine: 'Studio',
-    })
+    // And all that is left of the attributes: which SHAPE the card was started
+    // in, so an app upgraded while a terminal-scoped card is still in flight can
+    // tell the two apart and end the old one.
+    expect(aps.attributes).toEqual({ version: 2 })
     // Stale after an hour, never dismissed. Nothing reports an update token for
     // a card the relay started while the app was closed, so `done` can arrive
     // to find no row and the card would otherwise claim "Needs You" forever. A
@@ -873,11 +895,16 @@ describe('/v1/notify and Live Activities', () => {
     expect(aps['dismissal-date']).toBeUndefined()
   })
 
-  it('puts the turn clock in the attributes of the card it starts', async () => {
+  it('puts the leader\'s turn clock in the state of the card it starts', async () => {
     // The card counts elapsed time from this and nothing else: iOS renders a
     // date as a native timer, so there is no push per tick and no state to
     // update. Drop it and the timer is simply absent — no error, no failed
     // delivery, nothing in a log to find.
+    //
+    // In the STATE rather than the attributes, which is where it rode when a
+    // card was about one terminal. A card whose leader changes has to change the
+    // clock with it, or the second agent's work counts from the first agent's
+    // start.
     const calls = watchFetch()
     await ready()
     await post(
@@ -894,17 +921,19 @@ describe('/v1/notify and Live Activities', () => {
 
     const [, activity] = pushes(calls)
     expect(activity.body.aps.event).toBe('start')
-    expect(activity.body.aps.attributes).toEqual({
+    expect(activity.body.aps['content-state']).toEqual({
       terminal: 'term-1',
       label: 'claude',
       machine: 'Studio',
+      status: 'blocked',
+      detail: 'Waiting for your answer',
       startedAt: 1_755_000_000_000,
     })
     // A NUMBER, in milliseconds. The app's decoder tells seconds from
     // milliseconds apart by magnitude and reads a string back as nil, which
     // costs the timer without costing the card — the one failure mode that
     // reports itself nowhere.
-    expect(typeof activity.body.aps.attributes.startedAt).toBe('number')
+    expect(typeof activity.body.aps['content-state'].startedAt).toBe('number')
   })
 
   it('sends no clock at all for a machine that named none', async () => {
@@ -916,19 +945,25 @@ describe('/v1/notify and Live Activities', () => {
     await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
 
     const [, activity] = pushes(calls)
-    expect(activity.body.aps.attributes).toEqual({
+    expect(activity.body.aps['content-state']).toEqual({
       terminal: 'term-1',
       label: 'claude needs you',
       machine: 'Studio',
+      status: 'blocked',
+      detail: 'Waiting for your answer',
     })
-    expect('startedAt' in activity.body.aps.attributes).toBe(false)
+    expect('startedAt' in activity.body.aps['content-state']).toBe(false)
   })
 
-  it('never repeats the turn clock on an update or an end', async () => {
+  it('never repeats the attributes on an update or an end', async () => {
     // Attributes are the activity's identity, fixed for its whole life, and
-    // APNs REJECTS a push that repeats them. A `startedAt` leaking onto either
-    // of these does not move a timer — it costs the update entirely, so the
+    // APNs REJECTS a push that repeats them. One leaking onto either of these
+    // does not merely say something twice — it costs the update entirely, so the
     // card freezes on whatever it last said and looks like a dead relay.
+    //
+    // The turn clock rides the STATE now and therefore goes out on every push,
+    // which is the point: a card that changes leader has to be able to change
+    // the clock, and only the state can carry something that changes.
     const calls = watchFetch()
     await ready()
     await running('term-1')
@@ -943,10 +978,7 @@ describe('/v1/notify and Live Activities', () => {
     expect(events.map(([event]) => event)).toEqual(['update', 'update', 'end'])
     for (const [event, attributes, state] of events) {
       expect(attributes).toBeUndefined()
-      // Nor smuggled into the state, which is the app's `ContentState` and
-      // has no such property: an extra key there fails to decode and takes
-      // the whole update down with it.
-      expect(state.startedAt).toBeUndefined()
+      expect((state as any).startedAt).toBe(1_755_000_000_000)
       expect(event).not.toBe('start')
     }
   })
@@ -994,11 +1026,17 @@ describe('/v1/notify and Live Activities', () => {
     expect(activity.body.aps.event).toBe('end')
     // The final state is shown briefly, then a dismissal date clears it —
     // without one the card sits on the lock screen for hours.
-    expect(activity.body.aps['content-state']).toEqual({ status: 'done', detail: 'Tests pass' })
+    expect(activity.body.aps['content-state']).toEqual({
+      terminal: 'term-1',
+      label: 'Done',
+      machine: 'Studio',
+      status: 'done',
+      detail: 'Tests pass',
+    })
     expect(activity.body.aps['dismissal-date']).toBeGreaterThan(1_600_000_000)
     expect(activity.body.aps.attributes).toBeUndefined()
 
-    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(0)
   })
 
@@ -1042,10 +1080,11 @@ describe('/v1/notify and Live Activities', () => {
       .bind('user_2', Date.now())
       .run()
     await env.DB.prepare(
-      `INSERT INTO live_activities (id, account_id, terminal, update_token, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO install_cards
+         (id, account_id, update_token, leader_terminal, leader_status, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-      .bind(crypto.randomUUID(), 'user_2', 'term-1', 'their-update-token', Date.now())
+      .bind(crypto.randomUUID(), 'user_2', 'their-update-token', 'term-1', 'blocked', Date.now())
       .run()
 
     await post('/v1/notify', { title: 'hi', terminal: 'term-1', status: 'blocked' }, 'mine')
@@ -1073,6 +1112,9 @@ describe('/v1/notify and Live Activities', () => {
     expect(sent[0].url).toContain('/device/update-token')
     expect(sent[0].body.aps.event).toBe('update')
     expect(sent[0].body.aps['content-state']).toEqual({
+      terminal: 'term-1',
+      label: 'claude',
+      machine: 'Studio',
       status: 'working',
       detail: '3/7 · Designing test matrix',
     })
@@ -1105,6 +1147,9 @@ describe('/v1/notify and Live Activities', () => {
     expect(activity.headers['apns-push-type']).toBe('liveactivity')
     expect(activity.body.aps.event).toBe('start')
     expect(activity.body.aps['content-state']).toEqual({
+      terminal: 'term-1',
+      label: 'claude',
+      machine: 'Studio',
       status: 'working',
       detail: 'Reading watch.rs',
     })
@@ -1121,9 +1166,10 @@ describe('/v1/notify and Live Activities', () => {
   })
 
   it('gives the card it starts for a working agent its turn clock', async () => {
-    // Attributes are fixed for an activity's life, so this start is the only
-    // push that can carry the timer. A whole-run card without it counts nothing
-    // for as long as it exists.
+    // A whole-run card without it counts nothing for as long as it exists. It
+    // travels in the state rather than the attributes, so it can follow a change
+    // of leader — but a card started without one still shows no elapsed time
+    // until the next push arrives.
     const calls = watchFetch()
     await ready()
     await post(
@@ -1141,15 +1187,18 @@ describe('/v1/notify and Live Activities', () => {
 
     const [activity] = pushes(calls)
     expect(activity.body.aps['attributes-type']).toBe('AgentActivityAttributes')
-    expect(activity.body.aps.attributes).toEqual({
+    expect(activity.body.aps.attributes).toEqual({ version: 2 })
+    expect(activity.body.aps['content-state']).toEqual({
       terminal: 'term-1',
       label: 'claude',
       machine: 'Studio',
+      status: 'working',
+      detail: 'Writing fruit.txt',
       startedAt: 1_755_000_000_000,
     })
     // A NUMBER, in milliseconds. A string reads back as nil in the app and
     // costs the timer without costing the card.
-    expect(typeof activity.body.aps.attributes.startedAt).toBe('number')
+    expect(typeof activity.body.aps['content-state'].startedAt).toBe('number')
   })
 
   it('starts ONE card for a run, however many working pushes arrive', async () => {
@@ -1176,13 +1225,16 @@ describe('/v1/notify and Live Activities', () => {
     expect(sent[0].body.aps.event).toBe('start')
     expect(sent[0].url).toContain('/device/start-token')
 
-    // One row, holding the sentinel: a card is running for this agent and
-    // nothing yet knows where. It is what the UNIQUE (account_id, terminal)
-    // constraint refuses the second start against.
+    // One row, holding the sentinel: a card is running for this install and
+    // nothing yet knows where. It is what the UNIQUE (account_id) constraint
+    // refuses the second start against, and it remembers which agent the card is
+    // leading with so the next push can tell whether it outranks that one.
     const rows = await env.DB.prepare(
-      `SELECT terminal, update_token FROM live_activities`,
+      `SELECT leader_terminal, leader_status, update_token FROM install_cards`,
     ).all<any>()
-    expect(rows.results).toEqual([{ terminal: 'term-1', update_token: '' }])
+    expect(rows.results).toEqual([
+      { leader_terminal: 'term-1', leader_status: 'working', update_token: '' },
+    ])
   })
 
   it('updates the card it started blind once the app reports its token', async () => {
@@ -1206,6 +1258,9 @@ describe('/v1/notify and Live Activities', () => {
     expect(update.url).toContain('/device/update-token')
     expect(update.body.aps.event).toBe('update')
     expect(update.body.aps['content-state']).toEqual({
+      terminal: 'term-1',
+      label: 'claude',
+      machine: 'Studio',
       status: 'working',
       detail: 'Running tests',
     })
@@ -1248,7 +1303,7 @@ describe('/v1/notify and Live Activities', () => {
     const activities = pushes(calls).filter(call => call.body.aps?.event)
     expect(activities.map(call => call.body.aps.event)).toEqual(['start'])
 
-    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(0)
 
     // And the next run gets its card, because the row it would have collided
@@ -1291,6 +1346,9 @@ describe('/v1/notify and Live Activities', () => {
     const starts = pushes(calls).filter(call => call.body.aps?.event === 'start')
     expect(starts.length).toBe(2)
     expect(starts[1].body.aps['content-state']).toEqual({
+      terminal: 'term-1',
+      label: 'claude needs you',
+      machine: 'Studio',
       status: 'blocked',
       detail: 'Create haiku.txt?',
     })
@@ -1299,10 +1357,13 @@ describe('/v1/notify and Live Activities', () => {
       title: 'claude needs you',
       body: 'Create haiku.txt?',
     })
-    // The row remembers the tier it is now showing, which is what keeps this to
-    // one replacement.
-    const row = await env.DB.prepare(`SELECT blind_status FROM live_activities`).first<any>()
-    expect(row?.blind_status).toBe('blocked')
+    // The row remembers the leader it is now showing, which is what keeps this
+    // to one replacement.
+    const row = await env.DB.prepare(
+      `SELECT leader_terminal, leader_status FROM install_cards`,
+    ).first<any>()
+    expect(row?.leader_terminal).toBe('term-1')
+    expect(row?.leader_status).toBe('blocked')
   })
 
   it('replaces it once, however many times the agent blocks', async () => {
@@ -1339,7 +1400,7 @@ describe('/v1/notify and Live Activities', () => {
 
     expect(pushes(calls).filter(call => call.body.aps?.event).length).toBe(0)
     // The row outlives the card on purpose: it is the refusal being remembered.
-    const row = await env.DB.prepare(`SELECT update_token, dismissed_at FROM live_activities`)
+    const row = await env.DB.prepare(`SELECT update_token, dismissed_at FROM install_cards`)
       .first<any>()
     expect(row?.update_token).toBe('')
     expect(row?.dismissed_at).toBeGreaterThan(0)
@@ -1379,7 +1440,7 @@ describe('/v1/notify and Live Activities', () => {
       { terminal: 'term-1', updateToken: null, dismissed: true },
       await sessionFor('user_1'),
     )
-    await env.DB.prepare(`UPDATE live_activities SET dismissed_at = ?`)
+    await env.DB.prepare(`UPDATE install_cards SET dismissed_at = ?`)
       .bind(Date.now() - 2 * 60 * 60 * 1000)
       .run()
     await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
@@ -1400,7 +1461,7 @@ describe('/v1/notify and Live Activities', () => {
       await sessionFor('user_1'),
     )
 
-    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(0)
   })
 
@@ -1408,29 +1469,243 @@ describe('/v1/notify and Live Activities', () => {
     // A real update token means there is a card, it is up, and it can be moved
     // in place. Anything the relay remembered about not being able to reach one
     // is answered by that.
+    //
+    // The LEADER survives, and that is the half that changed. `blind_status` was
+    // cleared here because it only ever meant "what the card the relay cannot
+    // reach is showing"; `leader_status` means what the card is showing whether
+    // or not it can be reached, and clearing it would make every card forget its
+    // leader the moment the app came to the foreground.
     watchFetch()
     const session = await sessionFor('user_1')
     await ready()
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
     await running('term-1')
     await post('/v1/devices/activity', { terminal: 'term-1', updateToken: null, dismissed: true }, session)
     await running('term-1', 'fresh-token')
 
     const row = await env.DB.prepare(
-      `SELECT update_token, blind_status, dismissed_at FROM live_activities`,
+      `SELECT update_token, leader_terminal, leader_status, dismissed_at FROM install_cards`,
     ).first<any>()
     expect(row?.update_token).toBe('fresh-token')
-    expect(row?.blind_status).toBe(null)
+    expect(row?.leader_terminal).toBe('term-1')
+    expect(row?.leader_status).toBe('working')
     expect(row?.dismissed_at).toBe(null)
   })
 
   it('leaves activities alone when the daemon names no terminal', async () => {
-    // A row keyed on an empty terminal is every agent on the account sharing
-    // one card. Better no activity than one that lies about all of them.
+    // A card leads with one terminal and puts it in the URL a tap opens, and a
+    // leader under the empty string is a card that cannot say which agent it is
+    // about and cannot be retired by the runner that knows. Better no card at
+    // all.
     const calls = watchFetch()
     await ready()
     await post('/v1/notify', { title: 'hi', status: 'blocked' }, 'mine')
 
     expect(pushes(calls).length).toBe(1)
+  })
+
+  // MARK: - One card, several agents
+
+  /// What one card per install actually costs and buys, agent by agent.
+  ///
+  /// Everything above this point tests one terminal, which is the case that was
+  /// already right. The rules below are the ones the rekey added, and every one
+  /// of them exists because the relay now has to CHOOSE on every push: it holds
+  /// one row, four agents push into it, and nothing in this worker survives
+  /// between requests except those two columns.
+  describe('with several agents on one card', () => {
+    it('keeps one card however many agents start working', async () => {
+      // The failure this whole change exists to remove. Four agents used to mean
+      // four cards stacked on the lock screen, and a Dynamic Island that can
+      // present exactly one picking between them with no rule anybody wrote.
+      const calls = watchFetch()
+      await ready()
+      for (const terminal of ['term-1', 'term-2', 'term-3', 'term-4']) {
+        await post('/v1/notify', { title: 'claude', terminal, status: 'working' }, 'mine')
+      }
+
+      const starts = pushes(calls).filter(call => call.body.aps?.event === 'start')
+      expect(starts.length).toBe(1)
+      expect(starts[0].body.aps['content-state'].terminal).toBe('term-1')
+
+      const rows = await env.DB.prepare(`SELECT leader_terminal FROM install_cards`).all<any>()
+      expect(rows.results).toEqual([{ leader_terminal: 'term-1' }])
+    })
+
+    it('says nothing at all for a working agent that is not the leader', async () => {
+      // Four busy agents push every ten seconds. Letting each take the card
+      // would flip it between them six times a minute — unreadable, and four
+      // times the Live Activity budget spent to produce it. The budget matters:
+      // it is the same one the blocked alert depends on.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+      const before = pushes(calls).length
+      await post('/v1/notify', { title: 'codex', terminal: 'term-2', status: 'working' }, 'mine')
+
+      expect(pushes(calls).length).toBe(before)
+      const row = await env.DB.prepare(`SELECT leader_terminal FROM install_cards`).first<any>()
+      expect(row?.leader_terminal).toBe('term-1')
+    })
+
+    it('hands the card to an agent that blocks while the leader merely works', async () => {
+      // Blocked outranks working, always. An agent waiting on a person is the
+      // one thing the lock screen exists to show, and a busy agent must never
+      // hold the card against it.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+      await post(
+        '/v1/notify',
+        { title: 'codex needs you', subtitle: 'Run cargo test?', terminal: 'term-2', status: 'blocked', label: 'codex' },
+        'mine',
+      )
+
+      const updates = pushes(calls).filter(call => call.body.aps?.event === 'update')
+      expect(updates[updates.length - 1].body.aps['content-state']).toEqual({
+        terminal: 'term-2',
+        label: 'codex',
+        machine: 'Studio',
+        status: 'blocked',
+        detail: 'Run cargo test?',
+      })
+      const row = await env.DB.prepare(
+        `SELECT leader_terminal, leader_status FROM install_cards`,
+      ).first<any>()
+      expect(row?.leader_terminal).toBe('term-2')
+      expect(row?.leader_status).toBe('blocked')
+    })
+
+    it('never lets a working agent take the card back from a blocked one', async () => {
+      // The refusal that matters most. The card reads "Needs You" and an agent
+      // three panes over picks up work; moving the card would replace the one
+      // notification this product exists to deliver with a progress line.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
+      const before = pushes(calls).length
+      await post('/v1/notify', { title: 'codex', terminal: 'term-2', status: 'working' }, 'mine')
+
+      expect(pushes(calls).length).toBe(before)
+      const row = await env.DB.prepare(`SELECT leader_terminal FROM install_cards`).first<any>()
+      expect(row?.leader_terminal).toBe('term-1')
+    })
+
+    it('keeps the card with whichever agent blocked first', async () => {
+      // The one that has been waiting longest keeps it. Swapping the leader on
+      // each new question would rewrite the card out from under somebody in the
+      // middle of reading it — and the second agent's ALERT still fires, because
+      // that is a separate push decided before the card is touched at all.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
+      await post('/v1/notify', { title: 'codex needs you', terminal: 'term-2', status: 'blocked' }, 'mine')
+
+      const alerts = pushes(calls).filter(call => call.headers['apns-push-type'] === 'alert')
+      expect(alerts.length).toBe(2)
+      const row = await env.DB.prepare(`SELECT leader_terminal FROM install_cards`).first<any>()
+      expect(row?.leader_terminal).toBe('term-1')
+    })
+
+    it('lets the leader answer its own question and go back to working', async () => {
+      // A card's own agent always lands, whatever the tier — which is how a
+      // blocked leader stops being one. Without that the first question of a run
+      // would pin the card for the rest of it.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
+      await post(
+        '/v1/notify',
+        { title: 'claude', subtitle: 'Running tests', terminal: 'term-1', status: 'working' },
+        'mine',
+      )
+
+      const updates = pushes(calls).filter(call => call.body.aps?.event === 'update')
+      expect(updates[updates.length - 1].body.aps['content-state'].status).toBe('working')
+      const row = await env.DB.prepare(`SELECT leader_status FROM install_cards`).first<any>()
+      expect(row?.leader_status).toBe('working')
+    })
+
+    it('does not end the card when an agent it is not about finishes', async () => {
+      // With a card per terminal every `done` ended its own card. With one card
+      // it would end SOMEBODY ELSE'S — clearing the lock screen of a running
+      // agent because a different one stopped. The alert for that agent still
+      // goes out; only the card is left alone.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
+      await post('/v1/notify', { title: 'codex finished', terminal: 'term-2', status: 'done' }, 'mine')
+
+      const ends = pushes(calls).filter(call => call.body.aps?.event === 'end')
+      expect(ends.length).toBe(0)
+      const alerts = pushes(calls).filter(call => call.headers['apns-push-type'] === 'alert')
+      expect(alerts.length).toBe(2)
+      const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
+      expect(rows.results?.length).toBe(1)
+    })
+
+    it('ends the card when its own leader finishes, and gives the next one a card', async () => {
+      // The cost of one card, taken deliberately. The leader finishing ends the
+      // card while other agents are still running, and the next `working` push
+      // starts a fresh one within a tick — which the daemon sends about every
+      // ten seconds. For up to `DISMISSAL_DELAY_S` the finished card is still up
+      // beside it, and that minute is what the finished state is FOR: somebody
+      // who picks the phone up because of the alert has a last word to read.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+      await post('/v1/notify', { title: 'claude finished', terminal: 'term-1', status: 'done' }, 'mine')
+
+      const ends = pushes(calls).filter(call => call.body.aps?.event === 'end')
+      expect(ends.length).toBe(1)
+      expect(ends[0].body.aps['dismissal-date']).toBeGreaterThan(ends[0].body.aps.timestamp)
+      expect((await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()).results?.length).toBe(0)
+
+      await post('/v1/notify', { title: 'codex', terminal: 'term-2', status: 'working' }, 'mine')
+      const starts = pushes(calls).filter(call => call.body.aps?.event === 'start')
+      expect(starts.length).toBe(1)
+      expect(starts[0].body.aps['content-state'].terminal).toBe('term-2')
+    })
+
+    it('fits a maximal card inside the size ActivityKit will accept', async () => {
+      // ActivityKit caps a content state at 4KB encoded and APNs refuses a push
+      // past it — which from every side looks like a relay that sent nothing.
+      // The state grew from two fields to six with the leader, so this is
+      // MEASURED rather than reasoned about.
+      //
+      // Deliberately larger than anything a runner can produce: `detail` is cut
+      // on the host at `farcooler_core::feed::SAID_WIDTH`, a hundred and twenty
+      // characters, and the label and runner name are a preset and a hostname.
+      // Multi-byte throughout, because the cap is bytes and these fields carry
+      // whatever an agent said.
+      const calls = watchFetch()
+      await ready()
+      await post(
+        '/v1/notify',
+        {
+          title: '✳'.repeat(300),
+          subtitle: '✳'.repeat(600),
+          terminal: crypto.randomUUID(),
+          status: 'blocked',
+          label: '✳'.repeat(300),
+          startedAt: 1_755_000_000_000,
+        },
+        'mine',
+      )
+
+      const [, activity] = pushes(calls)
+      const encoded = new TextEncoder().encode(
+        JSON.stringify(activity.body.aps['content-state']),
+      ).length
+      expect(encoded).toBeLessThan(4096)
+    })
   })
 })
 
@@ -1452,13 +1727,25 @@ describe('/v1/notify/retire', () => {
     await pair('user_1', 'mine')
   }
 
-  /// A card that is up and addressable, the way the app reports one.
+  /// A card that is up, addressable, and known to be leading with `terminal`.
+  ///
+  /// Both halves are needed and only the relay can supply the first: the app
+  /// files an update token and knows nothing about which agent the card is
+  /// about, so a card whose leader has never been pushed is one no terminal in a
+  /// sweep can be shown to be about. That is written straight into the row here
+  /// rather than through a `working` notify, so the pushes a test counts are
+  /// only the ones the retirement itself produced.
   async function running(terminal: string, token = 'update-token') {
-    await post(
-      '/v1/devices/activity',
-      { terminal, updateToken: token },
-      await sessionFor('user_1'),
+    await env.DB.prepare(
+      `INSERT INTO install_cards
+         (id, account_id, update_token, leader_terminal, leader_status, updated_at)
+       VALUES (?, ?, ?, ?, 'blocked', ?)
+       ON CONFLICT (account_id) DO UPDATE SET update_token = excluded.update_token,
+                                              leader_terminal = excluded.leader_terminal,
+                                              updated_at = excluded.updated_at`,
     )
+      .bind(crypto.randomUUID(), 'user_1', token, terminal, Date.now())
+      .run()
   }
 
   it('ends the card and forgets the row', async () => {
@@ -1478,8 +1765,18 @@ describe('/v1/notify/retire', () => {
     // every second the card stays is a second of the lock screen stating
     // something that stopped being true.
     expect(activity.body.aps['dismissal-date']).toBe(activity.body.aps.timestamp)
+    // Nothing left to name. The card is gone before anything on it could be
+    // read, and a leader here would be a sentence about a run the runner has
+    // just said it cannot account for.
+    expect(activity.body.aps['content-state']).toEqual({
+      terminal: '',
+      label: '',
+      machine: '',
+      status: 'done',
+      detail: '',
+    })
 
-    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(0)
   })
 
@@ -1511,7 +1808,7 @@ describe('/v1/notify/retire', () => {
     await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
 
     expect(pushes(calls).map(call => call.body.aps?.event)).toEqual(['start'])
-    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(0)
 
     // Which is the point of deleting it: the row is what a second start would
@@ -1521,22 +1818,46 @@ describe('/v1/notify/retire', () => {
     expect(pushes(calls).filter(call => call.body.aps?.event === 'start').length).toBe(2)
   })
 
-  it('leaves the cards it was not asked about alone', async () => {
+  it('leaves a card leading with an agent it was not asked about alone', async () => {
     // A runner names the terminals it cannot account for, and an agent that is
     // still working — or still blocked, which is the case that matters — is not
-    // among them. Its card is left exactly as it is: not ended, and not
-    // re-raised either, which would alert twice for one question.
+    // among them. This is where one card per install changes the answer without
+    // changing the rule: the sweep names `term-1`, the card is about `term-2`,
+    // and ending it would clear the lock screen of a running agent because a
+    // different one stopped. Not ended, and not re-raised either, which would
+    // alert twice for one question.
     const calls = watchFetch()
     await ready()
-    await running('term-1', 'first-token')
     await running('term-2', 'second-token')
 
-    await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+    const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+    expect(await response.json()).toEqual({ retired: 0 })
 
-    expect(pushes(calls).length).toBe(1)
-    expect(pushes(calls)[0].url).toContain('/device/first-token')
-    const rows = await env.DB.prepare(`SELECT terminal FROM live_activities`).all<any>()
-    expect(rows.results?.map((row: any) => row.terminal)).toEqual(['term-2'])
+    expect(pushes(calls).length).toBe(0)
+    const row = await env.DB.prepare(`SELECT leader_terminal FROM install_cards`).first<any>()
+    expect(row?.leader_terminal).toBe('term-2')
+  })
+
+  it('retires nothing for a card whose leader it has never been told', async () => {
+    // The app filed an update token for a card this relay holds no history of —
+    // an `end` that raced the report, a card left over from an older build. There
+    // IS a card and nothing is known about what it says, so no terminal in a
+    // sweep can be shown to be what it is about. Left alone, the next push adopts
+    // it; ended here, a runner sweeping an unrelated pane takes down a card it
+    // cannot see.
+    const calls = watchFetch()
+    await ready()
+    await post(
+      '/v1/devices/activity',
+      { updateToken: 'orphan-token' },
+      await sessionFor('user_1'),
+    )
+
+    const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+    expect(await response.json()).toEqual({ retired: 0 })
+    expect(pushes(calls).length).toBe(0)
+    const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
+    expect(rows.results?.length).toBe(1)
   })
 
   it('will not end an activity belonging to another account', async () => {
@@ -1551,16 +1872,17 @@ describe('/v1/notify/retire', () => {
       .bind('user_2', Date.now())
       .run()
     await env.DB.prepare(
-      `INSERT INTO live_activities (id, account_id, terminal, update_token, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO install_cards
+         (id, account_id, update_token, leader_terminal, leader_status, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-      .bind(crypto.randomUUID(), 'user_2', 'term-1', 'their-update-token', Date.now())
+      .bind(crypto.randomUUID(), 'user_2', 'their-update-token', 'term-1', 'blocked', Date.now())
       .run()
 
     const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
     expect(await response.json()).toEqual({ retired: 0 })
     expect(calls.every(call => !call.url.includes('their-update-token'))).toBe(true)
-    const rows = await env.DB.prepare(`SELECT id FROM live_activities`).all<any>()
+    const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(1)
   })
 
@@ -1598,10 +1920,10 @@ describe('/v1/notify/retire', () => {
 
   it('takes only as many terminals as one request may name', async () => {
     // `RETIRE_LIMIT`. The largest honest sweep is one id per pane on the
-    // machine, and the bound is what stops this loop becoming a way to make the
-    // worker spend a minute in D1 on one caller's behalf. A real runner never
-    // trips it: it sends its sweep in requests of that size, so the terminal
-    // past the bound here arrives in the next one rather than being forgotten.
+    // machine, and the bound is what stops this route becoming a way to make the
+    // worker spend a minute reading one caller's body. A real runner never trips
+    // it: it sends its sweep in requests of that size, so the terminal past the
+    // bound here arrives in the next one rather than being forgotten.
     watchFetch()
     await ready()
     await running('term-late')
@@ -1613,8 +1935,8 @@ describe('/v1/notify/retire', () => {
     )
 
     expect(await response.json()).toEqual({ retired: 0 })
-    const rows = await env.DB.prepare(`SELECT terminal FROM live_activities`).all<any>()
-    expect(rows.results?.map((row: any) => row.terminal)).toEqual(['term-late'])
+    const row = await env.DB.prepare(`SELECT leader_terminal FROM install_cards`).first<any>()
+    expect(row?.leader_terminal).toBe('term-late')
   })
 })
 
