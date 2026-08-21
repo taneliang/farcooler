@@ -1740,7 +1740,17 @@ impl Rpc {
         // The compact ladder, computed from everything just set above — see
         // `wire::apply_rungs` for why it has to run last, and why the signal
         // line is handed to it rather than read off the message.
-        wire::apply_rungs(&mut message, self.watcher.signal(view.terminal.id).await.as_deref());
+        // The line and the counts behind its task-list rung go in together, so
+        // a list reply cannot state a position in prose and a different one in
+        // numbers. Two reads of the watcher's state, a moment apart, is the
+        // most this path can do — the alternative is a lock held across the
+        // whole conversion — and handing both to one function is what keeps
+        // the pair from also being set in two places. See `wire::apply_rungs`.
+        wire::apply_rungs(
+            &mut message,
+            self.watcher.signal(view.terminal.id).await.as_deref(),
+            self.watcher.plan(view.terminal.id).await,
+        );
         message
     }
 }

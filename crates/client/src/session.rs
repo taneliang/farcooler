@@ -331,6 +331,19 @@ impl Session {
                             "headline": t.headline.clone(),
                             "line": t.line.clone(),
                             "rank": t.rank,
+                            // How far the agent is through its OWN task list,
+                            // as the two numbers `line` may have composed into
+                            // `3/7`. Carried separately because the phone must
+                            // not read them back out of that string: `line` is
+                            // a rung, so a blocked agent's is the question and
+                            // holds no numbers at all, and scraping it would be
+                            // a second derivation of a fact the host derives
+                            // once. Absent — not zero — when the host has
+                            // nothing to say, which is a pane with no list and
+                            // every codex and cursor pane; see the fields'
+                            // comments in `proto/farcooler.proto`.
+                            "planDone": t.plan_done,
+                            "planTotal": t.plan_total,
                             // How the last turn ended, which `activity` cannot
                             // say: a turn that died reads as `done` there. The
                             // rungs above already carry it, and this is what

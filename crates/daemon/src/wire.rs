@@ -248,6 +248,14 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         headline: String::new(),
         line: String::new(),
         rank: 0,
+        // The counts behind rung 2 of that ladder, folded out of the same
+        // session log and therefore the watcher's for the same reason `feed`
+        // is. `None` and not `Some(0)`: absent is "this converter has nothing
+        // to say about a task list", and zero is "the agent wrote a list and
+        // has finished none of it" — a client draws those two differently, and
+        // `apply_rungs` is what fills them in when the watcher has an answer.
+        plan_done: None,
+        plan_total: None,
         // The watcher's as well, and for the strongest version of the reason:
         // it is read out of the agent's own session log, which only the
         // sampling loop holds a file offset into. `false` here is "nothing has
@@ -303,12 +311,34 @@ pub fn terminal_with_agent_state(view: &TerminalView, agents: &AgentSupervisor) 
 /// every field this file's history is a list of went missing exactly that way.
 /// Both callers hold the watcher, so both can supply it; a caller with no
 /// watcher passes `None` and gets the ladder a pane with no session log has.
-pub fn apply_rungs(message: &mut wire::Terminal, signal: Option<&str>) {
+///
+/// `plan` arrives beside it for the sharper version of that same reason. It is
+/// `(done, total)` — the position `signal` may have composed into `3/7` — and
+/// it is set HERE, in the one function that finishes a `Terminal`, rather than
+/// at each call site. The string and the numbers are two statements of one
+/// fact and they have to be made from one derivation: a caller that computed
+/// the line off one read of `Signals` and the counts off a later one would put
+/// `3/7` on the row and `4` on the bar beside it, which is precisely the
+/// disagreement this whole module is arranged around. Taking both together
+/// also means a third caller cannot supply one and forget the other.
+///
+/// `None` whenever the agent has no task list to report, and `total` is never
+/// `Some(0)` — see the fields' own comments in `farcooler.proto`, and
+/// `Signals::plan`, which is the only thing that builds one.
+///
+/// The counts are NOT gated on which rung `line` ended up showing. A blocked
+/// agent's line is the question, because that is the string worth the row —
+/// but the agent is still four tasks into seven, and that stays true while it
+/// waits. Withholding the numbers because the line spent itself on something
+/// else would make a bar vanish at the moment somebody looked at the row.
+pub fn apply_rungs(message: &mut wire::Terminal, signal: Option<&str>, plan: Option<(u32, u32)>) {
     let subject = rung_subject(message, crate::review::now_millis(), signal);
     message.glyph = farcooler_core::feed::glyph(&subject).to_string();
     message.headline = farcooler_core::feed::headline(&subject);
     message.line = farcooler_core::feed::line(&subject);
     message.rank = farcooler_core::feed::rank(&subject);
+    message.plan_done = plan.map(|(done, _)| done);
+    message.plan_total = plan.map(|(_, total)| total);
 }
 
 /// `message`'s Unix-millisecond timestamp fields, as milliseconds.
@@ -628,10 +658,17 @@ mod tests {
         // A signal line is passed, and outranked. The question wins outright
         // for a blocked pane, which is the one priority in the whole ladder
         // that must never be negotiable.
-        apply_rungs(&mut message, Some("3/7 · Designing test matrix"));
+        apply_rungs(&mut message, Some("3/7 · Designing test matrix"), Some((3, 7)));
         assert_eq!(message.glyph, "?");
         assert_eq!(message.headline, "codex needs you");
         assert_eq!(message.line, "Run: cargo test?");
+        // And the counts SURVIVE being outranked. The line spent itself on the
+        // question, which is right, and the agent is still three tasks into
+        // seven while it waits — so a bar drawn beside the question is drawn
+        // from these rather than from a string that no longer contains them.
+        // This is the case a client scraping `line` would get wrong.
+        assert_eq!(message.plan_done, Some(3));
+        assert_eq!(message.plan_total, Some(7));
     }
 
     #[test]
@@ -649,10 +686,52 @@ mod tests {
             subagents: vec!["Auditing the redaction rules".into()],
             ..Default::default()
         };
-        apply_rungs(&mut message, Some("3/7 · Designing test matrix · 2 agents"));
+        apply_rungs(&mut message, Some("3/7 · Designing test matrix · 2 agents"), Some((3, 7)));
         assert_eq!(message.glyph, "●");
         assert_eq!(message.headline, "overnight-fix 4m");
         assert_eq!(message.line, "3/7 · Designing test matrix · 2 agents");
+        // The same position the line opens with, as numbers. Asserted against
+        // the string in the same test on purpose: these two are one fact said
+        // twice, and the moment they can be written apart is the moment they
+        // can disagree.
+        assert_eq!(message.plan_done, Some(3));
+        assert_eq!(message.plan_total, Some(7));
+    }
+
+    #[test]
+    fn an_agent_with_no_task_list_gets_no_counts_rather_than_zero() {
+        // The distinction the whole optional-ness is for. This agent is working
+        // and has an action line and no list at all, which is codex, cursor and
+        // most claude sessions — `0/0` would be a bar on every one of them.
+        let mut message = wire::Terminal {
+            activity: wire::AgentActivity::Working as i32,
+            activity_changed_at: ago(20),
+            turn_started_at: ago(20),
+            current_command: "codex".to_string(),
+            ..Default::default()
+        };
+        apply_rungs(&mut message, Some("Writing fruit.txt"), None);
+        assert_eq!(message.line, "Writing fruit.txt");
+        assert_eq!(message.plan_done, None);
+        assert_eq!(message.plan_total, None);
+    }
+
+    #[test]
+    fn a_list_with_nothing_finished_sends_zero_done_and_a_real_total() {
+        // The other half of that distinction, and the reason absent cannot be
+        // spelled `0`. An agent that has written seven tasks and finished none
+        // has a bar — an empty one — and a client must be able to tell it from
+        // an agent that never wrote a list.
+        let mut message = wire::Terminal {
+            activity: wire::AgentActivity::Working as i32,
+            activity_changed_at: ago(20),
+            turn_started_at: ago(20),
+            current_command: "claude".to_string(),
+            ..Default::default()
+        };
+        apply_rungs(&mut message, Some("0/7 · Designing test matrix"), Some((0, 7)));
+        assert_eq!(message.plan_done, Some(0));
+        assert_eq!(message.plan_total, Some(7));
     }
 
     #[test]
@@ -664,7 +743,7 @@ mod tests {
             feed: vec!["Done. `fruit.txt` now contains `banana`.".into()],
             ..Default::default()
         };
-        apply_rungs(&mut message, Some("Writing fruit.txt"));
+        apply_rungs(&mut message, Some("Writing fruit.txt"), None);
         assert_eq!(message.glyph, "✓");
         assert_eq!(message.headline, "cursor done");
         assert_eq!(message.line, "Writing fruit.txt");
@@ -687,7 +766,7 @@ mod tests {
                 turn_failed,
                 ..Default::default()
             };
-            apply_rungs(&mut message, Some("Running cargo test"));
+            apply_rungs(&mut message, Some("Running cargo test"), None);
             message
         };
 
@@ -720,7 +799,7 @@ mod tests {
                 turn_failed: true,
                 ..Default::default()
             };
-            apply_rungs(&mut message, None);
+            apply_rungs(&mut message, None, None);
             assert_ne!(message.glyph, "✗", "{activity:?} was repainted as a failure");
             assert!(!message.headline.contains("failed"), "{}", message.headline);
         }
@@ -737,7 +816,7 @@ mod tests {
             exit_status: Some(wire::ExitStatus { code: Some(101), signal: None }),
             ..Default::default()
         };
-        apply_rungs(&mut message, None);
+        apply_rungs(&mut message, None, None);
         assert_eq!(message.glyph, "✗");
         assert_eq!(message.headline, "cargo test failed");
         assert_eq!(message.line, "cargo test · exit 101 · 2m 12s");
@@ -753,8 +832,8 @@ mod tests {
             wire::Terminal { activity: wire::AgentActivity::Blocked as i32, activity_changed_at: ago(1), ..Default::default() };
         let mut done =
             wire::Terminal { activity: wire::AgentActivity::Done as i32, activity_changed_at: ago(1), ..Default::default() };
-        apply_rungs(&mut blocked, None);
-        apply_rungs(&mut done, None);
+        apply_rungs(&mut blocked, None, None);
+        apply_rungs(&mut done, None, None);
         assert!(blocked.rank < done.rank, "blocked ({}) must outrank done ({})", blocked.rank, done.rank);
     }
 
@@ -769,7 +848,7 @@ mod tests {
             current_command: "zsh".to_string(),
             ..Default::default()
         };
-        apply_rungs(&mut message, None);
+        apply_rungs(&mut message, None, None);
         assert_eq!(message.glyph, "●", "still running, so still the in-progress glyph");
         assert_eq!(message.headline, "zsh running");
     }

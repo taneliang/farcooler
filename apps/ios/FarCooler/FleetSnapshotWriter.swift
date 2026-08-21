@@ -129,6 +129,16 @@ enum FleetSnapshotWriter {
             // it every agent's age is the snapshot's own `capturedAt`, which
             // `merging` moves to now. Nil from a daemon too old to send it, and
             // nil then falls back to `capturedAt` exactly as before.
-            activityChangedAt: terminal.activityChangedAt)
+            activityChangedAt: terminal.activityChangedAt,
+            // How far the agent is through its own task list, straight across
+            // and unchanged. Not defaulted the way `feed` and `turnFailed`
+            // above are, and the difference is the point: an empty feed and a
+            // turn nobody called failed are honest substitutes for silence,
+            // whereas `0` of `0` would be a progress claim no host made. A
+            // daemon too old to send these — or a codex or cursor pane, whose
+            // logs record nothing task-shaped — leaves both nil, and every
+            // surface downstream draws nothing rather than an empty bar.
+            planDone: terminal.planDone,
+            planTotal: terminal.planTotal)
     }
 }

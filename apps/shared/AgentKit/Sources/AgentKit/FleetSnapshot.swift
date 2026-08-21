@@ -40,11 +40,58 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         /// When this state began, when the host said. Nil is "not told", which
         /// is different from "just now" and must not be rendered as it.
         public var activityChangedAt: Date?
+        /// How far the agent is through its OWN task list, as the host counted
+        /// it. `planDone` of 4 and `planTotal` of 7 is `4/7`.
+        ///
+        /// Copied across unchanged, like every other field on this type, and
+        /// for the reason at the top of the file made sharper. The host already
+        /// states this position — `line` reads `4/7 · Designing test matrix` —
+        /// but `line` is a COMPOSED rung, and a surface that scraped `4/7` back
+        /// out of it would be a second derivation of a fact the ladder exists
+        /// to derive once. It would also be wrong exactly where it matters: a
+        /// blocked agent's `line` is the question, because that is the string
+        /// worth the row, and the numbers are not in it at all. So they travel
+        /// as numbers. See `plan_done` in `proto/farcooler.proto`.
+        ///
+        /// **Nothing here computes or infers.** No fraction, no denominator, no
+        /// fallback — a surface is handed what the host said or it is handed
+        /// nothing.
+        ///
+        /// **Optional, and nil is not zero.** Swift's synthesized `Decodable`
+        /// throws on a missing key, so a snapshot written before these existed,
+        /// or one written by a phone talking to a daemon too old to send them,
+        /// has to decode and simply not draw a bar — the same rule
+        /// `reviewsWaiting` states below and for the same reason. And the two
+        /// answers are genuinely different: `0` of `7` is an agent that has
+        /// written seven tasks and finished none, which has a bar, an empty
+        /// one; nil is an agent nobody has said anything about, which has no
+        /// bar and no space reserved for one.
+        ///
+        /// **They arrive together or not at all**, and `planTotal` is never
+        /// sent as `0`: `feed::signal` refuses to compose a position out of an
+        /// empty list, so the host never sends one. A reader that wants both
+        /// should still say so in one `guard` rather than trusting that.
+        ///
+        /// **`planTotal` can move in both directions while a turn runs.** An
+        /// agent adds tasks to its own list as it discovers work, so `2/5`
+        /// becoming `2/9` is honest rather than a glitch; and a task the agent
+        /// deletes counts toward neither half, so `3/7` can become `3/6`.
+        /// Anything that animates this must not read a rising denominator as
+        /// progress running backwards.
+        ///
+        /// **Not every agent can say this.** It is folded out of the agent's own
+        /// session log, and only claude's records a task list — see the field
+        /// comments in `proto/farcooler.proto` for the counts. A fleet will
+        /// carry these on some rows and not others, which is the distribution
+        /// `line` already has.
+        public var planDone: UInt32?
+        public var planTotal: UInt32?
 
         public init(
             id: String, label: String, machine: String, status: String,
             glyph: String, headline: String, line: String, feed: [String],
-            rank: UInt32, turnFailed: Bool, activityChangedAt: Date?
+            rank: UInt32, turnFailed: Bool, activityChangedAt: Date?,
+            planDone: UInt32? = nil, planTotal: UInt32? = nil
         ) {
             self.id = id
             self.label = label
@@ -57,6 +104,8 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             self.rank = rank
             self.turnFailed = turnFailed
             self.activityChangedAt = activityChangedAt
+            self.planDone = planDone
+            self.planTotal = planTotal
         }
 
         /// Whether this status stays true as the snapshot ages.

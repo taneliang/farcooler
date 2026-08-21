@@ -2751,6 +2751,14 @@ fn workspace_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_j
         "headline": t.headline,
         "line": t.line,
         "rank": t.rank,
+        // The two numbers behind that ladder's task-list rung. Projected here
+        // for the reason the rungs are, and with one addition of its own: the
+        // Mac app decodes THIS, and `line` already reads `3/7` — so without
+        // these the only way to draw a bar would be to parse the rung back
+        // apart, which is the one thing the host composing it is meant to make
+        // unnecessary. Absent, never zero, when there is no list.
+        "planDone": t.plan_done,
+        "planTotal": t.plan_total,
         // How the last turn ENDED, which `activity` alone cannot say: a turn
         // that died and one that succeeded are both `done` there. Rendered by
         // the app rather than only by the ladder, because this is the app that
@@ -2836,6 +2844,13 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         "headline": t.headline,
         "line": t.line,
         "rank": t.rank,
+        // Watched for the same reason the ladder is, and off the same event:
+        // a task moving is a line arriving in the session log, which is what
+        // makes this tick worth announcing at all. A bar that only advanced on
+        // a full refresh would sit still through the whole of a long turn —
+        // the one stretch a progress indicator exists for.
+        "planDone": t.plan_done,
+        "planTotal": t.plan_total,
         // Watched for the same reason the ladder is, and it moves on exactly
         // the event the ladder does: the tick a turn ends. A row that learned
         // about the failure only on a full refresh would show a clean `Done`
@@ -3110,6 +3125,11 @@ mod tests {
             headline: "claude needs you".to_string(),
             line: "Overwrite config.toml?".to_string(),
             rank: 1,
+            // A blocked agent still has a position in its list, and `line`
+            // above is the question rather than `3/7` — which is exactly why
+            // these travel as numbers.
+            plan_done: Some(3),
+            plan_total: Some(7),
             turn_failed: true,
             ..Default::default()
         };
@@ -3151,6 +3171,8 @@ mod tests {
             "headline",
             "line",
             "rank",
+            "planDone",
+            "planTotal",
             "turnFailed",
         ] {
             assert!(event.contains(field), "{field} is in neither projection");

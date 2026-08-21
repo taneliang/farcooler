@@ -850,6 +850,50 @@ message Terminal {
   // rather than empty, which a client can tell apart from an agent that said
   // nothing at all.
   optional string said = 32;
+
+  // How far along the agent is in its OWN task list, as two numbers.
+  //
+  // The same position `line` already states as `3/7`, carried as the counts it
+  // was composed from. Not because a client could not read that string --
+  // because it must not. `line` is a COMPOSED rung: the question outranks the
+  // task count, so a blocked agent's `line` is the question and carries no
+  // numbers at all, and an agent with no list carries `Writing fruit.txt`. A
+  // client that scraped `3/7` out of prose would be a second derivation of a
+  // fact this file exists to derive once, and it would be wrong in exactly the
+  // cases that matter most.
+  //
+  // Both or neither, and both are OPTIONAL. Absent means the host has nothing
+  // to say about a task list -- a daemon too old to send these, a pane with no
+  // session log, an agent that never wrote one, or an agent whose format does
+  // not record one at all (see below). Absent is NOT zero: `0/7` is an agent
+  // that has written seven tasks and finished none, which is a real and
+  // different thing from an agent with no list, and a surface that drew a bar
+  // for the second would be inventing a denominator nobody supplied.
+  //
+  // `plan_total` is never sent as 0. `feed::signal` already refuses to compose
+  // a position out of an empty list, and sending `0/0` here would hand every
+  // client a division it has to guard.
+  //
+  // **It can GROW mid-run, and it can shrink.** An agent adds tasks to its own
+  // list as it discovers work, so `2/5` becoming `2/9` is the honest answer and
+  // not a glitch -- a surface that animates this must not read a rising
+  // denominator as progress running backward. It shrinks too: a `deleted` task
+  // counts toward neither half, so an agent that drops a task it decided
+  // against goes from `3/7` to `3/6`. See `Signals::plan` in the daemon.
+  //
+  // **Not every agent can say this**, and that is a property of the agent's own
+  // log rather than of this field. Counted on one machine in August 2026:
+  // claude writes a task list in 563 of 985 session files, and its
+  // `TaskCreate`/`TaskUpdate`/`TodoWrite` lines are what the daemon's fold is
+  // built from. Codex writes `update_plan` in 1 of 350 rollouts, and in that
+  // one it is JavaScript source inside an `exec` call's `input` string rather
+  // than a structured field -- so `session_log::codex` parses none of it and
+  // there is nothing here to send. Cursor writes nothing task-shaped at all.
+  // A client therefore sees these fields on some agents and not others, which
+  // is the same distribution `line` already has: rung 2 for a pane with a list,
+  // rung 3 for a pane without.
+  optional uint32 plan_done = 33;
+  optional uint32 plan_total = 34;
 }
 
 // What a pane is hosting.

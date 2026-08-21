@@ -1517,6 +1517,29 @@ impl Signals {
         Some(farcooler_core::feed::Plan { done, total, active_form })
     }
 
+    /// That same position as the two NUMBERS it is, for the wire.
+    ///
+    /// `line` renders this into `3/7 · Designing test matrix · 2 agents` and
+    /// then it is prose, so every client that wanted the fraction back would
+    /// have to parse a composed string — and get it wrong the moment the agent
+    /// is blocked, because then the line is the question and the numbers are
+    /// not in it at all. The ladder is decided once here precisely so clients
+    /// cannot disagree; a client re-deriving `3/7` out of the string this
+    /// module composed would be a second derivation of one fact.
+    ///
+    /// Off the SAME `plan()` the line is composed from, deliberately. Two
+    /// folds of `self.tasks` would be two answers waiting to differ; one call
+    /// each from `Watcher::signal` and `Watcher::plan` is already two reads of
+    /// the state mutex a tick apart, which is why `wire::apply_rungs` takes the
+    /// string and the numbers together.
+    ///
+    /// The phrase is dropped, and only the phrase. It is already on `line`,
+    /// where it has a row to sit in; these two are for a surface with room for
+    /// a bar and a fraction and nothing else.
+    fn plan_counts(&self) -> Option<(u32, u32)> {
+        self.plan().map(|plan| (plan.done, plan.total))
+    }
+
     /// The agents still running, named — one line each on a surface with room.
     ///
     /// Only `completed` ends one. A third of the spawns on this machine come
@@ -2274,6 +2297,25 @@ impl Watcher {
     /// is applied, because only the rungs know the agent's state.
     pub async fn signal(&self, terminal: Uuid) -> Option<String> {
         self.state.lock().await.get(&terminal).and_then(|o| o.signals.line(o.mid_turn()))
+    }
+
+    /// How far this terminal's agent is through its own task list, as
+    /// `(done, total)`.
+    ///
+    /// `None` for a pane with no session log, for an agent that has not written
+    /// a list, and for an agent whose log format records none — which today is
+    /// codex and cursor; see `Signals::plan_counts` and the fields' comments in
+    /// `farcooler.proto`. All four are the same honest answer: nobody has said,
+    /// so no surface draws a bar.
+    ///
+    /// A separate accessor rather than a second return value on `signal`
+    /// because every fact the two builders of a live `Terminal` ask this type
+    /// for is one accessor — `feed`, `said`, `subagents`, `turn_failed` — and
+    /// one exception would be the one somebody has to remember. What must not
+    /// be separate is where they are SET: `wire::apply_rungs` takes the line
+    /// and these counts in one call for exactly that reason.
+    pub async fn plan(&self, terminal: Uuid) -> Option<(u32, u32)> {
+        self.state.lock().await.get(&terminal).and_then(|o| o.signals.plan_counts())
     }
 
     /// The agents this terminal's agent spawned and has not finished with,
@@ -3148,7 +3190,15 @@ impl Watcher {
             // The compact ladder, computed from everything just set above —
             // see `wire::apply_rungs` for why it has to run last, and why the
             // signal line is handed to it rather than read off the message.
-            wire::apply_rungs(&mut message, observed.signals.line(observed.mid_turn()).as_deref());
+            // The counts behind that line's task-list rung, off the SAME
+            // `Signals` in the same expression — one fold of one `Observed`,
+            // so the `3/7` in the string and the 3 and the 7 beside it cannot
+            // be a tick apart. See `wire::apply_rungs`.
+            wire::apply_rungs(
+                &mut message,
+                observed.signals.line(observed.mid_turn()).as_deref(),
+                observed.signals.plan_counts(),
+            );
 
             // The live card, from the same line the sidebar is about to draw.
             //
@@ -3802,6 +3852,56 @@ mod tests {
         signals.saw(&moved("1", TaskStatus::Completed));
         signals.saw(&moved("2", TaskStatus::InProgress));
         assert_eq!(signals.line(true).as_deref(), Some("1/2 · Identifying edge cases"));
+    }
+
+    /// The numbers on the wire and the numbers in the line are ONE fold.
+    ///
+    /// `plan_counts` exists so that no client has to read `1/2` back out of a
+    /// composed string. That only holds if the two are the same fact: a fold
+    /// that answered the line from one read of `tasks` and the counts from
+    /// another could put `1/2` on the row and a two-thirds-full bar beside it.
+    /// Asserted in one test rather than two so the pair cannot be edited apart.
+    #[test]
+    fn the_counts_on_the_wire_are_the_counts_in_the_line() {
+        let mut signals = Signals::default();
+        assert_eq!(signals.plan_counts(), None, "no list yet is not 0/0");
+
+        for event in [
+            created("Designing test matrix"),
+            numbered("1"),
+            created("Identifying edge cases"),
+            numbered("2"),
+            moved("1", TaskStatus::InProgress),
+        ] {
+            signals.saw(&event);
+        }
+        assert_eq!(signals.line(true).as_deref(), Some("0/2 · Designing test matrix"));
+        // Zero done and a real total, which is exactly the pair that must not
+        // be spelled "absent" anywhere on the way to a client.
+        assert_eq!(signals.plan_counts(), Some((0, 2)));
+
+        signals.saw(&moved("1", TaskStatus::Completed));
+        signals.saw(&moved("2", TaskStatus::InProgress));
+        assert_eq!(signals.line(true).as_deref(), Some("1/2 · Identifying edge cases"));
+        assert_eq!(signals.plan_counts(), Some((1, 2)));
+
+        // A total can GROW: an agent adds work to its own list as it finds it.
+        // The counts say so honestly rather than holding the denominator still,
+        // and a surface that animates them must not read this as going
+        // backwards. See the fields' comments in `farcooler.proto`.
+        signals.saw(&created("Auditing the rules"));
+        signals.saw(&numbered("3"));
+        assert_eq!(signals.plan_counts(), Some((1, 3)));
+
+        // And it can shrink, for the reason `a_deleted_task_leaves_the_total`
+        // records: a dropped task counts toward neither half.
+        signals.saw(&moved("3", TaskStatus::Deleted));
+        assert_eq!(signals.plan_counts(), Some((1, 2)));
+
+        // A turn boundary forgets the list, both ends of it, and the counts go
+        // with it rather than describing seven tasks the next turn never wrote.
+        signals.saw(&TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Finished });
+        assert_eq!(signals.plan_counts(), None);
     }
 
     /// The correction this stage's live run forced, as a test.
@@ -4660,7 +4760,7 @@ mod tests {
             turn_failed: died.failed,
             ..Default::default()
         };
-        wire::apply_rungs(&mut message, None);
+        wire::apply_rungs(&mut message, None, None);
         assert_eq!(message.glyph, "✗", "a dead turn drew the same tick as a healthy one");
         assert_eq!(message.headline, "cursor failed");
         // And the phone is told the same thing the sidebar shows.

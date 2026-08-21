@@ -44,6 +44,62 @@ struct FleetSnapshotTests {
         #expect(snapshot.agents.count == 1)
     }
 
+    /// A payload with no `planDone`/`planTotal` still decodes, and reads as
+    /// "not told" rather than as zero.
+    ///
+    /// The rule that governs every field added to this type, tested on the two
+    /// just added. Swift's synthesized `Decodable` throws on a missing key for a
+    /// non-optional, so one absent field would fail the WHOLE snapshot — every
+    /// agent on it, on every surface — rather than cost one row a bar. And the
+    /// payload here is not hypothetical: it is exactly what a snapshot written
+    /// by a build that predates these fields looks like on disk, and what a
+    /// phone talking to a daemon too old to send them writes today.
+    ///
+    /// Nil rather than 0 is the second half, and it is not pedantry. `0` of `7`
+    /// is an agent that has written seven tasks and finished none, which draws
+    /// an empty bar; nil is an agent nobody has said anything about, which
+    /// draws no bar and reserves no room for one. A default of zero would turn
+    /// every codex pane, every cursor pane and every claude session with no
+    /// task list into a progress claim no host ever made.
+    @Test func aPayloadWithoutThePlanCountsStillDecodes() throws {
+        let json = """
+        {"agents":[{"id":"t1","label":"claude","machine":"orchard",
+        "status":"working","glyph":"●","headline":"claude 4m","line":"x",
+        "feed":[],"rank":0,"turnFailed":false}],
+        "capturedAt":1000000,"complete":true}
+        """
+        let snapshot = try JSONDecoder().decode(FleetSnapshot.self, from: Data(json.utf8))
+        #expect(snapshot.agents.count == 1)
+        #expect(snapshot.agents[0].planDone == nil)
+        #expect(snapshot.agents[0].planTotal == nil)
+    }
+
+    /// And when they ARE there they survive the trip, zero included.
+    ///
+    /// The round trip above covers the default-nil agent this file builds; this
+    /// pins the other case, because `0` is the value most likely to be lost by
+    /// an encoder or a projection that treats it as empty. An agent seven tasks
+    /// into seven and an agent zero tasks into seven are both real rows, and
+    /// they must not arrive as the same one.
+    @Test func thePlanCountsSurviveAJsonRoundTripIncludingZero() throws {
+        var starting = agent("t1", status: "working")
+        starting.planDone = 0
+        starting.planTotal = 7
+        var finishing = agent("t2", status: "working")
+        finishing.planDone = 7
+        finishing.planTotal = 7
+        let snapshot = FleetSnapshot(
+            agents: [starting, finishing],
+            capturedAt: Date(timeIntervalSince1970: 1_000_000),
+            complete: true)
+        let decoded = try JSONDecoder().decode(
+            FleetSnapshot.self, from: JSONEncoder().encode(snapshot))
+        #expect(decoded == snapshot)
+        #expect(decoded.agents[0].planDone == 0)
+        #expect(decoded.agents[0].planTotal == 7)
+        #expect(decoded.agents[1].planDone == 7)
+    }
+
     /// Blocked and done are LATCHED: an agent waiting on you is still waiting
     /// an hour later, and nothing but a person changes that.
     @Test func aLatchedStatusStaysConfidentWhenOld() {

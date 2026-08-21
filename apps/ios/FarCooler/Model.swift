@@ -176,6 +176,28 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Computed on the host beside `activity`, so a widget showing one agent
     /// and this list showing twelve agree about which one matters.
     var rank: UInt32?
+    /// How far the agent is through its OWN task list: `planDone` of 4 and
+    /// `planTotal` of 7 is `4/7`.
+    ///
+    /// The same position `line` may already state in words, carried as the
+    /// numbers it was composed from. Separate fields rather than something read
+    /// back out of that string, because `line` is a RUNG: the question outranks
+    /// the task count, so a blocked agent's line is the question and holds no
+    /// numbers at all — and a phone parsing prose the host composed would be a
+    /// second derivation of a fact the ladder exists to derive once.
+    ///
+    /// Optional, like every other field added to this type, and nil is not
+    /// zero. Nil is "the host said nothing about a task list", which is a
+    /// daemon too old to send these, a pane with no session log, an agent that
+    /// never wrote a list, and every codex and cursor pane — their logs record
+    /// nothing task-shaped. `0` of `7` is a written list with nothing finished,
+    /// which is a different thing and reads differently.
+    ///
+    /// `planTotal` moves in both directions mid-turn: an agent adds tasks as it
+    /// finds work, and a task it deletes counts toward neither half. See
+    /// `plan_done` in `proto/farcooler.proto`.
+    var planDone: UInt32?
+    var planTotal: UInt32?
     /// The agents this agent spawned and has not finished with, named.
     /// Their COUNT is already inside `line`; these are the names.
     var subagents: [String]?
