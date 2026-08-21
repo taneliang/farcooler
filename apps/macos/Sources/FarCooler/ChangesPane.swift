@@ -1294,15 +1294,23 @@ private struct FileStatusBadge: View {
     /// lines, so a created or deleted FILE wearing them reads without being
     /// learned. Orange is spoken for: everywhere else in this app it means
     /// something wants you — a blocked agent, an unreachable runner, an adapter
-    /// that will not load. A rename is not an alarm, so it is gray like a
-    /// modification, and the letter is what tells them apart. Renamed and
-    /// copied were orange here until commit rows started carrying them, which
-    /// is when a moved file first read as a warning; the phone had them gray
-    /// all along.
+    /// that will not load — and a conflict is exactly that, the one row where
+    /// nothing moves until a human resolves it. A rename is not an alarm, so it
+    /// is gray like a modification, and the letter is what tells them apart.
+    ///
+    /// Conflicted was red here, which is the other honest reading: an error
+    /// state, and red is what `StatusGlyph` gives a turn that died or a runner
+    /// that is lost. It loses inside this pane, where red is the diff's own —
+    /// `background` and `lineAccent` a hundred lines up paint removed lines
+    /// with it — so a conflict wore the color of a deletion and only the letter
+    /// said otherwise. Renamed and copied were orange here until commit rows
+    /// started carrying them, which is when a moved file first read as a
+    /// warning; the phone had them gray all along.
     private var color: Color {
         switch status {
         case .added, .untracked: return .green
-        case .deleted, .conflicted: return .red
+        case .deleted: return .red
+        case .conflicted: return .orange
         case .modified, .renamed, .copied, .typeChanged, .none: return .secondary
         }
     }
