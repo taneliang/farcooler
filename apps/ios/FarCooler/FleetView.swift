@@ -36,17 +36,39 @@ enum Route: Hashable, Codable {
     /// knows exactly which agent was tapped.
     ///
     /// `.none` is the honest value for the first of those, and it is not a
-    /// missing focus — it is "apply the rule", resolved by
-    /// `Route.Focus.rule(for:inbox:)` at the moment the screen is built. That
-    /// matters most for a RESTORED path: a workspace saved at midnight and
-    /// reopened at seven should open on whatever needs you at seven, not on the
-    /// agent that needed you then.
+    /// missing focus — it is "nobody at this door had an opinion", resolved at
+    /// the moment the screen is built by `WorkspaceRoute.resolve()`.
+    ///
+    /// Which resolves it in an order, and the order is an order of authority:
+    ///
+    /// 1. **The route says.** Somebody pointed at a pane on the way in — a
+    ///    workspace list row, a tapped card, the switcher sheet. That is the
+    ///    most recent thing anyone asked for and it wins outright.
+    /// 2. **The tab you were last on.** `Connection.lastFocus`, written only
+    ///    when a person taps a chip. Read here rather than stored in the route
+    ///    itself, because a path element whose value changes is a destination
+    ///    SwiftUI may rebuild — see that property, and `WorkspaceView`.
+    /// 3. **The rule**, `rule(for:inbox:)`: whatever needs you now.
+    ///
+    /// Two and three used to be one, and the difference between them is the
+    /// difference between a place you chose and a place the app picked for you.
+    /// A workspace you last read the diff of should open on that diff when you
+    /// come back to it, at the gym ninety seconds later or in the morning —
+    /// `docs/jobs-to-be-done.md` F4 is the owner saying review has to be
+    /// resumable, and landing somewhere other than where you were is exactly
+    /// what it is not to be. A workspace you have never chosen a tab in has
+    /// nothing to be resumed to, and opens on whatever needs you at seven
+    /// rather than on the agent that needed you at midnight.
+    ///
+    /// Both of the last two degrade the same way: a remembered or ruled agent
+    /// that has left the fleet falls through to the next answer rather than to
+    /// a placeholder.
     enum Focus: Hashable, Codable {
         /// One agent, by terminal id.
         case agent(String)
         /// The worktree's own diff.
         case changes
-        /// No opinion — see `rule(for:inbox:)`.
+        /// No opinion — see the order above.
         case none
     }
 
@@ -60,7 +82,10 @@ enum Route: Hashable, Codable {
 }
 
 extension Route.Focus {
-    /// Which tab a workspace opens on when nobody said.
+    /// Which tab a workspace opens on when nobody said and nobody ever chose.
+    ///
+    /// The last of the three answers in `Route.Focus`, and the only one that
+    /// reads the world as it is right now rather than as somebody left it.
     ///
     /// Blocked agent, then unread diff, then whatever the fleet list would put
     /// at the top. In that order because it is the order of "what did you open
@@ -167,9 +192,39 @@ struct FleetView: View {
     /// string rather than `Data` only so it is legible when this misbehaves.
     @SceneStorage("fleet.path") private var savedPath = ""
 
-    /// Whether the saved path has had its one chance to come back. See
-    /// `restorePath` for why it gets exactly one.
-    @State private var restoredPath = false
+    /// The tab each workspace was last left on, as JSON, so being interrupted
+    /// does not cost you your place INSIDE the screen either.
+    ///
+    /// A second key rather than a field on `SavedPath`, and beside the path for
+    /// the same reason `Connection.lastFocus` is beside it in memory: this
+    /// changes when somebody taps a chip and the path changes when somebody
+    /// navigates, which are different moments, and a path saved by a build
+    /// without this still decodes.
+    ///
+    /// **Persisted deliberately, and it was a real question.** A memory of
+    /// where you were is stalest exactly when the app was killed longest ago,
+    /// and the argument for letting it die with the process is that a workspace
+    /// you last touched at midnight should open on whatever needs you at seven.
+    /// That argument is already made and already answered one level up: `path`
+    /// itself is persisted, so seven o'clock puts you back in the midnight
+    /// WORKSPACE regardless. Restoring the screen and then re-deriving the tab
+    /// inside it is not caution, it is the app half-remembering — and F4's case
+    /// is a phone killed in a pocket between sets at the gym, where the whole
+    /// point is to come back to the diff you were reading. If the staleness
+    /// worry is right it is right about the path, and that is a different
+    /// change from this one.
+    ///
+    /// What that costs is bounded by `restoreFocus`, which admits an entry only
+    /// if the fleet that just answered still has the workspace AND the pane it
+    /// names — so nothing here can resurrect a tab for something that is gone.
+    ///
+    /// Runner-scoped like the path, and for the same reason: ids are
+    /// per-runner, so a memory written on one names nothing on another.
+    @SceneStorage("fleet.focus") private var savedFocus = ""
+
+    /// Whether the saved place has had its one chance to come back. See
+    /// `restorePlace` for why it gets exactly one.
+    @State private var restoredPlace = false
 
     /// Whether the runner has told us what it has, at least once.
     ///
@@ -321,16 +376,21 @@ struct FleetView: View {
                 else { return }
                 path.removeSubrange(gone...)
             }
-            // The saved path's one chance, taken the moment there is a fleet to
-            // check it against. See `restorePath`.
+            // The saved place's one chance, taken the moment there is a fleet
+            // to check it against. See `restorePlace`.
             .onChange(of: hasFleet) { _, arrived in
-                if arrived { restorePath() }
+                if arrived { restorePlace() }
             }
             // And the other direction: every push and every pop is written
             // down. Cheap — a couple of hundred bytes of JSON on a navigation,
             // not on a poll — because `path` only changes when someone
             // navigates.
             .onChange(of: path) { _, routes in savePath(routes) }
+            // The same, for the half of "where you were" the path deliberately
+            // does not carry. Also only on a human action: `Connection`
+            // publishes this when a chip is tapped and at no other time — a
+            // poll that changes the whole fleet leaves it alone.
+            .onChange(of: connection.lastFocus) { _, focus in saveFocus(focus) }
             // A tapped Live Activity card, arriving as `…://terminal/<id>`.
             //
             // Here rather than on the root view, because this is the screen
@@ -469,11 +529,15 @@ struct FleetView: View {
             // and is not rewritten as the tab strip moves. A path element that
             // changes value is a destination SwiftUI is free to rebuild, and
             // rebuilding this one discards every mounted pane — which is the
-            // exact loss `WorkspaceView` exists to prevent. The cost used to be
-            // that a restored path reopened the pane you arrived at; it is
-            // smaller now, because a workspace restored from the inbox carries
-            // `.none` and re-runs the focus rule against the fleet as it is
-            // when you come back. See `Route.Focus`.
+            // exact loss `WorkspaceView` exists to prevent.
+            //
+            // That used to cost you the tab you were actually on: a restored
+            // path re-ran the focus rule, so reading a diff, being interrupted
+            // and coming back landed you on a blocked agent instead. It does
+            // not any more, and not because the path changed — the memory lives
+            // beside it, in `Connection.lastFocus`, where changing it moves no
+            // navigation state at all. See `Route.Focus` for the order the two
+            // are read in.
             show(terminal)
         } else if connection.phase == .connected {
             // The runner answered and does not have it: the pane is gone, or
@@ -496,18 +560,60 @@ struct FleetView: View {
     /// has answered, which is the first moment the question "does this still
     /// exist" has an answer.
     ///
+    /// Once, and only once. After this the path is whatever the person holding
+    /// the phone has done with it, and a second pass on a later reconnect would
+    /// be the app steering them somewhere they had already left.
+    ///
+    /// Two halves, because where you were is two facts: which screens were
+    /// stacked up, and which tab was showing inside the last of them. They are
+    /// stored apart for the reason `savedFocus` gives, and restored in an order
+    /// that matters — the remembered tabs go in FIRST, because installing the
+    /// path is what mounts a `WorkspaceRoute`, and that view reads the memory in
+    /// the same turn it appears. Seeded afterwards, the workspace would already
+    /// have opened on the rule's answer and latched it.
+    private func restorePlace() {
+        guard !restoredPlace else { return }
+        restoredPlace = true
+        restoreFocus()
+        restorePath()
+    }
+
+    /// The tabs, checked against the fleet that just arrived.
+    ///
+    /// Restored whether or not the path is — the memory is about workspaces
+    /// rather than about a location, so it is worth having for a workspace
+    /// opened by hand ten minutes from now as much as for the one coming back
+    /// on the path.
+    ///
+    /// Entries are dropped, not repaired, and both halves are checked: the
+    /// workspace has to still be in the fleet, and an `.agent` has to still name
+    /// a pane in it. `WorkspaceRoute` would degrade a dead one to the rule
+    /// anyway, so this is not what makes the app correct — it is what stops the
+    /// stored value accumulating worktrees that were merged away months ago.
+    private func restoreFocus() {
+        guard let data = savedFocus.data(using: .utf8),
+            let saved = try? JSONDecoder().decode(SavedFocus.self, from: data),
+            saved.runner == host.id.uuidString
+        else { return }
+
+        let live = connection.fleet.workspaces
+        let usable = saved.focus.filter { workspace, focus in
+            guard let workspace = live.first(where: { $0.id == workspace }) else { return false }
+            guard case .agent(let terminal) = focus else { return true }
+            return workspace.terminals.contains { $0.id == terminal }
+        }
+        guard !usable.isEmpty else { return }
+        connection.seedFocus(usable)
+    }
+
+    /// The screens, in the order they were pushed.
+    ///
     /// Truncated at the first route that no longer resolves rather than
     /// filtered, because a path is a sequence of pushes: keeping depth 2 after
     /// dropping depth 1 would put a screen on top of a screen nobody navigated
     /// through. A path that resolves to nothing simply leaves you at the root,
     /// which is where a cold launch has always landed.
-    ///
-    /// Once, and only once. After this the path is whatever the person holding
-    /// the phone has done with it, and a second pass on a later reconnect would
-    /// be the app steering them somewhere they had already left.
     private func restorePath() {
-        guard !restoredPath else { return }
-        restoredPath = true
         guard path.isEmpty, let data = savedPath.data(using: .utf8),
             let saved = try? JSONDecoder().decode(SavedPath.self, from: data),
             saved.runner == host.id.uuidString
@@ -548,11 +654,27 @@ struct FleetView: View {
         savedPath = json
     }
 
+    private func saveFocus(_ focus: [String: Route.Focus]) {
+        let saved = SavedFocus(runner: host.id.uuidString, focus: focus)
+        guard let data = try? JSONEncoder().encode(saved),
+            let json = String(data: data, encoding: .utf8)
+        else { return }
+        savedFocus = json
+    }
+
     /// The path and the runner it was walked on, which is the whole of what
     /// `savedPath` holds. See it for why the runner has to travel with it.
     private struct SavedPath: Codable {
         var runner: String
         var routes: [Route]
+    }
+
+    /// The remembered tabs and the runner they were chosen on. The runner
+    /// travels with them for the reason it travels with the path: workspace and
+    /// terminal ids mean nothing on a different one.
+    private struct SavedFocus: Codable {
+        var runner: String
+        var focus: [String: Route.Focus]
     }
 
     /// Every screen shown BEFORE a connection exists, wrapped in the ways out of
@@ -954,9 +1076,15 @@ struct FleetView: View {
 /// the path's. `FleetView` still pops the route when the WORKSPACE leaves the
 /// fleet, which is the one case where there is genuinely nothing left to show.
 ///
-/// A focus naming an agent that has gone falls back to the rule rather than to
-/// a placeholder, which is what makes a path restored hours later land
-/// somewhere useful. See `Route.Focus`.
+/// STARTING pane, and only that. `WorkspaceView` reports the chips a person
+/// taps to `Connection.lastFocus`, which this view reads on the way in and
+/// never again — a memory read once at mount cannot rebuild anything, which is
+/// the whole reason it is a dictionary on the connection and not a value in the
+/// path.
+///
+/// A focus naming an agent that has gone falls back — to the remembered tab,
+/// then to the rule — rather than to a placeholder, which is what makes a path
+/// restored hours later land somewhere useful. See `Route.Focus`.
 @MainActor
 private struct WorkspaceRoute: View {
     let workspace: String
@@ -1002,14 +1130,15 @@ private struct WorkspaceRoute: View {
 
     private func resolve() {
         guard opened == nil, let workspace = live else { return }
-        // The focus the route carries, and the rule for everything else —
-        // `.none` because the inbox had no opinion, and a named agent that has
-        // since left the fleet. Both end up in the same place on purpose.
-        var wanted = focus
-        if case .agent(let id) = focus,
-            !workspace.terminals.contains(where: { $0.id == id })
-        {
-            wanted = .none
+        // Three answers in order of authority — what the door asked for, then
+        // the tab this workspace was last left on, then the rule. Each one is
+        // filtered through `alive` first, so a `.none` here always means "this
+        // answer named a pane that is gone" or "this answer had no opinion",
+        // and both fall through to the next for the same reason. See
+        // `Route.Focus`, which sets the order out in full.
+        var wanted = alive(focus, in: workspace)
+        if case .none = wanted, let remembered = connection.lastFocus[workspace.id] {
+            wanted = alive(remembered, in: workspace)
         }
         if case .none = wanted {
             wanted = Route.Focus.rule(for: workspace, inbox: connection.inbox[workspace.id])
@@ -1025,6 +1154,22 @@ private struct WorkspaceRoute: View {
             }
             opened = Pane(terminal)
         }
+    }
+
+    /// A focus, or `.none` when what it names has left this worktree.
+    ///
+    /// The one degradation rule, and it is applied to both of the answers that
+    /// can be stale rather than only to the route's. An agent stopped overnight
+    /// is exactly as gone whether the path named it or you last read it, and
+    /// answering "the pane you want is not here" differently in the two cases is
+    /// how a screen ends up opening onto nothing. The rule needs no such filter,
+    /// because it picks out of the fleet as it is right now.
+    ///
+    /// `.changes` always survives: nothing on the runner has to exist for the
+    /// worktree's own diff. See `Pane`.
+    private func alive(_ focus: Route.Focus, in workspace: Workspace) -> Route.Focus {
+        guard case .agent(let id) = focus else { return focus }
+        return workspace.terminals.contains { $0.id == id } ? focus : .none
     }
 }
 

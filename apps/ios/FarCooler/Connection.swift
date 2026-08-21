@@ -167,6 +167,34 @@ final class Connection: ObservableObject {
     /// One review store per worktree, outliving the panes that show them. See
     /// `ChangesStores` for why they cannot live in the view.
     lazy var changesStores = ChangesStores(core: core)
+
+    /// The tab each worktree was last left on, by workspace id — and only ever
+    /// a tab somebody CHOSE. See `WorkspaceView.choose(_:)`, which is the one
+    /// writer, and `Route.Focus` for where it sits in the order of authority.
+    ///
+    /// It lives beside the navigation path rather than inside it, and that is
+    /// the whole design. Writing the focused tab back into `path` on every chip
+    /// tap changes a path element's VALUE, and SwiftUI is free to rebuild a
+    /// destination whose value changed — which would discard every mounted pane
+    /// and cost exactly the scroll positions, half-typed messages and open
+    /// streams `WorkspaceView` exists to keep. A dictionary the path never sees
+    /// cannot do that, because nothing about the navigation state moves when it
+    /// changes.
+    ///
+    /// Here rather than in a view because of what has to outlive what.
+    /// `WorkspaceView` is torn down whenever its route is popped, so a memory
+    /// inside it would be gone by the time anyone came back to read it — the
+    /// same argument `ChangesStores` makes above. `Connection` is a
+    /// `@StateObject` on `FleetView`, which `RootView` keys `.id(host)`, so
+    /// this is created once per runner and dies with it: workspace and terminal
+    /// ids are per-runner, and a memory that outlived the runner would name
+    /// nothing on the next one.
+    ///
+    /// `@Published` because `FleetView` writes it through to `@SceneStorage` on
+    /// change, the same way it saves the path. Chip taps are rare and
+    /// user-initiated, so the extra body pass costs less than a single poll
+    /// already does.
+    @Published private(set) var lastFocus: [String: Route.Focus] = [:]
     private var poller: Task<Void, Never>?
 
     /// The runner this connection is for, remembered so a reconnection has
@@ -1261,5 +1289,31 @@ final class Connection: ObservableObject {
 
     func terminal(_ id: String, in workspace: String) -> Terminal? {
         fleet.workspaces.first { $0.id == workspace }?.terminals.first { $0.id == id }
+    }
+
+    /// Remember the tab somebody chose in a worktree.
+    ///
+    /// Called from one place — a tap on the tab strip. Not from a deep link
+    /// retargeting the screen, not from the focus rule choosing where to open,
+    /// and not from a pane vanishing under the person reading it; see
+    /// `WorkspaceView.choose(_:)` for why each of those is a change the person
+    /// did not make, and `lastFocus` for what this is for.
+    func rememberFocus(_ focus: Route.Focus, in workspace: String) {
+        // `.none` is the absence of a choice, which is the one thing a record
+        // of choices must never hold: storing it would mean "the person picked
+        // no opinion", and reading it back would beat the rule with nothing.
+        if case .none = focus { return }
+        lastFocus[workspace] = focus
+    }
+
+    /// Install a memory restored from a previous run of the app.
+    ///
+    /// Only ever at launch, and only with entries `FleetView` has already
+    /// checked against the fleet that just arrived. Merged over rather than
+    /// assigned, so a tab chosen in the gap between connecting and the fleet
+    /// answering outranks the one written down yesterday — that person is
+    /// holding the phone now.
+    func seedFocus(_ remembered: [String: Route.Focus]) {
+        lastFocus = remembered.merging(lastFocus) { _, live in live }
     }
 }

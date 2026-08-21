@@ -37,6 +37,23 @@ enum Pane: Identifiable, Hashable {
         }
     }
 
+    /// This tab as something worth writing down.
+    ///
+    /// A `Pane` holds a whole `Terminal` — a snapshot of what the daemon said
+    /// when the tab was opened — and a snapshot is the wrong thing to remember
+    /// or persist, for the reason `Route` gives about its own cases. A
+    /// `Route.Focus` is an id, which either still names a pane on this runner
+    /// or does not, and the second answer is one `WorkspaceRoute` can act on.
+    ///
+    /// Never `.none`: that value means "nobody said", and a tab somebody tapped
+    /// is the opposite of that.
+    var focus: Route.Focus {
+        switch self {
+        case .terminal(let terminal): return .agent(terminal.id)
+        case .changes: return .changes
+        }
+    }
+
     /// The terminal this tab is, where it is one. Nil for Changes, which is
     /// exactly the question `Notifier.visibleTerminal` is asking.
     var terminal: Terminal? {
@@ -205,7 +222,7 @@ struct WorkspaceView: View {
                     workspace: currentWorkspace,
                     changes: connection.inbox[workspaceID],
                     current: current,
-                    onSelect: select
+                    onSelect: choose
                 )
                 .padding(.top, 6)
                 .padding(.bottom, 8)
@@ -478,6 +495,33 @@ struct WorkspaceView: View {
         guard currentWorkspace?.terminals.contains(where: { $0.id == terminal.id }) == true
         else { return }
         select(Pane(terminal))
+    }
+
+    /// Show a tab BECAUSE somebody tapped its chip, and remember that they did.
+    ///
+    /// The only writer of `Connection.lastFocus`, and every other route into
+    /// `select` is deliberately not one:
+    ///
+    /// - `honorRequest()`, which is a tapped Live Activity card or the switcher
+    ///   sheet. That tap chose a notification, not a place to work: writing it
+    ///   down would let a 3am ping about one agent move where you land when you
+    ///   come back to the diff you were reading, which is the loss this whole
+    ///   memory exists to prevent.
+    /// - The initial pane, which never comes through here at all — it is
+    ///   `init`'s argument, and it is usually the focus RULE's answer. Storing
+    ///   the rule's answer as a choice would make the memory self-fulfilling:
+    ///   every workspace would remember wherever it happened to open, and the
+    ///   rule would never get to run again.
+    /// - `prune`, where the pane you were reading stopped existing. Being moved
+    ///   because the runner took something away is not a preference, and
+    ///   recording it would outlive the accident that caused it.
+    ///
+    /// Written even when the chip tapped is already current. Nothing moves, but
+    /// the person did say where they want to be, and a rule-chosen tab they
+    /// confirm is one they should come back to.
+    private func choose(_ pane: Pane) {
+        connection.rememberFocus(pane.focus, in: workspaceID)
+        select(pane)
     }
 
     /// Show a tab, mounting it the first time it is asked for.
