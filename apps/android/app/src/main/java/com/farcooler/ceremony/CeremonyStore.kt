@@ -282,6 +282,29 @@ object CeremonyCore {
     }
 
     /**
+     * The client id a device is enrolled under, derived from its own key.
+     *
+     * Derived in Rust, and derived rather than invented for the reason
+     * `client_id` gives in `crates/client/src/ceremony.rs`: an id that comes out
+     * of the key is stable, so a device re-running a ceremony against a runner
+     * it is already on lands on the id already in that runner's fence instead of
+     * enrolling a second line naming the same device. The daemon's "this device
+     * is already enrolled" arm compares client ids, so an id this app made up
+     * would defeat that arm while looking, from here, like it had worked.
+     *
+     * Null when there is no core for this ABI or the text is not a public key.
+     * There is deliberately no fallback: a locally minted id is precisely the
+     * bug this call exists to stop, and one substituted here would reintroduce
+     * it silently.
+     */
+    fun clientId(publicKey: String): String? {
+        if (!NativeLibrary.loaded || publicKey.isEmpty()) return null
+        return runCatching { NativeClient.nativeClientId(publicKey) }
+            .getOrNull()
+            ?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
      * A shim's answer, as a payload or a refusal.
      *
      * Null means the shim itself could not answer — no core for this ABI, or a
@@ -721,17 +744,29 @@ class CeremonyStore(
         // no line was written for would be the one lie in this flow a person
         // could not detect.
         val wanted = picked()
-        val unwritten = enroller.enroll(
-            publicKey = asking.keyA,
-            label = asking.name,
-            // One id per enrollment, and it is what the forced command will
-            // carry — so it is what closing this device's sessions later will
-            // name. Made here because nothing else has made one: the ceremony
-            // correlates by its own id, which is a different thing with a
-            // different lifetime.
-            clientId = java.util.UUID.randomUUID().toString(),
-            runners = wanted,
-        )
+        // One id per device, and it is what the forced command will carry — so
+        // it is what closing this device's sessions later will name. Derived in
+        // Rust from the key in the code rather than made here: the ceremony
+        // correlates by its own id, which is a different thing with a different
+        // lifetime, and an id minted on this side would be a new one every time
+        // this device enrolled — a second line in the fence naming a device
+        // already in it. See [CeremonyCore.clientId].
+        //
+        // No id means nothing to enroll under, so nothing is asked for and every
+        // picked runner travels `pending` — a true statement about the file on
+        // each of them, and the same answer the Mac and iOS give. A UUID here
+        // would not be a fallback, it would be the bug.
+        val clientId = CeremonyCore.clientId(asking.keyA)
+        val unwritten = if (clientId == null) {
+            wanted.map { it.id }.toSet()
+        } else {
+            enroller.enroll(
+                publicKey = asking.keyA,
+                label = asking.name,
+                clientId = clientId,
+                runners = wanted,
+            )
+        }
         _someRunnersPending.value = unwritten.isNotEmpty()
         val granting = wanted.map { it.copy(pending = it.id in unwritten) }
 

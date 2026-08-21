@@ -453,10 +453,25 @@ struct AddDeviceView: View {
         let keyB = confirmation.offer.key_b
         // ONE id for both keys, and it is what the forced command will carry —
         // so it is what closing this device's sessions later will name, and what
-        // makes `client revoke` take both of a Mac's lines in one write. Made
-        // here because nothing else has made one: the ceremony correlates by
-        // its own id, which is a different thing with a different lifetime.
-        let clientID = UUID().uuidString
+        // makes `client revoke` take both of a Mac's lines in one write.
+        //
+        // **From KEY A, including for Key B's line.** The id names the DEVICE,
+        // not the key; deriving each line's id from its own key would split one
+        // Mac into two clients, and no single revoke could take both — which is
+        // the removal copy ("this takes that Mac's ssh, git and Zed access away
+        // too") turning into a lie the day somebody uses it. iOS derives the
+        // same id from the same key at `CeremonyStore.clientId(of:)`.
+        //
+        // Derived rather than made here, which is what this line used to do
+        // (`UUID().uuidString`). Not the ceremony's id — that one is a different
+        // thing with a different lifetime, a correlator for two codes a minute
+        // apart. This one is written into a runner's `authorized_keys` and
+        // outlives every session it names, so it has to be the SAME id the next
+        // time this device is added: a device re-running the ceremony against a
+        // runner it is already on must land on the id already in that fence
+        // instead of enrolling a second line for one device, and a fresh UUID
+        // could not do that by construction.
+        let clientID = DeviceKey.clientID(of: keyA)
 
         Task {
             await store.confirm(
@@ -464,7 +479,16 @@ struct AddDeviceView: View {
                 // rather than "Far Cooler is trying to authenticate".
                 reason: "Confirm adding \(name) to your runners"
             ) { granted in
-                await Enrollment.enroll(
+                // No id means the code's key did not parse, so there is nothing
+                // to enroll UNDER: no runner is written to and the screen says
+                // so. Deliberately not a UUID fallback — that is the bug this
+                // change removes, and as a fallback it would be the silent
+                // version of it, landing lines in somebody's `authorized_keys`
+                // under an id nothing can revoke by name while looking like it
+                // worked. iOS takes the same branch in `CeremonyStore.confirm()`
+                // and leaves every runner pending.
+                guard let clientID else { return Enrollment.unreadableKey }
+                return await Enrollment.enroll(
                     keyA: keyA, keyB: keyB, label: name, clientID: clientID,
                     // `control`, per the design, and it applies to Key A only:
                     // `read` is a narrowing set afterwards in Settings › Devices,

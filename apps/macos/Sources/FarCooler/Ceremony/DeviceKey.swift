@@ -116,6 +116,46 @@ enum DeviceKey {
         return String(decoding: buffer[0..<written], as: UTF8.self)
     }
 
+    /// The client id a device is enrolled under, derived from its Key A.
+    ///
+    /// Any device's Key A, not only this Mac's: the ceremony hands this Mac a
+    /// scanned code carrying the key of the device being added, and the id that
+    /// goes into that device's line comes from that key.
+    ///
+    /// **Derived, not invented.** `farcooler_client_client_id` is
+    /// `crates/client/src/ceremony.rs`'s `client_id` — the one place the format
+    /// is decided, so the Mac, iOS and Android spell one device one way. That
+    /// matters twice. The daemon's "this device is already enrolled" arm
+    /// compares client ids, so an id invented per platform defeats it; and the
+    /// id has to be STABLE, or a device re-running the ceremony against a runner
+    /// it is already on enrolls a second line naming one device and nothing can
+    /// afterwards say which session arrived on which key. This screen used to
+    /// mint a `UUID()`, which is the per-run version of exactly that: every run
+    /// a new device, as far as every fence was concerned.
+    ///
+    /// Same buffer contract as ``publicKey(of:)`` above, because it is the same
+    /// kind of call: raw text rather than JSON, the byte count returned, nothing
+    /// written when the buffer is short. `CeremonyFFI`'s `spill` belongs to the
+    /// ceremony's four JSON entry points and is the wrong shape for this one.
+    /// The id is `farcooler-` and twelve hex characters, so 128 bytes cannot be
+    /// short — and a buffer that somehow were short answers nil rather than a
+    /// truncated id, which is an id no revoke would match.
+    ///
+    /// Nil when the text is not a public key, and the caller must carry the nil
+    /// rather than substitute anything. A device with no readable key has no id;
+    /// enrolling it under a made-up one would put a line into somebody's
+    /// `authorized_keys` that no `client revoke` can name.
+    static func clientID(of publicKey: String) -> String? {
+        var buffer = [UInt8](repeating: 0, count: 128)
+        let written = publicKey.withCString { text in
+            buffer.withUnsafeMutableBufferPointer {
+                farcooler_client_client_id(text, $0.baseAddress, $0.count)
+            }
+        }
+        guard written > 0, written <= buffer.count else { return nil }
+        return String(decoding: buffer[0..<written], as: UTF8.self)
+    }
+
     /// A relay account id, as a filename. Anything else is refused rather than
     /// sanitized: an id this does not recognize is not an id, and writing a key
     /// under a guessed name is how one ends up orphaned.

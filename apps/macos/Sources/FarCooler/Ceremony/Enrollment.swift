@@ -160,7 +160,47 @@ enum Enrollment {
     /// asleep, an ssh key that is not loaded, a daemon that is not installed
     /// and a fence that is damaged all look identical — and a screen that
     /// guesses is how an app ends up telling somebody to loosen an sshd setting
-    /// that was never the problem.
+    /// that was never the problem. The transcript under it carries the CLI's
+    /// own words, which is where a cause appears when there is one to report.
+    ///
+    /// **It does not promise a retry either.** It used to end "Far Cooler will
+    /// try again when this Mac reconnects", and nothing in this repo retries an
+    /// enrollment: there is no queue, no reconnect hook, and by design there
+    /// will not be one. So that sentence left somebody waiting for a write that
+    /// is never attempted — the worst shape a failure can take, because it asks
+    /// for patience instead of action. iOS states the rule above
+    /// `CeremonyStore.note(about:outcomes:)` ("It deliberately does NOT say the
+    /// key will be written later"); this is the Mac's half of it. What is left
+    /// is what is true — those runners do not have the key — followed by the
+    /// one thing that changes it.
+    ///
+    /// **A Mac, where iOS says "a device".** Granting is a Mac-and-CLI
+    /// capability by design: `client.enroll` is served at `Scope::HostAdmin`
+    /// (`crates/daemon/src/rpc.rs`) and a phone is enrolled at `control`, so
+    /// sending somebody to their phone here would be sending them to a second
+    /// failure with a less useful message.
+    ///
+    /// "The new device" rather than "this device": the device being enrolled is
+    /// the one that showed the code, and on a Mac's screen "this device" reads
+    /// as the Mac doing the adding.
     static let couldNotReachAll =
-        "Some runners couldn’t be updated. Far Cooler will try again when this Mac reconnects."
+        "Some runners don’t have the new device’s key yet. You can add it later from a Mac "
+        + "that can reach them."
+
+    /// The transcript shown when the scanned code's key could not be read.
+    ///
+    /// Nothing is enrolled in that case — see the `clientID` branch in
+    /// `AddDeviceView.confirm(name:)`, which has no id to enroll under and
+    /// refuses to invent one — so this says what happened rather than leaving
+    /// the transcript empty. An empty transcript would show no sentence at all,
+    /// and "nothing was written and nothing was said" is the one outcome here
+    /// that a person cannot detect.
+    ///
+    /// It takes the transcript's slot rather than a new screen: the box under
+    /// ``couldNotReachAll`` is the place this flow already puts "what the thing
+    /// that talked to the runners had to say", and one sentence is what there is
+    /// to say. The reply code is still shown, because the new device still needs
+    /// it — the runners in it simply have no line for this key.
+    static let unreadableKey =
+        "Far Cooler couldn’t read the new device’s key, so no runner was updated."
 }
