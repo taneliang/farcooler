@@ -138,18 +138,29 @@ fun AgentScreen(model: AppModel, ref: TerminalRef, connection: Connection) {
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    if (error != null) {
+                    val trouble = error
+                    if (trouble != null) {
                         Text(
                             "Could not load this session",
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            error!!,
+                            trouble.sentence,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
                         )
+                        // The core's own words, below a sentence rather than
+                        // standing in for one. Under this headline and in this
+                        // face they used to read as Far Cooler's account of the
+                        // runner; they are not, and for a runner nobody can
+                        // reach they are also the only account anyone gets, so
+                        // they stay.
+                        trouble.transcript?.let {
+                            Spacer(Modifier.height(10.dp))
+                            DetailBox(it)
+                        }
                     } else {
                         Text(
                             "Say something to begin.",
@@ -164,17 +175,23 @@ fun AgentScreen(model: AppModel, ref: TerminalRef, connection: Connection) {
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    if (error != null) {
+                    error?.let { trouble ->
                         item {
                             // A stale error banner rather than a blanked
                             // screen: a failed poll is not a disconnection, so
                             // the last known transcript stays up while this
                             // device tries again.
                             Text(
-                                error!!,
+                                trouble.sentence,
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.tertiary,
                             )
+                            // Rare by construction, and that is what makes it
+                            // bearable at the head of a transcript already
+                            // scrolled to its tail: the failure that actually
+                            // happens on a phone is a dropped link, which
+                            // carries a written sentence and no transcript.
+                            trouble.transcript?.let { DetailBox(it) }
                         }
                     }
                     items(transcript.rows.size, key = { transcript.rows[it].id }) { index ->

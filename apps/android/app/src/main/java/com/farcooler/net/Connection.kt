@@ -53,7 +53,21 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
         /** First contact: the host's fingerprint, awaiting a human. */
         data class NeedsApproval(val fingerprint: String) : Phase
 
-        data class Failed(val message: String) : Phase
+        /**
+         * Stopped, with a reason, and a next move that depends on which reason.
+         *
+         * [kind] is what that reason MEANS. Defaulted to reading it off
+         * [message], which is right for everything the core hands back and
+         * wrong for the sentences this app writes itself: [Identity]'s three
+         * name the exact key step that failed and none of them contains the
+         * substring [Failure.of] looks for, so they used to be filed under
+         * "Can't connect" — an unclassified failure — with the app's own
+         * diagnosis sitting in the slot reserved for a runner's output.
+         */
+        data class Failed(
+            val message: String,
+            val kind: Failure = Failure.of(message),
+        ) : Phase
 
         data object Connected : Phase
 
@@ -261,9 +275,18 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
         val key = Identity.privateKey()
         if (key == null) {
             if (mine == attempt) {
+                // Named rather than classified: [Identity] already said which
+                // step failed, and this side knows without reading its words
+                // that the answer is "there is no key".
+                //
+                // Its sentence only. The platform's words about a Keystore
+                // write belong on the screen that manages this device's key —
+                // see `AuthorizeScreen`, which shows them — and not in a runner row
+                // whose subject is a runner that never got asked anything.
                 _phase.value = Phase.Failed(
-                    Identity.lastError
-                        ?: "This device has no SSH key and one could not be generated."
+                    Identity.lastError?.sentence
+                        ?: "This device has no SSH key and one could not be generated.",
+                    Failure.NO_IDENTITY,
                 )
             }
             return
@@ -338,8 +361,9 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
         val key = Identity.privateKey()
         if (key == null) {
             _phase.value = Phase.Failed(
-                Identity.lastError
-                    ?: "This device has no SSH key and one could not be generated."
+                Identity.lastError?.sentence
+                    ?: "This device has no SSH key and one could not be generated.",
+                Failure.NO_IDENTITY,
             )
             return
         }
@@ -389,7 +413,7 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
             return
         }
 
-        when (Failure.of(next.message)) {
+        when (next.kind) {
             Failure.KEY_REJECTED,
             Failure.HOST_KEY_CHANGED,
             Failure.NO_IDENTITY,

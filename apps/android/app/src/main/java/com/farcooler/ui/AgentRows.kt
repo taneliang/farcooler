@@ -60,6 +60,9 @@ import com.farcooler.model.ToolStatus
 import com.farcooler.model.TranscriptRow
 import com.farcooler.model.active
 import com.farcooler.model.doneCount
+import com.farcooler.model.isInformational
+import com.farcooler.model.sentence
+import com.farcooler.model.transcript
 
 /**
  * One row of a rendered agent transcript.
@@ -256,43 +259,6 @@ private fun ToolRowView(
 }
 
 /**
- * A tool's raw output, bounded.
- *
- * A tool that returns thousands of lines inside an expanding row froze the Mac
- * app when it was drawn whole, and a phone has less to spend. So the text is
- * clamped and says how much it clamped.
- */
-@Composable
-private fun DetailBox(text: String, maxLines: Int = 24) {
-    val lines = remember(text) { text.split("\n") }
-    val shown = remember(lines) { lines.take(maxLines).joinToString("\n") }
-    Column {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 6.dp)
-        ) {
-            Text(
-                shown,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-            )
-        }
-        if (lines.size > maxLines) {
-            Text(
-                "… ${lines.size - maxLines} more lines",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-    }
-}
-
-/**
  * A subagent's dispatch, and everything it did, as one object.
  *
  * The row and what it opens are one fill, so an expanded block cannot drift to
@@ -422,45 +388,42 @@ fun names(pending: PendingPermission, row: TranscriptRow): Boolean =
  */
 @Composable
 private fun GapRow(reason: GapReason) {
-    // LoadEmpty is news, not a failure — a fresh chat pane has nothing to
-    // restore because nothing happened yet, and the same "something broke"
-    // language a real gap gets would tell the user the opposite of the truth.
-    // It still gets a row: "nothing was lost" is exactly what this row exists
-    // to say plainly rather than leave the user to infer from silence.
-    val informational = reason is GapReason.LoadEmpty
     val tint =
-        if (informational) MaterialTheme.colorScheme.onSurfaceVariant
+        if (reason.isInformational) MaterialTheme.colorScheme.onSurfaceVariant
         else MaterialTheme.colorScheme.tertiary
+    val transcript = reason.transcript
 
-    Row(
+    // The sentence, then — where there is one — the adapter's account of the
+    // refusal beneath it. Both come from [GapReason]: the words are the same
+    // words the Mac and the phone draw, and the metrics here stay this app's
+    // own, which is the part that should differ.
+    Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(tint.copy(alpha = 0.12f))
             .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(
-            if (informational) Icons.Filled.Info else Icons.Filled.ContentCut,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            when (reason) {
-                GapReason.RingTrimmed -> "Some earlier history was trimmed and is not shown here."
-                GapReason.LoadUnsupported -> "This session could not be loaded from where it left off."
-                GapReason.LoadEmpty ->
-                    "This session has no recorded turns yet — there is nothing to restore."
-                is GapReason.LoadFailed ->
-                    "This session could not be loaded from where it left off: ${reason.detail}"
-                GapReason.Unparsed -> "Something happened here that this version cannot show."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            color = tint,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (reason.isInformational) Icons.Filled.Info else Icons.Filled.ContentCut,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            // Tinted here rather than on the whole row, so the box below keeps
+            // its own voice: that text is the adapter's, and coloring it like
+            // this row's sentence is the app appearing to have said it.
+            Text(
+                reason.sentence,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                color = tint,
+            )
+        }
+        if (transcript != null) DetailBox(transcript)
     }
 }
 

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -445,6 +446,7 @@ private fun TerminalSurface(
         is TerminalSession.Phase.Failed -> Status(
             title = "Could not load",
             message = current.message,
+            transcript = current.transcript,
         )
 
         is TerminalSession.Phase.Live -> {
@@ -466,8 +468,22 @@ private fun TerminalSurface(
     }
 }
 
+/**
+ * [message] is prose this app wrote; [transcript] is what the host said.
+ *
+ * Drawn as two different kinds of thing on purpose. The host's answer used to
+ * arrive as [message] and be set in the same line, so a lowercase fragment off
+ * an SSH channel read as Far Cooler's own account of the pane. Nothing is
+ * dropped — those words are the whole diagnosis of a pane nobody can read — it
+ * simply goes where output goes.
+ */
 @Composable
-private fun Status(spinner: Boolean = false, title: String, message: String? = null) {
+private fun Status(
+    spinner: Boolean = false,
+    title: String,
+    message: String? = null,
+    transcript: String? = null,
+) {
     Box(
         Modifier.fillMaxSize().background(Color(TerminalPalette.BACKGROUND)),
         contentAlignment = Alignment.Center,
@@ -486,6 +502,16 @@ private fun Status(spinner: Boolean = false, title: String, message: String? = n
                     color = Color.White.copy(alpha = 0.7f),
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 32.dp),
+                )
+            }
+            // Bounded to a readable column rather than the full width of a
+            // landscape phone, and left-aligned inside itself: a transcript
+            // centered with the prose above it stops looking like output.
+            if (transcript != null) {
+                Spacer(Modifier.height(12.dp))
+                DetailBox(
+                    transcript,
+                    modifier = Modifier.padding(horizontal = 32.dp).widthIn(max = 360.dp),
                 )
             }
         }

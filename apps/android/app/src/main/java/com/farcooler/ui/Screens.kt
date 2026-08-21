@@ -202,8 +202,17 @@ fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Identity.lastError?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            // The sentence in the app's voice, and — only where there is one —
+            // the platform's own words below it rather than inside it. Two of
+            // the three things [Identity] can report name their own cause and
+            // carry no transcript, so no empty box appears under them.
+            Identity.lastError?.let { trouble ->
+                Text(
+                    trouble.sentence,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                trouble.transcript?.let { DetailBox(it) }
             }
         }
     }

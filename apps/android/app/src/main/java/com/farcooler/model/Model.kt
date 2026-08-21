@@ -262,3 +262,28 @@ val Fleet.landingTerminal: Terminal?
         all.firstOrNull { StateKind.parse(it.state) == StateKind.RUNNING }?.let { return it }
         return all.firstOrNull()
     }
+
+/**
+ * What went wrong, in two voices.
+ *
+ * [sentence] is Far Cooler talking: what happened, and — where this side can
+ * know one — what to do about it. [transcript] is what the runner, the client
+ * core or the platform said back, and the two are never joined. A runner's
+ * words spliced onto the app's with a colon read as the app's own account of a
+ * machine it cannot see, which is the shape `776d3e0`, `e0f72df` and `c42c352`
+ * removed from the Mac and the phone.
+ *
+ * Nothing is discarded by keeping them apart. For a runner nobody can reach,
+ * that text is the only diagnosis there is; it goes in a `DetailBox`, where
+ * output goes, rather than where prose does.
+ *
+ * Null where there is nothing to show, so a screen can ask before it reserves
+ * the space — an empty box under a sentence reads as output that failed to
+ * arrive.
+ *
+ * One type, not one per surface. The Apple apps spell this idea four times —
+ * `AgentStream.Trouble`, `ChangesStore.Trouble`, `SheetFailure` and
+ * `TerminalSession.Phase.failed` — because a framework boundary stands between
+ * some of them. Nothing stands between these screens.
+ */
+data class Trouble(val sentence: String, val transcript: String? = null)

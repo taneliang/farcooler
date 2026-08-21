@@ -182,4 +182,67 @@ class AgentEventTest {
             (event as AgentEvent.CommandsAvailable).commands,
         )
     }
+
+    // The gap copy, pinned the way `AgentKitTests` pins the Mac's and the
+    // phone's. These sentences are the same sentences on all three platforms,
+    // and one gap read on two devices is the only way a drift between them ever
+    // shows itself.
+
+    private val everyReason = listOf(
+        GapReason.RingTrimmed,
+        GapReason.LoadUnsupported,
+        GapReason.LoadEmpty,
+        GapReason.LoadFailed("permission denied"),
+        GapReason.Unparsed,
+    )
+
+    @Test
+    fun noGapLeaksItsOwnCaseName() {
+        // A case name is an internal identifier. The sentence is the whole of
+        // what reaches a person.
+        for (reason in everyReason) {
+            val sentence = reason.sentence
+            assertTrue(sentence, sentence.isNotEmpty())
+            for (name in listOf("RingTrimmed", "LoadUnsupported", "LoadEmpty", "LoadFailed", "Unparsed")) {
+                assertTrue(sentence, !sentence.contains(name))
+            }
+        }
+    }
+
+    @Test
+    fun aFailedLoadKeepsItsWordsOutOfTheSentence() {
+        val reason = GapReason.LoadFailed("permission denied")
+        assertTrue(reason.sentence, !reason.sentence.contains("permission denied"))
+        assertTrue(reason.sentence, !reason.sentence.contains(":"))
+        assertEquals("permission denied", reason.transcript)
+    }
+
+    @Test
+    fun onlyAFailedLoadHasAnythingToShow() {
+        // Null rather than empty, so a row can ask before it reserves the
+        // space: an empty box under a sentence reads as output that failed to
+        // arrive.
+        assertNull(GapReason.RingTrimmed.transcript)
+        assertNull(GapReason.LoadUnsupported.transcript)
+        assertNull(GapReason.LoadEmpty.transcript)
+        assertNull(GapReason.Unparsed.transcript)
+        assertNull(GapReason.LoadFailed("").transcript)
+    }
+
+    @Test
+    fun anAgentThatCannotReopenReadsDifferentlyFromARefusal() {
+        // These two used to be the same sentence, word for word, and the only
+        // thing telling them apart was the adapter text spliced onto the end of
+        // one of them.
+        assertTrue(
+            GapReason.LoadUnsupported.sentence != GapReason.LoadFailed("x").sentence
+        )
+    }
+
+    @Test
+    fun onlyAnEmptySessionIsNews() {
+        assertTrue(GapReason.LoadEmpty.isInformational)
+        assertTrue(!GapReason.RingTrimmed.isInformational)
+        assertTrue(!GapReason.LoadFailed("x").isInformational)
+    }
 }

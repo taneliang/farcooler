@@ -7,6 +7,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.farcooler.core.ClientCore
+import com.farcooler.model.Trouble
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -49,9 +50,14 @@ object Identity {
      * to store it, and generated another next time — so the device
      * authenticated with one key while displaying a different one to authorise,
      * which looks exactly like a host rejecting a correct key.
+     *
+     * A [Trouble] rather than a string, because one of the three ways this is
+     * set has the platform's own words to add and the other two do not. Those
+     * words used to be spliced onto the end of the sentence with a colon, which
+     * made a Java exception read as Far Cooler's account of the Keystore.
      */
     @Volatile
-    var lastError: String? = null
+    var lastError: Trouble? = null
         private set
 
     /**
@@ -77,7 +83,7 @@ object Identity {
         read()?.let { return it }
         val name = deviceName()
         val pair = ClientCore.generateKey(name) ?: run {
-            lastError = "This device could not generate an SSH key."
+            lastError = Trouble("This device could not generate an SSH key.")
             return null
         }
         if (!write(pair.first)) return null
@@ -131,7 +137,8 @@ object Identity {
             // generate a new identity, which the runner will then refuse until
             // this device is authorized again. Saying so is what stops that
             // reading as a mysterious rejection.
-            lastError = "The stored SSH key could not be read; this device needs authorizing again."
+            lastError =
+                Trouble("The stored SSH key could not be read; this device needs authorizing again.")
             preferences.edit().remove(CIPHERTEXT).remove(IV).apply()
             null
         }
@@ -146,7 +153,13 @@ object Identity {
             .putString(IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
             .commit()
     }.getOrElse {
-        lastError = "This device’s SSH key could not be stored: ${it.message}"
+        // The sentence says what this side knows — the write did not take — and
+        // the Keystore's own words go under it rather than onto the end of it.
+        // No cause named and no retry promised: from here a `KeyStoreException`
+        // could be a locked key, a strongbox that refused, or a full store, and
+        // guessing sends somebody to change a setting that was never the
+        // problem. See `Enrollment.note(about:outcome:)` in the Mac app.
+        lastError = Trouble("This device’s SSH key couldn’t be stored.", it.message)
         false
     } == true
 

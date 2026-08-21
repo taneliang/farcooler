@@ -114,6 +114,72 @@ sealed interface GapReason {
     }
 }
 
+/**
+ * What a gap SAYS, as opposed to what it is.
+ *
+ * A [GapReason] case name is an internal identifier and never reaches a person
+ * — these sentences are the whole of what does. Matched word for word to
+ * AgentKit's `GapReason.sentence`, which the Mac and the phone both read from:
+ * one gap read on two devices is the only way a drift between them ever shows
+ * itself, and this row is the third device.
+ */
+val GapReason.sentence: String
+    get() = when (this) {
+        GapReason.RingTrimmed -> "Some earlier history was trimmed and isn’t shown here."
+        // Cause and consequence, both knowable: the agent said at `initialize`
+        // that it has no `session/load`, so nothing before this point was ever
+        // going to be here. This used to say, word for word, what
+        // [GapReason.LoadFailed]
+        // says — so the only thing telling a refusal apart from an agent that
+        // cannot reopen sessions at all was the adapter text spliced onto the
+        // end of one of them, which is exactly the text that had to stop being
+        // part of the sentence.
+        GapReason.LoadUnsupported ->
+            "This agent can’t reopen an earlier session, so the conversation starts here."
+        GapReason.LoadEmpty ->
+            "This session has no recorded turns yet — there’s nothing to restore."
+        is GapReason.LoadFailed -> "This session couldn’t be reopened from where it left off."
+        GapReason.Unparsed -> "Something happened here that this version can’t show."
+    }
+
+/**
+ * The adapter's own words about a refusal, to be shown as output.
+ *
+ * Null for every case with nothing to show, so a row can ask before it reserves
+ * the space — an empty box under a sentence reads as output that failed to
+ * arrive. Only [GapReason.LoadFailed] carries any: it is the one case where
+ * this side knows a load was refused and cannot know why, and the adapter's
+ * message is then the only account anyone has of it.
+ *
+ * The other four name their own cause, and a transcript under a sentence that
+ * already answers the question is noise.
+ *
+ * AgentKit spells this `detail`, and this cannot: [GapReason.LoadFailed] has a
+ * property of that name, a member beats an extension, and a call site holding
+ * the concrete type would silently get the raw string with no null and no empty
+ * check. `transcript` is what [com.farcooler.model.Trouble] already calls the
+ * other side's own words, so the two agree.
+ */
+val GapReason.transcript: String?
+    get() = when (val reason = this) {
+        is GapReason.LoadFailed -> reason.detail.takeIf { it.isNotEmpty() }
+        // Listed rather than defaulted, so a case added later has to say.
+        GapReason.RingTrimmed,
+        GapReason.LoadUnsupported,
+        GapReason.LoadEmpty,
+        GapReason.Unparsed,
+        -> null
+    }
+
+/**
+ * News, not a failure — so a row can say so in its color and its icon.
+ *
+ * A fresh chat pane has nothing to restore because nothing happened yet, and
+ * dressing that in the same "something broke" language as a real gap would tell
+ * the user the opposite of the truth.
+ */
+val GapReason.isInformational: Boolean get() = this == GapReason.LoadEmpty
+
 data class Diff(val path: String, val oldText: String?, val newText: String)
 
 data class PlanEntry(val content: String, val priority: String, val status: String)

@@ -41,6 +41,7 @@ import com.farcooler.data.Runner
 import com.farcooler.model.QuickAgents
 import com.farcooler.model.TaskSlug
 import com.farcooler.model.TerminalPresets
+import com.farcooler.model.Trouble
 import com.farcooler.model.Workspace
 import com.farcooler.net.Connection
 import kotlinx.coroutines.delay
@@ -198,7 +199,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
     var agentId by remember { mutableStateOf("claude") }
     var model_ by remember { mutableStateOf("") }
     var phase by remember { mutableStateOf<String?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
+    var failure by remember { mutableStateOf<Trouble?>(null) }
     var working by remember { mutableStateOf(false) }
 
     val connected = connections.filter { it.phase.value is Connection.Phase.Connected }
@@ -290,9 +291,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                     Text(it, style = MaterialTheme.typography.bodySmall)
                 }
             }
-            failure?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            }
+            failure?.let { SheetFailure(it) }
 
             Button(
                 onClick = {
@@ -319,7 +318,19 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                                 terminal = "",
                             )
                         }.getOrElse {
-                            failure = "Could not create the worktree: ${it.message}"
+                            // One sentence about the step, and the runner's
+                            // answer below it rather than joined to it with a
+                            // colon. No cause named: from here this could be a
+                            // path that is not a repository, a branch that
+                            // exists, or a runner that stopped answering
+                            // mid-call, and picking one would send somebody to
+                            // fix something that was never wrong.
+                            //
+                            // Word for word the phone's, in `TaskComposer`:
+                            // this sheet and that one are the same flow, and
+                            // two spellings of one failure is the drift the
+                            // whole rule exists to prevent.
+                            failure = Trouble("Couldn’t create the worktree.", it.message)
                             phase = null
                             working = false
                             return@launch
@@ -335,7 +346,13 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                                 QuickAgents.preset(agentId, model_),
                             )
                         }.getOrElse {
-                            failure = "Created the worktree, but could not start $agentName: ${it.message}"
+                            // What DID happen stays in the sentence — the
+                            // worktree exists, and somebody who reads only this
+                            // line still knows there is one to go back to.
+                            failure = Trouble(
+                                "Created the worktree, but couldn’t start $agentName.",
+                                it.message,
+                            )
                             phase = null
                             working = false
                             return@launch
@@ -360,8 +377,11 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                                 // than typing a task description into a question
                                 // it hasn't finished asking.
                                 com.farcooler.model.AgentActivity.BLOCKED -> {
-                                    failure =
-                                        "$agentName is waiting on a question. Open it to answer."
+                                    // Cause and next action, both known. No
+                                    // box: nothing came back to show, and
+                                    // nothing needs to.
+                                    failure = Trouble(
+                                        "$agentName is waiting on a question. Open it to answer.")
                                     phase = null
                                     working = false
                                     return@launch
@@ -371,9 +391,9 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                             if (ready) break
                         }
                         if (!ready) {
-                            failure =
+                            failure = Trouble(
                                 "$agentName was not ready within a minute. Nothing was sent — " +
-                                    "open it to check on it."
+                                    "open it to check on it.")
                             phase = null
                             working = false
                             return@launch
@@ -387,7 +407,10 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                             // the same packet as pasted text, not as submit.
                             target.writeRaw(terminalId, "0d")
                         }.onFailure {
-                            failure = "Started $agentName, but could not send the task: ${it.message}"
+                            failure = Trouble(
+                                "Started $agentName, but couldn’t send the task.",
+                                it.message,
+                            )
                             phase = null
                             working = false
                             return@launch
@@ -426,7 +449,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var branch by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
+    var failure by remember { mutableStateOf<Trouble?>(null) }
 
     // Per runner, because the branch is created on the one holding the project.
     val branchPrefix by (connection?.branchPrefix
@@ -523,14 +546,12 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
             )
 
             Text(
-                "A workspace is one git worktree and one branch. Its name is the worktree’s " +
+                "A workspace is one Git worktree and one branch. Its name is the worktree’s " +
                     "folder, so it can’t be changed later.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            failure?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            }
+            failure?.let { SheetFailure(it) }
 
             Button(
                 onClick = {
@@ -540,7 +561,12 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                         runCatching {
                             target.createWorkspace(repositoryId, trimmedName, effectiveBranch)
                         }.onFailure {
-                            failure = it.message
+                            // It used to be the whole red line, so whatever the
+                            // core said about a path or a branch was set in the
+                            // face this sheet writes its own refusals in — the
+                            // two above this button among them. Same sentence
+                            // as Quick Task's, because it is the same failure.
+                            failure = Trouble("Couldn’t create the worktree.", it.message)
                             working = false
                             return@launch
                         }
@@ -676,6 +702,26 @@ fun Picker(
                 )
             }
         }
+    }
+}
+
+/**
+ * One failure, drawn the way this app draws them: the sentence, then the
+ * transcript under it.
+ *
+ * One composable rather than a copy in each sheet, so two sheets reporting the
+ * same kind of failure cannot come to render it differently. Its Apple twin is
+ * `SheetFailureSection` in `apps/ios/FarCooler/FleetView.swift`.
+ */
+@Composable
+private fun SheetFailure(trouble: Trouble) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            trouble.sentence,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        trouble.transcript?.takeIf { it.isNotEmpty() }?.let { DetailBox(it) }
     }
 }
 

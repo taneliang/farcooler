@@ -2,9 +2,11 @@ package com.farcooler.net
 
 import android.util.Base64
 import com.farcooler.core.ClientCore
+import com.farcooler.core.DisconnectedException
 import com.farcooler.model.AgentEvent
 import com.farcooler.model.Sequenced
 import com.farcooler.model.Transcript
+import com.farcooler.model.Trouble
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -44,8 +46,18 @@ class AgentStream(
     private val _revision = MutableStateFlow(0L)
     val revision: StateFlow<Long> = _revision.asStateFlow()
 
-    private val _connectionError = MutableStateFlow<String?>(null)
-    val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
+    /**
+     * Why this pane is not showing a conversation: a sentence this app wrote,
+     * and — only where it has no account of its own — the core's own words.
+     *
+     * A [Trouble] rather than one string, because one string is how the core's
+     * words came to be drawn as the app's. Two of the three assignments below
+     * are sentences somebody wrote; the third was `e.message`, and it went into
+     * the same `Text` under the same headline as the others, so there was no
+     * way to read it as anything but Far Cooler talking.
+     */
+    private val _connectionError = MutableStateFlow<Trouble?>(null)
+    val connectionError: StateFlow<Trouble?> = _connectionError.asStateFlow()
 
     private var pollTask: Job? = null
 
@@ -103,8 +115,8 @@ class AgentStream(
             // not: it is a pane that has no shim behind it, and the two want
             // different words.
             if (batch.epoch == 0L && batch.events.isEmpty() && transcript.rows.isEmpty()) {
-                _connectionError.value =
-                    "No agent session on pane ${terminal.take(8)} yet. It may still be starting."
+                _connectionError.value = Trouble(
+                    "No agent session on pane ${terminal.take(8)} yet. It may still be starting.")
                 return
             }
 
@@ -134,7 +146,22 @@ class AgentStream(
             // the reader about, and the banner would outlive the screen it was
             // about.
             e.rethrowIfCancellation()
-            _connectionError.value = e.message ?: "The host stopped answering."
+            // A dropped link is not a mystery and not this pane's problem to
+            // solve: [Connection] is already reconnecting, so this says so and
+            // then goes quiet, which is what clearing on the next good batch
+            // does.
+            _connectionError.value = if (e is DisconnectedException) {
+                Trouble("The connection to this runner dropped. Reconnecting…")
+            } else {
+                // The one arm with nothing written about it, so the sentence
+                // says only what is known — that the read did not finish — and
+                // the core's words go in the box below it. Naming a cause here
+                // would be inventing one: from this side of an SSH link the
+                // cause is unknowable, and a guess sends somebody to change a
+                // setting that was never the problem. See
+                // `Enrollment.note(about:outcome:)` in the Mac app.
+                Trouble("The request that reads it didn’t finish.", e.message)
+            }
         } finally {
             _revision.value = transcript.revision
         }

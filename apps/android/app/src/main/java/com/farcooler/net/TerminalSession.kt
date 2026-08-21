@@ -62,7 +62,11 @@ class TerminalSession(
     sealed interface Phase {
         data object Connecting : Phase
         data object NotLive : Phase
-        data class Failed(val message: String) : Phase
+        /**
+         * A sentence this app wrote, and — where it has none of its own — the
+         * host's answer to put under it. See [humanFailure].
+         */
+        data class Failed(val message: String, val transcript: String? = null) : Phase
         data object Live : Phase
     }
 
@@ -537,7 +541,7 @@ class TerminalSession(
         streaming = false
         failedAttaches += 1
         if (failedAttaches >= MAX_ATTACH_ATTEMPTS) {
-            if (error != null) _phase.value = Phase.Failed(error)
+            if (error != null) _phase.value = humanFailure(error)
             // Everything the streaming path set up goes before the polling path
             // starts. Falling back used to start the poll loop and leave the
             // rest running, so a stream that was still delivering fed the
@@ -785,8 +789,45 @@ class TerminalSession(
      */
     private fun report(error: Exception) {
         val message = error.message.orEmpty()
-        _phase.value = if (message == "resource not found") Phase.NotLive else Phase.Failed(message)
+        _phase.value = if (message == "resource not found") Phase.NotLive else humanFailure(message)
     }
+
+    /**
+     * What actually goes under "Could not load".
+     *
+     * The core's word for a dead link is "not connected", which is right for a
+     * log and wrong for a screen: it is lowercase, it is a fragment, and it
+     * describes the FFI's session slot rather than anything the person holding
+     * the phone did or can do about it. It is also the line they saw — one SSH
+     * hiccup anywhere empties that slot and every call afterwards is answered
+     * with it, so this is the most common failure text there is, not an edge.
+     *
+     * Matched on the string rather than on `DisconnectedException`, which
+     * [report] could have offered, because the other caller could not: a stream
+     * reports its end as a bare JSON string with no type left on it (see
+     * `farcooler_client_stream_start`). One rule both paths can use beats a
+     * typed check here and an untyped one two hundred lines away that drift
+     * apart.
+     *
+     * Everything else is KEPT, whole. A message from the host is the host's to
+     * word, and rewriting all of them into one apology would throw away the
+     * only clue a real failure carries. It is no longer kept in the sentence's
+     * slot, though — passing it through as the phase's only string put an SSH
+     * fragment under a headline this app wrote, in the app's own face, with
+     * nothing to mark where Far Cooler stopped speaking.
+     *
+     * The sentence says only what this side knows: the read did not finish. No
+     * cause named, because from here the cause is unknowable and a guess sends
+     * somebody to change a setting that was never the problem — see
+     * `Enrollment.note(about:outcome:)` in the Mac app — and no retry promised,
+     * because nothing here performs one.
+     */
+    private fun humanFailure(message: String): Phase =
+        if (message == "not connected") {
+            Phase.Failed("The connection to this runner dropped. Reconnecting…")
+        } else {
+            Phase.Failed("The request that reads this pane didn’t finish.", message)
+        }
 
     // MARK: - Input
 

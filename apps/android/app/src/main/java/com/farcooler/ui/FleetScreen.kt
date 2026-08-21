@@ -428,7 +428,7 @@ private fun RunnerStatusRow(
             }
 
             is Connection.Phase.Failed -> {
-                val kind = Connection.Failure.of(current.message)
+                val kind = current.kind
                 Text(
                     failureHeadline(kind, connection),
                     style = MaterialTheme.typography.bodySmall,
@@ -439,6 +439,17 @@ private fun RunnerStatusRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Only where the app has no diagnosis of its own, which is the
+                // same scoping the Mac and the phone use: a transcript under a
+                // sentence that already names the cause and the fix is noise.
+                //
+                // Nothing is discarded. For a runner nobody can reach, this
+                // text is the only diagnosis that exists and somebody debugging
+                // one needs it. It just goes where output goes rather than
+                // where prose does, so the app stops appearing to have said it.
+                if (kind == Connection.Failure.OTHER && current.message.isNotEmpty()) {
+                    DetailBox(current.message, modifier = Modifier.padding(top = 6.dp))
+                }
                 Row {
                     when (kind) {
                         Connection.Failure.HOST_KEY_CHANGED ->
@@ -463,7 +474,7 @@ private fun failureHeadline(kind: Connection.Failure, connection: Connection): S
     Connection.Failure.KEY_REJECTED -> "Not authorized yet"
     Connection.Failure.HOST_KEY_CHANGED -> "This host’s key changed"
     Connection.Failure.UNREACHABLE -> "Can’t reach ${connection.host.address}"
-    Connection.Failure.DAEMON_MISSING -> "Far Cooler isn’t installed there"
+    Connection.Failure.DAEMON_MISSING -> "Far Cooler isn’t installed"
     Connection.Failure.NO_IDENTITY -> "This device has no key"
     Connection.Failure.KEY_NOT_TRUSTED -> "Key not trusted"
     Connection.Failure.STOPPED -> "Stopped waiting"
@@ -475,9 +486,13 @@ private fun failureHeadline(kind: Connection.Failure, connection: Connection): S
  * not. The raw string crossing up from Rust is written for whoever is reading a
  * log — lowercase, ending in things like "(os error 61)" — and putting that in
  * front of someone who just wants their runner back is asking them to
- * translate. Two cases keep it deliberately: the changed host key, whose
- * message carries the two fingerprints being compared, and the unclassified
- * failure, where the core's account is the only account there is.
+ * translate.
+ *
+ * The `else` arm is not raw text. Four of its five cases are sentences somebody
+ * wrote — the changed host key's carries the two fingerprints being compared
+ * and comes from `crates/client/src/ssh.rs`, the other three from `Connection`
+ * and `Identity` — and they are the core's words only in the sense that the
+ * core is where they are stored.
  */
 private fun failureDetail(
     kind: Connection.Failure,
@@ -493,6 +508,18 @@ private fun failureDetail(
 
     Connection.Failure.DAEMON_MISSING ->
         "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
+
+    // The undiagnosed arm, and the only one where `message` is whatever came
+    // back rather than something written to be read. Those words go in a
+    // `DetailBox` above instead of standing here as the app's own account of
+    // the runner.
+    //
+    // No cause named, deliberately: from this side the cause is unknowable, and
+    // a guess sends somebody to loosen an sshd setting that was never the
+    // problem. See `Enrollment.note(about:outcome:)` in the Mac app. Nor any
+    // retry promised — whether one is under way is `retryOrGiveUp`'s
+    // business, and the button below is the only offer this row makes.
+    Connection.Failure.OTHER -> "The attempt to reach it didn’t finish."
 
     else -> message
 }

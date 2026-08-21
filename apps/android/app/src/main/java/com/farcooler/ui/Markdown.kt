@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -106,6 +107,58 @@ private fun Marker(symbol: String, text: String, depth: Int, secondary: Boolean)
             modifier = Modifier.width(20.dp),
         )
         Body(text, secondary)
+    }
+}
+
+/**
+ * A bounded, scrolling block of output — a tool's, a runner's, or the core's.
+ *
+ * The Apple apps' `DetailBox` (`AgentKit/MarkdownView.swift`) in Compose: one
+ * fill a tonal step above whatever it sits on, monospaced, and never in the
+ * app's own voice. It lives beside the markdown drawing for the same reason
+ * theirs does — every surface that has output to show reaches for it, so it
+ * belongs with the drawing rather than inside the one screen that happened to
+ * need it first.
+ *
+ * Bounded twice, against two different failures. [maxLines] is the measuring
+ * cap: a tool that returns thousands of lines is measured whole on every
+ * layout pass, and drawing one froze the Mac app. The height cap is the layout
+ * one — this box now appears in bottom sheets whose primary button sits under
+ * it, and a box free to grow pushes that button off the screen. It scrolls
+ * both ways rather than wrapping, because a wrapped command line looks like
+ * two commands.
+ */
+@Composable
+fun DetailBox(text: String, maxLines: Int = 24, modifier: Modifier = Modifier) {
+    val lines = remember(text) { text.split("\n") }
+    val shown = remember(lines) { lines.take(maxLines).joinToString("\n") }
+    Column(modifier) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 180.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .verticalScroll(rememberScrollState())
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+            Text(
+                shown,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        // Said, not silently done. Output that stops early without saying so is
+        // output somebody can draw the wrong conclusion from.
+        if (lines.size > maxLines) {
+            Text(
+                "… ${lines.size - maxLines} more lines",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
     }
 }
 

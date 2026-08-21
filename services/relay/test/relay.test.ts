@@ -620,7 +620,7 @@ describe('the alert push body', () => {
     await pair('user_1', 'mine')
     await post(
       '/v1/notify',
-      { title: 'cursor failed', subtitle: "Its last turn didn't finish", terminal: 'term-1', status: 'done', label: 'cursor', failed: true },
+      { title: 'cursor failed', subtitle: "Its last turn didn’t finish", terminal: 'term-1', status: 'done', label: 'cursor', failed: true },
       'mine',
     )
 
