@@ -568,6 +568,26 @@ enum TerminalCmd {
     /// one-shot dump is not the same as opening a terminal, and clearing a
     /// notification nobody read is worse than not sending one.
     Seen { terminal: String },
+    /// Say which terminals are on a person's screen right now, so the runner
+    /// does not interrupt them about one they are already reading.
+    ///
+    /// Not a command anybody types: it is how the Mac app tells its runner what
+    /// its window is showing, several times a minute, and it is a REPLACEMENT
+    /// each time — the whole set, so naming nothing releases whatever was named
+    /// before. The runner believes it for a few seconds only, so a client that
+    /// dies stops suppressing on its own.
+    ///
+    /// Full ids are taken as they are, without a fleet listing to resolve them
+    /// against. That is the difference between this and every other terminal
+    /// command here: those are typed by a person who knows eight characters of
+    /// an id, and this one runs on a clock, where a `terminal.list` round trip
+    /// per beat would be the expensive half of a call whose whole job is to be
+    /// cheap. A prefix still works — anything that is not a full UUID sends the
+    /// listing once, for all of them together.
+    Watching {
+        /// The terminals on screen. None at all means none are.
+        terminals: Vec<String>,
+    },
 
     // -- Agent channel: `terminal.set_pane_mode` and friends. Every one of
     // these is a daemon RPC, not a byte stream, so — like `Seen`/`Stop` above
@@ -2053,6 +2073,49 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(req_for("terminal.seen", id)).await?;
             println!("marked {} seen", short(id));
+        }
+
+        TerminalCmd::Watching { terminals } => {
+            // Parsed before connecting, so the common case — an app sending
+            // ids it already holds in full — never touches `terminal.list`.
+            // `resolve` is reached only when something here is not a whole
+            // UUID, and then once for the whole set rather than once each.
+            let mut link = connect_to(runner).await?;
+            let mut ids: Vec<Uuid> = Vec::with_capacity(terminals.len());
+            let mut needs_lookup = false;
+            for t in &terminals {
+                match Uuid::parse_str(t) {
+                    Ok(id) => ids.push(id),
+                    Err(_) => {
+                        needs_lookup = true;
+                        break;
+                    }
+                }
+            }
+            if needs_lookup {
+                let known = list_terminals(&mut link, None).await?;
+                ids.clear();
+                for t in &terminals {
+                    ids.push(uuid_of(&resolve(&known, t, |x| &x.id, "terminal")?.id));
+                }
+            }
+            link.call(with(
+                req("terminal.watching"),
+                request::Payload::TerminalsWatched(farcooler_protocol::v1::TerminalsWatched {
+                    terminal_ids: ids.iter().copied().map(id_bytes).collect(),
+                }),
+            ))
+            .await?;
+            // Named rather than counted, because the one thing a person running
+            // this by hand needs to see is WHICH terminals they just claimed —
+            // and an empty line, which is the release, is the answer that would
+            // otherwise be indistinguishable from the command doing nothing.
+            let named: Vec<String> = ids.iter().map(|id| short(*id)).collect();
+            if named.is_empty() {
+                println!("watching nothing");
+            } else {
+                println!("watching {}", named.join(" "));
+            }
         }
 
         // Agent channel. Every payload here names its own `terminal_id`

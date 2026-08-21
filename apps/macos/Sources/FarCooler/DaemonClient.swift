@@ -1,4 +1,9 @@
 import AgentKit
+// `NSApp.isActive` and `didResignActiveNotification`, which are how this file
+// answers "is anybody actually looking at this window" — see `reportWatching`.
+import AppKit
+// `AnyCancellable`, for the one notification this client subscribes to itself.
+import Combine
 import Foundation
 
 /// Where a runner's connection stands.
@@ -76,6 +81,7 @@ final class DaemonClient: ObservableObject {
 
     init(target: String = "") {
         self.target = target.trimmingCharacters(in: .whitespaces)
+        watchResignations()
     }
 
     /// Cancels the retry loop rather than leaving it to run against a client
@@ -87,7 +93,14 @@ final class DaemonClient: ObservableObject {
     /// break the cycle. It would keep spawning `farcooler … events` and
     /// `workspace list` subprocesses against a runner this app no longer
     /// shows anywhere, invisible except in `ps`.
-    deinit { retryTask?.cancel() }
+    deinit {
+        retryTask?.cancel()
+        // For the same reason, one clock over: `reportWatching`'s renewal
+        // re-arms itself, so a client nobody holds anymore would go on
+        // spawning a `farcooler terminal watching` every three seconds against
+        // a runner this app no longer shows.
+        watchingTask?.cancel()
+    }
 
     @Published private(set) var state: HostState = .connecting
 
@@ -1563,6 +1576,121 @@ final class DaemonClient: ObservableObject {
     /// sending one.
     func markSeen(_ terminal: String) async {
         _ = await run(["terminal", "seen", terminal], background: true)
+    }
+
+    /// The terminals this window last told the runner it was showing, and when.
+    ///
+    /// Full ids, not the eight-character `short` every other command here takes.
+    /// A short id costs the CLI a `terminal.list` round trip to resolve, and this
+    /// call runs on a clock — see the `Watching` command in
+    /// `crates/cli/src/main.rs`, which takes a whole UUID as it is for exactly
+    /// this reason.
+    private var watching: [String] = []
+    private var watchingSentAt: Date = .distantPast
+    /// The renewal in flight, so arming a second one replaces the first rather
+    /// than running beside it. Same one-slot rule `retryTask` follows.
+    private var watchingTask: Task<Void, Never>?
+    /// Cancelled with this client, so a renewal cannot outlive the runner it
+    /// was talking about.
+    private var resignObserver: AnyCancellable?
+
+    /// How often a standing claim of attention is renewed.
+    ///
+    /// Three seconds, which is this app's one existing cadence — see
+    /// `changesInboxFloor` beside it and the phone's poll — and comfortably
+    /// inside the ten seconds the runner believes a claim for
+    /// (`WATCHED_TTL_MS` in `crates/daemon/src/watch.rs`). Two consecutive
+    /// failures are therefore survivable without a pane somebody is plainly
+    /// watching starting to buzz them.
+    private static let watchingFloor: TimeInterval = 3
+
+    /// Tell this runner which panes are in front of the person right now, so it
+    /// does not push a notification about an agent they are already reading.
+    ///
+    /// The complaint in the owner's words: a codex pane open, a question asked,
+    /// an answer given, and a buzz on the wrist about a reply already on screen.
+    /// `markSeen` above cannot fix that and never could — it says a pane HAS
+    /// been read, on the fleet event AFTER the turn ended, by which time the
+    /// push has crossed the relay. This says a pane IS being read, in advance,
+    /// so it is already true at the moment the turn ends.
+    ///
+    /// Suppression on the runner is per terminal and across every device,
+    /// because it is one person: this Mac saying its window can see a pane is
+    /// what silences the watch on their wrist. That is the whole point.
+    ///
+    /// The WHOLE visible set each time, replacing whatever this client said
+    /// last, so clicking from one pane to the next releases the first in the
+    /// same call that claims the second. An empty array is a real and important
+    /// call — "I am looking at nothing" — which is what leaving the app sends.
+    ///
+    /// **A timer, in the app that deliberately deleted its timers.** The
+    /// distinction is what the clock is for. `EventStream` replaced POLLING —
+    /// asking a quiet runner over and over what it already told us — and this
+    /// asks nothing: it is an assertion with an expiry, and an assertion that is
+    /// not renewed has to lapse or a crashed window would silence a terminal
+    /// forever. It also cannot be hung off fleet events, which was tried on
+    /// paper first: a working agent whose signal line happens not to move for
+    /// ten seconds — one long tool call — would let the claim expire in exactly
+    /// the seconds before it finishes, which is the one moment this has to be
+    /// right. It runs only while the app is frontmost with panes on screen, and
+    /// costs one `farcooler` invocation per three seconds over the ssh control
+    /// socket the CLI already keeps open — the same order as the
+    /// `changes inbox` read this app already makes on the same clock while an
+    /// agent works.
+    func reportWatching(_ terminals: [String]) {
+        // A window that is not frontmost is not showing anybody anything, and
+        // saying otherwise would suppress the notification that exists for
+        // precisely that case. `ContentView.markVisibleSeen` gates on this too;
+        // it is repeated here because the renewal below fires on its own clock,
+        // long after the call that armed it.
+        let claim = NSApp.isActive ? terminals : []
+        let changed = claim != watching
+        watchingTask?.cancel()
+        watchingTask = nil
+
+        if changed || Date().timeIntervalSince(watchingSentAt) >= Self.watchingFloor {
+            // Stamped before the call and stamped even when it fails, on the
+            // same terms as `changesInboxReadAt`: a runner that refuses this in
+            // a millisecond must not thereby be asked far more often than one
+            // that answers it. The floor is a floor on ATTEMPTS.
+            watching = claim
+            watchingSentAt = Date()
+            Task { [weak self] in
+                _ = await self?.run(["terminal", "watching"] + claim, background: true)
+            }
+        }
+
+        // Nothing left to renew. A released claim is the end of it — the runner
+        // forgets it on its own within `WATCHED_TTL_MS` even if this last call
+        // never lands.
+        guard !claim.isEmpty else { return }
+        watchingTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.watchingFloor))
+            guard !Task.isCancelled else { return }
+            self?.reportWatching(terminals)
+        }
+    }
+
+    /// Give the claim back the moment the window stops being frontmost.
+    ///
+    /// Rather than waiting for it to age out on the runner. An agent finishing
+    /// while you are in another app is precisely what the notification exists
+    /// for, so the seconds between switching away and the claim expiring are
+    /// seconds this feature would spend swallowing the notification it is least
+    /// entitled to swallow.
+    ///
+    /// Observed here rather than in the view, unlike `didBecomeActive`, because
+    /// the view's own hook is `markVisibleSeen`, which begins by refusing to do
+    /// anything at all when the app is not active — so there is no hook there
+    /// that resigning could reach. This is also what makes the renewal above
+    /// safe to leave running: whichever of the two notices first, the claim
+    /// goes.
+    private func watchResignations() {
+        resignObserver = NotificationCenter.default
+            .publisher(for: NSApplication.didResignActiveNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.reportWatching([]) }
+            }
     }
 
     /// Delete a terminal's record. Refused by the daemon while it is running.

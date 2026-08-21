@@ -1505,6 +1505,25 @@ async fn dispatch(
             session.mark_seen(id("terminal")?).await?;
             Ok(json!({}))
         }
+        // What this client has on screen right now, so the runner does not
+        // buzz a wrist about an agent the person is sitting there reading. The
+        // call above says a pane HAS been read; this one says a pane is BEING
+        // read, which is the difference between clearing a badge and not
+        // raising a notification in the first place.
+        //
+        // Answers `{}` for the same reason `terminal.seen` does, and with more
+        // reason: nothing on the runner changed, so there is nothing to echo.
+        //
+        // Unparseable ids are dropped rather than refused. This is sent on a
+        // poll's clock and a caller with one bad entry in a set of four should
+        // still have the other three believed — the daemon drops them the same
+        // way, at `terminal.watching` in `crates/daemon/src/rpc.rs`.
+        "terminal.watching" => {
+            let terminals: Vec<uuid::Uuid> =
+                strings("terminals").iter().filter_map(|s| s.parse().ok()).collect();
+            session.report_watching(&terminals).await?;
+            Ok(json!({}))
+        }
         // The screen, base64 so it survives JSON.
         //
         // A capture carries escape sequences and arbitrary bytes; JSON carries

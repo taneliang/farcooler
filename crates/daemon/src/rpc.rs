@@ -211,6 +211,13 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "terminal.dismiss_lost"
         | "terminal.restart"
         | "terminal.seen"
+        // Saying what is on your screen sits at the same scope as saying you
+        // have read it, and for the same reason: both change what this runner
+        // tells the owner. `read` is the scope handed to something that should
+        // only see the SHAPE of the fleet, and a read-scoped client that could
+        // assert attention could hold a terminal silent — which is a way of
+        // withholding a notification, not a way of looking at one.
+        | "terminal.watching"
         | "terminal.remove"
         // Reading a screen is `control`, not `read`.
         //
@@ -1237,6 +1244,38 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
+            // What this client currently has in front of a person, replacing
+            // whatever it last said.
+            //
+            // The counterpart to `terminal.seen` and deliberately NOT a variant
+            // of it: `seen` is a fact about the past that ends `Done`, where
+            // this is a claim about the present that decides whether a
+            // transition is allowed to interrupt anybody. They also fire at
+            // different moments, which is the entire point — `seen` arrives on
+            // the poll AFTER an agent finished, and by then the push has already
+            // buzzed a wrist. See `crate::watch::attention`.
+            //
+            // Nothing on the runner changes, so nothing is echoed back: an
+            // `Empty` rather than the terminal rows, since the rows this
+            // describes are the rows the caller was already looking at when it
+            // made the call. It also takes no `target_resource_id` — there are
+            // several ids, a Mac window shows a whole tiled layout at once —
+            // and ids it cannot parse are dropped rather than refused, because
+            // a heartbeat is not a place to fail a client over one bad entry.
+            //
+            // Answering an unpaired or unenrolled client costs nothing and is
+            // still correct: a runner nobody has paired for push sends no push
+            // to suppress, and the claim expires on its own either way.
+            "terminal.watching" => {
+                let Some(request::Payload::TerminalsWatched(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let terminals: Vec<Uuid> =
+                    p.terminal_ids.iter().filter_map(|id| wire::parse_id(id)).collect();
+                self.watcher.report_watching(self.who(), terminals);
+                Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
+            }
+
             "terminal.remove" => {
                 let id = Self::target(&req)?;
                 svc.remove_terminal(id).await?;
@@ -1750,6 +1789,7 @@ mod tests {
             "workspace.hide",
             "workspace.unhide",
             "terminal.seen",
+            "terminal.watching",
             "terminal.remove",
             "repository_root.remove",
             "workspace.remove_worktree",

@@ -1567,9 +1567,38 @@ struct ContentView: View {
     /// bookkeeping call, not a user-initiated action, and a runner gone quiet
     /// for a moment must not put "Cannot do that" on screen just because an
     /// agent on it happened to finish.
+    ///
+    /// It also tells each runner what this window is SHOWING, which is the same
+    /// judgement one beat earlier — see `DaemonClient.reportWatching`. Marking
+    /// seen ends a `done` that already happened; the claim of attention stops
+    /// the notification about it being raised in the first place, and the
+    /// difference between the two is the buzz on a wrist about a reply already
+    /// on screen. Reported from here rather than from hooks of its own because
+    /// there is one question underneath both — "is a person looking at this
+    /// pane right now" — and every path that answers it already funnels
+    /// through this: a fleet event, coming back to the app, and a selection
+    /// change. Anywhere those are wrong about what is on screen, `seen` has
+    /// been wrong in the same way for as long as it has existed, and one
+    /// answer is the point.
     private func markVisibleSeen() {
         guard NSApp.isActive else { return }
-        guard let ws = detailWorkspace, let client = store.client(for: ws) else { return }
+        let client = detailWorkspace.flatMap { store.client(for: $0) }
+        // Full ids, not `short`: resolving an abbreviation costs the CLI a
+        // fleet listing, and this runs on a clock. See the `Watching` command
+        // in `crates/cli/src/main.rs`.
+        client?.reportWatching(visibleTerminals.map(\.id))
+        // And every OTHER runner is told it is showing nothing. A window puts
+        // exactly one runner's workspace in the detail pane, so switching from a
+        // pane on one runner to a pane on another would otherwise leave the
+        // first still believing its pane is being watched — silent for as long
+        // as the claim takes to age out, on the runner you just walked away
+        // from. Every runner, and outside the guard below, because selecting
+        // NOTHING is a way of walking away too: `visibleTerminals` is empty
+        // then, and so is the claim every runner should be holding.
+        for other in store.clients.values where other !== client {
+            other.reportWatching([])
+        }
+        guard let client else { return }
         for terminal in visibleTerminals where terminal.agent == .done {
             // The daemon is idempotent, but this is not free: each call is a
             // CLI subprocess, and a fleet event arrives for every terminal on

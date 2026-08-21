@@ -60,6 +60,32 @@ const BACKSTOP_INTERVAL: Duration = Duration::from_secs(60);
 /// long anyone would stare at a stale sidebar and far above what the scan costs.
 const RECONCILE_BACKSTOP: Duration = Duration::from_secs(30);
 
+/// How long a client's word that it is looking at a pane stays good for.
+///
+/// The freshness bound on `terminal.watching`, and the whole reason a claim of
+/// attention is safe to act on at all. Suppression is the one thing in this
+/// module that makes a notification NOT happen, so the failure that matters is
+/// not a stale claim being ignored — it is a stale claim being believed: a
+/// phone that crashed, a Mac that was suspended with the lid closed, an SSH
+/// link that died mid-poll, any of which leaves a terminal that will never
+/// interrupt anyone again. Nothing has to be cleaned up by the client that went
+/// away, because the claim expires whether or not anybody notices it did.
+///
+/// Ten seconds, which is three of the phone's three-second polls and three of
+/// the Mac's beats on the same cadence — see `Connection.reportWatching` and
+/// `DaemonClient.reportWatching`. Two consecutive round trips can be lost to a
+/// slow link without a person who is plainly sitting there watching being
+/// buzzed about the pane in front of them, and a client that genuinely stops
+/// costs at most ten seconds of silence on the one terminal it named. Shorter
+/// would make a hiccup on a hotel network read as absence; longer would spend
+/// the window in the direction where the mistake is a missed notification
+/// rather than a redundant one.
+///
+/// The ten seconds is a ceiling and rarely the actual cost: both apps send an
+/// empty claim as they go to the background or lose focus, which releases every
+/// terminal they named at once. See `Watcher::report_watching`.
+const WATCHED_TTL_MS: i64 = 10_000;
+
 /// How many events a slow client may fall behind before it starts losing them.
 ///
 /// Losing them is the right failure. Dropping the connection would be worse
@@ -468,6 +494,50 @@ pub struct Watcher {
     /// own clock, the same gate-plus-backstop shape `reconcile_worktrees`
     /// already has for git.
     log_watcher: crate::log_watch::LogWatcher,
+    /// What each connected client says it is currently showing a person.
+    ///
+    /// A std mutex, on the same terms as `worktree_marks` above: every access is
+    /// a map lookup over a handful of entries and none of them is held across an
+    /// await. It is deliberately NOT part of `state` — `state` is what the
+    /// runner has DERIVED about a pane, and this is what a client has ASSERTED
+    /// about a person, which is a different kind of fact with a different
+    /// lifetime. Folding the two together would also mean an entry could only
+    /// exist for a terminal the sampler has already met, and a claim about a
+    /// pane arrives whenever the client happens to poll.
+    ///
+    /// Keyed by client rather than by terminal, and that is what makes a claim
+    /// withdrawable. A terminal-keyed map can only ever be added to — nothing in
+    /// it records WHO said so, so a client that navigates to another pane has no
+    /// way to say it stopped looking at the first, and the only release left is
+    /// waiting out `WATCHED_TTL_MS`. Keyed this way, a client's next call
+    /// REPLACES its whole set, so switching panes releases the old one in the
+    /// same round trip that claims the new one. See `TerminalsWatched` in the
+    /// proto for why the wire carries the whole set rather than a watch/unwatch
+    /// pair.
+    ///
+    /// The key is `Peer::client_id`, or `"-"` for a caller that named no device
+    /// — every local socket client, which on this runner means the Mac app
+    /// itself. Two local clients therefore share one slot, and that is accepted
+    /// rather than worked around: a runner is one Unix user and one person, the
+    /// Mac app is the only local caller that sends this, and inventing a
+    /// per-connection identity for it would buy multi-user semantics for a
+    /// product that has one user.
+    watched: std::sync::Mutex<HashMap<String, Watched>>,
+}
+
+/// One client's claim about what it is showing, and when it said so.
+///
+/// A `Vec` rather than a `HashSet`: it holds a Mac window's tiled layout, which
+/// is single digits, and a linear scan of four ids is faster than hashing one.
+struct Watched {
+    /// When this claim arrived, in Unix milliseconds. What `WATCHED_TTL_MS` is
+    /// measured against, and the reason a client that goes away silently stops
+    /// silencing anything.
+    at: i64,
+    /// The terminals this client said were in front of a person. Empty is a
+    /// real and useful claim — "I am looking at nothing" — which is what an app
+    /// sends as it backgrounds.
+    terminals: Vec<Uuid>,
 }
 
 /// One terminal as this tick found it, before anything is made of it.
@@ -1787,6 +1857,137 @@ fn card_orphaned(
     !settled || state_moved || activity_moved.is_some()
 }
 
+/// Whether a claim of attention made at `at` is still worth believing at `now`.
+///
+/// Its own function, tiny as it is, for the reason `should_refresh_card` is one:
+/// this is the freshness bound, it is the only thing standing between a client
+/// that crashed and a terminal that never notifies again, and a bound that is
+/// spelled inline at its one call site is a bound nothing can test. See
+/// `WATCHED_TTL_MS`.
+///
+/// A claim dated in the FUTURE is expired, not believed. `now_millis` reads the
+/// wall clock, so an NTP correction or a laptop resuming can move it backwards
+/// under a claim already recorded — and a bare `age < TTL` reads a negative age
+/// as freshly watched, which is a terminal silenced for as long as the jump was
+/// large. Erring towards expiry is erring towards sending the notification,
+/// which is the side of this to be wrong on: the mistake is then one buzz too
+/// many, and the other way it is every buzz missing.
+fn watch_is_live(at: i64, now: i64) -> bool {
+    let age = now.saturating_sub(at);
+    (0..WATCHED_TTL_MS).contains(&age)
+}
+
+/// Write down what one client says it is showing, replacing what it said last.
+///
+/// Free rather than a method for the reason `card_orphaned` is free: the two
+/// properties that matter here — a client's later word REPLACES its earlier one,
+/// and a client that stops speaking stops counting — are the properties the
+/// whole feature's safety rests on, and neither is testable through a `Watcher`
+/// without standing up a `Service`, a SQLite handle and a tmux server to ask a
+/// question about a `HashMap`.
+///
+/// Expired rows are dropped on the way past. There is no timer here to sweep on
+/// and no need for one: the map is bounded by the number of devices that have
+/// ever connected, `anyone_watching` checks freshness itself so a lingering row
+/// silences nothing, and clearing them here means a device revoked months ago
+/// does not keep a slot forever.
+fn record_watch(
+    watched: &mut HashMap<String, Watched>,
+    client: &str,
+    terminals: Vec<Uuid>,
+    now: i64,
+) {
+    watched.retain(|_, w| watch_is_live(w.at, now));
+    watched.insert(client.to_string(), Watched { at: now, terminals });
+}
+
+/// Whether ANY client's live claim covers this terminal.
+///
+/// Any, because there is one account and one person: a Mac with the pane on
+/// screen speaks for the watch on their wrist as much as for itself, and that
+/// is the complaint being fixed rather than a corner cut. A claim from a client
+/// that has gone quiet is skipped rather than removed, so reading this can stay
+/// on a shared reference and cannot be the thing that decides a device is gone.
+fn anyone_watching(watched: &HashMap<String, Watched>, terminal: Uuid, now: i64) -> bool {
+    watched.values().any(|w| watch_is_live(w.at, now) && w.terminals.contains(&terminal))
+}
+
+/// What a transition earns once it is known whether anyone is looking at it.
+///
+/// Three outcomes rather than a bool, because "do not alert" and "do nothing"
+/// are not the same instruction on a phone. A live card is a rectangle the relay
+/// keeps up until something ends it, and the ONLY thing that has ever ended one
+/// for a finished agent is the `done` push — so suppressing that push without
+/// saying anything else would leave a card reading "Working" over an agent that
+/// stopped ten minutes ago. That is the exact bug `5398dba` was written to
+/// close, reintroduced through a different door.
+enum Attention {
+    /// Send the notice its tier earns, alert and all. What every transition did
+    /// before this existed, and what all but two of them still do.
+    Announce,
+    /// Say nothing, and take the live card down SILENTLY — `crate::push::retire`
+    /// rather than `crate::push::notify`. No banner, no sound, no buzz on a
+    /// wrist, and no card left over claiming a run that has ended.
+    Retire,
+    /// Say nothing at all, and leave the card exactly where it is.
+    Hold,
+}
+
+/// Whether to interrupt the owner about a transition, and what to do instead.
+///
+/// The rule the whole feature reduces to: **you do not get told about an agent
+/// you are demonstrably watching right now**. `watched` is the daemon's answer
+/// to that — a client with a pane on screen and its app frontmost, saying so
+/// within `WATCHED_TTL_MS` — and it is per TERMINAL and across every device,
+/// because it is one person: a Mac focused on the pane silences the wrist beside
+/// it, which is precisely the complaint. Everything else is unchanged, and
+/// "everything else" is deliberately most of it: another pane finishing, the
+/// same pane finishing while the app is in the background, the window sitting
+/// behind a browser, a phone in a pocket, a client that stopped saying anything
+/// ten seconds ago.
+///
+/// `Done` retires rather than announces. The turn IS over, so the card has
+/// nothing left behind it and must come down; what it must not do is buzz, since
+/// the reply is already on the screen being read. `terminal.seen` will move the
+/// row off `Done` on the client's next poll, as it always has — this changes
+/// what the owner is TOLD, never what the runner believes.
+///
+/// `Blocked` raises nothing, and takes nothing down. Nothing, because you are
+/// looking at the question — that is the whole request. And nothing DOWN because
+/// a blocked agent is mid-turn: `card_still_earned` says a run is still behind
+/// that card, and retiring it would take the one notification this product
+/// exists for off a lock screen with nothing able to put it back, since `Blocked
+/// -> Blocked` is not a transition and pushes nothing. The card holds its last
+/// working line until the turn moves again — stale by a line, and honest about
+/// there being a run in progress.
+///
+/// The cost of `Hold`, stated because it is real: look at a question, walk away
+/// without answering it, and no alert will ever arrive for it. That is accepted
+/// rather than overlooked. The alternative — remembering the withheld notice and
+/// firing it once the claim expires — buzzes about a question you have already
+/// read every time you switch to a browser for eleven seconds, which is a worse
+/// version of the bug being fixed here.
+///
+/// `Working` never reaches this. It is pushed from `announce` rather than from
+/// the transition site, it is silent by construction (the relay refuses to alert
+/// on it), and a live card that goes on updating for a watched pane is right:
+/// the phone in your pocket is not the screen you are looking at.
+fn attention(next: AgentActivity, watched: bool) -> Attention {
+    if !watched {
+        return Attention::Announce;
+    }
+    match next {
+        AgentActivity::Done => Attention::Retire,
+        AgentActivity::Blocked => Attention::Hold,
+        // Nothing else produces a notice at all — `notification` answers `None`
+        // for every remaining tier — so this arm is reached only if that ever
+        // changes. `Announce` is the safe default of the two: a redundant
+        // notification is a nuisance, and a swallowed one is the product not
+        // working.
+        _ => Attention::Announce,
+    }
+}
+
 impl Watcher {
     pub fn new(service: Arc<Service>) -> Arc<Self> {
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
@@ -1797,6 +1998,7 @@ impl Watcher {
             worktree_marks: std::sync::Mutex::new(HashMap::new()),
             logs: std::sync::Mutex::new(HashMap::new()),
             log_watcher: crate::log_watch::LogWatcher::start(crate::log_watch::roots()),
+            watched: std::sync::Mutex::new(HashMap::new()),
             push: reqwest::Client::builder()
                 // A notification is worth a few seconds and no more. The
                 // sampling loop is not held either way — see
@@ -1965,6 +2167,48 @@ impl Watcher {
             let Some(pairing) = crate::push::Pairing::load() else { return };
             crate::push::retire(&client, &pairing, &terminals).await;
         });
+    }
+
+    /// Record what one client is showing a person right now.
+    ///
+    /// The whole set, replacing whatever this client last said, so a client that
+    /// navigated away releases the pane it left in the same call that claims the
+    /// one it arrived at — and an empty set, which is what both apps send as they
+    /// go to the background, releases everything they held at once. See
+    /// `Watcher::watched` for why this is keyed by client and not by terminal.
+    ///
+    /// Synchronous and cheap on purpose. This is called several times a minute
+    /// by every connected client with a pane on screen, from a dispatcher that
+    /// has a person waiting on the round trip; it takes a std mutex over a map
+    /// with one entry per device and does nothing else.
+    ///
+    /// Stale entries are dropped on every call rather than swept on a timer.
+    /// There is no timer to hang a sweep on that would not also be a timer this
+    /// module does not otherwise need, and the map is bounded either way by the
+    /// number of enrolled devices — but leaving expired rows in it would mean a
+    /// device revoked six months ago still occupying a slot, and the entry that
+    /// is expensive to keep is the one nobody will ever look at again.
+    /// Expiry-on-write cannot resurrect anything: `is_watched` checks freshness
+    /// itself, so a row that outlives its TTL between two calls silences
+    /// nothing.
+    pub fn report_watching(&self, client: &str, terminals: Vec<Uuid>) {
+        record_watch(&mut self.watched.lock().unwrap(), client, terminals, now_millis());
+    }
+
+    /// Whether anybody is looking at this terminal, as of `now`.
+    ///
+    /// Any client's live claim is enough, and no client's identity is consulted
+    /// beyond having one: there is one account and one person here, so a Mac
+    /// with the pane on screen speaks for the wrist as much as for itself. That
+    /// is the point rather than a simplification — the complaint being fixed is
+    /// a notification arriving on a watch about a pane being read on a Mac.
+    ///
+    /// `now` is passed in rather than read here so the decision about a terminal
+    /// uses the same clock as everything else the sampling loop decided about it
+    /// in that tick, and so the rule is testable without waiting out ten real
+    /// seconds.
+    fn is_watched(&self, terminal: Uuid, now: i64) -> bool {
+        anyone_watching(&self.watched.lock().unwrap(), terminal, now)
     }
 
     /// Subscribe a connection to the push stream.
@@ -2759,36 +3003,56 @@ impl Watcher {
             // is still unthrottled: `last_card_push` was just cleared above, so
             // the refresh in `announce` fires on this very tick.
             if let Some(next) = activity_moved.filter(|next| *next != AgentActivity::Working) {
-                // Both from `record`, not from the locals, which were moved
-                // into the entry above. Same values, and taking them off the
-                // record is what keeps the card and the row quoting one
-                // question — and agreeing about one turn — rather than two
-                // reads of each.
-                self.push_if_paired(
-                    id,
-                    next,
-                    &command,
-                    Quoted {
-                        // The one fact here that is NOT off the record, because
-                        // it is not a fact about the pane's state at all: a
-                        // workspace's name does not change while a turn ends,
-                        // and this is the sample's own copy of the row the
-                        // outer loop walked to reach this terminal.
-                        workspace: &workspace,
-                        question: record.blocked_question.as_deref(),
-                        // Off the same record as everything else here, for the
-                        // reason the comment above gives: the card, the row and
-                        // the banner must be quoting one read of this pane, not
-                        // three.
-                        //
-                        // `said`, not `feed.lines().last()`. They are two cuts
-                        // of one message and only one of them is a sentence's
-                        // beginning — see `farcooler_core::feed::Feed::said`.
-                        said: record.feed.said(),
-                    },
-                    record.turn_failed,
-                    record.turn_started_at,
-                );
+                // And whether the person is sitting there watching it happen.
+                //
+                // Asked here, at the transition, rather than after the fact —
+                // which is the whole reason `terminal.watching` exists beside
+                // `terminal.seen`. `seen` is the same judgement arriving one
+                // beat too late: a client reports it on its NEXT poll, up to
+                // three seconds after the turn ended, by which time the push
+                // has crossed the relay and buzzed a wrist. A claim of
+                // attention is made in advance and is therefore already true
+                // when the moment comes.
+                match attention(next, self.is_watched(id, now)) {
+                    // Nothing goes out, and the live card comes down silently
+                    // on the same batched request the orphan sweep uses — see
+                    // `retire_cards` at the end of this pass for why one
+                    // request rather than one per terminal. Deliberately the
+                    // same list `card_orphaned` fills: a `done` that nobody
+                    // needs to be told about and a card whose run has vanished
+                    // are the same instruction to the relay, and naming a
+                    // terminal twice costs a `SELECT` that finds nothing the
+                    // second time.
+                    Attention::Retire => orphaned.push(id),
+                    // A watched agent asking a question. See `attention` for
+                    // why this leaves the card alone rather than retiring it.
+                    Attention::Hold => {}
+                    Attention::Announce => self.push_if_paired(
+                        id,
+                        next,
+                        &command,
+                        Quoted {
+                            // The one fact here that is NOT off the record, because
+                            // it is not a fact about the pane's state at all: a
+                            // workspace's name does not change while a turn ends,
+                            // and this is the sample's own copy of the row the
+                            // outer loop walked to reach this terminal.
+                            workspace: &workspace,
+                            question: record.blocked_question.as_deref(),
+                            // Off the same record as everything else here, for the
+                            // reason the comment above gives: the card, the row and
+                            // the banner must be quoting one read of this pane, not
+                            // three.
+                            //
+                            // `said`, not `feed.lines().last()`. They are two cuts
+                            // of one message and only one of them is a sentence's
+                            // beginning — see `farcooler_core::feed::Feed::said`.
+                            said: record.feed.said(),
+                        },
+                        record.turn_failed,
+                        record.turn_started_at,
+                    ),
+                }
             }
             // A command failing is a STATE transition, not an activity one —
             // `activity_moved` never fires for it, so without this a `cargo
@@ -4971,6 +5235,157 @@ mod tests {
         // picks the phone up because of the alert beside it. Retiring here as
         // well would race that end and win.
         assert!(!card_orphaned(true, true, Some(AgentActivity::Done), Some(false)));
+    }
+
+    /// Nobody is looking, so everything is announced exactly as it was.
+    ///
+    /// The regression guard for the change, not a demonstration of it. The
+    /// overwhelming majority of transitions happen with no client watching that
+    /// pane — a phone in a pocket, a Mac behind a browser, a fleet of six agents
+    /// where five are off screen — and every one of them must reach the owner
+    /// the way it did before any of this existed.
+    #[test]
+    fn an_unwatched_agent_is_announced_exactly_as_before() {
+        assert!(matches!(attention(AgentActivity::Done, false), Attention::Announce));
+        assert!(matches!(attention(AgentActivity::Blocked, false), Attention::Announce));
+        // A turn that DIED is a `Done` like any other here: `attention` decides
+        // whether to interrupt, and `notification` decides what the interruption
+        // says. Keeping those apart is what stops a failed turn being silently
+        // swallowed by a rule about attention.
+        assert!(matches!(attention(AgentActivity::Done, false), Attention::Announce));
+    }
+
+    /// The bug, as reported: a codex pane open on screen, a question asked, an
+    /// answer given, and a phone buzzing about a reply already being read.
+    #[test]
+    fn an_agent_being_watched_does_not_buzz_the_person_watching_it() {
+        // The turn ends under your eyes. Nothing is sent — and the live card
+        // still has to come down, because the `done` push was the only thing
+        // that ever ended one, and suppressing it without retiring would leave
+        // a card reading "Working" over an agent that stopped. That is
+        // `5398dba`'s bug reintroduced through a different door.
+        assert!(matches!(attention(AgentActivity::Done, true), Attention::Retire));
+
+        // The agent asks a question you are already looking at. Nothing goes
+        // out, and nothing comes down either: a blocked agent is MID-TURN, its
+        // card is still earned — see `card_still_earned` — and taking it down
+        // would remove the one notification this product exists for with
+        // nothing able to put it back, since `Blocked -> Blocked` is not a
+        // transition and pushes nothing.
+        assert!(matches!(attention(AgentActivity::Blocked, true), Attention::Hold));
+    }
+
+    /// A claim of attention that nobody has renewed stops being believed.
+    ///
+    /// The single most important property here, because it is the only one whose
+    /// failure is silent: everything else about this feature fails by sending a
+    /// notification somebody did not need, and this one fails by a terminal that
+    /// never notifies anybody again. A phone that crashed, a Mac suspended with
+    /// the lid closed, an SSH link that died mid-poll — none of them get to run
+    /// any cleanup, so the claim has to expire on its own.
+    #[test]
+    fn a_claim_nobody_renews_expires_on_its_own() {
+        let at = 1_000_000;
+        // Just made, and just under the bound: still watching.
+        assert!(watch_is_live(at, at));
+        assert!(watch_is_live(at, at + WATCHED_TTL_MS - 1));
+        // The client stopped saying so. From here on the pane notifies again,
+        // which is the behavior of a runner that has never heard of this
+        // feature — the state this must always be able to fall back to.
+        assert!(!watch_is_live(at, at + WATCHED_TTL_MS));
+        assert!(!watch_is_live(at, at + 60_000));
+        // A clock that went BACKWARDS — an NTP correction, a laptop resuming —
+        // expires the claim rather than extending it for the length of the
+        // jump. Saturating arithmetic on an `i64` of milliseconds is what makes
+        // that true rather than an underflow that reads as freshly watched.
+        assert!(!watch_is_live(at, at - 60_000));
+    }
+
+    /// Three seconds of slack, because that is what a poll is worth.
+    ///
+    /// Both clients renew on a three-second clock, so the bound has to swallow
+    /// a lost round trip or two without deciding that somebody plainly sitting
+    /// there watching has gone away. Stated as a test rather than left implicit
+    /// in a constant, because shortening the TTL and lengthening a poll are
+    /// changes made in different files, months apart, by people who would not
+    /// otherwise find out they had just reintroduced the buzz.
+    #[test]
+    fn the_bound_survives_two_missed_polls() {
+        let poll = 3_000;
+        assert!(WATCHED_TTL_MS > poll * 3, "a claim must outlive three polls of its own clock");
+    }
+
+    /// A client can take back what it said, and nothing else can take it back
+    /// for them.
+    ///
+    /// The reason the map is keyed by client and not by terminal. Keyed by
+    /// terminal it could only ever be added to — nothing in it would record who
+    /// said so — and a person who clicked from one pane to the next would leave
+    /// the first silenced with no way to say otherwise.
+    #[test]
+    fn a_client_replaces_its_own_claim_and_only_its_own() {
+        let mac = "-";
+        let phone = "iphone";
+        let reading = Uuid::now_v7();
+        let next_door = Uuid::now_v7();
+        let elsewhere = Uuid::now_v7();
+        let now = 1_000_000;
+        let mut watched = HashMap::new();
+
+        // A Mac window showing a tiled layout: two panes on screen at once, and
+        // a pane beside the focused one is as much on screen as the focused
+        // one. Both are watched.
+        record_watch(&mut watched, mac, vec![reading, next_door], now);
+        assert!(anyone_watching(&watched, reading, now));
+        assert!(anyone_watching(&watched, next_door, now));
+        assert!(!anyone_watching(&watched, elsewhere, now));
+
+        // The phone, on another pane entirely. Two clients, two claims, and
+        // neither disturbs the other.
+        record_watch(&mut watched, phone, vec![elsewhere], now);
+        assert!(anyone_watching(&watched, reading, now));
+        assert!(anyone_watching(&watched, elsewhere, now));
+
+        // The Mac navigates away, to one pane. Its previous claim goes with the
+        // call rather than waiting out `WATCHED_TTL_MS` — an agent finishing in
+        // `next_door` a second from now is news again, immediately.
+        record_watch(&mut watched, mac, vec![reading], now + 1);
+        assert!(anyone_watching(&watched, reading, now + 1));
+        assert!(!anyone_watching(&watched, next_door, now + 1));
+        // And the phone's unrelated claim is untouched by any of it.
+        assert!(anyone_watching(&watched, elsewhere, now + 1));
+
+        // The Mac goes to the background and says so: an empty claim, which is
+        // the release both apps send rather than simply falling silent.
+        record_watch(&mut watched, mac, Vec::new(), now + 2);
+        assert!(!anyone_watching(&watched, reading, now + 2));
+        assert!(anyone_watching(&watched, elsewhere, now + 2));
+    }
+
+    /// A client that crashes cannot leave a terminal silent forever.
+    ///
+    /// The failure this feature has to be safe against, exercised through the
+    /// map rather than through the predicate alone: a phone that is killed by
+    /// iOS mid-poll runs no cleanup and sends no release, and the pane it named
+    /// has to start notifying again anyway.
+    #[test]
+    fn a_client_that_vanishes_stops_silencing_the_pane_it_left() {
+        let pane = Uuid::now_v7();
+        let now = 1_000_000;
+        let mut watched = HashMap::new();
+        record_watch(&mut watched, "iphone", vec![pane], now);
+        assert!(anyone_watching(&watched, pane, now));
+
+        // Suspended. No release, no further calls, nothing to observe from
+        // here at all.
+        assert!(anyone_watching(&watched, pane, now + WATCHED_TTL_MS - 1));
+        assert!(!anyone_watching(&watched, pane, now + WATCHED_TTL_MS));
+
+        // And the row itself is gone the next time anything writes, so a
+        // device that never comes back does not keep a slot for the life of the
+        // daemon.
+        record_watch(&mut watched, "ipad", vec![], now + WATCHED_TTL_MS);
+        assert!(!watched.contains_key("iphone"));
     }
 
     /// The gate that keeps this off the hot path.

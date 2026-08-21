@@ -129,6 +129,7 @@ message Request {
     ChangesInboxRequest changes_inbox = 65;
     ClientEnroll client_enroll = 66;
     ClientRevoke client_revoke = 67;
+    TerminalsWatched terminals_watched = 68;
   }
 }
 
@@ -1135,6 +1136,39 @@ message TerminalResize {
 message TerminalStop {
   bool force = 1;
   optional string typed_confirmation = 2;
+}
+
+// The terminals a client has in front of a person RIGHT NOW, and the whole set
+// of them.
+//
+// A claim about attention, not about state, and the only one in this protocol:
+// everything else a client sends asks the runner to do something or to describe
+// something, where this says "I can see these, so do not interrupt me about
+// them". What it buys is the notification nobody wants — an agent answering a
+// question you are sitting there reading, arriving on your wrist a second later
+// — and `crates/daemon/src/watch.rs`'s `attention` is where it is spent. See
+// `terminal.seen`, which is the same judgement made one beat too late: it runs
+// on the NEXT poll, up to three seconds after the turn ended, by which point
+// the push has already gone.
+//
+// The WHOLE set on every call, replacing whatever this client said last, rather
+// than a watch/unwatch pair. Two verbs would need the daemon to reconstruct a
+// client's set from a stream of edits it may have missed the middle of — and
+// the one thing this must never do is get stuck holding a claim nobody made,
+// because a claim that cannot be withdrawn is a terminal that never notifies
+// again. An empty list is therefore a real and important message: "I am looking
+// at nothing", which is what an app sends as it goes to the background.
+//
+// Several ids because a Mac window shows a whole tiled layout at once, and a
+// pane tiled beside the focused one is as much on screen as the focused one —
+// the same set `ContentView.visibleTerminals` already marks seen, for the same
+// reason.
+//
+// A claim is only good for `WATCHED_TTL_MS`, so a client that crashes, is
+// suspended, or loses its link stops suppressing on its own. Nothing here has
+// to be cleaned up by the thing that went away.
+message TerminalsWatched {
+  repeated bytes terminal_ids = 1;
 }
 
 // A pane's visible screen, escapes and all.

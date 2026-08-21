@@ -404,6 +404,22 @@ final class Connection: ObservableObject {
     func setActive(_ active: Bool) {
         let wasActive = isActive
         isActive = active
+        if !active {
+            // Give back the claim of attention on the way out, rather than
+            // letting it age out on the runner. A pane still mounted behind a
+            // locked phone has not been read by anybody, and an agent finishing
+            // while the phone is in a pocket is precisely what the push exists
+            // for — so the seconds between backgrounding and the claim expiring
+            // are seconds this feature would spend swallowing the notification
+            // it is least entitled to swallow. Best effort: iOS may suspend the
+            // process before the call lands, which is exactly what
+            // `WATCHED_TTL_MS` on the runner is the backstop for.
+            //
+            // Unconditional on `wasActive`, unlike the reconnect below: the
+            // cost of one redundant release is a few bytes, and the cost of a
+            // missed one is a notification nobody gets.
+            Task { await reportWatching([]) }
+        }
         guard active, !wasActive else { return }
 
         switch phase {
@@ -598,9 +614,17 @@ final class Connection: ObservableObject {
     /// Nothing is applied locally afterwards. The next poll brings the daemon's
     /// answer, and this client does not compute a terminal's state; see the note
     /// on the type.
+    ///
+    /// It also renews this client's claim of ATTENTION, which is the same
+    /// judgement one beat earlier — see `reportWatching`. Folded in here rather
+    /// than given its own call sites because there is exactly one question
+    /// underneath both ("is a person looking at this pane right now"), every
+    /// place that already answers it calls this, and a second set of call sites
+    /// is how the two answers come to disagree.
     func markVisibleSeen() async {
         guard phase == .connected else { return }
         guard UIApplication.shared.applicationState == .active else { return }
+        await reportWatching(Notifier.shared.visibleTerminal.map { [$0] } ?? [])
         guard let id = Notifier.shared.visibleTerminal else { return }
         guard
             let terminal = fleet.workspaces.lazy.flatMap(\.terminals).first(where: { $0.id == id }),
@@ -610,6 +634,72 @@ final class Connection: ObservableObject {
         defer { markingSeen.remove(id) }
 
         _ = try? await core.call("terminal.seen", ["terminal": id])
+    }
+
+    /// The terminals this phone last told the runner it was showing, and when.
+    ///
+    /// Both halves, because the send is skipped on two different grounds — see
+    /// `reportWatching`.
+    private var watching: [String] = []
+    private var watchingSentAt: Date = .distantPast
+
+    /// The shortest gap between two identical claims of attention.
+    ///
+    /// Two seconds, under the three-second poll that renews them, so the poll
+    /// sets the real cadence and this only absorbs the extra calls a person
+    /// generates by swiping through a pager. The runner believes a claim for ten
+    /// seconds — `WATCHED_TTL_MS` in `crates/daemon/src/watch.rs` — so renewing
+    /// on the poll leaves room for two lost round trips before a pane somebody
+    /// is plainly looking at starts buzzing them again.
+    private static let watchingFloor: TimeInterval = 2
+
+    /// Tell the runner which pane is in front of the person, so it does not push
+    /// a notification about one they are already reading.
+    ///
+    /// The complaint this exists for, in the owner's words: a codex pane open, a
+    /// question asked, an answer given, and a buzz on the wrist about a reply
+    /// already on screen. `markVisibleSeen` above cannot fix that, and this is
+    /// the reason there are two calls rather than one — `terminal.seen` runs on
+    /// the poll AFTER the agent finished, up to three seconds later, by which
+    /// time the push has crossed the relay and the watch has already tapped. A
+    /// claim of attention is made in advance and is therefore already true at
+    /// the moment the turn ends.
+    ///
+    /// Suppression on the runner is per terminal and across every device,
+    /// because it is one person: this phone saying it can see a pane is also
+    /// what silences the watch on their wrist. That is the point, not a
+    /// side effect.
+    ///
+    /// The WHOLE set on every call, replacing whatever this client said last,
+    /// so backing out of a pane releases it in the same round trip rather than
+    /// leaving it silent until the claim ages out. An empty array is therefore a
+    /// real and important call — "I am looking at nothing" — and the reason this
+    /// is not simply skipped when there is nothing to name.
+    ///
+    /// Sent again only when the set CHANGED or the floor has passed, which for a
+    /// phone that stays on one pane means one small call per poll. Nothing is
+    /// sent while backgrounded at all: `refresh` does not run there — see
+    /// `refreshIfWatched` — and `setActive(false)` releases the claim on the way
+    /// out.
+    ///
+    /// Errors swallowed, like `loadInbox` and for a stronger reason: this
+    /// decorates nothing and blocks nothing, and a runner too old to know the
+    /// method refuses it on every poll forever. Failing to be believed costs a
+    /// notification somebody did not need; failing loudly would cost the fleet
+    /// its screen.
+    func reportWatching(_ terminals: [String]) async {
+        guard phase == .connected else { return }
+        let changed = terminals != watching
+        guard changed || Date().timeIntervalSince(watchingSentAt) >= Self.watchingFloor else {
+            return
+        }
+        // Recorded before the call rather than after, and recorded even if it
+        // fails, for the reason `changesInboxReadAt` on the Mac is: a runner
+        // that refuses this in a millisecond must not thereby be asked a
+        // thousand times a second. The floor is a floor on ATTEMPTS.
+        watching = terminals
+        watchingSentAt = Date()
+        _ = try? await core.call("terminal.watching", ["terminals": terminals])
     }
 
     private func loadRepositories() async {

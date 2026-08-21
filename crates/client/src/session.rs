@@ -607,6 +607,38 @@ impl Session {
         self.value("terminal.seen", Some(terminal), None).await.map(|_| ())
     }
 
+    /// The terminals this client currently has in front of a person, and the
+    /// whole set of them.
+    ///
+    /// What stops a push arriving about a pane you are sitting there reading.
+    /// `mark_seen` above answers the same question one beat too late — a client
+    /// reports it on the poll AFTER the agent finished, and the notification
+    /// crossed the relay while that poll was in flight — so the runner has to be
+    /// told a pane is being watched BEFORE the turn ends, not after. See
+    /// `attention` in `crates/daemon/src/watch.rs`.
+    ///
+    /// Sent repeatedly, on whatever clock the caller already polls on, and the
+    /// runner only believes it for a few seconds: a client that crashes, is
+    /// suspended, or loses its link stops suppressing on its own rather than
+    /// leaving a terminal permanently silent. An empty slice is a real call and
+    /// the one that matters most — "I am looking at nothing" — which is what an
+    /// app sends as it goes to the background, releasing every terminal it named
+    /// in one round trip instead of waiting the claim out.
+    ///
+    /// Several ids because one window can show a whole tiled layout, and a pane
+    /// tiled beside the focused one is as much on screen as the focused one.
+    pub async fn report_watching(&mut self, terminals: &[Uuid]) -> Result<(), SessionError> {
+        let payload = request::Payload::TerminalsWatched(
+            farcooler_protocol::v1::TerminalsWatched {
+                terminal_ids: terminals
+                    .iter()
+                    .map(|id| bytes::Bytes::copy_from_slice(id.as_bytes()))
+                    .collect(),
+            },
+        );
+        self.value("terminal.watching", None, Some(payload)).await.map(|_| ())
+    }
+
     /// A terminal's visible screen, with escapes intact.
     ///
     /// `known_revision` is the last one received; the runner answers `unchanged`
