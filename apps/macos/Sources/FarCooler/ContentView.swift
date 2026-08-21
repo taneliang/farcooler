@@ -432,9 +432,15 @@ struct ContentView: View {
                 preselectedHost: intent.host,
                 branchPrefix: { host in store.clients[host]?.fleet.branchPrefix ?? "" }
             ) { host, repo, task, branch, base in
-                if let why = store.refusal(for: host) {
-                    return "Cannot do that: \(why)"
-                }
+                // The reason alone, not "Cannot do that: " + it. The sheet
+                // supplies its own sentence now and shows this in a
+                // `DetailBox` underneath, and `HostState.refusal` is mostly
+                // the stderr of whatever last failed to reach the runner — so
+                // the prefix was this app's words joined to a runner's with a
+                // colon, the join `e0f72df` took out of the phone. The banner
+                // path in `act(on:default:)` keeps its own prefix: nothing
+                // there draws a sentence above it.
+                if let why = store.refusal(for: host) { return why }
                 guard let client = store.clients[host] else {
                     return "that runner is not connected"
                 }
@@ -927,11 +933,26 @@ struct ContentView: View {
                     .font(.system(size: 26))
                     .foregroundStyle(.orange)
                 Text("Could not read the fleet").font(.callout.weight(.medium))
-                Text(error)
+                // The heading, then a sentence, then the box — the shape
+                // `ChangesPane` settled on for this exact string, and the
+                // wording it uses, because it is the same event: the command
+                // that reads something came back non-zero.
+                //
+                // `lastError` is `farcooler`'s stderr. It used to be this
+                // caption, centered under a heading the app wrote, in the
+                // app's own face — so ssh's words read as Far Cooler's
+                // account of the runner. Nothing is dropped moving it: when
+                // this Mac's own daemon will not answer, those words are the
+                // only diagnosis anyone has. No cause is named above them
+                // either, because from here it is unknowable and a guess
+                // sends somebody to fix the wrong thing — see
+                // `Enrollment.note(about:outcome:)`.
+                Text("The command that reads it didn’t finish.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .textSelection(.enabled)
+                DetailBox(text: error)
+                    .frame(maxWidth: 420)
                 Button("Try again") {
                     Task { await local?.refresh() }
                 }

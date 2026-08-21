@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import SwiftUI
 
@@ -21,15 +22,21 @@ struct NewWorkspaceSheet: View {
     /// one runner — once the picker below has been touched, its own
     /// selection carries its own host and this is never read again.
     var preselectedHost: String = ""
+    /// What a given runner says branch names start with. Per runner, because
+    /// the branch is created on the one holding the repository.
+    var branchPrefix: (String) -> String = { _ in "" }
     /// Receives host and repository together with the rest of the form, and
-    /// answers with the daemon's own failure message, or nil on success. A
+    /// answers with whatever the attempt came back with, or nil on success. A
     /// `String` return rather than swallowing the result is what lets this
     /// sheet stay open and say why, the same way `RemoveWorkspaceSheet` and
     /// `AddRepositorySheet` already do — `createWorkspace` failing used to
     /// dismiss the sheet exactly as if it had succeeded.
-    /// What a given runner says branch names start with. Per runner, because
-    /// the branch is created on the one holding the repository.
-    var branchPrefix: (String) -> String = { _ in "" }
+    ///
+    /// Those words are the runner's, not a sentence to set under this sheet's
+    /// heading: on the daemon path it is `farcooler`'s stderr, and on the
+    /// refusal path it is `HostState.unreachable(reason:)`, which is the
+    /// stderr of whichever command last failed to reach the runner. So the
+    /// sentence is written below and this goes in the box under it.
     let onCreate: (_ host: String, _ repo: String, _ name: String, _ branch: String, _ base: String)
         async -> String?
     @Environment(\.dismiss) private var dismiss
@@ -47,7 +54,7 @@ struct NewWorkspaceSheet: View {
     @State private var branch = ""
     @State private var base = "HEAD"
     @State private var working = false
-    @State private var error: String?
+    @State private var failure: SheetFailure?
 
     /// Whether more than one runner has a repository on offer — the picker
     /// names the runner alongside the repository only when that distinction
@@ -110,17 +117,27 @@ struct NewWorkspaceSheet: View {
             confirmTitle: "Create",
             canConfirm: canCreate,
             working: working,
-            error: error,
+            failure: failure,
             onCancel: { dismiss() },
             onConfirm: {
                 guard let choice else { return }
                 working = true
-                error = nil
-                if let failure = await onCreate(
+                failure = nil
+                if let words = await onCreate(
                     choice.host, choice.short, name, effectiveBranch, base)
                 {
                     working = false
-                    error = failure
+                    // The same sentence the phone's `TaskComposer` says for
+                    // this exact step, word for word. One operation worded
+                    // twice is one of them eventually worded wrongly.
+                    //
+                    // No cause named beyond the step: a branch that exists, a
+                    // base revision git cannot resolve and a runner that never
+                    // answered all arrive here as one string this side does not
+                    // parse, and guessing between them sends somebody to fix
+                    // the wrong thing. See `Enrollment.note(about:outcome:)`.
+                    failure = SheetFailure(
+                        sentence: "Couldn’t create the worktree.", transcript: words)
                     return
                 }
                 working = false
@@ -215,7 +232,7 @@ struct RemoveWorkspaceSheet: View {
 
     @State private var typed = ""
     @State private var needsName = false
-    @State private var errorMessage: String?
+    @State private var failure: SheetFailure?
     @State private var working = false
 
     private var matches: Bool { typed == workspace.task }
@@ -231,11 +248,11 @@ struct RemoveWorkspaceSheet: View {
             // sheet exists to do.
             canConfirm: !working && (!needsName || matches),
             working: working,
-            error: errorMessage,
+            failure: failure,
             onCancel: { dismiss() },
             onConfirm: {
                 working = true
-                errorMessage = nil
+                failure = nil
                 let result = await onRemove(typed)
                 working = false
                 switch result {
@@ -246,8 +263,24 @@ struct RemoveWorkspaceSheet: View {
                 case .failed(let message):
                     // Not "there is uncommitted work here" — that callout is
                     // reserved for a genuine confirmation-required refusal.
-                    // The daemon's own message names what to actually fix.
-                    errorMessage = message
+                    // The daemon's own message names what to actually fix, so
+                    // it is kept whole: `TmuxUnavailable`, the main checkout, a
+                    // `git worktree remove` that failed, each of which wants a
+                    // different thing done about it and none of which this side
+                    // can tell apart.
+                    //
+                    // What changed is only where it is set. It used to BE this
+                    // sheet's error line, which put `farcooler`'s stderr under
+                    // a heading the app wrote, in the app's own voice, with
+                    // nothing marking where Far Cooler stopped speaking. The
+                    // sentence is now the app's and the box below is the
+                    // runner's — the same move `ChangesPane` made for the same
+                    // string, and the phone's `RemoveWorktreeConfirmSheet`
+                    // after it. That sheet is this one's counterpart and says
+                    // this sentence exactly.
+                    failure = SheetFailure(
+                        sentence: "Removing this worktree didn’t finish.",
+                        transcript: message)
                 }
             }
         ) {
@@ -316,7 +349,7 @@ struct RemoveRepositorySheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var typed = ""
-    @State private var errorMessage: String?
+    @State private var failure: SheetFailure?
     @State private var working = false
 
     /// The daemon confirms by folder name, not repository name — `root.path`
@@ -338,11 +371,11 @@ struct RemoveRepositorySheet: View {
             confirmRole: .destructive,
             canConfirm: !working && (!isShared || matches),
             working: working,
-            error: errorMessage,
+            failure: failure,
             onCancel: { dismiss() },
             onConfirm: {
                 working = true
-                errorMessage = nil
+                failure = nil
                 let result = await onRemove(isShared ? typed : rootName)
                 working = false
                 switch result {
@@ -353,9 +386,22 @@ struct RemoveRepositorySheet: View {
                     // disagree — not the ordinary "you mistyped it" this
                     // reads as for a worktree, but there is nothing more
                     // specific to say from here.
-                    errorMessage = "That did not match — try again."
+                    //
+                    // No transcript: this is Far Cooler's own finding, the
+                    // daemon said nothing beyond refusing, and there is
+                    // nothing to show. Carrying it as a sentence with no box
+                    // is the whole reason these two arms stopped sharing one
+                    // `String?` — they used to be set into the same line and
+                    // drawn identically, which is what made the arm below read
+                    // as the app talking.
+                    failure = SheetFailure(sentence: "That did not match — try again.")
                 case .failed(let message):
-                    errorMessage = message
+                    // Anything else the daemon refused over — a repository
+                    // still holding worktrees, a root it no longer has. Its
+                    // words, in the box; the step, in the sentence.
+                    failure = SheetFailure(
+                        sentence: "Removing this repository didn’t finish.",
+                        transcript: message)
                 }
             }
         ) {
@@ -395,8 +441,20 @@ struct RemoveRepositorySheet: View {
 /// it through with no confirmation would cancel an agent's work with the same
 /// keystroke that opens the layout menu.
 struct PaneModeConfirmSheet: View {
-    /// The daemon's own description of what is in flight, so this says
-    /// something true about the specific turn rather than a generic warning.
+    /// What came back when the switch was refused.
+    ///
+    /// It was documented as the daemon's description of the turn in flight,
+    /// and it is not: `DomainError::ConfirmationRequired` is a unit variant
+    /// whose whole message is "exact typed confirmation required" (see
+    /// `crates/core/src/error.rs`), and this is `farcooler`'s stderr carrying
+    /// it. Set straight into the warning callout, that phrase was the only
+    /// thing this sheet said about the turn — a CLI's refusal string reading
+    /// as Far Cooler's own explanation.
+    ///
+    /// Kept rather than dropped, because a `ConfirmationRequired` that came
+    /// from somewhere other than the turn guard would say so here and nowhere
+    /// else. It goes in a `DetailBox` now, under a sentence written on this
+    /// side.
     let message: String
     let onConfirm: () async -> Void
     @Environment(\.dismiss) private var dismiss
@@ -410,7 +468,7 @@ struct PaneModeConfirmSheet: View {
             confirmRole: .destructive,
             canConfirm: !working,
             working: working,
-            error: nil,
+            failure: nil,
             onCancel: { dismiss() },
             onConfirm: {
                 working = true
@@ -419,12 +477,55 @@ struct PaneModeConfirmSheet: View {
                 dismiss()
             }
         ) {
-            Callout(icon: "exclamationmark.triangle.fill", tone: .warning, text: message)
+            VStack(alignment: .leading, spacing: 10) {
+                // This side's own words, and it has the standing to write
+                // them: the daemon answers `ConfirmationRequired` here only
+                // from `guard_toggle` on the pane's agent activity, which is
+                // what "a turn is in flight" means. `ContentView` already
+                // states it that way where the sheet is raised. Nothing beyond
+                // that is claimed — what the turn was working on is not
+                // something this side knows.
+                Callout(
+                    icon: "exclamationmark.triangle.fill",
+                    tone: .warning,
+                    text: "This pane has a turn in flight. Switching modes cancels it."
+                )
+
+                if !message.isEmpty {
+                    DetailBox(text: message)
+                }
+            }
         }
     }
 }
 
 // MARK: - Shared chrome
+
+/// What a sheet says when the thing it asked for did not happen: this app's
+/// own sentence, and — only where it has no account of its own — the runner's
+/// words underneath it.
+///
+/// Two fields rather than one string, because one string is how the runner's
+/// words came to be spoken in Far Cooler's voice. Every sheet below kept a
+/// single `String?`, and `SheetFrame` set whatever was in it into the same red
+/// `Callout` — so `RemoveRepositorySheet`'s own "That did not match" and a raw
+/// line of `farcooler` stderr arrived on screen as the same kind of thing, and
+/// the second one read as a sentence this app had written.
+///
+/// The same two fields as the phone's `SheetFailure` in `FleetView.swift`,
+/// deliberately: one shape for one idea, so the two apps cannot drift into
+/// disagreeing about how a failed sheet reads. See `f9f37eb` for the class of
+/// bug that is.
+struct SheetFailure {
+    /// Far Cooler talking. Always present, because a sheet that stays open
+    /// owes the reader a sentence about the step it was on.
+    let sentence: String
+    /// What came back from the runner, when this side has no diagnosis of its
+    /// own. Never concatenated with `sentence`, and never set for a refusal
+    /// the app already understands — a transcript under a sentence that names
+    /// both the cause and the fix is noise.
+    var transcript: String?
+}
 
 /// One frame for every sheet, so padding, button order and rhythm match.
 struct SheetFrame<Content: View>: View {
@@ -434,7 +535,7 @@ struct SheetFrame<Content: View>: View {
     var confirmRole: ButtonRole? = nil
     let canConfirm: Bool
     let working: Bool
-    let error: String?
+    let failure: SheetFailure?
     let onCancel: () -> Void
     let onConfirm: () async -> Void
     @ViewBuilder let content: Content
@@ -454,10 +555,20 @@ struct SheetFrame<Content: View>: View {
             content
                 .padding(.horizontal, 24)
 
-            if let error {
-                Callout(icon: "xmark.octagon.fill", tone: .error, text: error)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 12)
+            if let failure {
+                VStack(alignment: .leading, spacing: 10) {
+                    Callout(icon: "xmark.octagon.fill", tone: .error, text: failure.sentence)
+                    // Where output goes, rather than where prose does. This is
+                    // the same pairing `DaemonUpdateCard`, `RunnersSettings`
+                    // and `ChangesPane` already draw, and nothing is dropped to
+                    // get it — for a runner nobody can reach, these words are
+                    // the only diagnosis there is.
+                    if let transcript = failure.transcript, !transcript.isEmpty {
+                        DetailBox(text: transcript)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
             }
 
             Divider().padding(.top, 20)
@@ -554,7 +665,7 @@ struct AddRepositorySheet: View {
     @State private var chosen: URL?
     @State private var remotePath: String = ""
     @State private var working = false
-    @State private var error: String?
+    @State private var failure: SheetFailure?
 
     /// The path being proposed, however it was chosen. Building this from a
     /// `URL` even for a typed remote path is pure string manipulation — the
@@ -607,7 +718,7 @@ struct AddRepositorySheet: View {
             confirmTitle: "Add repository",
             canConfirm: canConfirm,
             working: working,
-            error: error,
+            failure: failure,
             onCancel: { dismiss() },
             onConfirm: { await confirm() }
         ) {
@@ -670,7 +781,7 @@ struct AddRepositorySheet: View {
                 }
             }
         }
-        .onChange(of: host) { _, _ in error = nil }
+        .onChange(of: host) { _, _ in failure = nil }
     }
 
     private func choose() {
@@ -682,8 +793,22 @@ struct AddRepositorySheet: View {
         panel.message = "Choose a git repository."
         if panel.runModal() == .OK {
             chosen = panel.url
-            error = nil
+            failure = nil
         }
+    }
+
+    /// One sentence for both steps, because to the person adding a repository
+    /// they are one step — and because the phone's `AddRepositorySheet` catches
+    /// exactly these two calls in one `catch` and says this. Word for word with
+    /// it, so the two apps cannot come to spell one failure two ways.
+    ///
+    /// Which of the two failed is in the box, not in the sentence: allowlisting
+    /// and registering fail for different reasons and this side does not read
+    /// either answer, so naming a cause here would be inventing one. See
+    /// `Enrollment.note(about:outcome:)`. Nor is a retry promised — the Add
+    /// button is the only offer, and pressing it again is the reader's call.
+    private static func couldNotAdd(_ words: String) -> SheetFailure {
+        SheetFailure(sentence: "Adding this repository didn’t finish.", transcript: words)
     }
 
     private func confirm() async {
@@ -703,13 +828,13 @@ struct AddRepositorySheet: View {
             // otherwise be impossible to add from this sheet at all: its
             // enclosing folder always fails and there is no error to read to
             // find out why.
-            if let fallbackFailure = await onAddRoot(host, path.path) {
-                error = fallbackFailure
+            if let words = await onAddRoot(host, path.path) {
+                failure = Self.couldNotAdd(words)
                 return
             }
         }
-        if let failure = await onRegister(host, path.path) {
-            error = failure
+        if let words = await onRegister(host, path.path) {
+            failure = Self.couldNotAdd(words)
             return
         }
         dismiss()

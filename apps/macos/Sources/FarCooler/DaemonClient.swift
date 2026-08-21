@@ -780,11 +780,19 @@ final class DaemonClient: ObservableObject {
             // Show the daemon's own output, truncated. A decode failure is
             // almost always something unexpected on stdout, and the first line
             // of it says what.
+            //
+            // The output ALONE, with no sentence in front of it. Both spellings
+            // used to lead with "Could not read the fleet", which is verbatim
+            // the heading `ContentView.fleetPlaceholder` draws directly above
+            // this — so the screen said it twice, the second time colon-spliced
+            // onto a dump of the CLI's stdout. Every surface that renders this
+            // now supplies its own sentence and puts these words in a
+            // `DetailBox` beneath it, so a prefix here is one sentence too
+            // many, and joining it to the CLI's words with a colon is the join
+            // `e0f72df` took out of the phone.
             let sample = String(data: data.prefix(200), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            lastError = sample.isEmpty
-                ? "Could not read the fleet: \(error.localizedDescription)"
-                : "Could not read the fleet. The CLI said: \(sample)"
+            lastError = sample.isEmpty ? error.localizedDescription : sample
             state = .unreachable(reason: lastError ?? "Could not read the fleet.")
             scheduleRetry()
         }
@@ -1469,9 +1477,15 @@ final class DaemonClient: ObservableObject {
     /// What asking the daemon to switch a pane's mode came back with.
     enum PaneModeResult {
         case ok
-        /// A turn is in flight; switching would cancel it. Carries the
-        /// daemon's own description of what that turn is, so the confirmation
-        /// shown for it says something true rather than a generic warning.
+        /// A turn is in flight; switching would cancel it.
+        ///
+        /// Carries what the CLI printed, which is NOT a description of the
+        /// turn however this once read: `DomainError::ConfirmationRequired`
+        /// is a unit variant and its whole message is "exact typed
+        /// confirmation required". `PaneModeConfirmSheet` writes the sentence
+        /// about the turn itself and shows this in a `DetailBox`, because a
+        /// refusal string set as the app's own warning is the app appearing
+        /// to have said it.
         case confirmationRequired(String)
         case failed(String)
     }
