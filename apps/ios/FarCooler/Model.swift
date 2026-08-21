@@ -139,6 +139,24 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// row with no feed must read as "nothing to say" rather than as a decoding
     /// failure that takes the whole fleet down.
     var feed: [String]?
+    /// The last thing the agent said, WHOLE and from its opening.
+    ///
+    /// The same message `feed`'s last lines were cut from, cut from the other
+    /// end and to a notification's width rather than a row's — and a separate
+    /// field because it cannot be recovered from those lines: a feed entry is
+    /// a wrapped ROW, so the last of them is the last forty characters of the
+    /// window. That is how a lock screen came to read "batches to avoid N+1
+    /// shits." about a turn that had ended "More shit. An industrial quantity
+    /// of shit, shipped in carefully authorized batches to avoid N+1 shits."
+    ///
+    /// Cut on the host to about 120 characters — roughly the two lines a
+    /// banner shows, less the workspace name in front of it; see
+    /// `farcooler_core::feed::SAID_WIDTH`. This app renders it and decides
+    /// nothing about it.
+    ///
+    /// Optional because a daemon from before this existed sends no key, which
+    /// `lastSaid` reads as "ask the feed instead" rather than as nothing said.
+    var said: String?
     /// Where the agent is, in one line: the question it is blocked on, its
     /// position in its own task list, or what it is doing right now.
     ///
@@ -275,6 +293,28 @@ struct Terminal: Decodable, Identifiable, Hashable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return Array(steps.suffix(3))
+    }
+
+    /// What to quote in a notification about this pane.
+    ///
+    /// Ported from the Mac's `lastSaid`, in the same words and for the same
+    /// reason the notification body itself was: one person reads a banner on
+    /// the Mac and a push on this phone about one pane, and they must not be
+    /// two different notifications.
+    ///
+    /// `said` and NOT `recentSteps.last`. The two are cut from one message at
+    /// opposite ends — a step is a wrapped row, so the last of them is the end
+    /// of the window, while a notification arrives after the fact and has to
+    /// open where the sentence opens. The cut is the host's; see
+    /// `farcooler_core::feed::Feed::said`.
+    ///
+    /// The feed's last line is the fallback and only that: a runner still on
+    /// an older daemon sends no `said`, and the tail of the window is a worse
+    /// sentence than the head but a much better one than nothing.
+    var lastSaid: String? {
+        let quoted = (said ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !quoted.isEmpty { return quoted }
+        return recentSteps.last
     }
 
     /// The subagents still running, named, at most three.

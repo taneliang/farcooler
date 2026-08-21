@@ -823,6 +823,32 @@ message Terminal {
   // for one line and not for a list. The names are here for the surfaces that
   // have room for them.
   repeated string subagents = 31;
+
+  // The last thing the agent said, from its OPENING, for a notification.
+  //
+  // Not the last entry of `feed`, and it exists because it cannot be one. A
+  // feed entry is a wrapped LINE, so the last of them is the last forty
+  // characters of the window — the end of the message for narration, and the
+  // end of the message's head for an answer. Quoting it is what put `batches
+  // to avoid N+1 shits.` on a lock screen about a turn that had ended `More
+  // shit. An industrial quantity of shit, shipped in carefully authorized
+  // batches to avoid N+1 shits.`
+  //
+  // The whole message, redacted on the host on exactly the terms `feed` is,
+  // and cut from its start to about 120 characters — roughly the two lines an
+  // iOS banner shows, less the workspace name every notifier writes in front
+  // of it. See `farcooler_core::feed::SAID_WIDTH`.
+  //
+  // Sent for narration too, not only for a turn's closing answer. A
+  // notification reports something already OVER, and an agent that stops
+  // mid-narration has still stopped — there is no conclusion coming for the
+  // client to wait for.
+  //
+  // Optional and additive: a client too old to read it keeps quoting the
+  // feed's last line, and a daemon too old to send it leaves the field absent
+  // rather than empty, which a client can tell apart from an agent that said
+  // nothing at all.
+  optional string said = 32;
 }
 
 // What a pane is hosting.

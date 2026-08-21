@@ -72,7 +72,11 @@ final class Notifier {
         switch activity {
         case .blocked:
             content.title = "\(terminal.label) needs you"
-            content.body = "\(workspace) — waiting for your answer"
+            // Capitalized to match the daemon's own `watch::notification`, which
+            // writes this same sentence into the push it sends when this app is
+            // closed. One person gets whichever of the two is delivered, about
+            // one pane, and two casings of one sentence is two notifications.
+            content.body = "\(workspace) — Waiting for your answer"
             // The one state worth breaking through a Focus for: an agent that
             // is blocked has stopped, and will stay stopped until answered.
             content.interruptionLevel = .timeSensitive
@@ -83,7 +87,7 @@ final class Notifier {
             // is the lie the row's green checkmark used to tell.
             if terminal.turnDidFail {
                 content.title = "\(terminal.label) failed"
-                content.body = "\(workspace) — its last turn didn't finish"
+                content.body = "\(workspace) — Its last turn didn't finish"
             } else {
                 content.title = "\(terminal.label) finished"
                 // What it finished, where there is an answer to that.
@@ -101,7 +105,18 @@ final class Notifier {
                 // day and which worktree this was is what tells them apart.
                 // Falls back to the workspace alone when the turn was all tool
                 // calls and no prose, which is a real case.
-                if let said = terminal.recentSteps.last, !said.isEmpty {
+                //
+                // `lastSaid`, not `recentSteps.last`, which is what this used
+                // to read. A step is a wrapped ROW, so the last of them is the
+                // last forty characters of the window — the END of the message
+                // — and a notification reports something already over, where
+                // what a sentence opens with is what it is about. A turn that
+                // ended "More shit. An industrial quantity of shit, shipped in
+                // carefully authorized batches to avoid N+1 shits." arrived as
+                // "batches to avoid N+1 shits." until it did not. The whole
+                // message is on the wire now, cut from its start by the daemon
+                // — see `Terminal.lastSaid`.
+                if let said = terminal.lastSaid, !said.isEmpty {
                     content.body = "\(workspace) — \(said)"
                 } else {
                     content.body = workspace

@@ -97,10 +97,17 @@ impl Pairing {
 ///
 /// **One line at a time, and never the transcript itself.** `subtitle` is one
 /// composed line — the agent's question while it is blocked, the composed
-/// signal rung while it works — and it is the same string the sidebar is
-/// drawing: derived from the transcript and the tool stream, redacted at
-/// `farcooler_core::feed`'s single choke point, and cut to `feed::WIDTH`.
-/// Never the conversation behind it, never a command line, never raw output.
+/// signal rung while it works, the last thing it said once it is done, each
+/// under the name of the worktree it happened in — derived from the transcript
+/// and the tool stream, redacted at `farcooler_core::feed`'s single choke
+/// point, and cut there too. Never the conversation behind it, never a command
+/// line, never raw output.
+///
+/// Two widths, because two surfaces: `feed::WIDTH`, forty characters, for the
+/// rung a sidebar row and a live card draw, and `feed::SAID_WIDTH`, a hundred
+/// and twenty, for the sentence a `done` banner quotes — a banner is the width
+/// of a phone and about two lines tall, where a row is neither. Both are cut
+/// on the host, and both are cut after redaction rather than before it.
 ///
 /// The REPETITION is the part worth stating outright, because it is new and it
 /// is not what "a notification" sounds like. A `working` notice moves the live

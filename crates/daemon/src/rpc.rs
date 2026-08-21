@@ -1683,6 +1683,12 @@ impl Rpc {
         // client that reads a list and then watches events must not see the
         // feed appear, vanish, and come back.
         message.feed = self.watcher.feed(view.terminal.id).await;
+        // The same message those lines were cut from, cut from its opening
+        // instead, off the same `Observed` for the same reason: this is what
+        // both apps' notifications quote, and a client that read it from a
+        // list and then watched events must not see the sentence a banner is
+        // about appear only on one of the two paths.
+        message.said = self.watcher.said(view.terminal.id).await;
         // Off the same `Observed` for the same reason the feed is: a client
         // that lists terminals and then watches events must not be told a turn
         // failed by one path and that it finished cleanly by the other.

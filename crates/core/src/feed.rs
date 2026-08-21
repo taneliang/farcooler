@@ -99,6 +99,35 @@ pub const WIDTH: usize = 40;
 /// work per message is linear in the message rather than in the turn.
 const WINDOW: usize = 2 * CAPACITY * (WIDTH + 1);
 
+/// The most of one message a NOTIFICATION may quote, in characters.
+///
+/// A different budget from [`WIDTH`] because it answers a different question.
+/// [`WIDTH`] is forty because that is one row of a sidebar or a Live Activity,
+/// and a [`Step`] is one row. A notification body is the full width of a phone
+/// and about two lines tall before iOS truncates it — call it ninety
+/// characters — with roughly four in the expanded presentation a pull-down or
+/// Notification Center gives. The body is not the quote alone either: every
+/// notifier here writes it as `workspace — said`, and a worktree name plus the
+/// dash spends ten to thirty of those characters before the agent's own words
+/// begin (the two worktrees on this machine are named `native-sdk-parity` and
+/// `ios-accessory-layout-fixes`, seventeen and twenty-six).
+///
+/// A hundred and twenty is what leaves those two banner lines FULL rather than
+/// ending early, with something behind them for the reader who pulls the
+/// banner down. Measured against the 1,065 codex final answers in
+/// `~/.codex/sessions` on this machine: flattened to one line their median
+/// length is 194 characters and their median OPENING SENTENCE is 139, so
+/// forty characters carries a whole opening sentence for 39% of them, a
+/// hundred and twenty for 49%, and a hundred and sixty for only 51%. The
+/// curve is flat past this point, and every character past it is one iOS
+/// throws away.
+///
+/// A ceiling and not a target: a third of those answers are under forty
+/// characters and arrive whole. And it is a bound in the sense [`WINDOW`] is —
+/// this runs per pane on a loop, so what a [`Feed`] holds must not grow with
+/// what an agent writes.
+pub const SAID_WIDTH: usize = 120;
+
 /// `text` fit for a row: redacted, flattened, narrowed and cut to `max`.
 ///
 /// The one choke point. Redaction runs first and truncation last, and that
@@ -348,6 +377,14 @@ pub struct Feed {
     /// A `Vec` rather than a `VecDeque`: it holds three elements, so shifting
     /// on eviction costs nothing, and a slice is what callers want to read.
     steps: Vec<Step>,
+    /// The last message, whole and cut from its HEAD — see [`Feed::said`].
+    ///
+    /// Stored rather than derived from `steps`, because it cannot be derived
+    /// from them: a step is a wrapped LINE, and for narration the window keeps
+    /// the message's tail, so its opening is not in there to recover. Private
+    /// for the same reason [`Step`]'s field is — it reaches a lock screen, and
+    /// [`Feed::append`] is the only thing that fills it.
+    said: Option<String>,
 }
 
 /// Which end of a message survives when it is longer than the window.
@@ -398,11 +435,20 @@ impl Feed {
     ///
     /// See [`cleaned`] for why the passes run in the order they do; this is
     /// the same order with the final cut replaced by a wrap.
+    ///
+    /// Both of the strings this keeps are cut from that one redacted message,
+    /// here, and neither is cut from the other: the window takes whichever end
+    /// [`Keep`] names and [`said`](Self::said) always takes the opening. Two
+    /// cuts of one string, made where the string is still whole.
     fn append(&mut self, text: &str, keep: Keep) {
         let text = narrow_paths(&one_line(&redact::redact(text)));
         if text.is_empty() {
             return;
         }
+        // Taken before the window is, and from the message rather than from
+        // the window: `windowed` throws away the very characters this wants
+        // whenever `keep` is `Tail`.
+        self.said = Some(clipped(&text, SAID_WIDTH));
         let mut lines = wrapped(&windowed(&text, keep), WIDTH);
         if keep == Keep::Head && lines.len() > CAPACITY {
             // The answer ran past what a row can hold, and a reader who is not
@@ -431,22 +477,42 @@ impl Feed {
         self.steps.iter().map(|step| step.text.clone()).collect()
     }
 
-    /// The most recent thing the agent said, or nothing when it has said
-    /// nothing.
+    /// The last thing the agent said, from its OPENING, for a notification.
     ///
-    /// One step is one line — see [`lines`](Self::lines) — so this is a whole
-    /// message rather than a fragment of one, already redacted and already cut
-    /// to the window by whichever of [`push`](Self::push) or
-    /// [`conclude`](Self::conclude) recorded it. Which end it was cut from is
-    /// the point: a turn that ended with an answer went through `conclude`,
-    /// which keeps the OPENING, and an agent's summary opens with what it did.
+    /// Not the last of [`lines`](Self::lines), and the difference is the whole
+    /// reason this is a second string rather than a read of the first. A
+    /// [`Step`] is one WRAPPED LINE, so the last one is the last forty
+    /// characters of the window — the end of the message for narration, and
+    /// the end of the message's HEAD for an answer. That is what put
+    /// `batches to avoid N+1 shits.` on a lock screen for a turn that had
+    /// actually ended `More shit. An industrial quantity of shit, shipped in
+    /// carefully authorized batches to avoid N+1 shits.`: 101 characters,
+    /// wrapped to three lines, the third one quoted, and the sentence it
+    /// belongs to nowhere on the screen.
     ///
-    /// That is what makes this worth putting in a notification. "claude
+    /// The opening REGARDLESS of which kind of saying this was, which is the
+    /// second half of the same finding. [`Keep::Tail`] is right for the
+    /// transcript for a good reason — a live window is watched, and the newest
+    /// thing in it is why you are looking — and that reason is exactly what
+    /// stops being true here: a notification is a summary of something already
+    /// over, read once, after the fact, and what a message opens with is what
+    /// it is about. Classifying the message correctly does not save it either.
+    /// An agent that stops mid-narration has still finished, there is no
+    /// conclusion coming, and its notification must still quote a sentence
+    /// from the start.
+    ///
+    /// This is what makes a `done` notification worth sending. "claude
     /// finished" is a sentence about Far Cooler; "I've added the tail window
     /// and fixed the stale action" is a sentence about the work, and it is
-    /// already sitting here by the time the turn is over.
-    pub fn latest(&self) -> Option<&str> {
-        self.steps.last().map(|step| step.text.as_str())
+    /// already sitting here by the time the turn is over — redacted whole, cut
+    /// to [`SAID_WIDTH`], and the SAME string every surface quotes, so a Mac's
+    /// banner and a phone's push about one pane cannot say two things.
+    ///
+    /// `None` when the agent has said nothing at all, which is a real case: a
+    /// turn can be all tool calls, and that reads as a notification with no
+    /// second line rather than as a blank one pretending to be content.
+    pub fn said(&self) -> Option<&str> {
+        self.said.as_deref()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1023,6 +1089,110 @@ mod tests {
             "an answer cut short says so: {:?}",
             concluding.lines()
         );
+    }
+
+    /// The complaint that named this fix, quoted from the product owner's own
+    /// pane, with both readings of one message asserted side by side.
+    ///
+    /// A notification said `batches to avoid N+1 shits.` about a turn that had
+    /// ended `More shit. An industrial quantity of shit, shipped in carefully
+    /// authorized batches to avoid N+1 shits.` — 101 characters, wrapped to
+    /// exactly three lines of forty, the third one quoted. Nothing was
+    /// misparsed and nothing was truncated: the third LINE of a window is
+    /// simply not the opening of a message, and reading a notification off it
+    /// was the whole of the defect.
+    ///
+    /// Narration, on purpose, because narration is the harder half. The window
+    /// still keeps the tail — that is what a live transcript is for — and the
+    /// notification still opens where the message opens.
+    #[test]
+    fn a_notification_quotes_the_opening_of_what_narration_ends_on() {
+        let mut feed = Feed::default();
+        feed.push(
+            "More shit. An industrial quantity of shit, shipped in carefully \
+             authorized batches to avoid N+1 shits.",
+        );
+        assert_eq!(
+            feed.lines()[2],
+            "batches to avoid N+1 shits.",
+            "the window is unchanged: {:?}",
+            feed.lines()
+        );
+        assert_eq!(
+            feed.said(),
+            Some(
+                "More shit. An industrial quantity of shit, shipped in carefully \
+                 authorized batches to avoid N+1 shits."
+            ),
+            "and the notification reads the same message from its start"
+        );
+    }
+
+    /// An answer is quoted whole where it fits, and from its start where it
+    /// does not — never from the end of the WINDOW, which is what a `conclude`
+    /// long enough to fill three lines used to hand over.
+    #[test]
+    fn a_notification_quotes_more_of_an_answer_than_a_row_can_hold() {
+        let mut feed = Feed::default();
+        feed.conclude(
+            "I've added the tail window and fixed the stale action, then ran the \
+             whole suite twice to be sure the flake was the flake and not me.",
+        );
+        let said = feed.said().expect("the agent said something");
+        assert!(said.starts_with("I've added the tail window"), "{said}");
+        assert!(
+            said.chars().count() > WIDTH * 2,
+            "a notification is not three rows: {} characters",
+            said.chars().count()
+        );
+        assert!(said.chars().count() <= SAID_WIDTH, "{} characters", said.chars().count());
+    }
+
+    /// However much an agent writes, what a notification quotes is bounded —
+    /// and it says it was cut rather than stopping mid-word as though that
+    /// were the end of the sentence.
+    #[test]
+    fn a_very_long_message_is_cut_to_the_notification_width_and_says_so() {
+        let mut feed = Feed::default();
+        feed.conclude(&"lorem ipsum dolor sit amet ".repeat(4_000));
+        let said = feed.said().expect("the agent said something");
+        assert_eq!(said.chars().count(), SAID_WIDTH);
+        assert!(said.ends_with('…'), "{said}");
+        assert!(said.starts_with("lorem ipsum"), "{said}");
+    }
+
+    /// Redaction runs on the WHOLE message before either cut, which is the
+    /// rule [`Feed::append`] exists to hold — and a notification is the
+    /// surface it matters most on, since it is the one that reaches a lock
+    /// screen with nobody logged in.
+    ///
+    /// The credential sits past the row window's three lines on purpose: a
+    /// version of this that cut first and redacted after would pass every
+    /// assertion about `lines` and still put the token in the notification.
+    #[test]
+    fn a_credential_is_gone_from_the_notification_as_well_as_the_window() {
+        let mut feed = Feed::default();
+        feed.conclude(
+            "Deployed the worker and the relay together, checked both logs, and \
+             the token that did it was AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI.",
+        );
+        let said = feed.said().expect("the agent said something");
+        assert!(!said.contains("wJalrXUtnFEMI"), "{said}");
+        for line in feed.lines() {
+            assert!(!line.contains("wJalrXUtnFEMI"), "{line}");
+        }
+    }
+
+    /// A turn can be all tool calls and no prose, and that is nothing to say
+    /// rather than an empty sentence to show.
+    #[test]
+    fn a_feed_that_has_heard_no_prose_has_nothing_to_quote() {
+        let mut feed = Feed::default();
+        assert_eq!(feed.said(), None);
+        // Whitespace is not prose either: `append` drops it before it can
+        // become a blank second line on a lock screen.
+        feed.push("   \n  ");
+        assert_eq!(feed.said(), None);
     }
 
     /// A finished agent reads as what it did, which was the explicit ask.

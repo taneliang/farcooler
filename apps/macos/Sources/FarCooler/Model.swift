@@ -224,6 +224,23 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// and a row with no feed has to read as "nothing to say" rather than as a
     /// decoding failure.
     var feed: [String]?
+    /// The last thing the agent said, WHOLE and from its opening.
+    ///
+    /// The same message `feed`'s last lines were cut from, cut from the other
+    /// end and to a notification's width rather than a row's. It is a separate
+    /// field because it cannot be recovered from those lines: a feed entry is
+    /// a wrapped ROW, so the last of them is the last forty characters of the
+    /// window — which is how a banner about a turn that ended "More shit. An
+    /// industrial quantity of shit, shipped in carefully authorized batches to
+    /// avoid N+1 shits." came to read "batches to avoid N+1 shits."
+    ///
+    /// Cut on the host, like every other string here, and to about 120
+    /// characters — see `farcooler_core::feed::SAID_WIDTH` for why that
+    /// number. This app renders it and decides nothing about it.
+    ///
+    /// Optional because a daemon from before this existed sends no key, which
+    /// `lastSaid` reads as "ask the feed instead" rather than as nothing said.
+    var said: String?
     /// Where the agent is, in one line: the question it is blocked on, its
     /// position in its own task list (`3/7 · Designing test matrix · 2
     /// agents`), or what it is doing right now (`Writing fruit.txt`).
@@ -527,6 +544,26 @@ struct Terminal: Decodable, Identifiable, Hashable {
         // host that ever sent four could not make one row twice the height of
         // every other row in the fleet.
         return Array(steps.suffix(3))
+    }
+
+    /// What to quote in a notification about this pane.
+    ///
+    /// `said` and NOT `recentSteps.last`, which is what a banner used to
+    /// quote. The two are cut from one message at opposite ends: a step is a
+    /// wrapped row, so the last of them is the end of the window, and a
+    /// notification arrives after the fact and has to open where the sentence
+    /// opens. That is decided on the host — see
+    /// `farcooler_core::feed::Feed::said` — so this Mac, the phone, and the
+    /// push the daemon sends when neither app is watching all quote one
+    /// string.
+    ///
+    /// The feed's last line is the fallback and only that: a runner still on
+    /// an older daemon sends no `said`, and the tail of the window is a worse
+    /// sentence than the head but a much better one than nothing.
+    var lastSaid: String? {
+        let quoted = (said ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !quoted.isEmpty { return quoted }
+        return recentSteps.last
     }
 }
 

@@ -169,73 +169,127 @@ struct Notice {
 /// from today. A `Done` turn has no clock to run and arrives as `None` on its
 /// own, so there is nothing to special-case — and a tier that dropped the field
 /// would be a card started from it with the timer silently missing.
-/// What a notice can say beyond naming a state, taken off the record that
+/// What a notice QUOTES beyond naming a state, taken off the record that
 /// produced it.
 ///
-/// A struct rather than two more parameters because both of these travel
+/// A struct rather than three more parameters because all three travel
 /// together from `push_if_paired` down, and the two functions they cross were
 /// already at clippy's argument limit — but mostly because they are one idea:
-/// the agent's own words, whichever kind it currently has to offer.
+/// the second line of a notification, which is which pane this is about
+/// followed by whatever that pane currently has to say for itself.
+///
+/// `workspace` is the newest of the three and the one the product owner asked
+/// for outright. Every push said `codex finished` and nothing more, and they
+/// run several codexes at once, so the notification identified nothing — the
+/// agent's name is what a pane has in COMMON with the others, not what tells
+/// it apart. Both local notifiers had already answered this the same way,
+/// with a body of `workspace — said`; see `Quoted::body`, which is that shape
+/// written once so the phone's push and the Mac's banner about one pane say
+/// one thing.
 #[derive(Debug, Clone, Copy, Default)]
-struct Said<'a> {
+struct Quoted<'a> {
+    /// Which worktree this pane belongs to, by the name a client shows for it:
+    /// `ws.name()`, the same string `wire::workspace` sends as `task_name`.
+    ///
+    /// Not an `Option`, because every terminal belongs to a workspace and the
+    /// sampling loop is already iterating them to reach this pane at all. It
+    /// can still arrive EMPTY — `Quoted::default()`, and a name derived from a
+    /// path that has none — and `body` treats that as "nothing to say about
+    /// which pane" rather than drawing a leading dash.
+    workspace: &'a str,
     /// What the agent is asking, while it is asking it. Read off the screen.
     question: Option<&'a str>,
-    /// The last thing the agent said. Read out of its own log — see
-    /// `farcooler_core::feed::Feed::latest`.
-    summary: Option<&'a str>,
+    /// The last thing the agent said, from its OPENING. Read out of its own
+    /// log — see `farcooler_core::feed::Feed::said`, which is also where the
+    /// "from its opening" is decided and why it is not the feed's last line.
+    said: Option<&'a str>,
 }
 
-impl Said<'_> {
+impl Quoted<'_> {
     /// The text, or nothing when it is absent or blank. Both fields arrive
     /// from places that can legitimately hand over an empty string, and an
     /// empty subtitle is a blank second line on a lock screen.
     fn worth_saying(text: Option<&str>) -> Option<&str> {
         text.map(str::trim).filter(|t| !t.is_empty())
     }
+
+    /// One notification body: which pane this is about, then what there is to
+    /// say about it.
+    ///
+    /// `add-auth — Both tests pass.` The workspace goes IN FRONT rather than
+    /// into the title, because the title is already `codex finished` and a
+    /// title is what a notification is sorted and stacked by — and because
+    /// this is the shape both local notifiers have written since they gained a
+    /// body at all, and the owner reads a Mac banner and a phone push about
+    /// the same pane.
+    ///
+    /// Either half can be missing and the result still reads as a sentence: a
+    /// turn can be all tool calls and say nothing, and a workspace name can be
+    /// empty. Neither produces a stray dash — `— Both tests pass.` looks like
+    /// a rendering bug, and a lock screen is not where to debug one.
+    fn body(&self, text: Option<&str>) -> String {
+        match (Self::worth_saying(Some(self.workspace)), Self::worth_saying(text)) {
+            (Some(workspace), Some(text)) => format!("{workspace} — {text}"),
+            (Some(workspace), None) => workspace.to_string(),
+            (None, Some(text)) => text.to_string(),
+            (None, None) => String::new(),
+        }
+    }
 }
 
 fn notification(
     activity: AgentActivity,
     label: &str,
-    said: Said<'_>,
+    quoted: Quoted<'_>,
     failed: bool,
     started_at: Option<i64>,
 ) -> Option<Notice> {
     match activity {
         AgentActivity::Blocked => Some(Notice {
             title: format!("{label} needs you"),
-            subtitle: match Said::worth_saying(said.question) {
-                Some(q) => q.to_string(),
-                None => "Waiting for your answer".to_string(),
-            },
+            // The question is what a person answers from the lock screen, and
+            // the workspace is what tells them which of three blocked codexes
+            // is asking it. Both, in that order, for the same reason `Done`
+            // carries both: `codex needs you / Do you want to create
+            // haiku.txt?` is answerable and still not attributable.
+            subtitle: quoted
+                .body(Some(Quoted::worth_saying(quoted.question).unwrap_or("Waiting for your answer"))),
             status: "blocked",
             failed: false,
             started_at,
         }),
         AgentActivity::Done if failed => Some(Notice {
             title: format!("{label} failed"),
-            subtitle: "Its last turn didn't finish".to_string(),
+            subtitle: quoted.body(Some("Its last turn didn't finish")),
             status: "done",
             failed: true,
             started_at,
         }),
-        // The last thing the agent SAID, which is very nearly always its
-        // closing answer — `Feed::conclude` keeps the opening of one, and an
-        // agent's summary opens with what it did.
+        // The last thing the agent SAID, from the start of it, under the name
+        // of the worktree it said it in.
         //
-        // This subtitle was empty, so the whole notification was "claude
+        // This subtitle was empty once, so the whole notification was "claude
         // finished": a sentence about Far Cooler, arriving on a lock screen,
-        // saying nothing about the work it is reporting on. The sentence
-        // underneath it now is the agent's own, already redacted and already
-        // cut to a window by the daemon, and it is the difference between
-        // knowing something ended and knowing whether to go and look.
+        // saying nothing about the work it is reporting on. Then it was the
+        // agent's words alone, which is a sentence about the work and still
+        // not about WHICH work — the owner runs several codexes at once, and
+        // `codex finished` names the one thing they all have in common.
         //
-        // Empty when the agent said nothing this turn, which is a real case —
-        // a turn can be all tool calls — and reads as the old behavior rather
-        // than as a blank line pretending to be content.
+        // What is quoted is `Feed::said`, not the feed's last line: a feed
+        // entry is a wrapped row, so its last one is the last forty characters
+        // of the window, which is how a turn that ended "More shit. An
+        // industrial quantity of shit, shipped in carefully authorized batches
+        // to avoid N+1 shits." reached a phone as "batches to avoid N+1
+        // shits." That is a fact about where the string was cut and not about
+        // how the turn was parsed, so it is fixed where the cut is made.
+        //
+        // The workspace alone when the agent said nothing this turn, which is
+        // a real case — a turn can be all tool calls — and reads as a row that
+        // has nothing to add rather than as a blank line pretending to be
+        // content.
         AgentActivity::Done => Some(Notice {
             title: format!("{label} finished"),
-            subtitle: Said::worth_saying(said.summary).unwrap_or_default().to_string(),
+            subtitle: quoted.body(quoted.said),
             status: "done",
             failed: false,
             started_at,
@@ -255,9 +309,19 @@ fn notification(
         // working agent has nothing to ask. The parameter is "whatever the card
         // should say under the label", and for `Blocked` that happens to be
         // what the agent asked.
+        //
+        // And the one tier with no workspace in front of it, which is the
+        // difference between a card and a banner. A banner arrives once, into a
+        // stack of other banners, and has to say which pane it is about or it
+        // says nothing. A card is a rectangle the relay updates IN PLACE for
+        // the length of one run — it is already identified by being the card it
+        // is — and its second line is `feed::signal`'s composed rung, a
+        // forty-character budget already spent saying where the agent is.
+        // Spending a quarter of it restating the worktree would cost the task
+        // position that is the only thing on there worth watching.
         AgentActivity::Working => Some(Notice {
             title: label.to_string(),
-            subtitle: said.question.unwrap_or("").to_string(),
+            subtitle: quoted.question.unwrap_or("").to_string(),
             status: "working",
             failed: false,
             started_at,
@@ -297,14 +361,29 @@ fn should_refresh_card(last_push_ms: Option<i64>, now_ms: i64) -> bool {
 /// open for — it is a turn that is OVER, just over badly. The wording is what
 /// tells a failure apart from a success; the status only tells the relay
 /// whether to keep a card on the lock screen.
-fn exit_notice(label: &str, exit_code: Option<i32>, exit_signal: Option<i32>) -> Notice {
-    let subtitle = match (exit_code, exit_signal) {
+///
+/// `workspace` for the same reason an agent's notice carries one, and it is
+/// the same complaint one step over: `cargo build failed / Exit code 101` at
+/// three in the morning names neither the worktree it broke in nor anything
+/// else that would tell it from the other two builds running. The Mac's local
+/// `reportFailedExit` has written `workspace — exit code 101` all along, so
+/// this is also the push catching up with the banner beside it.
+fn exit_notice(
+    label: &str,
+    workspace: &str,
+    exit_code: Option<i32>,
+    exit_signal: Option<i32>,
+) -> Notice {
+    let outcome = match (exit_code, exit_signal) {
         (_, Some(signal)) => format!("Stopped by signal {signal}"),
         (Some(code), _) => format!("Exit code {code}"),
         // Reached only if this is ever called outside `exited_into_failure`'s
         // guard, which already requires one of the two above.
         (None, None) => String::new(),
     };
+    // Through the same join every other notice's body goes through, so an
+    // absent workspace cannot leave a leading dash here either.
+    let subtitle = Quoted { workspace, ..Quoted::default() }.body(Some(&outcome));
     // No clock. This is a command that exited, not an agent turn — there is no
     // `turn_started_at` at this call site to be right about, and the relay ends
     // a card on `done` rather than starting one, so a timer would have nowhere
@@ -419,6 +498,18 @@ struct Sampled {
     /// back to the title and the screen, which is the right failure: attaching a
     /// pane to the wrong conversation is worse than attaching it to none.
     cwd: String,
+    /// Which worktree this pane belongs to, by the name a client shows for it.
+    ///
+    /// Carried on the sample rather than looked up at the push site, exactly
+    /// as `exit_code` above is and for the same reason: the outer loop is
+    /// already iterating workspaces to reach this terminal, so the name is in
+    /// hand here, and a second read taken later in the tick could name a
+    /// workspace this pass is not otherwise describing.
+    ///
+    /// The name and not the path. A notification is read on a lock screen and
+    /// a path is `host_admin` only — see this module's rule about which fields
+    /// carry one — and `add-auth` is the string a person recognizes anyway.
+    workspace: String,
     state: TerminalState,
     pane_mode: farcooler_store::models::PaneMode,
     preset: String,
@@ -1624,11 +1715,11 @@ impl Watcher {
         terminal: Uuid,
         activity: AgentActivity,
         label: &str,
-        said: Said<'_>,
+        quoted: Quoted<'_>,
         turn_failed: bool,
         started_at: Option<i64>,
     ) {
-        let Some(notice) = notification(activity, label, said, turn_failed, started_at) else {
+        let Some(notice) = notification(activity, label, quoted, turn_failed, started_at) else {
             return;
         };
         self.push_notice(terminal, label, notice);
@@ -1671,7 +1762,11 @@ impl Watcher {
             terminal,
             AgentActivity::Working,
             label,
-            Said { question: Some(line), summary: None },
+            // No workspace and nothing said. A working notice is a card the
+            // relay moves in place, whose one line is the composed signal rung
+            // — see the `Working` arm of `notification` for why neither of the
+            // other two belongs on it.
+            Quoted { workspace: "", question: Some(line), said: None },
             false,
             started_at,
         );
@@ -1689,10 +1784,11 @@ impl Watcher {
         &self,
         terminal: Uuid,
         label: &str,
+        workspace: &str,
         exit_code: Option<i32>,
         exit_signal: Option<i32>,
     ) {
-        self.push_notice(terminal, label, exit_notice(label, exit_code, exit_signal));
+        self.push_notice(terminal, label, exit_notice(label, workspace, exit_code, exit_signal));
     }
 
     /// Send one notice to the relay, detached from the sampling loop.
@@ -1765,6 +1861,20 @@ impl Watcher {
     /// than a missing one: a plain shell has nothing to report.
     pub async fn feed(&self, terminal: Uuid) -> Vec<String> {
         self.state.lock().await.get(&terminal).map(|o| o.feed.lines()).unwrap_or_default()
+    }
+
+    /// The last thing this terminal's agent said, from its OPENING.
+    ///
+    /// What a notification quotes, and deliberately NOT the last entry of
+    /// `feed` above: those are wrapped rows, so the last of them is the end of
+    /// the window rather than the start of a sentence. See
+    /// `farcooler_core::feed::Feed::said`.
+    ///
+    /// `None` for a pane with no session log and for an agent that has said
+    /// nothing, which are both honest answers rather than missing ones — and
+    /// distinct from `Some("")`, which this can never return.
+    pub async fn said(&self, terminal: Uuid) -> Option<String> {
+        self.state.lock().await.get(&terminal).and_then(|o| o.feed.said().map(str::to_string))
     }
 
     /// Where this terminal's agent is, in one line: its position in its own
@@ -2157,6 +2267,10 @@ impl Watcher {
                     purpose,
                     pid: running.map(|r| r.pid),
                     cwd: workspace.workspace.worktree_path.clone(),
+                    // The same string `wire::workspace` puts on the wire as
+                    // `task_name`, off the same row, so a notification and the
+                    // sidebar row it is about name the worktree identically.
+                    workspace: workspace.workspace.name(),
                     state: terminal.state(),
                     pane_mode: terminal.terminal.pane_mode,
                     preset: terminal.terminal.command_preset.clone(),
@@ -2198,6 +2312,7 @@ impl Watcher {
             purpose,
             pid,
             cwd,
+            workspace,
             state: terminal_state,
             pane_mode,
             preset,
@@ -2464,13 +2579,23 @@ impl Watcher {
                     id,
                     next,
                     &command,
-                    Said {
+                    Quoted {
+                        // The one fact here that is NOT off the record, because
+                        // it is not a fact about the pane's state at all: a
+                        // workspace's name does not change while a turn ends,
+                        // and this is the sample's own copy of the row the
+                        // outer loop walked to reach this terminal.
+                        workspace: &workspace,
                         question: record.blocked_question.as_deref(),
                         // Off the same record as everything else here, for the
                         // reason the comment above gives: the card, the row and
                         // the banner must be quoting one read of this pane, not
                         // three.
-                        summary: record.feed.latest(),
+                        //
+                        // `said`, not `feed.lines().last()`. They are two cuts
+                        // of one message and only one of them is a sentence's
+                        // beginning — see `farcooler_core::feed::Feed::said`.
+                        said: record.feed.said(),
                     },
                     record.turn_failed,
                     record.turn_started_at,
@@ -2482,7 +2607,7 @@ impl Watcher {
             // the phone. See `exited_into_failure` for the exact rule.
             if exited_into_failure(just_appeared, previous_state, terminal_state, exit_code, exit_signal)
             {
-                self.push_failed_exit(id, &command, exit_code, exit_signal);
+                self.push_failed_exit(id, &command, &workspace, exit_code, exit_signal);
             }
 
             tracing::info!(
@@ -2537,6 +2662,14 @@ impl Watcher {
             // width. See `farcooler_core::feed` for why both happen here and
             // not on the three clients that render them.
             message.feed = observed.feed.lines();
+            // The same last message the window above ends on, cut from its
+            // OPENING instead — which is not recoverable from those lines, so
+            // it travels as its own field rather than being re-derived by
+            // three clients that would each get it wrong the same way. This is
+            // what the two apps' local notifications quote, so that a banner
+            // raised on this Mac and a push delivered to the phone beside it
+            // are one sentence. See `farcooler_core::feed::Feed::said`.
+            message.said = observed.feed.said().map(str::to_string);
             // The agents this one spawned, named, on the same terms: a
             // description is text the agent wrote and takes the same cleaning
             // every other line here does.
@@ -2731,42 +2864,114 @@ mod tests {
     /// produced the notice.
     #[test]
     fn a_finished_agent_says_what_it_did() {
-        let said = Said {
+        let quoted = Quoted {
+            workspace: "add-auth",
             question: None,
-            summary: Some("I've added the tail window and fixed the stale action"),
+            said: Some("I've added the tail window and fixed the stale action"),
         };
-        let notice = notification(AgentActivity::Done, "claude", said, false, None).expect("done");
+        let notice = notification(AgentActivity::Done, "claude", quoted, false, None).expect("done");
         assert_eq!(notice.title, "claude finished");
-        assert_eq!(notice.subtitle, "I've added the tail window and fixed the stale action");
+        assert_eq!(
+            notice.subtitle,
+            "add-auth — I've added the tail window and fixed the stale action"
+        );
     }
 
-    /// A turn can be all tool calls and no prose. That reads as the old
-    /// behavior rather than as a blank line pretending to be content.
+    /// A notification has to say WHICH pane finished, and the agent's name is
+    /// the one thing that cannot.
+    ///
+    /// The product owner runs several codexes at once, so `codex finished`
+    /// with nothing under it identified nothing at all — the title names the
+    /// harness, which is exactly what every pane in the fleet has in common.
+    /// The worktree is what tells them apart, and it goes in the BODY because
+    /// the title is already a sentence and because both local notifiers have
+    /// written `workspace — said` since they gained a body: the owner reads a
+    /// Mac banner and a phone push about the same pane, and they must not be
+    /// two different notifications.
     #[test]
-    fn a_finished_agent_that_said_nothing_says_nothing() {
+    fn a_finished_agent_says_which_workspace_it_finished_in() {
+        let quoted =
+            Quoted { workspace: "add-auth", question: None, said: Some("Both tests pass.") };
+        let one = notification(AgentActivity::Done, "codex", quoted, false, None).expect("done");
+        let other = notification(
+            AgentActivity::Done,
+            "codex",
+            Quoted { workspace: "fix-flaky-ci", ..quoted },
+            false,
+            None,
+        )
+        .expect("done");
+        assert_eq!(one.title, other.title, "same agent, and the title cannot tell them apart");
+        assert_eq!(one.subtitle, "add-auth — Both tests pass.");
+        assert_eq!(other.subtitle, "fix-flaky-ci — Both tests pass.");
+    }
+
+    /// A turn can be all tool calls and no prose. That reads as the row it
+    /// belongs to rather than as a blank line pretending to be content — and
+    /// the workspace on its own is still an answer to "which one finished",
+    /// which is the more useful half.
+    #[test]
+    fn a_finished_agent_that_said_nothing_still_says_where() {
         for quiet in [None, Some(""), Some("   ")] {
-            let said = Said { question: None, summary: quiet };
+            let quoted = Quoted { workspace: "add-auth", question: None, said: quiet };
             let notice =
-                notification(AgentActivity::Done, "claude", said, false, None).expect("done");
-            assert_eq!(notice.subtitle, "", "{quiet:?}");
+                notification(AgentActivity::Done, "claude", quoted, false, None).expect("done");
+            assert_eq!(notice.subtitle, "add-auth", "{quiet:?}");
         }
     }
 
-    /// The summary belongs to the turn that ended, not to the question in
-    /// front of it: a blocked agent is asking, and what it said before asking
-    /// is not the answer to "what does it need".
+    /// And with neither, nothing at all — never a dangling dash.
+    ///
+    /// `Quoted::default()` is what the tests below hand over and what a pane
+    /// whose worktree path yields no name would produce. `— Both tests pass.`
+    /// reads as a rendering bug, and a lock screen is not where anybody can
+    /// debug one.
     #[test]
-    fn a_blocked_agent_still_quotes_its_question() {
-        let said = Said { question: Some("Overwrite fruit.txt?"), summary: Some("Almost there") };
+    fn a_notice_with_nothing_to_say_says_nothing_rather_than_a_bare_dash() {
         let notice =
-            notification(AgentActivity::Blocked, "claude", said, false, None).expect("blocked");
-        assert_eq!(notice.subtitle, "Overwrite fruit.txt?");
+            notification(AgentActivity::Done, "claude", Quoted::default(), false, None).expect("done");
+        assert_eq!(notice.subtitle, "");
+        let unnamed = Quoted { workspace: "  ", question: None, said: Some("Both tests pass.") };
+        let notice = notification(AgentActivity::Done, "claude", unnamed, false, None).expect("done");
+        assert_eq!(notice.subtitle, "Both tests pass.");
     }
 
-    /// A `Said` carrying only a question, which is what these tests are about.
-    /// The summary half arrives from the agent's log and has its own tests.
-    fn just_asking(question: &str) -> Said<'_> {
-        Said { question: Some(question), summary: None }
+    /// A failed turn names its workspace too. Being told an agent died is
+    /// worth very little if it does not say which one.
+    #[test]
+    fn a_failed_turn_says_which_workspace_died() {
+        let quoted = Quoted { workspace: "add-auth", ..Quoted::default() };
+        let notice = notification(AgentActivity::Done, "codex", quoted, true, None).expect("done");
+        assert_eq!(notice.title, "codex failed");
+        assert_eq!(notice.subtitle, "add-auth — Its last turn didn't finish");
+    }
+
+    /// The said belongs to the turn that ended, not to the question in
+    /// front of it: a blocked agent is asking, and what it said before asking
+    /// is not the answer to "what does it need".
+    ///
+    /// The workspace rides in front of the question for the same reason it
+    /// rides in front of an answer: `codex needs you / Do you want to create
+    /// haiku.txt?` is answerable from a lock screen and still does not say
+    /// which of three codexes is asking it.
+    #[test]
+    fn a_blocked_agent_still_quotes_its_question() {
+        let quoted = Quoted {
+            workspace: "add-auth",
+            question: Some("Overwrite fruit.txt?"),
+            said: Some("Almost there"),
+        };
+        let notice =
+            notification(AgentActivity::Blocked, "claude", quoted, false, None).expect("blocked");
+        assert_eq!(notice.subtitle, "add-auth — Overwrite fruit.txt?");
+    }
+
+    /// A `Quoted` carrying only a question, which is what these tests are about.
+    /// The said half arrives from the agent's log and has its own tests, and
+    /// the workspace half is asserted where it is the point rather than
+    /// repeated at every call site that is about something else.
+    fn just_asking(question: &str) -> Quoted<'_> {
+        Quoted { workspace: "", question: Some(question), said: None }
     }
 
     /// `resolved_activity` for the tests that predate questions, which is most
@@ -2936,6 +3141,95 @@ mod tests {
         assert_eq!(entry.feed.lines(), while_working, "the turn ended; the summary did not");
         let entry = entry.advance_to(AgentActivity::Idle, 9_000);
         assert_eq!(entry.feed.lines(), while_working, "and being seen does not clear it either");
+    }
+
+    /// The value the notification's second line is read off, at the moment it
+    /// is read off.
+    ///
+    /// `notification` is tested against a said handed to it directly, and
+    /// `a_finished_agent_keeps_its_feed` proves the feed survives the
+    /// transition. This is the link between them: that a turn ending with an
+    /// answer leaves that answer as `feed.said()`, which is what
+    /// `push_if_paired` takes off the record on exactly that tick. Without it
+    /// the two halves could both pass while the sentence that reaches a lock
+    /// screen was empty.
+    #[test]
+    fn a_finished_turn_leaves_its_answer_where_the_push_looks() {
+        let mut entry = Observed::begin(AgentActivity::Working, 1_000);
+        entry.saw_events(&[
+            TurnEvent::Said { text: "Reading watch.rs.".to_string(), conclusion: false },
+            TurnEvent::Said { text: "Both tests pass.".to_string(), conclusion: true },
+            TurnEvent::Ended {
+                at_ms: None,
+                duration_ms: None,
+                outcome: TurnOutcome::Finished,
+            },
+        ]);
+        // Narration first, the answer last: each message replaces the one
+        // before it, so the answer is what `said` hands back rather than the
+        // narration that led to it.
+        let entry = entry.advance_to(AgentActivity::Done, 7_000);
+        assert_eq!(entry.feed.said(), Some("Both tests pass."));
+    }
+
+    /// The same link for the message that made this a bug report, end to end:
+    /// a codex rollout line, through the parser, through the fold, to the
+    /// string the push site reads.
+    ///
+    /// The owner's notification said `batches to avoid N+1 shits.` The parser
+    /// was innocent — that message arrived correctly flagged as the turn's
+    /// final answer, and the census in `session_log::codex` is that `phase` is
+    /// present on every one of the 1,065 final answers in `~/.codex/sessions`
+    /// on this machine. What went wrong was downstream of all of it: the push
+    /// read the last WRAPPED ROW of a three-row window, which for a
+    /// 101-character sentence is its last twenty-seven characters. So this
+    /// asserts both readings of one message at once — the transcript still
+    /// ends where it ended, and the notification now opens where the sentence
+    /// opens.
+    #[test]
+    fn the_notification_quotes_the_start_of_the_answer_and_the_row_still_ends_it() {
+        const ANSWER: &str = "More shit. An industrial quantity of shit, shipped in \
+                              carefully authorized batches to avoid N+1 shits.";
+        let mut entry = Observed::begin(AgentActivity::Working, 1_000);
+        entry.saw_events(&[TurnEvent::Said { text: ANSWER.to_string(), conclusion: true }]);
+        let entry = entry.advance_to(AgentActivity::Done, 7_000);
+
+        assert_eq!(entry.feed.lines().last().map(String::as_str), Some("batches to avoid N+1 shits."));
+        assert_eq!(entry.feed.said(), Some(ANSWER));
+
+        let notice = notification(
+            AgentActivity::Done,
+            "codex",
+            Quoted { workspace: "add-auth", question: None, said: entry.feed.said() },
+            false,
+            None,
+        )
+        .expect("done");
+        assert_eq!(notice.title, "codex finished");
+        assert_eq!(notice.subtitle, format!("add-auth — {ANSWER}"));
+    }
+
+    /// And the same when the agent never wrote a conclusion at all.
+    ///
+    /// The parser is right about this one too: narration is narration, and the
+    /// window is meant to keep its tail. But a turn that stops mid-narration
+    /// has still stopped — there is no answer coming — and its notification
+    /// still has to open where the sentence opens. That is why the head cut
+    /// lives beside the window rather than inside `conclude`.
+    #[test]
+    fn a_turn_that_ended_on_narration_still_gets_quoted_from_the_start() {
+        const NARRATION: &str = "Reading the watcher first, then the parser it calls, and \
+                                 only then changing anything at all.";
+        let mut entry = Observed::begin(AgentActivity::Working, 1_000);
+        entry.saw_events(&[TurnEvent::Said { text: NARRATION.to_string(), conclusion: false }]);
+        let entry = entry.advance_to(AgentActivity::Done, 7_000);
+
+        assert!(
+            entry.feed.lines().last().is_some_and(|line| line.ends_with("anything at all.")),
+            "the window keeps watching the tail: {:?}",
+            entry.feed.lines()
+        );
+        assert_eq!(entry.feed.said(), Some(NARRATION));
     }
 
     /// The transcript is what the agent SAID, and nothing else in the batch.
@@ -3904,7 +4198,7 @@ mod tests {
         assert_eq!(message.headline, "cursor failed");
         // And the phone is told the same thing the sidebar shows.
         assert_eq!(
-            notification(folded, "cursor", Said::default(), died.failed, None).map(|n| n.title),
+            notification(folded, "cursor", Quoted::default(), died.failed, None).map(|n| n.title),
             Some("cursor failed".to_string())
         );
     }
@@ -4133,11 +4427,11 @@ mod tests {
         // `done` for an agent that is merely busy.
         let asking = just_asking("Do you want to create haiku.txt?");
         assert_eq!(
-            notification(AgentActivity::Working, "claude", Said::default(), false, None).map(|n| n.status),
+            notification(AgentActivity::Working, "claude", Quoted::default(), false, None).map(|n| n.status),
             Some("working")
         );
-        assert!(notification(AgentActivity::Idle, "claude", Said::default(), false, None).is_none());
-        assert!(notification(AgentActivity::Unspecified, "claude", Said::default(), false, None).is_none());
+        assert!(notification(AgentActivity::Idle, "claude", Quoted::default(), false, None).is_none());
+        assert!(notification(AgentActivity::Unspecified, "claude", Quoted::default(), false, None).is_none());
         // Not even with a question in hand: a question is what a card SAYS, not
         // what decides there is one.
         assert_eq!(
@@ -4149,10 +4443,10 @@ mod tests {
         // mid-flight is still a turn in flight, and a phone buzzing about an
         // agent that is busy is the noise this rule exists to refuse.
         assert_eq!(
-            notification(AgentActivity::Working, "claude", Said::default(), true, None).map(|n| n.status),
+            notification(AgentActivity::Working, "claude", Quoted::default(), true, None).map(|n| n.status),
             Some("working")
         );
-        assert!(notification(AgentActivity::Idle, "claude", Said::default(), true, None).is_none());
+        assert!(notification(AgentActivity::Idle, "claude", Quoted::default(), true, None).is_none());
     }
 
     /// A working agent gets a CARD, and never a banner.
@@ -4208,7 +4502,7 @@ mod tests {
         // Blocked matters most: it is the only tier the relay ever STARTS a
         // card from, and attributes are fixed for an activity's life, so a
         // clock missing here can never be sent again for that card.
-        let blocked = notification(AgentActivity::Blocked, "claude", Said::default(), false, Some(STARTED))
+        let blocked = notification(AgentActivity::Blocked, "claude", Quoted::default(), false, Some(STARTED))
             .expect("blocked");
         assert_eq!(blocked.started_at, Some(STARTED));
 
@@ -4238,7 +4532,7 @@ mod tests {
     #[test]
     fn a_blocked_agent_says_what_it_wants() {
         let notice =
-            notification(AgentActivity::Blocked, "claude", Said::default(), false, None).expect("blocked");
+            notification(AgentActivity::Blocked, "claude", Quoted::default(), false, None).expect("blocked");
         assert_eq!(notice.title, "claude needs you");
         assert_eq!(notice.subtitle, "Waiting for your answer");
         // What raises the live card. The relay is deliberately not in the
@@ -4271,10 +4565,10 @@ mod tests {
         // blank second line — see `registry.blocked_question`, which returns
         // None for a trust gate whose '?' is mid-line.
         for absent in [None, Some(""), Some("   ")] {
-            let said = Said { question: absent, summary: None };
-            let notice = notification(AgentActivity::Blocked, "claude", said, false, None)
+            let quoted = Quoted { workspace: "add-auth", question: absent, said: None };
+            let notice = notification(AgentActivity::Blocked, "claude", quoted, false, None)
                 .expect("blocked");
-            assert_eq!(notice.subtitle, "Waiting for your answer", "{absent:?}");
+            assert_eq!(notice.subtitle, "add-auth — Waiting for your answer", "{absent:?}");
         }
     }
 
@@ -4288,7 +4582,7 @@ mod tests {
     /// and it is the more important half.
     #[test]
     fn a_finished_agent_does_not_inherit_the_question_it_answered() {
-        let notice = notification(AgentActivity::Done, "claude", Said::default(), false, None).expect("done");
+        let notice = notification(AgentActivity::Done, "claude", Quoted::default(), false, None).expect("done");
         assert_eq!(notice.title, "claude finished");
         // And what takes the card back down. An empty subtitle is fine; an
         // empty status would leave a live card up on the lock screen until the
@@ -4318,7 +4612,7 @@ mod tests {
     /// person reads one vocabulary for both.
     #[test]
     fn a_turn_that_died_says_so_rather_than_saying_it_finished() {
-        let notice = notification(AgentActivity::Done, "cursor", Said::default(), true, None).expect("done");
+        let notice = notification(AgentActivity::Done, "cursor", Quoted::default(), true, None).expect("done");
         assert_eq!(notice.title, "cursor failed");
         assert_eq!(notice.subtitle, "Its last turn didn't finish");
         // Still "done": there is no live card to hold open for a turn that is
@@ -4340,20 +4634,24 @@ mod tests {
     /// wrong in both is simply not believed.
     #[test]
     fn a_finished_turn_is_not_reported_as_a_failed_one() {
-        let done = notification(AgentActivity::Done, "claude", Said::default(), false, None).expect("done");
+        let done = notification(AgentActivity::Done, "claude", Quoted::default(), false, None).expect("done");
         assert!(!done.failed);
         // Neither tier has ended at all, so neither can have ended badly.
-        let blocked = notification(AgentActivity::Blocked, "claude", Said::default(), true, None);
+        let blocked = notification(AgentActivity::Blocked, "claude", Quoted::default(), true, None);
         assert_eq!(blocked.map(|n| n.failed), Some(false));
         let working = notification(AgentActivity::Working, "claude", just_asking("x"), true, None);
         assert_eq!(working.map(|n| n.failed), Some(false));
     }
 
     #[test]
-    fn a_failed_exit_names_the_code() {
-        let notice = exit_notice("cargo build", Some(101), None);
+    fn a_failed_exit_names_the_code_and_the_workspace() {
+        let notice = exit_notice("cargo build", "add-auth", Some(101), None);
         assert_eq!(notice.title, "cargo build failed");
-        assert_eq!(notice.subtitle, "Exit code 101");
+        // Which build broke, as well as how. `cargo build failed / Exit code
+        // 101` at three in the morning is a fact about a fleet and not about
+        // any pane in it — the same complaint the agent notices answer, one
+        // step over, and the same shape the Mac's local banner already used.
+        assert_eq!(notice.subtitle, "add-auth — Exit code 101");
         // Not "blocked": nothing is waiting on an answer, so there is no live
         // card to raise. Reusing "done" is what keeps the relay's vocabulary at
         // two words instead of a third it was never taught.
@@ -4368,8 +4666,8 @@ mod tests {
     fn a_signal_names_the_signal_not_the_code() {
         // A process killed by a signal has no exit code at all, so the
         // sentence has to come from the signal or say nothing useful.
-        let notice = exit_notice("cargo build", None, Some(9));
-        assert_eq!(notice.subtitle, "Stopped by signal 9");
+        let notice = exit_notice("cargo build", "add-auth", None, Some(9));
+        assert_eq!(notice.subtitle, "add-auth — Stopped by signal 9");
     }
 
     /// The rule that decides whether a state transition reaches a phone.

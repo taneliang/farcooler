@@ -304,6 +304,15 @@ impl Session {
                             // it is the one with no screen to scroll back
                             // through and the smallest row to say it in.
                             "feed": t.feed.clone(),
+                            // The last of those messages WHOLE and from its
+                            // start, which is what the phone's `Notifier` puts
+                            // in a banner. It cannot be recovered from the
+                            // lines above — they are wrapped rows, so the last
+                            // of them is the end of the window rather than the
+                            // beginning of a sentence, which is how a lock
+                            // screen came to read `batches to avoid N+1
+                            // shits.` See `farcooler_core::feed::Feed::said`.
+                            "said": t.said.clone(),
                             // The agents it spawned and has not finished with,
                             // named, on the same terms. A phone shows these
                             // under the row exactly as the Mac does, and their

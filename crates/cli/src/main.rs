@@ -2665,6 +2665,12 @@ fn workspace_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_j
         // redacted and already cut to a row's width — a client renders these
         // and decides nothing about them.
         "feed": t.feed,
+        // The last of those messages WHOLE and from its start, which is what a
+        // notification quotes. Not derivable from `feed`: those are wrapped
+        // rows, so their last entry is the end of the window rather than the
+        // beginning of a sentence — see `farcooler_core::feed::Feed::said`.
+        // This is the app whose `Notifier` reads it.
+        "said": t.said,
         // The agents it spawned and has not finished with, named. On the same
         // terms as the feed, and here for the same reason the rungs are: a
         // field on the wire and missing from a projection is this function's
@@ -2749,6 +2755,12 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // the agent is on it, and a transcript that only arrived on a full
         // refresh would always be describing the previous minute.
         "feed": t.feed,
+        // Watched for a sharper version of the same reason: this is the
+        // sentence the app's own `Notifier` puts in a banner the instant a
+        // turn ends, and the event carrying `activity: done` is the one that
+        // makes it fire. Arriving only on the next full refresh would mean the
+        // banner quoting the turn before it.
+        "said": t.said,
         // Watched for the identical reason, one field along: a subagent that
         // reached a row only at the next full refresh would be finished before
         // anyone saw it start.
@@ -3070,6 +3082,7 @@ mod tests {
             "blockedQuestion",
             "chatCapable",
             "feed",
+            "said",
             "subagents",
             "glyph",
             "headline",

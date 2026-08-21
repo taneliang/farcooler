@@ -91,7 +91,11 @@ final class Notifier {
         switch activity {
         case .blocked:
             content.title = "\(terminal.title) needs you"
-            content.body = "\(workspace) — waiting for your answer"
+            // Capitalized to match the daemon's own `watch::notification`, which
+            // writes this same sentence into the push it sends when this app is
+            // closed. One person gets whichever of the two is delivered, about
+            // one pane, and two casings of one sentence is two notifications.
+            content.body = "\(workspace) — Waiting for your answer"
             content.interruptionLevel = .timeSensitive
         case .done:
             // How the turn ENDED, which `activity` alone cannot say — the
@@ -101,19 +105,30 @@ final class Notifier {
             // most likely to be looking at.
             if terminal.status == .failedTurn {
                 content.title = "\(terminal.title) failed"
-                content.body = "\(workspace) — its last turn didn't finish"
+                content.body = "\(workspace) — Its last turn didn't finish"
             } else {
                 content.title = "\(terminal.title) finished"
                 // What it finished, where there is an answer to that. The body
                 // was the workspace alone, which the title had very nearly said
                 // already — so the whole notification was a sentence about Far
-                // Cooler rather than about the work. `recentSteps` is the
-                // agent's own last words, already redacted and cut to a window
+                // Cooler rather than about the work. What follows the dash is
+                // the agent's own last words, already redacted and already cut
                 // by the daemon.
                 //
                 // The same change as the phone's, in the same words, because
                 // the two notifications are read by one person about one pane.
-                if let said = terminal.recentSteps.last, !said.isEmpty {
+                //
+                // `lastSaid`, not `recentSteps.last`, which is what this used
+                // to read. A step is a wrapped ROW, so the last of them is the
+                // last forty characters of the window — the END of the message
+                // — and a notification reports something already over, where
+                // what a sentence opens with is what it is about. A turn that
+                // ended "More shit. An industrial quantity of shit, shipped in
+                // carefully authorized batches to avoid N+1 shits." arrived as
+                // "batches to avoid N+1 shits." until it did not. The daemon
+                // sends the whole message cut from its start; see
+                // `Terminal.lastSaid`.
+                if let said = terminal.lastSaid, !said.isEmpty {
                     content.body = "\(workspace) — \(said)"
                 } else {
                     content.body = workspace
@@ -163,9 +178,9 @@ final class Notifier {
         // The code or the signal, whichever the command actually left behind
         // — never both, since a signal means there is no exit code to show.
         if let signal = terminal.exitSignal {
-            content.body = "\(workspace) — stopped by signal \(signal)"
+            content.body = "\(workspace) — Stopped by signal \(signal)"
         } else if let code = terminal.exitCode {
-            content.body = "\(workspace) — exit code \(code)"
+            content.body = "\(workspace) — Exit code \(code)"
         } else {
             content.body = workspace
         }

@@ -229,6 +229,17 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // The watcher's for the identical reason: a spawned agent is found by
         // reading the same file at the same offset.
         subagents: Vec::new(),
+        // And the watcher's for the same reason once more: this is the same
+        // message the feed's last lines were cut from, cut from the other end
+        // — see `farcooler_core::feed::Feed::said` — so it comes off the same
+        // `Observed` at the same moment or it is a notification quoting one
+        // turn over another turn's row.
+        //
+        // `None` rather than `Some(String::new())`: absent means "this
+        // converter has nothing to say about it", and an empty string means
+        // "the agent said nothing", which is a different fact a client renders
+        // differently.
+        said: None,
         // The compact ladder is derived from `activity`, `blocked_question`
         // and `feed` above — all of them the watcher's to decide, and none of
         // them known yet at this point in the conversion. `apply_rungs` fills
