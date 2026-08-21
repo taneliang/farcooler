@@ -105,6 +105,11 @@ AGENTKIT_SOURCES = [
     # set of build ids rather than reusing these.
     "AgentActivityAttributes.swift",
     "AgentEvent.swift",
+    # What the Test button in an adapter editor says. Shared because the type
+    # and its words were declared three times — here, on the Mac and on
+    # Android — and one of the three sentences had quietly become false on one
+    # platform only. Not in `WATCH_AGENTKIT_SOURCES`: the watch edits nothing.
+    "AdapterTest.swift",
     # The intent layer, and in `activity_build_ids` below for the same reason
     # `AgentActivityAttributes.swift` is: TWO targets, one file. The widget
     # extension has to construct `AnswerPermissionIntent` to put it on a button

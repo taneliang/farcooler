@@ -47,6 +47,9 @@ import com.farcooler.model.AdapterTestOutcome
 import com.farcooler.model.envToLines
 import com.farcooler.model.linesToEnv
 import com.farcooler.model.linesToList
+import com.farcooler.model.sentence
+import com.farcooler.model.succeeded
+import com.farcooler.model.transcript
 import kotlinx.coroutines.launch
 
 /**
@@ -315,7 +318,7 @@ private val PREVIEW_FIXTURE: String = buildString {
  * One agent's adapter, with a button that proves the launch half works.
  *
  * Grouped Launch and Detection, and that split is the point: Test starts the
- * adapter and completes an ACP handshake, so it proves Launch. It cannot prove
+ * adapter and completes a handshake, so it proves Launch. It cannot prove
  * Detection — those strings are matched against output only that agent produces,
  * and a wrong one does not fail, it stops the agent being recognized.
  */
@@ -449,20 +452,27 @@ fun AdapterEditorScreen(
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 }
             }
+            // The sentence, then — where there is one — the runner's own account
+            // of the refusal beneath it. Both come from `AdapterTestOutcome`,
+            // whose words are matched to AgentKit's: this screen used to hold
+            // that `when` itself, as did the Mac's editor and the phone's, and
+            // one Test pressed on two devices is the only way that drift ever
+            // shows itself.
             outcome?.let {
-                when (it) {
-                    is AdapterTestOutcome.Worked ->
-                        Text(
-                            "Starts and speaks ACP — ${it.reported}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    is AdapterTestOutcome.Failed ->
-                        Text(
-                            it.why,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        it.sentence,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (it.succeeded) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                    // Asked for, not assumed: null for every outcome that named
+                    // its own cause, and an empty box under a sentence reads as
+                    // output that failed to arrive.
+                    it.transcript?.let { said -> DetailBox(said) }
                 }
             }
         }

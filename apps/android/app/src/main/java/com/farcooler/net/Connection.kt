@@ -763,13 +763,21 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
     /** Prove an adapter works, without saving it first. */
     suspend fun testAdapter(adapter: AdapterInfo): AdapterTestOutcome {
         val data = attempt { core.call("adapter.test", adapter.toJson()) }.getOrNull()
-            ?: return AdapterTestOutcome.Failed("That runner couldn’t be reached.")
+            // Nothing to put under the sentence: a bridge call that throws
+            // throws a state rather than a message. The Mac's own arm has the
+            // CLI's line and passes it — see `RunnerSettingsStore.test`.
+            ?: return AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer(null))
         return if (data["ok"]?.jsonPrimitive?.booleanOrNull == true) {
             AdapterTestOutcome.Worked(
                 data["reported"]?.jsonPrimitive?.contentOrNull ?: "answered")
         } else {
+            // Empty rather than a sentence when the field is missing: an outcome
+            // with nothing to show says so by having no transcript, and the
+            // words for that case are `AdapterTestOutcome`'s to choose rather
+            // than this call site's.
             AdapterTestOutcome.Failed(
-                data["failure"]?.jsonPrimitive?.contentOrNull ?: "The adapter did not answer.")
+                AdapterTestOutcome.Reason.Refused(
+                    data["failure"]?.jsonPrimitive?.contentOrNull.orEmpty()))
         }
     }
 

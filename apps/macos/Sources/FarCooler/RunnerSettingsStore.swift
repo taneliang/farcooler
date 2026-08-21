@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import SwiftUI
 
@@ -132,22 +133,27 @@ final class RunnerSettingsStore: ObservableObject {
     /// The unsaved form is exactly the input this wants: the question is "will
     /// this work", asked before committing it to the file.
     func test(adapter: AdapterInfo) async -> AdapterTestOutcome {
-        guard let payload = adapter.commandJSON else {
-            return .failed("That adapter could not be described.")
-        }
+        guard let payload = adapter.commandJSON else { return .failed(.formUnusable) }
         let result = await CLI.run(hostArguments + ["--json", "adapter", "test", "--json-stdin"], stdin: payload)
         guard let data = result.output.data(using: .utf8),
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             // A non-zero exit with unparseable output is the CLI's own words —
             // usually "couldn't reach that runner" — and they are better than
-            // anything invented here.
-            return .failed(Self.tidy(result.output))
+            // anything invented here, so they are kept. They are kept as
+            // OUTPUT, under a sentence this app wrote: this used to hand them
+            // straight to `.failed` and the editor drew them in its own red,
+            // which is the join `776d3e0` and `c42c352` took out everywhere
+            // else.
+            return .failed(.noAnswer(Self.tidy(result.output)))
         }
         if body["ok"] as? Bool == true {
             return .worked(body["reported"] as? String ?? "answered")
         }
-        return .failed(body["failure"] as? String ?? "The adapter did not answer.")
+        // Empty rather than a sentence when the field is missing: an outcome
+        // with nothing to show says so by having no detail, and the words for
+        // that case are `AdapterTestOutcome`'s to choose, not this call site's.
+        return .failed(.refused(body["failure"] as? String ?? ""))
     }
 
     // MARK: - Plumbing
@@ -187,12 +193,6 @@ final class RunnerSettingsStore: ObservableObject {
         guard let line, !line.isEmpty else { return "That runner couldn’t be reached." }
         return line.replacingOccurrences(of: "error: ", with: "")
     }
-}
-
-/// What a handshake said.
-enum AdapterTestOutcome: Equatable {
-    case worked(String)
-    case failed(String)
 }
 
 /// One adapter, plus where it came from.

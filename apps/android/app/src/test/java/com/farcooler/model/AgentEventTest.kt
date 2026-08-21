@@ -245,4 +245,105 @@ class AgentEventTest {
         assertTrue(!GapReason.RingTrimmed.isInformational)
         assertTrue(!GapReason.LoadFailed("x").isInformational)
     }
+
+    // What an adapter test says, mirroring
+    // `apps/shared/AgentKit/Tests/AgentKitTests/AdapterTestTests.swift` case for
+    // case. Here rather than beside `RunnerSettings.kt` because this is the file
+    // that holds the pins for copy shared with AgentKit, and a sentence that has
+    // to match another platform's word for word is only pinned if the two suites
+    // sit where the next person looks for both.
+
+    @Test
+    fun noAdapterTestOutcomeLeaksItsOwnCaseName() {
+        val all = listOf(
+            AdapterTestOutcome.Worked("Claude Code 2.0.1"),
+            AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer(null)),
+            AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer("error: no such runner")),
+            AdapterTestOutcome.Failed(
+                AdapterTestOutcome.Reason.Refused("could not find `npx` on this runner")),
+        )
+        for (outcome in all) {
+            val sentence = outcome.sentence
+            assertTrue(sentence, sentence.isNotEmpty())
+            for (name in listOf("Worked", "Failed", "NoAnswer", "Refused")) {
+                assertTrue(sentence, !sentence.contains(name))
+            }
+        }
+    }
+
+    @Test
+    fun aRefusedHandshakeKeepsTheRunnersWordsOutOfTheSentence() {
+        // The defect: `failure` from the daemon drawn as the app's own red
+        // line, here and on both Apple platforms. What it sends is a lowercase
+        // fragment about a process, and it must still reach a person — it is
+        // the only clue about which field is wrong — but as output, in a
+        // `DetailBox`, not in this app's voice.
+        val said = "the adapter started and then went silent"
+        val outcome = AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.Refused(said))
+        assertTrue(outcome.sentence, !outcome.sentence.contains(said))
+        assertTrue(outcome.sentence, !outcome.sentence.contains(":"))
+        assertEquals(said, outcome.transcript)
+    }
+
+    @Test
+    fun anAdapterTestOutcomeWithNothingToShowReservesNoRoomForABox() {
+        assertNull(AdapterTestOutcome.Worked("Claude Code 2.0.1").transcript)
+        assertNull(AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer(null)).transcript)
+        // The daemon sends `failure` as "" on the success path, and a client
+        // that lost the field decodes to the same thing. Neither is a
+        // transcript.
+        assertNull(AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer("")).transcript)
+        assertNull(AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.Refused("")).transcript)
+    }
+
+    @Test
+    fun anAdapterTestSuccessDoesNotClaimAProtocolItMayNotHaveSpoken() {
+        // The defect three copies were hiding. Only the Mac's `AdapterInfo`
+        // carries a `backend`, so only the Mac can ask for the agent's native
+        // protocol — and when it does, no ACP is spoken at all. This phone's
+        // copy of the sentence was true and the Mac's was false.
+        val native = AdapterTestOutcome.Worked("codex app-server 0.44")
+        assertTrue(native.sentence, !native.sentence.contains("ACP"))
+        // The name is still the news, so it is still in the line.
+        assertTrue(native.sentence, native.sentence.contains("codex app-server 0.44"))
+    }
+
+    @Test
+    fun onlyAWorkingAdapterIsDrawnAsGoodNews() {
+        assertTrue(AdapterTestOutcome.Worked("x").succeeded)
+        assertTrue(!AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer(null)).succeeded)
+        assertTrue(!AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.Refused("x")).succeeded)
+    }
+
+    @Test
+    fun theTwoWaysATestFailsHereDoNotSayTheSameThing() {
+        // The trap `b357841` found in `GapReason`: two cases returning one
+        // sentence, with the other side's text spliced onto the end of one of
+        // them carrying the whole distinction.
+        assertTrue(
+            AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer(null)).sentence !=
+                AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.Refused("x")).sentence
+        )
+    }
+
+    @Test
+    fun theAdapterTestSentencesMatchAgentKitWordForWord() {
+        // The whole point of writing them down twice. These are AgentKit's
+        // `AdapterTestOutcome.sentence`, copied out of
+        // `apps/shared/AgentKit/Sources/AgentKit/AdapterTest.swift`; Kotlin
+        // cannot import it, so the only thing that can hold the three platforms
+        // together is a literal here that fails when somebody edits one side.
+        assertEquals(
+            "Starts and answers — codex app-server 0.44",
+            AdapterTestOutcome.Worked("codex app-server 0.44").sentence,
+        )
+        assertEquals(
+            "That runner couldn’t be reached.",
+            AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer(null)).sentence,
+        )
+        assertEquals(
+            "This adapter didn’t start and answer.",
+            AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.Refused("x")).sentence,
+        )
+    }
 }

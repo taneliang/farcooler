@@ -82,12 +82,6 @@ final class RunnerSettingsModel: ObservableObject {
     }
 }
 
-/// What a handshake said.
-enum AdapterTestOutcome: Equatable {
-    case worked(String)
-    case failed(String)
-}
-
 /// One adapter, plus where it came from. Mirrors the Mac's own `AdapterInfo`.
 struct AdapterInfo: Identifiable, Equatable {
     enum Origin: String {

@@ -3,7 +3,7 @@ import SwiftUI
 /// One agent's adapter, with a button that proves the launch half works.
 ///
 /// Grouped Launch and Detection, and that split is the most important thing
-/// here: Test starts the adapter and completes an ACP handshake, so it proves
+/// here: Test starts the adapter and completes a handshake, so it proves
 /// Launch. It cannot prove Detection — those strings are matched against output
 /// only that agent produces, and a wrong one does not fail, it stops the agent
 /// being recognized, which shows up later as "chat mode broke" somewhere else.
@@ -119,15 +119,32 @@ struct AdapterEditorView: View {
                 .disabled(testing || assembled.program.trimmingCharacters(in: .whitespaces).isEmpty)
 
                 if let outcome {
-                    switch outcome {
-                    case .worked(let reported):
-                        Label("Starts and speaks ACP — \(reported)", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.callout)
-                    case .failed(let why):
-                        Label(why, systemImage: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                            .font(.callout)
+                    // The sentence, then — where there is one — the runner's own
+                    // account of the refusal beneath it. `outcome.sentence` and
+                    // `outcome.detail` are AgentKit's, shared with the Mac's
+                    // editor: the two used to hold this `switch` privately, and
+                    // one Test pressed on two devices is the only way that drift
+                    // ever shows itself. The type sizes stay this app's own.
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(
+                            outcome.sentence,
+                            systemImage: outcome.succeeded
+                                ? "checkmark.circle.fill" : "xmark.circle.fill"
+                        )
+                        .font(.callout)
+                        // `Color.green`, not `.green` — that shorthand resolves
+                        // to `HierarchicalShapeStyle`, a different type from
+                        // `Color.red`, and a ternary needs both branches to
+                        // agree.
+                        .foregroundStyle(outcome.succeeded ? Color.green : Color.red)
+
+                        // Asked for, not assumed: `detail` is nil for every
+                        // outcome that named its own cause, and an empty box
+                        // under a sentence reads as output that failed to
+                        // arrive.
+                        if let detail = outcome.detail {
+                            DetailBox(text: detail)
+                        }
                     }
                 }
             }

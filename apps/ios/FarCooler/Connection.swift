@@ -999,11 +999,19 @@ final class Connection: ObservableObject {
     func testAdapter(_ adapter: AdapterInfo) async -> AdapterTestOutcome {
         guard let data = try? await core.call("adapter.test", adapter.arguments),
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return .failed("That runner couldn’t be reached.") }
+        else {
+            // Nothing to put under the sentence: a bridge call that throws
+            // throws a state rather than a message. The Mac's own arm has the
+            // CLI's line and passes it — see `RunnerSettingsStore.test`.
+            return .failed(.noAnswer(nil))
+        }
         if body["ok"] as? Bool == true {
             return .worked(body["reported"] as? String ?? "answered")
         }
-        return .failed(body["failure"] as? String ?? "The adapter did not answer.")
+        // Empty rather than a sentence when the field is missing: an outcome
+        // with nothing to show says so by having no detail, and the words for
+        // that case are `AdapterTestOutcome`'s to choose, not this call site's.
+        return .failed(.refused(body["failure"] as? String ?? ""))
     }
 
     private static func themes(from body: [String: Any]) -> [Theme] {

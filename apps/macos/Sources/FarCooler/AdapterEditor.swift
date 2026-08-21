@@ -1,13 +1,15 @@
+import AgentKit
 import SwiftUI
 
 /// One agent's adapter, with a button that proves the launch half works.
 ///
 /// The fields are grouped **Launch** and **Detection**, and that split is the
-/// most important thing in this sheet. Test starts the adapter and completes an
-/// ACP handshake, so it proves Launch. It cannot prove Detection: those strings
-/// are matched against output only that agent produces, and getting one wrong
-/// does not fail loudly — it stops the agent being recognized, which surfaces
-/// later as "chat mode broke" from somewhere else entirely.
+/// most important thing in this sheet. Test starts the adapter and completes a
+/// handshake — the agent's own protocol under **Native**, ACP otherwise — so it
+/// proves Launch. It cannot prove Detection: those strings are matched against
+/// output only that agent produces, and getting one wrong does not fail loudly
+/// — it stops the agent being recognized, which surfaces later as "chat mode
+/// broke" from somewhere else entirely.
 ///
 /// So the sheet says which half it can vouch for rather than showing one green
 /// checkmark over seven fields.
@@ -153,41 +155,61 @@ struct AdapterEditor: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 12) {
-            Button(testing ? "Testing…" : "Test") {
-                Task {
-                    testing = true
-                    outcome = await store.test(adapter: assembled)
-                    testing = false
-                }
-            }
-            .disabled(testing || assembled.program.trimmingCharacters(in: .whitespaces).isEmpty)
+        // The outcome sits ABOVE the buttons rather than beside them. A refused
+        // handshake arrives with the runner's own account of it, that account
+        // goes in a `DetailBox` where output goes, and a box does not fit in a
+        // row that also has to hold Cancel and Save. It used to be a single
+        // `Label` capped at two lines with the runner's text inside it — so the
+        // only clue about which field is wrong was drawn in this app's voice
+        // AND silently cut in half. The phone's editor never had that cap,
+        // which is what one shared switch and three private renderings buys.
+        VStack(alignment: .leading, spacing: 8) {
+            if !testing, let outcome {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(
+                        outcome.sentence,
+                        systemImage: outcome.succeeded
+                            ? "checkmark.circle.fill" : "xmark.circle.fill"
+                    )
+                    .font(.caption)
+                    // `Color.green`, not `.green` — that shorthand resolves to
+                    // `HierarchicalShapeStyle`, a different type from
+                    // `Color.red`, and a ternary needs both branches to agree.
+                    .foregroundStyle(outcome.succeeded ? Color.green : Color.red)
 
-            if testing {
-                ProgressView().controlSize(.small)
-            } else if let outcome {
-                switch outcome {
-                case .worked(let reported):
-                    Label("Starts and speaks ACP — \(reported)", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                        .lineLimit(2)
-                case .failed(let why):
-                    Label(why, systemImage: "xmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .lineLimit(2)
+                    // Asked for, not assumed: `detail` is nil for every outcome
+                    // that named its own cause, and an empty box under a
+                    // sentence reads as output that failed to arrive.
+                    if let detail = outcome.detail {
+                        DetailBox(text: detail)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Spacer()
-            Button("Cancel") { dismiss() }
-            Button("Save") {
-                onSave(assembled)
-                dismiss()
+            HStack(spacing: 12) {
+                Button(testing ? "Testing…" : "Test") {
+                    Task {
+                        testing = true
+                        outcome = await store.test(adapter: assembled)
+                        testing = false
+                    }
+                }
+                .disabled(testing || assembled.program.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                if testing {
+                    ProgressView().controlSize(.small)
+                }
+
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save") {
+                    onSave(assembled)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSave)
             }
-            .keyboardShortcut(.defaultAction)
-            .disabled(!canSave)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
