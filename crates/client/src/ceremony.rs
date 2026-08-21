@@ -113,9 +113,20 @@ pub struct RunnerEntry {
     /// address it belongs to, which is what stops the unknown-host prompt from
     /// ever appearing and what makes an interception a refusal.
     pub host_key: String,
-    /// This runner was asleep when the trusted device tried to enroll. It is
-    /// still listed, because access follows when that device next reaches it and
-    /// the new device simply retries.
+    /// This runner does NOT have the new device's key.
+    ///
+    /// A write that failed, a runner that could not be reached, and one never
+    /// attempted are all the same value here, because the runner's
+    /// `authorized_keys` is in the same state in all three. So the CAUSE is not
+    /// recoverable from this flag and nothing downstream should guess at one.
+    ///
+    /// It is still listed, and it is the END STATE rather than a waiting room.
+    /// Nothing retries it: the new device cannot enroll itself anywhere, and a
+    /// phone may never enroll a device's key at all — granting is a
+    /// Mac-and-CLI capability. Access follows only when somebody runs the
+    /// ceremony again from a device that CAN reach this runner. Both join
+    /// screens read this to decide what not to add and what to say about it;
+    /// see `Joined` in each app's `JoinView.swift`.
     pub pending: bool,
 }
 
@@ -713,8 +724,9 @@ mod tests {
         assert!(m.runners[0].host_key.starts_with("SHA256:"));
     }
 
-    /// A runner that was asleep during enrollment is listed, marked pending,
-    /// rather than dropped — access follows and the device simply retries.
+    /// A runner the granting device could not write to is listed, marked
+    /// pending, rather than dropped — the flag is what lets the receiving side
+    /// tell it apart from a runner it can actually reach.
     #[test]
     fn a_manifest_round_trips_including_pending_runners() {
         let mine = offer("iPhone", "acct_1", KEY_A, None);

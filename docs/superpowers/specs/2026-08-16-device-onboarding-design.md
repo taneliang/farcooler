@@ -327,9 +327,15 @@ scan already required it.
 **5. The new device records the manifest as consumed** and connects, with host
 keys already pinned, so the unknown-host prompt never appears.
 
-Runners that were asleep during step 3 are still listed, marked pending. Access
-follows when the trusted device next reaches them; the new device simply retries
-and succeeds. Nothing more has to be delivered.
+Runners the trusted device could not write to in step 3 are still listed, marked
+pending. **Nothing retries them, and that is the end state rather than a gap.**
+The new device cannot enroll itself anywhere, and a phone may never enroll a
+device's key at all. So the receiving device leaves a pending runner out of the
+list it just built and out of `~/.ssh/config`, names it, and says the only thing
+that works — which is the section immediately below: the same ceremony again,
+from a device that can reach that runner. It says nothing about WHY, because
+asleep, never installed, and a fence that could not be rewritten are identical
+from there.
 
 **If the new device has no camera** — a Mac mini — there is no ceremony. That is
 the manual path, and the app says so rather than inventing a weaker exchange for

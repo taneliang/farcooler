@@ -131,15 +131,18 @@ struct JoinView: View {
     // MARK: - Added
 
     private var added: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("This device is ready")
+        let joined = Joined(store.granted)
+        return VStack(alignment: .leading, spacing: 16) {
+            Text(joined.headline)
                 .font(.title3.weight(.semibold))
 
-            Text("This device can access these runners:")
-            .font(.callout)
-            .foregroundStyle(.secondary)
+            if let summary = joined.summary {
+                Text(summary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
 
-            ForEach(store.granted) { runner in
+            ForEach(joined.reachable) { runner in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(runner.label)
                     Text("\(runner.user)@\(runner.address)")
@@ -147,6 +150,18 @@ struct JoinView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
+            }
+
+            // The runners this device was NOT given a key for, named. The
+            // mirror of what the granting screen says in `AddDeviceView`, and
+            // orange for the same reason: it is the half somebody has to act
+            // on, and the alternative to reading it here is meeting it later as
+            // a connection that fails for no stated reason.
+            if let note = joined.note {
+                Text(note)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
@@ -167,6 +182,11 @@ struct JoinView: View {
     /// Matched by address, user and port rather than by the id in the manifest:
     /// two devices generate their own ids for the same runner, so adopting by
     /// id would leave someone with the same box listed twice.
+    ///
+    /// A pending runner is not written into it at all — see ``Joined``. It is
+    /// also not taken back OUT of it: this reply says nothing about a key some
+    /// earlier ceremony wrote, and dropping a runner the person is already
+    /// using would be a second wrong answer rather than a correction.
     private func adopt() {
         for entry in store.granted {
             let existing = runners.hosts.first {
@@ -176,15 +196,108 @@ struct JoinView: View {
                 // Already known. The pin is the one thing worth taking from the
                 // manifest, and only when this device has none of its own: a
                 // fingerprint someone approved here outranks one that arrived
-                // in a code.
+                // in a code. Taken whatever `pending` says, because a host key
+                // is a fact about the box and the flag is a fact about a file.
                 if existing.fingerprint == nil, !entry.host_key.isEmpty {
                     var updated = existing
                     updated.fingerprint = entry.host_key
                     runners.update(updated)
                 }
-            } else {
+            } else if !entry.pending {
                 runners.add(entry.asRunner)
             }
         }
+    }
+}
+
+/// A reply, as the device RECEIVING it has to read it.
+///
+/// `CeremonyRunner.pending` means "this runner does NOT have this device's
+/// key". The granting side decides it from what its writes actually did — a
+/// Mac in `Enrollment.Outcome.granting(_:)`, a phone in
+/// ``CeremonyStore/confirm()`` — so it arrives here as a fact about a file on
+/// another machine, and a failed write, an unreachable runner and one never
+/// attempted all arrive the same way, because the file is in the same state in
+/// all three.
+///
+/// **Nothing here fixes one, and nothing anywhere else does either.** There is
+/// no retry queue, and a phone may never enroll a device's key: granting is a
+/// Mac-and-CLI capability. A runner a granting device could not write to
+/// traveling pending is the intended end state, so the only move this device
+/// has is to be honest about it — which is what this split is.
+///
+/// ## What a pending runner does NOT get
+///
+/// It is not added to the runner list, and it is not shown as one this device
+/// can access. Both used to happen to every runner in the reply, and both are
+/// claims of access: an entry that can only fail to connect, in a list where it
+/// looks identical to a working one. Selecting it is the first thing this app
+/// does with a new runner, so it would be the first thing to fail.
+///
+/// Leaving it out loses nothing that lasts. The remedy the note names is this
+/// same ceremony, run again from a device that CAN reach that runner, and the
+/// runner then arrives with `pending` false: added at the moment it works
+/// rather than before it does. An entry marked "might not work" would be worse
+/// than no entry, because nothing in this app could ever clear the mark.
+///
+/// The Mac reads a reply the same way, in its own `Joined`. The two differ only
+/// in what the screen does with the answer — the phone lists runners, the Mac
+/// counts them in a sentence — and in the one extra thing a Mac writes for a
+/// runner it can reach, which is the `~/.ssh/config` block.
+struct Joined {
+    /// The runners whose `authorized_keys` has this device's key.
+    let reachable: [CeremonyRunner]
+    /// The runners that do not.
+    let pending: [CeremonyRunner]
+
+    init(_ runners: [CeremonyRunner]) {
+        reachable = runners.filter { !$0.pending }
+        pending = runners.filter(\.pending)
+    }
+
+    static let ready = "This device is ready"
+
+    /// Not ``ready`` when nothing landed, which is not a corner: a phone grants
+    /// the one runner its live connection reaches, so a single failed write
+    /// there is a reply where every runner is pending.
+    var headline: String {
+        reachable.isEmpty ? "No runners were added" : Self.ready
+    }
+
+    /// The line above the list, or nil when there is no list and ``note`` is the
+    /// whole message.
+    var summary: String? {
+        if !reachable.isEmpty { return "This device can access these runners:" }
+        return pending.isEmpty ? "The other device didn’t share any runners." : nil
+    }
+
+    /// What to say about the runners that did not take the key.
+    ///
+    /// It NAMES them, which the granting side deliberately does not: over there
+    /// the sentence sits beside the list the person just ticked, and here that
+    /// list is exactly what is missing — "which ones" is the question. What it
+    /// does not do is guess WHY, for the reason
+    /// ``CeremonyStore/note(about:outcomes:)`` gives: a runner asleep, a daemon
+    /// never installed and a fence that could not be rewritten look identical
+    /// from here, and a screen that guesses is how an app ends up telling
+    /// somebody to loosen an sshd setting that was never the problem.
+    ///
+    /// It promises nothing later, either. Nothing retries, so "yet" is as far as
+    /// this goes, and the sentence after it is an instruction rather than a wait.
+    var note: String? {
+        guard !pending.isEmpty else { return nil }
+        let names = ListFormatter.localizedString(byJoining: pending.map(name(of:)))
+        return pending.count == 1
+            ? "\(names) doesn’t have this device’s key yet. To use it, add this device again "
+                + "from one that can reach it."
+            : "\(names) don’t have this device’s key yet. To use them, add this device again "
+                + "from one that can reach them."
+    }
+
+    /// A label comes from the granting device and is what somebody ticked there,
+    /// so it is the name to use. `user@address` is the fallback for a reply that
+    /// carried none, because a sentence with a blank in it names nothing.
+    private func name(of runner: CeremonyRunner) -> String {
+        runner.label.isEmpty ? "\(runner.user)@\(runner.address)" : runner.label
     }
 }
