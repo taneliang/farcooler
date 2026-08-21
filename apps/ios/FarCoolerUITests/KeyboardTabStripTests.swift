@@ -14,14 +14,20 @@ final class KeyboardTabStripTests: XCTestCase {
             throw XCTSkip("The current device state has no agent composer to exercise.")
         }
 
-        let otherTab = app.buttons.matching(
-            NSPredicate(format: "label ==[c] %@ AND value != %@", "changes", "current")
-        ).firstMatch
+        // The Changes tab, by identifier rather than by label. Its label now
+        // carries the diff's counts when there are any — "Changes, 82 added, 13
+        // removed" — so matching on the word alone found it only on a clean
+        // worktree. It is also no longer a pane the host has to have opened:
+        // every workspace has this chip. See `TerminalTabStrip`.
+        let otherTab = app.buttons["workspace-tab-changes"]
         guard otherTab.waitForExistence(timeout: 5) else {
-            throw XCTSkip("The current workspace has no unselected changes pane.")
+            throw XCTSkip("The current screen is not a workspace with a tab strip.")
+        }
+        guard otherTab.value as? String != "current" else {
+            throw XCTSkip("The workspace opened on its Changes tab; nothing to switch to.")
         }
         let initialTabFrame = otherTab.frame
-        let initialSwitcherFrame = app.buttons["Switch terminal"].frame
+        let initialSwitcherFrame = app.buttons["Switch workspace"].frame
         let originalTab = app.buttons.matching(
             NSPredicate(format: "value == %@", "current")
         ).firstMatch
@@ -81,16 +87,13 @@ final class KeyboardTabStripTests: XCTestCase {
         XCTAssertTrue(otherTab.isHittable, "The tab strip moved behind the navigation bar")
         otherTab.tap()
 
-        let currentTab = app.buttons.matching(
-            NSPredicate(format: "value == %@", "current")
-        ).firstMatch
         let selected = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label ==[c] %@", "changes"), object: currentTab)
+            predicate: NSPredicate(format: "value == %@", "current"), object: otherTab)
         XCTAssertEqual(
             XCTWaiter.wait(for: [selected], timeout: 5), .completed,
-            "The changes tab did not become the current pane after the tap"
+            "The Changes tab did not become the current pane after the tap"
         )
-        let changesSwitcher = app.buttons["Switch terminal"]
+        let changesSwitcher = app.buttons["Switch workspace"]
         let reviewOptions = app.buttons["Review options"]
         XCTAssertTrue(reviewOptions.waitForExistence(timeout: 2))
         XCTAssertGreaterThan(
@@ -114,28 +117,30 @@ final class KeyboardTabStripTests: XCTestCase {
             "The hidden changes pane left its review menu in the agent toolbar"
         )
 
+        // The switcher sheet, which now hands its selection all the way back up
+        // to `FleetView.show(_:)` rather than selecting inside the screen — a
+        // pane in another worktree is a different screen. A pane in THIS one
+        // comes straight back down and switches tabs without rebuilding
+        // anything, which is what this checks.
         let tabPrefix = "terminal-tab-"
-        XCTAssertTrue(otherTab.identifier.hasPrefix(tabPrefix))
-        let terminalID = String(otherTab.identifier.dropFirst(tabPrefix.count))
-        app.buttons["Switch terminal"].tap()
+        let agentTab = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND value != %@", tabPrefix, "current")
+        ).firstMatch
+        guard agentTab.waitForExistence(timeout: 3) else {
+            throw XCTSkip("This workspace has no second agent pane to switch to.")
+        }
+        let terminalID = String(agentTab.identifier.dropFirst(tabPrefix.count))
+        app.buttons["Switch workspace"].tap()
         let modalRow = app.buttons["fleet-terminal-\(terminalID)"]
         XCTAssertTrue(modalRow.waitForExistence(timeout: 3))
         XCTAssertTrue(modalRow.isHittable, "The terminal row was visible but not tappable")
         modalRow.tap()
 
         let selectedFromModal = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label ==[c] %@", "changes"),
-            object: app.buttons.matching(
-                NSPredicate(format: "value == %@", "current")
-            ).firstMatch
-        )
-        let modalSelectionResult = XCTWaiter.wait(for: [selectedFromModal], timeout: 3)
-        let currentLabel = app.buttons.matching(
-            NSPredicate(format: "value == %@", "current")
-        ).firstMatch.label
+            predicate: NSPredicate(format: "value == %@", "current"), object: agentTab)
         XCTAssertEqual(
-            modalSelectionResult, .completed,
-            "Tapping a terminal in the modal did not navigate to it; current tab was \(currentLabel)"
+            XCTWaiter.wait(for: [selectedFromModal], timeout: 3), .completed,
+            "Tapping a terminal in the modal did not switch to its tab"
         )
         XCTAssertFalse(app.buttons["Done"].exists, "The terminal modal did not dismiss")
     }

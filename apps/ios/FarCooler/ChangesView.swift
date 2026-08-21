@@ -111,7 +111,7 @@ struct ChangesView: View {
             // first request to the one screenful that exists. It half-worked —
             // the offset was recorded before the restore had had its turn, so a
             // second or third visit jumped — and all of it existed only because
-            // the view was destroyed on every pane switch. `PaneHost` keeps the
+            // the view was destroyed on every pane switch. `WorkspaceView` keeps the
             // pane mounted, so the scroll never moves and there is nothing to
             // put back.
             //
@@ -167,7 +167,7 @@ struct ChangesView: View {
             // was, a picker.
             //
             // Presented from here rather than from either control that opens it:
-            // one of those controls lives in `PaneHost`'s toolbar, and a sheet
+            // one of those controls lives in `WorkspaceView`'s toolbar, and a sheet
             // hung off a `Menu`'s content is hung off something that is not a live
             // view hierarchy to present from. The flag lives on the store so both
             // can reach it.
@@ -924,7 +924,7 @@ private struct FileIndexSheet: View {
 
 /// The changes pane's contextual toolbar control.
 ///
-/// Owned by `PaneHost`, not `ChangesView`: the host owns every navigation-bar
+/// Owned by `WorkspaceView`, not `ChangesView`: the host owns every navigation-bar
 /// item and can therefore keep their order stable as panes change. A mounted
 /// child contributing its own toolbar item made SwiftUI merge two independent
 /// toolbar trees, which moved the worktree switcher whenever this menu appeared.

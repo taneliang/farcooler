@@ -1,39 +1,89 @@
 import SwiftUI
 
-/// Every terminal in the fleet, one tap from whichever one is on screen.
+/// One workspace's tabs: its agents, and its diff.
 ///
 /// Ported from nothing — the Mac always has its sidebar on screen, so
-/// switching terminals there is a click away regardless of which one is
-/// open. A phone's terminal screen is full-bleed with no sidebar to fall
+/// switching panes there is a click away regardless of which one is
+/// open. A phone's workspace screen is full-bleed with no sidebar to fall
 /// back to, and "go back to the list, find the row, tap it" is the wrong
 /// cost for something as routine as glancing at a second agent. This strip
-/// makes every terminal one tap away without ever leaving the screen that
+/// makes every tab one tap away without ever leaving the screen that
 /// made checking on it worthwhile.
 ///
-/// Deliberately flat across the whole fleet rather than scoped to the current
-/// workspace: the 3am case this exists for is "is the OTHER agent still
-/// blocked", which is exactly as likely to be in a different worktree as the
-/// same one.
+/// ## Why this is scoped to one workspace now
+///
+/// It used to be flat across the whole fleet, and the argument for that was
+/// written down here: the 3am case is "is the OTHER agent still blocked", which
+/// is as likely to be in a different worktree as the same one. That is still
+/// true, and it stopped being the case this strip has to serve.
+///
+/// The job the owner described is reviewing what an agent did — reading what it
+/// said, judging it, looking at the change, replying — and every one of those is
+/// inside ONE worktree. A flat strip cannot hold that worktree's diff, because a
+/// diff belongs to a workspace and a flat strip has no workspace; and if it did
+/// hold one it would be a lone unlabeled chip in a row of ten unrelated ones.
+/// Scoped, the strip is the toggle: the agents that did the work, and the work
+/// they did, side by side.
+///
+/// The cross-worktree jump is not lost, it moved to where it reads better. Back
+/// is a list ranked by what needs you, which answers "is the other agent still
+/// blocked" with a sentence rather than with a chip's dot — and the switcher
+/// sheet in the toolbar still lists the whole runner.
+///
+/// A host-side `changes` pane is filtered out. The Changes chip already is that
+/// pane's review — same `ChangesStore`, keyed by workspace — and two chips onto
+/// one diff is a choice with no difference behind it.
 struct TerminalTabStrip: View {
-    let workspaces: [Workspace]
-    let current: Terminal
-    let onSelect: (Terminal) -> Void
+    /// The workspace whose tabs these are. Optional only for the moment between
+    /// this screen appearing and the fleet's next answer; the Changes chip
+    /// stands on its own until then, because the diff is fetched by workspace id
+    /// and needs nothing from the fleet.
+    let workspace: Workspace?
+    /// What this worktree has changed, for the Changes chip's counts. Nil when
+    /// the daemon has not answered yet or there is nothing to say.
+    let changes: InboxRow?
+    let current: Pane
+    let onSelect: (Pane) -> Void
+
+    /// The agent chips, in a deliberately unchanging order.
+    ///
+    /// Fleet order, not `sortRank`. `FleetList` sorts its rows by the runner's
+    /// rank and defends that at length, and the argument it had to answer — a
+    /// row that moves under a finger already travelling toward it is a tap that
+    /// lands on something else — is worse here, not better: these targets are
+    /// small, they sit in one line, and an agent going from working to blocked
+    /// would slide every chip past the thumb aimed at one of them.
+    ///
+    /// A host-side `changes` pane is not among them; the Changes chip is that
+    /// pane. See `Pane.init(_:)`.
+    private var terminals: [Terminal] {
+        (workspace?.terminals ?? []).filter { !$0.isChangesPane }
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
-                    ForEach(workspaces) { workspace in
-                        let numbering = workspace.ordinals()
-                        ForEach(workspace.terminals) { terminal in
-                            TabChip(
-                                terminal: terminal,
-                                ordinal: numbering[terminal.id],
-                                isCurrent: terminal.id == current.id,
-                                onTap: { onSelect(terminal) }
-                            )
-                            .id(terminal.id)
-                        }
+                    // Changes leads, so the one chip that is always there is
+                    // always in the same place — the diff is what a thumb can
+                    // find without reading, and the agents shuffle around it as
+                    // panes come and go.
+                    ChangesChip(
+                        counts: changes,
+                        isCurrent: current.id == Pane.changes.id,
+                        onTap: { onSelect(.changes) }
+                    )
+                    .id(Pane.changes.id)
+
+                    let numbering = workspace?.ordinals() ?? [:]
+                    ForEach(terminals) { terminal in
+                        TabChip(
+                            terminal: terminal,
+                            ordinal: numbering[terminal.id],
+                            isCurrent: current.id == Pane(terminal).id,
+                            onTap: { onSelect(Pane(terminal)) }
+                        )
+                        .id(Pane(terminal).id)
                     }
                 }
                 // Enough that a chip never reaches the bar's corner arc. Less
@@ -74,8 +124,68 @@ struct TerminalTabStrip: View {
     }
 }
 
-/// One tab. Compact by necessity — this is a phone, and the strip has to
-/// hold a whole fleet's worth of these on one line.
+/// The worktree's own tab: what the branch changed.
+///
+/// Always there, including on a workspace with no panes at all, because the
+/// diff is asked for by workspace id — see `Pane`. That is also why it needs no
+/// terminal, no dot and no state: nothing about it can be starting, exited or
+/// lost.
+///
+/// **Deliberately not amber.** Orange means an agent is waiting on an answer,
+/// on this strip and on the widget, the Live Activity, the complication and the
+/// inbox, and a glance at any of them has to answer "does this need me" without
+/// reading a word. A diff waiting to be read is worth showing; it is not worth
+/// the color that means someone is stuck. `NeedsYouView.workspaceRow` makes the
+/// same argument about the same fact.
+///
+/// So the counts carry it instead, in the green and red they have everywhere
+/// else in this app — which says how big the change is as well as that there is
+/// one, in the same space a badge would have taken.
+private struct ChangesChip: View {
+    let counts: InboxRow?
+    let isCurrent: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 5) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 11))
+                Text("Changes")
+                    .font(.caption)
+                    .lineLimit(1)
+                // Absent entirely on a clean worktree. `+0 -0` on every branch
+                // with nothing on it is noise in the shape of information —
+                // `FleetList`'s workspace header leaves it out for the same
+                // reason.
+                if let counts, counts.hasDiff {
+                    HStack(spacing: 3) {
+                        Text("+\(counts.insertions)").foregroundStyle(.green)
+                        Text("-\(counts.deletions)").foregroundStyle(.red)
+                    }
+                    .font(.caption2.monospaced())
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .modifier(ChipGlass(isCurrent: isCurrent))
+            .foregroundStyle(isCurrent ? Color.white : Color.white.opacity(0.75))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("workspace-tab-changes")
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(isCurrent ? "current" : "")
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
+    }
+
+    private var accessibilityLabel: String {
+        guard let counts, counts.hasDiff else { return "Changes" }
+        return "Changes, \(counts.insertions) added, \(counts.deletions) removed"
+    }
+}
+
+/// One agent's tab. Compact by necessity — this is a phone, and the strip has
+/// to hold a workspace's panes and its diff on one line.
 private struct TabChip: View {
     let terminal: Terminal
     let ordinal: Int?

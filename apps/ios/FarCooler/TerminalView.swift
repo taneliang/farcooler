@@ -40,7 +40,7 @@ struct TerminalView: View {
     ///
     /// This used to be `@State` that the tab strip reassigned, because one
     /// `TerminalView` was reused for every pane in the workspace. It is a `let`
-    /// now: `PaneHost` keeps one of these per visited pane and shows the
+    /// now: `WorkspaceView` keeps one of these per visited pane and shows the
     /// current one, so a pane never becomes a different pane.
     let terminal: Terminal
     /// Whether this pane is the one on screen.
@@ -85,7 +85,7 @@ struct TerminalView: View {
         TerminalMetrics.cell(.terminal(fontChoice, size: fontSize))
     }
 
-    /// Images on their way into this pane, owned by `PaneHost` so a transfer
+    /// Images on their way into this pane, owned by `WorkspaceView` so a transfer
     /// started on one pane survives switching to another.
     @ObservedObject var pastes: ImagePasteQueue
 
@@ -154,6 +154,14 @@ struct TerminalView: View {
                 // pane that has none — the mode has been in the fleet all
                 // along, with nothing on this platform able to show it.
                 //
+                // No longer the ordinary way a diff is reached: `WorkspaceView`
+                // gives every workspace a Changes tab that needs no pane behind
+                // it, and folds a host-side `changes` pane into that tab rather
+                // than mounting it here. What is left for this branch is a pane
+                // that BECOMES a `changes` pane while it is mounted — the Mac
+                // can do that to a worktree this phone is looking at — and the
+                // alternative for that case is the VT grid and the original bug.
+                //
                 // Keyed on the WORKSPACE rather than the terminal: what is
                 // being reviewed is the worktree, and two changes panes in one
                 // workspace are the same review.
@@ -207,7 +215,7 @@ struct TerminalView: View {
                 // smaller height, so the geometry it reports is the geometry the
                 // user can actually see.
                 //
-                // `PaneHost` no longer takes the framework's automatic
+                // `WorkspaceView` no longer takes the framework's automatic
                 // avoidance — it lifted the whole container and carried the tab
                 // strip up behind the navigation bar — so the grid asks for its
                 // own room. `KeyboardInset` reports the keyboard's whole reach,
@@ -532,7 +540,7 @@ struct TerminalView: View {
         let usable = size.height - padding.top - padding.bottom
         return max(1, Int((usable / cellSize.height).rounded(.down)))
     }
-    // `select` is gone. Switching panes is `PaneHost`'s job now, and it does
+    // `select` is gone. Switching panes is `WorkspaceView`'s job now, and it does
     // it by showing a different, already-mounted pane rather than by pointing
     // this one somewhere else — which is what makes a pane's grid, scroll
     // offset and fold state survive the switch.

@@ -345,7 +345,7 @@ final class TerminalSession: ObservableObject {
     /// gone, so asking it anything is a request into the void.
     /// Come back to a pane that was hidden, keeping what it looked like.
     ///
-    /// `PaneHost` mounts every visited pane and hides the ones you are not
+    /// `WorkspaceView` mounts every visited pane and hides the ones you are not
     /// looking at, precisely so their state survives — and the pane's state
     /// includes its screen. So coming back is not `relink`: nothing about the
     /// link changed, the terminal id is the same, and the only thing that

@@ -16,26 +16,90 @@ import SwiftUI
 /// this runner or it does not, and the second answer is one this screen can act
 /// on.
 ///
-/// The next stage of this design collapses `.review` and `.terminal` into a
-/// single `case workspace(id:focus:)` — one screen per worktree, with the diff
-/// and each of its agents as tabs. See
-/// `.claude/agent/done/phone-workspace-review-sketch.md`. That is one case
-/// added and two removed; nothing about the path, its storage, its restoration
-/// or its pruning changes with it.
+/// `.review` and `.terminal` were two routes here and are one now. They only
+/// ever differed in what the screen opened ONTO — a diff or a transcript — and
+/// the owner's account of reviewing an agent's work is that those are two views
+/// of one thing you move between constantly: read what it said it did, judge
+/// it, look at the change, reply. Two destinations made that a Back and a
+/// second navigation. One destination with a FOCUS makes it a chip.
 enum Route: Hashable, Codable {
     /// Every workspace on this runner, and the toolbar that starts new work.
     case workspaces
-    /// One worktree's diff, read without going through a pane.
-    case review(workspace: String)
-    /// One pane, by terminal id.
-    case terminal(id: String)
+    /// One worktree — its agents and its diff — with one of them showing.
+    case workspace(id: String, focus: Focus)
 
-    /// Whether this route is a pane. Asked by the two places that care about
-    /// panes specifically: a deep link arriving while one is open, and a fleet
-    /// that emptied underneath one.
-    var isTerminal: Bool {
-        if case .terminal = self { return true }
-        return false
+    /// Which tab a workspace opens on.
+    ///
+    /// Part of the route rather than state inside the screen because it is the
+    /// only thing the two doors into a workspace disagree about: the inbox
+    /// knows a workspace needs you and not which pane of it, the workspace list
+    /// knows exactly which agent was tapped.
+    ///
+    /// `.none` is the honest value for the first of those, and it is not a
+    /// missing focus — it is "apply the rule", resolved by
+    /// `Route.Focus.rule(for:inbox:)` at the moment the screen is built. That
+    /// matters most for a RESTORED path: a workspace saved at midnight and
+    /// reopened at seven should open on whatever needs you at seven, not on the
+    /// agent that needed you then.
+    enum Focus: Hashable, Codable {
+        /// One agent, by terminal id.
+        case agent(String)
+        /// The worktree's own diff.
+        case changes
+        /// No opinion — see `rule(for:inbox:)`.
+        case none
+    }
+
+    /// The workspace this route is about, or nil for the ones that are not
+    /// about one. Asked by the two places that care: a deep link arriving while
+    /// a workspace is open, and a workspace that left the fleet underneath one.
+    var workspaceID: String? {
+        if case .workspace(let id, _) = self { return id }
+        return nil
+    }
+}
+
+extension Route.Focus {
+    /// Which tab a workspace opens on when nobody said.
+    ///
+    /// Blocked agent, then unread diff, then whatever the fleet list would put
+    /// at the top. In that order because it is the order of "what did you open
+    /// this for": an agent that stopped to ask is waiting on you, a diff that
+    /// moved is waiting to be read, and a workspace where neither is true is
+    /// one you went looking for rather than one that called.
+    ///
+    /// The blocked agent is chosen by `sortRank` — `farcooler_core::feed::rank`,
+    /// computed on the runner — with the terminal id as a tiebreak, because
+    /// ranks genuinely collide and `min(by:)` over a collision has to land on
+    /// the same agent every time or the screen opens somewhere different on
+    /// each poll.
+    ///
+    /// One function, called from the inbox row, from a restored path, and from
+    /// a focus naming an agent that has since gone. Three copies of this would
+    /// be three answers to "where does this workspace open".
+    static func rule(for workspace: Workspace, inbox: InboxRow?) -> Route.Focus {
+        // A `changes` pane the host happens to have open is not an agent and is
+        // not a candidate: the diff it shows is the Changes tab, which is
+        // already the second branch below.
+        let panes = workspace.terminals.filter { !$0.isChangesPane }
+
+        if let blocked = panes.filter({ $0.agent == .blocked })
+            .min(by: { ($0.sortRank, $0.id) < ($1.sortRank, $1.id) })
+        {
+            return .agent(blocked.id)
+        }
+        // Both halves, and they are not the same fact. `hasDiff` is true of
+        // every worktree with work on it and stays true after you have read it;
+        // `changedSinceReviewed` is the daemon's watermark, and it is what makes
+        // this "there is something new here" rather than "there is a branch
+        // here". `NeedsYouView.items` gates its second tier on the same pair.
+        if let inbox, inbox.changedSinceReviewed, inbox.hasDiff { return .changes }
+        if let top = panes.min(by: { ($0.sortRank, $0.id) < ($1.sortRank, $1.id) }) {
+            return .agent(top.id)
+        }
+        // A workspace with no panes at all still has a diff to read, and that
+        // is the whole reason Changes needs no pane to exist behind it.
+        return .changes
     }
 }
 
@@ -133,8 +197,12 @@ struct FleetView: View {
     /// fleet to look in.
     @State private var pendingTerminal: String?
 
-    /// The terminal to show, handed to `PaneHost` and cleared the moment it
-    /// takes it.
+    /// The terminal to show, handed to `WorkspaceView` and cleared the moment
+    /// it takes it.
+    ///
+    /// Only ever a pane in the workspace already on screen — `show(_:)` sends
+    /// anything else through the path instead — because this is the retarget
+    /// channel, and retargeting is the thing that keeps mounted panes alive.
     ///
     /// One-shot rather than a record of which terminal the card chose: the tab
     /// strip moves on afterwards without telling this screen, so a second card
@@ -190,11 +258,13 @@ struct FleetView: View {
             // would not be there to receive it.
             //
             // Changing pane while one is open does NOT come through here — the
-            // tab strip and the switcher sheet retarget `PaneHost` in place,
-            // and a deep link arriving while a pane is open goes to `requested`
-            // for the same reason. Appending a second `.terminal` would mount a
-            // second `PaneHost` on top of the first and leave every pane
-            // underneath it holding a stream nobody can see.
+            // tab strip retargets `WorkspaceView` in place, and a deep link or
+            // the switcher sheet naming a pane in the SAME workspace goes to
+            // `requested` for the same reason. Appending a second `.workspace`
+            // would mount a second `WorkspaceView` on top of the first and leave
+            // every pane underneath it holding a stream nobody can see. A pane
+            // in a DIFFERENT workspace replaces the last route rather than
+            // appending — see `show(_:)`.
             .navigationDestination(for: Route.self) { destination($0) }
             .sheet(isPresented: $editing) {
                 HostEditorView(
@@ -214,27 +284,42 @@ struct FleetView: View {
             .onChange(of: scenePhase) { _, phase in
                 connection.setActive(phase == .active)
             }
-            // A fleet that empties has nothing for the terminal screen to show,
-            // so the pane comes off the path.
+            // A workspace that leaves the fleet has nothing left to show, so it
+            // comes off the path.
             //
-            // Removing the last worktree used to leave this sitting on a pane
-            // that no longer exists, with the switcher sheet as the only way
-            // out and nothing in it. Deliberately keyed on the fleet being
-            // EMPTY rather than on the route's own terminal still being
-            // present: `PaneHost` moves on from the terminal it opened with
-            // whenever the tab strip is used, so "the terminal we opened is
-            // gone" is a routine, correct state and must not yank anyone
-            // anywhere. `TerminalRoute` carries the other half of that
-            // argument.
+            // This used to watch the fleet's TERMINAL count and pop when it hit
+            // zero, because the screen underneath was a pane host and a pane
+            // host with no panes is a dead end with the switcher sheet as its
+            // only exit. `WorkspaceView` is not that: its Changes tab needs no
+            // pane to exist, so a worktree whose last agent was stopped is still
+            // a screen worth standing on — you are usually there to read what
+            // the agent left behind.
             //
-            // Truncated at the FIRST pane rather than emptied outright, so
+            // What IS a dead end is the worktree itself being removed, and that
+            // is what this watches now. Deliberately not the focused pane
+            // disappearing: `WorkspaceView` moves off the pane it opened with
+            // whenever the tab strip is used, so "the terminal we arrived at is
+            // gone" is routine and correct and must not yank anyone anywhere.
+            //
+            // Guarded on the fleet being non-empty, because a reconnect can
+            // briefly answer with nothing and every workspace would look
+            // removed — the same guard, for the same reason, as
+            // `WorkspaceView.prune`.
+            //
+            // Truncated at the FIRST workspace rather than emptied outright, so
             // someone who reached it through the workspace list lands back on
             // that list — which still has its toolbar, and is the one screen
             // that can start the work that would refill the fleet.
-            .onChange(of: terminalCount) { _, count in
-                guard count == 0, let pane = path.firstIndex(where: \.isTerminal)
+            .onChange(of: workspaceIDs) { _, ids in
+                guard !ids.isEmpty else { return }
+                let live = Set(ids)
+                guard
+                    let gone = path.firstIndex(where: { route in
+                        guard let id = route.workspaceID else { return false }
+                        return !live.contains(id)
+                    })
                 else { return }
-                path.removeSubrange(pane...)
+                path.removeSubrange(gone...)
             }
             // The saved path's one chance, taken the moment there is a fleet to
             // check it against. See `restorePath`.
@@ -297,9 +382,9 @@ struct FleetView: View {
 
     /// What each route draws.
     ///
-    /// Two of the three go through a small wrapper rather than being built
+    /// The workspace goes through a small wrapper rather than being built
     /// straight out of the fleet here, and that indirection is load-bearing —
-    /// see `TerminalRoute`.
+    /// see `WorkspaceRoute`.
     @ViewBuilder
     private func destination(_ route: Route) -> some View {
         switch route {
@@ -309,24 +394,59 @@ struct FleetView: View {
             // for one screen and neither of them what the screen is. See
             // `NeedsYouView.workspacesRow`.
             //
-            // `onSelect` appends, so a terminal opened from here sits ON this
+            // `onSelect` appends, so a workspace opened from here sits ON this
             // list at depth 2 and Back returns to it. That is the whole of the
             // Back bug: the same callback used to assign `landing`, and
             // assigning `landing` replaced this screen with the pane.
+            //
+            // Focused on the terminal that was tapped, and that is the only
+            // thing this door and the inbox's door disagree about. Here you
+            // pointed at an agent; there you pointed at a workspace and the
+            // rule decides. See `Route.Focus`.
             WorkspaceListView(
                 connection: connection,
-                onSelect: { path.append(.terminal(id: $0.id)) },
+                onSelect: { show($0) },
                 hosts: store
             )
             .navigationTitle("Workspaces")
             .navigationBarTitleDisplayMode(.inline)
 
-        case .review(let workspace):
-            ReviewRoute(workspace: workspace, connection: connection)
+        case .workspace(let id, let focus):
+            WorkspaceRoute(
+                workspace: id, focus: focus, connection: connection, hosts: store,
+                requested: $requested, onOpen: show)
+        }
+    }
 
-        case .terminal(let id):
-            TerminalRoute(
-                id: id, connection: connection, hosts: store, requested: $requested)
+    /// Show a terminal, wherever it is.
+    ///
+    /// The one place that decides between the three things a request to open a
+    /// pane can mean, so a deep link, the workspace list and the switcher sheet
+    /// inside a workspace cannot answer it differently.
+    ///
+    /// - Already in the workspace on screen: hand it to `requested`, which
+    ///   `WorkspaceView` honors by switching tabs. Nothing is pushed and nothing
+    ///   is rebuilt, so every mounted pane keeps its scroll position, its
+    ///   half-typed message and its open ssh stream.
+    /// - A DIFFERENT workspace while one is open: replace the route rather than
+    ///   append. Appending would stack a second `WorkspaceView` on the first and
+    ///   leave every pane underneath it holding a stream nobody can see;
+    ///   replacing swaps the host at the same depth, so Back still means what it
+    ///   meant a moment ago.
+    /// - Nothing open: append, which is the ordinary push.
+    private func show(_ terminal: Terminal) {
+        guard
+            let workspace = connection.fleet.workspaces.first(where: { candidate in
+                candidate.terminals.contains { $0.id == terminal.id }
+            })
+        else { return }
+
+        if path.last?.workspaceID == workspace.id {
+            requested = terminal
+        } else if path.last?.workspaceID != nil {
+            path[path.count - 1] = .workspace(id: workspace.id, focus: .agent(terminal.id))
+        } else {
+            path.append(.workspace(id: workspace.id, focus: .agent(terminal.id)))
         }
     }
 
@@ -340,34 +460,21 @@ struct FleetView: View {
         let all = connection.fleet.workspaces.flatMap(\.terminals)
         if let terminal = all.first(where: { $0.id == id }) {
             pendingTerminal = nil
-            // One or the other, never both, and which one depends on whether a
-            // pane is already open. They do different jobs: appending PUSHES a
-            // pane host when the inbox or the workspace list is what is on
-            // screen, and `requested` retargets a host that is already mounted
-            // — `PaneHost` reads its `terminal` argument once, at init, so a
-            // card tapped while another pane was open would otherwise do
-            // nothing at all.
+            // Push, replace or retarget — `show(_:)` owns that decision, and
+            // owning it in one place is why a card behaves the same whether it
+            // was tapped at the inbox, inside the workspace it names, or inside
+            // a different one.
             //
-            // Doing both is the damaging option, and the reasoning survives the
-            // move from `landing` to a path unchanged: appending a second
-            // `.terminal` stacks a second `PaneHost` on the first, and each
-            // host holds its own mounted panes with their scroll positions,
-            // half-typed messages and open ssh streams. Retargeting in place is
-            // what keeps every one of those.
-            //
-            // The path deliberately goes on naming the terminal the pane was
-            // OPENED with, exactly as `landing` did. `PaneHost` moves on
-            // without telling this screen — the tab strip, the switcher sheet
-            // and this retarget all do it — and rewriting the path to follow
-            // would be a push, which is the one thing that must not happen
-            // here. The cost is that a restored path reopens the pane you
-            // arrived at rather than the one you ended on; the workspace route
-            // that replaces `.terminal` carries a focus and closes that gap.
-            if path.last?.isTerminal == true {
-                requested = terminal
-            } else {
-                path.append(.terminal(id: terminal.id))
-            }
+            // The path goes on naming the pane the workspace was OPENED with
+            // and is not rewritten as the tab strip moves. A path element that
+            // changes value is a destination SwiftUI is free to rebuild, and
+            // rebuilding this one discards every mounted pane — which is the
+            // exact loss `WorkspaceView` exists to prevent. The cost used to be
+            // that a restored path reopened the pane you arrived at; it is
+            // smaller now, because a workspace restored from the inbox carries
+            // `.none` and re-runs the focus rule against the fleet as it is
+            // when you come back. See `Route.Focus`.
+            show(terminal)
         } else if connection.phase == .connected {
             // The runner answered and does not have it: the pane is gone, or
             // the card was about another runner entirely — the URL carries an
@@ -416,17 +523,20 @@ struct FleetView: View {
     }
 
     /// Whether this runner still has the thing a route names.
+    ///
+    /// The workspace, and deliberately not its focus. A worktree that is still
+    /// here is a screen worth restoring even if the agent you were reading has
+    /// since been stopped — the diff is still there, the other agents are still
+    /// there, and `WorkspaceRoute` falls back to the focus rule for exactly this
+    /// case. Refusing the whole route over a missing pane would drop you at the
+    /// inbox instead, which is further from where you were.
     private func resolves(_ route: Route) -> Bool {
         switch route {
         case .workspaces:
             // Always. The screen lists whatever there is, including nothing.
             return true
-        case .review(let workspace):
-            return connection.fleet.workspaces.contains { $0.id == workspace }
-        case .terminal(let id):
-            return connection.fleet.workspaces.contains { workspace in
-                workspace.terminals.contains { $0.id == id }
-            }
+        case .workspace(let id, _):
+            return connection.fleet.workspaces.contains { $0.id == id }
         }
     }
 
@@ -529,10 +639,11 @@ struct FleetView: View {
         }
     }
 
-    /// How many terminals the whole fleet has. Watched rather than the fleet
-    /// itself, because this screen only cares about the one transition.
-    private var terminalCount: Int {
-        connection.fleet.workspaces.reduce(0) { $0 + $1.terminals.count }
+    /// Every workspace this runner still has. Watched rather than the fleet
+    /// itself, because this screen only cares about one of it going away.
+    /// Sorted because `onChange` wants `Equatable` and a stable order.
+    private var workspaceIDs: [String] {
+        connection.fleet.workspaces.map(\.id).sorted()
     }
 
     /// Connect, then let the inbox draw whatever fleet that connection
@@ -791,80 +902,42 @@ struct FleetView: View {
     }
 }
 
-/// One pane, resolved from an id exactly once.
+/// One workspace, opened on one tab, resolved exactly once.
 ///
 /// The wrapper exists for a single reason, and removing it puts back the worst
-/// bug this screen can have. `PaneHost` needs a `Terminal` value, the path
-/// holds an id, and the obvious thing — looking the id up in the fleet every
+/// bug this screen can have. `WorkspaceView` needs a starting `Pane`, the path
+/// holds an id and a focus, and the obvious thing — resolving that focus every
 /// time this destination is evaluated — makes the host's very existence
-/// conditional on that lookup going on succeeding. It routinely stops
-/// succeeding: the pane you opened can be killed, dismissed or removed while
-/// you are reading a different tab in the same host, which is an ordinary state
-/// `PaneHost` already handles by pruning it out of `visited`. If the lookup
-/// drove the view structure, that same moment would swap the whole host for a
-/// placeholder and throw away every mounted pane — the exact loss `PaneHost`
-/// exists to prevent, and the same argument `FleetView`'s empty-fleet rule
-/// makes from the other side.
+/// conditional on the lookup going on succeeding. It routinely stops
+/// succeeding: the pane you arrived at can be killed, dismissed or removed
+/// while you are reading a different tab in the same workspace, which is an
+/// ordinary state `WorkspaceView` already handles by pruning it out of
+/// `visited`. If the lookup drove the view structure, that same moment would
+/// swap the whole host for a placeholder and throw away every mounted pane —
+/// the exact loss `WorkspaceView` exists to prevent, and the same argument
+/// `FleetView`'s removed-workspace rule makes from the other side.
 ///
-/// So the terminal is latched the first time it resolves and never unlatched.
-/// After that this view's structure is fixed and the host is left alone; who is
-/// on screen inside it is `PaneHost`'s business, not the path's. `FleetView`
-/// still pops the pane when the fleet empties entirely, which is the one case
-/// where there is genuinely nothing left to show.
+/// So the starting pane is latched the first time it resolves and never
+/// unlatched. After that this view's structure is fixed and the host is left
+/// alone; which tab is on screen inside it is `WorkspaceView`'s business, not
+/// the path's. `FleetView` still pops the route when the WORKSPACE leaves the
+/// fleet, which is the one case where there is genuinely nothing left to show.
 ///
-/// The unresolved branch is close to unreachable — the path is only appended to
-/// for a terminal the fleet just produced, and a restored path is checked
-/// against the fleet before it is installed — but "close to" is not "never", so
-/// it waits rather than crashing, and takes the fleet's next answer.
+/// A focus naming an agent that has gone falls back to the rule rather than to
+/// a placeholder, which is what makes a path restored hours later land
+/// somewhere useful. See `Route.Focus`.
 @MainActor
-private struct TerminalRoute: View {
-    let id: String
+private struct WorkspaceRoute: View {
+    let workspace: String
+    let focus: Route.Focus
     @ObservedObject var connection: Connection
     let hosts: RunnerStore
     @Binding var requested: Terminal?
+    /// How to open a pane this workspace does not contain — the switcher sheet
+    /// can name one anywhere on the runner. See `FleetView.show(_:)`.
+    let onOpen: (Terminal) -> Void
 
-    @State private var opened: Terminal?
-
-    var body: some View {
-        Group {
-            if let opened {
-                PaneHost(
-                    terminal: opened, connection: connection, hosts: hosts,
-                    requested: $requested)
-            } else {
-                ProgressView()
-            }
-        }
-        .onAppear { resolve() }
-        .onChange(of: liveTerminalIDs) { _, _ in resolve() }
-    }
-
-    /// Sorted rather than a set, because `onChange` wants `Equatable` and a
-    /// stable order. The same shape `PaneHost` uses to prune.
-    private var liveTerminalIDs: [String] {
-        connection.fleet.workspaces.flatMap(\.terminals).map(\.id).sorted()
-    }
-
-    private func resolve() {
-        guard opened == nil else { return }
-        opened = connection.fleet.workspaces.flatMap(\.terminals).first { $0.id == id }
-    }
-}
-
-/// One worktree's changes, opened from the inbox rather than from a pane.
-///
-/// Latches the workspace's NAME for the same reason `TerminalRoute` latches its
-/// terminal: `ChangesView` holds a scroll position and a set of open files that
-/// a structural change would discard, and a workspace can leave the fleet while
-/// somebody is still reading its diff. The agents a comment can be sent to are
-/// read live, because that list is a fact about the runner right now and
-/// nothing is destroyed by it changing.
-@MainActor
-private struct ReviewRoute: View {
-    let workspace: String
-    @ObservedObject var connection: Connection
-
-    @State private var name: String?
+    @State private var opened: Pane?
 
     private var live: Workspace? {
         connection.fleet.workspaces.first { $0.id == workspace }
@@ -872,27 +945,62 @@ private struct ReviewRoute: View {
 
     var body: some View {
         Group {
-            if let name {
-                // The store comes from `Connection`, so this is the SAME review
-                // the workspace's `changes` pane would show if there is one:
-                // the scroll position, the folds, the diffs already read and
-                // the notes written are one per worktree, not one per way in.
-                // See `ChangesStores`.
-                ReviewScreen(
-                    store: connection.changesStores.store(for: workspace),
-                    workspaceName: name,
-                    agents: live?.reviewAgentTargets() ?? [])
+            if let opened {
+                WorkspaceView(
+                    workspace: workspace, initial: opened, connection: connection,
+                    hosts: hosts, requested: $requested, onOpen: onOpen)
             } else {
                 ProgressView()
             }
         }
-        .onAppear { if name == nil { name = live?.task } }
+        .onAppear { resolve() }
+        .onChange(of: liveIDs) { _, _ in resolve() }
+    }
+
+    /// This workspace and its panes, as something `onChange` can compare.
+    ///
+    /// Scoped to the workspace rather than the fleet, and the workspace's own id
+    /// is in it deliberately: a worktree with no terminals at all still has a
+    /// diff to open, and a key made only of terminal ids would never change when
+    /// such a workspace arrived — leaving this on the spinner for good. Sorted
+    /// because `onChange` wants a stable order.
+    private var liveIDs: [String] {
+        guard let live else { return [] }
+        return [live.id] + live.terminals.map(\.id).sorted()
+    }
+
+    private func resolve() {
+        guard opened == nil, let workspace = live else { return }
+        // The focus the route carries, and the rule for everything else —
+        // `.none` because the inbox had no opinion, and a named agent that has
+        // since left the fleet. Both end up in the same place on purpose.
+        var wanted = focus
+        if case .agent(let id) = focus,
+            !workspace.terminals.contains(where: { $0.id == id })
+        {
+            wanted = .none
+        }
+        if case .none = wanted {
+            wanted = Route.Focus.rule(for: workspace, inbox: connection.inbox[workspace.id])
+        }
+
+        switch wanted {
+        case .changes, .none:
+            opened = .changes
+        case .agent(let id):
+            guard let terminal = workspace.terminals.first(where: { $0.id == id }) else {
+                opened = .changes
+                return
+            }
+            opened = Pane(terminal)
+        }
     }
 }
 
 /// The workspace list plus what it takes to act on it: quick task, new
 /// workspace, pull-to-refresh. Shown two places — pushed from the inbox's
-/// Workspaces row, and inside the sheet `PaneHost` opens to switch terminals —
+/// Workspaces row, and inside the sheet `WorkspaceView` opens to switch
+/// terminals —
 /// so a task started from either one works the same way and neither loses a
 /// capability the other has.
 ///

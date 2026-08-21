@@ -2,14 +2,66 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
-/// Every pane you have opened in this workspace, all still there.
+/// One tab in a workspace.
 ///
-/// One `TerminalView` was reused for every pane before this: switching tabs
-/// pointed it at a different terminal, which meant SwiftUI tore down whatever
-/// the old pane had built. A chat lost its scroll position and its half-typed
-/// message, a review lost which files were open and where you were reading, and
-/// a terminal renegotiated its size with tmux on every visit — which is the
-/// content jumping around on open.
+/// Two kinds, and the second one has no object behind it on the runner. Every
+/// `changes.*` RPC takes a `workspace_id` and nothing else — see
+/// `Session::change_set` and `Session::file_diff` in
+/// `crates/client/src/session.rs`, which pass `None` where a terminal-scoped
+/// call passes an id — so the diff is a fact about the worktree that this app
+/// can ask for whether or not anybody ever opened a `changes` pane in it. That
+/// is what lets Changes be a tab at no cost on the daemon side.
+///
+/// A `changes` pane the host DOES have is filtered out of the tab strip and
+/// folded into this one by `Pane.init(_:)`. Both resolve to the same
+/// `ChangesStore`, keyed by workspace on `Connection`, so what has been read,
+/// what is folded, where you were and the notes you have written are one review
+/// rather than one per door.
+enum Pane: Identifiable, Hashable {
+    case terminal(Terminal)
+    case changes
+
+    /// The pane a terminal belongs on. A `changes` pane is the Changes tab, not
+    /// a tab of its own — the alternative is two chips showing one diff.
+    init(_ terminal: Terminal) {
+        self = terminal.isChangesPane ? .changes : .terminal(terminal)
+    }
+
+    /// Namespaced, because a terminal id and the word "changes" are different
+    /// kinds of thing and a collision between them would silently give two
+    /// panes one SwiftUI identity — which is resolved by drawing one of them.
+    var id: String {
+        switch self {
+        case .terminal(let terminal): return "terminal:\(terminal.id)"
+        case .changes: return "changes"
+        }
+    }
+
+    /// The terminal this tab is, where it is one. Nil for Changes, which is
+    /// exactly the question `Notifier.visibleTerminal` is asking.
+    var terminal: Terminal? {
+        if case .terminal(let terminal) = self { return terminal }
+        return nil
+    }
+}
+
+/// One worktree: the agents working in it, its diff, and every tab you have
+/// opened still mounted behind the one on screen.
+///
+/// This was `PaneHost`, scoped to a terminal and given a tab strip of the whole
+/// fleet. The owner's account of reviewing an agent's work is what re-scoped it:
+/// reading a diff is only part of the job, and the larger part is seeing what
+/// the agent said it did, deciding whether that was right, and replying to it.
+/// Those two live in one worktree and you move between them constantly, so they
+/// are tabs of one screen rather than two destinations with a Back between them.
+/// The reply channel is the agent's own composer, one chip away.
+///
+/// One `TerminalView` was reused for every pane before any of this: switching
+/// tabs pointed it at a different terminal, which meant SwiftUI tore down
+/// whatever the old pane had built. A chat lost its scroll position and its
+/// half-typed message, a review lost which files were open and where you were
+/// reading, and a terminal renegotiated its size with tmux on every visit —
+/// which is the content jumping around on open.
 ///
 /// So panes are mounted and left mounted, and switching shows a different one.
 /// State survives because nothing is destroyed: there is no scroll position to
@@ -22,28 +74,43 @@ import UIKit
 /// and have several of them arguing with tmux about one pane's geometry, making
 /// the resize churn worse rather than better.
 ///
-/// Only panes actually VISITED are mounted. Mounting the whole fleet would pay
-/// setup for panes nobody opens, and a workspace's handful of visited panes is
-/// what "the tabs I am working in" actually means.
+/// Only panes actually VISITED are mounted. Mounting every tab would pay setup
+/// for panes nobody opens — including fetching a diff nobody asked to see — and
+/// a workspace's handful of visited panes is what "the tabs I am working in"
+/// actually means.
 @MainActor
-struct PaneHost: View {
+struct WorkspaceView: View {
+    /// The worktree this screen is, by id.
+    ///
+    /// An id and not a `Workspace`, so everything drawn from it is read live.
+    /// The panes are the part that must not be re-read — see `visited` — and
+    /// they carry their own values.
+    let workspaceID: String
+
     @ObservedObject var connection: Connection
     let hosts: RunnerStore?
 
-    /// A pane something OUTSIDE this screen has asked to show — today, a tapped
-    /// Live Activity card routed by `FleetView.onOpenURL`.
+    /// A pane something OUTSIDE this screen has asked to show — a tapped Live
+    /// Activity card, or the switcher sheet naming a pane in this workspace,
+    /// both routed by `FleetView.show(_:)`.
     ///
-    /// `terminal` below is only an initial value, so once this view is mounted
-    /// it cannot be pointed anywhere by its arguments; a deep link that arrived
+    /// `initial` below is only a starting value, so once this view is mounted it
+    /// cannot be pointed anywhere by its arguments; a deep link that arrived
     /// while a pane was already open would otherwise be silently ignored.
     /// Cleared here the moment it is honored, so asking twice for the same pane
     /// works — the second ask is a change again.
     @Binding var requested: Terminal?
 
-    @State private var current: Terminal
+    /// How to open a pane this workspace does not hold. The switcher sheet
+    /// lists the whole runner, and a terminal in another worktree is a different
+    /// screen — see `FleetView.show(_:)`, which replaces this route rather than
+    /// stacking a second host on it.
+    let onOpen: (Terminal) -> Void
+
+    @State private var current: Pane
     /// Visited panes, oldest first. An array rather than a set so the order is
     /// stable — SwiftUI identity in a `ForEach` is the whole mechanism here.
-    @State private var visited: [Terminal]
+    @State private var visited: [Pane]
     @State private var showWorkspaceList = false
     /// Images on their way into a terminal. Owned here rather than per pane, so
     /// a transfer keeps running — and keeps reporting — when you switch away
@@ -62,35 +129,42 @@ struct PaneHost: View {
     @Environment(\.scenePhase) private var scenePhase
 
     init(
-        terminal: Terminal,
+        workspace: String,
+        initial: Pane,
         connection: Connection,
         hosts: RunnerStore? = nil,
-        requested: Binding<Terminal?> = .constant(nil)
+        requested: Binding<Terminal?> = .constant(nil),
+        onOpen: @escaping (Terminal) -> Void = { _ in }
     ) {
+        self.workspaceID = workspace
         self.connection = connection
         self.hosts = hosts
+        self.onOpen = onOpen
         _requested = requested
-        _current = State(initialValue: terminal)
-        _visited = State(initialValue: [terminal])
+        _current = State(initialValue: initial)
+        _visited = State(initialValue: [initial])
     }
 
-    /// The current terminal as the daemon describes it RIGHT NOW.
+    /// The current terminal as the daemon describes it RIGHT NOW, or nil on the
+    /// Changes tab, which is not a terminal at all.
     ///
-    /// `current` is a copy taken when the pane was opened, which is right for
+    /// `current` holds a copy taken when the pane was opened, which is right for
     /// identity and wrong for pane mode — switching a pane to chat has to change
     /// what the toolbar offers.
-    private var live: Terminal {
-        guard let workspace = currentWorkspace?.id else { return current }
-        return connection.terminal(current.id, in: workspace) ?? current
+    private var live: Terminal? {
+        guard let terminal = current.terminal else { return nil }
+        return connection.terminal(terminal.id, in: workspaceID) ?? terminal
     }
 
     private var currentWorkspace: Workspace? {
-        connection.fleet.workspaces.first { $0.terminals.contains { $0.id == current.id } }
+        connection.fleet.workspaces.first { $0.id == workspaceID }
     }
 
-    private var currentName: String {
-        current.displayName(ordinal: currentWorkspace?.ordinals()[current.id])
-    }
+    /// What to call this workspace before the fleet has one to call it.
+    ///
+    /// Only ever shown in the gap between this screen appearing and the next
+    /// poll answering, which `WorkspaceRoute` has usually already closed.
+    private var workspaceName: String { currentWorkspace?.task ?? "Workspace" }
 
     var body: some View {
         GeometryReader { geometry in
@@ -105,18 +179,14 @@ struct PaneHost: View {
                 // depth and edge treatment of the original screen.
                 ZStack {
                     ForEach(visited) { pane in
-                        TerminalView(
-                            terminal: pane,
-                            isVisible: pane.id == current.id,
-                            connection: connection,
-                            pastes: pastes)
+                        content(of: pane)
                             // Hidden, not removed. `opacity` keeps the view in the
                             // hierarchy — which is what preserves its state — while
                             // `allowsHitTesting` stops a pane nobody can see from
                             // swallowing taps meant for the one on top of it.
                             .opacity(pane.id == current.id ? 1 : 0)
                             .allowsHitTesting(pane.id == current.id)
-                            // Never recycled onto a different terminal.
+                            // Never recycled onto a different pane.
                             .id(pane.id)
                     }
                 }
@@ -132,7 +202,10 @@ struct PaneHost: View {
                 // An overlay, not layout chrome: pin only the control while
                 // leaving the scroll surface underneath at full height.
                 TerminalTabStrip(
-                    workspaces: connection.fleet.workspaces, current: current, onSelect: select
+                    workspace: currentWorkspace,
+                    changes: connection.inbox[workspaceID],
+                    current: current,
+                    onSelect: select
                 )
                 .padding(.top, 6)
                 .padding(.bottom, 8)
@@ -165,14 +238,21 @@ struct PaneHost: View {
         // doesn't know or care whether this device is in Light Mode.
         .preferredColorScheme(Themes.shared.current.colorScheme)
         // The task and its branch: the place you are is the workspace, and that
-        // is true regardless of which of its panes is focused.
-        .navigationTitle(currentWorkspace?.task ?? currentName)
+        // is true regardless of which of its tabs is focused.
+        .navigationTitle(workspaceName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
         .photosPicker(isPresented: $showPhotoPicker, selection: $pickedImage, matching: .images)
         .onChange(of: pickedImage) { _, item in
             guard let item else { return }
-            let target = live.id
+            // No terminal to type a path into — only reachable if the tab moved
+            // while the picker was up. Cleared rather than left set, or picking
+            // the same photo again would not read as a change and nothing would
+            // happen twice.
+            guard let target = live?.id else {
+                pickedImage = nil
+                return
+            }
             let core = connection.core
             Task {
                 // Loaded as data rather than as an `Image`: the picker hands
@@ -189,13 +269,27 @@ struct PaneHost: View {
                 pickedImage = nil
             }
         }
+        // The fast path across worktrees, and it keeps that job.
+        //
+        // Every selection goes back up to `FleetView.show(_:)` rather than being
+        // handled here, including a pane in THIS workspace: that function
+        // already knows the three answers, and one of them — a terminal in
+        // another worktree, which this strip no longer holds a chip for — is one
+        // this screen cannot give. A pane in this workspace comes straight back
+        // down through `requested` and switches tabs without rebuilding
+        // anything.
         .sheet(isPresented: $showWorkspaceList) {
             NavigationStack {
                 WorkspaceListView(
                     connection: connection,
                     onSelect: { terminal in
-                        select(terminal)
+                        // Dismissed BEFORE the selection is acted on. A pane in
+                        // another worktree replaces this route, which takes this
+                        // view and the sheet it owns with it — and a sheet whose
+                        // presenter has gone is a sheet with nobody left to
+                        // close it.
                         showWorkspaceList = false
+                        onOpen(terminal)
                     },
                     onDismiss: { showWorkspaceList = false },
                     hosts: hosts
@@ -208,10 +302,9 @@ struct PaneHost: View {
         // while banners about the others still arrive — see `Notifier`.
         .onAppear {
             markVisible()
-            // Also on appear, not only on change: a card tapped at cold launch
-            // sets both the terminal this view is built with and the request,
-            // so the request never changes value after mounting and would sit
-            // there unclaimed, blocking the next tap on the same card.
+            // Also on appear, not only on change. A request set before this
+            // view mounted never changes value afterwards, so it would sit
+            // there unclaimed and block the next tap on the same card.
             honorRequest()
         }
         .onChange(of: requested?.id) { _, _ in honorRequest() }
@@ -227,10 +320,51 @@ struct PaneHost: View {
         // Removing a terminal used to leave the screen pointed at it; now it
         // also has to come out of `visited`, or its `TerminalView` would stay
         // mounted forever holding a session for a pane the host has forgotten.
+        // The Changes tab is never pruned: nothing on the runner has to exist
+        // for it, so nothing can stop existing.
         .onChange(of: liveTerminalIDs) { _, ids in prune(to: ids) }
         // Keyboard room is owned by each pane below. The outer host remains
         // full-height so its navigation boundary and tab overlay never move.
         .ignoresSafeArea(.keyboard, edges: .bottom)
+    }
+
+    /// What one tab draws.
+    ///
+    /// The two branches are the two things a workspace is: a pane on the runner,
+    /// and the worktree's own diff. The second needs nothing on the runner to
+    /// exist — see `Pane`.
+    @ViewBuilder
+    private func content(of pane: Pane) -> some View {
+        switch pane {
+        case .terminal(let terminal):
+            TerminalView(
+                terminal: terminal,
+                isVisible: pane.id == current.id,
+                connection: connection,
+                pastes: pastes)
+
+        case .changes:
+            // The store comes from `Connection`, keyed by workspace, so this is
+            // the SAME review a `changes` pane in this worktree would show and
+            // the same one the Mac is looking at: the scroll position, the
+            // folds, the diffs already read and the notes written are one per
+            // worktree, not one per way in. See `ChangesStores`.
+            //
+            // No `isVisible` argument, and it needs none. What that flag buys on
+            // a terminal is a stream, a poll and a tmux size assertion that must
+            // stop when the pane is merely hidden; `ChangesView` holds none of
+            // those. It loads once, on mount, and mounting only happens when
+            // somebody selects this tab.
+            //
+            // `agents` as plain values rather than the `Connection` they come
+            // from, for the reason `ChangesView.agents` states: this is the one
+            // screen in the app whose body is a forty-card lazy stack somebody
+            // is mid-scroll through.
+            ChangesView(
+                store: connection.changesStores.store(for: workspaceID),
+                workspaceName: workspaceName,
+                agents: currentWorkspace?.reviewAgentTargets() ?? [])
+        }
     }
 
     @ToolbarContentBuilder
@@ -246,7 +380,7 @@ struct PaneHost: View {
 
         ToolbarItem(placement: .principal) {
             VStack(spacing: 0) {
-                Text(currentWorkspace?.task ?? currentName)
+                Text(workspaceName)
                     .font(.headline)
                     .lineLimit(1)
                 if let branch = currentWorkspace?.branch {
@@ -266,7 +400,7 @@ struct PaneHost: View {
         ToolbarItemGroup(placement: .topBarTrailing) {
             // Terminal or chat, on the pane that can be either. Shown only
             // where the daemon says switching is supported.
-            if live.canSwitchPaneMode {
+            if let live, live.canSwitchPaneMode {
                 Button {
                     Task {
                         await connection.setPaneMode(
@@ -282,7 +416,7 @@ struct PaneHost: View {
 
             // Only on a pane that is actually a terminal: this sends an image
             // by typing its path into a tty.
-            if !live.isAgentPane && !live.isChangesPane {
+            if let live, !live.isAgentPane, !live.isChangesPane {
                 Menu {
                     // A plain Button, and the picker hangs off the screen: a
                     // `PhotosPicker` placed directly in a menu renders as a row
@@ -308,14 +442,19 @@ struct PaneHost: View {
                 .accessibilityLabel("Send an image")
             }
 
-            if live.isChangesPane, let workspace = currentWorkspace {
-                ChangesToolbarMenu(store: connection.changesStores.store(for: workspace.id))
+            // The review's own controls — the base it is compared against, and
+            // the notes waiting to be sent. Keyed on the TAB rather than on a
+            // pane's mode, because the tab is now the only way this screen shows
+            // a diff. A host-side `changes` pane arrives here as the same tab;
+            // see `Pane.init(_:)`.
+            if case .changes = current {
+                ChangesToolbarMenu(store: connection.changesStores.store(for: workspaceID))
             }
 
             Button { showWorkspaceList = true } label: {
                 Image(systemName: "square.stack")
             }
-            .accessibilityLabel("Switch terminal")
+            .accessibilityLabel("Switch workspace")
         }
     }
 
@@ -326,22 +465,28 @@ struct PaneHost: View {
         connection.fleet.workspaces.flatMap(\.terminals).map(\.id).sorted()
     }
 
-    /// Show the pane a deep link asked for, through the same `select` the tab
-    /// strip and the switcher sheet use — retargeting rather than rebuilding,
-    /// so the panes already mounted keep everything they were holding.
+    /// Show the pane a deep link or the switcher sheet asked for, through the
+    /// same `select` the tab strip uses — retargeting rather than rebuilding, so
+    /// the panes already mounted keep everything they were holding.
+    ///
+    /// Ignored, and cleared, for a terminal in another worktree. `FleetView`
+    /// only ever sends one that is in this one, and honoring anything else would
+    /// mean drawing a pane with no chip and a title naming the wrong worktree.
     private func honorRequest() {
         guard let terminal = requested else { return }
-        select(terminal)
         requested = nil
+        guard currentWorkspace?.terminals.contains(where: { $0.id == terminal.id }) == true
+        else { return }
+        select(Pane(terminal))
     }
 
-    /// Show a pane, mounting it the first time it is asked for.
-    private func select(_ terminal: Terminal) {
-        guard terminal.id != current.id else { return }
-        if !visited.contains(where: { $0.id == terminal.id }) {
-            visited.append(terminal)
+    /// Show a tab, mounting it the first time it is asked for.
+    private func select(_ pane: Pane) {
+        guard pane.id != current.id else { return }
+        if !visited.contains(where: { $0.id == pane.id }) {
+            visited.append(pane)
         }
-        current = terminal
+        current = pane
     }
 
     private func prune(to ids: [String]) {
@@ -350,14 +495,26 @@ struct PaneHost: View {
         // a reconnect, a host mid-restart — would otherwise unmount every pane
         // and throw away exactly the state this type exists to keep.
         guard !alive.isEmpty else { return }
-        visited.removeAll { !alive.contains($0.id) }
-        if !alive.contains(current.id), let next = visited.first {
-            current = next
+        visited.removeAll { pane in
+            guard let terminal = pane.terminal else { return false }
+            return !alive.contains(terminal.id)
+        }
+        if !visited.contains(where: { $0.id == current.id }) {
+            // Changes is the floor. A worktree whose last agent was stopped
+            // while you were reading it still has a diff, which is usually why
+            // you were there — the alternative is a screen with nothing on it.
+            select(visited.first ?? .changes)
         }
     }
 
+    /// Which pane the runner should believe is being read.
+    ///
+    /// Nil on the Changes tab, and that is the honest answer rather than a gap:
+    /// no pane is on screen, so no pane's notification should be suppressed and
+    /// no agent's finished turn should be marked seen. `Connection.markVisibleSeen`
+    /// reads exactly this and reports an empty watch list for it.
     private func markVisible() {
-        Notifier.shared.visibleTerminal = current.id
+        Notifier.shared.visibleTerminal = current.terminal?.id
         Task { await connection.markVisibleSeen() }
     }
 }

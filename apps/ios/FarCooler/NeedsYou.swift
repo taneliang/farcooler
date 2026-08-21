@@ -11,44 +11,56 @@ import SwiftUI
 /// and a terminal is an answer to a question nobody asked. See
 /// `docs/jobs-to-be-done.md`, where those are the Reassure and Unblock jobs.
 ///
-/// ## Two row kinds, one list
+/// ## The row is a workspace
+///
+/// It was two row kinds — a blocked agent, and a worktree whose branch had
+/// moved — and that produced FOUR rows for one piece of work when a workspace
+/// held three blocked agents and an unread diff. The two kinds bought exactly
+/// one thing between them: a different destination. Now that both open the same
+/// screen they buy only a different starting TAB, which is a property of the
+/// tap and not a reason for a row.
+///
+/// So one row per workspace: its name and branch, `+N -M` when the inbox says
+/// there is a diff, and a `TerminalRow` for each blocked agent inside it. A
+/// workspace that is both blocked and unread appears once, saying both.
 ///
 /// **Blocked agents** come from the fleet this connection is already polling.
-/// **Reviews** come from `changes.inbox`, which the daemon has answered since
-/// the review surface landed and which this app used for one thing: drawing
-/// `+82 -13` on a workspace header in `FleetList`. The rows are the same fact
-/// at two different scales — an agent that stopped to ask, and a branch that
-/// moved since anyone last read it — and both are "you, now", so they belong in
-/// one list rather than in two screens somebody has to choose between.
+/// **The counts** come from `changes.inbox`, which the daemon has answered since
+/// the review surface landed and which this app already used to draw `+82 -13`
+/// on a workspace header in `FleetList`.
 ///
-/// A `done` agent is deliberately NOT a row here, and that is worth spelling
-/// out because `AgentActivity.wantsAttention` includes it and this screen does
-/// not. What a finished agent leaves behind is a diff, and a diff already has a
-/// row: the review one, which says how big it is and opens what you would
-/// actually read. Listing the agent as well would put two rows on the front door
-/// for one piece of work, and the second of them would open a transcript rather
-/// than the change. A `done` agent whose worktree is clean — one that answered a
-/// question or investigated something — is reachable through Workspaces, which
-/// is where the whole fleet still is.
+/// A `done` agent is deliberately NOT what puts a workspace on this list, and
+/// that is worth spelling out because `AgentActivity.wantsAttention` includes it
+/// and this screen does not. What a finished agent leaves behind is a diff, and
+/// a diff already puts the workspace here through the second tier below. Whether
+/// a `done` agent whose worktree is CLEAN — one that answered a question or
+/// investigated something — belongs on the front door is an open decision, in
+/// `needs-planning/done-agents-on-the-front-door.md`. The workspace row changes
+/// its economics: such an agent would ride a row that already exists rather than
+/// adding one, which was the objection to it. Today it is reachable through
+/// Workspaces, where the whole fleet still is.
 ///
 /// ## Ordering
 ///
-/// `rank` decides it. That number is computed on the host —
+/// Two tiers. **Blocked first**, a workspace ranked by the lowest `sortRank`
+/// among its blocked agents; then **unread diffs**, workspaces where
+/// `changedSinceReviewed && hasDiff` and nothing is blocked, in the order the
+/// fleet arrived in.
+///
+/// `rank` decides the first tier. That number is computed on the host —
 /// `farcooler_core::feed::rank`, blocked before done before working, oldest
 /// first inside a tier — precisely so a widget with room for one agent and a
 /// list with room for twelve cannot disagree about which one matters. Nothing
-/// here re-scores. The one thing this adds is a tiebreak on the terminal id,
-/// because ranks genuinely collide — two agents that entered the same tier in
-/// the same second get the same number — and `sort` is not stable, so without
-/// it two equally-ranked rows could swap places on any poll. A row that moves
-/// under a finger already travelling toward it is a tap that lands on something
-/// else.
+/// here re-scores. The one thing this adds is a tiebreak on the id, because
+/// ranks genuinely collide — two agents that entered the same tier in the same
+/// second get the same number — and `sort` is not stable, so without it two
+/// equally-ranked rows could swap places on any poll. A row that moves under a
+/// finger already travelling toward it is a tap that lands on something else.
 ///
-/// Reviews follow every blocked row, in the order the fleet itself arrived in.
-/// They have no rank of their own — `InboxRow` is a workspace's counts, not an
-/// agent's state — and inventing one from the workspace's terminals would sort
-/// a diff by how blocked some agent in the same worktree happens to be, which
-/// is not a fact about the diff.
+/// The second tier has no rank of its own — `InboxRow` is a workspace's counts,
+/// not an agent's state — and inventing one from the workspace's terminals would
+/// sort a diff by how blocked some agent in the same worktree happens to be,
+/// which is not a fact about the diff.
 ///
 /// ## Hidden worktrees are not here
 ///
@@ -69,27 +81,34 @@ struct NeedsYouView: View {
     let runner: Runner
     let store: RunnerStore
 
-    /// One entry in the list.
+    /// One row: a workspace, and every reason it is on this screen.
     ///
-    /// An enum rather than two `ForEach`es over two arrays, because the two
-    /// kinds interleave by rule — blocked ahead of reviews — and two sections
-    /// would draw a divider between them that says they are different lists.
-    /// They are one list of one thing: work that is waiting on a person.
-    enum Item: Identifiable {
-        case blocked(workspace: Workspace, terminal: Terminal, ordinal: Int?)
-        case review(workspace: Workspace, counts: InboxRow)
+    /// A struct rather than the two-case enum this replaced, because the two
+    /// cases were two rows for one piece of work — see the note above. The
+    /// tiers are an ordering over these, not a difference in kind.
+    struct Item: Identifiable {
+        let workspace: Workspace
+        /// Its blocked agents, most urgent first. Empty on a row that is here
+        /// only for its diff.
+        let blocked: [Terminal]
+        /// `Workspace.ordinals()`, computed once per row rather than once per
+        /// agent inside it.
+        let ordinals: [String: Int]
+        /// What the branch changed, when the runner has said. Nil is "no answer
+        /// yet", which is different from zero and is drawn as nothing either
+        /// way.
+        let counts: InboxRow?
 
-        /// Prefixed by kind. A workspace id and a terminal id are different
-        /// namespaces today, and a collision between them would silently give
-        /// two rows one identity — which SwiftUI resolves by drawing one of
-        /// them.
-        var id: String {
-            switch self {
-            case .blocked(_, let terminal, _): return "blocked:\(terminal.id)"
-            case .review(let workspace, _): return "review:\(workspace.id)"
-            }
-        }
+        var id: String { workspace.id }
     }
+
+    /// How many blocked agents a row shows before it starts counting them.
+    ///
+    /// Three, because each one is a `TerminalRow` up to four bands tall and a
+    /// workspace with eight blocked agents would otherwise be the whole screen.
+    /// What is lost by truncating is small: the tab strip on the other side of
+    /// the tap holds every one of them, labelled.
+    private static let agentsPerRow = 3
 
     /// The workspaces this screen will speak about at all. See the note on
     /// hidden worktrees above.
@@ -99,35 +118,38 @@ struct NeedsYouView: View {
 
     private var items: [Item] {
         var blocked: [(rank: UInt32, item: Item)] = []
+        var unread: [Item] = []
+
         for workspace in visible {
-            let numbering = workspace.ordinals()
-            for terminal in workspace.terminals where terminal.agent == .blocked {
-                blocked.append(
-                    (
-                        terminal.sortRank,
-                        .blocked(
-                            workspace: workspace, terminal: terminal,
-                            ordinal: numbering[terminal.id])
-                    ))
+            let counts = connection.inbox[workspace.id]
+            let waiting = workspace.terminals
+                .filter { $0.agent == .blocked }
+                .sorted { ($0.sortRank, $0.id) < ($1.sortRank, $1.id) }
+            let item = Item(
+                workspace: workspace, blocked: waiting, ordinals: workspace.ordinals(),
+                counts: counts)
+
+            if let first = waiting.first {
+                // The lowest rank among them, which `waiting` has already put
+                // in front. A workspace is as urgent as its most urgent agent;
+                // anything else — an average, a count — would let a worktree
+                // with six working agents outrank one with a single agent that
+                // has been stuck for an hour.
+                blocked.append((first.sortRank, item))
+            } else if let counts, counts.changedSinceReviewed, counts.hasDiff {
+                // Both conditions, and they are not the same one. `hasDiff` is
+                // "this branch differs from its base", which is true of every
+                // worktree with work on it and stays true after you have read
+                // it. `changedSinceReviewed` is the daemon's watermark — the
+                // cheap two-syscall gate, never a fleet-wide `git status` — and
+                // it is what makes this an INBOX rather than a list of every
+                // branch in flight.
+                unread.append(item)
             }
         }
         blocked.sort { ($0.rank, $0.item.id) < ($1.rank, $1.item.id) }
 
-        let reviews: [Item] = visible.compactMap { workspace in
-            // Both conditions, and they are not the same one. `hasDiff` is
-            // "this branch differs from its base", which is true of every
-            // worktree with work on it and stays true after you have read it.
-            // `changedSinceReviewed` is the daemon's watermark — the cheap
-            // two-syscall gate, never a fleet-wide `git status` — and it is
-            // what makes this an INBOX rather than a list of every branch in
-            // flight.
-            guard let counts = connection.inbox[workspace.id],
-                counts.changedSinceReviewed, counts.hasDiff
-            else { return nil }
-            return .review(workspace: workspace, counts: counts)
-        }
-
-        return blocked.map(\.item) + reviews
+        return blocked.map(\.item) + unread
     }
 
     /// How many agents are mid-turn.
@@ -202,115 +224,105 @@ struct NeedsYouView: View {
         }
     }
 
-    @ViewBuilder
+    /// One workspace, and every reason it is on this screen.
+    ///
+    /// ONE tap target for the whole row, and the tap carries no opinion about
+    /// which tab opens — `Route.Focus.none` means "apply the rule", and the rule
+    /// lands on the most urgent blocked agent, or the diff if there is an unread
+    /// one, or the top pane. See `Route.Focus.rule(for:inbox:)`.
+    ///
+    /// One target rather than one per agent and one for the counts. The counts
+    /// stay a label: a small target beside a large one, on a row somebody is
+    /// tapping while walking, is a coin toss with a wrong side. And the agents
+    /// inside are here to be READ — they are what the agent said it did, which
+    /// is the larger half of reviewing its work — not to be aimed at. Every one
+    /// of them is a labelled chip on the other side of the tap.
     private func row(for item: Item) -> some View {
-        switch item {
-        case .blocked(let workspace, let terminal, let ordinal):
-            // A value link: the tap appends `.terminal` to `FleetView.path`,
-            // and appending is the whole navigation model here — see `Route`.
-            //
-            // This was a Button with a hand-drawn chevron, because the pane had
-            // exactly ONE destination in the stack and a second
-            // `navigationDestination` declared on this screen would have fought
-            // it. A path has one destination per route TYPE, declared once at
-            // the stack's root and usable from any depth, so neither worry
-            // survives and the system draws the chevron again.
-            NavigationLink(value: Route.terminal(id: terminal.id)) {
-                blockedRow(workspace: workspace, terminal: terminal, ordinal: ordinal)
-            }
-            .accessibilityIdentifier("needs-you-terminal-\(terminal.id)")
-
-        case .review(let workspace, let counts):
-            // By value for the same reason, and by workspace ID rather than by
-            // building the screen here: a route has to survive being written to
-            // disk and read back into a different launch. `FleetView` resolves
-            // it — and keeps this exactly the same review a `changes` pane in
-            // that worktree would show, because the store is keyed by workspace
-            // on `Connection`. See `ChangesStores`.
-            NavigationLink(value: Route.review(workspace: workspace.id)) {
-                reviewRow(workspace: workspace, counts: counts)
-            }
-            .accessibilityIdentifier("needs-you-review-\(workspace.id)")
+        NavigationLink(value: Route.workspace(id: item.workspace.id, focus: .none)) {
+            workspaceRow(item)
         }
+        .accessibilityIdentifier("needs-you-workspace-\(item.workspace.id)")
     }
 
-    /// A blocked agent, drawn by the row the fleet list already uses.
+    /// The row's contents: what the worktree is, what it changed, and who in it
+    /// is waiting.
     ///
-    /// `TerminalRow` and nothing new. It is four bands — the label with a
-    /// ticking clock, the signal line the host composed, the agent's last three
-    /// utterances, and its running subagents — and a second way to draw an
-    /// agent is a second chance for two screens to say different things about
-    /// one pane. Its `TimelineView` also keeps the schedule that matters: one
-    /// second for a row with a clock, an hour for one without, so idle rows do
-    /// not redraw every second to show nothing new. Every row here has a clock,
-    /// since blocked is one of the two states that has one.
+    /// The counts get the monospaced green-and-red treatment `FleetList`'s
+    /// workspace header gives them, so `+82 -13` is the same shape wherever it
+    /// appears — and they are absent on a clean worktree, because `+0 -0` on
+    /// every row is noise in the shape of information.
     ///
-    /// The only thing added is which worktree it is in. The fleet list answers
-    /// that with a section header per workspace; this list is ordered by
-    /// urgency and cuts across workspaces, so each row has to carry it.
-    private func blockedRow(workspace: Workspace, terminal: Terminal, ordinal: Int?)
-        -> some View
-    {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(workspace.task)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                // The width of `TerminalRow`'s state dot plus its gutter, so
-                // the worktree name starts on the same column as the agent's
-                // label directly under it rather than half a dot to its left.
-                .padding(.leading, 18)
-            TerminalRow(terminal: terminal, ordinal: ordinal)
-        }
-    }
+    /// Deliberately no amber anywhere on this row. That color is reserved across
+    /// the widget, the Live Activity, the complication and this app for an agent
+    /// waiting on an answer, and `TerminalRow` already spends it on exactly
+    /// those, inside. A second mark up here would say the same thing twice and
+    /// weaken it both times.
+    private func workspaceRow(_ item: Item) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.workspace.task)
+                        .font(.body)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
 
-    /// A branch that has moved since anyone read it.
-    ///
-    /// Laid out to line up with the blocked rows above it: a leading mark in
-    /// the dot's column, then the name, then the detail. The counts get the
-    /// same monospaced green-and-red treatment `FleetList`'s workspace header
-    /// gives them, so `+82 -13` is the same shape wherever it appears.
-    ///
-    /// Deliberately not amber. That color is reserved across the widget, the
-    /// Live Activity, the complication and this app for an agent that is
-    /// waiting on an answer, so that a glance at any surface answers "does this
-    /// need me" without reading a word. A diff waiting to be read is worth a
-    /// row; it is not worth the color that means someone is stuck.
-    private func reviewRow(workspace: Workspace, counts: InboxRow) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .frame(width: 8)
-                .padding(.top, 5)
+                    Spacer(minLength: 0)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(workspace.task)
-                    .font(.body)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                HStack(spacing: 4) {
-                    Text("+\(counts.insertions)").foregroundStyle(.green)
-                    Text("-\(counts.deletions)").foregroundStyle(.red)
+                    if let counts = item.counts, counts.hasDiff {
+                        HStack(spacing: 4) {
+                            Text("+\(counts.insertions)").foregroundStyle(.green)
+                            Text("-\(counts.deletions)").foregroundStyle(.red)
+                        }
+                        .font(.caption.monospaced())
+                    }
                 }
-                .font(.caption.monospaced())
 
                 // The main checkout has a branch like everything else, but
                 // WHICH branch is not the useful fact about it — that it is the
                 // repository itself is. `FleetList`'s header says the same
                 // thing the same way.
-                Text(workspace.isMainCheckout ? "Primary checkout" : workspace.branch)
+                Text(item.workspace.isMainCheckout ? "Primary checkout" : item.workspace.branch)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
+
+            // `TerminalRow` and nothing new. It is four bands — the label with
+            // a ticking clock, the signal line the host composed, the agent's
+            // last three utterances, and its running subagents — and a second
+            // way to draw an agent is a second chance for two screens to say
+            // different things about one pane. Its `TimelineView` also keeps the
+            // schedule that matters: one second for a row with a clock, an hour
+            // for one without. Every agent here has a clock, since blocked is
+            // one of the two states that has one.
+            //
+            // This is the part of the row that answers "what did it do", which
+            // the owner is explicit is most of what reviewing an agent's work
+            // is. It is worth the height.
+            ForEach(item.blocked.prefix(Self.agentsPerRow)) { terminal in
+                TerminalRow(terminal: terminal, ordinal: item.ordinals[terminal.id])
+                    // Indented under the workspace, so the row reads as one
+                    // thing containing several rather than as a heading that
+                    // happens to sit above some agents.
+                    .padding(.leading, 8)
+            }
+
+            if item.blocked.count > Self.agentsPerRow {
+                Text(overflow(item.blocked.count - Self.agentsPerRow))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 26)
+            }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(workspace.task), \(counts.insertions) added, \(counts.deletions) removed")
+        .padding(.vertical, 2)
+    }
+
+    /// The agents this row ran out of room for. A sentence rather than a bare
+    /// number, because "+2" under a list of agents reads as two more of
+    /// something and does not say what.
+    private func overflow(_ count: Int) -> String {
+        count == 1 ? "1 more agent needs you" : "\(count) more agents need you"
     }
 
     /// The most common state, and it is doing a job rather than filling a gap.
@@ -399,43 +411,5 @@ struct NeedsYouView: View {
             return "No workspaces on \(runner.label) yet. This is where you start one."
         }
         return "Every workspace on \(runner.label) is hidden. They’re still in here."
-    }
-}
-
-/// A worktree's changes, opened from the inbox instead of from a pane.
-///
-/// `ChangesView` was reachable one way: a `changes` pane the host had opened,
-/// drawn by `TerminalView` and given its toolbar by `PaneHost`. That is the
-/// right home for it while you are driving a workspace, and it is the wrong one
-/// for the job this screen exists to serve — at the gym, where the thing you
-/// came to do is read a branch and there is no reason to go through a pane to
-/// reach it, or to need one to exist.
-///
-/// So this wraps the same view with the title and the toolbar item the pane
-/// host supplies, and nothing else. The store is `Connection`'s, keyed by
-/// workspace, so this and a `changes` pane on the same worktree are one review:
-/// what has been read, what is folded, where you were, and the notes you have
-/// written are all on the store rather than in either view.
-///
-/// A plain `let` rather than an `@ObservedObject`, deliberately. Both children
-/// observe the store themselves; observing it here as well would re-evaluate
-/// this wrapper — and therefore rebuild the forty-card lazy stack's enclosing
-/// view — on every one of the store's many publishes. `ChangesView` carries the
-/// same argument about why `agents` arrives as plain values rather than as the
-/// `Connection` they were derived from.
-struct ReviewScreen: View {
-    let store: ChangesStore
-    let workspaceName: String
-    var agents: [ReviewAgentTarget] = []
-
-    var body: some View {
-        ChangesView(store: store, workspaceName: workspaceName, agents: agents)
-            .navigationTitle(workspaceName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    ChangesToolbarMenu(store: store)
-                }
-            }
     }
 }

@@ -42,7 +42,9 @@ SOURCES = [
     "TerminalSession.swift",
     "TerminalTabStrip.swift",
     "TerminalView.swift",
-    "PaneHost.swift",
+    # One worktree: its agents and its diff, as tabs. Was `PaneHost.swift`,
+    # which was scoped to a terminal.
+    "WorkspaceView.swift",
     "DockedBar.swift",
     "ImagePaste.swift",
     "AgentStream.swift",
