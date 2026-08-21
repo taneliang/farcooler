@@ -230,6 +230,28 @@ final class FleetStore: ObservableObject {
         }
     }
 
+    /// Runners running a daemon that is not this app's build, in `hosts`
+    /// order — this Mac first.
+    ///
+    /// Deliberately NOT folded into `unhealthyHosts` above, which is the list
+    /// the status bar's trouble dots come from. Three reasons, and all three
+    /// would be bugs if this were merged into it:
+    ///
+    /// - A stale runner is not unhealthy. It answers every read, its tmux is
+    ///   fine, and its panes are live; what is wrong is that it is a different
+    ///   program from the one this app was built against. Painting it with the
+    ///   same dot as a runner that has gone dark would make both mean less.
+    /// - A trouble dot RECONNECTS when clicked, and a connection that is
+    ///   already up has nothing to retry. The action here has to ask first —
+    ///   it costs every agent conversation on that runner.
+    /// - `unhealthyHosts` leaves out a runner still in `.connecting` because
+    ///   nothing is known about it yet. This list is empty for exactly the
+    ///   same runner and for a different reason: a version this client has not
+    ///   read is not a version to make claims about.
+    var staleHosts: [String] {
+        hosts.filter { clients[$0]?.daemonSkew.offersUpdate == true }
+    }
+
     // MARK: - Routing
 
     /// The runner a row came from.

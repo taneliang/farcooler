@@ -15,9 +15,30 @@ import Foundation
 /// and tested going on reproducing in front of you. `farcooler status` said
 /// MISMATCH, and nothing was obliged to read it.
 ///
-/// Replacing costs nothing that matters. Terminals are tmux windows and outlive
-/// the daemon entirely; agent shims reconnect on the next start; durable state
-/// is committed to SQLite per call.
+/// Replacing is not free, and this comment used to say it was: "terminals are
+/// tmux windows and outlive the daemon entirely; agent shims reconnect on the
+/// next start; durable state is committed to SQLite per call." The first and
+/// third are true. The second is not, and it is the expensive one — the daemon
+/// owns each agent transcript outright, in memory, bounded by
+/// `TRANSCRIPT_LIMIT` in `crates/daemon/src/agent_supervisor.rs`, so a shim
+/// that reconnects reconnects to a conversation that no longer exists. What a
+/// replacement costs is every agent chat history on this Mac, plus anything
+/// typed and not yet sent. See `DaemonSkew`.
+///
+/// Which is why nothing else in the app replaces a daemon without asking. This
+/// one call is the exception, deliberately and narrowly: it runs at launch,
+/// before the first read, where the alternative is not "keep your history" but
+/// "spend the session talking to a different program from the one this app was
+/// built with" — the failure it was written for, where a fix that shipped goes
+/// on reproducing because yesterday's daemon still holds the socket. Anywhere
+/// the daemon is already the right one, `daemon ensure` changes nothing at all.
+///
+/// It is worth knowing that this window is not zero: an app relaunch is the one
+/// moment Far Cooler will replace a daemon on your behalf, and on a Mac that
+/// updated overnight that is the moment the local agent histories go. Making
+/// that a question rather than a launch step means teaching `ensure` to report
+/// what it WOULD do without doing it, and is a change to the CLI's contract
+/// (`crates/cli/src/daemon_link.rs`, `Ensured`), not to this file.
 @MainActor
 final class LocalDaemon: ObservableObject {
     static let shared = LocalDaemon()

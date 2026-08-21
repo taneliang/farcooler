@@ -101,6 +101,79 @@ final class DaemonClient: ObservableObject {
     /// for the same reason and with the same name.
     @Published private(set) var linkGeneration = 0
 
+    /// Which build is answering for this runner, or nil until this link's own
+    /// read has come back.
+    ///
+    /// Per LINK, not per client: a daemon that was replaced is a different
+    /// program on the same socket, so the answer is cleared the moment the
+    /// link is, rather than being carried across a reconnection where it would
+    /// describe something that is no longer there. That matters in the one
+    /// direction that would be embarrassing — a runner someone has just
+    /// updated by hand would otherwise go on being reported as behind until
+    /// the app was relaunched.
+    @Published private(set) var daemonBuild: DaemonBuild?
+
+    /// Set when the read above ran and could not answer.
+    ///
+    /// Distinguished from `daemonBuild == nil`, which is only "nobody has
+    /// asked yet". A runner that answered `workspace list` and then failed to
+    /// answer `status` is a real case — `status` asks for host facts, and a
+    /// daemon old enough to predate that method answers `NOT_FOUND` — and the
+    /// two must not look the same, or the runner most likely to be stale
+    /// would be shown as one whose read simply had not landed.
+    @Published private(set) var daemonBuildUnreadable = false
+
+    /// Whether what is running there is what this app was built to drive.
+    ///
+    /// Derived rather than stored, and derived from `state` FIRST, because
+    /// connection health outranks version news in every case: a runner nobody
+    /// can reach is not a runner with a stale daemon, whatever the last link
+    /// happened to report about it. See `DaemonSkew`, which is where the
+    /// reasoning and the copy live.
+    var daemonSkew: DaemonSkew {
+        Self.skew(
+            state: state,
+            build: daemonBuild,
+            unreadable: daemonBuildUnreadable,
+            remote: !target.isEmpty)
+    }
+
+    /// The rule itself, as a pure function of the four things it reads.
+    ///
+    /// Static and free of `self` so it can be tested. It decides whether
+    /// somebody is told their runner is out of date, and both ways of getting
+    /// it wrong are bad in a way that is invisible by looking: too eager and
+    /// the sidebar nags about a runner that is fine, too shy and a feature
+    /// silently does nothing — which is the bug this whole file exists to
+    /// answer, and it went unnoticed for fourteen commits.
+    ///
+    /// `remote` rather than the target string, because the only thing the rule
+    /// needs from it is whether "update the older side" could be about a
+    /// runner at all. This Mac cannot be a protocol version behind itself.
+    /// `nonisolated` because it touches nothing on the actor — every input is
+    /// a parameter. That is what lets a test call it without a client.
+    nonisolated static func skew(
+        state: HostState, build: DaemonBuild?, unreadable: Bool, remote: Bool
+    ) -> DaemonSkew {
+        switch state {
+        case .connecting, .reconnecting, .notInstalled:
+            return .unavailable
+        case .unreachable(let reason):
+            // The one flavor of unreachable that IS a version. `explain` in
+            // `crates/cli/src/remote.rs` says "update the older side" for a
+            // refused handshake, and this client already gives that failure
+            // the slow retry cadence because retrying cannot fix it.
+            let mismatch =
+                remote && reason.localizedCaseInsensitiveContains("update the older side")
+            return mismatch ? .tooOldToTalk : .unavailable
+        case .connected:
+            guard let build else {
+                return unreadable ? .unknown : .unavailable
+            }
+            return build.matches ? .current : .behind(daemon: build.readable)
+        }
+    }
+
     /// Called the moment `refresh()` transitions `state` into `.connected`
     /// from anything else — set by `FleetStore`, which uses it to re-seed
     /// repositories, roots and layouts on every reconnection, not only at
@@ -660,6 +733,24 @@ final class DaemonClient: ObservableObject {
                 // said nothing, because as far as it knew it was connected.
                 linkGeneration += 1
                 onReconnect?()
+                // Which build is on the other end of the link that just came
+                // up. Cleared first: whatever was read before belongs to the
+                // previous link, and a daemon that went away and came back is
+                // exactly the case where it could have been replaced.
+                //
+                // Once per link rather than per read, because a daemon cannot
+                // change build without going away — and going away is what
+                // ends the event stream, which is what brings us back here. So
+                // this costs one extra round trip per reconnection, not one
+                // per `refresh()`, of which there are some thirty call sites.
+                //
+                // Detached, like `refreshChangesInbox()` above and for the same
+                // reason: this is news for a dot in the sidebar, and awaiting
+                // it here would put an ssh round trip in front of every
+                // reconnection before the fleet could be drawn.
+                daemonBuild = nil
+                daemonBuildUnreadable = false
+                Task { await self.readDaemonBuild() }
             }
             // Reap on every read, not only on events. A terminal that exited
             // while the app was closed produces no event to react to, so
@@ -683,6 +774,97 @@ final class DaemonClient: ObservableObject {
             state = .unreachable(reason: lastError ?? "Could not read the fleet.")
             scheduleRetry()
         }
+    }
+
+    // MARK: - Which build is answering
+
+    /// Ask this runner which daemon is on the other end, and whether it is the
+    /// one this app ships.
+    ///
+    /// `status --json`, which is what `AboutSheet` already reads for this Mac
+    /// and what the CLI prints MISMATCH from. Three reasons it is the right
+    /// source rather than `host probe`:
+    ///
+    /// - It reports the RUNNING daemon. `host probe` reads
+    ///   `~/.local/bin/farcoolerd --version` over ssh, which is the binary on
+    ///   disk — and a runner whose binary was replaced while its service kept
+    ///   running the old process is stale in the way that actually costs you a
+    ///   feature, while looking current to the probe.
+    /// - The comparison is made where both stamps are known. `buildsMatch` is
+    ///   `host_facts.daemon_version == farcooler_protocol::BUILD` inside the
+    ///   CLI this app bundles, so "current" means "built with the app you are
+    ///   holding" for a remote runner and this Mac alike, without the app
+    ///   deriving anything from two strings.
+    /// - It never changes what it is measuring. `connect_to` dials and
+    ///   reports; only `daemon ensure` replaces anything. A detector that
+    ///   quietly fixed what it found would make this whole file pointless.
+    private func readDaemonBuild() async {
+        // `runRaw`, and its message dropped on the floor: a status read that
+        // failed is news for this one dot and nothing else, and `run()` would
+        // put it in `lastError` — the window's error banner — where a
+        // background poll's failure has no business being. `background: true`
+        // for the same reason it is set on `refresh()`: nothing here should
+        // toggle `busy` and re-evaluate every terminal surface in the app.
+        let (data, _) = await runRaw(["--json", "status"], background: true)
+        guard let data,
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let version = body["daemonVersion"] as? String
+        else {
+            // No guess either way. `daemonSkew` reads this as `.unknown`,
+            // which offers nothing and claims nothing — see its own doc for
+            // why silence beats a dot nobody can act on.
+            daemonBuildUnreadable = true
+            return
+        }
+        daemonBuildUnreadable = false
+        daemonBuild = DaemonBuild(
+            version: version,
+            // Absent means a CLI or daemon from before the field existed,
+            // which cannot have been built with this app — the opposite
+            // default from `AboutSheet`'s, which is reading a pair that ships
+            // together and has no such case.
+            matches: body["buildsMatch"] as? Bool ?? false,
+            platform: body["platform"] as? String ?? "")
+    }
+
+    /// Replace the daemon on this runner with the build this app ships.
+    ///
+    /// **Never call this on a schedule, on a reconnection, or on the way to
+    /// something else.** It restarts `farcoolerd`, and a restart discards every
+    /// agent conversation on that runner — see `DaemonSkew` for where that is
+    /// established in the daemon's own source. The only caller is
+    /// `DaemonUpdateCard`, after a person has read what it costs and pressed
+    /// the button that says so.
+    ///
+    /// Two mechanisms, because there are two kinds of runner and they are
+    /// updated by different things:
+    ///
+    /// - **A remote runner** is updated by `runner install`, which copies this
+    ///   app's `farcooler` and `farcoolerd` over ssh, verifies their SHA-256 on
+    ///   the far side, and restarts the service. That is the same command
+    ///   Settings ▸ Runners spells "Reinstall".
+    /// - **This Mac** is not installed onto at all. Its daemon lives inside the
+    ///   app bundle, so bringing it up to date means stopping whatever holds
+    ///   the socket and starting the bundled one — `daemon ensure`, through
+    ///   `LocalDaemon`, which is the same call the app makes at launch.
+    func updateDaemon() async -> DaemonUpdateOutcome {
+        if target.isEmpty {
+            if let problem = await LocalDaemon.shared.ensure().problem {
+                return .failed(problem)
+            }
+        } else {
+            let result = await Runners.shared.install(target)
+            guard result.ok else { return .failed(result.output) }
+        }
+
+        // The link this client held was to a daemon that has just been stopped,
+        // so nothing is on the other end of it. `reconnectNow()` is the same
+        // path a click on a trouble dot takes: it refreshes, restarts the event
+        // stream, and — through `refresh()`'s reconnection branch — re-reads
+        // which build is now answering, which is what makes the dot go quiet
+        // without anybody asking it to.
+        reconnectNow()
+        return .updated
     }
 
     @Published var repositories: [Repository] = []

@@ -430,6 +430,10 @@ struct ProjectHeader: View {
     /// Which runner this project's worktrees are on.
     var host: String = ""
     var hostState: HostState = .connected
+    /// This runner's daemon, when it is one the app is offering to replace.
+    /// Nil is the ordinary case — a runner running the build this app ships
+    /// has nothing to say here. See `HostDot`.
+    var daemonUpdate: DaemonUpdateTarget?
     /// Whether to name the runner at all — noise on a fleet of one.
     var showHost: Bool = false
     var onReconnect: () -> Void = {}
@@ -483,7 +487,7 @@ struct ProjectHeader: View {
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
-                    HostDot(state: hostState, onReconnect: onReconnect)
+                    HostDot(state: hostState, onReconnect: onReconnect, update: daemonUpdate)
                     Spacer()
 
                     if onNewWorktree != nil || onNewTerminal != nil {
@@ -540,11 +544,34 @@ struct ProjectHeader: View {
 /// the whole point is that you notice it only when something is wrong.
 /// Reconnection is amber and silent; only a runner that has given up is red,
 /// and clicking it retries at once rather than waiting out the backoff.
+///
+/// A stale daemon is the fourth thing that can be wrong with a runner, and the
+/// first one that is not about whether it answers. It rides in this same column
+/// rather than in a control of its own, because "does this runner need
+/// something from me" is one question and one glance — see `DaemonSkewDot`,
+/// which draws it, and `DaemonSkew`, which decides when there is anything to
+/// draw. Connection always wins: `daemonSkew` is `.unavailable` for every state
+/// but `.connected` (and for the one refused handshake that is really a version),
+/// so a runner that is merely reconnecting cannot lose its amber dot to
+/// yesterday's version news.
 struct HostDot: View {
     let state: HostState
     let onReconnect: () -> Void
+    /// Non-nil only when this runner's daemon is one the app has grounds to
+    /// offer to replace. Defaulted, so the call sites that have no fleet
+    /// behind them — and any future one — read exactly as they did.
+    var update: DaemonUpdateTarget?
 
     var body: some View {
+        if let update, update.skew.offersUpdate {
+            DaemonSkewDot(target: update)
+        } else {
+            connection
+        }
+    }
+
+    @ViewBuilder
+    private var connection: some View {
         switch state {
         case .connected:
             EmptyView()

@@ -103,9 +103,20 @@ final class Runners: ObservableObject {
 
     /// Install the daemon and CLI onto a runner, and register whatever keeps
     /// them running there.
-    func install(_ target: String) async -> String {
-        let result = await CLI.run(["host", "install", target])
-        return result.output
+    ///
+    /// **This restarts the daemon on that runner**, which is not free: agent
+    /// conversations live in the daemon's memory and do not survive it. See
+    /// `DaemonSkew`. Every caller has to have said so first — Settings ▸
+    /// Runners confirms before a Reinstall, and the sidebar's update card
+    /// states the cost in full.
+    ///
+    /// Hands back whether it worked as well as what it said. The transcript
+    /// alone cannot answer that: `runner install` prints its progress as it
+    /// goes, so a run that got three steps in and then refused looks, in text,
+    /// much like one that finished — and a caller that treated the two the
+    /// same would report a runner updated when it is not.
+    func install(_ target: String) async -> (ok: Bool, output: String) {
+        await CLI.run(["host", "install", target])
     }
 
     // MARK: - Letting a runner reach you

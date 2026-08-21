@@ -607,6 +607,24 @@ struct ContentView: View {
         return store.hosts.filter { !present.contains($0) && !$0.isEmpty }
     }
 
+    /// One runner's daemon, as something the sidebar can offer to replace —
+    /// or nil, which is the ordinary case and the quiet one.
+    ///
+    /// This is the only place that pairs a host with the client that can act
+    /// on it, so the views downstream never learn whether a runner is updated
+    /// over ssh or out of this app's own bundle. `DaemonClient.updateDaemon()`
+    /// knows, and it is the only thing that needs to.
+    ///
+    /// Gated on `offersUpdate` rather than on "not current": a runner whose
+    /// version could not be read is not a runner to offer an update for, and a
+    /// runner nobody can reach is not one either. See `DaemonSkew`.
+    private func daemonUpdate(for host: String) -> DaemonUpdateTarget? {
+        guard let client = store.clients[host], client.daemonSkew.offersUpdate else { return nil }
+        return DaemonUpdateTarget(host: host, skew: client.daemonSkew) {
+            await client.updateDaemon()
+        }
+    }
+
     /// A group's identity for `hiddenExpanded`'s key.
     ///
     /// Two runners can have a project of the same name, and a lone project
@@ -756,6 +774,7 @@ struct ContentView: View {
                                     },
                                 host: group.host,
                                 hostState: store.state(of: group.host),
+                                daemonUpdate: daemonUpdate(for: group.host),
                                 showHost: isSilentHost ? false : showHosts,
                                 onReconnect: { store.reconnect(group.host) },
                                 isCollapsed: preferences.isProjectCollapsed(key),
@@ -1007,6 +1026,19 @@ struct ContentView: View {
                             "\(host.isEmpty ? "this Mac" : host): \(troubleReason(for: host)) — click to retry"
                         )
                     }
+                }
+
+                // A runner running a daemon that is not this app's build.
+                //
+                // Beside the trouble dots and not among them: those say a
+                // runner cannot do its job, this says it is doing its job as a
+                // different program from the one this app was built against —
+                // and unlike them, a click here must not act, it must ask. See
+                // `FleetStore.staleHosts` for why the two lists stay separate,
+                // and `DaemonUpdateBar` for why this one is not hidden on a
+                // fleet of one the way `showHosts` hides the rest.
+                if !store.staleHosts.isEmpty {
+                    DaemonUpdateBar(targets: store.staleHosts.compactMap(daemonUpdate(for:)))
                 }
 
                 Spacer()

@@ -25,6 +25,16 @@ struct RunnersSettings: View {
     /// Optional-of-target rather than a bool plus a target, so the sheet cannot
     /// be presented without knowing which runner it is about.
     @State private var editingRunner: RunnerChoice?
+    /// The runner a Reinstall has been asked for and not yet confirmed.
+    ///
+    /// A `String?` and not a bool, for the same reason `editingRunner` is not
+    /// one: the dialog has to know which runner it is about, and a bool beside
+    /// a separate target is two pieces of state that can disagree.
+    ///
+    /// `nil` when nothing is being asked. This Mac never appears here — its row
+    /// has no install button at all, because its daemon comes out of the app
+    /// bundle rather than over ssh.
+    @State private var confirmingReinstall: String?
 
     var body: some View {
         Form {
@@ -63,6 +73,32 @@ struct RunnersSettings: View {
         .formStyle(.grouped)
         .sheet(item: $editingRunner) { choice in
             RunnerSettingsSheet(name: choice.name, target: choice.target)
+        }
+        // A dialog rather than the sidebar's card, because this is a settings
+        // row and the question is a yes or a no — the card exists to carry two
+        // version numbers next to each other, which is news this row already
+        // shows in its own subtitle.
+        //
+        // Destructive, and not as decoration: confirming this discards every
+        // agent conversation on that runner. The dialog is what makes that a
+        // decision instead of a side effect.
+        .confirmationDialog(
+            "Reinstall Far Cooler on this runner?",
+            isPresented: Binding(
+                get: { confirmingReinstall != nil },
+                set: { if !$0 { confirmingReinstall = nil } }
+            ),
+            presenting: confirmingReinstall
+        ) { target in
+            Button("Reinstall", role: .destructive) {
+                Task { await install(target) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { target in
+            Text(
+                "Reinstalling restarts the daemon on \(target). "
+                    + DaemonRestartCost.sentence
+            )
         }
         .task {
             // Everything at once. These are independent ssh round trips and a
@@ -197,8 +233,21 @@ struct RunnersSettings: View {
     private func actions(for runner: Runner) -> some View {
         HStack(spacing: 8) {
             if runner.probe?.installable == true {
-                Button(runner.probe?.isInstalled == true ? "Reinstall" : "Install") {
-                    Task { await install(runner.target) }
+                // A first install starts a daemon where there was none, and
+                // costs nothing because there is nothing there yet to lose. A
+                // REINSTALL restarts one that is already running agents, and
+                // that is not free — every agent conversation on that runner
+                // lives in the daemon's memory and goes with it. See
+                // `DaemonRestartCost`, which is the same sentence the sidebar's
+                // update card is built from, because a cost worded twice is a
+                // cost that will eventually be worded wrongly.
+                //
+                // This button predates that fact being written down anywhere;
+                // it has been restarting daemons silently since it shipped.
+                if runner.probe?.isInstalled == true {
+                    Button("Reinstall") { confirmingReinstall = runner.target }
+                } else {
+                    Button("Install") { Task { await install(runner.target) } }
                 }
             }
 
@@ -272,7 +321,7 @@ struct RunnersSettings: View {
         // Shown whether it worked or not. An install that failed halfway is
         // exactly when the transcript matters, and it is the only place the
         // reason exists.
-        log[target] = await runners.install(target)
+        log[target] = await runners.install(target).output
         await runners.probe(target)
 
         // `runners.probe` only updates this row's own display. The

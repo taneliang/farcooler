@@ -1,14 +1,32 @@
 //! The daemon's half of every agent session.
 //!
-//! It owns no transcript. The shim holds the ring, because the shim lives
-//! exactly as long as the pane whose liveness is already authoritative — so a
-//! daemon restart costs no history and needs no `session/load`.
+//! **It owns the transcript.** `recent` is the conversation, not a cache in
+//! front of one: it is held in memory here, bounded by `TRANSCRIPT_LIMIT`, and
+//! nothing asks the shim for anything older because the shim has nothing older
+//! to give. It has to outlive the shim, which restarts on every pane-mode
+//! toggle while the conversation does not.
 //!
-//! What lives here is the bookkeeping only the daemon can do: which terminals
-//! are in agent pane mode, what each one's activity is, and fanning events out
-//! to however many clients are watching. `recent` is a small fast-attach
-//! window only — the shim's ring, not this one, is what a client falls back on
-//! when it asks for history older than this holds.
+//! The consequence, said here because this is the first place anyone reads:
+//! **a daemon restart discards every agent conversation on this runner.**
+//! Terminals do not work that way and the difference is easy to assume away —
+//! they are tmux panes, and `runtime.rs` rebuilds a pane's replay from tmux's
+//! own scrollback at attach, so they come back from tmux rather than from
+//! anything held here. Nothing rebuilds a transcript. Whatever was typed and
+//! not yet sent goes too, which is what `ToggleRefusal::TurnInFlight` below
+//! already refuses a toggle over. So restarting the daemon — to install an
+//! update, say — is not free, and anything that offers to do it has to say so
+//! first. The Mac app's `DaemonSkew` is written against this paragraph.
+//!
+//! (This module doc used to claim the opposite: "It owns no transcript. The
+//! shim holds the ring ... so a daemon restart costs no history and needs no
+//! `session/load`." That was left over from the design this file replaced —
+//! `TRANSCRIPT_LIMIT` has flagged the same leftover just below for as long as
+//! it has existed — and it is the more dangerous of the two contradictory
+//! claims, because it is the one on top and it says a restart is safe.)
+//!
+//! What else lives here is the bookkeeping only the daemon can do: which
+//! terminals are in agent pane mode, what each one's activity is, and fanning
+//! events out to however many clients are watching.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
