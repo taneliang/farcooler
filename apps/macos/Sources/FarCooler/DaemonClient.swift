@@ -1638,6 +1638,14 @@ final class DaemonClient: ObservableObject {
     /// `changes inbox` read this app already makes on the same clock while an
     /// agent works.
     func reportWatching(_ terminals: [String]) {
+        // `"watching"` is `farcooler_protocol::capability::WATCHING`. A runner
+        // that predates it withholds nothing and notifies exactly as it always
+        // did — but this renews itself every few seconds for as long as a pane
+        // is on screen, so without the check it would spawn a `farcooler`
+        // invocation on that clock forever to be refused the same way each
+        // time. `daemonBuild` is nil until the first status read lands, which
+        // reads as "not yet" and is retried by the next claim.
+        guard daemonBuild?.can("watching") ?? false else { return }
         // A window that is not frontmost is not showing anybody anything, and
         // saying otherwise would suppress the notification that exists for
         // precisely that case. `ContentView.markVisibleSeen` gates on this too;

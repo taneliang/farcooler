@@ -689,6 +689,13 @@ final class Connection: ObservableObject {
     /// its screen.
     func reportWatching(_ terminals: [String]) async {
         guard phase == .connected else { return }
+        // `"watching"` is `farcooler_protocol::capability::WATCHING`. A runner
+        // that predates it withholds nothing and notifies exactly as it always
+        // did, which is the honest fallback — but this is a HEARTBEAT, so
+        // without the check it would spend a failing round trip every few
+        // seconds, for as long as a pane is on screen, to be refused the same
+        // way every time.
+        guard daemon?.can("watching") ?? false else { return }
         let changed = terminals != watching
         guard changed || Date().timeIntervalSince(watchingSentAt) >= Self.watchingFloor else {
             return

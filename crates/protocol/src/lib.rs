@@ -202,13 +202,31 @@ pub mod capability {
     /// enroll on a runner has to say so before the ceremony starts, not after
     /// the user has scanned a code.
     pub const ENROLLMENT: &str = "enrollment";
+    /// Telling a runner which terminals a client currently has on screen, so it
+    /// can withhold a notification about an agent somebody is already looking
+    /// at.
+    ///
+    /// Its own capability rather than part of `TERMINALS`, for the reason
+    /// `ENROLLMENT` is its own: a daemon that predates this advertises
+    /// `terminals` and cannot do it, so folding it in would have every runner
+    /// claim a method half of them lack. The claim is a HEARTBEAT — every few
+    /// seconds, for as long as a pane is on screen — so a client that could not
+    /// tell would spend a failing round trip on that clock forever rather than
+    /// once.
+    ///
+    /// Absent means the runner notifies exactly as it always did, which is why
+    /// a client can simply not send it.
+    pub const WATCHING: &str = "watching";
 
     /// Every capability this build has, in a stable order.
     ///
     /// Stable so that two daemons of the same build produce byte-identical
     /// hellos, which makes the list diffable in a log.
     pub const ALL: &[&str] =
-        &[WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES, ENROLLMENT];
+        &[
+            WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
+            ENROLLMENT, WATCHING,
+        ];
 
     /// The capability a method belongs to, or `None` if there is no such
     /// method.
@@ -266,6 +284,7 @@ pub mod capability {
             "adapter.list" | "adapter.upsert" | "adapter.delete" | "adapter.test" => ADAPTERS,
             "theme.list" | "theme.upsert" | "theme.delete" | "settings.set_branch_prefix" => THEMES,
             "client.list" | "client.enroll" | "client.revoke" => ENROLLMENT,
+            "terminal.watching" => WATCHING,
             _ => return None,
         })
     }
