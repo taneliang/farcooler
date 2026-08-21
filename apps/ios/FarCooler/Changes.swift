@@ -612,7 +612,23 @@ final class ChangesStore: ObservableObject {
     @Published private(set) var generation = 0
 
     @Published var loading = false
-    @Published var error: String?
+
+    /// Why this worktree is not showing a diff: a sentence this app wrote,
+    /// and — only where it has no account of its own — the runner's own words.
+    ///
+    /// Two fields rather than one string, the same two `AgentStream.Trouble`
+    /// and `SheetFailure` already carry. `error` used to be the sentence
+    /// ALONE, and what came back was dropped on the floor to make it — which
+    /// on this screen throws away the diagnosis and keeps the summary. The Mac
+    /// has kept that text since `776d3e0`, in a `DetailBox` under its own
+    /// sentence; see `ChangesPane.problem`. Nothing here speaks it. It is
+    /// shown where output goes.
+    struct Trouble: Equatable {
+        let sentence: String
+        var transcript: String?
+    }
+
+    @Published var error: Trouble?
 
     /// What the reader wants to tell the agent, collected across the review.
     ///
@@ -772,7 +788,7 @@ final class ChangesStore: ObservableObject {
             // a worktree with no changes in it. An old daemon is the likeliest
             // reason a phone sees this, so the message says so.
             changeSet = .empty
-            self.error = Self.message(for: error)
+            self.error = Self.trouble(for: error)
         }
 
         // Read again rather than kept: these are diffs against a base that may
@@ -1325,12 +1341,33 @@ final class ChangesStore: ObservableObject {
     }
 
     /// The core's answer, as something worth putting on a phone screen.
-    private static func message(for error: Error) -> String {
+    ///
+    /// The old-runner arm names the cause, so it passes no transcript: a dump
+    /// of what the call said, under a sentence that already answers the
+    /// question, is noise. That is the same scoping the Mac makes with its
+    /// `if !old`, and it is why this returns two fields instead of always
+    /// filling both.
+    ///
+    /// Its sentence stays the phone's rather than the Mac's, which is the one
+    /// place these two screens deliberately differ. The Mac's ends "Update it
+    /// in Settings › Runners." and there is no such screen here — a phone
+    /// cannot update a runner — so carrying it over would send somebody
+    /// looking for a tab that does not exist. The wording it keeps is the
+    /// phone's own, matching `BranchAndStack`'s sentence for the same runner.
+    ///
+    /// The other arm has no diagnosis at all, so its sentence says only what
+    /// is known and the words go in the box. "Request" rather than the Mac's
+    /// "command" because the mechanisms genuinely differ — that side shells
+    /// out to `farcooler changes … --json` and this one makes an FFI call —
+    /// and `AgentStream` already spells the phone's half of that sentence.
+    private static func trouble(for error: Error) -> Trouble {
         let text = error.localizedDescription.lowercased()
         if text.contains("not found") || text.contains("unknown method") {
-            return "This runner’s Far Cooler is too old to review changes."
+            return Trouble(sentence: "This runner’s Far Cooler is too old to review changes.")
         }
-        return "Couldn’t read what this worktree changed."
+        return Trouble(
+            sentence: "Couldn’t read this worktree. The request that reads it didn’t finish.",
+            transcript: error.localizedDescription)
     }
 }
 

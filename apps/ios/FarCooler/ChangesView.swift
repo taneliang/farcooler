@@ -83,16 +83,25 @@ struct ChangesView: View {
 
                     if let error = store.error {
                         ChangesNotice(
-                            symbol: "exclamationmark.triangle", tint: .orange, text: error)
+                            symbol: "exclamationmark.triangle", tint: .orange,
+                            text: error.sentence, detail: error.transcript)
                     } else if store.commitUnreadable {
                         // Ahead of the empty case on purpose: a commit that could
                         // not be read also has no files, and "nothing changed here"
                         // is the one sentence that must not be said about it.
+                        //
+                        // The Mac's words for this exact failure, from
+                        // `ChangesPane.nothingTitle` and `nothingDetail`, rather
+                        // than a second spelling of them — and both controls it
+                        // names are on this screen, in the row under a commit's
+                        // subject. No transcript here, and that is the Mac's
+                        // reasoning too: what `changes.commit_files` returns is
+                        // about a subprocess, and this is about a commit.
                         ChangesNotice(
                             symbol: "exclamationmark.triangle",
                             tint: .orange,
-                            text: "Couldn’t read this commit. An amend or a rebase may have "
-                                + "replaced it while you were reading.")
+                            text: "Couldn’t read this commit. It might not be on this branch "
+                                + "anymore. Choose another, or go back to the whole branch.")
                     } else if store.files.isEmpty && !store.loading {
                         ChangesNotice(
                             symbol: "checkmark.circle", tint: .secondary, text: nothingHere)
@@ -1453,12 +1462,23 @@ private struct ChangesNotice: View {
     let symbol: String
     let tint: Color
     let text: String
+    /// What came back from the runner, for the one notice this app has no
+    /// account of. Inside the card rather than beneath it, because the words
+    /// and the sentence are one report; and in a `DetailBox` rather than a
+    /// second `Text`, because a box is what marks output as somebody else's.
+    /// Every other caller leaves it nil and draws exactly what it drew before.
+    var detail: String? = nil
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(tint)
-            Text(text).font(.footnote).foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).foregroundStyle(tint)
+                Text(text).font(.footnote).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            if let detail, !detail.isEmpty {
+                DetailBox(text: detail)
+            }
         }
         .padding(12)
         .background(ChangesSurface.card, in: .rect(cornerRadius: 12))
@@ -1601,9 +1621,17 @@ private struct CommentOutboxSheet: View {
             List {
                 if let failure = comments.failure {
                     Section {
-                        Label(failure, systemImage: "exclamationmark.triangle")
+                        Label(failure.sentence, systemImage: "exclamationmark.triangle")
                             .font(.footnote)
                             .foregroundStyle(.orange)
+                        // Only where the queue has no account of what went
+                        // wrong. Orange and not red, and a `Label` and not
+                        // `SheetFailureSection`: nothing was lost here — the
+                        // notes are still in the list below — and the button
+                        // beneath already reads Try Again.
+                        if let transcript = failure.transcript, !transcript.isEmpty {
+                            DetailBox(text: transcript)
+                        }
                     }
                 }
 

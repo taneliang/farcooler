@@ -260,7 +260,12 @@ final class ReviewCommentQueue: ObservableObject {
     /// automatic retry would be the app deciding, with no evidence, that a
     /// prompt which may well have arrived should be delivered a second time.
     /// The comments stay in `pending` and the reader is the one who decides.
-    @Published var failure: String?
+    ///
+    /// `ChangesStore.Trouble`, not a second declaration of the same two
+    /// fields: this queue and that store are one screen, and the sentence and
+    /// the runner's words have to stay apart here for the same reason they do
+    /// there.
+    @Published var failure: ChangesStore.Trouble?
 
     private static let sentKept = 5
 
@@ -353,25 +358,36 @@ final class ReviewCommentQueue: ObservableObject {
             pending = []
             failure = nil
         } catch {
-            failure = Self.message(for: error)
+            failure = Self.trouble(for: error)
         }
     }
 
     /// The core's answer, as something worth putting on a phone screen.
     ///
-    /// Never the raw error: what the FFI hands back is a Rust word for an empty
-    /// session slot wrapped in Swift enum syntax, and the person reading it
-    /// wanted to send a sentence to an agent.
-    private static func message(for error: Error) -> String {
+    /// Never the raw error AS the sentence: what the FFI hands back is a Rust
+    /// word for an empty session slot wrapped in Swift enum syntax, and the
+    /// person reading it wanted to send a sentence to an agent. That was never
+    /// a reason to drop it, though, and this used to — the first two arms know
+    /// what happened and say so, and the third knew nothing and said so in a
+    /// sentence built out of a string it then threw away. It travels in the
+    /// box now, and only on the arm with nothing written about it: under
+    /// either of the other two it would be a transcript beneath a sentence
+    /// that already names the cause and what to do next.
+    private static func trouble(for error: Error) -> ChangesStore.Trouble {
         if let core = error as? ClientCore.CoreError, case .disconnected = core {
-            return "The connection to this runner dropped, so these are still here. "
-                + "Try again once it’s back."
+            return ChangesStore.Trouble(
+                sentence: "The connection to this runner dropped, so these are still here. "
+                    + "Try again once it’s back.")
         }
         let text = error.localizedDescription.lowercased()
         if text.contains("not found") || text.contains("unknown method") {
-            return "That pane isn’t running an agent anymore, so there was nothing to send to."
+            return ChangesStore.Trouble(
+                sentence:
+                    "That pane isn’t running an agent anymore, so there was nothing to send to.")
         }
-        return "Couldn’t send these. They’re still here."
+        return ChangesStore.Trouble(
+            sentence: "Couldn’t send these. They’re still here.",
+            transcript: error.localizedDescription)
     }
 
     // MARK: Storage
