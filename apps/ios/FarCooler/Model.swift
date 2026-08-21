@@ -470,21 +470,15 @@ enum AgentActivity: String {
     }
 }
 
-extension Fleet {
-    /// The terminal a host lands on when its worktree list is skipped — see
-    /// `FleetView`. An agent waiting on you outranks everything else, because
-    /// that is the whole reason to have opened the app; short of that, the
-    /// first terminal already running is a better first screen than an
-    /// arbitrary one that has exited or never started. `nil` only when the
-    /// host has no terminals at all, which is what sends `FleetView` back to
-    /// showing its list instead.
-    var landingTerminal: Terminal? {
-        let all = workspaces.flatMap(\.terminals)
-        if let attention = all.first(where: { $0.agent.wantsAttention }) { return attention }
-        if let running = all.first(where: { StateKind.parse($0.state) == .running }) { return running }
-        return all.first
-    }
-}
+// `Fleet.landingTerminal` was here: an agent waiting on you, else the first
+// terminal already running, else anything — the pane `FleetView` opened onto at
+// connect. It is gone because the phone no longer lands on a terminal at all;
+// it opens onto `NeedsYouView`, which lists everything wanting a person rather
+// than picking one and hiding the rest. The ranking argument it embodied is not
+// lost — the host computes it, on `Terminal.rank`, and the inbox orders by that.
+//
+// Android still has its own copy and still lands, which is fine: it mirrors the
+// phone one release behind, and this is the release that changed.
 
 struct Repository: Decodable, Identifiable, Hashable {
     var id: String

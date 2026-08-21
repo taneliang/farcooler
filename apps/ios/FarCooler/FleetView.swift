@@ -1,15 +1,19 @@
 import SwiftUI
 
-/// The fleet on one host.
+/// One runner, and everything the phone shows of it.
 ///
-/// Was the screen between a host and a terminal; now it is mostly a
-/// hand-off. A host with a terminal already running goes straight to it
-/// (`landing`, decided once per connection — see below) and this screen is
-/// what a host with nothing running shows instead, and what `TerminalView`'s
-/// switcher sheet reuses to list every worktree. Every state shown here is
-/// still DERIVED by the daemon at the moment of asking — the phone never
-/// computes a terminal's state, because a client that re-derives can
-/// disagree with the daemon and with the Mac about the same terminal.
+/// This used to be the screen between a host and a terminal, and then mostly a
+/// hand-off: it picked a terminal on connect — `fleet.landingTerminal` — and
+/// the worktree list existed only for a runner that had none. It no longer
+/// lands anywhere. A connected phone opens onto `NeedsYouView`, which is the
+/// answer to the question the app is actually opened with, and the fleet list
+/// is one tap below it. See that view's own comment, and
+/// `docs/jobs-to-be-done.md` for why the front door changed.
+///
+/// What did not change: every state shown here is DERIVED by the daemon at the
+/// moment of asking. The phone never computes a terminal's state, because a
+/// client that re-derives can disagree with the daemon and with the Mac about
+/// the same terminal.
 @MainActor
 struct FleetView: View {
     let host: Runner
@@ -17,20 +21,33 @@ struct FleetView: View {
 
     @StateObject private var connection = Connection()
 
-    /// Which terminal this screen is showing, decided once per connection
-    /// attempt and then left alone.
+    /// The terminal on screen, or nil when the inbox is.
     ///
-    /// Recomputing this on every poll would mean a terminal finishing its
-    /// work while this screen is open — an ordinary thing to happen while
-    /// someone is reading it — yanks them onto a different pane mid-read.
-    /// `nil` with `landingDecided` true means the fleet genuinely has no
-    /// terminals, which is what falls back to the list below; `nil` with it
-    /// false means a connection attempt hasn't finished yet.
+    /// The app's ONE terminal destination. Non-nil pushes `PaneHost` onto this
+    /// screen and nil is what a back-swipe writes here, so this is a faithful
+    /// answer to "is a pane open" rather than a wish that one were — see the
+    /// `navigationDestination` in `body`.
     ///
-    /// Assigning it is also how the empty-state list opens a terminal, and
-    /// that is deliberately a REPLACEMENT rather than a push — see `connected`.
+    /// It is no longer decided on connect. Everything that opens a terminal —
+    /// a blocked row in the inbox, a row in the worktree list, a tapped Live
+    /// Activity card — assigns this and nothing else, which is what makes the
+    /// terminal reachable at exactly one stack depth with exactly one meaning
+    /// for Back.
     @State private var landing: Terminal?
-    @State private var landingDecided = false
+
+    /// Whether the runner has told us what it has, at least once.
+    ///
+    /// On the connection rather than in a `@State` here, and that is not
+    /// bookkeeping — it is the difference between an honest screen and a
+    /// flickering lie. `phase == .connected` is set BEFORE the first `fleet`
+    /// call is awaited, in both `start` and `reconnect`, so a flag flipped on
+    /// the phase would draw "Nothing needs you" over `Fleet.empty` for a whole
+    /// SSH round trip. And a flag set after `connect(_:)` returns would never
+    /// be set at all for the connection that failed, gave up, and then came
+    /// back through `reconnectNow` — which is the ordinary way out of the
+    /// failure screen. `Connection.hasFleet` is set by the read itself, which
+    /// is the only moment that actually answers the question.
+    private var hasFleet: Bool { connection.hasFleet }
 
     /// The terminal a tapped Live Activity card asked for, held until a fleet
     /// arrives that has it.
@@ -83,21 +100,46 @@ struct FleetView: View {
                 connected
             }
         }
-        // No `navigationDestination` here, and that absence is the fix.
+        // The one place a terminal opens, and it is a push again.
         //
-        // The list used to PUSH a terminal while the landing terminal was
-        // rendered as the stack root, so whether the terminal screen had a back
-        // button at all depended on whether the fleet happened to be empty at
-        // the moment this screen connected — and backing out of a pushed
-        // terminal landed on a list that, by then, usually had a terminal to go
-        // straight back into. One screen at two stack depths is one screen with
-        // two different answers to "what does back mean here".
+        // The history is worth keeping, because the bug it fixed can come
+        // back. The worktree list used to PUSH a terminal while the landing
+        // terminal was rendered as the stack ROOT — so whether the terminal
+        // screen had a back button at all depended on whether the fleet
+        // happened to be empty at the moment this screen connected, and backing
+        // out of a pushed terminal landed on a list that by then usually had a
+        // terminal to go straight back into. One screen at two stack depths is
+        // one screen with two different answers to "what does Back mean here".
+        // The fix at the time was to make the terminal the root and have the
+        // list replace itself.
         //
-        // Now there is one: the terminal is always the root, opening one from
-        // the empty-state list REPLACES the list rather than stacking on it,
-        // and every other way of changing terminal — the tab strip, the
-        // switcher sheet — already retargeted in place. Nothing pushes, so
-        // nothing can be backed out of into itself.
+        // That fix rested on the list being a fallback nobody was meant to sit
+        // on. It is the front door now, and a front door you cannot get back to
+        // is worse than the problem: the only way out of a terminal would be
+        // the switcher sheet. So the terminal is pushed — and the invariant is
+        // kept, from the other side. `NeedsYouView` is the root
+        // unconditionally, this is the only `navigationDestination` for a
+        // terminal in the stack, and every route into one assigns `landing`.
+        // The terminal is therefore always at depth one and Back always means
+        // the inbox, whether you arrived from a blocked row, from the worktree
+        // list, or from a tapped Live Activity card at cold launch.
+        //
+        // Attached to the outer `Group` rather than inside `connected`, so the
+        // destination exists in every phase. A card tapped while this screen is
+        // still connecting sets `pendingTerminal`, and `openRequested` runs
+        // again the moment a fleet arrives; a destination declared inside the
+        // connected branch would not be there to receive it.
+        //
+        // Changing pane while one is open does NOT come through here — the tab
+        // strip and the switcher sheet retarget `PaneHost` in place, and a deep
+        // link arriving while a pane is open goes to `requested` for the same
+        // reason. Reassigning `landing` would rebuild the host and throw away
+        // every pane it has mounted.
+        .navigationDestination(item: $landing) { terminal in
+            PaneHost(
+                terminal: terminal, connection: connection, hosts: store,
+                requested: $requested)
+        }
         .sheet(isPresented: $editing) {
             HostEditorView(
                 existing: host,
@@ -115,15 +157,16 @@ struct FleetView: View {
         .onChange(of: scenePhase) { _, phase in
             connection.setActive(phase == .active)
         }
-        // A fleet that empties has nothing for the terminal screen to show.
+        // A fleet that empties has nothing for the terminal screen to show, so
+        // it pops back to the inbox.
         //
-        // `landing` was decided once and never revisited, so removing the last
-        // worktree left this sitting on a pane that no longer exists, with the
-        // switcher sheet as the only way out and nothing in it. Deliberately
-        // keyed on the fleet being EMPTY rather than on `landing` still being
-        // present: `TerminalView` moves on from the terminal it opened with
-        // whenever the tab strip is used, so "the terminal we landed on is
-        // gone" is a routine, correct state and must not yank anyone anywhere.
+        // Removing the last worktree used to leave this sitting on a pane that
+        // no longer exists, with the switcher sheet as the only way out and
+        // nothing in it. Deliberately keyed on the fleet being EMPTY rather
+        // than on `landing` still being present: `TerminalView` moves on from
+        // the terminal it opened with whenever the tab strip is used, so "the
+        // terminal we opened is gone" is a routine, correct state and must not
+        // yank anyone anywhere.
         .onChange(of: terminalCount) { _, count in
             if count == 0 { landing = nil }
         }
@@ -156,14 +199,25 @@ struct FleetView: View {
         let all = connection.fleet.workspaces.flatMap(\.terminals)
         if let terminal = all.first(where: { $0.id == id }) {
             pendingTerminal = nil
-            landing = terminal
-            landingDecided = true
-            // Both, and they do different jobs: `landing` is what mounts the
-            // pane host when nothing is on screen yet, and `requested` is what
-            // retargets it when something already is. Setting only the first
-            // would leave a card tapped while another pane was open doing
-            // nothing at all — `PaneHost` reads `landing` once, at init.
-            requested = terminal
+            // One or the other, never both, and which one depends on whether a
+            // pane is already open. They do different jobs: `landing` PUSHES
+            // the pane host when the inbox is what is on screen, and
+            // `requested` retargets a host that is already mounted —
+            // `PaneHost` reads its `terminal` argument once, at init, so a card
+            // tapped while another pane was open would otherwise do nothing at
+            // all.
+            //
+            // Assigning both, which is what this did while the terminal was the
+            // stack root, is now the damaging option: writing `landing` while
+            // the destination is already showing rebuilds `PaneHost` from
+            // scratch and drops every pane it had mounted, along with their
+            // scroll positions, half-typed messages and open ssh streams. That
+            // is the one thing `PaneHost` exists to prevent.
+            if landing == nil {
+                landing = terminal
+            } else {
+                requested = terminal
+            }
         } else if connection.phase == .connected {
             // The runner answered and does not have it: the pane is gone, or
             // the card was about another runner entirely — the URL carries an
@@ -233,38 +287,27 @@ struct FleetView: View {
         withAnimation { stalled = true }
     }
 
+    /// The root of the stack, in every phase that has a fleet behind it.
+    ///
+    /// Always the inbox, never a terminal. A terminal is a `PaneHost` pushed on
+    /// top of this — see the `navigationDestination` in `body` — which is what
+    /// gives Back one meaning.
     @ViewBuilder
     private var connected: some View {
-        if let landing {
-            PaneHost(terminal: landing, connection: connection, hosts: store, requested: $requested)
-                // Deliberately NOT keyed on the terminal.
-                //
-                // `TerminalView` owns which terminal it is showing and swaps it
-                // in place — see its `select`, which retargets the live ssh
-                // stream rather than opening a second one. Keying it here would
-                // tear the screen down and rebuild it on every tab tap,
-                // dropping the stream to reopen it a moment later.
-                .id(landingIdentity)
-        } else if landingDecided {
-            // The empty-state list. Choosing here REPLACES this screen with the
-            // terminal rather than pushing onto it, so the terminal is the root
-            // whichever way you arrived at it.
-            WorkspaceListView(connection: connection, onSelect: { landing = $0 }, hosts: store)
-                .navigationTitle(host.label)
-                .navigationBarTitleDisplayMode(.inline)
+        if hasFleet {
+            NeedsYouView(
+                connection: connection, runner: host, store: store,
+                onOpen: { landing = $0 })
         } else {
+            // Not the inbox with nothing in it. Until the runner has answered,
+            // "Nothing needs you" would be a claim made from `Fleet.empty` —
+            // see `hasFleet`. The runner's own name is the title here because
+            // there is nothing else yet to say what is being waited on.
             ProgressView()
                 .navigationTitle(host.label)
                 .navigationBarTitleDisplayMode(.inline)
         }
     }
-
-    /// What makes the terminal screen a NEW screen rather than the same one.
-    ///
-    /// Only the transition from "no terminal" to "a terminal" does — which is
-    /// the empty-state list opening the first one. Every later change of
-    /// terminal is `TerminalView`'s own business and must not rebuild it.
-    private var landingIdentity: Bool { landing != nil }
 
     /// How many terminals the whole fleet has. Watched rather than the fleet
     /// itself, because this screen only cares about the one transition.
@@ -272,19 +315,24 @@ struct FleetView: View {
         connection.fleet.workspaces.reduce(0) { $0 + $1.terminals.count }
     }
 
-    /// Connect, then decide `landing` from whatever fleet that connection
-    /// produced. Shared by the initial `.task` and every retry below — the
-    /// approval screen's "Trust this host" and the failure screen's "Try
-    /// again" each start a fresh connection of their own, and each one needs
-    /// the same decision made afterwards, not the one left over from a
-    /// connection attempt that never got this far.
+    /// Connect, then let the inbox draw whatever fleet that connection
+    /// produced.
+    ///
+    /// Shared by the initial `.task` and every retry below — the approval
+    /// screen's "Trust This Runner" and the failure screen's "Try Again" each
+    /// start a fresh connection of their own, and each one has to end with the
+    /// deep link getting its second look.
+    ///
+    /// What is gone from here is `landing = connection.fleet.landingTerminal`.
+    /// That line chose an agent for you at every connect, and it chose one on
+    /// every reconnection ceremony too — so a phone that lost its tunnel in
+    /// transit could come back on a different pane than the one you were
+    /// reading.
     private func connect(_ target: Runner) async {
         await connection.start(host: target)
-        landing = connection.fleet.landingTerminal
-        landingDecided = true
-        // After the landing decision, not before: a card tapped at cold launch
-        // is a direct instruction and outranks the guess this screen makes on
-        // its own, and doing it in the other order would let the guess win.
+        // A card tapped at cold launch delivers its URL before there is a fleet
+        // to look the id up in, so `openRequested` found nothing and gave up.
+        // This is its second chance, now that there is somewhere to look.
         openRequested()
     }
 
@@ -514,10 +562,16 @@ struct FleetView: View {
 }
 
 /// The worktree list plus what it takes to act on it: quick task, new
-/// workspace, pull-to-refresh. Shown two places — as `FleetView`'s own
-/// fallback when a host has no terminal to land on, and inside the sheet
-/// `TerminalView` opens to switch terminals — so a task started from either
-/// one works the same way and neither loses a capability the other has.
+/// workspace, pull-to-refresh. Shown two places — pushed from the inbox's
+/// Working row, and inside the sheet `TerminalView` opens to switch terminals
+/// — so a task started from either one works the same way and neither loses a
+/// capability the other has.
+///
+/// It was `FleetView`'s fallback for a runner with no terminal to land on,
+/// which is why the two toolbar buttons live here: they were on the only screen
+/// a runner with nothing running could show. That makes this the one place to
+/// start work, and it is now a tap below the front door rather than at it. See
+/// `NeedsYouView.working`.
 struct WorkspaceListView: View {
     @ObservedObject var connection: Connection
     let onSelect: (Terminal) -> Void

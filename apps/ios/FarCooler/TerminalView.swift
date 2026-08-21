@@ -130,23 +130,6 @@ struct TerminalView: View {
 
     private var currentName: String { terminal.displayName(ordinal: currentOrdinal) }
 
-    /// The panes in a worktree that a review note can be handed to.
-    ///
-    /// `isAgentPane` OR `canSwitchPaneMode`, because both are the daemon's word
-    /// for "an agent is in here" and only the first is about what is currently
-    /// DRAWN. A claude the user has flipped back to its raw terminal is still
-    /// an agent holding an ACP session, and `terminal.agent_prompt` reaches it;
-    /// excluding it would mean a review with nowhere to send to for the sole
-    /// reason that somebody wanted to watch the tty.
-    private func reviewAgents(in workspace: Workspace) -> [ReviewAgentTarget] {
-        let ordinals = workspace.ordinals()
-        return workspace.terminals
-            .filter { $0.isAgentPane || $0.canSwitchPaneMode }
-            .map {
-                ReviewAgentTarget(id: $0.id, name: $0.displayName(ordinal: ordinals[$0.id]))
-            }
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             // Chosen by `terminal.isAgentPane`, which the daemon sets — never
@@ -183,11 +166,13 @@ struct TerminalView: View {
                 // already in hand, and handed over as values rather than as
                 // the `Connection` so that reviewing a diff does not
                 // re-evaluate a forty-card lazy stack on every three-second
-                // poll. See `ChangesView.agents`.
+                // poll. See `ChangesView.agents`. The filter itself lives on
+                // `Workspace` because the inbox reaches the same review by a
+                // different door — see `Workspace.reviewAgentTargets()`.
                 ChangesView(
                     store: connection.changesStores.store(for: workspace.id),
                     workspaceName: workspace.task,
-                    agents: reviewAgents(in: workspace))
+                    agents: workspace.reviewAgentTargets())
                     .id(workspace.id)
             } else {
                 GeometryReader { geo in

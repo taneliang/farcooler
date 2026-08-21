@@ -26,6 +26,9 @@ SOURCES = [
     "Connection.swift",
     "FleetSnapshotWriter.swift",
     "FleetView.swift",
+    # The front door: what on this runner is waiting on a person. See its own
+    # doc comment for why the phone stopped opening into a terminal.
+    "NeedsYou.swift",
     "Model.swift",
     "Notifications.swift",
     "LiveActivities.swift",

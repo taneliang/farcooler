@@ -197,6 +197,31 @@ struct ReviewAgentTarget: Identifiable, Equatable {
     var name: String
 }
 
+extension Workspace {
+    /// The panes in this worktree a review note can be handed to.
+    ///
+    /// `isAgentPane` OR `canSwitchPaneMode`, because both are the daemon's word
+    /// for "an agent is in here" and only the first is about what is currently
+    /// DRAWN. A claude the user has flipped back to its raw terminal is still an
+    /// agent holding an ACP session, and `terminal.agent_prompt` reaches it;
+    /// excluding it would mean a review with nowhere to send to for the sole
+    /// reason that somebody wanted to watch the tty.
+    ///
+    /// Here rather than beside either caller, because there are two now: a
+    /// review reached through a `changes` pane (`TerminalView`) and one reached
+    /// from the inbox (`NeedsYouView`). Two copies of this filter is two
+    /// chances for the same worktree to offer different agents depending on
+    /// which door you came through.
+    func reviewAgentTargets() -> [ReviewAgentTarget] {
+        let numbering = ordinals()
+        return terminals
+            .filter { $0.isAgentPane || $0.canSwitchPaneMode }
+            .map {
+                ReviewAgentTarget(id: $0.id, name: $0.displayName(ordinal: numbering[$0.id]))
+            }
+    }
+}
+
 /// Comments written across a review, collected until they are sent as one.
 ///
 /// **Collect, then send** is the whole design, and it is about the receiving end
