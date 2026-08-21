@@ -16,7 +16,11 @@ import SwiftUI
 /// The polling path below is kept, and is not dead code: `startStream`
 /// answers false when there is no ssh session to open a second channel on,
 /// and a screen that updates once a second is enormously better than a screen
-/// that says it cannot be shown.
+/// that says it cannot be shown. It is also what holds the screen while a
+/// stream that failed is being re-attached — see `scheduleStreamRetry` — so
+/// the two paths are not "the good one and the sad one" so much as the
+/// picture and the stand-in that keeps the pane live until the picture is
+/// back.
 ///
 /// This never decides whether a terminal is "live" — the host does, the same
 /// way `Connection` never computes a workspace's state. An unreadable screen
@@ -110,9 +114,36 @@ final class TerminalSession: ObservableObject {
     /// The revision of the last screen seen, so the geometry check can be
     /// answered in a hundred bytes when nothing moved.
     private var revision: UInt64 = 0
-    /// Consecutive stream attaches that produced nothing before ending.
-    /// Reset by the first byte through. See `streamEnded`.
-    private var failedAttaches = 0
+    /// The emulator the stream is going to fill, held aside until the stream
+    /// actually says something.
+    ///
+    /// `prime` builds this — empty, at the pane's size — because the bytes
+    /// start arriving the moment the channel opens and a chunk with no
+    /// emulator to receive it is simply lost. It used to go straight into
+    /// `vt`, which was right while a reopen was the only thing that ever
+    /// re-attached: nothing else was painting, so an empty core on screen for
+    /// one round trip was the same spinner the reopen already showed.
+    ///
+    /// It is wrong now that a re-attach runs WITH the poll loop still
+    /// painting. `vt` is what `publish` draws and what a keystroke's
+    /// `jumpToBottom` redraws, so installing an empty core into it mid-retry
+    /// would blank a screen polling was keeping perfectly current — the exact
+    /// thing keeping polling alive through the retries was for. So the
+    /// stream's core waits here, and `consume` installs it at the instant the
+    /// first byte makes the stream the painter.
+    ///
+    /// Its size travels with it because `render` moves `paneSize` on every
+    /// poll. Without it, a pane somebody reshaped during the retry would leave
+    /// `checkGeometry` comparing the pane's new size against a `paneSize` that
+    /// already agrees, while the emulator just installed is still the old
+    /// width — a mis-wrapped screen with nothing left to notice it.
+    private var streamCore: (emulator: VTCore, columns: Int, rows: Int)?
+    /// How long the next re-attach waits. Widened by `scheduleStreamRetry`,
+    /// reset by the first byte through — see `consume`.
+    private var streamRetryDelay: Double = TerminalSession.streamRetryFloor
+    /// The re-attach that is waiting to happen, held so that an `open` from
+    /// any other cause can cancel it rather than race it.
+    private var streamRetry: Task<Void, Never>?
     private var started = false
 
     /// How often to ask the host how big this pane is now.
@@ -170,6 +201,38 @@ final class TerminalSession: ObservableObject {
     /// of firing early is a working terminal that quietly stops scrolling.
     private static let firstByteDeadline: Duration = .seconds(12)
 
+    /// How long the first re-attach waits after a stream fails, and how long
+    /// the longest one waits.
+    ///
+    /// A pane no longer settles for polling after three dead attaches — see
+    /// `streamEnded` — so the interval is the only thing keeping the retries
+    /// affordable, and the flat 500ms this used to sleep cannot do it alone:
+    /// two attaches a second, per pane, on a link that is already failing.
+    ///
+    /// The floor stays at that 500ms, because the common failure is one
+    /// dropped channel on a link that is otherwise fine, and half a second is
+    /// the right answer to it. The ceiling is a different question, and it is
+    /// deliberately NOT `slowInterval`. A poll is one `terminal.screen` RPC
+    /// answered by a daemon already running. An attach execs `farcoolerd
+    /// --stream` on the runner: a cold process that opens a second SQLite
+    /// handle with its migrations, refreshes the whole tmux inventory, and
+    /// only then captures the pane's entire scrollback — the work
+    /// `firstByteDeadline` allows twelve seconds for. Retrying that once a
+    /// second would not be a retry, it would be a load generator aimed at a
+    /// runner already having a bad time, and every attempt spends one of the
+    /// ten ssh sessions a default sshd gives this whole phone.
+    ///
+    /// Thirty seconds is therefore the ceiling. It is comfortably longer than
+    /// one attach's own worst case, so attempts cannot overlap or queue behind
+    /// each other; it is short enough that a link which comes back is
+    /// streaming again — scrollback and all — within half a minute, with
+    /// nobody tapping anything; and nothing is waiting on it meanwhile,
+    /// because the poll loop is painting the whole time. The only thing a
+    /// wider gap costs is scrollback the pane did not have a moment ago
+    /// anyway.
+    private static let streamRetryFloor: Double = 0.5
+    private static let streamRetryCeiling: Double = 30.0
+
     // MARK: - Adaptive polling (fallback only)
     //
     // Reached when there is no ssh session to stream over. "Adaptive" means
@@ -205,6 +268,7 @@ final class TerminalSession: ObservableObject {
     deinit {
         poller?.cancel()
         geometry?.cancel()
+        streamRetry?.cancel()
         resizeDebounce?.cancel()
         // The core's stream task outlives this object — it belongs to the ssh
         // session, not to whoever was watching — so it has to be told, not
@@ -245,12 +309,15 @@ final class TerminalSession: ObservableObject {
         capturedCursor = nil
         phase = .connecting
         started = true
-        // The strike count belongs to the terminal being left, not the one
-        // arriving. Carried over, a terminal whose predecessor had already
-        // given up on streaming reached the three-strike fallback on its first
-        // hiccup and showed a failure it had not earned — which is the error
-        // that flashed when switching tabs.
-        failedAttaches = 0
+        // The backoff belongs to the terminal being left, not the one
+        // arriving. Carried over, a terminal whose predecessor had spent the
+        // last ten minutes failing to stream would open and then wait half a
+        // minute before its own first re-attach. When this was a strike count
+        // instead, the same carry-over was worse: the arriving terminal
+        // reached the three-strike fallback on its first hiccup and showed a
+        // failure it had not earned, which is the error that flashed when
+        // switching tabs.
+        streamRetryDelay = Self.streamRetryFloor
         hasResized = false
         // The size this device would like has not changed — the screen did
         // not resize, only what it is showing did — but `lastResizeSent`
@@ -304,9 +371,10 @@ final class TerminalSession: ObservableObject {
     func resume() {
         guard !started else { return }
         started = true
-        // A fresh visit deserves fresh strikes: three dead attaches from an
-        // earlier visit must not send this one straight to polling.
-        failedAttaches = 0
+        // A fresh visit deserves a fresh backoff: an interval an earlier
+        // visit widened must not make this one wait half a minute for its
+        // first re-attach.
+        streamRetryDelay = Self.streamRetryFloor
         // AFTER `open`, which is not where the other openers put it, and has to
         // be here.
         //
@@ -348,7 +416,7 @@ final class TerminalSession: ObservableObject {
         paneSize = nil
         capturedCursor = nil
         phase = .connecting
-        failedAttaches = 0
+        streamRetryDelay = Self.streamRetryFloor
         hasResized = false
         lastResizeSent = nil
         Task { await open() }
@@ -517,19 +585,43 @@ final class TerminalSession: ObservableObject {
     /// believed it: `streamEnded` and `streamSaidNothing` tore down and went to
     /// polling while their ssh channel stayed open, delivering into an
     /// emulator nothing was showing. Ten of those is `MaxSessions` on a default
-    /// sshd, after which no stream opens at all — see the stop each of them now
-    /// makes for itself.
+    /// sshd, after which no stream opens at all — see the awaited stop
+    /// `scheduleStreamRetry` now makes before every wait.
     private func teardown() {
         poller?.cancel()
         poller = nil
+        teardownExceptPolling()
+    }
+
+    /// Everything `teardown` stops except the poll loop.
+    ///
+    /// For the three callers that must not stop it: `streamEnded` and
+    /// `streamSaidNothing`, which hand the screen to polling and then retry,
+    /// and `open`, which every one of those retries goes through. Cancelling
+    /// the poller there would freeze the pane on whatever the last capture
+    /// painted for the length of the backoff — and with the retries no longer
+    /// stopping at three, "the length of the backoff" has no end. A pane
+    /// frozen on a stale screen that still looks alive is worse than the
+    /// second-old one it replaced, which would have made this whole change a
+    /// regression.
+    ///
+    /// The pending re-attach goes here rather than in `teardown`, for the same
+    /// reason it is cancelled at all: an `open` in progress IS an attempt, and
+    /// a timer that fires another one on top of it would fork the retry chain
+    /// in two, then four. Every path back into `open` therefore arrives with
+    /// at most one retry outstanding — its own, which it has just cancelled.
+    private func teardownExceptPolling() {
         geometry?.cancel()
         geometry = nil
         silence?.cancel()
         silence = nil
+        streamRetry?.cancel()
+        streamRetry = nil
         resizeDebounce?.cancel()
         resizeDebounce = nil
         pendingResizeSize = nil
         inbox = nil
+        streamCore = nil
         streaming = false
     }
 
@@ -564,7 +656,14 @@ final class TerminalSession: ObservableObject {
     /// before settling. A spinner for that moment is honest; a wrong screen is
     /// not.
     private func open() async {
-        teardown()
+        // `teardown` minus the poll loop, which has to survive this call.
+        // Every caller but one has already stopped the poller, or never
+        // started it; the exception is the re-attach in `scheduleStreamRetry`,
+        // which arrives here with polling actively painting the pane and needs
+        // it to keep painting until a stream is genuinely carrying bytes
+        // again. Handing the screen back is `consume`'s job, on the first
+        // byte, so that at no instant do both paint.
+        teardownExceptPolling()
         // Awaited, unlike the fire-and-forget stop `teardown` does for callers
         // that cannot wait. Both stop and start go through the same actor, and
         // a stop that had not landed yet would arrive after the start below and
@@ -598,15 +697,62 @@ final class TerminalSession: ObservableObject {
             // not be reached, it is a pane the host says is not running, and
             // polling one of those every second forever would spend a round
             // trip per second to be told the same true thing.
-            if case .failed = phase { startLoop() }
+            if case .failed = phase {
+                startLoop()
+                // And ask for the stream again on the widening interval. A
+                // screen call that failed says nothing about whether this link
+                // can carry a stream — it usually means there is no link at
+                // all this second — so giving up on streaming because of one
+                // would be settling for polling by a side door, which is the
+                // thing this pane must never do.
+                scheduleStreamRetry()
+            } else {
+                // And a `.notLive` pane stops being polled at all. Said out
+                // loud here because this method no longer stops the poller on
+                // the way in: a loop started by a retry would otherwise
+                // outlive the pane it was covering for, which is the round
+                // trip a second the paragraph above refuses to spend.
+                poller?.cancel()
+                poller = nil
+            }
             return
         }
+        // Re-checked here, after every await above, and not only in
+        // `reattach`. `stop()` can land while this call is suspended in
+        // `stopStream` or `prime` — the view disappeared, the tab changed —
+        // and the guard `reattach` passed a moment ago says nothing about
+        // that. Attaching anyway opens an ssh channel for a pane nobody is
+        // looking at, AFTER `stop`'s own `stopStream` has already gone, so
+        // nothing releases it until the pane is opened again.
+        //
+        // A default sshd gives the whole phone ten sessions across every pane
+        // on that runner, and this file's history is largely the story of
+        // running out of them. The hazard predates the retry loop, which had
+        // one flat attempt and no cancellation at all; unbounded retries do
+        // not create it but do make it reachable far more often, which is
+        // reason enough to close it now.
+        guard started else { return }
         if await attach() {
             watchGeometry()
             return waitForTheFirstByte()
         }
-        render(screen)
+        // Nothing opened, so the core `prime` just built has nothing to fill
+        // it, and the poll path builds its own.
+        streamCore = nil
+        // Painted only when nothing else is painting. On a retry a poll loop
+        // is already running, and this screen and its next answer were in
+        // flight together — so drawing this one now is as likely to put an
+        // older capture over a newer one as it is to help, for a pane that is
+        // already repainting itself several times a second.
+        if poller == nil { render(screen) }
         startLoop()
+        // `startStream` answers false when there is no ssh session to open a
+        // second channel on — and a session comes back without anything here
+        // being told. `relink` covers the case where the link is replaced
+        // while this pane is on screen; this covers the rest, for the price of
+        // one attempt every thirty seconds against a connection that is
+        // already answering polls.
+        scheduleStreamRetry()
     }
 
     /// A stream that opened, was accepted, and then never said anything.
@@ -644,20 +790,81 @@ final class TerminalSession: ObservableObject {
     }
 
     /// The deadline passed with the screen still blank.
+    ///
+    /// This used to be a permanent surrender, and said so: "this path goes to
+    /// polling and never reopens." That was the second cliff, and the quieter
+    /// one — `streamEnded`'s three strikes at least needed three channels to
+    /// drop, while a single channel that opened and then sat there stranded
+    /// the pane on the poll loop on the first try. On a wedged link it is also
+    /// the likelier of the two, because a wedged channel does not drop, it
+    /// hangs.
+    ///
+    /// So it now does exactly what `streamEnded` does: hand the screen to
+    /// polling, and try the stream again on the widening interval. Its
+    /// fire-and-forget stop went with the reasoning that justified it — see
+    /// `scheduleStreamRetry`, which stops the channel awaited, because there
+    /// is now a start for a late stop to arrive after and cancel.
     private func streamSaidNothing() {
         // Only while nothing has been painted. A stream that delivered and then
         // went quiet is an idle pane, which is the ordinary state of most of
         // them, and tearing that down would swap a working stream for polling
         // every two seconds of quiet.
         guard streaming, phase == .connecting else { return }
-        teardown()
-        // Fire and forget, safely: this path goes to polling and never reopens,
-        // so there is no start for a late stop to arrive after. A channel that
-        // opened and said nothing is the likeliest one to be wedged, and
-        // leaving it held is how the next pane finds no channels left.
-        let id = terminalID
-        Task { await stopStream(id) }
+        teardownExceptPolling()
         startLoop()
+        scheduleStreamRetry()
+    }
+
+    /// Hand the channel back, wait, and attach again.
+    ///
+    /// The wait widens geometrically, in the same shape and on the same
+    /// `backoffFactor` the poll loop coasts on; only the ceiling differs, and
+    /// it differs by a factor of thirty for the reasons `streamRetryCeiling`
+    /// gives. From `streamRetryFloor` that is nine widenings and something
+    /// under a minute and a half of wall clock to reach it, which is the shape
+    /// wanted: a link that hiccuped is streaming again within a second, and a
+    /// link that is genuinely down is asked twice a minute instead of twice a
+    /// second.
+    ///
+    /// The stop happens BEFORE the wait, and is awaited. Before, because a
+    /// channel that just failed is the likeliest one to be wedged, and holding
+    /// it for the length of a backoff that now reaches half a minute is how
+    /// the next pane finds no channels left — ten is all a default sshd gives
+    /// this phone for every pane it has open. Awaited, because stop and start
+    /// go through the same actor in the order they are asked, and a stop left
+    /// in flight arrives after the next start and cancels the stream that
+    /// start just opened: a session that believes it is streaming, attached to
+    /// nothing, which is a screen that stops updating and never says why.
+    /// `open` awaits its own stop for precisely this reason, and this stop is
+    /// no different now that both failure paths reopen.
+    private func scheduleStreamRetry() {
+        let id = terminalID
+        let delay = streamRetryDelay
+        streamRetryDelay = min(streamRetryDelay * Self.backoffFactor, Self.streamRetryCeiling)
+        streamRetry?.cancel()
+        streamRetry = Task { [weak self] in
+            await self?.stopStream(id)
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            await self?.reattach()
+        }
+    }
+
+    /// The scheduled re-attach, arriving. The handle is dropped first because
+    /// this retry is no longer pending — it is the one running — and `open`
+    /// cancels whatever is pending on its way in.
+    ///
+    /// `started` is checked because the cancel and the wake-up can cross: a
+    /// retry that was already resuming when `stop` cancelled it would open an
+    /// ssh channel for a pane nobody is looking at any more, and the stop that
+    /// `stop` itself made has already been and gone. That channel is one of
+    /// ten and nothing would close it until this object died. Every other
+    /// caller of `open` sets `started` first, or is only reachable while it is
+    /// already true, so this costs them nothing.
+    private func reattach() async {
+        streamRetry = nil
+        guard started else { return }
+        await open()
     }
 
     /// One screen: the pane's size, whether it is running at all, and — only
@@ -691,7 +898,15 @@ final class TerminalSession: ObservableObject {
             // every character would not.
             emulator.setPalette(Themes.shared.current.packed)
             applyModes(response.modes, to: emulator)
-            vt = emulator
+            // Installed as the screen's emulator only when nothing else is
+            // painting. When a poll loop is — which is every re-attach, and
+            // was never possible before the retries stopped cancelling it —
+            // putting an empty core into `vt` would blank a pane that polling
+            // is keeping current, the moment anything called `publish`. It
+            // waits in `streamCore` instead, and `consume` installs it on the
+            // first byte. See `streamCore`.
+            streamCore = (emulator, response.columns, response.rows)
+            if poller == nil { vt = emulator }
             return response
         } catch {
             report(error)
@@ -725,9 +940,10 @@ final class TerminalSession: ObservableObject {
         return opened
     }
 
-    /// Feed everything that has arrived, in order, and redraw once.
+    /// Feed everything that has arrived, in order, and redraw once — and, on
+    /// the first byte, take the screen back from the poll loop.
     private func consume() {
-        guard let inbox, let vt else { return }
+        guard let inbox else { return }
         let bytes = inbox.take()
         guard !bytes.isEmpty else { return }
         // The stream spoke, so the deadline on its silence is spent. Cancelled
@@ -737,7 +953,38 @@ final class TerminalSession: ObservableObject {
         // to get this right.
         silence?.cancel()
         silence = nil
-        failedAttaches = 0
+        // And so is the interval the failures before it had widened. A stream
+        // that delivered is evidence about this link that the tally of what
+        // came before it is not, so the next failure starts over at half a
+        // second rather than wherever this pane's history had crept to.
+        streamRetryDelay = Self.streamRetryFloor
+        // The handover, and the whole reason it is here. Until this byte,
+        // polling owned the screen — through every retry, which is what keeps
+        // a pane live instead of frozen on whatever `prime` last painted. From
+        // this byte on the stream owns it, and only ever one of them may:
+        // `streamEnded` records what both at once looked like, "two painters,
+        // disagreeing, one of them every second".
+        //
+        // It is a swap and not merely a cancel, because the two paths do not
+        // share an emulator. `render` builds a fresh `VTCore` for every
+        // capture on purpose, so the core `vt` holds at this instant is one a
+        // poll built and the next poll would have thrown away. These bytes are
+        // a continuation of the screen the stream's own replay draws, so they
+        // belong in the core `prime` built for them — and both halves happen
+        // here, in one turn on the main actor, with nothing published in
+        // between, so no frame is ever drawn from half of each.
+        //
+        // The poller is cancelled first, but a cancel cannot recall a round
+        // trip already asked for: `poll` checks for its own cancellation
+        // before it paints, which is the other half of this.
+        if let streamCore {
+            poller?.cancel()
+            poller = nil
+            vt = streamCore.emulator
+            paneSize = (streamCore.columns, streamCore.rows)
+            self.streamCore = nil
+        }
+        guard let vt else { return }
         vt.feed(bytes)
         // From here on the emulator's own caret is the true one: these bytes
         // are a continuation of the screen they move the caret across, unlike
@@ -746,43 +993,51 @@ final class TerminalSession: ObservableObject {
         publish()
     }
 
-    /// The stream stopped. Try again, then settle for polling.
+    /// The stream stopped. Hand the screen to polling, and try again.
     ///
     /// A stream ends for two very different reasons: the pane finished, or the
     /// channel did. Only the host can tell those apart, so this asks it — by
     /// reopening, which begins with the screen call that reports a pane that
-    /// is no longer running. A channel that drops repeatedly without ever
-    /// delivering a byte is a connection that cannot carry a stream, and
-    /// retrying it forever would be a worse screen than the polling that
-    /// definitely works.
+    /// is no longer running, and which stops the retries for good when it says
+    /// so. See the `.notLive` branch in `open`.
+    ///
+    /// It used to stop asking after three dead attaches and settle for polling
+    /// permanently. The reason was channel exhaustion, and it was a real one:
+    /// every attach spends one of the ten sessions a default sshd allows, and
+    /// the fallback used to tear down this side while leaving the stream
+    /// running on the host, so a handful of panes doing it exhausted the
+    /// budget and then nothing could stream at all. That leak is fixed —
+    /// `scheduleStreamRetry` releases the channel, awaited, before it waits,
+    /// and `open` stops the stream again before it starts one. Retries release
+    /// before they re-acquire, so they cannot accumulate.
+    ///
+    /// What the cliff cost outlived what it bought. A pane on the polling path
+    /// has no scrollback whatsoever — a poll carries `capture-pane -e -p`, the
+    /// visible screen and no history — so swiping it does nothing at all,
+    /// silently, on a pane that repaints every second and looks perfectly
+    /// alive. Three unlucky seconds put a pane in that state until somebody
+    /// happened to switch tabs and back.
+    ///
+    /// The error the stream ended with is deliberately not shown. It was worth
+    /// showing at the cliff, as the last thing that pane would ever say about
+    /// streaming; now that polling is painting and the stream is coming back
+    /// on its own, "Could not load" over a screen that is visibly working
+    /// would simply be untrue. A failure polling can see for itself is still
+    /// reported, by `poll`.
     private func streamEnded(_ error: String?) {
         guard streaming else { return }
-        streaming = false
-        failedAttaches += 1
-        guard failedAttaches < 3 else {
-            if let error { phase = .failed(Self.humanFailure(error)) }
-            // Everything the streaming path set up goes before the polling path
-            // starts, and that is the whole fix for a screen that flashed a
-            // wrong layout once a second. Falling back used to start the poll
-            // loop and leave the rest running, so a stream that was still
-            // delivering fed the emulator correct bytes while the poll repainted
-            // a capture over the top of them — two painters, disagreeing, one of
-            // them every second. A fallback has to be a handover, not an
-            // addition.
-            teardown()
-            // See `teardown`: it stops nothing on the host, and this is the
-            // path its comment wrongly promised it did. Three dead attaches is
-            // three channels, and the pane that inherits an sshd with none left
-            // gets a stream that opens and never speaks.
-            let id = terminalID
-            Task { await stopStream(id) }
-            startLoop()
-            return
-        }
-        Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
-            await self?.open()
-        }
+        // Everything the streaming path set up goes before the polling path
+        // starts, and that is the whole fix for a screen that flashed a wrong
+        // layout once a second. Falling back used to start the poll loop and
+        // leave the rest running, so a stream that was still delivering fed the
+        // emulator correct bytes while the poll repainted a capture over the
+        // top of them — two painters, disagreeing, one of them every second. A
+        // fallback has to be a handover, not an addition — and now that the
+        // fallback is temporary, so does the return trip: `consume` cancels
+        // the poller in the same turn it installs the stream's emulator.
+        teardownExceptPolling()
+        startLoop()
+        scheduleStreamRetry()
     }
 
     // MARK: - Geometry
@@ -849,13 +1104,33 @@ final class TerminalSession: ObservableObject {
     /// scheduled tick would still land late. Restarting the loop is what
     /// actually changes the cadence rather than just sneaking in one extra
     /// poll ahead of it.
+    ///
+    /// The handle is cleared as well as cancelled, because `startLoop` now
+    /// refuses to start a second loop over a live one and reads that handle to
+    /// decide. The cadence reset moved in there with it.
     private func wake() {
-        interval = Self.fastInterval
         poller?.cancel()
+        poller = nil
         startLoop()
     }
 
+    /// Start the poll loop, unless one is already running.
+    ///
+    /// Idempotent because the callers now overlap. `open` starts a loop when
+    /// it cannot stream, both stream failures start one before they retry, and
+    /// every retry goes back through `open` — so on a pane that keeps failing,
+    /// this is called once per attempt with a loop already painting. Two loops
+    /// on one pane would be two captures per interval and two painters of the
+    /// same kind, which is merely wasteful rather than wrong; what makes it
+    /// unacceptable is that it would be one more loop per retry, without end.
+    ///
+    /// The cadence is reset here rather than at each call site, because every
+    /// reason to start a loop is a reason to poll now: polling begins when
+    /// something just changed, and whatever interval an earlier loop had
+    /// backed off to described a screen that is no longer the one being shown.
     private func startLoop() {
+        guard poller == nil else { return }
+        interval = Self.fastInterval
         poller = Task { [weak self] in
             while let self, !Task.isCancelled {
                 await self.poll()
@@ -868,6 +1143,16 @@ final class TerminalSession: ObservableObject {
     private func poll() async {
         do {
             let data = try await core.call("terminal.screen", ["terminal": terminalID])
+            // The stream may have taken the screen while this call was in
+            // flight. `consume` cancels this loop the instant the first byte
+            // lands, but a cancel cannot recall an ssh round trip already
+            // asked for, and what comes back is a capture: painting it now
+            // would draw a whole re-flowed screen over the bytes the stream
+            // has just started delivering. That is the two painters again, in
+            // the one window left where they can still overlap. Checked here
+            // rather than only in the loop above, because that check happens
+            // after this method has already painted.
+            guard !Task.isCancelled else { return }
             let response = try JSONDecoder().decode(ScreenResponse.self, from: data)
 
             // The cheap compare that makes backing off free: `ScreenResponse`
@@ -884,6 +1169,10 @@ final class TerminalSession: ObservableObject {
             interval = Self.fastInterval
             render(response)
         } catch {
+            // A failure that arrived after the stream took over is not this
+            // screen's news to report: `.failed` over a pane the stream is now
+            // painting would be the same lie from the other direction.
+            guard !Task.isCancelled else { return }
             report(error)
             // Back off on a persistent error too — a terminal that keeps
             // failing to load has no "changing" to detect, and retrying it
