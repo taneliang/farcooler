@@ -1206,7 +1206,7 @@ final class ChangesStore: ObservableObject {
                 "changes.commit_files", ["workspace": workspace, "sha": sha])
             let answer = try JSONDecoder().decode(CommitFiles.self, from: data)
             guard asked == generation else { return }
-            commitFiles = answer.asDetermined
+            commitFiles = answer.files
             commitUnreadable = false
         } catch {
             guard asked == generation else { return }
@@ -1351,42 +1351,30 @@ final class ChangesStores {
 
 // MARK: - One commit's files
 
-/// The answer to `changes.commit_files`, before its statuses are believed.
+/// The answer to `changes.commit_files`, decoded and believed.
 ///
-/// This is the trap on the commit path and it is worse here than on the Mac,
-/// because here it is invisible. That client shells out to `changes files`,
-/// which prints counts and a path and NO status at all, so it was forced to
-/// notice. The FFI projects the same `FileChange` the change set's files come
-/// through, `status` and all — and the status is very largely made up.
+/// Believed because the host determines it. `commit_files` in
+/// crates/daemon/src/file_diff.rs runs `git diff --name-status -z
+/// --find-renames` alongside the `--numstat -z` pass, over the SAME left-hand
+/// ref, and `apply_name_status_z` merges the status letter onto the counts.
+/// So `added`, `deleted`, `renamed` and `type_changed` on this wire are git's
+/// verdicts, not a parser's fallback, and this screen shows them.
 ///
-/// `commit_files` in crates/daemon/src/file_diff.rs runs
-/// `git diff --numstat -z --find-renames`, and `parse_numstat_z` in
-/// change_set.rs turns each record into a `FileChange`. `--numstat` counts
-/// lines; it never says added or deleted. So that parser writes
-/// `FileStatus::Modified` into every record it does not recognize as a rename,
-/// and the wire faithfully carries "modified" for a file the commit CREATED.
-/// Decoded as it stands, a brand-new file would be labeled "Modified" and a
-/// deleted one likewise — a claim nothing in the pipeline ever checked.
+/// It was not always so, and the shape of what it replaced is worth keeping:
+/// `commit_files` used to run `--numstat` alone. That counts lines and cannot
+/// say whether a path was created or removed, so `parse_numstat_z` wrote
+/// `Modified` into every record it did not recognize as a rename — and a file a
+/// commit CREATED crossed the wire labeled modified. This type used to throw
+/// the status away for that reason. Deleting the guard is the point of keeping
+/// the note: nothing here second-guesses the host any more.
 ///
-/// So the status is thrown away, and `ChangesFileCard` says "Changed" instead.
+/// A daemon older than that fix still sends "modified" for everything, and
+/// nothing on this side can tell that from a real modification — the wrong
+/// value is well-formed. That is left to `farcooler status` and the app's
+/// version-skew notice, which already say when a runner is behind, rather than
+/// paid for by every current runner losing badges it computed correctly.
 private struct CommitFiles: Decodable {
     var files: [ChangedFile]
-
-    /// The same files, keeping only the status the daemon actually determined.
-    ///
-    /// A rename survives, and only a rename: it is the one branch of
-    /// `parse_numstat_z` that git itself established, via `--find-renames` and
-    /// the two extra NUL-separated path fields a rename record carries.
-    /// Everything else is the parser's `else`. `binary` survives for the same
-    /// reason — `--numstat` prints `-` for both counts on a file it cannot
-    /// count, which is a fact and not a fallback.
-    var asDetermined: [ChangedFile] {
-        files.map { file in
-            var copy = file
-            if copy.status != .renamed { copy.status = nil }
-            return copy
-        }
-    }
 }
 
 // MARK: - One file's patch

@@ -572,12 +572,17 @@ final class ChangesStore: ObservableObject {
     /// splitting on whitespace instead would lose the second half of every file
     /// whose name contains a space.
     ///
-    /// The status is deliberately nil, not a guess. The daemon builds this list
-    /// from `git diff --numstat`, which counts lines and never says added or
-    /// deleted; it fills in `Modified` for everything that is not a rename, and
-    /// the CLI does not print even that. Defaulting to `M` here would put
-    /// "Modified" beside a file the commit created, so the badge says only that
-    /// the file changed.
+    /// The status is deliberately nil, not a guess — and nil because of the
+    /// format above, not because the answer is untrustworthy. The daemon knows:
+    /// `changes.commit_files` merges `git diff --name-status --find-renames`
+    /// onto the counts, so added, deleted and renamed are git's own verdicts
+    /// (crates/daemon/src/file_diff.rs). `changes files` in
+    /// crates/cli/src/changes.rs prints only the two counts and the path, so
+    /// the letter is lost in the pipe and there is nothing here to read.
+    /// Defaulting to `M` would put "Modified" beside a file the commit created,
+    /// so the badge says only that the file changed. The phone does not go
+    /// through the CLI and does show the real letter; teaching this command to
+    /// print it is what would close the gap.
     nonisolated static func parseCommitFiles(_ text: String) -> [ChangedFile] {
         var out: [ChangedFile] = []
         for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {

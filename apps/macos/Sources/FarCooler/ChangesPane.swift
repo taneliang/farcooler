@@ -1301,12 +1301,19 @@ private struct FileStatusBadge: View {
 
     /// No status is its own state, and it used to be spelled `M`.
     ///
-    /// The file list for one commit comes from `git diff --numstat`, which
-    /// counts lines and never says added, deleted or renamed — the daemon fills
-    /// in `Modified` for everything it does not detect as a rename, and the CLI
-    /// prints only the counts and the path. So "Modified" beside a file the
-    /// commit CREATED is not a default, it is a wrong answer; a dot says the
-    /// file changed, which is the whole of what is known.
+    /// Branch and Local rows carry a real letter: the daemon determines both
+    /// from git — `change_set::numstat` merges `--name-status` onto the counts,
+    /// and the working tree's rows carry porcelain codes.
+    ///
+    /// A COMMIT's rows carry none, and the reason is this client's transport,
+    /// not the daemon's. `changes.commit_files` has determined added, deleted
+    /// and renamed since crates/daemon/src/file_diff.rs gained its
+    /// `--name-status` pass, but this pane reads the CLI, and `changes files`
+    /// in crates/cli/src/changes.rs prints `+ins -del path` and nothing else —
+    /// the status never survives the pipe. Defaulting to `M` would put
+    /// "Modified" beside a file the commit CREATED, so a dot says the file
+    /// changed, which is the whole of what reached us. Teaching that command to
+    /// print the letter is what would retire this.
     var body: some View {
         Text(binary ? "B" : (status?.mark ?? "•"))
             .font(.system(size: 9.5, weight: .semibold, design: .monospaced))

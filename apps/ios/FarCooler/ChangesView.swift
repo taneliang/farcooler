@@ -1088,15 +1088,19 @@ private struct ChangesFileCard: View {
 
     private var heading: some View {
         HStack(spacing: 10) {
-            // A bullet, not `M`, when nothing determined the status.
+            // The host's letter, whichever scope this row came from.
             //
-            // Every file in a commit arrives that way: `changes.commit_files`
-            // is built from `git diff --numstat`, which counts lines and never
-            // says added or deleted, and `CommitFiles.asDetermined` drops the
-            // "modified" the parser invents so that nothing here has to guess.
-            // Defaulting to `M` would put "Modified" beside a file the commit
-            // created — the accessibility label below says "Changed" for the
-            // same reason.
+            // `A`, `D`, `R` and `T` are real here. A commit's files come from
+            // `changes.commit_files`, which merges `git diff --name-status`
+            // onto the counts (crates/daemon/src/file_diff.rs); the branch's
+            // come from `change_set::numstat`, which has always done the same;
+            // Local reads the working tree's own porcelain codes. So a file a
+            // commit created is badged `A`, not `M`.
+            //
+            // The bullet is the no-status case only — a daemon so old it omits
+            // the field, which decodes as nil rather than as a wrong letter.
+            // "Changed" is what it can honestly say, and the accessibility
+            // label below says the same.
             Text(file.status?.mark ?? "•")
                 .font(.caption2.monospaced().weight(.bold))
                 .foregroundStyle(file.status?.tint ?? .secondary)
