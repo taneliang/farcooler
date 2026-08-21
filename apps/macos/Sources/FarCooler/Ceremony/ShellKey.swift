@@ -177,11 +177,11 @@ enum ShellKeyError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .couldNotGenerate:
-            return "Far Cooler couldn't make a new key."
+            return "Far Cooler couldn’t make a new key."
         case .alreadyThere(let name):
-            return "There's already a key called \(name) in ~/.ssh. Pick another name."
+            return "There’s already a key called \(name) in ~/.ssh. Pick another name."
         case .couldNotWrite(let name):
-            return "Far Cooler couldn't write \(name) to ~/.ssh."
+            return "Far Cooler couldn’t write \(name) to ~/.ssh."
         }
     }
 }

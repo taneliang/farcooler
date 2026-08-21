@@ -167,12 +167,12 @@ enum DaemonRestartCost {
     /// Said first, because it is the reassuring half and it is true.
     static let terminals =
         "Terminals survive that. They live in tmux, and each pane is replayed "
-        + "from tmux's own scrollback when the app reattaches."
+        + "from tmux’s own scrollback when the app reattaches."
 
     /// Said second, because it is the half that costs something.
     static let agents =
-        "Agent conversations don't. The daemon holds every agent transcript in "
-        + "memory, so restarting it discards each agent's chat history on this "
+        "Agent conversations don’t. The daemon holds every agent transcript in "
+        + "memory, so restarting it discards each agent’s chat history on this "
         + "runner, along with anything typed and not yet sent."
 
     /// Both halves in one paragraph, for a `confirmationDialog`, which takes a
@@ -233,10 +233,10 @@ struct DaemonSkewDot: View {
     private var help: String {
         switch target.skew {
         case .tooOldToTalk:
-            return "This runner's daemon is too old for this app to talk to — "
+            return "This runner’s daemon is too old for this app to talk to — "
                 + "click to see what updating costs"
         default:
-            return "This runner's daemon is behind Far Cooler — "
+            return "This runner’s daemon is behind Far Cooler — "
                 + "click to see what updating costs"
         }
     }
@@ -284,8 +284,8 @@ struct DaemonUpdateBar: View {
         .buttonStyle(.plain)
         .help(
             targets.count == 1
-                ? "\(targets[0].name) is running a daemon that is not this app's build"
-                : "\(targets.count) runners are running a daemon that is not this app's build"
+                ? "\(targets[0].name) is running a daemon that is not this app’s build"
+                : "\(targets.count) runners are running a daemon that is not this app’s build"
         )
         .popover(isPresented: $showingCard, arrowEdge: .top) {
             DaemonUpdateCard(targets: targets) { showingCard = false }
@@ -360,7 +360,7 @@ struct DaemonUpdateCard: View {
                 // with the price of a fix to a problem it had not named.
                 if target.skew == .tooOldToTalk {
                     Text(
-                        "Far Cooler can't reach this runner at all: the app and "
+                        "Far Cooler can’t reach this runner at all: the app and "
                             + "that daemon no longer agree on a protocol version, "
                             + "and no amount of retrying changes that."
                     )
@@ -376,7 +376,7 @@ struct DaemonUpdateCard: View {
             .fixedSize(horizontal: false, vertical: true)
 
             if let words = failures[target.host] {
-                Text("The update didn't finish.")
+                Text("The update didn’t finish.")
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.orange)
                 DetailBox(text: words)
@@ -428,10 +428,10 @@ struct DaemonUpdateCard: View {
 
     private func lead(for target: DaemonUpdateTarget) -> String {
         if target.host.isEmpty {
-            return "Updating replaces this Mac's daemon with the one inside the app "
+            return "Updating replaces this Mac’s daemon with the one inside the app "
                 + "and restarts it."
         }
-        return "Updating copies this app's Far Cooler onto \(target.name) and "
+        return "Updating copies this app’s Far Cooler onto \(target.name) and "
             + "restarts the daemon there."
     }
 

@@ -172,14 +172,14 @@ private struct RunnerAddressStep: View {
                 .font(.title2.weight(.semibold))
 
             Text(
-                "Far Cooler runs `farcooler` over SSH, so anything you can already reach "
-                    + "works: a `user@host`, or an alias from your `~/.ssh/config`."
+                "Far Cooler runs farcooler over SSH, so anything you can already reach "
+                    + "works: a user@host, or an alias from your ~/.ssh/config."
             )
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
-            TextField("user@host, or an ssh alias", text: $target)
+            TextField("user@host, or an SSH alias", text: $target)
                 .autocorrectionDisabled()
                 .onSubmit(add)
 

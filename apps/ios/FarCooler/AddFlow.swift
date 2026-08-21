@@ -140,7 +140,7 @@ struct AddView: View {
         if runners.hosts.isEmpty {
             return Blocker(
                 reason: "Connect this \(Self.deviceKind) to a runner first. "
-                    + "There's nothing to share yet.",
+                    + "There’s nothing to share yet.",
                 fix: nil
             )
         }
@@ -240,8 +240,8 @@ private struct ConnectThisDeviceStep: View {
                     road(
                         icon: "network",
                         title: "Enter an Address",
-                        detail: "Type a runner's SSH address and put this "
-                            + "\(AddView.deviceKind)'s key on it yourself. No account needed.",
+                        detail: "Type a runner’s SSH address and put this "
+                            + "\(AddView.deviceKind)’s key on it yourself. No account needed.",
                         recommended: false
                     )
                 }
@@ -318,7 +318,7 @@ private struct SignInStep: View {
             Text(
                 "Both devices sign in to the same account, so each can prove who it is "
                     + "before any key is written. Far Cooler still reaches your runners "
-                    + "over SSH — the account isn't a way in."
+                    + "over SSH — the account isn’t a way in."
             )
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -408,7 +408,9 @@ private struct RunnerAddressStep: View {
     @State private var port = "22"
     @State private var copied = false
 
-    private var publicKey: String { Identity.publicKey ?? "could not generate a key" }
+    private var publicKey: String {
+        Identity.publicKey ?? "Far Cooler couldn’t make a key for this \(AddView.deviceKind)."
+    }
 
     private var isValid: Bool {
         !address.trimmingCharacters(in: .whitespaces).isEmpty

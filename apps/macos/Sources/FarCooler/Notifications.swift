@@ -105,7 +105,7 @@ final class Notifier {
             // most likely to be looking at.
             if terminal.status == .failedTurn {
                 content.title = "\(terminal.title) failed"
-                content.body = "\(workspace) — Its last turn didn't finish"
+                content.body = "\(workspace) — Its last turn didn’t finish"
             } else {
                 content.title = "\(terminal.title) finished"
                 // What it finished, where there is an answer to that. The body

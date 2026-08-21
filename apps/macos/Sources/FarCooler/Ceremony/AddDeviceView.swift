@@ -162,8 +162,8 @@ struct AddDeviceView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text(
                     isMac
-                        ? "Add \"\(name)\"?"
-                        : "Add \"\(name)\" to \(account.email)?"
+                        ? "Add “\(name)”?"
+                        : "Add “\(name)” to \(account.email)?"
                 )
                 .font(.title3.weight(.semibold))
 

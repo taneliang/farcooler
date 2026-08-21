@@ -185,7 +185,7 @@ enum DeviceKeyError: LocalizedError {
         case .noAccount:
             return "Sign in before adding this Mac to an account."
         case .unreadable:
-            return "Far Cooler couldn't read this Mac's key."
+            return "Far Cooler couldn’t read this Mac’s key."
         }
     }
 }

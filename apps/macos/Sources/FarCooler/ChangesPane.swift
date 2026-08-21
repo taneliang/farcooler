@@ -93,7 +93,7 @@ struct ChangesPane: View {
     private var problem: some View {
         let old = changes.client.changesSupported == false
         return VStack(alignment: .leading, spacing: 3) {
-            Text(old ? "This runner can't show changes yet" : "Couldn't read this worktree")
+            Text(old ? "This runner can’t show changes yet" : "Couldn’t read this worktree")
                 .font(.system(size: 11.5, weight: .medium))
             Text(
                 old
@@ -432,7 +432,7 @@ struct ChangesPane: View {
     private var commitPickerHelp: String {
         guard changes.scope == .commit else { return "Look at one commit" }
         if changes.selectedCommitInfo == nil {
-            return "This commit isn't on the branch anymore. It's still readable."
+            return "This commit isn’t on the branch anymore. It’s still readable."
         }
         return "One commit, against its first parent"
     }
@@ -519,7 +519,7 @@ struct ChangesPane: View {
     private var noCommitsDetail: String {
         let base = changes.changeSet.baseRef
         return base.isEmpty
-            ? "There's nothing to compare this branch against yet."
+            ? "There’s nothing to compare this branch against yet."
             : "Nothing has been committed here since \(base)."
     }
 
@@ -778,7 +778,7 @@ struct ChangesPane: View {
     /// worktree with nothing uncommitted is work that has been committed, and a
     /// commit that could not be read is not an empty commit at all.
     private var nothingTitle: String {
-        changes.commitUnreadable ? "Couldn't read this commit" : "Nothing changed here"
+        changes.commitUnreadable ? "Couldn’t read this commit" : "Nothing changed here"
     }
 
     private var nothingDetail: String {
@@ -799,7 +799,7 @@ struct ChangesPane: View {
             return "This commit changed nothing against its first parent."
         case .branch:
             return changes.changeSet.baseRef.isEmpty
-                ? "There's nothing to compare this branch against yet."
+                ? "There’s nothing to compare this branch against yet."
                 : "This branch matches \(changes.changeSet.baseRef)."
         }
     }
@@ -963,7 +963,7 @@ struct ChangesPane: View {
                 // compare a brand new file against, and "No textual changes"
                 // under the name of a file somebody just wrote is the most
                 // wrong thing this view could say.
-                out.append(note(f, "New file — git isn't tracking it yet"))
+                out.append(note(f, "New file — git isn’t tracking it yet"))
             } else if let lines = changes.fileDiffs[f.path] {
                 if lines.isEmpty {
                     out.append(note(f, "No textual changes"))

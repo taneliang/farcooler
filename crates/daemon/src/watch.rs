@@ -297,7 +297,7 @@ fn notification(
         }),
         AgentActivity::Done if failed => Some(Notice {
             title: format!("{label} failed"),
-            subtitle: quoted.body(Some("Its last turn didn't finish")),
+            subtitle: quoted.body(Some("Its last turn didn’t finish")),
             status: "done",
             failed: true,
             started_at,
@@ -3687,7 +3687,7 @@ mod tests {
         let quoted = Quoted { workspace: "add-auth", ..Quoted::default() };
         let notice = notification(AgentActivity::Done, "codex", quoted, true, None).expect("done");
         assert_eq!(notice.title, "codex failed");
-        assert_eq!(notice.subtitle, "add-auth — Its last turn didn't finish");
+        assert_eq!(notice.subtitle, "add-auth — Its last turn didn’t finish");
     }
 
     /// The said belongs to the turn that ended, not to the question in
@@ -5408,7 +5408,7 @@ mod tests {
     fn a_turn_that_died_says_so_rather_than_saying_it_finished() {
         let notice = notification(AgentActivity::Done, "cursor", Quoted::default(), true, None).expect("done");
         assert_eq!(notice.title, "cursor failed");
-        assert_eq!(notice.subtitle, "Its last turn didn't finish");
+        assert_eq!(notice.subtitle, "Its last turn didn’t finish");
         // Still "done": there is no live card to hold open for a turn that is
         // over, however it ended — the same reasoning `exit_notice` follows.
         assert_eq!(notice.status, "done");

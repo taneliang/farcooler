@@ -87,7 +87,7 @@ final class Notifier {
             // is the lie the row's green checkmark used to tell.
             if terminal.turnDidFail {
                 content.title = "\(terminal.label) failed"
-                content.body = "\(workspace) — Its last turn didn't finish"
+                content.body = "\(workspace) — Its last turn didn’t finish"
             } else {
                 content.title = "\(terminal.label) finished"
                 // What it finished, where there is an answer to that.
