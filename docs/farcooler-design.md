@@ -23,6 +23,27 @@ Revised again during `/plan-eng-review` on 2026-07-26. The load-bearing changes:
 > deliberately: renaming a proto message needs a version and a compatibility
 > window, not a vocabulary decision.
 
+> **Scope note, 2026-08-21.** Four constraints below are now contradicted by the
+> shipped product, and the contradiction is deliberate in every case:
+>
+> - *"No background mobile awareness in MVP"* — push notifications, the APNs
+>   relay, Live Activities and Dynamic Island presentations all ship, and the
+>   card is interactive. The reasoning that removed them held that interactive
+>   control is a foreground activity; what changed is that the fleet got large
+>   enough that learning about a blocked agent on foreground reconnect was too
+>   late to be worth anything.
+> - *"The MVP ships an iOS app built with React Native"* — the phone, the watch
+>   and the Mac are native SwiftUI sharing `AgentKit`; Android is native Kotlin.
+> - *"Deferred: ... rich diff review"* — the Mac and the phone both read a
+>   branch a commit at a time.
+> - *"all notification surfaces are removed from the product"*, from the
+>   `/plan-eng-review` revision above — same reversal as the first item.
+>
+> The prose is left as it was written, for the reason the vocabulary note gives.
+> What each surface is *for* now lives in
+> [`jobs-to-be-done.md`](jobs-to-be-done.md); this document says what the
+> product is for, and that has not changed.
+
 ## Problem Statement
 
 Engineers can run increasingly capable coding agents, but serious parallel use still pulls them back to a laptop. Desktop orchestrators make it easier to run multiple agents, while first-party mobile products make individual vendor sessions reachable from a phone. The missing experience is a terminal-first command center that lets an engineer create and supervise many task-scoped coding workspaces across machines they control.
