@@ -182,6 +182,21 @@ pub async fn file_diff(
 }
 
 /// The files one commit touched, against its first parent.
+///
+/// Two diffs over the SAME range, merged — the pattern `change_set::numstat`
+/// settled on. `--numstat` counts lines and can spot a rename, but it has no
+/// way to say whether a path was created or removed, so `parse_numstat_z`
+/// writes `Modified` into every record it does not recognize as a rename. That
+/// value is a placeholder and this is the merge that overwrites it: without it
+/// a commit that CREATED a file reports it "modified", and so does one that
+/// deleted it — which is precisely the distinction a reviewer opens a commit
+/// to read.
+///
+/// `left` is resolved once and handed to BOTH calls. For a root commit it is
+/// the empty tree, and a `--name-status` pass against `sha^1` there would not
+/// merely fail loudly — `apply_name_status_z` matches by path and ignores what
+/// it cannot find, so a mismatched range yields statuses that look plausible
+/// and describe a different diff. One binding, two uses, no second resolve.
 pub async fn commit_files(repo: &Path, sha: &str) -> Result<Vec<crate::change_set::FileChange>> {
     let merge = is_merge(repo, sha).await?;
     let parent = format!("{sha}^1");
@@ -191,8 +206,12 @@ pub async fn commit_files(repo: &Path, sha: &str) -> Result<Vec<crate::change_se
 
     let raw =
         git_bytes(repo, &["diff", "--numstat", "-z", "--find-renames", &left, sha]).await?;
-    if !raw.ok {
+    let names =
+        git_bytes(repo, &["diff", "--name-status", "-z", "--find-renames", &left, sha]).await?;
+    if !raw.ok || !names.ok {
         return Err(DomainError::OperationFailed);
     }
-    Ok(crate::change_set::parse_numstat_z(&raw.stdout))
+    let mut files = crate::change_set::parse_numstat_z(&raw.stdout);
+    crate::change_set::apply_name_status_z(&mut files, &names.stdout);
+    Ok(files)
 }

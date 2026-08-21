@@ -8,6 +8,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use farcooler_daemon::change_set::FileStatus;
 use farcooler_daemon::file_diff::{Selector, Unsupported, commit_files, file_diff, is_merge};
 use tempfile::TempDir;
 
@@ -241,4 +242,125 @@ async fn asking_for_context_recovers_the_lines_a_diff_leaves_out() {
         wide.diff.hunks[0].lines.iter().any(|l| l.text == "line 30"),
         "a line from the gap is present once the context is asked for"
     );
+}
+
+// The status a commit's file list carries.
+//
+// `--numstat` counts lines; it cannot tell a created file from a deleted one,
+// and `parse_numstat_z` fills that gap with `Modified` as a placeholder. These
+// check that `commit_files` merges the `--name-status` pass that replaces the
+// placeholder, because a badge reading "modified" on a file the commit brought
+// into existence is a wrong answer that looks like a right one.
+
+fn status_of<'a>(
+    files: &'a [farcooler_daemon::change_set::FileChange],
+    path: &str,
+) -> &'a farcooler_daemon::change_set::FileChange {
+    files.iter().find(|f| f.path == path).unwrap_or_else(|| {
+        let seen: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        panic!("{path} missing from commit_files; saw {seen:?}")
+    })
+}
+
+#[tokio::test]
+async fn a_commit_that_creates_a_file_says_added() {
+    let dir = repo();
+    let p = dir.path();
+    write(p, "brand_new.txt", "did not exist before\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "add a file"]);
+    let sha = capture(p, &["rev-parse", "HEAD"]);
+
+    let files = commit_files(p, &sha).await.expect("files");
+    assert_eq!(status_of(&files, "brand_new.txt").status, FileStatus::Added);
+}
+
+#[tokio::test]
+async fn a_commit_that_deletes_a_file_says_deleted() {
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["rm", "-q", "shared.txt"]);
+    run(p, &["commit", "-q", "-m", "remove a file"]);
+    let sha = capture(p, &["rev-parse", "HEAD"]);
+
+    let files = commit_files(p, &sha).await.expect("files");
+    let f = status_of(&files, "shared.txt");
+    assert_eq!(f.status, FileStatus::Deleted);
+    // A delete is where the placeholder was most misleading: the counts are all
+    // removals, so even the line totals agreed it was not a modification.
+    assert_eq!(f.insertions, 0);
+    assert_eq!(f.deletions, 3);
+}
+
+#[tokio::test]
+async fn a_commit_that_renames_a_file_says_renamed_and_keeps_the_old_path() {
+    // `--numstat -z` already reports renames on its own, so this is the case
+    // the merge must not damage: `apply_name_status_z` writes the same verdict
+    // over it, and the old path has to survive both passes.
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["mv", "shared.txt", "moved.txt"]);
+    run(p, &["commit", "-q", "-m", "rename a file"]);
+    let sha = capture(p, &["rev-parse", "HEAD"]);
+
+    let files = commit_files(p, &sha).await.expect("files");
+    let f = status_of(&files, "moved.txt");
+    assert_eq!(f.status, FileStatus::Renamed);
+    assert_eq!(f.old_path.as_deref(), Some("shared.txt"));
+}
+
+#[tokio::test]
+async fn a_root_commit_reports_every_file_as_added_rather_than_modified() {
+    // The trap this is here for: a root commit is diffed against the empty
+    // tree, and both diffs have to be given that same left side. Resolve it
+    // twice, or let the name-status pass fall back to `sha^1`, and the merge
+    // either matches nothing or describes another range entirely — silently,
+    // because `apply_name_status_z` leaves unmatched paths alone. Nothing in a
+    // repository's first commit is a modification; there was nothing to modify.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let p = dir.path();
+    run(p, &["init", "--initial-branch=main", "-q"]);
+    run(p, &["config", "user.email", "test@example.com"]);
+    run(p, &["config", "user.name", "Test"]);
+    run(p, &["config", "commit.gpgsign", "false"]);
+    write(p, "first.txt", "one\n");
+    write(p, "second.txt", "two\n");
+    write(p, "third.txt", "three\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "initial"]);
+    let root = capture(p, &["rev-list", "--max-parents=0", "HEAD"]);
+
+    let files = commit_files(p, &root).await.expect("files");
+    assert_eq!(files.len(), 3);
+    for f in &files {
+        assert_eq!(f.status, FileStatus::Added, "{} in the first commit", f.path);
+    }
+}
+
+#[tokio::test]
+async fn one_commit_that_adds_deletes_and_renames_reports_three_distinct_statuses() {
+    // The end-to-end shape a reviewer actually sees. Before the merge all three
+    // of these came back "modified", which made the badge worthless: it said
+    // the same word about a file that appeared, one that vanished, and one that
+    // only moved.
+    let dir = repo();
+    let p = dir.path();
+    write(p, "doomed.txt", "this file is going away soon\n");
+    write(p, "mover.txt", "alpha\nbravo\ncharlie\ndelta\necho\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "set the stage"]);
+
+    write(p, "fresh.txt", "brand new contents, unlike anything here\n");
+    run(p, &["rm", "-q", "doomed.txt"]);
+    run(p, &["mv", "mover.txt", "moved.txt"]);
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "add, delete, rename"]);
+    let sha = capture(p, &["rev-parse", "HEAD"]);
+
+    let files = commit_files(p, &sha).await.expect("files");
+    assert_eq!(status_of(&files, "fresh.txt").status, FileStatus::Added);
+    assert_eq!(status_of(&files, "doomed.txt").status, FileStatus::Deleted);
+    assert_eq!(status_of(&files, "moved.txt").status, FileStatus::Renamed);
+    assert_eq!(status_of(&files, "moved.txt").old_path.as_deref(), Some("mover.txt"));
+    assert_eq!(files.len(), 3);
 }
