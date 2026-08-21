@@ -231,8 +231,60 @@ private struct TabChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("terminal-tab-\(terminal.id)")
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(isCurrent ? "current" : "")
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
+    }
+
+    /// The chip's name, plus the one thing its two ornaments are drawn to say.
+    ///
+    /// Read aloud, a chip was its name and nothing else: the ring and the dot
+    /// are color, and color is the one channel VoiceOver cannot carry. The ring
+    /// in particular is the amber "this wants you" signal the whole product
+    /// turns on — on the widget, the Live Activity, the complication and the
+    /// inbox — so a reader who cannot see it was the one reader getting none of
+    /// it.
+    ///
+    /// `ChangesChip`'s shape exactly: a name, and a clause only when there is a
+    /// fact to put in it. The restraint matters more here than there, because
+    /// there is one Changes chip and there can be eight of these. A strip where
+    /// every chip recites an activity is a list nobody can hear the end of, and
+    /// a strip exists to be scrubbed past. `NeedsYouView` made the same call
+    /// when it labelled the workspace header and left the `TerminalRow`s under
+    /// it to speak for themselves.
+    ///
+    /// So a running pane whose agent is working, idle, or not an agent at all
+    /// says only its name. That is not a fact withheld: it is the chip with no
+    /// ring and a green dot, and a reader learns that state by hearing nothing
+    /// after a name rather than by hearing "Working" eight times on the way to
+    /// the tab they wanted.
+    private var spokenStatus: String? {
+        // The two ornaments are not independent, so they resolve to one clause
+        // rather than two — activity only means anything while the process is
+        // alive, so a live pane speaks its agent and a dead one speaks its
+        // process. That derivation and these words are the Mac's `Status`; see
+        // `apps/macos/Sources/FarCooler/Model.swift`, so one pane cannot be
+        // called two different things by the two apps.
+        switch kind {
+        case .running: return wantsAttention ? terminal.activityLabel : nil
+        case .starting: return "Starting"
+        // How it ended, not merely that it did — the same split `runDidFail`
+        // draws, so a chip cannot say "Exited" about a command that died.
+        case .exited: return terminal.runDidFail ? "Failed" : "Exited"
+        case .error: return "Failed to start"
+        case .lost: return "Lost"
+        // Not "Unknown", which is an internal word covering two situations.
+        // The daemon could not read this pane, which is a claim about the
+        // reading and not about the pane — the distinction the Mac's
+        // `unreadable` exists to make.
+        case .unknown: return "Not answering"
+        }
+    }
+
+    private var accessibilityLabel: String {
+        let name = terminal.displayName(ordinal: ordinal)
+        guard let status = spokenStatus else { return name }
+        return "\(name), \(status)"
     }
 }
 

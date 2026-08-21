@@ -1048,16 +1048,27 @@ struct WorkspaceListView: View {
         // background of its own that would sit on top of it.
         .scrollContentBackground(.hidden)
         .toolbar {
-            // Sparkles for "describe it" (QuickTaskView), plain plus for
-            // "fill in the form" (NewWorkspaceView) — same two flows the
+            // Sparkles for "describe it" (`TaskComposerView`), plain plus for
+            // "fill in the form" (`NewWorkspaceView`) — same two flows the
             // Mac keeps side by side, kept apart here by icon rather than
             // by picking a winner, since a phone's one-sentence flow is
             // new and unproven next to a form that already works.
+            //
+            // Named out loud, because an `Image` alone in a `Button` is read
+            // as its SF Symbol: "sparkles" and "plus" were the whole of what
+            // VoiceOver had to tell the app's two ways of starting work apart,
+            // and neither is a word this product uses. Each is named for the
+            // sheet it opens — Quick Task's own title, and the workspace form's
+            // title-cased as a button label is — so the button and the screen
+            // behind it are one name, and `FleetList`'s empty state points at
+            // these two by exactly these names.
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showQuickTask = true } label: { Image(systemName: "sparkles") }
+                    .accessibilityLabel("Quick Task")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showNewWorkspace = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("New Workspace")
             }
             if let onDismiss {
                 ToolbarItem(placement: .confirmationAction) {
@@ -1315,8 +1326,41 @@ struct FleetList: View {
     var body: some View {
         List {
             if fleet.workspaces.isEmpty {
-                Text("No workspaces on this runner.")
-                    .foregroundStyle(.secondary)
+                // What this screen is FOR, rather than only what it lacks.
+                //
+                // The door that leads here promises it — "This is where you
+                // start one", in `NeedsYouView.workspacesFooter` — and arriving
+                // at "No workspaces on this runner." was that promise going
+                // unanswered by the screen that has to keep it. This is the one
+                // place on the phone where work is started, and a person who
+                // took the sentence at its word landed on a flat denial.
+                //
+                // `ContentUnavailableView` rather than a hand-rolled headline:
+                // it is the platform's own empty state, at the size and rhythm
+                // iOS gives every other one, and the Mac's workspace
+                // placeholder and the watch's already use it.
+                //
+                // **No `actions:` block, deliberately.** The two buttons that
+                // start work are in this screen's own toolbar, a thumb's reach
+                // above this text, and the comment on them records a decision
+                // NOT to pick a winner between the two flows. One button here
+                // would pick it; both would be four controls for two actions on
+                // one screen, which is the competing pair to avoid. The
+                // sentence names them instead, in the words their accessibility
+                // labels use — so the button a reader is sent to is the button
+                // they can find, by ear or by eye.
+                //
+                // Still a row inside the `List`, so pull-to-refresh survives: a
+                // runner that has nothing yet is exactly the fleet worth
+                // pulling on.
+                ContentUnavailableView(
+                    "No Workspaces",
+                    systemImage: "arrow.triangle.branch",
+                    description: Text(
+                        "This is where you start one, with Quick Task or New Workspace.")
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
 
             ForEach(shown) { workspace in
