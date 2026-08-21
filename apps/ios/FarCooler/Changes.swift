@@ -669,9 +669,12 @@ final class ChangesStore: ObservableObject {
 
     /// The files this scope is about.
     ///
-    /// Branch is what the branch COMMITTED — the same thing the summary counts,
-    /// deliberately: two numbers describing one worktree have to be the same
-    /// number. Local is what has not been committed yet, and it has to come
+    /// Branch is what the branch COMMITTED — the same thing the summary card
+    /// above this list counts, but no longer the same thing the FLEET counts:
+    /// `7927c13` moved `change_set::shortstat` to compare the base against the
+    /// WORKING TREE and taught it to count untracked lines, so the `+N −M` on a
+    /// dirty worktree's row in Fleet and in Needs You reads higher than this
+    /// one. Local is what has not been committed yet, and it has to come
     /// from the working tree rather than from the committed file list, or a
     /// file an agent just wrote — the only kind of file Local exists to show —
     /// would never appear in it.

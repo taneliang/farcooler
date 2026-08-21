@@ -70,14 +70,13 @@ enum FleetSnapshotWriter {
     /// those and leaves the number meaning what the word says: something to
     /// look at, that moved since you looked.
     ///
-    /// The known cost of that choice is an UNDERCOUNT, and it is upstream
-    /// rather than ours to compensate for: `insertions`/`deletions` are
-    /// committed-only today, so a worktree whose only work is uncommitted
-    /// reports `0/0` and drops out of this count even though the daemon's
-    /// `touched_at` signal knows it moved. `.claude/agent/done/live-diff-counts.md`
-    /// is the approved fix and it belongs in the daemon; when it lands this
-    /// count improves with no change here. Undercounting is also the safe
-    /// direction — the surface says less rather than something untrue.
+    /// That cost an UNDERCOUNT for as long as `insertions`/`deletions` were
+    /// committed-only: a worktree whose only work was uncommitted reported
+    /// `0/0` and dropped out of this count even though the daemon's `touched_at`
+    /// signal knew it had moved. `7927c13` fixed it where it belonged, in the
+    /// daemon — `change_set::shortstat` now compares the base against the
+    /// working tree and counts untracked lines — so an agent that has edited
+    /// and not committed reaches this count, with no change here.
     private static func reviewsWaiting(_ inbox: [String: InboxRow]?) -> Int? {
         guard let inbox else { return nil }
         return inbox.values.filter { $0.changedSinceReviewed && $0.hasDiff }.count

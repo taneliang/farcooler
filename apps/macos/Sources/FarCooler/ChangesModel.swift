@@ -365,9 +365,15 @@ final class ChangesStore: ObservableObject {
 
     /// The files this scope is about.
     ///
-    /// Branch is what the branch COMMITTED — `git diff base…HEAD` — which is
-    /// the same thing the sidebar counts, deliberately: two numbers describing
-    /// one worktree have to be the same number.
+    /// Branch is what the branch COMMITTED — `git diff base…HEAD` — and its
+    /// per-file counts are what the header above this list sums.
+    ///
+    /// That used to be the same number the sidebar draws, and is not any more:
+    /// `7927c13` moved `change_set::shortstat` to compare the base against the
+    /// WORKING TREE and taught it to count untracked lines, so a dirty
+    /// worktree's row reads higher than its own panel. Both numbers are honest
+    /// about what they count and nothing has been decided about which one this
+    /// header should be.
     ///
     /// Local is what has not been committed yet, and it used to be neither. The
     /// scope switched which diff each FILE showed while the file LIST stayed
