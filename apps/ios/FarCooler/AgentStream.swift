@@ -136,6 +136,7 @@ final class AgentStream: ObservableObject {
                 return Sequenced(seq: frame.seq, event: event)
             }
             transcript.apply(decoded)
+            recordForGlances()
             connectionError = nil
         } catch {
             // `String(describing:)` on a Swift error prints the CASE, not the
@@ -258,10 +259,57 @@ final class AgentStream: ObservableObject {
         // for confirmation sat there after the work it gated had happened —
         // the same fix the Mac already carries.
         transcript.clearPendingPermission()
+        // And down on every OTHER surface with it. A lock screen card offering
+        // an answer to a permission this pane just answered is the duplicate
+        // this whole seam is careful about, and this is the moment the phone
+        // knows it is gone.
+        recordForGlances()
         _ = try? await core.call(
             "terminal.agent_answer",
             ["terminal": terminal, "requestId": requestID, "optionId": optionID])
     }
+
+    /// Write what this agent is waiting on into the App Group, for the surfaces
+    /// that cannot ask.
+    ///
+    /// A widget extension has no connection and no way to reach a runner, so
+    /// the option names it would put on a button exist for it only if something
+    /// with a connection writes them down. This pane is one of the two places
+    /// that ever holds them — `WatchLinkHost.pendingPermission` is the other —
+    /// and it holds them already, folded, on every poll.
+    ///
+    /// **Only on a change.** `pump` runs every 700ms, and a file written twenty
+    /// times a minute per open pane would be a shared container rewritten for
+    /// nothing: a permission arrives once and stands until it is answered. The
+    /// id is enough to tell them apart — an agent does not reissue one — and
+    /// comparing ids rather than whole permissions keeps this a string
+    /// comparison on a poll path.
+    ///
+    /// `nil` is written as deliberately as a permission is. A pane that has
+    /// just watched a permission go is the best-informed thing on the phone
+    /// about that fact, and a card left offering answers to a question that is
+    /// over is exactly what `GlancePermissions` exists to prevent.
+    private func recordForGlances() {
+        let pending = transcript.pendingPermission
+        guard pending?.id != recordedRequest else { return }
+        recordedRequest = pending?.id
+        GlancePermissionStore.update {
+            $0.recording(
+                pending.map { permission in
+                    GlancePermission(
+                        terminal: terminal,
+                        request: permission.id,
+                        options: permission.options.map {
+                            GlancePermissionOption(id: $0.id, name: $0.name, kind: $0.kind)
+                        },
+                        observedAt: Date())
+                },
+                for: terminal)
+        }
+    }
+
+    /// The id this pane last filed, so an unchanged permission is not refiled.
+    private var recordedRequest: String?
 
     func setMode(_ mode: String) async {
         _ = try? await core.call("terminal.agent_set_mode", ["terminal": terminal, "mode": mode])

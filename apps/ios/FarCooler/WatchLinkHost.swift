@@ -1,8 +1,10 @@
+import ActivityKit
 import Foundation
 import WatchConnectivity
 
 /// The phone's half of the watch link: push the fleet, and perform what the
-/// watch asks.
+/// watch asks — and, since the Live Activity grew buttons, what a lock screen
+/// card asks too.
 ///
 /// The watch holds no SSH identity and reaches no runner. Everything it wants
 /// done is done HERE, through `Connection`'s core — the same calls
@@ -10,6 +12,16 @@ import WatchConnectivity
 /// cannot answer the same agent differently. That is not a convenience; a
 /// second client that spoke to the daemon on its own would be a second place
 /// for "which option did they pick" to be decided.
+///
+/// **The widget extension is the second such surface, and it arrives here for
+/// the same reason.** `AnswerPermissionIntent` runs in the app's process and
+/// hands itself to `answerFromGlance` below, which reaches the runner through
+/// the one `Connection` this object already holds. The name on the front of
+/// this file is now narrower than what it does; renaming it would move the
+/// connection registration in `Connection.start`, the delegate that
+/// `PushDelegate` activates at launch and the replay cache all at once, which
+/// is a large diff to buy a better noun. What matters is that there is still
+/// exactly one place where a surface without a connection gets one.
 ///
 /// **This object has no connection of its own, and cannot make one.** It holds
 /// a weak reference to whichever `Connection` the app is currently running, and
@@ -170,7 +182,7 @@ final class WatchLinkHost: NSObject {
             // Activity and once in the widget.
             return .failed("Open \(appName) on your iPhone, then try again.")
         }
-        guard await ready(connection) else {
+        guard await ready(connection, within: Self.connectBudget) else {
             // Named apart because it is the one unreachable state a person can
             // do something about, and "can’t reach that runner" would send them
             // to check their Wi-Fi instead of to the fingerprint waiting on
@@ -196,6 +208,15 @@ final class WatchLinkHost: NSObject {
                 "terminal.agent_answer",
                 ["terminal": terminal, "requestId": request, "optionId": option],
                 on: connection, doing: "answer that")
+            // The card and the wrist look at the same agent, so an answer sent
+            // from one has to take the other's buttons down. Only on success,
+            // for the reason the replay cache below is cleared only on success:
+            // a failed answer leaves the agent waiting, and a card that quietly
+            // stopped offering the answer would be the surface hiding the one
+            // thing still worth doing.
+            if case .sent = reply {
+                GlancePermissionStore.update { $0.clearingPermission(for: terminal) }
+            }
             // Cleared on SUCCESS only, and the ordering is the whole point.
             //
             // It has to be cleared at all for the reason
@@ -217,8 +238,44 @@ final class WatchLinkHost: NSObject {
             return reply
 
         case let .pendingPermission(terminal):
-            return await pendingPermission(terminal: terminal, on: connection)
+            let reply = await pendingPermission(
+                terminal: terminal, on: connection, within: Self.replayBudget)
+            // An OBSERVATION, so it is written down where a surface with no
+            // connection can use it.
+            //
+            // Here rather than inside `pendingPermission` deliberately:
+            // `answerFromGlance` calls that same method to check an id it is
+            // about to send, and a write on that path would file a fresh record
+            // in the middle of an answer that has already been claimed against
+            // the previous one. Reading is not observing; being ASKED what an
+            // agent is waiting on is.
+            if case let .permission(found) = reply { Self.record(found, for: terminal) }
+            return reply
         }
+    }
+
+    /// File what an agent turned out to be waiting on, for the surfaces that
+    /// cannot ask.
+    ///
+    /// `nil` is written as emphatically as a permission is: the caller
+    /// established that this agent is waiting on nothing, and a card left
+    /// offering yesterday's answers is the failure `GlancePermissions` was
+    /// written to prevent.
+    static func record(_ permission: WatchPermission?, for terminal: String) {
+        let observed = permission.map { pending in
+            GlancePermission(
+                terminal: terminal,
+                request: pending.id,
+                // Field for field, the same copy `WatchPermission` itself is of
+                // `PendingPermission`. Three spellings of three fields, and
+                // each crossing is a boundary between two binaries — see
+                // `GlancePermissionOption`.
+                options: pending.options.map {
+                    GlancePermissionOption(id: $0.id, name: $0.name, kind: $0.kind)
+                },
+                observedAt: Date())
+        }
+        GlancePermissionStore.update { $0.recording(observed, for: terminal) }
     }
 
     /// One core call, reported as `sent` or as a sentence.
@@ -264,7 +321,9 @@ final class WatchLinkHost: NSObject {
     /// watch already renders as such — an agent can be blocked on a trust gate
     /// or a plain question, and reporting that as a failure would put an error
     /// in front of somebody when nothing went wrong.
-    private func pendingPermission(terminal: String, on connection: Connection) async -> WatchReply {
+    private func pendingPermission(
+        terminal: String, on connection: Connection, within budget: TimeInterval
+    ) async -> WatchReply {
         var replay = replays[terminal] ?? Replay(epoch: 0, transcript: Transcript(), askedAt: Date())
         // Read out before the closure captures anything. `replay` is a `var`
         // this function goes on to mutate, and a concurrently-executing closure
@@ -275,7 +334,7 @@ final class WatchLinkHost: NSObject {
 
         let data: Data
         do {
-            data = try await withTimeout(seconds: Self.replayBudget) {
+            data = try await withTimeout(seconds: budget) {
                 try await connection.core.call(
                     "terminal.agent_subscribe",
                     ["terminal": terminal, "fromSeq": fromSeq, "epoch": epoch])
@@ -361,6 +420,274 @@ final class WatchLinkHost: NSObject {
 
     private static let replayCacheLimit = 8
 
+    // MARK: - Answering from a glance surface
+
+    /// Let `AnswerPermissionIntent` reach this object.
+    ///
+    /// Called from `PushDelegate.application(_:didFinishLaunchingWithOptions:)`
+    /// beside `start()`, and the call site matters for the same reason it
+    /// matters there: iOS launches this app into the background to perform an
+    /// app intent, a background launch may never build a scene, and a hook
+    /// installed from a SwiftUI `.task` would therefore be missing in exactly
+    /// the case a lock screen button exists for.
+    ///
+    /// Separate from `start()` rather than folded into it, because `start()`
+    /// returns early when `WCSession.isSupported()` is false — which it is on
+    /// an iPad — and a card's buttons have nothing to do with whether this
+    /// device can pair a watch.
+    func acceptAnswersFromGlances() {
+        AnswerPermissionDelivery.handler = { intent in
+            await WatchLinkHost.shared.answerFromGlance(intent)
+        }
+    }
+
+    /// Answer one permission on behalf of a surface that cannot reach a runner,
+    /// and leave behind an honest account of what happened.
+    ///
+    /// Five things happen in order, and the ORDER is the design:
+    ///
+    ///   1. **Claim, or stop.** `GlancePermissions.claiming` refuses when this
+    ///      phone already has an answer standing against this request id, which
+    ///      is what makes a second tap impossible rather than merely unlikely.
+    ///      It has to be enforced here because nothing downstream will:
+    ///      `terminal.agent_answer` posts a message and returns without
+    ///      waiting, and `AgentEvent::Resolved` — the one event that could
+    ///      retire a permission — is emitted by nothing in the tree. A widget
+    ///      also has no in-flight state of its own; the claim IS the disabled
+    ///      state that `PermissionView` gets from `@State`.
+    ///   2. **A connection, or a sentence.** Both refusals are the ones the
+    ///      watch already gets, word for word, because they are the same two
+    ///      conditions and two wordings for one condition would read as two
+    ///      problems.
+    ///   3. **Verify before writing.** The options came out of a file whose age
+    ///      is not knowable from here, so the id is checked against the agent's
+    ///      own stream before anything is sent. This is the only place a stale
+    ///      answer can be caught at all — see the note on step 1 — and catching
+    ///      it is what makes "answering a permission somebody already answered
+    ///      fails visibly" true rather than aspirational.
+    ///   4. **One attempt.** Never a retry. ACP's `session/prompt` is sent with
+    ///      `request_no_wait` and nothing acknowledges an answer, so a retry is
+    ///      a second answer to a live agent, not a second chance at the first.
+    ///   5. **Say what is known.** `sent`, `unsure` and `nothingSent` are kept
+    ///      apart with the care `WatchLinkClient` spells out, because the
+    ///      failure they exist to prevent is the one this surface cannot take
+    ///      back: a reject that landed, reported as unsent, followed by a tap
+    ///      on the option that allows.
+    ///
+    /// **What is deliberately NOT done here: verification is refused, not
+    /// skipped.** If the agent's stream cannot be read, this does not send
+    /// anyway on the theory that the permission is probably still open. A card
+    /// that says "couldn't check that agent" and leaves the buttons off is a
+    /// worse experience and a correct one; a duplicate answer to a live agent
+    /// is neither.
+    private func answerFromGlance(_ intent: AnswerPermissionIntent) async {
+        let terminal = intent.terminal
+        let request = intent.request
+
+        guard
+            let claimed = GlancePermissionStore.read().claiming(
+                terminal: terminal, request: request, option: intent.option,
+                optionName: intent.optionName, at: Date())
+        else {
+            // Already answered from this phone. Nothing is written, because the
+            // record that refused this tap is the one already on the card and
+            // overwriting it would replace the account of the answer that
+            // landed with an account of the tap that did not.
+            return
+        }
+        GlancePermissionStore.write(claimed)
+
+        guard let connection else {
+            // `appName`, not a literal: a canary build is named "FC Canary" and
+            // telling somebody running it to open "Far Cooler" sends them
+            // looking for an app that is not on their phone.
+            await settle(intent, .nothingSent, "Open \(appName) on your iPhone, then try again.")
+            return
+        }
+        guard await ready(connection, within: Self.glanceConnectBudget) else {
+            if case .needsApproval = connection.phase {
+                await settle(intent, .nothingSent, "Approve this runner on your iPhone first.")
+            } else {
+                await settle(intent, .nothingSent, "Your iPhone can’t reach that runner right now.")
+            }
+            return
+        }
+
+        switch await pendingPermission(
+            terminal: terminal, on: connection, within: Self.glanceReplayBudget)
+        {
+        case let .permission(pending):
+            guard let pending else {
+                // Nothing pending. NOT the same as "answered", and the sentence
+                // must not say so: `PermissionView` spells out that an agent
+                // can be blocked on something this vocabulary has no word for —
+                // a trust gate, a plain question — and a restarted session
+                // reads identically from here. What IS known is that the thing
+                // these buttons offered to answer is not what the agent is
+                // waiting on, so the buttons go and the sentence says only that.
+                GlancePermissionStore.update { $0.clearingPermission(for: terminal) }
+                await settle(intent, .nothingSent, "This agent isn’t waiting on that anymore.")
+                return
+            }
+            guard pending.id == request else {
+                // Answered somewhere else, and the agent has since stopped on
+                // something new. The new permission is deliberately NOT written
+                // here: this path is an answer, not an observation, and filing
+                // fresh options under a claim made against the old ones is how
+                // a card ends up offering buttons beside a sentence about a
+                // different question. The next real observation records it.
+                GlancePermissionStore.update { $0.clearingPermission(for: terminal) }
+                await settle(
+                    intent, .nothingSent, "This agent’s waiting on something else now.")
+                return
+            }
+        case let .failed(reason):
+            // The phone's own sentence, unedited — it already says whether this
+            // is a runner it cannot reach or an agent it could not read in
+            // time. Nothing was sent either way.
+            await settle(intent, .nothingSent, reason)
+            return
+        case .sent:
+            // A `sent` in answer to a question is this build's own vocabulary
+            // contradicting itself. It establishes nothing about what the agent
+            // is waiting on, so it must not be treated as a match.
+            await settle(
+                intent, .nothingSent, "Your iPhone couldn’t read that agent’s conversation.")
+            return
+        }
+
+        do {
+            _ = try await withTimeout(seconds: Self.glanceActionBudget) {
+                try await connection.core.call(
+                    "terminal.agent_answer",
+                    ["terminal": terminal, "requestId": request, "optionId": intent.option])
+            }
+            // Cleared on success only, exactly as the watch's answer clears it,
+            // and for the reason `Transcript.clearPendingPermission` gives: the
+            // agent resumes without acknowledging what it was blocked on, so
+            // nothing arrives to retire this and the next replay would re-offer
+            // a permission already answered.
+            replays[terminal]?.transcript.clearPendingPermission()
+            GlancePermissionStore.update { $0.clearingPermission(for: terminal) }
+            // The option's own name, quoted, because "Answered" alone does not
+            // say which of several buttons landed — and on a lock screen the
+            // tap and the confirmation can be minutes apart.
+            await settle(intent, .sent, "Sent “\(intent.optionName)”.")
+        } catch {
+            let (outcome, message) = Self.glanceFailure(error)
+            await settle(intent, outcome, message)
+        }
+    }
+
+    /// Write the outcome where the card can read it, and ask the card to look.
+    ///
+    /// Awaited rather than launched in a `Task`, because the caller is an app
+    /// intent and the process has no promise of living past its return: a
+    /// detached redraw is a redraw that may never run, on exactly the pocketed
+    /// phone this whole path exists for.
+    private func settle(
+        _ intent: AnswerPermissionIntent, _ outcome: GlanceAnswer.Outcome, _ message: String
+    ) async {
+        GlancePermissionStore.update {
+            $0.settling(
+                terminal: intent.terminal, request: intent.request,
+                outcome: outcome, message: message, at: Date())
+        }
+        await Self.redraw(leading: intent.terminal)
+    }
+
+    /// The same three stages the watch gets, on a shorter clock.
+    ///
+    /// The clock is the difference and it is not adjustable: WatchConnectivity
+    /// holds a reply handler open while the watch shows a spinner, and an app
+    /// intent gets whatever background execution the system feels like granting
+    /// a widget's button — which is not documented, is measured in seconds, and
+    /// ends without warning. The watch's eight, ten and eight add to
+    /// twenty-six, and an intent killed at twenty leaves a claim marked
+    /// `inFlight` with nothing left running to settle it: a card reading
+    /// "Sending your answer…" until `GlanceAnswer.freshFor` expires it.
+    ///
+    /// So each stage is cut, and cut in the direction that fails safely. A
+    /// connect that gives up early reports `nothingSent`, which is true — the
+    /// answer never left — and says it is safe to try again. Only the last
+    /// stage can end in doubt, and it is the one nothing can shorten away.
+    private static let glanceConnectBudget: TimeInterval = 5
+    private static let glanceReplayBudget: TimeInterval = 7
+    private static let glanceActionBudget: TimeInterval = 6
+
+    /// What a failed answer means, in the only three words this surface has.
+    ///
+    /// The direction of the doubt is chosen, not incidental. Only the errors
+    /// that PROVE the runner was never written to are reported as `nothingSent`;
+    /// everything else, including a timeout and a link that vanished mid-call,
+    /// is `unsure`. `withTimeout` says why in its own comment — it stops
+    /// waiting, it does not stop the work, and "the call may well land a moment
+    /// later, into nothing" — and `WatchLinkClient.didNotHearBack` says what
+    /// that costs when it is guessed the other way: a reject that landed,
+    /// reported as unsent, and a person who then taps the option that allows.
+    ///
+    /// `rejected` is the one error that is genuinely safe. It is the DAEMON's
+    /// own refusal, returned through `DomainError`, which means the call
+    /// arrived and was declined before any message reached the agent.
+    private static func glanceFailure(_ error: Error) -> (GlanceAnswer.Outcome, String) {
+        if error is Timeout {
+            return (
+                .unsure,
+                "No answer came back. It may still have gone through — check before trying again."
+            )
+        }
+        if let core = error as? ClientCore.CoreError {
+            switch core {
+            case .notStarted:
+                return (.nothingSent, "Your iPhone couldn’t start its connection. Nothing was sent.")
+            case let .rejected(message):
+                // The daemon answers `NotFound` for a terminal it no longer has,
+                // which is worth its own sentence: nothing is wrong with the
+                // link and trying again will not help.
+                return (
+                    .nothingSent,
+                    message.lowercased().contains("not found")
+                        ? "That agent isn’t running anymore."
+                        : "That runner turned it down, so nothing was sent."
+                )
+            case .disconnected, .malformed:
+                break
+            }
+        }
+        return (
+            .unsure,
+            "Your iPhone lost touch with the runner. It may still have gone through — "
+                + "check before trying again."
+        )
+    }
+
+    /// Ask the lock screen card to draw itself again.
+    ///
+    /// The outcome of an answer lives in the App Group, and a card only reads
+    /// that file when it renders. WidgetKit is documented to refresh an
+    /// interactive surface once its intent finishes; this re-publishes the
+    /// card's CURRENT state as well, so the sentence appears even if that
+    /// refresh does not cover a Live Activity. Not observed on a device — see
+    /// this task's report.
+    ///
+    /// Every field is copied from what the card already holds, `staleDate`
+    /// included. This is a request to redraw and must not become a second
+    /// author of the card's contents: the relay writes those, and a phone that
+    /// started editing them would be the `line` field
+    /// `AgentActivityAttributes` documents — read by one side and written by
+    /// two.
+    ///
+    /// Only the card that is leading with this agent, and never a card that has
+    /// moved on to somebody else.
+    private static func redraw(leading terminal: String) async {
+        for activity in Activity<AgentActivityAttributes>.activities
+        where activity.content.state.terminal == terminal {
+            await activity.update(
+                ActivityContent(
+                    state: activity.content.state, staleDate: activity.content.staleDate))
+        }
+    }
+
     // MARK: - Reaching the runner
 
     /// Whether this connection can carry a call right now, waiting a little if
@@ -373,7 +700,11 @@ final class WatchLinkHost: NSObject {
     /// `reconnectNow` is the same escape hatch the UI offers when you can see
     /// it is stuck, used here for the same reason: something outside the
     /// backoff timer knows a connection is wanted this second.
-    private func ready(_ connection: Connection) async -> Bool {
+    /// `budget` is passed rather than defaulted because the two callers do not
+    /// share a clock: the watch is holding a `sendMessage` reply open, and an
+    /// app intent has whatever background execution the system granted a
+    /// widget's button. See `glanceConnectBudget`.
+    private func ready(_ connection: Connection, within budget: TimeInterval) async -> Bool {
         if connection.phase == .connected { return true }
         // Not from `.failed` or `.needsApproval`. Those are waiting on a person
         // — a host key to trust, a key to authorize — and no amount of retrying
@@ -388,7 +719,7 @@ final class WatchLinkHost: NSObject {
         // trying, and interrupting it would throw away a handshake in progress
         // and start the slowest part over.
         if isReconnecting(connection.phase) { connection.reconnectNow() }
-        let deadline = Date().addingTimeInterval(Self.connectBudget)
+        let deadline = Date().addingTimeInterval(budget)
         while Date() < deadline {
             if connection.phase == .connected { return true }
             if case .failed = connection.phase { return false }

@@ -171,7 +171,8 @@ private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDeleg
 /// through `UIApplicationDelegate` and nowhere else. The watch link is here for
 /// the mirror-image reason: it has to be listening before any scene exists.
 final class PushDelegate: NSObject, UIApplicationDelegate {
-    /// Activate the watch link at launch, including a launch nobody asked for.
+    /// Activate the watch link at launch, including a launch nobody asked for,
+    /// and let a lock screen card's buttons find their way here too.
     ///
     /// iOS starts this app in the background to deliver a `sendMessage` from the
     /// watch, and a background launch may never build a `WindowGroup` at all —
@@ -182,6 +183,13 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
     /// listening, waits out WatchConnectivity's timeout, and reports that the
     /// phone did not answer.
     ///
+    /// `acceptAnswersFromGlances` is here for the identical reason and it is
+    /// the same sentence one surface further out: iOS launches this app into
+    /// the background to perform an `AppIntent`, so the handler that carries a
+    /// card's tap to a runner has to be installed before any scene exists. A
+    /// button whose intent runs against an uninstalled handler reports that it
+    /// could not send — honest, and avoidable by one line at the right moment.
+    ///
     /// `assumeIsolated` rather than a `Task`, and it is an assertion rather
     /// than a hope: UIKit calls every `UIApplicationDelegate` lifecycle method
     /// on the main thread, so the claim is true and the check is free. A `Task`
@@ -191,7 +199,10 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        MainActor.assumeIsolated { WatchLinkHost.shared.start() }
+        MainActor.assumeIsolated {
+            WatchLinkHost.shared.start()
+            WatchLinkHost.shared.acceptAnswersFromGlances()
+        }
         return true
     }
 

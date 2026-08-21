@@ -103,6 +103,17 @@ AGENTKIT_SOURCES = [
     # set of build ids rather than reusing these.
     "AgentActivityAttributes.swift",
     "AgentEvent.swift",
+    # The intent layer, and in `activity_build_ids` below for the same reason
+    # `AgentActivityAttributes.swift` is: TWO targets, one file. The widget
+    # extension has to construct `AnswerPermissionIntent` to put it on a button
+    # and the app has to perform it, and a second declaration of the type would
+    # be two intents with one name — which the system resolves by picking one,
+    # silently. `GlancePermissions.swift` is the App Group file they pass the
+    # agent's own option names through; neither target can reach a runner from a
+    # render, so the words on those buttons have to be written down somewhere
+    # both can open.
+    "AnswerPermissionIntent.swift",
+    "GlancePermissions.swift",
     "Composer.swift",
     # In this list AND in `WATCH_AGENTKIT_SOURCES` below: the phone and the
     # watch are two binaries that have to agree about these messages down to the
@@ -351,7 +362,17 @@ build_ids = {
 activity_build_ids = {
     name: oid("activity-build/" + name)
     for name in ACTIVITY_SOURCES
-    + ["AgentActivityAttributes.swift", "FleetSnapshot.swift", "SnapshotStore.swift"]
+    + [
+        "AgentActivityAttributes.swift",
+        "FleetSnapshot.swift",
+        "SnapshotStore.swift",
+        # The card's buttons. `AnswerPermissionIntent` is what a button is wired
+        # to and `GlancePermissions` is where its labels come from — the
+        # extension can reach no runner, so the agent's own option names arrive
+        # through the App Group or not at all.
+        "AnswerPermissionIntent.swift",
+        "GlancePermissions.swift",
+    ]
 }
 
 # A third set, on exactly the reasoning above. `FleetSnapshot.swift` and

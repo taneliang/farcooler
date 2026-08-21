@@ -1,4 +1,5 @@
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -41,7 +42,24 @@ import WidgetKit
 struct AgentActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: AgentActivityAttributes.self) { context in
-            LockScreenCard(state: context.state, tail: FleetTail.current(excluding: context.state.terminal))
+            // Read once per render and handed down, the same way `FleetTail`
+            // is. Both are App Group file reads on a render path, and both are
+            // wanted by two presentations that must not disagree.
+            let ask = LeaderAsk.current(for: context.state)
+            LockScreenCard(
+                state: context.state,
+                // The fleet line steps aside while there is an answer on offer.
+                // Not a preference: a lock screen card is capped at about 160
+                // points and the leader already spends most of it, so a divider
+                // and a line about everybody else are the difference between
+                // the reject button being on the card and being clipped off the
+                // bottom of it. The tail says how many others are running; the
+                // buttons are the only thing on this surface that cannot be got
+                // anywhere else.
+                tail: ask.isPresent
+                    ? FleetTail.unknown
+                    : FleetTail.current(excluding: context.state.terminal),
+                ask: ask)
                 // The card's own background. Left to the system's material
                 // rather than a color of ours: the lock screen wallpaper is
                 // behind it and a flat fill sits on top of the photo like a
@@ -62,7 +80,10 @@ struct AgentActivityWidget: Widget {
                 .widgetURL(terminalURL(context.state.terminal))
         } dynamicIsland: { context in
             let status = AgentStatus(context.state.status)
-            let tail = FleetTail.current(excluding: context.state.terminal)
+            let ask = LeaderAsk.current(for: context.state)
+            let tail =
+                ask.isPresent
+                ? FleetTail.unknown : FleetTail.current(excluding: context.state.terminal)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     StatusBadge(status: status)
@@ -84,7 +105,11 @@ struct AgentActivityWidget: Widget {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
-                        if let started = context.state.startedAt {
+                        // The turn clock gives way to the answer, exactly as
+                        // it does on the lock screen card and for the same
+                        // reason: how long an agent has been stopped is worth
+                        // less than being able to stop it being stopped.
+                        if let started = context.state.startedAt, !ask.isPresent {
                             Text(started, style: .timer)
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.tertiary)
@@ -101,6 +126,13 @@ struct AgentActivityWidget: Widget {
                                 .opacity(tail.qualified ? 0.6 : 1)
                                 .padding(.top, 2)
                         }
+                        // The same controls the lock screen card draws, from
+                        // the same view. Expanded is the one Island
+                        // presentation that can carry a decision — compact and
+                        // minimal are a glyph and a word — and a card whose
+                        // buttons appeared only when the phone was locked would
+                        // be two different features wearing one name.
+                        if ask.isPresent { AnswerControls(ask: ask) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -257,14 +289,235 @@ struct FleetTail {
     }
 }
 
+/// What the card's leader is waiting on, and what this phone last did about it.
+///
+/// The third thing this card draws and the only one it can ACT on. The leader
+/// comes off the push, the tail comes off the fleet snapshot, and this comes
+/// off a second file in the same App Group — `GlancePermissions`, whose own doc
+/// comment sets out why the options cannot ride on the push and what it costs
+/// that they do not.
+///
+/// **Gated on the PUSH, not on the file's age.** A permission record carries
+/// the time it was written and that time is deliberately not a freshness test:
+/// a permission left up over lunch is still live, and hiding the buttons after
+/// ten minutes would hide them in exactly the case somebody wants them. What
+/// decides whether an answer may be offered at all is `status`, which arrives
+/// by push and is as fresh as the last thing that happened. A leader the runner
+/// says is working or finished gets no buttons whatever this file holds.
+///
+/// **An empty terminal gets nothing**, which is not a theoretical case: a card
+/// started by a build older than the fleet restructure has no terminal in its
+/// content state at all, and a permission cannot be keyed to an agent the card
+/// cannot name. That is also what keeps the overflow copy below honest — it
+/// tells somebody to tap the card, and `terminalURL` returns nil for exactly
+/// this state.
+struct LeaderAsk {
+    let terminal: String
+    /// What the agent offered, if this phone has ever read it off the stream.
+    let permission: GlancePermission?
+    /// What this phone last sent about that permission, and how it went.
+    let answer: GlanceAnswer?
+
+    /// Nothing to say, which draws nothing and leaves the card as it was.
+    static let none = LeaderAsk(terminal: "", permission: nil, answer: nil)
+
+    static func current(
+        for state: AgentActivityAttributes.ContentState, now: Date = Date()
+    ) -> LeaderAsk {
+        guard AgentStatus(state.status) == .blocked, !state.terminal.isEmpty else { return .none }
+        let store = GlancePermissionStore.read()
+        let permission = store.permission(for: state.terminal)
+        var answer = store.answer(for: state.terminal).flatMap { $0.isFresh(at: now) ? $0 : nil }
+        // An answer about a DIFFERENT request says nothing about this one, and
+        // showing it beside these buttons would report on a question that is
+        // already over. Dropped rather than drawn.
+        if let permission, let standing = answer, standing.request != permission.request {
+            answer = nil
+        }
+        guard permission != nil || answer != nil else { return .none }
+        return LeaderAsk(terminal: state.terminal, permission: permission, answer: answer)
+    }
+
+    /// Whether the card has anything at all to add under the leader. What the
+    /// timer and the fleet line give way to.
+    var isPresent: Bool { permission != nil || answer != nil }
+
+    /// Whether a tap may still write to this agent.
+    ///
+    /// False for every outcome except `nothingSent`, which is the one that
+    /// established the runner was never written to. This is the card's version
+    /// of what `PermissionView` gets from `@State` — buttons off for the
+    /// duration of a send, handed back only on the failure that is safe to
+    /// repeat — and it has to be persisted rather than held in memory, because
+    /// the process that renders this card is not the process that sent the
+    /// answer and may not have existed when it was sent.
+    var offersButtons: Bool {
+        guard permission != nil else { return false }
+        guard let answer else { return true }
+        return !answer.refusesAnotherTap
+    }
+
+    /// The sentence under the leader, if there is one to say.
+    ///
+    /// The three outcomes are kept apart by color as well as by words, on the
+    /// reasoning `PermissionView` gives for drawing "Nothing to Answer" and
+    /// "Couldn't Check" differently: two states that mean opposite things must
+    /// not look alike at a glance. Green is the only one that claims anything
+    /// happened.
+    var note: (text: String, symbol: String, tint: Color)? {
+        guard let answer else { return nil }
+        switch answer.outcome {
+        // No message is stored for a claim in flight — there is nothing known
+        // yet to store — so the wait is named here. A row that simply went
+        // quiet is indistinguishable from a tap that missed.
+        case .inFlight: return ("Sending your answer…", "arrow.up.circle", .secondary)
+        case .sent: return (answer.message, "checkmark.circle.fill", .green)
+        case .unsure, .nothingSent: return (answer.message, "exclamationmark.triangle.fill", .red)
+        }
+    }
+}
+
+/// The agent's own answers, as buttons, and whatever came of the last one.
+///
+/// Drawn identically on the lock screen and in the expanded Dynamic Island,
+/// from one view, because they are one decision presented twice — the same
+/// reason `terminalURL` is one function.
+///
+/// **Nothing here shortens an option's name.** There is no `lineLimit` and no
+/// `truncationMode` on a button label anywhere below, and there must not be:
+/// `Allow Bash(cargo test…` is a button that hides what it allows, and
+/// `PermissionView` refuses the same thing on a screen with more room than this
+/// one. What gives way instead is the LIST — `GlancePermission.fit` decides how
+/// many of the agent's answers there is room for, refuses to show a yes without
+/// a no, and counts whatever it left off so the overflow line can say so.
+private struct AnswerControls: View {
+    let ask: LeaderAsk
+
+    /// How much room a card has for buttons, in lines and in characters.
+    ///
+    /// **Estimated, and estimated LOW on purpose.** A widget extension cannot
+    /// measure text before it lays it out, and the two directions cost
+    /// differently: guessing small sends somebody into the app who could have
+    /// answered from the card, while guessing large pushes a button off the
+    /// bottom of a card that does not scroll — and the button at the bottom is
+    /// the reject.
+    ///
+    /// Three lines is what is left of a lock screen card once the leader has
+    /// had its name, one line of question and a badge, against the roughly 160
+    /// points the system gives the presentation. Forty characters is a
+    /// conservative reading of a `.footnote` line across a card that wide;
+    /// SF Pro at 13 points fits nearer fifty. Neither number has been checked
+    /// on a device — see this task's report — which is the other reason the
+    /// labels below wrap freely: an underestimate costs a button, and an
+    /// overestimate costs a second line rather than a clipped word.
+    private static let lines = 3
+    private static let columns = 40
+
+    @ViewBuilder var body: some View {
+        if ask.isPresent {
+            VStack(alignment: .leading, spacing: 6) {
+                if let note = ask.note {
+                    Label(note.text, systemImage: note.symbol)
+                        .font(.caption)
+                        .foregroundStyle(note.tint)
+                }
+                if ask.offersButtons, let permission = ask.permission {
+                    let fit = permission.fit(lines: Self.lines, columns: Self.columns)
+                    ForEach(fit.shown) { option in
+                        OptionButton(
+                            terminal: ask.terminal,
+                            request: permission.request,
+                            option: option,
+                            // The same derivation the phone and the watch run,
+                            // so all three agree about which answer is the
+                            // plain yes. Emphasis only — every word on every
+                            // button is still the agent's.
+                            emphasized: option.id == permission.plainYes?.id)
+                    }
+                    if let overflow = Self.overflow(fit) {
+                        Text(overflow)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    /// What to say about the answers that are not on screen.
+    ///
+    /// Said rather than left out. `WatchPermission.init?` states the rule this
+    /// follows: a person shown a shorter list than the agent offered will pick
+    /// from what they were shown, believing it was everything. So the count is
+    /// on the card, and the way to the rest is the tap target the card already
+    /// had.
+    private static func overflow(_ fit: GlanceOptionFit) -> String? {
+        guard fit.hidden > 0 else { return nil }
+        if fit.shown.isEmpty {
+            // Either the agent's answers are too long to put here without
+            // shortening them, or its vocabulary offers nothing this build
+            // recognizes as a refusal. Both end the same way, and neither is
+            // worth explaining on a lock screen.
+            return "Tap the card to answer."
+        }
+        return "Tap the card for \(fit.hidden) more answer\(fit.hidden == 1 ? "" : "s")."
+    }
+}
+
+/// One answer, as the agent worded it, wired to the intent that sends it.
+///
+/// `Button(intent:)` and never a `Link`. That is the whole of how these coexist
+/// with the card's `.widgetURL`: a button owns its own frame and the URL covers
+/// what is left, where two URL-based targets over one area have nothing to say
+/// which wins — the hazard `FleetWidget`'s `Layout` enum exists to keep off
+/// that widget.
+private struct OptionButton: View {
+    let terminal: String
+    let request: String
+    let option: GlancePermissionOption
+    let emphasized: Bool
+
+    var body: some View {
+        Group {
+            if emphasized {
+                button.buttonStyle(.borderedProminent)
+            } else {
+                button.buttonStyle(.bordered)
+            }
+        }
+        .controlSize(.small)
+    }
+
+    private var button: some View {
+        Button(
+            intent: AnswerPermissionIntent(
+                terminal: terminal,
+                request: request,
+                option: option.id,
+                // Carried so the card can name the answer that landed once the
+                // permission it belonged to is gone and its words with it. See
+                // `GlanceAnswer.optionName`.
+                optionName: option.name)
+        ) {
+            Text(option.name)
+                .font(.footnote)
+                // No `lineLimit`, no `truncationMode`. A long name wraps; it is
+                // never cut. See this view's enclosing type.
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
 /// The lock screen presentation: the leader, then everyone else in one line.
 private struct LockScreenCard: View {
     let state: AgentActivityAttributes.ContentState
     let tail: FleetTail
+    let ask: LeaderAsk
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            LeaderRow(state: state)
+            LeaderRow(state: state, ask: ask)
             if let rest = tail.line {
                 Divider()
                 Text(rest)
@@ -282,46 +535,73 @@ private struct LockScreenCard: View {
 /// doing under them, its own clock, and a colored badge on the right.
 ///
 /// Its own view rather than inlined, and that is worth keeping: the leader is
-/// the part of this card that gets controls. A `Review` on a finished run and
-/// an answer on a blocked one both belong in this `VStack`, under `detail` and
-/// beside the timer, where the target shape puts them — not in `LockScreenCard`
-/// beside the fleet line, which is about everybody else.
+/// the part of this card that gets controls. The answer to a blocked run is now
+/// one of them — `AnswerControls`, under `detail` where the target shape puts
+/// it, and not in `LockScreenCard` beside the fleet line, which is about
+/// everybody else. A `Review` on a finished run belongs in the same place.
+///
+/// **The controls are Buttons, and the card keeps its `widgetURL`.** Those do
+/// not fight: a `Button` claims its own frame and the modifier covers whatever
+/// is left, so tapping an option answers and tapping anywhere else opens the
+/// agent. That is a different arrangement from the one `FleetWidget`'s `Layout`
+/// enum exists to prevent, which was per-row `Link`s AND a `widgetURL` — two
+/// URL-based targets over one area, with nothing to say which wins. There is no
+/// `Link` here and there must not be one.
 private struct LeaderRow: View {
     let state: AgentActivityAttributes.ContentState
+    let ask: LeaderAsk
 
     var body: some View {
         let status = AgentStatus(state.status)
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                // Name and runner on one line rather than stacked. The card has
-                // a fleet line to fit now, and "claude · studio" is how every
-                // other surface in this product names an agent.
-                Text(runnerSuffixed)
-                    .font(.headline)
-                    .lineLimit(1)
-                let body = state.detail
-                if !body.isEmpty {
-                    Text(body)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .padding(.top, 2)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    // Name and runner on one line rather than stacked. The card
+                    // has a fleet line to fit now, and "claude · studio" is how
+                    // every other surface in this product names an agent.
+                    Text(runnerSuffixed)
+                        .font(.headline)
+                        .lineLimit(1)
+                    let body = state.detail
+                    if !body.isEmpty {
+                        // One line rather than two while there is an answer to
+                        // offer. The question stays — answering something you
+                        // cannot see is worse than anything this saves — but the
+                        // second line of it is the cheapest twenty points on a
+                        // card that has to end with a reject button still on it.
+                        Text(body)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(ask.isPresent ? 1 : 2)
+                            .padding(.top, 2)
+                    }
+                    // How long this turn has been going. `.timer` and not a
+                    // string we compute: the extension gets no wake-up per
+                    // second, so anything we render ourselves is frozen at the
+                    // moment of the last push. The system counts this one,
+                    // network or not — and it counts from the LEADER's start,
+                    // which is why that date moved onto the content state with
+                    // the rest of the leader.
+                    //
+                    // Hidden while an answer is on offer, along with the fleet
+                    // line: a clock counting an agent that is stopped is the
+                    // least useful thing on a card whose buttons could start it
+                    // again.
+                    if let started = state.startedAt, !ask.isPresent {
+                        Text(started, style: .timer)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 2)
+                    }
                 }
-                // How long this turn has been going. `.timer` and not a string
-                // we compute: the extension gets no wake-up per second, so
-                // anything we render ourselves is frozen at the moment of the
-                // last push. The system counts this one, network or not — and
-                // it counts from the LEADER's start, which is why that date
-                // moved onto the content state with the rest of the leader.
-                if let started = state.startedAt {
-                    Text(started, style: .timer)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 2)
-                }
+                Spacer(minLength: 0)
+                StatusBadge(status: status)
             }
-            Spacer(minLength: 0)
-            StatusBadge(status: status)
+            // Guarded at the call site as well as inside the view. A `VStack`
+            // asked to lay out a child that draws nothing is one more thing
+            // about this card's spacing that would have to be checked on a
+            // device rather than reasoned about.
+            if ask.isPresent { AnswerControls(ask: ask) }
         }
     }
 
