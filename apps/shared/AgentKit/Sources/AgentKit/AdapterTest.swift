@@ -77,15 +77,20 @@ extension AdapterTestOutcome {
     /// platforms.
     ///
     /// The success line used to read "Starts and speaks ACP — \(reported)",
-    /// and that was the defect the triplication was hiding. Only the Mac's
-    /// `AdapterInfo` carries a `backend`, so only the Mac can ask for the
-    /// native protocol — and when it does, the daemon runs `codex app-server`
-    /// or the Claude CLI's stream-json handshake and no ACP is spoken at all.
-    /// The identical sentence was therefore true on two platforms and false on
-    /// the third, which is precisely the drift nobody can see from one device.
-    /// What Test actually proves either way is that the program starts and
-    /// answers, so that is what this says; the protocol, where it matters, is
-    /// already inside `reported`.
+    /// and that was the defect the triplication was hiding. An adapter set to
+    /// the agent's native protocol is dispatched by the daemon to `codex
+    /// app-server` or the Claude CLI's stream-json handshake, where no ACP is
+    /// spoken at all — and when only one of three platforms could ask for
+    /// that, the identical sentence was true on two and false on the third,
+    /// which is precisely the drift nobody can see from one device.
+    ///
+    /// It names no protocol now, and that is not a stopgap: this type is
+    /// handed an outcome and never the form that produced it, so on this side
+    /// the weaker sentence is the only true one. What Test proves either way
+    /// is that the program starts and answers, and the protocol, where it
+    /// matters, is already inside `reported`. A caller that does still hold
+    /// the adapter can be more specific — `farcooler adapter test` names the
+    /// backend, because it sent it.
     public var sentence: String {
         switch self {
         case .worked(let reported):

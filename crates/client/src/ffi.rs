@@ -1728,6 +1728,21 @@ fn adapter_json(items: &[farcooler_protocol::v1::Adapter]) -> Value {
                 Ok(farcooler_protocol::v1::AdapterOrigin::User) => "user",
                 _ => "unknown",
             },
+            // A word for the same reason `origin` is one, and here at all
+            // because `wire_adapter` below reads it back: without it the two
+            // halves of this pair disagree, and the phones were the side that
+            // paid. They could not learn a saved adapter's backend, so they
+            // sent none — which made `adapter.test` from a phone exercise ACP
+            // against an adapter saved as native and report it working, and
+            // made saving that adapter's `commands` from a phone rewrite the
+            // table to ACP on the way past. `adapter list --json` in the CLI
+            // has carried this since the field existed, which is why the Mac
+            // never saw either.
+            //
+            // `as_str` rather than a match, because it is documented as the
+            // inverse of the `parse` that reads this key back — so the two
+            // directions are one pair by construction and not by agreement.
+            "backend": farcooler_core::activity::AdapterBackend::from_proto(a.backend).as_str(),
             // Derived here rather than left to each client: an adapter with no
             // program is a recognized agent Far Cooler cannot host as a chat,
             // which is a real state and the one thing a picker has to know.
@@ -2151,6 +2166,51 @@ mod encoding_tests {
         assert_eq!(decode_hex(""), Some(vec![]));
         assert_eq!(decode_hex("abc"), None, "odd length is not a byte string");
         assert_eq!(decode_hex("zz"), None);
+    }
+
+    /// The bridge's two adapter projections have to be one round trip.
+    ///
+    /// They were not. `wire_adapter` has read `backend` since the field
+    /// existed, and `adapter_json` never wrote it — so a phone's only view of
+    /// an adapter had no backend in it, could send none back, and the daemon
+    /// read the absent field as ACP. That is a Test button reporting a working
+    /// adapter for a protocol nothing spoke to it, and an upsert of anything
+    /// else on the form quietly rewriting the table to ACP on the way past.
+    ///
+    /// Written as a round trip rather than as an assertion about one key,
+    /// because the failure was the two halves disagreeing and only a trip
+    /// through both can see that.
+    #[test]
+    fn an_adapter_keeps_its_backend_through_the_bridge_and_back() {
+        let saved = farcooler_protocol::v1::Adapter {
+            preset: "codex".to_string(),
+            program: "codex".to_string(),
+            backend: farcooler_protocol::v1::AdapterBackend::Native as i32,
+            ..Default::default()
+        };
+
+        let shown = adapter_json(std::slice::from_ref(&saved))["adapters"][0].clone();
+        assert_eq!(shown["backend"], json!("native"));
+
+        // Back through the door a client sends on, with the object it was
+        // handed — which is exactly what an editor holds when Test is pressed.
+        let strings = |_: &str| Vec::new();
+        let sent = wire_adapter("codex", "codex", &strings, &shown);
+        assert_eq!(sent.backend, saved.backend);
+    }
+
+    /// And an object with no `backend` at all still means ACP.
+    ///
+    /// A phone built before this key exists sends the dictionary it always
+    /// sent, and must keep the behavior it had rather than failing to decode.
+    #[test]
+    fn an_adapter_json_with_no_backend_is_acp() {
+        let strings = |_: &str| Vec::new();
+        let sent = wire_adapter("cursor", "cursor-agent", &strings, &json!({}));
+        assert_eq!(
+            farcooler_core::activity::AdapterBackend::from_proto(sent.backend),
+            farcooler_core::activity::AdapterBackend::Acp
+        );
     }
 }
 

@@ -88,7 +88,27 @@ struct AdapterInfo: Identifiable, Equatable {
         case builtIn, override, user, unknown
     }
 
+    /// Which protocol Far Cooler speaks to this agent.
+    ///
+    /// `native` means the agent's own — `codex app-server`, or the Claude
+    /// CLI's stream-json control protocol — rather than an ACP adapter
+    /// wrapping it.
+    ///
+    /// Carried without a control to change it, which is deliberate and not an
+    /// oversight. The Protocol picker is the Mac's, and this phone editor is
+    /// the shorter form. But a value that is not carried is a value that is
+    /// lost: with no `backend` here, Test sent none and the runner read the
+    /// absent field as ACP — so pressing Test on an adapter saved as native
+    /// reported a working adapter for a protocol nothing had spoken to it, and
+    /// saving a detection string from this screen rewrote the table to ACP.
+    /// Round-tripping it costs a field and fixes both.
+    enum Backend: String {
+        case acp
+        case native
+    }
+
     var preset: String
+    var backend: Backend = .acp
     var program: String = ""
     var args: [String] = []
     var env: [String: String] = [:]
@@ -107,6 +127,10 @@ struct AdapterInfo: Identifiable, Equatable {
     init?(json: [String: Any]) {
         guard let preset = json["preset"] as? String else { return nil }
         self.preset = preset
+        // Anything unrecognized, and an object from a runner too old to send
+        // the key, is `acp` — the behavior every adapter had before the field
+        // existed, and the safe direction to be wrong in.
+        backend = Backend(rawValue: json["backend"] as? String ?? "") ?? .acp
         program = json["program"] as? String ?? ""
         args = json["args"] as? [String] ?? []
         env = json["env"] as? [String: String] ?? [:]
@@ -123,7 +147,8 @@ struct AdapterInfo: Identifiable, Equatable {
 
     var arguments: [String: Any] {
         [
-            "preset": preset, "program": program, "args": args, "env": env,
+            "preset": preset, "backend": backend.rawValue,
+            "program": program, "args": args, "env": env,
             "commands": commands, "identity": identity, "blocked": blocked, "working": working,
         ]
     }

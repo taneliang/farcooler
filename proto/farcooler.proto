@@ -569,7 +569,8 @@ message Adapter {
   // Detection, as opposed to launch. Wrong values here do not fail loudly: they
   // stop an agent being recognized, which surfaces as "chat mode broke" from
   // somewhere else entirely. `adapter.test` cannot check these — it proves the
-  // adapter starts and speaks ACP — so a client must not imply that it does.
+  // adapter starts and answers over the `backend` below, which is not always
+  // ACP — so a client must not imply that it does.
   repeated string commands = 5;
   repeated string identity = 6;
   repeated string blocked = 7;

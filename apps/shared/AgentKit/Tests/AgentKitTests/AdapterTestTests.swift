@@ -68,11 +68,13 @@ import Testing
 }
 
 @Test func aSuccessDoesNotClaimAProtocolItMayNotHaveSpoken() {
-    // The defect the triplication was hiding. Only the Mac's `AdapterInfo`
-    // carries a `backend`, so only the Mac can ask for `native` — and when it
-    // does, the daemon runs codex's app-server or the Claude CLI's stream-json
-    // handshake and no ACP is spoken at all. One sentence, true on two
-    // platforms and false on the third.
+    // The defect the triplication was hiding. An adapter asking for `native`
+    // is dispatched by the daemon to codex's app-server or the Claude CLI's
+    // stream-json handshake, and no ACP is spoken at all — so one shared
+    // sentence claimed a protocol that, for those, was never used. It claims
+    // none now: this type is handed an outcome and not the form behind it, so
+    // it cannot know which was spoken and must not guess. The CLI, which still
+    // holds the adapter it sent, does name it.
     let native = AdapterTestOutcome.worked("codex app-server 0.44")
     #expect(!native.sentence.contains("ACP"))
     // The name is still the news, so it is still in the line.

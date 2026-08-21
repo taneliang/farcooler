@@ -1151,6 +1151,10 @@ async fn adapter(runner: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible 
                 found
             };
             let preset = found.preset.clone();
+            // Kept before the adapter is moved into the request, because it is
+            // the only thing that says what the handshake actually was:
+            // `adapter.test` in `rpc.rs` dispatches on exactly this value.
+            let backend = found.backend;
 
             let r = link.call(with(req("adapter.test"), request::Payload::Adapter(found))).await?;
             let result::Value::AdapterTestResult(outcome) = expect_value(r.value, "test result")?
@@ -1169,9 +1173,20 @@ async fn adapter(runner: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible 
             } else if outcome.ok {
                 println!("{preset}  OK  {}", outcome.reported);
                 println!();
-                println!("This proves it starts and speaks ACP. Whether the agent is");
-                println!("RECOGNIZED in a pane depends on its detection strings, which");
-                println!("nothing here can check.");
+                // Named, because this side sent it. The line used to say ACP
+                // whatever the adapter was configured for, and a native one is
+                // dispatched to `codex app-server` or the Claude CLI's
+                // stream-json handshake, where no ACP is spoken at all — so on
+                // the one backend the claim mattered for, it was false.
+                //
+                // The apps say the weaker "Starts and answers" from one shared
+                // sentence in `AgentKit/AdapterTest.swift`, which is handed an
+                // outcome and not the form that produced it. This is not that
+                // sentence and does not have to be as weak: the adapter is
+                // right here.
+                println!("This proves it starts and answers over {}.", backend_spoken(backend));
+                println!("Whether the agent is RECOGNIZED in a pane depends on its detection");
+                println!("strings, which nothing here can check.");
             } else {
                 println!("{preset}  FAILED  {}", outcome.failure);
             }
@@ -1273,6 +1288,21 @@ fn backend_label(backend: i32) -> &'static str {
     match farcooler_protocol::v1::AdapterBackend::try_from(backend) {
         Ok(farcooler_protocol::v1::AdapterBackend::Native) => "native",
         _ => "acp",
+    }
+}
+
+/// Which protocol a handshake just used, in a sentence rather than a cell.
+///
+/// Native does not name the protocol, because native is not one: codex speaks
+/// app-server and claude speaks stream-json, and `dispatch::handshake` is the
+/// single place that decides which from the preset. Spelling that mapping out
+/// again here would be a second copy of it, free to drift the moment a third
+/// agent gets a native backend — and the version line in `reported` already
+/// says which one answered.
+fn backend_spoken(backend: i32) -> &'static str {
+    match farcooler_protocol::v1::AdapterBackend::try_from(backend) {
+        Ok(farcooler_protocol::v1::AdapterBackend::Native) => "its own native protocol",
+        _ => "ACP",
     }
 }
 

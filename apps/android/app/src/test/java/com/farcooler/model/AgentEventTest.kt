@@ -1,5 +1,7 @@
 package com.farcooler.model
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -298,10 +300,12 @@ class AgentEventTest {
 
     @Test
     fun anAdapterTestSuccessDoesNotClaimAProtocolItMayNotHaveSpoken() {
-        // The defect three copies were hiding. Only the Mac's `AdapterInfo`
-        // carries a `backend`, so only the Mac can ask for the agent's native
-        // protocol — and when it does, no ACP is spoken at all. This phone's
-        // copy of the sentence was true and the Mac's was false.
+        // The defect three copies were hiding. An adapter set to the agent's
+        // native protocol speaks no ACP at all — `rpc.rs` dispatches it to
+        // `codex app-server` or the Claude CLI's stream-json handshake — and
+        // one shared sentence claimed ACP for all of them. It is claimed for
+        // none of them now: this side is handed an outcome, not the form that
+        // produced it, so it cannot know which was spoken and does not guess.
         val native = AdapterTestOutcome.Worked("codex app-server 0.44")
         assertTrue(native.sentence, !native.sentence.contains("ACP"))
         // The name is still the news, so it is still in the line.
@@ -324,6 +328,37 @@ class AgentEventTest {
             AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer(null)).sentence !=
                 AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.Refused("x")).sentence
         )
+    }
+
+    @Test
+    fun anAdapterKeepsItsBackendOnTheWayBackToTheRunner() {
+        // The other half of what `3b63d54` left behind, and the half that is a
+        // model gap rather than copy. The bridge sends `backend` with every
+        // adapter and reads it back off `adapter.test` and `adapter.upsert`;
+        // if this class drops it in between, Test asks the runner to exercise
+        // ACP against an adapter saved as native — and reports it working for
+        // a protocol nothing spoke to it — while saving a detection string
+        // from this screen rewrites the table to acp on the way past.
+        val json = Json { ignoreUnknownKeys = true }
+        val saved = json.decodeFromString(
+            AdapterInfo.serializer(),
+            """{"preset":"codex","backend":"native","program":"codex"}""",
+        )
+        assertEquals("native", saved.backend)
+        assertEquals("native", saved.toJson()["backend"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun anAdapterFromARunnerThatNamesNoBackendIsAcp() {
+        // A runner too old to send the key leaves it out, and must keep the
+        // behavior it had rather than failing to decode. Unspecified means acp
+        // on the wire, in config.toml, and here.
+        val json = Json { ignoreUnknownKeys = true }
+        val old = json.decodeFromString(
+            AdapterInfo.serializer(),
+            """{"preset":"cursor","program":"cursor-agent"}""",
+        )
+        assertEquals("acp", old.backend)
     }
 
     @Test

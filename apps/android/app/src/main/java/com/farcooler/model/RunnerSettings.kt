@@ -84,11 +84,12 @@ val AdapterTestOutcome.succeeded: Boolean get() = this is AdapterTestOutcome.Wor
  * Matched word for word to AgentKit's `AdapterTestOutcome.sentence`. The
  * success line used to read "Starts and speaks ACP", with the reported name
  * after it, on all three platforms — and that is the defect three copies were
- * hiding. Only the Mac's `AdapterInfo` carries a `backend`, so only the Mac can
- * ask for the agent's native protocol, and when it does no ACP is spoken at
- * all: one sentence, true here and on the phone and false on the Mac. What Test
- * proves either way is that the program starts and answers, so that is what
- * this says.
+ * hiding. An adapter set to the agent's native protocol is dispatched by the
+ * runner to `codex app-server` or the Claude CLI's stream-json handshake, and
+ * no ACP is spoken at all — so the one sentence was false wherever `native`
+ * could be asked for. It names no protocol now, because this side is handed an
+ * outcome and never the form behind it. What Test proves either way is that
+ * the program starts and answers, so that is what this says.
  */
 val AdapterTestOutcome.sentence: String
     get() = when (this) {
@@ -141,6 +142,21 @@ val AdapterTestOutcome.transcript: String?
 @Serializable
 data class AdapterInfo(
     val preset: String,
+    /**
+     * Which protocol Far Cooler speaks to this agent — `acp`, or `native` for
+     * the agent's own: `codex app-server`, or the Claude CLI's stream-json
+     * control protocol.
+     *
+     * A string rather than an enum, the way `origin` below is one, because the
+     * bridge sends a word and anything unrecognized means `acp` on the runner
+     * anyway. Carried without a control to change it, which is deliberate: the
+     * Protocol picker is the Mac's. But a value that is not carried is a value
+     * that is lost — with no `backend` here, Test sent none, the runner read
+     * the absent field as `acp`, and an adapter saved as native was reported
+     * working for a protocol nothing had spoken to it. Saving anything else on
+     * this screen rewrote the table to `acp` on the way past, too.
+     */
+    val backend: String = "acp",
     val program: String = "",
     val args: List<String> = emptyList(),
     val env: Map<String, String> = emptyMap(),
@@ -184,6 +200,7 @@ data class AdapterInfo(
      */
     fun toJson(): JsonObject = buildJsonObject {
         put("preset", preset)
+        put("backend", backend)
         put("program", program)
         putJsonArray("args") { args.forEach { add(JsonPrimitive(it)) } }
         putJsonObject("env") { env.forEach { (key, value) -> put(key, value) } }
