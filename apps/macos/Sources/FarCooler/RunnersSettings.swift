@@ -75,9 +75,11 @@ struct RunnersSettings: View {
             RunnerSettingsSheet(name: choice.name, target: choice.target)
         }
         // A dialog rather than the sidebar's card, because this is a settings
-        // row and the question is a yes or a no — the card exists to carry two
-        // version numbers next to each other, which is news this row already
-        // shows in its own subtitle.
+        // row and the question is a yes or a no. The card exists to carry the
+        // version news and the update offer to somewhere a person has not gone
+        // looking; this row is already the place they went looking, and its
+        // own subtitle has said which build is over there since before either
+        // of them existed.
         //
         // Destructive, and not as decoration: confirming this discards every
         // agent conversation on that runner. The dialog is what makes that a
@@ -96,7 +98,7 @@ struct RunnersSettings: View {
             Button("Cancel", role: .cancel) {}
         } message: { target in
             Text(
-                "Reinstalling restarts the daemon on \(target). "
+                "Reinstalling restarts Far Cooler on \(target). "
                     + DaemonRestartCost.sentence
             )
         }

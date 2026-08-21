@@ -150,34 +150,43 @@ enum DaemonUpdateOutcome: Equatable {
     case failed(String)
 }
 
-/// What a person is told before a daemon is replaced, in one place.
+/// What a person is told before Far Cooler is restarted on a runner, in one
+/// place.
 ///
 /// One copy, two surfaces — the sidebar's update card and the Reinstall
 /// confirmation in Settings ▸ Runners — because a cost worded twice is a cost
 /// somebody will eventually word wrongly, and the wrong wording here is one
-/// that lets an agent's memory go without saying so. The claims are checked
-/// against the code that makes them; see `DaemonSkew`'s own doc for where each
-/// one comes from.
+/// that lets an agent's memory go without saying so.
 ///
-/// Neither sentence names the ACTION — updating, reinstalling, restarting —
-/// only the daemon and what happens to it, so the same two sentences are true
-/// under a button that says "Update Daemon" and under one that says
-/// "Reinstall".
+/// Two short lines, where there were two paragraphs. The long form was true
+/// and is not gone: tmux replaying a pane out of its own scrollback,
+/// `agent_supervisor.rs` holding `recent` in a `HashMap` in memory. That is
+/// WHY these two lines can be trusted, and it lives in `DaemonSkew`'s doc
+/// above, where every claim made here is checked against the code that makes
+/// it. It does not belong on screen: somebody deciding whether to spend an
+/// afternoon of agent memory needs the price, not the receipt.
+///
+/// Neither line names the ACTION — updating, reinstalling, restarting — only
+/// what happens to what is running, so both are true under a button that says
+/// "Update Runner" and under one that says "Reinstall".
 enum DaemonRestartCost {
-    /// Said first, because it is the reassuring half and it is true.
-    static let terminals =
-        "Terminals survive that. They live in tmux, and each pane is replayed "
-        + "from tmux’s own scrollback when the app reattaches."
-
-    /// Said second, because it is the half that costs something.
+    /// Said first now, because it is the half that costs something and the
+    /// only fact anywhere on the card that changes the answer. It used to run
+    /// second, under a paragraph of reassurance, in bold — which was the app
+    /// noticing it had put the deciding sentence in the wrong place and trying
+    /// to fix that with weight instead of with order.
     static let agents =
-        "Agent conversations don’t. The daemon holds every agent transcript in "
-        + "memory, so restarting it discards each agent’s chat history on this "
-        + "runner, along with anything typed and not yet sent."
+        "Agent conversations there are lost, along with anything typed and "
+        + "not sent."
 
-    /// Both halves in one paragraph, for a `confirmationDialog`, which takes a
-    /// message rather than a layout.
-    static var sentence: String { "\(terminals) \(agents)" }
+    /// Said second, and kept, because the question people actually arrive with
+    /// is whether they are about to lose their terminals.
+    static let terminals = "Terminals survive."
+
+    /// Both lines in one paragraph, for a `confirmationDialog`, which takes a
+    /// message rather than a layout. The caller names the runner in the
+    /// sentence before this one, which is what "there" points at.
+    static var sentence: String { "\(agents) \(terminals)" }
 }
 
 // MARK: - The dot
@@ -233,10 +242,10 @@ struct DaemonSkewDot: View {
     private var help: String {
         switch target.skew {
         case .tooOldToTalk:
-            return "This runner’s daemon is too old for this app to talk to — "
+            return "This runner is too old for the app to reach — "
                 + "click to see what updating costs"
         default:
-            return "This runner’s daemon is behind Far Cooler — "
+            return "This runner is behind the app — "
                 + "click to see what updating costs"
         }
     }
@@ -284,16 +293,21 @@ struct DaemonUpdateBar: View {
         .buttonStyle(.plain)
         .help(
             targets.count == 1
-                ? "\(targets[0].name) is running a daemon that is not this app’s build"
-                : "\(targets.count) runners are running a daemon that is not this app’s build"
+                ? "\(targets[0].name) isn’t running this app’s build of Far Cooler"
+                : "\(targets.count) runners aren’t running this app’s build of Far Cooler"
         )
         .popover(isPresented: $showingCard, arrowEdge: .top) {
             DaemonUpdateCard(targets: targets) { showingCard = false }
         }
     }
 
+    /// "Runner", not "Daemon": the thing a person added, named and can point
+    /// at is a runner, and the `farcoolerd` on it is an implementation detail
+    /// of that. See `DaemonUpdateCard.title(for:)`, which sets the rule and
+    /// names the one place on these surfaces where the older word is still the
+    /// honest one.
     private var label: String {
-        targets.count == 1 ? "Update Daemon…" : "Update \(targets.count) Daemons…"
+        targets.count == 1 ? "Update Runner…" : "Update \(targets.count) Runners…"
     }
 }
 
@@ -303,11 +317,19 @@ struct DaemonUpdateBar: View {
 ///
 /// Everything about this view exists so that nothing is replaced by accident:
 ///
-/// - The versions are named, both of them, because "behind" without a number
-///   is a claim rather than a fact and because the number is what someone
-///   pastes into a bug report.
-/// - The cost is stated in full before the button, not after it and not in a
-///   tooltip. It is the reason this is a card and not a menu item.
+/// - The cost is above the button, not after it and not in a tooltip. It is
+///   the reason this is a card and not a menu item. It is also two short lines
+///   rather than the three paragraphs it was: what is lost, then what isn't,
+///   with the expensive one in primary text. `DaemonRestartCost` holds both,
+///   and `DaemonSkew`'s doc holds the mechanism underneath them, which is
+///   deliberately not on screen — nobody deciding this needs to be told that a
+///   pane's replay is rebuilt out of tmux's scrollback.
+/// - The versions are behind a disclosure, closed. They were the second thing
+///   on the card and they were a comparison nobody could make: an app and a
+///   daemon a few commits apart both say `0.1.0`, and the eye that goes
+///   looking for a difference finds two identical numbers and a git SHA. The
+///   number is still exactly what somebody pastes into a bug report, so it is
+///   kept, spelled the same way, one click away.
 /// - Nothing here has `.keyboardShortcut(.defaultAction)`. Escape dismisses;
 ///   Return does nothing at all. A popover that discards every agent
 ///   conversation on a runner when a stray Return arrives is not a popover
@@ -334,9 +356,9 @@ struct DaemonUpdateCard: View {
             }
         }
         .padding(16)
-        // Wide enough for the cost to read as two short paragraphs rather than
-        // a column of five-word lines, and narrow enough to sit under a 6pt
-        // dot in a 320pt sidebar without covering the list it came from.
+        // Wide enough that the cost lands in two lines rather than a column of
+        // five-word ones, and narrow enough to sit under a 6pt dot in a 320pt
+        // sidebar without covering the list it came from.
         .frame(width: 340)
     }
 
@@ -350,30 +372,24 @@ struct DaemonUpdateCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            versions(for: target)
-
             VStack(alignment: .leading, spacing: 8) {
-                // Why this runner is showing nothing, before what updating it
-                // would cost. A runner the app cannot speak to at all is a
-                // different situation from one that works and is behind, and
-                // the card would be describing the wrong problem if it opened
-                // with the price of a fix to a problem it had not named.
-                if target.skew == .tooOldToTalk {
-                    Text(
-                        "Far Cooler can’t reach this runner at all: the app and "
-                            + "that daemon no longer agree on a protocol version, "
-                            + "and no amount of retrying changes that."
-                    )
-                }
                 Text(lead(for: target))
-                Text(DaemonRestartCost.terminals)
                 // The one line someone has to read, so it is the one line that
-                // is not secondary gray.
+                // is not secondary gray — and it now comes BEFORE the
+                // reassurance rather than after it. Emphasis was doing a job
+                // that order should have been doing.
                 Text(DaemonRestartCost.agents).foregroundStyle(.primary)
+                Text(DaemonRestartCost.terminals)
             }
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+
+            // Under the sentence it is evidence for, not between the title and
+            // the sentence. Title, what happens, what it costs, then the small
+            // print for anyone who wants it — and nothing between the two
+            // lines that decide this and the buttons that act on them.
+            versions(for: target)
 
             if let words = failures[target.host] {
                 Text("The update didn’t finish.")
@@ -388,28 +404,62 @@ struct DaemonUpdateCard: View {
 
     /// Sentence case, like every alert title on this platform. Title case is
     /// for the buttons.
+    ///
+    /// "Runner", not "daemon", and the rule the whole file now follows: the
+    /// noun a person can point at is a runner — one `farcoolerd` under one
+    /// Unix user, the same thing Settings ▸ Runners lists and the same thing
+    /// this card names on its second line — while "daemon" is the name of a
+    /// process they never see and did not install by that name. The word is
+    /// not banned, it is spent where it is the only true one: the `Daemon`
+    /// version row inside the disclosure, where what is being named really is
+    /// the build that answered rather than the runner it answered for. Every
+    /// other surface here says runner, and the engineering comments go on
+    /// saying daemon, because they are talking about the process.
     private func title(for target: DaemonUpdateTarget) -> String {
         switch target.skew {
-        case .tooOldToTalk: return "This daemon is too old to reach"
-        default: return "This daemon is behind the app"
+        case .tooOldToTalk: return "This runner is too old to reach"
+        default: return "This runner is behind the app"
         }
     }
 
-    /// Both stamps, in one idiom.
+    /// Both stamps, in one idiom, behind a disclosure that starts closed.
+    ///
+    /// The block was full height under the title, and it invited a comparison
+    /// that could not be made: both rows read `0.1.0`, because the app and the
+    /// daemon are the same release built at different commits, and all a
+    /// reader could do with it was notice that the parentheses differed. What
+    /// the numbers are genuinely for — pasting into a bug report, and being
+    /// able to check that "behind" is a fact rather than a claim — survives a
+    /// click perfectly well.
     ///
     /// `AppVersion.display` says `0.2.0 (beta 3)` and a daemon says
     /// `0.1.0+a1b2c3`; `DaemonBuild.readable` already exists to close exactly
     /// that gap, and `DaemonSkew.behind` carries the result of it.
+    ///
+    /// Nothing at all for `.tooOldToTalk`, honestly: a daemon that refused the
+    /// handshake never told us what it was, and a disclosure holding one row —
+    /// this app's own version, which About already shows — is a control that
+    /// opens onto nothing.
     @ViewBuilder
     private func versions(for target: DaemonUpdateTarget) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            version("App", AppVersion.display)
-            // Absent for `.tooOldToTalk`, honestly: a daemon that refused the
-            // handshake never told us what it was, and inventing a row that
-            // says "unknown" beside a row that says a real version invites the
-            // eye to compare two things, one of which is not a fact.
-            if let daemon = target.skew.daemonVersion {
-                version("Daemon", daemon)
+        if let daemon = target.skew.daemonVersion {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 3) {
+                    version("App", AppVersion.display)
+                    // "Daemon", and this is the one row that keeps the word.
+                    // A runner does not have a version; the `farcoolerd`
+                    // answering for it does, and this row is the one thing on
+                    // the card somebody copies into a bug report — where being
+                    // exact about which of the two programs is meant is the
+                    // whole point of writing it down.
+                    version("Daemon", daemon)
+                }
+                .padding(.top, 4)
+            } label: {
+                // Sentence case: this is a label on a container, not a button.
+                Text("Version details")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -426,13 +476,31 @@ struct DaemonUpdateCard: View {
         }
     }
 
+    /// One line, and it is the ACTION — not how the action works.
+    ///
+    /// What it replaced spelled out the mechanism twice over: a copy onto the
+    /// far side over ssh, or a swap out of the app bundle. That difference is
+    /// real and it is worth knowing when an install fails halfway — which is
+    /// why `runner install` names it, and why the failure below shows the
+    /// installer's own transcript. It is not worth knowing while deciding,
+    /// because it changes nothing about the price, so remote and local now say
+    /// the same shape of sentence and differ only in what they call the place.
+    ///
+    /// `.tooOldToTalk` gets its own line, because a runner the app cannot
+    /// speak to at all is a different situation from one that works and is
+    /// behind, and the card would be describing the wrong problem if it opened
+    /// with the price of a fix to a problem it had not named. It also says
+    /// retrying is pointless, because the dot this card hangs from is the one
+    /// that used to offer a retry.
     private func lead(for target: DaemonUpdateTarget) -> String {
-        if target.host.isEmpty {
-            return "Updating replaces this Mac’s daemon with the one inside the app "
-                + "and restarts it."
+        if target.skew == .tooOldToTalk {
+            return "Far Cooler can’t reach \(target.name) until it’s updated. "
+                + "Retrying won’t help."
         }
-        return "Updating copies this app’s Far Cooler onto \(target.name) and "
-            + "restarts the daemon there."
+        // "this Mac" mid-sentence, where the line above it says "This Mac":
+        // the same runner, spelled for the grammar it is sitting in.
+        return "Updating restarts Far Cooler on "
+            + (target.host.isEmpty ? "this Mac" : target.name) + "."
     }
 
     @ViewBuilder
@@ -456,7 +524,7 @@ struct DaemonUpdateCard: View {
             } else {
                 Button("Not Now") { onDone() }
                     .keyboardShortcut(.cancelAction)
-                Button(failures[target.host] == nil ? "Update Daemon" : "Try Again") {
+                Button(failures[target.host] == nil ? "Update Runner" : "Try Again") {
                     Task { await run(target) }
                 }
                 .buttonStyle(.borderedProminent)
