@@ -12,71 +12,236 @@ import SwiftUI
 /// grid of whatever bytes happened to be on a pane that is not a tty. The pane
 /// mode has been in the protocol and in the fleet all along; the phone simply
 /// had no surface to put it on.
+///
+/// ## What this screen is shaped around
+///
+/// Between sets. One hand. Ninety seconds at a time, a dozen times an hour,
+/// with iOS very likely terminating the app in between — and the thing being
+/// read is a branch an agent wrote overnight, forty files across a dozen
+/// commits. Every decision below follows from that: the controls that move you
+/// through a diff are at the BOTTOM, because that is where a thumb is; exactly
+/// one file is open at a time, because that is what makes "next" mean
+/// something; where you were is written to disk on every move, because the
+/// process will not be alive to be asked; and the output of reading — a note
+/// for the agent — is collected here rather than requiring a trip to another
+/// screen to type.
+///
+/// What this screen never records is a JUDGMENT. There is no "reviewed" tick on
+/// a file, and that is deliberate: an agent is still editing these files, so a
+/// tick on a file that has changed twice since would be a claim the app is in
+/// no position to make. The daemon's workspace-level `changed_since_reviewed`
+/// watermark is the piece of review state that survives an edit, because an
+/// edit is what invalidates it. See `ReviewPosition`.
 @MainActor
 struct ChangesView: View {
     /// Owned by `Connection`, not by this view — the view is destroyed on every
     /// tab switch and the scroll, the folds and the fetched diffs must not be.
     @ObservedObject var store: ChangesStore
     let workspaceName: String
+
+    /// The agent panes in this worktree a review note can be sent to.
+    ///
+    /// A plain array of values rather than the `Connection` it is derived from.
+    /// Holding the connection here would re-evaluate this view's body on every
+    /// three-second fleet poll, and this is the one screen in the app whose
+    /// body is a forty-card lazy stack somebody is mid-scroll through.
+    var agents: [ReviewAgentTarget] = []
+
+    @State private var showingIndex = false
+    @State private var showingComments = false
+    @State private var composing: ComposeRequest?
+
+    /// A composer that has been asked for, and what it is about.
+    ///
+    /// A wrapper with its own identity rather than presenting on the anchor
+    /// itself: two notes written about the same hunk are two separate sheets,
+    /// and `sheet(item:)` keyed on the anchor would refuse the second one
+    /// because it compares equal to the first.
+    private struct ComposeRequest: Identifiable {
+        let id = UUID()
+        let anchor: ReviewAnchor
+    }
+
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                summary
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    summary
+                        .id(Self.topAnchor)
 
-                if let error = store.error {
-                    ChangesNotice(
-                        symbol: "exclamationmark.triangle", tint: .orange, text: error)
-                } else if store.commitUnreadable {
-                    // Ahead of the empty case on purpose: a commit that could
-                    // not be read also has no files, and "nothing changed here"
-                    // is the one sentence that must not be said about it.
-                    ChangesNotice(
-                        symbol: "exclamationmark.triangle",
-                        tint: .orange,
-                        text: "Couldn't read this commit. An amend or a rebase may have "
-                            + "replaced it while you were reading.")
-                } else if store.files.isEmpty && !store.loading {
-                    ChangesNotice(
-                        symbol: "checkmark.circle", tint: .secondary, text: nothingHere)
-                }
+                    if let saved = store.resume {
+                        resumeCard(saved)
+                    }
+                    if let note = store.resumeNote {
+                        // Tap to dismiss. It has said its piece the moment it
+                        // is read, and a sentence about a file that moved has
+                        // no business still being on the screen three commits
+                        // later.
+                        ChangesNotice(symbol: "bookmark", tint: .secondary, text: note)
+                            .onTapGesture { store.resumeNote = nil }
+                    }
 
-                ForEach(store.files) { file in
-                    ChangesFileCard(file: file, store: store)
+                    if let error = store.error {
+                        ChangesNotice(
+                            symbol: "exclamationmark.triangle", tint: .orange, text: error)
+                    } else if store.commitUnreadable {
+                        // Ahead of the empty case on purpose: a commit that could
+                        // not be read also has no files, and "nothing changed here"
+                        // is the one sentence that must not be said about it.
+                        ChangesNotice(
+                            symbol: "exclamationmark.triangle",
+                            tint: .orange,
+                            text: "Couldn't read this commit. An amend or a rebase may have "
+                                + "replaced it while you were reading.")
+                    } else if store.files.isEmpty && !store.loading {
+                        ChangesNotice(
+                            symbol: "checkmark.circle", tint: .secondary, text: nothingHere)
+                    }
+
+                    fileCards
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            // No scroll restore WITHIN a run of the app, and that is still the
+            // point.
+            //
+            // There used to be one here: an offset kept in the store, put back
+            // on appear, asked for repeatedly because a lazy stack clamps the
+            // first request to the one screenful that exists. It half-worked —
+            // the offset was recorded before the restore had had its turn, so a
+            // second or third visit jumped — and all of it existed only because
+            // the view was destroyed on every pane switch. `PaneHost` keeps the
+            // pane mounted, so the scroll never moves and there is nothing to
+            // put back.
+            //
+            // What DOES get put back is a position across a process death,
+            // which is a different problem with a different answer: a file
+            // path, offered rather than applied. See `ReviewPosition` for why
+            // an anchor and not an offset, and `resumeCard` for why it asks.
+            .background(TerminalPalette.background)
+            // Pull to refresh asks the daemon to recompute rather than answer from
+            // its cache: it is the affordance that exists because no watcher is
+            // perfect, and the user must always have a way to be certain.
+            .refreshable { await store.load(fresh: true) }
+            .task { await store.loadIfNeeded() }
+            // Every jump on this screen goes through one channel, so there is
+            // one place that can be wrong about scrolling: the index sheet, the
+            // Next and Previous buttons, and the resumed bookmark all set
+            // `store.jump` and this moves the scroll. Cleared immediately after,
+            // so nothing re-scrolls under somebody who has since scrolled away.
+            .onChange(of: store.jump) { _, jump in
+                guard let jump else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(jump.path, anchor: .top)
+                }
+                store.jump = nil
+            }
+            // At the bottom, in thumb reach, and never in the navigation bar.
+            //
+            // The bar is the whole of "moving through a large diff" and it has
+            // to be reachable by the hand already holding the phone — the top
+            // of a modern iPhone is not, one-handed, and a control you have to
+            // shuffle your grip to press is a control that does not get pressed
+            // between sets. It also stays put while the diff scrolls behind it,
+            // so "how far in am I" is answerable without scrolling anywhere.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                ReviewBar(
+                    store: store,
+                    comments: store.comments,
+                    onIndex: { showingIndex = true },
+                    onComments: { showingComments = true })
+            }
+            // A sheet, not a push. Choosing a commit is a detour off the thing on
+            // screen and it ends by coming straight back to it — the same shape as
+            // the worktree switcher and `BranchPicker`, which is what this app
+            // already uses for a choice of this weight. A push would put the diff
+            // behind a Back button and make the branch feel like somewhere you had
+            // left.
+            //
+            // It is no longer the ONLY way through the commits, which is the
+            // change that matters: a sheet is right for "which one of these" and
+            // wrong for "start at the beginning and keep going". The second
+            // reading now has controls of its own — see `commitHeader` and
+            // `ChangesStore.showNextCommit` — and this stayed as what it always
+            // was, a picker.
+            //
+            // Presented from here rather than from either control that opens it:
+            // one of those controls lives in `PaneHost`'s toolbar, and a sheet
+            // hung off a `Menu`'s content is hung off something that is not a live
+            // view hierarchy to present from. The flag lives on the store so both
+            // can reach it.
+            .sheet(isPresented: $store.showingHistory) {
+                CommitHistorySheet(store: store)
+            }
+            .sheet(isPresented: $showingIndex) {
+                FileIndexSheet(store: store)
+            }
+            .sheet(item: $composing) { request in
+                CommentComposer(anchor: request.anchor, comments: store.comments)
+            }
+            .sheet(isPresented: $showingComments) {
+                CommentOutboxSheet(
+                    comments: store.comments,
+                    agents: agents,
+                    branch: store.changeSet.branch)
+            }
         }
-        // No scroll restore, and that is the point.
-        //
-        // There used to be one here: an offset kept in the store, put back on
-        // appear, asked for repeatedly because a lazy stack clamps the first
-        // request to the one screenful that exists. It half-worked — the offset
-        // was recorded before the restore had had its turn, so a second or
-        // third visit jumped — and all of it existed only because the view was
-        // destroyed on every pane switch. `PaneHost` keeps the pane mounted, so
-        // the scroll never moves and there is nothing to put back.
-        .background(TerminalPalette.background)
-        // Pull to refresh asks the daemon to recompute rather than answer from
-        // its cache: it is the affordance that exists because no watcher is
-        // perfect, and the user must always have a way to be certain.
-        .refreshable { await store.load(fresh: true) }
-        .task { await store.loadIfNeeded() }
-        // A sheet, not a push. Choosing a commit is a detour off the thing on
-        // screen and it ends by coming straight back to it — the same shape as
-        // the worktree switcher and `BranchPicker`, which is what this app
-        // already uses for a choice of this weight. A push would put the diff
-        // behind a Back button and make the branch feel like somewhere you had
-        // left.
-        //
-        // Presented from here rather than from either control that opens it:
-        // one of those controls lives in `PaneHost`'s toolbar, and a sheet
-        // hung off a `Menu`'s content is hung off something that is not a live
-        // view hierarchy to present from. The flag lives on the store so both
-        // can reach it.
-        .sheet(isPresented: $store.showingHistory) {
-            CommitHistorySheet(store: store)
+    }
+
+    /// The id of the summary card, so landing "at the top" has somewhere to go.
+    private static let topAnchor = ChangesStore.topAnchor
+
+    /// The files, with whatever a tool generated held to the end.
+    ///
+    /// Two loops rather than one, because the generated files get a heading of
+    /// their own — see `ChangedFile.isGenerated` for why they are separated at
+    /// all. The order here is `ChangesStore.reviewOrder`, which is also the
+    /// order Next and Previous walk, so `7 of 23` counts the same list the
+    /// reader is looking at.
+    @ViewBuilder
+    private var fileCards: some View {
+        ForEach(store.handWrittenFiles) { file in
+            card(file)
         }
+        if !store.generatedFiles.isEmpty {
+            generatedHeading
+            ForEach(store.generatedFiles) { file in
+                card(file)
+            }
+        }
+    }
+
+    private func card(_ file: ChangedFile) -> some View {
+        ChangesFileCard(
+            file: file,
+            store: store,
+            onComment: { composing = ComposeRequest(anchor: $0) },
+            onVisible: { store.noteVisible(file.path, isVisible: $0) }
+        )
+        // The scroll target. Every jump names a path, so every card answers to
+        // one.
+        .id(file.path)
+    }
+
+    private var generatedHeading: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wrench.and.screwdriver")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            Text(
+                store.generatedFiles.count == 1
+                    ? "1 Generated File" : "\(store.generatedFiles.count) Generated Files"
+            )
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Text("\(store.generatedLineCount) lines")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 8)
     }
 
     /// Which nothing this is, when the list is empty.
@@ -95,6 +260,68 @@ struct ChangesView: View {
                 + "which is also what a clean merge looks like."
         }
     }
+
+    // MARK: - Coming back
+
+    /// The offer to go back where the last window ended.
+    ///
+    /// An offer and not a jump. The app was almost certainly terminated between
+    /// the two windows, and in the meantime the agent has probably kept
+    /// working: restoring silently would drop somebody who opened this pane to
+    /// glance at one thing into the middle of a patch, and — worse — into a
+    /// diff that has changed shape underneath the position being restored. So
+    /// it says where it thinks they were, in the words of the branch rather
+    /// than in path-and-sha, and waits to be asked.
+    private func resumeCard(_ saved: ReviewPosition) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Continue where you stopped", systemImage: "bookmark")
+                .font(.footnote.weight(.semibold))
+            Text(resumeDescription(saved))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button("Continue") {
+                    Task { await store.applyResume() }
+                }
+                .buttonStyle(.borderedProminent)
+                Spacer(minLength: 4)
+                Button("Not Now") { store.dismissResume() }
+                    .buttonStyle(.bordered)
+            }
+            .font(.footnote)
+            .controlSize(.small)
+        }
+        .padding(12)
+        .background(ChangesSurface.card, in: .rect(cornerRadius: 12))
+    }
+
+    /// Where the bookmark says you were, said the way the branch says it.
+    ///
+    /// A subject rather than a sha wherever one is known: "you were reading
+    /// `push.ts` in *handle retries on 429*" is a place somebody recognizes,
+    /// and `local/a1b2c3d4` is a place they have to decode.
+    private func resumeDescription(_ saved: ReviewPosition) -> String {
+        var place: String
+        if let sha = ReviewPosition.sha(in: saved.scope) {
+            let known = store.changeSet.commits.first { $0.sha == sha }
+            if let known, !known.subject.isEmpty {
+                place = "in “\(known.subject)”"
+            } else {
+                place = "in commit \(sha.prefix(8))"
+            }
+        } else if saved.scope == "local" {
+            place = "in the uncommitted work"
+        } else {
+            place = "on the whole branch"
+        }
+        if let file = saved.file ?? saved.topFile {
+            return "You were at \((file as NSString).lastPathComponent), \(place)."
+        }
+        return "You were \(place)."
+    }
+
+    // MARK: - The summary card
 
     /// Branch, what is being compared, and the two numbers — the whole worktree
     /// in one card.
@@ -126,7 +353,7 @@ struct ChangesView: View {
         .background(ChangesSurface.card, in: .rect(cornerRadius: 14))
     }
 
-    /// Base, counts, the comparison control, and the way into the history.
+    /// Base, counts, the comparison control, and the two ways into the commits.
     @ViewBuilder
     private var branchHeader: some View {
         HStack(spacing: 10) {
@@ -137,11 +364,22 @@ struct ChangesView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            Text("+\(store.changeSet.insertions)")
-                .font(.caption.monospaced()).foregroundStyle(.green)
-            Text("−\(store.changeSet.deletions)")
-                .font(.caption.monospaced()).foregroundStyle(.red)
+            // The branch's own totals while nothing was generated, and the
+            // hand-written subtotal once something was. See `generatedNote`.
+            if store.generatedFiles.isEmpty {
+                Text("+\(store.changeSet.insertions)")
+                    .font(.caption.monospaced()).foregroundStyle(.green)
+                Text("−\(store.changeSet.deletions)")
+                    .font(.caption.monospaced()).foregroundStyle(.red)
+            } else {
+                Text("+\(store.writtenInsertions)")
+                    .font(.caption.monospaced()).foregroundStyle(.green)
+                Text("−\(store.writtenDeletions)")
+                    .font(.caption.monospaced()).foregroundStyle(.red)
+            }
         }
+
+        generatedNote
 
         // Only a GUESSED base is called out. The others are recorded facts;
         // a guess is the one that can silently produce a wrong diff that
@@ -169,17 +407,75 @@ struct ChangesView: View {
         .pickerStyle(.segmented)
         .padding(.top, 2)
 
-        historyRow
+        commitEntry
     }
 
-    /// The way in to one commit at a time.
+    /// What the two numbers at the top are not counting.
     ///
-    /// A row rather than a toolbar item alone, because a control nobody can see
-    /// is a feature nobody has: the toolbar's copy of this exists for the reader
-    /// who is already scrolled a thousand lines down, not for the one arriving.
-    private var historyRow: some View {
+    /// The whole reason `isGenerated` exists. A branch that touched eleven
+    /// source files and regenerated a lockfile reads as four thousand lines
+    /// changed, and somebody with ninety seconds cannot tell that from a branch
+    /// that really did rewrite four thousand lines. Split, the headline is the
+    /// work and this line is the lockfile — and the two still add up to what
+    /// the daemon counted, which is why this says the numbers rather than
+    /// hiding them.
+    @ViewBuilder
+    private var generatedNote: some View {
+        if !store.generatedFiles.isEmpty {
+            HStack(spacing: 6) {
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text(
+                    store.generatedFiles.count == 1
+                        ? "plus 1 generated file" : "plus \(store.generatedFiles.count) generated files"
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                Text("+\(store.generatedInsertions) −\(store.generatedDeletions)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// The two ways in to one commit at a time.
+    ///
+    /// Rows rather than toolbar items alone, because a control nobody can see
+    /// is a feature nobody has: the toolbar's copy of History exists for the
+    /// reader who is already scrolled a thousand lines down, not for the one
+    /// arriving.
+    ///
+    /// Two of them, because "which commit" and "all of them, in order" are
+    /// different questions and the second is the one an agent-authored branch
+    /// is actually read with. Until this existed the picker was the only door,
+    /// which made the reading this screen is FOR — first commit, then the next,
+    /// then the next — a trip through a sheet every time.
+    @ViewBuilder
+    private var commitEntry: some View {
         let count = store.changeSet.commits.count
-        return Button {
+
+        if count > 0 {
+            Button {
+                Task { await store.startAtFirstCommit() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "list.number")
+                        .font(.caption)
+                    Text("Review Commit by Commit")
+                        .font(.footnote.weight(.medium))
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 6)
+        }
+
+        Button {
             store.showingHistory = true
         } label: {
             HStack(spacing: 8) {
@@ -210,12 +506,12 @@ struct ChangesView: View {
         .padding(.top, 4)
     }
 
-    /// Which commit is on screen, what it did, and the ways back out.
+    /// Which commit is on screen, what it said it was doing, and the ways on.
     ///
-    /// The counts are summed from the commit's own file list rather than read
-    /// off `ChangeCommit`, whose three count fields the daemon hardcodes to
-    /// zero — see `ChangesStore.commitInsertions`. They appear only once that
-    /// list has landed, because until then the honest number is no number.
+    /// The counts come from `ChangeCommit` when the daemon sent them and from
+    /// the commit's own file list otherwise — see `ChangesStore.commitCounts`.
+    /// They are the same number either way; `--shortstat` is the sum of the
+    /// same commit's `--numstat`.
     @ViewBuilder
     private func commitHeader(_ sha: String) -> some View {
         let known = store.selectedCommitInfo
@@ -243,12 +539,28 @@ struct ChangesView: View {
                     .truncationMode(.tail)
             }
             Spacer(minLength: 4)
-            if !store.commitFiles.isEmpty {
-                Text("+\(store.commitInsertions)")
+            if let counts = store.commitCounts {
+                Text("+\(counts.insertions)")
                     .font(.caption.monospaced()).foregroundStyle(.green)
-                Text("−\(store.commitDeletions)")
+                Text("−\(counts.deletions)")
                     .font(.caption.monospaced()).foregroundStyle(.red)
             }
+        }
+
+        generatedNote
+
+        // The rationale, which for an agent's commit is usually the only one
+        // written down anywhere.
+        //
+        // Here rather than only in the picker, and at length rather than in a
+        // preview: this is the screen that is ABOUT this commit, and the body
+        // is the cheapest context there is before a line of diff is read —
+        // which between two sets is very often the only context there is time
+        // for. Keyed on the sha so moving to the next commit starts it folded
+        // again rather than inheriting however far the last one was opened.
+        if let body = known?.bodyText {
+            CommitBodyText(text: body)
+                .id(sha)
         }
 
         // The change set no longer lists this sha, so there is no subject and no
@@ -265,6 +577,41 @@ struct ChangesView: View {
                 .foregroundStyle(.orange)
         }
 
+        // Where this commit sits in the branch, and the way to the ones either
+        // side of it without opening a picker. This is what makes commit-by-
+        // commit a path: the reader who has finished one commit's files takes
+        // one tap to the next intention, and the position says how many are
+        // left — which a sheet, opened and dismissed, never could.
+        if let position = store.commitPositionLabel {
+            HStack(spacing: 8) {
+                Button {
+                    Task { await store.showPreviousCommit() }
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .disabled(store.previousCommit == nil)
+                .accessibilityLabel("Previous commit")
+
+                Text(position)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    Task { await store.showNextCommit() }
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .disabled(store.nextCommit == nil)
+                .accessibilityLabel("Next commit")
+
+                Spacer(minLength: 4)
+            }
+            .font(.footnote)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .padding(.top, 2)
+        }
+
         HStack(spacing: 8) {
             // The obvious way back, said in words. On the Mac this is a segment
             // of a control that is still on screen; here that control is not
@@ -279,6 +626,299 @@ struct ChangesView: View {
         .buttonStyle(.bordered)
         .controlSize(.small)
         .padding(.top, 2)
+    }
+}
+
+/// A commit body, folded to four lines until it is asked for.
+///
+/// Folded because an agent's body runs to paragraphs and this card sits above
+/// the file list — left open, a good commit message would push the diff off the
+/// screen. Four lines is enough for the first sentence of the rationale, which
+/// is the part that decides whether the rest is worth reading.
+private struct CommitBodyText: View {
+    let text: String
+    @State private var expanded = false
+
+    /// Whether folding it would actually hide anything.
+    ///
+    /// Measured crudely — a line count and a length — rather than with a text
+    /// layout pass, because the cost of being wrong is a "More" button that
+    /// reveals nothing, and the cost of measuring properly on every redraw of a
+    /// scrolling list is real.
+    private var isLong: Bool {
+        text.contains("\n\n") || text.count > 200
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(expanded ? nil : 4)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+            if isLong {
+                Button(expanded ? "Less" : "More") {
+                    withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                }
+                .font(.caption2)
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+            }
+        }
+        .padding(.top, 2)
+    }
+}
+
+// MARK: - The bar at the bottom
+
+/// Where you are in the diff, and the controls that move you through it.
+///
+/// Everything here is one-handed. The two chevrons are 44 points square at the
+/// trailing edge, where a right thumb rests; the index is a single tap at the
+/// leading edge; and the position between them is the only place on this screen
+/// that answers "how much of this is left", because a phone's scrollbar is a
+/// hairline that appears while you drag and vanishes while you read.
+///
+/// The Next button is the same control for two different moves, and changes its
+/// face when it changes its meaning: while a commit has files left it goes to
+/// the next file, and on the last file of a commit it becomes Next Commit. That
+/// is the join that turns a stack of commits into something you can walk from
+/// end to end without ever opening a picker.
+private struct ReviewBar: View {
+    @ObservedObject var store: ChangesStore
+    /// Observed separately from the store, so adding a note redraws this bar
+    /// and not the forty-card diff behind it.
+    @ObservedObject var comments: ReviewCommentQueue
+    let onIndex: () -> Void
+    let onComments: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Only when there is something in it. A permanent empty outbox
+            // would be a row of chrome charging rent on a screen that has none
+            // to spare.
+            if !comments.pending.isEmpty {
+                Button(action: onComments) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "text.bubble")
+                            .font(.caption)
+                        Text(
+                            comments.pending.count == 1
+                                ? "1 note for the agent" : "\(comments.pending.count) notes for the agent"
+                        )
+                        .font(.footnote.weight(.medium))
+                        Spacer(minLength: 4)
+                        Text("Review and Send")
+                            .font(.caption)
+                            .foregroundStyle(.tint)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Divider()
+            }
+
+            HStack(spacing: 10) {
+                Button(action: onIndex) {
+                    Label("Files", systemImage: "list.bullet.indent")
+                        .font(.footnote.weight(.medium))
+                        .padding(.vertical, 10)
+                        .padding(.trailing, 8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(store.files.isEmpty)
+
+                Spacer(minLength: 4)
+
+                Text(store.positionLabel)
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Button {
+                    store.showPreviousFile()
+                } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.body.weight(.medium))
+                        // A glyph is not a tap target; this is.
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!store.hasPreviousFile)
+                .accessibilityLabel("Previous file")
+
+                Button {
+                    if store.nextIsCommit {
+                        Task { await store.showNextCommit() }
+                    } else {
+                        store.showNextFile()
+                    }
+                } label: {
+                    Group {
+                        if store.nextIsCommit {
+                            HStack(spacing: 4) {
+                                Text("Next Commit").font(.footnote.weight(.medium))
+                                Image(systemName: "chevron.right.2").font(.caption)
+                            }
+                            .padding(.horizontal, 8)
+                        } else {
+                            Image(systemName: "chevron.down")
+                                .font(.body.weight(.medium))
+                                .frame(width: 44)
+                        }
+                    }
+                    .frame(height: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!store.hasNextFile && !store.nextIsCommit)
+                .accessibilityLabel(store.nextIsCommit ? "Next commit" : "Next file")
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 6)
+        }
+        .background(.bar)
+    }
+}
+
+// MARK: - The file index
+
+/// Every file in this comparison, on one screen, without scrolling the diff.
+///
+/// The difference between reviewing four files and reviewing forty. A lazy
+/// stack of forty patches has no table of contents — the only way to learn what
+/// a branch touched is to scroll past all of it — and on a phone that is a
+/// minute of dragging before the first decision about where to look.
+///
+/// The counts are here for the same reason: a forty-file branch is not forty
+/// equal things, and `+412 −6` beside one name is usually enough to say where
+/// to start.
+private struct FileIndexSheet: View {
+    @ObservedObject var store: ChangesStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+
+    private func matching(_ files: [ChangedFile]) -> [ChangedFile] {
+        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return files }
+        // The whole path, not the leaf: "daemon" is how somebody asks for
+        // everything under `crates/daemon/`, and matching only the filename
+        // would answer that with nothing.
+        return files.filter { $0.path.lowercased().contains(query) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                let written = matching(store.handWrittenFiles)
+                let generated = matching(store.generatedFiles)
+
+                if written.isEmpty && generated.isEmpty {
+                    Text(
+                        store.files.isEmpty
+                            ? "Nothing changed in this comparison."
+                            : "No files match that."
+                    )
+                    .foregroundStyle(.secondary)
+                }
+
+                if !written.isEmpty {
+                    Section {
+                        ForEach(written) { file in
+                            row(file)
+                        }
+                    } header: {
+                        Text("Files")
+                    }
+                }
+
+                if !generated.isEmpty {
+                    Section {
+                        ForEach(generated) { file in
+                            row(file)
+                        }
+                    } header: {
+                        Text("Generated")
+                    } footer: {
+                        // Says what the split is FOR, at the one place somebody
+                        // is looking at both halves at once.
+                        Text(
+                            "Counted apart from the branch's totals, so a lockfile "
+                                + "doesn't make a branch look bigger than it is.")
+                    }
+                }
+            }
+            .searchable(text: $search, prompt: "Filter files")
+            .navigationTitle("Files")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func row(_ file: ChangedFile) -> some View {
+        Button {
+            // Expanding is what selects: one file is open at a time, so opening
+            // this one is the same act as making it the place Next counts from.
+            store.expand(file.path)
+            dismiss()
+        } label: {
+            HStack(spacing: 10) {
+                Text(file.status?.mark ?? "•")
+                    .font(.caption2.monospaced().weight(.bold))
+                    .foregroundStyle(file.status?.tint ?? .secondary)
+                    .frame(width: 14)
+                    .accessibilityLabel(file.status?.label ?? "Changed")
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.name)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if !file.directory.isEmpty {
+                        Text(file.directory)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                }
+
+                Spacer(minLength: 4)
+
+                if file.binary {
+                    Text("binary").font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    if file.insertions > 0 {
+                        Text("+\(file.insertions)")
+                            .font(.caption2.monospaced()).foregroundStyle(.green)
+                    }
+                    if file.deletions > 0 {
+                        Text("−\(file.deletions)")
+                            .font(.caption2.monospaced()).foregroundStyle(.red)
+                    }
+                }
+
+                if store.isExpanded(file.path) {
+                    Image(systemName: "checkmark").font(.footnote).foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
     }
 }
 
@@ -358,24 +998,25 @@ enum ChangesSurface {
 private struct ChangesFileCard: View {
     let file: ChangedFile
     @ObservedObject var store: ChangesStore
+    /// Ask for a note about some part of this file.
+    let onComment: (ReviewAnchor) -> Void
+    /// Whether this card is on screen, so the store can remember roughly where
+    /// the reader had got to. See `ChangesStore.noteVisible`.
+    let onVisible: (Bool) -> Void
 
-    private var collapsed: Bool { store.collapsedFiles.contains(file.path) }
+    private var expanded: Bool { store.isExpanded(file.path) }
     private var lines: [DiffComputation.Line] { store.fileDiffs[file.path] ?? [] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                if collapsed {
-                    store.collapsedFiles.remove(file.path)
-                } else {
-                    store.collapsedFiles.insert(file.path)
-                }
+                store.toggle(file.path)
             } label: {
                 heading
             }
             .buttonStyle(.plain)
 
-            if !collapsed {
+            if expanded {
                 if store.loadingFiles.contains(file.path) {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
@@ -396,17 +1037,42 @@ private struct ChangesFileCard: View {
                         .foregroundStyle(.secondary)
                         .padding(12)
                 } else {
-                    DiffLines(lines: lines)
+                    DiffHunks(
+                        lines: lines,
+                        file: file.path,
+                        commit: store.scope.commitSha,
+                        onComment: onComment)
                 }
+
+                // At the END of the file rather than in the heading, because
+                // that is where the reader is when they have something to say
+                // about it — and because a second button inside the heading's
+                // button is a tap target overlapping the one that folds the
+                // card.
+                Button {
+                    onComment(
+                        ReviewAnchor(
+                            file: file.path, commit: store.scope.commitSha,
+                            firstLine: nil, lastLine: nil, quote: nil))
+                } label: {
+                    Label("Comment on This File", systemImage: "text.bubble")
+                        .font(.footnote)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
             }
         }
         .background(ChangesSurface.card, in: .rect(cornerRadius: 12))
         // The scroll decides what gets read: a file is fetched when its card
         // comes into view, not when the change set loads.
         .task(id: taskKey) {
-            guard !collapsed else { return }
+            guard expanded else { return }
             await store.ensure(file.path)
         }
+        .onScrollVisibilityChange(threshold: 0.05) { onVisible($0) }
     }
 
     /// Re-runs when the file, the fold state, or the generation changes — each
@@ -418,7 +1084,7 @@ private struct ChangesFileCard: View {
     /// would sit at "Reading…" forever. Every emptying bumps the generation,
     /// including the ones a scope change causes, so this covers strictly more
     /// than keying on the scope did — a pull to refresh included.
-    private var taskKey: String { "\(file.path)#\(store.generation)#\(collapsed)" }
+    private var taskKey: String { "\(file.path)#\(store.generation)#\(expanded)" }
 
     private var heading: some View {
         HStack(spacing: 10) {
@@ -474,7 +1140,7 @@ private struct ChangesFileCard: View {
                 }
             }
 
-            Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+            Image(systemName: expanded ? "chevron.down" : "chevron.right")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -484,41 +1150,239 @@ private struct ChangesFileCard: View {
     }
 }
 
-/// The patch itself.
-///
-/// Scrolls sideways inside its own card rather than wrapping: a wrapped diff
-/// line breaks the one property a diff has — that a line is a line — and on a
-/// phone almost every line of real code would wrap.
-private struct DiffLines: View {
-    let lines: [DiffComputation.Line]
+// MARK: - The patch
 
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                    // Where the hunks were joined. The line numbers jumping is
-                    // what says lines were left out, so the divider is drawn
-                    // from the numbers rather than from a `@@` header a phone
-                    // has no room to show.
-                    if gapBefore(index) {
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.25))
-                            .frame(height: 1)
-                            .padding(.vertical, 3)
-                    }
-                    DiffLineRow(line: line)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 10)
+/// How a file's lines are cut up for a phone.
+///
+/// Pure functions over the lines the daemon sent. Nothing here fetches, widens
+/// or recovers anything: the daemon decided what this patch contains — its
+/// context, its truncation, its redactions — and this only decides how much of
+/// what arrived is on screen at once.
+private enum DiffLayout {
+    /// One run of lines with no gap in it.
+    ///
+    /// Derived from the line NUMBERS rather than from a `@@` header, because
+    /// the phone's `FileDiff` is already structured hunks and the flattening
+    /// into `DiffComputation.Line` drops the boundaries — a jump in the new
+    /// file's numbering is what is left of them, and it is enough.
+    struct Hunk: Identifiable {
+        let id: Int
+        let lines: [DiffComputation.Line]
+
+        var firstLine: Int? { lines.compactMap(\.newNumber).first }
+        var lastLine: Int? { lines.compactMap(\.newNumber).last }
+
+        /// `Lines 120-148`, or nothing at all for a hunk with no new-side
+        /// numbering — every line of a deleted file, for one.
+        var rangeLabel: String? {
+            guard let firstLine else { return nil }
+            guard let lastLine, lastLine > firstLine else { return "Line \(firstLine)" }
+            return "Lines \(firstLine)-\(lastLine)"
         }
     }
 
-    private func gapBefore(_ index: Int) -> Bool {
-        guard index > 0 else { return false }
-        guard let previous = lines[index - 1].newNumber, let current = lines[index].newNumber
-        else { return false }
-        return current > previous + 1
+    static func hunks(_ lines: [DiffComputation.Line]) -> [Hunk] {
+        var out: [Hunk] = []
+        var current: [DiffComputation.Line] = []
+        for (index, line) in lines.enumerated() {
+            if index > 0, gap(lines[index - 1], line), !current.isEmpty {
+                out.append(Hunk(id: out.count, lines: current))
+                current = []
+            }
+            current.append(line)
+        }
+        if !current.isEmpty { out.append(Hunk(id: out.count, lines: current)) }
+        return out
+    }
+
+    private static func gap(_ previous: DiffComputation.Line, _ current: DiffComputation.Line)
+        -> Bool
+    {
+        guard let before = previous.newNumber, let after = current.newNumber else { return false }
+        return after > before + 1
+    }
+
+    /// A stretch of a hunk, either drawn or folded away.
+    struct Segment: Identifiable {
+        let id: Int
+        let lines: [DiffComputation.Line]
+        /// How many unchanged lines this stands in for, when it is a fold.
+        let folded: Int?
+    }
+
+    /// Lines kept either side of a folded run.
+    private static let keep = 2
+    /// The shortest run of unchanged lines worth folding at all.
+    ///
+    /// Five, which given the daemon's default three lines of context means this
+    /// fires on hunks git MERGED — a run of six unchanged lines between two
+    /// changes is what two nearby edits look like after `-U3` joins them. That
+    /// is exactly the shape an LLM refactor produces, twenty small edits
+    /// scattered down one file, and folding each gap to a tappable line saves
+    /// several screens of dragging over the length of the file. It never fires
+    /// on a new file, which has no unchanged lines at all.
+    private static let foldFrom = 5
+
+    static func segments(of hunk: Hunk) -> [Segment] {
+        var out: [Segment] = []
+        var index = 0
+        let lines = hunk.lines
+
+        func append(_ slice: ArraySlice<DiffComputation.Line>, folded: Int?) {
+            guard !slice.isEmpty || folded != nil else { return }
+            out.append(Segment(id: out.count, lines: Array(slice), folded: folded))
+        }
+
+        while index < lines.count {
+            guard lines[index].kind == .context else {
+                let start = index
+                while index < lines.count, lines[index].kind != .context { index += 1 }
+                append(lines[start..<index], folded: nil)
+                continue
+            }
+            let start = index
+            while index < lines.count, lines[index].kind == .context { index += 1 }
+            let run = lines[start..<index]
+            let atStart = start == 0
+            let atEnd = index == lines.count
+            // Head and tail are what stays: the lines actually touching a
+            // change are the ones that give it its place, and the ones further
+            // out are the ones nobody reads.
+            let head = atStart ? 0 : keep
+            let tail = atEnd ? 0 : keep
+            let hidden = run.count - head - tail
+            guard run.count >= foldFrom, hidden >= 2 else {
+                append(run, folded: nil)
+                continue
+            }
+            if head > 0 { append(run.prefix(head), folded: nil) }
+            append(ArraySlice(run.dropFirst(head).dropLast(tail)), folded: hidden)
+            if tail > 0 { append(run.suffix(tail), folded: nil) }
+        }
+        return out
+    }
+}
+
+/// The patch itself, one hunk at a time.
+///
+/// Each hunk scrolls sideways in its OWN scroll view, and that is the fix for
+/// the thing that made long lines miserable on a phone: with one scroll view
+/// around the whole file, dragging to see the end of a 200-character line in
+/// the third hunk dragged the first two hunks off the screen with it, and
+/// coming back meant dragging all of them back. Per hunk, a long line moves
+/// only its own neighborhood — and every other hunk stays where it was left.
+///
+/// Wrapping instead is not an option: a wrapped diff line breaks the one
+/// property a diff has, that a line is a line, and on a phone almost every line
+/// of real code would wrap.
+private struct DiffHunks: View {
+    let lines: [DiffComputation.Line]
+    let file: String
+    let commit: String?
+    let onComment: (ReviewAnchor) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(DiffLayout.hunks(lines)) { hunk in
+                HunkView(hunk: hunk, file: file, commit: commit, onComment: onComment)
+            }
+        }
+        .padding(.bottom, 4)
+    }
+}
+
+private struct HunkView: View {
+    let hunk: DiffLayout.Hunk
+    let file: String
+    let commit: String?
+    let onComment: (ReviewAnchor) -> Void
+
+    /// Folds the reader has opened, by segment. Local to the hunk and lost when
+    /// the card is folded, which is right: the reason to open a fold is the
+    /// question being asked right now.
+    @State private var revealed: Set<Int> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(DiffLayout.segments(of: hunk)) { segment in
+                        if let folded = segment.folded, !revealed.contains(segment.id) {
+                            foldRow(segment, count: folded)
+                        } else {
+                            ForEach(segment.lines) { line in
+                                DiffLineRow(line: line)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    /// Where in the file this is, and the way to say something about it.
+    ///
+    /// The line range is what makes a note on a hunk into an instruction an
+    /// agent can act on: `push.ts` alone leaves it to search a 300-line file
+    /// for whatever was meant, and `push.ts`, around lines 120-148 does not.
+    private var header: some View {
+        HStack(spacing: 8) {
+            if let range = hunk.rangeLabel {
+                Text(range)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 4)
+            Button {
+                onComment(
+                    ReviewAnchor(
+                        file: file,
+                        commit: commit,
+                        firstLine: hunk.firstLine,
+                        lastLine: hunk.lastLine,
+                        quote: ReviewAnchor.quoting(changedLine ?? "")))
+            } label: {
+                Image(systemName: "text.bubble")
+                    .font(.caption)
+                    .frame(width: 40, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Comment on this hunk")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 4)
+        .padding(.top, 4)
+    }
+
+    /// The first line this hunk actually changed, for the note to quote.
+    ///
+    /// The first CHANGED line rather than the first line: a hunk opens with
+    /// context, and quoting an untouched line back at an agent points it at the
+    /// line before the thing being talked about.
+    private var changedLine: String? {
+        hunk.lines.first { $0.kind != .context }?.text
+    }
+
+    private func foldRow(_ segment: DiffLayout.Segment, count: Int) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { _ = revealed.insert(segment.id) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.down.circle")
+                    .font(.caption2)
+                Text(count == 1 ? "1 unchanged line" : "\(count) unchanged lines")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.tertiary)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -597,6 +1461,282 @@ private struct ChangesNotice: View {
     }
 }
 
+// MARK: - Saying something back
+
+/// Writing one note about one part of the diff.
+///
+/// **Dictation first**, which on iOS means the system keyboard's microphone
+/// rather than a recognizer of this app's own: the field comes up focused with
+/// the keyboard already open, so dictating is one tap on a key that is always
+/// in the same place, and it needs no microphone permission, no speech
+/// entitlement, and no second transcription engine to disagree with the one the
+/// user already has. Typing with a thumb is the fallback rather than the
+/// expectation.
+///
+/// The anchor is shown, not implied. What separates a comment from a prompt is
+/// that it is ABOUT something, and the reader has to be able to see which
+/// something before deciding what to say about it.
+private struct CommentComposer: View {
+    let anchor: ReviewAnchor
+    @ObservedObject var comments: ReviewCommentQueue
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var text = ""
+    @FocusState private var writing: Bool
+
+    private var canAdd: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(
+                        "What should the agent do about this?", text: $text, axis: .vertical)
+                        .lineLimit(3...10)
+                        .focused($writing)
+                } header: {
+                    Text("Note")
+                } footer: {
+                    Text("Tap the microphone on the keyboard to dictate.")
+                }
+
+                Section {
+                    Text((anchor.file as NSString).lastPathComponent)
+                        .font(.subheadline)
+                    Text(anchor.file)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if anchor.firstLine != nil {
+                        Text(anchor.placeDescription.capitalizedFirst)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let quote = anchor.quote {
+                        Text(quote)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                } header: {
+                    Text("About")
+                } footer: {
+                    // Says the thing that makes collecting worth the wait.
+                    Text(
+                        "Notes are collected and sent to the agent together, so it "
+                            + "gets one turn instead of one per note.")
+                }
+            }
+            .navigationTitle("Add a Note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        comments.add(
+                            ReviewComment(
+                                anchor: anchor,
+                                text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
+                        dismiss()
+                    }
+                    .disabled(!canAdd)
+                }
+            }
+            .task {
+                // Focused on arrival, because the whole point is to say the
+                // thing while it is in mind — and because a keyboard that has
+                // to be summoned is a tap the free hand is not available for.
+                //
+                // After the presentation animation rather than during it:
+                // focus asked for while a sheet is still sliding up is
+                // routinely dropped on the floor, and a composer that comes up
+                // with no keyboard costs the tap this was meant to save.
+                try? await Task.sleep(for: .milliseconds(250))
+                writing = true
+            }
+        }
+    }
+}
+
+extension String {
+    /// `lines 12-40` → `Lines 12-40`, for the one place a phrase written for
+    /// mid-sentence use has to start one.
+    fileprivate var capitalizedFirst: String {
+        guard let first = self.first else { return self }
+        return first.uppercased() + dropFirst()
+    }
+}
+
+/// Everything written but not yet said, and the one button that says it.
+///
+/// **Collect, then send**, which is a decision about the agent rather than
+/// about the phone: five notes fired off as five prompts are five turns, each
+/// re-reading the files the last one just touched, and the fifth arrives while
+/// the agent is still acting on the first. The same five delivered together are
+/// one turn against one branch.
+///
+/// **Nothing here is ever resent on its own.** `session/prompt` goes out with
+/// `request_no_wait` and its response signals end-of-turn rather than receipt,
+/// so there is no acknowledgment anywhere on this path that an agent received a
+/// prompt. A failed send therefore means "this client did not get an answer",
+/// which is not the same as "the agent did not get the prompt" — and an
+/// automatic retry would be the app deciding, with no evidence, that a message
+/// which may already have arrived should arrive twice. So the notes stay, the
+/// failure is stated, and the reader is the one who decides.
+private struct CommentOutboxSheet: View {
+    @ObservedObject var comments: ReviewCommentQueue
+    let agents: [ReviewAgentTarget]
+    let branch: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let failure = comments.failure {
+                    Section {
+                        Label(failure, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+                Section {
+                    if comments.pending.isEmpty {
+                        Text("Nothing written yet. Tap the speech bubble beside a hunk.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(comments.pending) { comment in
+                        row(comment)
+                    }
+                    .onDelete { offsets in
+                        // Resolved to comments BEFORE anything is removed:
+                        // deleting by index while the indices are shifting
+                        // under the loop is how a two-row swipe deletes the
+                        // wrong second row.
+                        for comment in offsets.map({ comments.pending[$0] }) {
+                            comments.remove(comment)
+                        }
+                    }
+                } header: {
+                    Text("To Send")
+                }
+
+                if !comments.pending.isEmpty {
+                    Section {
+                        sendControl
+                    } footer: {
+                        Text(
+                            "Far Cooler can't tell whether an agent received a prompt, "
+                                + "so nothing is ever resent on its own.")
+                    }
+                }
+
+                if !comments.sent.isEmpty {
+                    Section {
+                        ForEach(comments.sent) { batch in
+                            sentRow(batch)
+                        }
+                    } header: {
+                        Text("Sent")
+                    } footer: {
+                        // The receipt, and why it is the only one there can be.
+                        Text("What went, and when. There's no delivery receipt to show.")
+                    }
+                }
+            }
+            .navigationTitle("Notes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    /// One button when there is one agent, a menu when there are several, and a
+    /// sentence when there are none.
+    ///
+    /// A picker with one entry would be a choice nobody has, and a disabled
+    /// button with no explanation is the app refusing without saying why: a
+    /// worktree whose agent has exited has nowhere to send to, and that is a
+    /// fact about the worktree rather than a fault in the notes.
+    @ViewBuilder
+    private var sendControl: some View {
+        if comments.sending {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Sending…").foregroundStyle(.secondary)
+            }
+        } else if agents.isEmpty {
+            Text("No agent is running in this worktree, so there's nowhere to send these yet.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } else if agents.count == 1, let only = agents.first {
+            Button {
+                Task { await comments.send(to: only, branch: branch) }
+            } label: {
+                Label(
+                    comments.failure == nil ? "Send to \(only.name)" : "Try Again",
+                    systemImage: "paperplane")
+            }
+        } else {
+            Menu {
+                ForEach(agents) { agent in
+                    Button(agent.name) {
+                        Task { await comments.send(to: agent, branch: branch) }
+                    }
+                }
+            } label: {
+                Label(
+                    comments.failure == nil ? "Send to an Agent" : "Try Again",
+                    systemImage: "paperplane")
+            }
+        }
+    }
+
+    private func row(_ comment: ReviewComment) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(comment.text)
+                .font(.subheadline)
+            Text(place(comment.anchor))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.head)
+        }
+    }
+
+    private func place(_ anchor: ReviewAnchor) -> String {
+        let leaf = (anchor.file as NSString).lastPathComponent
+        guard anchor.firstLine != nil else { return leaf }
+        return "\(leaf) · \(anchor.placeDescription)"
+    }
+
+    private func sentRow(_ batch: SentReviewBatch) -> some View {
+        DisclosureGroup {
+            Text(batch.text)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(batch.count == 1 ? "1 note" : "\(batch.count) notes")
+                    .font(.subheadline)
+                Text(
+                    "to \(batch.agentName) · "
+                        + Date(timeIntervalSince1970: batch.sentAt)
+                        .formatted(date: .omitted, time: .shortened)
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 /// The branch, one commit at a time.
 ///
 /// A branch is a sequence of decisions, and until this existed the pane could
@@ -607,6 +1747,10 @@ private struct ChangesNotice: View {
 /// `BranchPicker` and the worktree switcher. Lazy by construction, so a branch
 /// with six hundred commits on it costs what a screenful costs; `.searchable`
 /// is what makes that branch usable rather than merely survivable.
+///
+/// A picker, and now ONLY a picker: reading a branch commit by commit no longer
+/// comes through here, because it never should have — see `commitEntry` and
+/// `ChangesStore.showNextCommit`. This is for the commit somebody has in mind.
 private struct CommitHistorySheet: View {
     @ObservedObject var store: ChangesStore
     @Environment(\.dismiss) private var dismiss
@@ -623,12 +1767,16 @@ private struct CommitHistorySheet: View {
     private var shown: [ChangeCommit] {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else { return store.commitsNewestFirst }
-        // Subject, author and sha, because all three are things people
-        // half-remember about a commit they are looking for. The sha is matched
-        // as a prefix: nobody searches for the middle of a hash, and a
-        // substring match on hex turns every two-character query into noise.
+        // Subject, body, author and sha, because all four are things people
+        // half-remember about a commit they are looking for. The body is in
+        // there now that it is carried at all, and it is often where the word
+        // somebody remembers actually appears — an agent puts the file it
+        // touched in the rationale far more often than in the subject. The sha
+        // is matched as a prefix: nobody searches for the middle of a hash, and
+        // a substring match on hex turns every two-character query into noise.
         return store.commitsNewestFirst.filter {
             $0.subject.lowercased().contains(query)
+                || ($0.bodyText?.lowercased().contains(query) ?? false)
                 || $0.author.lowercased().contains(query)
                 || $0.sha.lowercased().hasPrefix(query)
         }
@@ -718,13 +1866,17 @@ private struct CommitHistorySheet: View {
         }
     }
 
-    /// Sha, subject, author and age — everything that is actually known.
+    /// Sha, subject, the top of the rationale, author, age and what it changed.
     ///
-    /// No `+N -M`, and that is not an omission this file can fix: the daemon
-    /// hardcodes all three of `ChangeCommit`'s count fields to zero and the wire
-    /// drops them entirely. See `ChangeCommit`'s own comment. The counts appear
-    /// in the summary card once a commit is chosen, summed from the file list
-    /// that choosing it fetches, where they are real numbers.
+    /// The two lines of body are the addition that changes what this list is
+    /// for. A subject is a label; the body is the closest thing an agent writes
+    /// to an explanation, and two lines of it is usually the difference between
+    /// "some commit about retries" and knowing whether this is the commit worth
+    /// opening — which, with ninety seconds, decides the whole window.
+    ///
+    /// The `+N −M` are the daemon's own, from `--shortstat` on the same
+    /// `git log` that produced the row, and they are absent rather than zero
+    /// when it could not count them. See `ChangeCommit.counts`.
     private func row(_ commit: ChangeCommit) -> some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
@@ -736,6 +1888,13 @@ private struct CommitHistorySheet: View {
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
+                if let preview = commit.bodyPreview {
+                    Text(preview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
                 HStack(spacing: 6) {
                     Text(commit.short)
                         .font(.caption2.monospaced())
@@ -753,6 +1912,32 @@ private struct CommitHistorySheet: View {
                 }
             }
             Spacer(minLength: 4)
+            // Down the trailing edge rather than along the meta line, which had
+            // no room left: sha, author and age already fill a phone's width,
+            // and a fourth and fifth item on that line truncated the author to
+            // an initial.
+            VStack(alignment: .trailing, spacing: 2) {
+                if let counts = commit.counts {
+                    HStack(spacing: 4) {
+                        Text("+\(counts.insertions)")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.green)
+                        Text("−\(counts.deletions)")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.red)
+                    }
+                }
+                // How WIDE the commit is, which the two line counts do not say:
+                // `+300 −40` across one file is a rewrite and across thirty is
+                // a rename sweep, and on a branch being read one commit at a
+                // time that is the difference between opening it now and
+                // leaving it for the next window.
+                if let touched = commit.filesChanged, touched > 0 {
+                    Text(touched == 1 ? "1 file" : "\(touched) files")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
             if store.scope.commitSha == commit.sha {
                 Image(systemName: "checkmark").font(.footnote).foregroundStyle(.tint)
             }

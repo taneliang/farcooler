@@ -53,6 +53,9 @@ SOURCES = [
     "AdapterEditorView.swift",
     "Changes.swift",
     "ChangesView.swift",
+    # Where the reader was and what they want to say, both of which outlive the
+    # process — see its own doc comment.
+    "ChangesReview.swift",
     "BranchAndStack.swift",
 ]
 

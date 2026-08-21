@@ -326,7 +326,8 @@ fn change_set_json(cs: &pb::ChangeSet) -> serde_json::Value {
         // sums a selected commit's file list to get `+N -M` is now summing to
         // reach a number it was sent.
         "commits": cs.commits.iter().map(|c| serde_json::json!({
-            "sha": c.sha, "subject": c.subject, "author": c.author, "timestamp": c.timestamp,
+            "sha": c.sha, "subject": c.subject, "body": c.body,
+            "author": c.author, "timestamp": c.timestamp,
             "files_changed": c.files_changed,
             "insertions": c.insertions,
             "deletions": c.deletions,

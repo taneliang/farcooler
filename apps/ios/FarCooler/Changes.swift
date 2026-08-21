@@ -56,25 +56,124 @@ struct ChangeSet: Decodable, Equatable {
     var baseIsGuessed: Bool { baseSource == "guessed" }
 }
 
-/// One commit on this branch, as the history sheet draws it.
+/// One commit on this branch, as the history list and the commit header draw
+/// it.
 ///
-/// Four fields and no counts, which is not an oversight and cannot be fixed
-/// here: `ChangeCommit` in the protocol carries `files_changed`, `insertions`
-/// and `deletions`, but `commits_since` in crates/daemon/src/change_set.rs
-/// writes 0 into all three, and `change_set_json` in
-/// crates/client/src/session.rs does not project them onto the wire at all. So
-/// a row says what is actually known — who, when, and what they called it —
-/// and the `+N -M` for a commit appears once it is SELECTED, summed from the
-/// file list that selection fetches. Two zeroes dressed up as a count would be
-/// worse than no count.
+/// ## Everything past `timestamp` is optional, and has to be
+///
+/// Swift's synthesized `Decodable` throws on a missing key, and this type is
+/// decoded inside `ChangeSet` — so a phone that met a runner whose daemon
+/// predates any one of these fields would fail to decode the ENTIRE change set,
+/// every file and every commit, over one absent key. Optional is therefore not
+/// a nicety here; it is what lets an older runner show a commit with no
+/// rationale and no counts, which is exactly what such a runner knows.
+///
+/// ## The counts
+///
+/// `files_changed`, `insertions` and `deletions` were hardcoded zeroes in
+/// `commits_since` (crates/daemon/src/change_set.rs) for as long as that
+/// function existed, and `change_set_json` did not project them, so both
+/// clients worked around it by summing the file list of whichever commit had
+/// been SELECTED — which meant a history row could not say what a commit did
+/// until it was opened. `--shortstat` on the same `git log` now answers, with
+/// `--diff-merges=first-parent` so a merge's row agrees with the file list it
+/// opens.
+///
+/// **Zero still means unknown**, which is why `counts` below returns nil for
+/// it. A runner on a git older than 2.31 rejects `--diff-merges` and the daemon
+/// retries without it, leaving merges at the zeroes they always had; and a
+/// commit that genuinely changed nothing is rare enough that showing `+0 −0`
+/// for it is a worse trade than staying quiet. The number that IS shown is the
+/// same number the summed file list produces — `--shortstat` is the sum of the
+/// same commit's `--numstat`, renames detected on both sides.
 struct ChangeCommit: Decodable, Equatable, Identifiable {
     var sha: String
     var subject: String
+    /// Everything the author wrote after the subject line.
+    ///
+    /// `body = 3` has been in `ChangeCommit` in the protocol since the message
+    /// existed, and it was dropped on the way out rather than never carried:
+    /// `change_set_json` in crates/client/src/session.rs projected four fields
+    /// and this was not one of them.
+    ///
+    /// It matters more for agent work than for human work. An agent's commit
+    /// body is usually the closest thing to a written rationale for what it
+    /// did — why this approach, what it decided against, what it could not
+    /// finish — and it is the cheapest context available before reading a
+    /// single line of diff, which on a phone between two sets is the only
+    /// context there is time for.
+    var body: String?
     var author: String
     var timestamp: Int
+    var filesChanged: Int?
+    var insertions: Int?
+    var deletions: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case sha, subject, body, author, timestamp, insertions, deletions
+        case filesChanged = "files_changed"
+    }
 
     var id: String { sha }
     var short: String { String(sha.prefix(8)) }
+
+    /// `+N −M`, when the daemon actually counted them.
+    ///
+    /// Nil rather than `(0, 0)` for the reason the type comment gives: on this
+    /// wire a zero is indistinguishable from "this runner could not tell you",
+    /// and a row claiming `+0 −0` about a merge on an old git would be stating
+    /// a fact nobody established.
+    var counts: (insertions: Int, deletions: Int)? {
+        let plus = insertions ?? 0
+        let minus = deletions ?? 0
+        guard plus > 0 || minus > 0 else { return nil }
+        return (plus, minus)
+    }
+
+    /// The body with its surrounding whitespace gone, or nil if there was none.
+    ///
+    /// Nil rather than an empty string so every caller's `if let` is the same
+    /// shape whether the field was absent (an older runner) or present and
+    /// empty (a commit with only a subject, which is most of them).
+    var bodyText: String? {
+        let trimmed = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The first paragraph worth putting in a list row.
+    ///
+    /// The first paragraph rather than the first line, because a body is prose
+    /// that was wrapped for a terminal and its first line is half a sentence.
+    ///
+    /// Trailer-only paragraphs are skipped. Every commit in this repository
+    /// ends in `Co-Authored-By:` and most agent commits add more of the same,
+    /// and a row whose one line of preview reads `Co-Authored-By: Claude …` has
+    /// spent the most valuable line on the screen saying nothing. Skipped, not
+    /// stripped: the full body is shown in the header, trailers and all, since
+    /// on the screen that is ABOUT one commit they are part of what it says.
+    var bodyPreview: String? {
+        guard let bodyText else { return nil }
+        for paragraph in bodyText.components(separatedBy: "\n\n") {
+            let lines = paragraph.split(separator: "\n", omittingEmptySubsequences: true)
+            guard !lines.isEmpty else { continue }
+            guard lines.allSatisfy({ Self.isTrailer(String($0)) }) else {
+                return lines.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
+    }
+
+    /// `Key: value` at the start of a line, which is git's own shape for a
+    /// trailer. Deliberately loose — this decides what to show first, not what
+    /// to keep, so a false positive costs a paragraph's place in a preview and
+    /// never a line of the body.
+    private static func isTrailer(_ line: String) -> Bool {
+        guard let colon = line.firstIndex(of: ":"), colon > line.startIndex else { return false }
+        let key = line[line.startIndex..<colon]
+        guard line.index(after: colon) < line.endIndex else { return false }
+        guard line[line.index(after: colon)] == " " else { return false }
+        return key.allSatisfy { $0.isLetter || $0 == "-" }
+    }
 
     /// How long ago this commit was made, in the same shorthand a working
     /// agent's row already uses: `12m`, `3h`, `2d`.
@@ -131,6 +230,54 @@ struct ChangedFile: Decodable, Equatable, Identifiable {
         case path, status, insertions, deletions, binary
         case oldPath = "old_path"
     }
+
+    /// Whether a tool wrote this file rather than a person or an agent.
+    ///
+    /// It exists because of what it does to the two numbers at the top of the
+    /// screen. A branch that touched eleven source files and regenerated
+    /// `Cargo.lock` reads as four thousand lines changed, and the reader — who
+    /// has ninety seconds — has no way to tell that from a branch that really
+    /// did rewrite four thousand lines. Counted apart, the same branch reads as
+    /// `+300 −120`, and a quieter line underneath says a lockfile moved too.
+    ///
+    /// **This rule belongs on the host, beside `crates/core/src/feed.rs`.** It
+    /// is a fact about a repository — what its build regenerates, what its
+    /// `.gitattributes` marks `linguist-generated`, what its own conventions
+    /// call vendored — and the host is the only place that can read any of
+    /// that. Deciding it here means two clients with two lists, and a phone
+    /// that is wrong about a repository it has never seen. It is here only
+    /// because putting it there is a protocol field plus a daemon rule plus
+    /// both clients, which is a larger change than this screen; when that
+    /// lands, this becomes a fallback for older runners and nothing else.
+    ///
+    /// Deliberately conservative in the meantime. Everything below is a name a
+    /// tool writes and nobody edits by hand, so a false positive costs a fold
+    /// the reader can open with one tap; a rule like "anything under `vendor/`"
+    /// would start folding files people wrote.
+    var isGenerated: Bool { Self.isGenerated(path) }
+
+    static func isGenerated(_ path: String) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        if generatedNames.contains(name) { return true }
+        // Suffixes rather than whole names, for the families whose stem varies:
+        // `pnpm-lock.yaml` is matched above, `schema.generated.ts` here.
+        return generatedSuffixes.contains { name.hasSuffix($0) }
+    }
+
+    private static let generatedNames: Set<String> = [
+        "Cargo.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
+        "Gemfile.lock", "Podfile.lock", "poetry.lock", "uv.lock", "composer.lock",
+        "go.sum", "Package.resolved", "flake.lock", "gradle.lockfile", "mix.lock",
+        // An .xcodeproj is generated state in this repository specifically —
+        // `apps/ios/generate-project.py` writes it — and it is the file that
+        // most often makes an iOS branch look twice its size.
+        "project.pbxproj",
+    ]
+
+    private static let generatedSuffixes: [String] = [
+        ".generated.swift", ".generated.ts", ".generated.go", ".g.dart", ".pb.go",
+        ".pb.rs", "_pb2.py",
+    ]
 }
 
 enum ChangedFileStatus: String, Decodable {
@@ -319,27 +466,57 @@ final class ChangesStore: ObservableObject {
     /// empty. An unread file and a file with no hunks are not the same thing.
     @Published var loadingFiles: Set<String> = []
 
-    /// Files folded down to their heading.
+    /// The one file whose patch is open, or nil when the pane is a list of
+    /// headings.
     ///
-    /// Starts holding EVERY file, so the pane opens as a list of what changed
-    /// rather than as the first file's patch — the overview is the thing you
-    /// come to this screen for, and on a phone one expanded diff fills the
-    /// screen and buries the other nineteen files below it. Opening one is a
-    /// tap; scrolling past nineteen open ones is not.
+    /// ONE, not a set, and that is a change of shape rather than a tightening
+    /// of a limit. Every file starts folded so the pane opens as a list of what
+    /// changed rather than as the first file's patch — the overview is what you
+    /// come to this screen for, and on a phone one expanded diff already fills
+    /// the screen. Letting a second one open buries the first under it, and by
+    /// the fifth the list has stopped being navigable in either direction.
     ///
-    /// It also means nothing is fetched until it is asked for: `ChangesFileCard`
-    /// only calls `ensure` when it is expanded, so a forty-file branch costs one
-    /// round trip on arrival instead of forty.
-    @Published var collapsedFiles: Set<String> = []
+    /// Holding exactly one is also what makes the rest of this screen possible.
+    /// "Where am I" has an answer, so the bar at the bottom can say `7 of 23`;
+    /// "the next file" has an answer, so Next and Previous can exist at all;
+    /// and the bookmark has one path to write down instead of a set whose
+    /// meaning on re-entry would be a guess. A set could express none of that.
+    ///
+    /// It also keeps the phone's cellular cost at one file: `ChangesFileCard`
+    /// calls `ensure` only when it is expanded, so a forty-file branch costs
+    /// one round trip on arrival rather than forty.
+    @Published private(set) var expandedFile: String?
 
-    /// Which files have EVER been seen, so newly-arrived ones can be collapsed
-    /// without re-collapsing anything somebody deliberately opened.
-    private var known: Set<String> = []
+    // No scroll offset here, and none in the bookmark either — see
+    // `ReviewPosition`, which explains at length why a position on this screen
+    // is a PATH. The Mac's `ChangesStore` holds an offset because its pane is
+    // destroyed when a tmux layout is switched; this one's is not, since
+    // `PaneHost` keeps every visited pane mounted, so within one run of the app
+    // the scroll never moves and there is nothing to put back.
 
-    // No scroll position here. The Mac's `ChangesStore` holds one because its
-    // pane is destroyed when a tmux layout is switched; this one's is not —
-    // `PaneHost` keeps every visited pane mounted, so the scroll view is never
-    // rebuilt and never needs putting back.
+    /// A file the view should scroll to, once.
+    ///
+    /// The identity is what makes it fire: tapping the same file in the index
+    /// twice, or pressing Next into a file that is already the expanded one
+    /// after a refresh reshuffled the list, has to move the scroll both times,
+    /// and a bare `String?` compares equal and does nothing the second time.
+    /// The view clears it after acting, so nothing re-scrolls under somebody
+    /// who has since scrolled away.
+    @Published var jump: Jump?
+
+    struct Jump: Equatable {
+        let id = UUID()
+        let path: String
+    }
+
+    /// The id of the summary card, so "land at the top and say why" has
+    /// somewhere to land.
+    ///
+    /// A jump names a path and every card answers to one; the summary answers
+    /// to this, which is a string no path can be. That keeps one channel for
+    /// every scroll on this screen rather than a second mechanism for the one
+    /// case that is not a file.
+    static let topAnchor = "changes.top"
 
     /// Files the daemon would not render, and why. Held so the row can say so
     /// rather than being a control that does nothing when tapped.
@@ -357,9 +534,17 @@ final class ChangesStore: ObservableObject {
             // Mac needs a second reset written out inside `select(commit:)`.
             fileDiffs = [:]
             unsupported = [:]
-            // Every scope is a different file list, so which of them is folded
-            // has to be worked out again rather than carried across.
-            known = []
+            // Every scope is a different file list, so the open file goes with
+            // it rather than being carried across — the same path can exist in
+            // both and mean two different patches, which is the one way this
+            // screen could show a commit's hunks under the branch's heading.
+            expandedFile = nil
+            topFile = nil
+            // The cards that were on screen belong to the list that is being
+            // replaced. A path can exist in both scopes, so a leftover entry
+            // here would let a card nobody can see decide where the bookmark
+            // says the reader is.
+            onScreen = []
             // A commit's file list is FETCHED rather than derived from the
             // change set, so leaving the previous one in place would put the
             // old commit's files under the new one's subject for as long as the
@@ -367,7 +552,8 @@ final class ChangesStore: ObservableObject {
             commitFiles = []
             commitUnreadable = false
             generation &+= 1
-            adoptFoldState()
+            adoptExpansion()
+            rememberPosition()
         }
     }
 
@@ -417,14 +603,57 @@ final class ChangesStore: ObservableObject {
     @Published var loading = false
     @Published var error: String?
 
+    /// What the reader wants to tell the agent, collected across the review.
+    ///
+    /// A separate object rather than more `@Published`s here, because its
+    /// lifetime is different in the way that matters: everything else on this
+    /// store is derived from the daemon and can be thrown away and re-read,
+    /// while a comment is the only thing on this screen that a person typed and
+    /// that nothing else in the world has a copy of. It persists itself; see
+    /// `ReviewCommentQueue`.
+    let comments: ReviewCommentQueue
+
+    /// The file at the top of the screen, when none is expanded.
+    ///
+    /// Not `@Published`: nothing draws it. It exists only so the bookmark has
+    /// something to say about a reader who was going down the list of headings
+    /// rather than reading a patch, which is most of the first window of a
+    /// review.
+    private var topFile: String?
+
+    /// The cards currently on screen, for the same reason and with the same
+    /// silence. See `noteVisible`.
+    private var onScreen: Set<String> = []
+
+    /// A bookmark from a previous run of the app, offered but not applied.
+    ///
+    /// Offered, and that is deliberate. Restoring silently would put somebody
+    /// who opened this pane to check one thing into the middle of a patch they
+    /// were reading yesterday, and — worse — a branch that moved underneath
+    /// them in between would land them somewhere that looks like where they
+    /// were and is not. So the app says where it thinks they were and waits.
+    @Published private(set) var resume: ReviewPosition?
+
+    /// Why the resume did not land exactly where it was aimed.
+    ///
+    /// A position is a HINT and is allowed to be wrong: an agent that kept
+    /// working overnight deletes files, rewrites commits, and renames the thing
+    /// that was being read. The rule is to land as close as possible — the top
+    /// of the branch, the top of the file — and to say so, rather than to
+    /// pretend the bookmark was honored or to refuse to move at all.
+    @Published var resumeNote: String?
+
     private let core: ClientCore
     private let workspace: String
     /// Whether this store has ever read the worktree.
     private var hasLoaded = false
+    /// Whether the bookmark has already had its one chance to be offered.
+    private var hasOfferedResume = false
 
     init(core: ClientCore, workspace: String) {
         self.core = core
         self.workspace = workspace
+        self.comments = ReviewCommentQueue(core: core, workspace: workspace)
     }
 
     /// The files this scope is about.
@@ -548,7 +777,138 @@ final class ChangesStore: ObservableObject {
         if let sha = scope.commitSha {
             await readCommitFiles(sha)
         }
-        adoptFoldState()
+        adoptExpansion()
+        offerResumeOnce()
+    }
+
+    // MARK: - Where you stopped
+
+    /// Read the bookmark, once per run of the app, and offer it.
+    ///
+    /// After the first load rather than before it, because the offer names a
+    /// commit's subject and a file, and both of those are things only the
+    /// change set can supply. Offered once: a pull to refresh is somebody
+    /// asking about the branch they are already reading, and re-offering to
+    /// take them somewhere else would be the app arguing with them.
+    private func offerResumeOnce() {
+        guard !hasOfferedResume else { return }
+        hasOfferedResume = true
+        guard error == nil else { return }
+        guard let saved = ReviewBookmarks.read(workspace), saved.isSomewhere else { return }
+        // Already there. Two ways that happens and both must be caught, or the
+        // card is an interruption that resolves to nothing:
+        //
+        // - the store outlived a tab switch rather than a termination, so every
+        //   part of the position still matches what is on screen; or
+        // - the position IS the top of the list — somebody who opened the pane,
+        //   read the first heading and got called away is not somewhere that
+        //   needs restoring to.
+        let unmoved =
+            saved.scope == scope.wire && saved.file == expandedFile
+            && saved.topFile == topFile
+        let atTheTop =
+            saved.scope == scope.wire && saved.file == nil
+            && saved.topFile == reviewOrder.first?.path
+        guard !unmoved, !atTheTop else { return }
+        resume = saved
+    }
+
+    /// Take the offer.
+    ///
+    /// Every step is allowed to fail, and each failure lands one level further
+    /// out with a sentence saying which one gave way. That is the whole
+    /// contract of this feature: a bookmark is a hint about a branch that an
+    /// agent has probably kept editing, and the alternative to landing nearby
+    /// and saying so is either lying about where you are or refusing to move.
+    func applyResume() async {
+        guard let saved = resume else { return }
+        resume = nil
+        resumeNote = nil
+
+        if let sha = ReviewPosition.sha(in: saved.scope) {
+            guard changeSet.commits.contains(where: { $0.sha == sha }) else {
+                // The commit was amended or rebased away overnight, which for
+                // an agent-authored branch is not an edge case. The branch as a
+                // whole still contains its work, so that is where this lands.
+                resumeNote =
+                    "That commit isn't on the branch anymore — it was amended or rebased. "
+                    + "This is the whole branch instead."
+                showWholeBranch()
+                jump = Jump(path: Self.topAnchor)
+                return
+            }
+            await select(commit: sha)
+        } else if saved.scope == "local" {
+            scope = .local
+        } else {
+            scope = .branch
+        }
+
+        let live = files.map(\.path)
+        if let file = saved.file {
+            guard live.contains(file) else {
+                resumeNote =
+                    "\((file as NSString).lastPathComponent) isn't in this diff anymore, "
+                    + "so this is the top."
+                jump = Jump(path: Self.topAnchor)
+                return
+            }
+            expand(file)
+        } else if let top = saved.topFile, live.contains(top) {
+            jump = Jump(path: top)
+        }
+    }
+
+    func dismissResume() {
+        resume = nil
+        // Not forgotten, only declined. Somebody who taps the X wants this
+        // screen out of the way, not a bookmark deleted — the next window may
+        // well be the one they meant to resume in.
+        resumeNote = nil
+    }
+
+    /// Write down where the reader is.
+    ///
+    /// Called on every move rather than on the way out, because there is no way
+    /// out to hook: iOS terminates a suspended app without telling it, which in
+    /// the situation this screen is built for is the NORMAL way a review window
+    /// ends. `UserDefaults` coalesces writes itself, and the record is three
+    /// short strings.
+    private func rememberPosition() {
+        // Not while an offer is on the table. The first cards realize
+        // themselves the moment the pane draws, and each one reports its
+        // visibility — so without this, arriving at the screen would overwrite
+        // the very position the "Continue where you stopped" card is offering,
+        // and a reader who tapped it after a second termination would be taken
+        // to the top of the branch they had just opened.
+        guard resume == nil else { return }
+        ReviewBookmarks.write(
+            ReviewPosition(
+                scope: scope.wire, file: expandedFile, topFile: topFile,
+                savedAt: Date().timeIntervalSince1970),
+            for: workspace)
+    }
+
+    /// A card said whether it is on screen. See `topFile`.
+    ///
+    /// The set is kept here rather than in a `@State` in the view on purpose:
+    /// this fires several times a second while somebody scrolls, and a
+    /// `@Published` — or a `@State` in `ChangesView` — would re-evaluate a
+    /// forty-card lazy stack on every one of them. Nothing draws this, so
+    /// nothing needs to be told about it.
+    func noteVisible(_ path: String, isVisible: Bool) {
+        if isVisible {
+            onScreen.insert(path)
+        } else {
+            onScreen.remove(path)
+        }
+        // The topmost visible card, which is the reading-order first one that
+        // is on screen — not "the last card that appeared", which depends on
+        // which way the scroll was going.
+        let top = reviewOrder.first { onScreen.contains($0.path) }?.path
+        guard top != topFile else { return }
+        topFile = top
+        rememberPosition()
     }
 
     // MARK: - One commit at a time
@@ -582,6 +942,147 @@ final class ChangesStore: ObservableObject {
     var commitInsertions: Int { commitFiles.reduce(0) { $0 + $1.insertions } }
     var commitDeletions: Int { commitFiles.reduce(0) { $0 + $1.deletions } }
 
+    // MARK: - The branch, one commit at a time
+
+    /// The commits in the order they are READ, which is the order they were
+    /// made: base forward.
+    ///
+    /// The opposite of `commitsNewestFirst`, and both are right for what they
+    /// are for. A picker is reached for with one commit in mind and it is
+    /// almost always the newest, so that list leads with it. Working THROUGH a
+    /// branch is a different activity: each commit is one intention, and an
+    /// agent's intentions only make sense forwards — the third commit fixes
+    /// what the second one introduced, and read backwards it is a repair to
+    /// something that has not happened yet. `commits_since` already logs with
+    /// `--reverse` for exactly this reading, so this is the wire's own order.
+    var commitsInOrder: [ChangeCommit] { changeSet.commits }
+
+    var commitIndex: Int? {
+        guard let sha = scope.commitSha else { return nil }
+        return commitsInOrder.firstIndex { $0.sha == sha }
+    }
+
+    /// `Commit 3 of 12`, for the header of a commit being read in sequence.
+    ///
+    /// Nil for a commit the branch no longer lists, which an amend mid-review
+    /// produces: it has no position in a sequence it is not in, and inventing
+    /// one would be the header's one claim that could be flatly wrong.
+    var commitPositionLabel: String? {
+        guard let commitIndex else { return nil }
+        return "Commit \(commitIndex + 1) of \(commitsInOrder.count)"
+    }
+
+    var nextCommit: ChangeCommit? {
+        guard let commitIndex, commitIndex + 1 < commitsInOrder.count else { return nil }
+        return commitsInOrder[commitIndex + 1]
+    }
+
+    var previousCommit: ChangeCommit? {
+        guard let commitIndex, commitIndex > 0 else { return nil }
+        return commitsInOrder[commitIndex - 1]
+    }
+
+    /// Begin the itinerary: the first commit the branch made.
+    ///
+    /// The way in that the History sheet is not. A sheet is the right shape for
+    /// "which one of these", and the wrong shape for "start at the beginning
+    /// and keep going" — which for an agent-authored branch is the reading that
+    /// makes it legible, and the reading this screen exists to support.
+    func startAtFirstCommit() async {
+        guard let first = commitsInOrder.first else { return }
+        await select(commit: first.sha)
+    }
+
+    /// Move one commit along the branch, without going back out to a sheet.
+    ///
+    /// This is what makes commit-by-commit a path rather than a detour: the
+    /// reader finishes a commit's last file and the same control that has been
+    /// moving them through files moves them to the next intention. Returning to
+    /// a picker between every commit is twelve extra taps on a branch of twelve
+    /// and a reason not to read it this way at all.
+    func showNextCommit() async {
+        guard let next = nextCommit else { return }
+        await select(commit: next.sha)
+    }
+
+    func showPreviousCommit() async {
+        guard let previous = previousCommit else { return }
+        await select(commit: previous.sha)
+    }
+
+    /// Whether Next should carry on into the following commit.
+    ///
+    /// Only at the END of a commit's files, so the control means one thing at a
+    /// time: while there are files left it is "next file", and exactly once per
+    /// commit it becomes "next commit" and says so on its face.
+    var nextIsCommit: Bool {
+        scope.commitSha != nil && !hasNextFile && nextCommit != nil
+    }
+
+    // MARK: - What a tool wrote
+
+    /// The files a build regenerated, and the ones a person or an agent wrote.
+    ///
+    /// Split rather than filtered: a lockfile that moved is a real fact about a
+    /// branch, and hiding it would be this screen deciding what the reader is
+    /// allowed to see. Only its SIZE is misleading — see `ChangedFile.isGenerated`
+    /// — so the two are counted apart and both are listed.
+    var generatedFiles: [ChangedFile] { files.filter(\.isGenerated) }
+    var handWrittenFiles: [ChangedFile] { files.filter { !$0.isGenerated } }
+
+    /// The files in reading order: what somebody wrote, then what a tool wrote.
+    ///
+    /// The order the screen draws AND the order Next and Previous walk, which
+    /// is why it is one property rather than a sort inside the view: `7 of 23`
+    /// has to count the list the reader is looking at, and a display order that
+    /// differed from the navigation order would make Next jump backwards up the
+    /// screen.
+    ///
+    /// Generated last rather than in the daemon's order, because the reason
+    /// they are marked at all is that they are not what the review is about —
+    /// and Next dropping somebody into the middle of a regenerated lockfile,
+    /// eleven files before the end, is the tap that ends a review.
+    var reviewOrder: [ChangedFile] { handWrittenFiles + generatedFiles }
+
+    /// `4,012 lines` across the generated files, for the line under the counts.
+    var generatedLineCount: Int {
+        generatedFiles.reduce(0) { $0 + $1.insertions + $1.deletions }
+    }
+
+    var writtenInsertions: Int { handWrittenFiles.reduce(0) { $0 + $1.insertions } }
+    var writtenDeletions: Int { handWrittenFiles.reduce(0) { $0 + $1.deletions } }
+    var generatedInsertions: Int { generatedFiles.reduce(0) { $0 + $1.insertions } }
+    var generatedDeletions: Int { generatedFiles.reduce(0) { $0 + $1.deletions } }
+
+    /// The two numbers for the commit on screen, generated files held apart.
+    ///
+    /// Three sources in order of how much they know, which is not
+    /// over-engineering but the three things that are actually true at
+    /// different moments:
+    ///
+    /// 1. When this comparison contains a generated file, the headline is the
+    ///    hand-written subtotal — summed from the file list, because the row's
+    ///    own `--shortstat` counts the whole commit and the lockfile in it is
+    ///    the number this split exists to stop showing.
+    /// 2. Otherwise the daemon's own count off `ChangeCommit`, which arrives
+    ///    with the change set and is therefore right before the commit's file
+    ///    list has landed.
+    /// 3. Otherwise the sum of that file list, which is what both clients did
+    ///    for as long as the daemon's three count fields were hardcoded zeroes.
+    ///
+    /// All three are the same number when more than one is available:
+    /// `--shortstat` is the sum of the same commit's `--numstat`, with renames
+    /// detected on both sides and binaries contributing zero to both.
+    var commitCounts: (insertions: Int, deletions: Int)? {
+        if !generatedFiles.isEmpty {
+            guard !commitFiles.isEmpty else { return nil }
+            return (writtenInsertions, writtenDeletions)
+        }
+        if let counts = selectedCommitInfo?.counts { return counts }
+        guard !commitFiles.isEmpty else { return nil }
+        return (commitInsertions, commitDeletions)
+    }
+
     /// Show one commit, against its first parent.
     func select(commit sha: String) async {
         // Already showing it. Re-reading would spend a round trip to arrive at
@@ -607,7 +1108,78 @@ final class ChangesStore: ObservableObject {
         // list on the way past.
         guard asked == generation else { return }
         loading = false
-        adoptFoldState()
+        adoptExpansion()
+    }
+
+    // MARK: - Moving through the files
+
+    var currentIndex: Int? {
+        guard let expandedFile else { return nil }
+        return reviewOrder.firstIndex { $0.path == expandedFile }
+    }
+
+    /// `7 of 23`, or the count on its own when nothing is open.
+    ///
+    /// Said in words rather than left to a scrollbar, because a phone's
+    /// scrollbar is a hairline that appears while you drag and disappears while
+    /// you read — so the one question a long diff raises, "how much of this is
+    /// left", has no answer on screen at the moment it is asked.
+    var positionLabel: String {
+        let total = reviewOrder.count
+        guard total > 0 else { return "No files" }
+        guard let currentIndex else {
+            return total == 1 ? "1 file" : "\(total) files"
+        }
+        return "\(currentIndex + 1) of \(total)"
+    }
+
+    func isExpanded(_ path: String) -> Bool { expandedFile == path }
+
+    /// Open one file, closing whatever was open. See `expandedFile`.
+    func expand(_ path: String?) {
+        guard expandedFile != path else { return }
+        expandedFile = path
+        rememberPosition()
+        if let path { jump = Jump(path: path) }
+    }
+
+    func toggle(_ path: String) {
+        if expandedFile == path {
+            expandedFile = nil
+            rememberPosition()
+        } else {
+            expand(path)
+        }
+    }
+
+    var hasNextFile: Bool {
+        guard !reviewOrder.isEmpty else { return false }
+        guard let currentIndex else { return true }
+        return currentIndex + 1 < reviewOrder.count
+    }
+
+    var hasPreviousFile: Bool {
+        guard let currentIndex else { return false }
+        return currentIndex > 0
+    }
+
+    /// The next file, or the first one when the reader is still on the list.
+    ///
+    /// Starting the sequence from "nothing open" is the point: Next is then the
+    /// single control that begins a review as well as continuing one, which on
+    /// a phone held in one hand is worth more than the symmetry of having it do
+    /// nothing until something is selected.
+    func showNextFile() {
+        let order = reviewOrder
+        guard !order.isEmpty else { return }
+        guard let currentIndex else { return expand(order[0].path) }
+        guard currentIndex + 1 < order.count else { return }
+        expand(order[currentIndex + 1].path)
+    }
+
+    func showPreviousFile() {
+        guard let currentIndex, currentIndex > 0 else { return }
+        expand(reviewOrder[currentIndex - 1].path)
     }
 
     /// Back to the whole branch: merge base to HEAD, every commit at once.
@@ -646,15 +1218,18 @@ final class ChangesStore: ObservableObject {
         }
     }
 
-    /// Collapse anything not seen before; leave everything else as the user
-    /// left it.
+    /// Keep the open file open, unless it has stopped existing.
     ///
-    /// Not simply "collapse all on load": a poll that picks up one new commit
-    /// would then fold away the file somebody was mid-way through reading.
-    private func adoptFoldState() {
-        let live = Set(files.map(\.path))
-        collapsedFiles = collapsedFiles.intersection(live).union(live.subtracting(known))
-        known = live
+    /// Not "collapse everything on load": a poll that picks up one new commit
+    /// would then fold away the file somebody is mid-way through reading, which
+    /// on this screen is the whole of what they were doing. Only a file that is
+    /// no longer in this scope's list gives way, and it has to — nothing would
+    /// draw it.
+    private func adoptExpansion() {
+        guard let open = expandedFile else { return }
+        guard !files.contains(where: { $0.path == open }) else { return }
+        expandedFile = nil
+        rememberPosition()
     }
 
     /// Read one file's diff, if it has not been read already.
@@ -687,12 +1262,37 @@ final class ChangesStore: ObservableObject {
             } else {
                 fileDiffs[path] = diff.lines()
             }
+            prefetchAfter(path)
         } catch {
             // Left unread rather than recorded as empty, so pulling to refresh
             // tries it again instead of showing a permanent blank.
             guard asked == generation else { return }
             fileDiffs[path] = nil
         }
+    }
+
+    /// Read the file after this one, so Next lands on a patch instead of on a
+    /// spinner.
+    ///
+    /// Exactly ONE file ahead, and only from the file that is actually open.
+    /// Since a file is fetched when it is expanded and only one is ever
+    /// expanded, pressing Next used to buy a round trip over somebody's
+    /// cellular link every single time — which is the tap this whole screen is
+    /// built around. One ahead pays for that with one extra read per file and
+    /// no runaway: the prefetched file is not expanded, so it does not fetch
+    /// the one after it, and the chain stops at one.
+    private func prefetchAfter(_ path: String) {
+        guard path == expandedFile else { return }
+        let order = reviewOrder
+        guard let index = order.firstIndex(where: { $0.path == path }),
+            index + 1 < order.count
+        else { return }
+        let next = order[index + 1].path
+        guard fileDiffs[next] == nil, !loadingFiles.contains(next) else { return }
+        // Not awaited: the file on screen has landed and nothing about drawing
+        // it is waiting on this. A detached read that arrives after the reader
+        // has moved on is discarded by the generation check inside `ensure`.
+        Task { await ensure(next) }
     }
 
     /// Mark this worktree as read, which is what clears its badge everywhere.

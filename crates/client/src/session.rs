@@ -1303,6 +1303,11 @@ fn change_set_json(cs: &farcooler_protocol::v1::ChangeSet) -> serde_json::Value 
         "commits": cs.commits.iter().map(|c| json!({
             "sha": c.sha,
             "subject": c.subject,
+            // The message under the subject. `commits_since` has always parsed
+            // `%b` into it and nothing ever sent it on, so a phone reading a
+            // branch saw only first lines — which is where an agent puts what
+            // it did, and never why.
+            "body": c.body,
             "author": c.author,
             "timestamp": c.timestamp,
             "files_changed": c.files_changed,
