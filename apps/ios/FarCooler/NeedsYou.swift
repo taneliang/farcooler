@@ -21,39 +21,71 @@ import SwiftUI
 /// tap and not a reason for a row.
 ///
 /// So one `Section` per workspace: its name and branch in the header, a
-/// `TerminalRow` for each blocked agent inside it, and a "Review Changes" row
-/// for the diff. A workspace that is both blocked and unread appears once,
-/// saying both — and every part of what it says is now something you can tap,
-/// which is what `section(for:)` is about.
+/// `TerminalRow` for each agent inside it that wants a person — blocked first,
+/// then finished — and a "Review Changes" row for the diff. A workspace that is
+/// blocked and finished and unread appears once, saying all three — and every
+/// part of what it says is something you can tap, which is what `section(for:)`
+/// is about.
 ///
 /// **Blocked agents** come from the fleet this connection is already polling.
 /// **The counts** come from `changes.inbox`, which the daemon has answered since
 /// the review surface landed and which this app already used to draw `+82 -13`
 /// on a workspace header in `FleetList`.
 ///
-/// A `done` agent is deliberately NOT what puts a workspace on this list, and
-/// that is worth spelling out because `AgentActivity.wantsAttention` includes it
-/// and this screen does not. What a finished agent leaves behind is a diff, and
-/// a diff already puts the workspace here through the second tier below. Whether
-/// a `done` agent whose worktree is CLEAN — one that answered a question or
-/// investigated something — belongs on the front door is an open decision, in
-/// `needs-planning/done-agents-on-the-front-door.md`. The workspace row changes
-/// its economics: such an agent would ride a row that already exists rather than
-/// adding one, which was the objection to it. Today it is reachable through
-/// Workspaces, where the whole fleet still is.
+/// **A finished agent is here too, always.** This screen was the one surface in
+/// the product that disagreed with `AgentActivity.wantsAttention`, on the
+/// argument that what a finished agent leaves behind is a diff and a diff
+/// already brings its workspace here through the second tier. That is true of
+/// the finish that CHANGED something and false of the finish that did not — the
+/// question answered, the investigation that touched no files, the work already
+/// reviewed. In the owner's words, *“often I ask questions and stuff and I do
+/// want to know when an answer comes back”*: an answer arriving is not an edge
+/// case this screen tolerates, it is the thing it most needs to say. Decided in
+/// `.claude/agent/done/done-agents-on-needs-you.md`.
+///
+/// Deliberately NOT conditioned on the workspace having no other news. "Show a
+/// finished agent only when nothing else covers its workspace" is one condition
+/// cheaper and it suppresses the answer exactly when a busy worktree makes it
+/// hardest to notice. It also buys nothing under this shape: a finished agent is
+/// another row inside a header that already exists, which is what retired the
+/// objection this question used to turn on — that it meant two rows for one
+/// piece of work.
+///
+/// The amber does not spread with it. `attentionColor` gives `done` green and a
+/// failed turn red, and orange stays what it has always been across the widget,
+/// the Live Activity, the complication and this app: an agent waiting on an
+/// answer. A finished agent is not waiting on anyone, and spending one color on
+/// both would weaken it for both.
 ///
 /// ## Ordering
 ///
-/// Two tiers. **Blocked first**, a workspace ranked by the lowest `sortRank`
-/// among its blocked agents; then **unread diffs**, workspaces where
-/// `changedSinceReviewed && hasDiff` and nothing is blocked, in the order the
-/// fleet arrived in.
+/// Two tiers, and the first one holds two kinds now. **Agents wanting attention
+/// first**, a workspace ranked by the lowest `sortRank` among them; then
+/// **unread diffs**, workspaces where `changedSinceReviewed && hasDiff` and no
+/// agent wants anything, in the order the fleet arrived in.
+///
+/// **Blocked before finished, and this screen does not arrange it.**
+/// `farcooler_core::feed::rank` already tiers blocked, then done — a failed turn
+/// included, on purpose; see `feed::tier` — then working, then idle, each a
+/// whole `TIER_SPAN` apart. So filtering on the shared `wantsAttention` and
+/// taking the lowest rank in a workspace yields blocked-above-finished for free,
+/// both across sections and inside one.
+///
+/// **A finished agent goes above an unread diff.** A diff sits still: it was
+/// true before the app was opened and stays true until it is read. A finished
+/// turn is news with somebody on the other end waiting for it, and it expires
+/// the moment it is read — `seen(Done) → Idle`, so looking at it is what ends
+/// it. The perishable thing goes above the durable one. Across sections that
+/// falls out of the two tiers below; inside a section it is the literal order of
+/// `section(for:)`'s groups.
 ///
 /// `rank` decides the first tier. That number is computed on the host —
 /// `farcooler_core::feed::rank`, blocked before done before working, oldest
 /// first inside a tier — precisely so a widget with room for one agent and a
 /// list with room for twelve cannot disagree about which one matters. Nothing
-/// here re-scores. The one thing this adds is a tiebreak on the id, because
+/// here re-scores, and that is what keeps the two kinds in one tier honest: a
+/// second opinion about which agent matters is the exact thing that number
+/// exists to prevent. The one thing this adds is a tiebreak on the id, because
 /// ranks genuinely collide — two agents that entered the same tier in the same
 /// second get the same number — and `sort` is not stable, so without it two
 /// equally-ranked rows could swap places on any poll. A row that moves under a
@@ -90,9 +122,18 @@ struct NeedsYouView: View {
     /// tiers are an ordering over these, not a difference in kind.
     struct Item: Identifiable {
         let workspace: Workspace
-        /// Its blocked agents, most urgent first. Empty on a row that is here
-        /// only for its diff.
+        /// Its blocked agents, most urgent first. Empty on a section that is
+        /// here only for a finished agent or for its diff.
         let blocked: [Terminal]
+        /// Its finished agents — `done`, which is finished and unseen — in the
+        /// host's order. Empty on a section that is here for something else.
+        ///
+        /// A separate array rather than more entries in `blocked`, because the
+        /// two are counted and worded separately when a section runs out of
+        /// room: "2 more agents need you" and "2 more agents finished" are not
+        /// the same sentence, and one list of five would have to say one of
+        /// them about both.
+        let finished: [Terminal]
         /// `Workspace.ordinals()`, computed once per row rather than once per
         /// agent inside it.
         let ordinals: [String: Int]
@@ -108,7 +149,7 @@ struct NeedsYouView: View {
         var id: String { workspace.id }
     }
 
-    /// How many blocked agents a workspace shows before it starts counting
+    /// How many agents of ONE KIND a workspace shows before it starts counting
     /// them.
     ///
     /// Three, because each one is a `TerminalRow` up to four bands tall and a
@@ -118,8 +159,16 @@ struct NeedsYouView: View {
     ///
     /// Unchanged by giving each of them its own row. The cap is about density,
     /// and density is precisely what this shape already spends: a workspace
-    /// that used to be one row is now a header, up to three agents and a diff.
+    /// that used to be one row is now a header, some agents and a diff.
     /// Raising the cap here would spend it twice.
+    ///
+    /// Spent PER KIND rather than over the agents together, which is the one
+    /// thing finished agents changed about it. A shared budget of three, spent
+    /// blocked-first, would hide an answer behind three open questions in the
+    /// same worktree — which is the narrow rule this screen rejected, arriving
+    /// through the back door as a truncation. The cost is a worst case one row
+    /// taller than before, in a workspace that already has three blocked agents
+    /// and three finished ones.
     private static let agentsPerWorkspace = 3
 
     /// The workspaces this screen will speak about at all. See the note on
@@ -129,25 +178,41 @@ struct NeedsYouView: View {
     }
 
     private var items: [Item] {
-        var blocked: [(rank: UInt32, item: Item)] = []
+        var attention: [(rank: UInt32, item: Item)] = []
         var unread: [Item] = []
 
         for workspace in visible {
             let counts = connection.inbox[workspace.id]
-            let waiting = workspace.terminals
-                .filter { $0.agent == .blocked }
+            // `wantsAttention` and not a list of cases, because that property
+            // IS the product's single definition of what is worth interrupting
+            // someone for — `activity.rs:825` on the host, `AgentActivity` here
+            // — and this screen writing its own copy of the answer is how it
+            // came to be the only surface that disagreed with it.
+            //
+            // Sorted once, by the host's rank, and then split. The split does
+            // not reorder: `rank` puts every blocked agent a whole tier below
+            // every finished one, so the two slices come out already in the
+            // order they are drawn in.
+            let wanting = workspace.terminals
+                .filter { $0.agent.wantsAttention }
                 .sorted { ($0.sortRank, $0.id) < ($1.sortRank, $1.id) }
             let item = Item(
-                workspace: workspace, blocked: waiting, ordinals: workspace.ordinals(),
+                workspace: workspace, blocked: wanting.filter { $0.agent == .blocked },
+                finished: wanting.filter { $0.agent == .done }, ordinals: workspace.ordinals(),
                 counts: counts)
 
-            if let first = waiting.first {
-                // The lowest rank among them, which `waiting` has already put
+            if let first = wanting.first {
+                // The lowest rank among them, which `wanting` has already put
                 // in front. A workspace is as urgent as its most urgent agent;
                 // anything else — an average, a count — would let a worktree
                 // with six working agents outrank one with a single agent that
                 // has been stuck for an hour.
-                blocked.append((first.sortRank, item))
+                //
+                // A workspace whose only news is a finished agent ranks by that
+                // agent, which lands it below every blocked workspace and above
+                // every unread diff without this line knowing which kind it is
+                // holding.
+                attention.append((first.sortRank, item))
             } else if let counts, counts.changedSinceReviewed, counts.hasDiff {
                 // Both conditions, and they are not the same one. `hasDiff` is
                 // "this branch differs from its base", which is true of every
@@ -159,9 +224,24 @@ struct NeedsYouView: View {
                 unread.append(item)
             }
         }
-        blocked.sort { ($0.rank, $0.item.id) < ($1.rank, $1.item.id) }
+        attention.sort { ($0.rank, $0.item.id) < ($1.rank, $1.item.id) }
 
-        return blocked.map(\.item) + unread
+        return attention.map(\.item) + unread
+    }
+
+    /// Every row this screen is drawing, in order, by identity.
+    ///
+    /// The value the list's animation is keyed on — see `body`. It changes when
+    /// a row arrives or leaves, including when the row leaving was the last one
+    /// in its section, and it does not change when a row merely says something
+    /// new. The workspace id is in there so a section appearing or disappearing
+    /// counts as a change even in the cases where none of the row ids move.
+    private var rowIdentities: [String] {
+        items.flatMap { item in
+            [item.id]
+                + item.blocked.prefix(Self.agentsPerWorkspace).map(\.id)
+                + item.finished.prefix(Self.agentsPerWorkspace).map(\.id)
+        }
     }
 
     /// How many agents are mid-turn.
@@ -208,6 +288,28 @@ struct NeedsYouView: View {
         // background of its own that would sit on top of it. The same reason
         // `WorkspaceListView` does it.
         .scrollContentBackground(.hidden)
+        // A row that clears itself, faded rather than snapped.
+        //
+        // This list only ever gained rows before. A finished agent's row ENDS
+        // when somebody looks at it — `seen(Done) → Idle`, it is defined as
+        // unseen — so rows now leave on a poll as well.
+        //
+        // Usually that happens where nobody is looking. `markVisibleSeen` sends
+        // `terminal.seen` only for the pane actually in front of the person,
+        // which is the workspace screen pushed on top of this one, so the row
+        // is already gone by the time this list is uncovered and there is
+        // nothing to animate. What is left is the case where the row goes while
+        // this screen IS the screen: the same agent read on the Mac, or one
+        // that starts another turn and drops to `working`. That is a row
+        // vanishing under a thumb, and an unannounced deletion takes every row
+        // below it up by its height mid-reach.
+        //
+        // Keyed on `rowIdentities` and nothing else. `TerminalRow` re-evaluates
+        // once a second under its own `TimelineView`, and a bare `.animation`
+        // here would try to animate every tick of every clock on the screen;
+        // keyed, a signal line the host rewrote or a `+82 -13` that moved
+        // changes in place, and only arrivals and departures are animated.
+        .animation(.default, value: rowIdentities)
         .refreshable { await connection.refresh() }
         .navigationTitle("Needs You")
         .navigationSubtitle(subtitle)
@@ -262,8 +364,10 @@ struct NeedsYouView: View {
     /// it is exactly the hazard this shape removes. Every target here is a
     /// full-width list row of the same kind — an agent, an agent, the diff —
     /// stacked, with nothing beside any of them to lose the toss against. The
-    /// counts are not a small thing next to the row any more; they are the
-    /// trailing end of the row that opens them.
+    /// finished agents joined that stack without changing it, which is the
+    /// whole reason they were cheap to add. The counts are not a small thing
+    /// next to the row any more; they are the trailing end of the row that
+    /// opens them.
     ///
     /// The other half of that objection stays true and constrains what is
     /// inside: the agent lines are here to be READ. They are what the agent
@@ -303,23 +407,34 @@ struct NeedsYouView: View {
             // and a `Section` header says that structurally — which is the
             // point of using one.
             ForEach(item.blocked.prefix(Self.agentsPerWorkspace)) { terminal in
-                NavigationLink(
-                    value: Route.workspace(id: item.workspace.id, focus: .agent(terminal.id))
-                ) {
-                    TerminalRow(terminal: terminal, ordinal: item.ordinals[terminal.id])
-                }
-                // Per agent, where the old identifier was per workspace and had
-                // no readers at all. Nothing in `FarCoolerUITests` matches these
-                // yet; they are on the same pattern as `fleet-terminal-<id>` and
-                // `terminal-tab-<id>`, so a test that wants to open the second
-                // blocked agent from the front door has a name to ask for.
-                .accessibilityIdentifier("needs-you-agent-\(terminal.id)")
+                agentRow(item, terminal)
             }
 
             if item.blocked.count > Self.agentsPerWorkspace {
-                Text(overflow(item.blocked.count - Self.agentsPerWorkspace))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                overflowLine(blockedOverflow(item.blocked.count - Self.agentsPerWorkspace))
+            }
+
+            // The finished agents, below the blocked ones and above the diff.
+            //
+            // The same row, and deliberately the same row: `TerminalRow` reads
+            // `Terminal.activityLabel` and `activitySymbol`, which already say
+            // "Done" with a green check and "Failed" with a red cross, so a
+            // finished agent is drawn here exactly as it is drawn in the fleet
+            // list and the tab strip. A second way to draw one is a second
+            // chance for two screens to say different things about one pane.
+            //
+            // Tapping one opens the agent, which is what ENDS it: `terminal.seen`
+            // clears `done` to `idle` on the next poll, and the row goes. That
+            // is the intended shape of this row and not a wrinkle in it — see
+            // the animation note in `body` for what happens to the ones nobody
+            // opened.
+            ForEach(item.finished.prefix(Self.agentsPerWorkspace)) { terminal in
+                agentRow(item, terminal)
+            }
+
+            if item.finished.count > Self.agentsPerWorkspace {
+                overflowLine(
+                    finishedOverflow(Array(item.finished.dropFirst(Self.agentsPerWorkspace))))
             }
 
             // Absent on a worktree the runner has called clean, which is the
@@ -440,11 +555,62 @@ struct NeedsYouView: View {
         .accessibilityIdentifier("needs-you-changes-\(item.workspace.id)")
     }
 
-    /// The agents this row ran out of room for. A sentence rather than a bare
-    /// number, because "+2" under a list of agents reads as two more of
-    /// something and does not say what.
-    private func overflow(_ count: Int) -> String {
+    /// One agent, wherever it came from.
+    ///
+    /// Shared by the blocked group and the finished one because the row is the
+    /// same row and the route is the same route: `Route.Focus.agent` opens the
+    /// workspace on that pane, which is what a person wants from both — the
+    /// answer to the question, or the answer to the question they asked.
+    ///
+    /// The identifier is per agent, where the old one was per workspace and had
+    /// no readers at all. Nothing in `FarCoolerUITests` matches these yet; they
+    /// are on the same pattern as `fleet-terminal-<id>` and `terminal-tab-<id>`,
+    /// so a test that wants to open the second blocked agent — or the finished
+    /// one under it — from the front door has a name to ask for.
+    private func agentRow(_ item: Item, _ terminal: Terminal) -> some View {
+        NavigationLink(
+            value: Route.workspace(id: item.workspace.id, focus: .agent(terminal.id))
+        ) {
+            TerminalRow(terminal: terminal, ordinal: item.ordinals[terminal.id])
+        }
+        .accessibilityIdentifier("needs-you-agent-\(terminal.id)")
+    }
+
+    /// The line a group puts under itself when it ran out of room.
+    private func overflowLine(_ sentence: String) -> some View {
+        Text(sentence)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+    }
+
+    /// The blocked agents this section ran out of room for. A sentence rather
+    /// than a bare number, because "+2" under a list of agents reads as two more
+    /// of something and does not say what.
+    private func blockedOverflow(_ count: Int) -> String {
         count == 1 ? "1 more agent needs you" : "\(count) more agents need you"
+    }
+
+    /// The finished agents this section ran out of room for.
+    ///
+    /// Says "failed" when any of the hidden ones did, and the words are the
+    /// daemon's rather than a third set: `watch.rs` titles a finished turn
+    /// "<name> finished" and a died-halfway one "<name> failed", and
+    /// `Terminal.activityLabel` puts the same distinction on the rows above this
+    /// line. A sentence that swept a failure into "finished" would hide the one
+    /// thing in the group most worth going in for — and it would hide it in the
+    /// only place on this screen where the agents are counted instead of shown.
+    ///
+    /// Takes the terminals rather than a count, because the count cannot answer
+    /// which of them failed.
+    private func finishedOverflow(_ hidden: [Terminal]) -> String {
+        let failures = hidden.filter(\.turnDidFail).count
+        if failures == hidden.count {
+            return failures == 1 ? "1 more agent failed" : "\(failures) more agents failed"
+        }
+        if failures > 0 {
+            return "\(hidden.count) more agents finished, \(failures) failed"
+        }
+        return hidden.count == 1 ? "1 more agent finished" : "\(hidden.count) more agents finished"
     }
 
     /// The changes row, said rather than spelled.
@@ -471,6 +637,20 @@ struct NeedsYouView: View {
     /// Inside the list rather than instead of it, so the Working row stays
     /// exactly where it is in both states and does not move to the middle of
     /// the screen and back as the last agent finishes.
+    ///
+    /// It still reads true now that finished agents are listed, and the check is
+    /// worth writing down because the sentence is an assertion about the whole
+    /// runner. This branch is `items.isEmpty`, and a workspace with a finished
+    /// agent in it produces an `Item` — so "Nothing Needs You" cannot be on
+    /// screen while a `done` agent sits unseen. The one exception is the one
+    /// this screen takes everywhere: a HIDDEN workspace is not counted, here or
+    /// in `workingCount` or in the subtitle, because a front door that shows
+    /// what you hid is not honoring the hiding.
+    ///
+    /// `reassuranceDetail` under it is untouched and stays honest for the same
+    /// reason it always was: it counts agents that are `working`, which is
+    /// disjoint from the two states that put a row on this screen. It is the
+    /// answer to "is anything happening", asked only once nothing needs you.
     private var reassurance: some View {
         VStack(spacing: 10) {
             Image(systemName: "checkmark.circle")
