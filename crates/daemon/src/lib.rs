@@ -5,6 +5,7 @@ pub mod enrollment;
 pub mod fanout;
 pub mod file_diff;
 pub mod foreground;
+pub mod fs_watch;
 pub mod git;
 pub mod layout;
 pub mod log_join;

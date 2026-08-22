@@ -3,9 +3,14 @@
 //! Holds the change-set cache and its invalidation.
 //!
 //! `watch.rs` samples tmux panes for agent activity and observes neither file
-//! content nor ref movement, so this brings its own: a two-syscall gate on every
-//! tick, invalidation when the daemon itself changes something under a
-//! worktree, and an explicit Refresh because no watcher is perfect.
+//! content nor ref movement, so this brings its own: a two-syscall gate,
+//! invalidation when the daemon itself changes something under a worktree, and
+//! an explicit Refresh because no watcher is perfect.
+//!
+//! That gate used to run on every tick for every worktree. It does not any
+//! more: `fs_watch` watches the same two files and tells the watch loop when
+//! they move, and `cheap_gate` is now the key a demand-driven `get` compares
+//! against plus the fallback for a worktree the watcher could not register.
 //!
 //! The sidebar's `+N -M` is computed here but no longer decided here. It costs
 //! a `git diff` and a `git status`, which is affordable once per worktree that
@@ -61,10 +66,10 @@ pub struct ReviewCache {
     /// writer, and its only caller today is `changes.set_base`. An agent editing
     /// a file writes it with its own tools in its own pane, not through this
     /// process, so nothing here hears about it. What DOES see that is the
-    /// watcher, which is already sampling every pane once a second and knows
-    /// which of them has an agent working in it — see
-    /// `Watcher::probe_change_sets`, where that observation is the gate that
-    /// actually earns the `git` call.
+    /// filesystem, which `fs_watch` now listens to, and the pane sampler, which
+    /// is already reading every pane once a second and knows which of them has
+    /// an agent working in it — see `Watcher::probe_change_sets`, where both are
+    /// gates that earn the `git` call and this stamp is neither.
     touched: Mutex<HashMap<Uuid, i64>>,
     /// Per-workspace sidebar counts, as the watch loop last computed them.
     ///
@@ -131,10 +136,17 @@ pub enum Counts {
 
 /// mtimes of the two files that move whenever git does something structural.
 ///
-/// Deliberately NOT a `git status`: this runs on every tick for every workspace
-/// with a review surface open, and porcelain output is the expensive call. This
-/// is two `stat`s, and it is only a gate — anything it lets through is verified
-/// by the real computation behind it.
+/// Deliberately NOT a `git status`: this is on the path of every request for a
+/// change set, and porcelain output is the expensive call. This is two `stat`s,
+/// and it is only a gate — anything it lets through is verified by the real
+/// computation behind it.
+///
+/// It is no longer what the watch loop asks on a clock. `fs_watch` registers a
+/// watch on the same two files, so the sampler is TOLD when they move rather
+/// than looking every three seconds per worktree; this stays as the key
+/// `ReviewCache::get` compares against, which is demand-driven, and as the
+/// fallback gate for a worktree the watcher reports it does not cover. See
+/// `Watcher::probe_change_sets`.
 pub fn cheap_gate(worktree: &Path) -> (u128, u128) {
     fn mtime(p: PathBuf) -> u128 {
         std::fs::metadata(&p)
@@ -144,19 +156,29 @@ pub fn cheap_gate(worktree: &Path) -> (u128, u128) {
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     }
-    // In a linked worktree `.git` is a FILE pointing at the real directory, so
-    // HEAD and index live beside it there rather than here. Reading the pointer
-    // is one open of a very small file, and only on the miss path.
-    let dot_git = worktree.join(".git");
-    let git_dir = if dot_git.is_dir() {
-        dot_git
-    } else {
-        std::fs::read_to_string(&dot_git)
-            .ok()
-            .and_then(|s| s.strip_prefix("gitdir: ").map(|p| PathBuf::from(p.trim())))
-            .unwrap_or(dot_git)
-    };
+    let git_dir = git_dir(worktree);
     (mtime(git_dir.join("HEAD")), mtime(git_dir.join("index")))
+}
+
+/// Where this worktree's own `HEAD` and `index` live.
+///
+/// In a linked worktree `.git` is a FILE pointing at the real directory, so
+/// they live beside it there rather than here. Reading the pointer is one open
+/// of a very small file.
+///
+/// Shared with `fs_watch`, which registers a watch on the same directory that
+/// `cheap_gate` stats. Two copies of this would be two answers about which
+/// directory a worktree's git state is in, and the one that was wrong would be
+/// wrong silently — a gate that never fires, or a watch on nothing.
+pub fn git_dir(worktree: &Path) -> PathBuf {
+    let dot_git = worktree.join(".git");
+    if dot_git.is_dir() {
+        return dot_git;
+    }
+    std::fs::read_to_string(&dot_git)
+        .ok()
+        .and_then(|s| s.strip_prefix("gitdir: ").map(|p| PathBuf::from(p.trim())))
+        .unwrap_or(dot_git)
 }
 
 impl ReviewCache {
@@ -213,10 +235,16 @@ impl ReviewCache {
     /// Whether the cached counts still describe this worktree, as far as
     /// anything free can tell.
     ///
-    /// Two `stat`s and two map lookups; no git, ever. The watch loop asks this
-    /// before anything else, because even resolving a base can run git for a
-    /// repository whose default branch has never been read — and a worktree that
-    /// has not moved must cost nothing at all.
+    /// Two `stat`s and two map lookups; no git, ever. Asked before anything
+    /// else, because even resolving a base can run git for a repository whose
+    /// default branch has never been read — and a worktree that has not moved
+    /// must cost nothing at all.
+    ///
+    /// The FALLBACK gate now: the watch loop asks it only for a worktree
+    /// `fs_watch` reports it does not cover, because two `stat`s per worktree
+    /// every three seconds is still a poll, and an idle fleet is meant to make
+    /// no syscall at all. See `counts_unproven`, which is the half of this that
+    /// no watcher can replace and which every worktree still pays.
     ///
     /// False for a workspace that has never been probed, which is how the first
     /// pass after the daemon starts reaches every worktree.
@@ -227,6 +255,29 @@ impl ReviewCache {
             .unwrap_or_else(|x| x.into_inner())
             .get(&workspace_id)
             .is_some_and(|c| !c.stale && c.key == key)
+    }
+
+    /// Whether this workspace needs recomputing for a reason no filesystem
+    /// event will ever report.
+    ///
+    /// The half of `counts_current` that costs nothing at all — no `stat`, one
+    /// map lookup — and the half a watcher cannot replace. Two things reach it:
+    /// a workspace nobody has probed yet, which is how the first pass after a
+    /// daemon start reaches every worktree; and a workspace this daemon marked
+    /// stale itself, which is a base changing or a change set recomputed for a
+    /// client. Neither of those is a write to a file, so neither moves under a
+    /// watch.
+    ///
+    /// Kept apart from `counts_current` because a watched worktree must not pay
+    /// its two `stat`s. Two per worktree every three seconds is not much, and
+    /// it is still a poll on a fleet whose whole property is that an idle
+    /// runner does nothing.
+    pub fn counts_unproven(&self, workspace_id: Uuid) -> bool {
+        self.shortstats
+            .lock()
+            .unwrap_or_else(|x| x.into_inner())
+            .get(&workspace_id)
+            .is_none_or(|c| c.stale)
     }
 
     /// Say that this workspace's counts no longer describe its worktree.

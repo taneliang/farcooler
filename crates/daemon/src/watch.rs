@@ -52,13 +52,39 @@ const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 /// it exists to catch goes unreported forever.
 const BACKSTOP_INTERVAL: Duration = Duration::from_secs(60);
 
-/// How often every repository is reconciled regardless of what the gate says.
+/// How long one repository goes unreconciled with no event to prompt it.
 ///
-/// The gate watches one directory, and something could change a worktree
-/// without touching it — a filesystem with no mtime granularity, a `git
-/// worktree repair`, a restore from backup. Thirty seconds is well under how
-/// long anyone would stare at a stale sidebar and far above what the scan costs.
-const RECONCILE_BACKSTOP: Duration = Duration::from_secs(30);
+/// The backstop half of a gate-plus-backstop pair, in the shape
+/// `LOG_JOIN_BACKSTOP_MS` has rather than the whole-fleet forced tick this
+/// replaces: measured per repository from its own last pass, and OR'd into the
+/// same boolean the event gate answers.
+///
+/// It is a **watcher-failure** backstop and nothing else. Staleness is covered
+/// — `fs_watch` is told when `<common>/worktrees` moves — and what is not
+/// covered is a watcher that was never registered, or one that stopped
+/// delivering without saying so, which is exactly the class of defect this
+/// project keeps finding. Five minutes rather than thirty seconds because it
+/// no longer has to be fast enough to be the primary signal: it only has to be
+/// fast enough that a runner whose watcher died is not wrong all night. The
+/// cost when it fires is one `git worktree list` per repository, which is what
+/// makes five minutes affordable and what made thirty seconds affordable
+/// before it.
+const RECONCILE_BACKSTOP_MS: i64 = 300_000;
+
+/// How long one worktree goes unprobed with no event to prompt it.
+///
+/// The same shape and the same reason, over the expensive pass rather than the
+/// cheap one: three git processes per worktree, so the number has to be much
+/// larger. Ten minutes on an idle fleet of twenty worktrees is sixty git
+/// processes every ten minutes — against the zero it cost before, and against
+/// a three-second poll spending the same sixty every three seconds if the
+/// gates ever stopped answering.
+///
+/// This is the one place in this module that spends git on a clock, and it is
+/// spent buying back the guarantee the watcher cannot give about itself: that
+/// it is still working. A daemon that silently stopped noticing edits is worse
+/// than a daemon that pays a little to find out.
+const CHANGE_SET_BACKSTOP_MS: i64 = 600_000;
 
 /// How often the sidebar's `+N -M` is re-derived for a worktree that moved.
 ///
@@ -479,7 +505,18 @@ pub struct Watcher {
     /// Last observed mtime of each repository's `worktrees` directory.
     ///
     /// A std mutex: held only across a map lookup, never across an await.
+    ///
+    /// The FALLBACK gate now, not the primary one — `fs_watcher` is told when
+    /// that directory moves. Kept live rather than deleted, and consulted only
+    /// for a repository the watcher does not cover: a registration that failed
+    /// must leave the daemon where it was, not somewhere worse.
     worktree_marks: std::sync::Mutex<HashMap<Uuid, std::time::SystemTime>>,
+    /// When each repository was last reconciled.
+    ///
+    /// A std mutex on the same terms. Absent for a repository nothing has
+    /// reconciled, which is what makes the first pass after a daemon start
+    /// reach all of them — see `RECONCILE_BACKSTOP_MS`.
+    worktree_reconciles: std::sync::Mutex<HashMap<Uuid, i64>>,
     /// When each workspace's `+N -M` was last computed.
     ///
     /// A std mutex on the same terms as `worktree_marks`. Absent for a worktree
@@ -529,6 +566,22 @@ pub struct Watcher {
     /// own clock, the same gate-plus-backstop shape `reconcile_worktrees`
     /// already has for git.
     log_watcher: crate::log_watch::LogWatcher,
+    /// The filesystem telling us a worktree, or its `.git`, moved.
+    ///
+    /// The sibling of `log_watcher` one layer down, and what retired the two
+    /// polls this module used to run on every tick: `review::cheap_gate`'s two
+    /// `stat`s per worktree every three seconds, and `worktrees_changed`'s one
+    /// `stat` per repository every second. See `fs_watch`, which explains why
+    /// registration is gitignore-aware and why the registration strategy
+    /// differs by platform.
+    ///
+    /// Not the only thing that can trigger either pass, for the same reason
+    /// `log_watcher` is not: it reports whether it covers a subject, the
+    /// gates it replaced stay live for the subjects it does not, and
+    /// `CHANGE_SET_BACKSTOP_MS` and `RECONCILE_BACKSTOP_MS` try anyway on
+    /// their own slow clocks. An `Arc` because the registration walk is done
+    /// from a spawned pass rather than from `new`.
+    fs_watcher: Arc<crate::fs_watch::TreeWatcher>,
     /// What each connected client says it is currently showing a person.
     ///
     /// A std mutex, on the same terms as `worktree_marks` above: every access is
@@ -2068,11 +2121,17 @@ impl Watcher {
             events,
             state: tokio::sync::Mutex::new(HashMap::new()),
             worktree_marks: std::sync::Mutex::new(HashMap::new()),
+            worktree_reconciles: std::sync::Mutex::new(HashMap::new()),
             change_set_probes: std::sync::Mutex::new(HashMap::new()),
             change_set_activity: std::sync::Mutex::new(HashMap::new()),
             change_set_probing: std::sync::atomic::AtomicBool::new(false),
             logs: std::sync::Mutex::new(HashMap::new()),
             log_watcher: crate::log_watch::LogWatcher::start(crate::log_watch::roots()),
+            // Registers nothing here on purpose: the fleet is not known yet,
+            // and on a per-tree backend every registration restarts the event
+            // stream. The two passes that already enumerate the fleet do the
+            // registering, off the daemon's startup path.
+            fs_watcher: Arc::new(crate::fs_watch::TreeWatcher::start()),
             watched: std::sync::Mutex::new(HashMap::new()),
             push: reqwest::Client::builder()
                 // A notification is worth a few seconds and no more. The
@@ -2430,9 +2489,10 @@ impl Watcher {
     ///
     /// Also called directly by the RPC layer after `repository.register`,
     /// `workspace.hide`, and `workspace.unhide` — mutations that change the
-    /// fleet without touching git, so the mtime gate in `reconcile_worktrees`
-    /// never fires for them and other connected clients would otherwise learn
-    /// about them only at the next `RECONCILE_BACKSTOP` tick.
+    /// fleet without touching git at all, so neither the watch on
+    /// `<common>/worktrees` nor the mtime gate behind it ever fires for them,
+    /// and other connected clients would otherwise learn about them only at
+    /// that repository's next `RECONCILE_BACKSTOP_MS` pass.
     pub fn announce_fleet_changed(&self) {
         let _ = self.events.send(Event {
             event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
@@ -2473,6 +2533,10 @@ impl Watcher {
     /// than counts that arrive late. A worktree on a stalled mount buys the same
     /// stall out of `GIT_TIMEOUT`.
     ///
+    /// Registering the worktree watches is now on the same list, and lands on
+    /// the same first pass: a `git ls-files` per worktree, and a `watch` call
+    /// per directory on the backends that charge per directory.
+    ///
     /// A flag rather than a queue. If a pass is still running, the next tick has
     /// nothing to add: it would gate on exactly the same facts and probe exactly
     /// the same worktrees, and two of them racing would spend the git twice.
@@ -2494,37 +2558,43 @@ impl Watcher {
     /// worktree, a `merge-base`, a `diff --shortstat` and a
     /// `status --porcelain=v2` — and what makes it affordable is everything this
     /// refuses to do before spending them. A worktree is probed only when one of
-    /// these says it might have changed, and all three are free:
+    /// these says it might have changed, and none of them costs a git process:
     ///
-    /// - `review::cheap_gate` moved: a commit, a rebase, a checkout, a `git add`.
-    ///   Two `stat`s.
-    /// - The cache was marked stale by something this daemon did itself — a base
-    ///   change, or a change set recomputed for a client. The second matters more
-    ///   than it sounds: that computation hashes the CONTENTS of every dirty
-    ///   file, so a worktree whose diff someone has open is already proving edits
-    ///   the gate cannot see. A map lookup.
-    /// - An agent has been active in one of its panes since the last probe —
+    /// - **The filesystem said so.** `fs_watch` was told that something under
+    ///   the worktree, or under the `.git` that worktree reads `HEAD` and
+    ///   `index` out of, was written. A drained set lookup. This is the primary
+    ///   signal and it is the one that spends nothing at all when nothing
+    ///   happens: an idle runner produces no events, so it makes no lookups
+    ///   worth the name and asks the kernel for nothing.
+    /// - **The cache was marked stale by something this daemon did itself** — a
+    ///   base change, or a change set recomputed for a client. Not a write to
+    ///   any file, so no watcher can see it. A map lookup.
+    /// - **An agent has been active in one of its panes since the last probe** —
     ///   observed working, or its own session log advanced. A map lookup, off an
-    ///   observation `sample()` already made this second.
+    ///   observation `sample()` already made this second, so it is free whether
+    ///   or not anything else is watching.
     ///
-    /// The third is the one that earns the feature. Agents write files with their
-    /// own tools, so nothing about an edit in place moves the first, and a count
-    /// gated on it alone is the committed-only count this replaces. It is also
-    /// what catches an edit that came from no agent at all in a pane this runner
-    /// is sampling anyway — someone's own editor, an agent shelling out to `sed`.
+    /// The first is what closes the gap this pass used to name out loud: an edit
+    /// made in a worktree with NO pane open and NO diff on screen, by something
+    /// this daemon never served, moved none of the other two and was not noticed
+    /// until the next commit or the next time anyone worked or looked there. An
+    /// agent editing a file writes only that file, so `.git` never moves; a
+    /// commit writes only into `.git`, so the working tree is byte-identical
+    /// either side of it. The watcher sees both, which is why it is registered
+    /// on both.
     ///
-    /// And it is what keeps the property this module is built around: a fleet
-    /// where nothing is happening passes none of the three, so it spawns no git
-    /// at all, however many worktrees it holds. That is deliberately not a clock.
-    /// A timed backstop over every worktree — the shape `reconcile_worktrees`
-    /// uses, where the cost is one `git worktree list` per REPOSITORY — would
-    /// here be those three per WORKTREE forever, on a runner whose whole job is
-    /// to be left alone overnight. The cost of not having one is a real
-    /// gap and worth naming: an edit made in a worktree with NO pane open and NO
-    /// diff on screen, by something this daemon never saw, is not noticed until
-    /// the next commit or the next time anyone works or looks there. Every case
-    /// this product is actually about passes one of the three.
-    async fn probe_change_sets(&self) {
+    /// **And it keeps the property this module is built around, and makes it
+    /// stronger.** A fleet where nothing is happening passes none of these, so
+    /// it spawns no git at all however many worktrees it holds — and now it also
+    /// makes no `stat` and no `git worktree list`, because the two polls that
+    /// used to run every tick regardless are gone. `review::cheap_gate`'s two
+    /// `stat`s per worktree are still HERE, as the fallback below, and they run
+    /// only for a worktree the watcher reports it does not cover.
+    ///
+    /// The one clock left is `CHANGE_SET_BACKSTOP_MS`, which is not about
+    /// staleness — the watcher covers that — but about the watcher having
+    /// stopped without saying so.
+    async fn probe_change_sets(self: &Arc<Self>) {
         let Ok(workspaces) = self.service.store.list_all_workspaces() else { return };
 
         let live: HashSet<Uuid> = workspaces.iter().map(|ws| ws.id).collect();
@@ -2538,6 +2608,41 @@ impl Watcher {
             .unwrap_or_else(|e| e.into_inner())
             .retain(|id, _| live.contains(id));
 
+        // Drained once for the whole pass, before anything is decided, for the
+        // reason `sample` drains the log watcher once a tick: every workspace
+        // consults the same answer, and draining per workspace would give the
+        // first one the news and the rest an empty set. Events that arrive
+        // while this pass runs land in the next drain rather than being lost —
+        // the set is what coalesces them, and it is never cleared by anything
+        // but a drain.
+        let moved = self.fs_watcher.drain_workspaces();
+
+        // A directory git cares about that did not exist when the registration
+        // walk ran. Its creation surfaced, because its parent is watched;
+        // nothing written INSIDE it would, until it is registered too. Asked
+        // here rather than in the watcher's own callback because the answer
+        // costs a `stat` per unfamiliar path and the callback runs on the
+        // backend's event thread.
+        let rewalk: HashSet<Uuid> = moved
+            .iter()
+            .filter(|(id, paths)| self.fs_watcher.needs_rewalk(**id, paths))
+            .map(|(id, _)| *id)
+            .collect();
+        let fleet: Vec<(Uuid, std::path::PathBuf)> = workspaces
+            .iter()
+            .map(|ws| (ws.id, std::path::PathBuf::from(&ws.worktree_path)))
+            .collect();
+        // A set comparison when the fleet has not changed, which is every pass
+        // but the ones where a worktree appeared, went, or grew a directory.
+        //
+        // Awaited here rather than pushed off the executor, unlike the
+        // repository half: this pass is ALREADY detached, and is detached for
+        // exactly this class of reason — see `spawn_change_set_probe`. When it
+        // does work it is a `git ls-files` and a run of `watch` calls, both of
+        // which the tick loop would have to wait on if this ran there.
+        self.fs_watcher.sync_workspaces(&fleet, &rewalk).await;
+
+        let now = now_millis();
         for ws in workspaces {
             let worktree = std::path::PathBuf::from(&ws.worktree_path);
             // A worktree whose directory is gone is not a worktree that changed
@@ -2567,7 +2672,26 @@ impl Watcher {
                 (Some(_), None) => true,
                 (None, _) => false,
             };
-            if !worked_since && self.service.review_cache.counts_current(ws.id, &worktree) {
+            // Unprobed reads as due, which is what makes the first pass after a
+            // daemon start reach every worktree — the same thing the missing
+            // `counts_current` entry used to do.
+            let backstop_due =
+                probed_at.is_none_or(|probed| now.saturating_sub(probed) >= CHANGE_SET_BACKSTOP_MS);
+            let unproven = self.service.review_cache.counts_unproven(ws.id);
+
+            let worth_probing = if self.fs_watcher.covers_workspace(ws.id) {
+                moved.contains_key(&ws.id) || worked_since || unproven || backstop_due
+            } else {
+                // The fallback, and the reason `cheap_gate` is still here. A
+                // registration that failed — no backend, the inotify ceiling, a
+                // worktree too large to watch — leaves this workspace exactly
+                // where it was before any of this: two `stat`s and the activity
+                // gate, which is a known and bounded gap rather than a daemon
+                // that quietly stopped noticing edits. `fs_watch` says so out
+                // loud when it lands here.
+                worked_since || !self.service.review_cache.counts_current(ws.id, &worktree)
+            };
+            if !worth_probing {
                 continue;
             }
 
@@ -2610,34 +2734,104 @@ impl Watcher {
         }
     }
 
-    /// Reconcile repositories whose worktrees moved, or all of them if forced.
+    /// Reconcile repositories whose set of worktrees moved.
     ///
     /// Broadcasts only when something actually changed, for the same reason
     /// `sample` does: a fleet where nothing is happening produces no traffic,
     /// which is what makes a phone holding an SSH session overnight reasonable.
-    async fn reconcile_worktrees(&self, force: bool) {
+    ///
+    /// The gate used to be one `stat` of `<common>/worktrees` per repository
+    /// per tick — a poll, cheap but running all night on a runner where nothing
+    /// was going to happen. `fs_watch` watches that directory instead, which is
+    /// how a worktree appearing is learned without asking git for the list, and
+    /// what retired the thirty-second forced pass that stood behind the `stat`.
+    ///
+    /// The `stat` is still here for a repository the watcher does not cover,
+    /// and `RECONCILE_BACKSTOP_MS` still tries every repository on its own slow
+    /// clock — five minutes rather than thirty seconds, because it is now
+    /// insuring against a watcher that stopped rather than standing in for one
+    /// that was never the primary signal.
+    async fn reconcile_worktrees(&self) {
         let Ok(repositories) = self.service.list_repositories() else { return };
 
+        // Drained before the loop and after the list, so a signal is never
+        // taken out of the set for a repository this pass is not going to
+        // visit.
+        let awake = self.fs_watcher.drain_repositories();
+        let fleet: Vec<(Uuid, std::path::PathBuf)> = repositories
+            .iter()
+            .map(|repo| (repo.id, std::path::PathBuf::from(&repo.canonical_git_dir)))
+            .collect();
+        // `awake` is passed in because `<common>/worktrees` does not exist until
+        // the FIRST linked worktree creates it, and its creation is an event on
+        // `<common>` — so this is the moment to look again, and the only moment
+        // worth looking. See `TreeWatcher::sync_repositories`.
+        //
+        // Off the executor, on the same terms as `listening_ports` and
+        // `foreground::read` in `sample`: registering a watch is a synchronous
+        // call into the platform backend, and this one runs INSIDE the tick
+        // loop rather than on a detached task. Awaiting it on the executor
+        // would let a slow backend hold up the fleet's own sampling, and a
+        // fleet whose rows stop moving is a worse failure than a worktree
+        // registered a beat late.
+        {
+            let registry = Arc::clone(&self.fs_watcher);
+            let (plan, waking) = (fleet.clone(), awake.clone());
+            let _ = tokio::task::spawn_blocking(move || registry.sync_repositories(&plan, &waking))
+                .await;
+        }
+
+        let now = now_millis();
         let mut changed = false;
         for repo in repositories {
             let common = std::path::PathBuf::from(&repo.canonical_git_dir);
-            let previous = self
-                .worktree_marks
+            let reconciled_at = self
+                .worktree_reconciles
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .get(&repo.id)
                 .copied();
+            // Never reconciled reads as due, which is what makes the first pass
+            // after a daemon start reach every repository — the job the
+            // immediate first tick of the old forced interval used to do.
+            let backstop_due = reconciled_at
+                .is_none_or(|at| now.saturating_sub(at) >= RECONCILE_BACKSTOP_MS);
 
-            let moved = worktrees_changed(&common, previous);
-            if moved.is_none() && !force {
-                continue;
-            }
-            if let Some(mark) = moved {
-                self.worktree_marks
+            let worth_reconciling = if self.fs_watcher.covers_repository(repo.id) {
+                awake.contains(&repo.id) || backstop_due
+            } else {
+                // The fallback gate, unchanged: the mtime of the one directory
+                // a worktree appears in. Only reached for a repository whose
+                // registration failed, and `fs_watch` says so when it does.
+                let previous = self
+                    .worktree_marks
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .insert(repo.id, mark);
+                    .get(&repo.id)
+                    .copied();
+                match worktrees_changed(&common, previous) {
+                    Some(mark) => {
+                        self.worktree_marks
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(repo.id, mark);
+                        true
+                    }
+                    None => backstop_due,
+                }
+            };
+            if !worth_reconciling {
+                continue;
             }
+
+            // Stamped whether or not anything came of it, on the same terms as
+            // `change_set_probes`: this records that we LOOKED, and stamping
+            // only on success would put a repository git cannot answer for into
+            // a once-a-second retry loop.
+            self.worktree_reconciles
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(repo.id, now_millis());
 
             match crate::reconcile::repository(&self.service, repo.id).await {
                 Ok(outcome) => changed |= !outcome.is_quiet(),
@@ -2656,26 +2850,25 @@ impl Watcher {
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut backstop = tokio::time::interval(BACKSTOP_INTERVAL);
         backstop.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut worktrees = tokio::time::interval(RECONCILE_BACKSTOP);
-        worktrees.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut change_sets = tokio::time::interval(CHANGE_SET_INTERVAL);
         change_sets.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // The first tick of an interval completes immediately, and comparing
         // the inventory against itself before anything has had a chance to
         // diverge would only ever report a false alarm.
         backstop.tick().await;
-        worktrees.tick().await;
 
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
                     self.sample().await;
-                    // Gated: one stat per repository, and a git process only
-                    // for repositories whose worktrees actually moved.
-                    self.reconcile_worktrees(false).await;
+                    // Gated: a drained set lookup per repository, and a git
+                    // process only for repositories the filesystem says
+                    // actually gained or lost a worktree. The separate forced
+                    // pass this used to sit beside is gone — its job is now
+                    // `RECONCILE_BACKSTOP_MS`, measured per repository inside.
+                    self.reconcile_worktrees().await;
                 }
                 _ = backstop.tick() => self.service.backstop_reconcile().await,
-                _ = worktrees.tick() => self.reconcile_worktrees(true).await,
                 // Its first tick is immediate and that is wanted: every worktree
                 // is unprobed at startup, so this pass is what puts a number
                 // beside a row before anybody asks for one.
@@ -3460,13 +3653,19 @@ impl Watcher {
 ///
 /// `git worktree add` creates a directory under `$GIT_COMMON_DIR/worktrees` and
 /// `git worktree remove` deletes one; either moves that directory's mtime. One
-/// `stat` per repository per tick is nothing, where one `git worktree list` per
-/// repository per tick is a process spawn per repository per second, almost
-/// always to learn that nothing happened.
+/// `stat` per repository is nothing, where one `git worktree list` per
+/// repository is a process spawn almost always spent to learn that nothing
+/// happened.
+///
+/// **The fallback gate, not the primary one.** `fs_watch` watches that same
+/// directory and says when it moved, which costs nothing on a repository where
+/// nothing is happening — this runs only for a repository whose registration
+/// failed, and it is kept precisely so that such a repository lands where it
+/// was before rather than somewhere worse.
 ///
 /// Returns the new mtime when it moved, `None` when it did not. A repository
 /// with no linked worktrees has no such directory and reports no change, which
-/// is correct: the backstop pass in `run` still covers anything this misses.
+/// is correct: `RECONCILE_BACKSTOP_MS` still covers anything this misses.
 pub fn worktrees_changed(
     git_common_dir: &std::path::Path,
     since: Option<std::time::SystemTime>,

@@ -889,8 +889,8 @@ impl Rpc {
                 // has, which changes the fleet without touching git — so the
                 // reconciler's mtime gate never fires for this. Without an
                 // explicit announce, other connected clients would not learn
-                // about the new workspaces until the next RECONCILE_BACKSTOP
-                // tick (30s).
+                // about the new workspaces until this repository's next
+                // RECONCILE_BACKSTOP_MS pass (5 min).
                 self.watcher.announce_fleet_changed();
                 Ok(result::Value::Repository(wire::repository(&repo, scope)))
             }
@@ -1068,7 +1068,8 @@ impl Rpc {
                 // the workspace row itself, so the reconcile pass that
                 // follows finds nothing gone and stays quiet. Without this,
                 // other connected clients would not learn the worktree is
-                // gone until the next RECONCILE_BACKSTOP tick (30s), if ever.
+                // gone until this repository's next RECONCILE_BACKSTOP_MS
+                // pass (5 min), if ever.
                 self.watcher.announce_fleet_changed();
                 let view = svc.workspace_view(&ws).await?;
                 Ok(result::Value::Workspace(wire::workspace(&view, scope)))
