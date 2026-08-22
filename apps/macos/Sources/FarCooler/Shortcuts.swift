@@ -79,7 +79,7 @@ enum Shortcut {
                 Item(keys: "%  /  \"", action: "Split right / down — a new pane here"),
                 Item(keys: "!", action: "Move the focused pane out of the layout"),
                 Item(keys: "x", action: "Close the focused pane’s terminal"),
-                Item(keys: "c", action: "New group — several layouts per worktree"),
+                Item(keys: "c", action: "New group — several layouts per workspace"),
                 Item(keys: "n  /  p", action: "Next / previous group"),
                 Item(keys: "&", action: "Close this group"),
                 Item(keys: "a", action: "Toggle the focused pane between terminal and chat"),
@@ -97,9 +97,9 @@ enum Shortcut {
         (
             "App",
             [
-                Item(keys: "⌘P", action: "Go to anything — a terminal, a worktree, a new task"),
+                Item(keys: "⌘P", action: "Go to anything — a terminal, a workspace, a new task"),
                 Item(keys: "⌘B", action: "Show or hide the sidebar"),
-                Item(keys: "⌘F", action: "Find a worktree or agent"),
+                Item(keys: "⌘F", action: "Find a workspace or agent"),
                 Item(keys: "⌘,", action: "Settings"),
                 Item(keys: "⌘/", action: "Keyboard shortcuts"),
                 Item(keys: "⌘0", action: "Reload the fleet"),

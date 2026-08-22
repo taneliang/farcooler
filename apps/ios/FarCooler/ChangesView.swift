@@ -257,7 +257,7 @@ struct ChangesView: View {
     private var nothingHere: String {
         switch store.scope {
         case .branch: return "This branch hasn’t committed anything yet."
-        case .local: return "Nothing uncommitted. The worktree is clean."
+        case .local: return "Nothing uncommitted. The workspace is clean."
         case .commit:
             // Not "this commit is empty". A commit is compared against its
             // FIRST parent here — `Selector::Commit` in the daemon's
@@ -1752,8 +1752,8 @@ private struct CommentOutboxSheet: View {
     ///
     /// A picker with one entry would be a choice nobody has, and a disabled
     /// button with no explanation is the app refusing without saying why: a
-    /// worktree whose agent has exited has nowhere to send to, and that is a
-    /// fact about the worktree rather than a fault in the notes.
+    /// workspace whose agent has exited has nowhere to send to, and that is a
+    /// fact about the workspace rather than a fault in the notes.
     @ViewBuilder
     private var sendControl: some View {
         if comments.sending {
@@ -1762,7 +1762,7 @@ private struct CommentOutboxSheet: View {
                 Text("Sending…").foregroundStyle(.secondary)
             }
         } else if agents.isEmpty {
-            Text("No agent is running in this worktree, so there’s nowhere to send these yet.")
+            Text("No agent is running in this workspace, so there’s nowhere to send these yet.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } else if agents.count == 1, let only = agents.first {

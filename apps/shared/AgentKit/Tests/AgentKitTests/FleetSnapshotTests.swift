@@ -458,17 +458,17 @@ struct FleetSnapshotTests {
     @Test func oneOfSomethingIsSaidInTheSingular() {
         #expect(FleetSnapshot.Glance.blocked(1).phrase == "1 needs you")
         #expect(FleetSnapshot.Glance.blocked(1).caption == "agent needs you")
-        #expect(FleetSnapshot.Glance.review(1).caption == "worktree to review")
+        #expect(FleetSnapshot.Glance.review(1).caption == "workspace to review")
         #expect(FleetSnapshot.Glance.working(1).caption == "agent working")
     }
 
-    /// Reviews are counted in WORKTREES and blocked agents in agents, because
+    /// Reviews are counted in WORKSPACES and blocked agents in agents, because
     /// they are counts of different things — `changes.inbox` answers per
-    /// worktree. A caption that called both of them agents would make "2 need
+    /// workspace. A caption that called both of them agents would make "2 need
     /// you" and "3 to review" look like five agents.
     @Test func theTwoCountsAreCountsOfDifferentThings() {
         #expect(FleetSnapshot.Glance.blocked(2).caption == "agents need you")
-        #expect(FleetSnapshot.Glance.review(3).caption == "worktrees to review")
+        #expect(FleetSnapshot.Glance.review(3).caption == "workspaces to review")
         #expect(FleetSnapshot.Glance.working(4).caption == "agents working")
     }
 

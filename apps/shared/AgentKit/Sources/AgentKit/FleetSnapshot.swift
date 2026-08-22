@@ -345,7 +345,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     public enum Glance: Sendable, Equatable {
         /// Agents stopped, waiting on a person. Amber, and nothing else is.
         case blocked(Int)
-        /// Worktrees whose diff moved since anyone last looked. Never amber.
+        /// Workspaces whose diff moved since anyone last looked. Never amber.
         case review(Int)
         /// Agents getting on with it, with nothing waiting on you.
         case working(Int)
@@ -387,16 +387,16 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         }
 
         /// The same fact under a number that is already drawn large: "agents
-        /// need you", "worktrees to review", "agents working".
+        /// need you", "workspaces to review", "agents working".
         ///
-        /// **Worktrees**, not agents, for `review`. The two counts are counts of
-        /// different things — `changes.inbox` answers per worktree — and a
+        /// **Workspaces**, not agents, for `review`. The two counts are counts of
+        /// different things — `changes.inbox` answers per workspace — and a
         /// caption that called both of them agents would make "2 need you" and
         /// "3 to review" look like five agents.
         public var caption: String {
             switch self {
             case let .blocked(n): n == 1 ? "agent needs you" : "agents need you"
-            case let .review(n): n == 1 ? "worktree to review" : "worktrees to review"
+            case let .review(n): n == 1 ? "workspace to review" : "workspaces to review"
             case let .working(n): n == 1 ? "agent working" : "agents working"
             }
         }

@@ -431,7 +431,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
     }
 }
 
-/** The form next to Quick Task, for a worktree you want to name yourself. */
+/** The form next to Quick Task, for a workspace you want to name yourself. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
@@ -486,7 +486,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("New worktree", style = MaterialTheme.typography.headlineSmall)
+            Text("New workspace", style = MaterialTheme.typography.headlineSmall)
 
             if (connected.size > 1) {
                 Picker(
@@ -586,10 +586,10 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
 }
 
 /**
- * A second pane in a worktree that already has one.
+ * A second pane in a workspace that already has one.
  *
  * The Mac offers this on every workspace; iOS only ever creates a terminal as
- * part of Quick Task, so a worktree that needed an agent AND a shell to watch
+ * part of Quick Task, so a workspace that needed an agent AND a shell to watch
  * it — the ordinary layout on the Mac — could not get one from a phone at all.
  */
 @OptIn(ExperimentalMaterial3Api::class)

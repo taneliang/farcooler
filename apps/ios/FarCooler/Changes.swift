@@ -1431,7 +1431,7 @@ final class ChangesStore: ObservableObject {
             return Trouble(sentence: "This runner’s Far Cooler is too old to review changes.")
         }
         return Trouble(
-            sentence: "Couldn’t read this worktree. The request that reads it didn’t finish.",
+            sentence: "Couldn’t read this workspace. The request that reads it didn’t finish.",
             transcript: error.localizedDescription)
     }
 }

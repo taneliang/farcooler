@@ -828,7 +828,7 @@ async fn pane_host(kind: &str) -> Fallible {
         "changes" => "changes",
         other => return Err(format!("unknown pane kind: {other}").into()),
     };
-    println!("Far Cooler is drawing this worktree's {what} here.");
+    println!("Far Cooler is drawing this workspace's {what} here.");
     // No signal handling: tmux kills the pane's process group, and a wait that
     // caught SIGHUP to exit tidily would only be a slower way to be killed.
     std::future::pending::<()>().await;

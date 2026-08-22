@@ -164,7 +164,7 @@ struct CommandPalette: View {
 
             PaletteField(
                 text: $query,
-                placeholder: "Go to a terminal, a worktree, or start something",
+                placeholder: "Go to a terminal, a workspace, or start something",
                 horizontalMoves: isSwitcher,
                 onMove: move,
                 onSubmit: submit,

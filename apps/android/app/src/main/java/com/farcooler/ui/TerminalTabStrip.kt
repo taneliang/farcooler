@@ -44,7 +44,7 @@ import com.farcooler.net.TerminalRef
  * Deliberately flat across the whole fleet — every runner included — rather
  * than scoped to the current workspace: the 3am case this exists for is "is the
  * OTHER agent still blocked", which is exactly as likely to be on a different
- * runner as in the same worktree.
+ * runner as in the same workspace.
  */
 @Composable
 fun TerminalTabStrip(

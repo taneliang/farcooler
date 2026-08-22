@@ -248,7 +248,7 @@ data class DaemonBuild(
 }
 
 /**
- * The terminal a host lands on when its worktree list is skipped.
+ * The terminal a host lands on when its workspace list is skipped.
  *
  * An agent waiting on you outranks everything else, because that is the whole
  * reason to have opened the app; short of that, the first terminal already

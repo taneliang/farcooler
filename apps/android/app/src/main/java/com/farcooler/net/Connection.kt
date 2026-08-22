@@ -641,9 +641,9 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
     }
 
     /**
-     * Hide or unhide a worktree.
+     * Hide or unhide a workspace.
      *
-     * The Mac has had this since worktree management landed and neither phone
+     * The Mac has had this since workspace management landed and neither phone
      * app ever got it, which on a runner that adopts every worktree it already
      * has means a sidebar of twenty rows and no way to put nineteen away.
      * Hiding never touches git and is never refused for a running terminal — it

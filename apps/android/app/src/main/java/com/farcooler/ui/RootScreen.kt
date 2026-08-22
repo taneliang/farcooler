@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
  *
  * The fleet lives in a navigation drawer rather than behind a button, which is
  * where the Mac's sidebar and the phone's "switch terminal" sheet both end up
- * on this platform. It is the one place worktrees, runners, settings and
+ * on this platform. It is the one place workspaces, runners, settings and
  * "start something new" all belong together, and an edge swipe reaches it
  * without a target to hit — which matters at 3am, one-handed, checking whether
  * the other agent is still blocked.

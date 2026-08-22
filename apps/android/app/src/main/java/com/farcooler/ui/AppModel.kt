@@ -24,7 +24,7 @@ sealed interface Route {
     /** No runners yet, so there is nothing else to show. */
     data object Onboarding : Route
 
-    /** The worktree list — what a runner with nothing running shows. */
+    /** The workspace list — what a runner with nothing running shows. */
     data object Fleet : Route
 
     data class Terminal(val ref: TerminalRef) : Route
@@ -145,7 +145,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
             return
         }
         // Only once at least one runner has answered, or a slow SSH handshake
-        // would land on the empty worktree list and stay there.
+        // would land on the empty workspace list and stay there.
         val anySettled = fleet.active.value.any { it.phase.value !is Connection.Phase.Connecting }
         if (!anySettled) return
 
@@ -170,7 +170,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
      *
      * By id alone, because that is all a notification carries and all it can
      * carry: it may have been posted by the messaging service in a process that
-     * had no fleet at all. The runner and worktree are looked up from whatever
+     * had no fleet at all. The runner and workspace are looked up from whatever
      * has since connected, and a tap that arrives before the fleet does simply
      * lands on the list — which is the honest answer, not a guess.
      */

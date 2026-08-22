@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
  *
  * The host is carried rather than looked up. Short ids are the last eight hex
  * characters of a UUID minted per daemon; across three runners and a hundred
- * worktrees the birthday collision probability is around one in a hundred
+ * workspaces the birthday collision probability is around one in a hundred
  * thousand, and the cost of losing that coin flip is acting on the wrong
  * runner. Carrying the runner removes the class of bug rather than betting
  * against it — the same conclusion the Mac reached.

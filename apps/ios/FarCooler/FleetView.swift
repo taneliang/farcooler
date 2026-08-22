@@ -2070,7 +2070,7 @@ struct RemoveWorktreeConfirmSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("This worktree has uncommitted changes. Enter its name to remove it.")
+                    Text("This workspace has uncommitted changes. Enter its name to remove it.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

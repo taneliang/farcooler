@@ -616,7 +616,7 @@ private struct TilePane: View {
                 Circle()
                     .fill(.orange)
                     .frame(width: 5, height: 5)
-                    .help("This worktree has uncommitted changes")
+                    .help("This workspace has uncommitted changes")
             }
 
             Button {

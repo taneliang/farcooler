@@ -101,7 +101,7 @@ struct ChangesPane: View {
     private var problem: some View {
         let old = changes.client.changesSupported == false
         return VStack(alignment: .leading, spacing: 3) {
-            Text(old ? "This runner can’t show changes yet" : "Couldn’t read this worktree")
+            Text(old ? "This runner can’t show changes yet" : "Couldn’t read this workspace")
                 .font(.system(size: 11.5, weight: .medium))
             Text(
                 old

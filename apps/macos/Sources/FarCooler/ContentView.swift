@@ -176,7 +176,7 @@ struct ContentView: View {
                             .symbolVariant(changesPane(in: ws) == nil ? .none : .fill)
                             .help(
                                 changesPane(in: ws) == nil
-                                    ? "Show what this worktree changed, in a pane"
+                                    ? "Show what this workspace changed, in a pane"
                                     : "Close the changes pane")
                         }
                     }
@@ -820,7 +820,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
-            TextField("Search worktrees and agents", text: $query)
+            TextField("Search workspaces and agents", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .focused($searchFocused)
@@ -2058,7 +2058,7 @@ struct ContentView: View {
     /// found" on a Mac with four of them installed.
     private func openInPreferredEditor() {
         guard let workspace = detailWorkspace else {
-            errorBanner = "Open a worktree first — there is nothing to hand to an editor."
+            errorBanner = "Open a workspace first — there is nothing to hand to an editor."
             return
         }
         let editors = Editors.shared

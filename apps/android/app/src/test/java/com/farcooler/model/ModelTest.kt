@@ -119,7 +119,7 @@ class ModelTest {
 
     @Test
     fun aHostWithNoTerminalsHasNothingToLandOn() {
-        // Which is what sends the app to its worktree list instead.
+        // Which is what sends the app to its workspace list instead.
         assertNull(Fleet(workspaces = listOf(Workspace(id = "w"))).landingTerminal)
     }
 

@@ -66,7 +66,7 @@ import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.launch
 
 /**
- * Every worktree on every runner, in one scroll area.
+ * Every workspace on every runner, in one scroll area.
  *
  * Shown two places — as the whole screen when nothing is running anywhere, and
  * inside the drawer over a terminal — so a task started from either one works
@@ -118,7 +118,7 @@ fun FleetScreen(model: AppModel, onSelect: (TerminalRef) -> Unit, onOpenDrawer: 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Worktrees") },
+                title = { Text("Workspaces") },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(Icons.Outlined.Menu, contentDescription = "Show the fleet")
@@ -186,7 +186,7 @@ private fun FleetBody(
                 }
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { showNewWorkspace = true }) {
-                    Icon(Icons.Filled.Add, contentDescription = "New worktree")
+                    Icon(Icons.Filled.Add, contentDescription = "New workspace")
                 }
             }
         }
@@ -221,8 +221,8 @@ private fun FleetBody(
         if (visible.isEmpty()) {
             item {
                 Text(
-                    if (entries.isEmpty()) "No worktrees on any connected runner."
-                    else "Every worktree is hidden.",
+                    if (entries.isEmpty()) "No workspaces on any connected runner."
+                    else "Every workspace is hidden.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -280,7 +280,7 @@ private fun FleetBody(
                 ) {
                     Icon(Icons.Outlined.VisibilityOff, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (showHidden) "Hide hidden worktrees" else "$hiddenCount hidden")
+                    Text(if (showHidden) "Hide hidden workspaces" else "$hiddenCount hidden")
                 }
             }
         }
@@ -557,7 +557,7 @@ private fun WorkspaceHeader(
         }
         Box {
             IconButton(onClick = { menu = true }) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "Worktree actions")
+                Icon(Icons.Filled.MoreVert, contentDescription = "Workspace actions")
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(

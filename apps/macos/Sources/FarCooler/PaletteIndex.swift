@@ -42,7 +42,7 @@ struct PaletteEntry: Identifiable, Equatable {
     ///
     /// The filtered list deliberately mixes three kinds of thing, and at a
     /// glance they are indistinguishable — "auth" is as plausibly a terminal as
-    /// a worktree as the task you are about to start. One word per row is
+    /// a workspace as the task you are about to start. One word per row is
     /// cheaper than three headed sections, and sections would freeze the order
     /// of the results, which is the one thing ranking exists to decide.
     var kind: String
@@ -239,7 +239,7 @@ enum PaletteIndex {
             title: workspace.task,
             detail: workspace.windowSubtitle,
             symbol: "arrow.triangle.branch",
-            kind: "worktree")
+            kind: "workspace")
     }
 }
 

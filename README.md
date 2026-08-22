@@ -4,7 +4,8 @@ A terminal-first command center for parallel coding agents on runners you own.
 
 A **workspace** is one git worktree plus one branch for one task, along with its
 terminals and agent processes. Far Cooler lets you run several at once and see,
-truthfully, which are alive.
+truthfully, which are alive. Both words are real, and each has a job — see
+[`docs/workspaces.md`](docs/workspaces.md).
 
 A **runner** is one `farcoolerd`: one Unix user, on one host, with its own
 worktrees and its own `~/.ssh/authorized_keys`. A host may carry several — three

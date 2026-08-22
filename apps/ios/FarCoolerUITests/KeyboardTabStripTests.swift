@@ -18,7 +18,7 @@ final class KeyboardTabStripTests: XCTestCase {
         // carries the diff's counts when there are any, and what they count —
         // "Changes, 82 added, 13 removed, including work that isn’t committed
         // yet" — so matching on the word alone found it only on a clean
-        // worktree. It is also no longer a pane the host has to have opened:
+        // workspace. It is also no longer a pane the host has to have opened:
         // every workspace has this chip. See `TerminalTabStrip`.
         let otherTab = app.buttons["workspace-tab-changes"]
         guard otherTab.waitForExistence(timeout: 5) else {
@@ -99,14 +99,14 @@ final class KeyboardTabStripTests: XCTestCase {
         XCTAssertTrue(reviewOptions.waitForExistence(timeout: 2))
         XCTAssertGreaterThan(
             changesSwitcher.frame.minX, reviewOptions.frame.minX,
-            "The worktree switcher was not the rightmost changes-pane control"
+            "The workspace switcher was not the rightmost changes-pane control"
         )
         XCTAssertEqual(
             changesSwitcher.frame.maxX, initialSwitcherFrame.maxX, accuracy: 2,
-            "The worktree switcher moved when the changes toolbar appeared"
+            "The workspace switcher moved when the changes toolbar appeared"
         )
         let toolbarPost = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        toolbarPost.name = "worktree-button-order-and-transcript-type-post"
+        toolbarPost.name = "workspace-button-order-and-transcript-type-post"
         toolbarPost.lifetime = .keepAlways
         add(toolbarPost)
 
@@ -120,7 +120,7 @@ final class KeyboardTabStripTests: XCTestCase {
 
         // The switcher sheet, which now hands its selection all the way back up
         // to `FleetView.show(_:)` rather than selecting inside the screen — a
-        // pane in another worktree is a different screen. A pane in THIS one
+        // pane in another workspace is a different screen. A pane in THIS one
         // comes straight back down and switches tabs without rebuilding
         // anything, which is what this checks.
         let tabPrefix = "terminal-tab-"

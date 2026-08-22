@@ -434,17 +434,17 @@ struct WorkspaceSection: View {
     ///
     /// The sidebar's number and the Changes pane's Branch header answer
     /// different questions and are not being made to agree: this one is "is
-    /// this worth opening at all", so it spans everything in the worktree,
+    /// this worth opening at all", so it spans everything in the workspace,
     /// while Branch is "what lands when this merges" and counts commits only.
     /// See `ChangesStore.files` for where the two diverge on the wire.
     ///
     /// Nil rather than an empty string when there is nothing to say: an empty
-    /// tooltip is not the same thing as no tooltip, and every clean worktree in
+    /// tooltip is not the same thing as no tooltip, and every clean workspace in
     /// the fleet would be tracking one.
     private var changesHelp: String? {
         guard let changes, changes.hasDiff else { return nil }
         return "+\(changes.insertions.formatted()) -\(changes.deletions.formatted()) in this "
-            + "worktree — committed work, uncommitted edits, and untracked files, together. "
+            + "workspace — committed work, uncommitted edits, and untracked files, together. "
             + "The Changes pane splits them: Branch is what’s committed, Uncommitted is what isn’t."
     }
 
@@ -548,7 +548,7 @@ struct ProjectHeader: View {
                             help: "Add to \(name)",
                             items: [
                                 onNewWorktree.map {
-                                    SidebarMenuItem(title: "New Worktree in \(name)…", action: $0)
+                                    SidebarMenuItem(title: "New Workspace in \(name)…", action: $0)
                                 },
                                 // The main checkout is a place people work — a quick
                                 // build, a look at main while a worktree is
@@ -568,7 +568,7 @@ struct ProjectHeader: View {
                     if let onRemove {
                         // Its own button rather than a second item on the `+`
                         // menu: that menu is for adding things, and a destructive
-                        // action one row below "New worktree" is a misclick away
+                        // action one row below "New Workspace" is a misclick away
                         // from removing a repository instead of branching one.
                         SidebarMenuButton(
                             systemImage: "ellipsis",
@@ -1060,7 +1060,7 @@ struct WorkspaceDetail: View {
                 .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
             Text("No terminals").font(.callout.weight(.medium))
-            Text("A terminal runs one agent, or one shell, inside this worktree.")
+            Text("A terminal runs one agent, or one shell, inside this workspace.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1160,7 +1160,7 @@ struct HiddenWorktrees: View {
                             Circle()
                                 .fill(Color.orange)
                                 .frame(width: 5, height: 5)
-                                .help("\(attention) waiting on you, inside a hidden worktree")
+                                .help("\(attention) waiting on you, inside a hidden workspace")
                         }
                         Spacer(minLength: 0)
                     }
