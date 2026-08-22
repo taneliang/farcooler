@@ -128,10 +128,19 @@ Drive, Review and Tend belong at all.
 | **Console** | Reassure, Unblock | `SidebarViews`, `FleetStore`, ⌘⌃N Next Needing Attention |
 | **Cockpit** | Drive, Review, Decide | `PaneCanvas`, `TerminalPane`, `TileView`, `ChangesPane`, Layout menu |
 
-**The design problem is the transition, not either mode.** Today they are close
-to separate worlds: a sidebar and a pane canvas, bridged by exactly one command
-(⌘⌃N). The loop — glance, drop in, act, leave — is the job, and only the middle
-of it is designed.
+**The design problem is the transition, not either mode.** The loop is glance →
+drop in → act → leave.
+
+Correction (2026-08-21): an earlier draft said the two modes were "bridged by
+exactly one command (⌘⌃N)". That was wrong. There are three routes in, and the
+best of them is well designed: the sidebar's filter, ⌃⌘N for whatever is
+blocked, and **⌘P** — a switcher with live screen previews, recency ordering from
+`VisitLog` following Alt-Tab's rule exactly (the pane you are in is not the first
+entry), and results that mix navigating with creating. `CommandPalette.swift` and
+`VisitLog.swift` are among the most carefully reasoned files in the app.
+
+What remains unexamined is the **leave** step, and whether the Mac needs a
+console *view* at all or whether the sidebar plus ⌘P already is one.
 
 **Must not:** become a general terminal emulator, or compete with the user's
 editor. `OpenInEditor` exists precisely so it doesn't have to.
