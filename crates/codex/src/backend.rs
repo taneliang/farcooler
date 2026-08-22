@@ -314,10 +314,25 @@ pub fn models_from(result: &serde_json::Value) -> Vec<ModelInfo> {
 /// Ordered by how much codex is allowed to do unasked, which is the axis a
 /// person chooses along — not the order the union declares them in. Named the
 /// way someone would choose them rather than the way the wire spells them.
+///
+/// That last sentence now stands in deliberate contrast to `permission_modes`
+/// in the claude backend, which does the opposite: it reproduces the agent's
+/// own names and descriptions exactly, because claude publishes them. Codex
+/// sends `approvalPolicy` as a bare string — `"untrusted"`, `"on-request"`,
+/// `"never"` — with no name and no description anywhere on that wire, so there
+/// is nothing to borrow and these three sentences are ours. Read the difference
+/// as a decision, not as drift somebody missed.
+///
+/// Being ours, they follow Far Cooler's copy rules, curly apostrophe included
+/// ("isn’t"). `"Don't Ask"` is the exception, and the harder call: it is our
+/// rendering of `never` that happens to land on claude's word for a different
+/// id. Straight, so that the two pickers agree when they sit side by side —
+/// a curly one here would show a person `Don’t Ask` on codex and `Don't Ask` on
+/// claude in the same list of panes.
 fn approval_policies() -> Vec<AgentChoice> {
     [
         ("untrusted", "Ask Always", "Prompts before anything not already trusted"),
-        ("on-request", "Ask When Needed", "Prompts only when the sandbox isn't enough"),
+        ("on-request", "Ask When Needed", "Prompts only when the sandbox isn’t enough"),
         ("never", "Don't Ask", "Never prompts — the sandbox is the only limit"),
     ]
     .iter()

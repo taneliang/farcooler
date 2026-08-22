@@ -439,15 +439,38 @@ fn new_session_id() -> String {
 ///
 /// Ordered by how much they let the agent do on its own, which is the axis a
 /// person is actually choosing along — not the order the union happens to
-/// declare them in. Descriptions are the CLI's own words.
+/// declare them in. Ordering stays ours: choosing the order a person picks
+/// along is not the same as renaming what they are picking.
+///
+/// The names and descriptions are the agent's own, not ours. They are copied
+/// from `crates/acp/tests/fixtures/*.jsonl` — recordings of a real agent's
+/// `availableModes` — and from the newest recording where two disagree, which
+/// is why `default` reads "Manual" rather than the "Default" the 0.16.2
+/// fixtures carry. The ACP adapter relays that same list verbatim
+/// (`crates/acp/src/session.rs`), so a claude pane reads identically whichever
+/// adapter it came up on; that is the whole point of matching. Models already
+/// worked this way on both adapters.
+///
+/// `"Don't Ask"` keeps a STRAIGHT apostrophe, and so does every other borrowed
+/// string here, because that is how the agent spells it and these are the
+/// agent's words rather than Far Cooler's copy. A house-style sweep that curls
+/// apostrophes must leave them alone — curling only our half is how two pickers
+/// side by side end up spelling one name two ways.
+///
+/// What it costs: ACP gets the agent's wording updates for free, this list does
+/// not. When the agent renames a mode, the native adapter is stale until a
+/// person notices and re-reads the fixtures. That is the price of matching, and
+/// it is written here so the next reader finds it rather than rediscovers it.
+/// If the claude CLI ever publishes an available-modes list on the native
+/// protocol, that list should replace this hardcoded one outright.
 fn permission_modes() -> Vec<AgentChoice> {
     [
-        ("plan", "Plan", "Plan only — no tools run"),
-        ("default", "Ask", "Prompts before anything dangerous"),
-        ("acceptEdits", "Accept Edits", "File edits go through without asking"),
-        ("auto", "Auto", "A model decides which prompts to approve"),
-        ("dontAsk", "Don't Ask", "Never prompts — denies whatever is not pre-approved"),
-        ("bypassPermissions", "Bypass", "Skips every permission check"),
+        ("plan", "Plan Mode", "Planning mode, no actual tool execution"),
+        ("default", "Manual", "Standard behavior, prompts for dangerous operations"),
+        ("acceptEdits", "Accept Edits", "Auto-accept file edit operations"),
+        ("auto", "Auto", "Use a model classifier to approve/deny permission prompts"),
+        ("dontAsk", "Don't Ask", "Don't prompt for permissions, deny if not pre-approved"),
+        ("bypassPermissions", "Bypass Permissions", "Bypass all permission checks"),
     ]
     .iter()
     .map(|(id, name, description)| AgentChoice {
@@ -676,14 +699,41 @@ mod tests {
     }
 
     #[test]
-    fn a_mode_is_named_the_way_a_person_would_choose_it() {
-        // Not the way the wire spells it — the mistake `AgentChoice` was given
-        // a `name` to fix, and one a picker offering `bypassPermissions` makes.
-        let modes = permission_modes();
-        let auto = modes.iter().find(|m| m.id == "auto").expect("auto is offered");
-        assert_eq!(auto.name, "Auto");
-        assert!(auto.description.contains("model"), "and says what it does: {auto:?}");
-        assert!(modes.iter().any(|m| m.name == "Accept Edits"));
+    fn a_mode_is_named_the_way_the_agent_names_it() {
+        // Not the way we would have named it. The picker this backend draws and
+        // the one ACP draws are the same agent's modes, and they have to read
+        // identically — so the check is against a recording of the real agent
+        // rather than against anyone's taste. The recording is the authority: if
+        // this fails, the list above is what is wrong.
+        //
+        // `workflow_dispatch.jsonl` is the newest fixture that carries every id
+        // (0.64.2); the 0.16.2 pair predate `auto` and still call `default`
+        // "Default". Straight apostrophes throughout, deliberately — see the
+        // comment on `permission_modes`.
+        let recording: serde_json::Value = serde_json::from_str(
+            include_str!("../../acp/tests/fixtures/workflow_dispatch.jsonl")
+                .lines()
+                .nth(1)
+                .expect("the fixture answers session/new on its second line"),
+        )
+        .expect("a recorded JSON-RPC frame");
+        let recorded = recording["result"]["modes"]["availableModes"]
+            .as_array()
+            .expect("the agent announced its modes");
+
+        for mode in permission_modes() {
+            let theirs = recorded
+                .iter()
+                .find(|m| m["id"] == mode.id.as_str())
+                .unwrap_or_else(|| panic!("the agent has no mode {}", mode.id));
+            assert_eq!(mode.name, theirs["name"].as_str().expect("a name"), "id {}", mode.id);
+            assert_eq!(
+                mode.description,
+                theirs["description"].as_str().expect("a description"),
+                "id {}",
+                mode.id
+            );
+        }
     }
 
     #[test]
