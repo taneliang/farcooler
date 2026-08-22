@@ -203,7 +203,15 @@ struct RunnerSettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
+                        // A plain label hit-tests where its content is, and the
+                        // run between the name and the chevron is most of the
+                        // row.
+                        .contentShape(Rectangle())
                     }
+                    // A disclosure row, not an action: without this the name and
+                    // the chevron inherit the button's accent tint. See
+                    // `CommitHistorySheet` in `ChangesView`.
+                    .buttonStyle(.plain)
                 }
                 .onDelete { offsets in
                     let names = offsets.map { model.themes[$0].name }
@@ -243,7 +251,9 @@ struct RunnerSettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
                 Button {
                     editingAdapter = AdapterInfo(preset: unusedAdapterName())

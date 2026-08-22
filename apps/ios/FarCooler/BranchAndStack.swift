@@ -48,6 +48,12 @@ struct BranchPicker: View {
                     } label: {
                         row(branch)
                     }
+                    // A branch name and its subject are content, not an action
+                    // — without this they inherit the button's accent tint, and
+                    // the hierarchical styles inside the row resolve against it
+                    // rather than against the label color. See
+                    // `CommitHistorySheet` in `ChangesView`.
+                    .buttonStyle(.plain)
                     // git refuses a second checkout of a branch, so the row is
                     // disabled rather than left tappable to fail afterwards.
                     .disabled(branch.checkedOut)
@@ -95,6 +101,10 @@ struct BranchPicker: View {
                     .lineLimit(1)
             }
         }
+        // A plain label sizes to its text. Give the tap the whole visible row,
+        // including the blank trailing space beside a short branch name.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 

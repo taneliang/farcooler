@@ -235,6 +235,11 @@ private struct ConnectThisDeviceStep: View {
                         recommended: true
                     )
                 }
+                // The hub screen draws this same row as a `NavigationLink`,
+                // which does not tint its label; a `Button` does, which turned
+                // the title, the description and the chevron three shades of
+                // blue on one of the two screens. See `CommitHistorySheet`.
+                .buttonStyle(.plain)
             }
 
             Section {
@@ -247,6 +252,7 @@ private struct ConnectThisDeviceStep: View {
                         recommended: false
                     )
                 }
+                .buttonStyle(.plain)
             }
         }
         .navigationTitle("Connect This Device")

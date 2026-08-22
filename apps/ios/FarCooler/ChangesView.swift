@@ -986,6 +986,9 @@ private struct FileIndexSheet: View {
             }
             .contentShape(Rectangle())
         }
+        // A file name and its directory are content, not an action — without
+        // this they inherit the button's accent tint. See `CommitHistorySheet`.
+        .buttonStyle(.plain)
     }
 }
 
@@ -1882,6 +1885,15 @@ private struct CommitHistorySheet: View {
                     } label: {
                         wholeBranch
                     }
+                    // `.plain`, or the row comes out blue. A button's label
+                    // inherits the accent tint, and `.primary`, `.secondary`
+                    // and `.tertiary` are hierarchical — they resolve against
+                    // whatever the current foreground style is, so inside a
+                    // tinted label they render as shades of the accent rather
+                    // than shades of gray. Every row in this sheet is content
+                    // that happens to be tappable; the Mac's commit popover has
+                    // said `.plain` here all along.
+                    .buttonStyle(.plain)
                 }
 
                 Section {
@@ -1909,6 +1921,7 @@ private struct CommitHistorySheet: View {
                         } label: {
                             row(commit)
                         }
+                        .buttonStyle(.plain)
                     }
                 } header: {
                     Text("Commits")
@@ -1954,6 +1967,10 @@ private struct CommitHistorySheet: View {
                 Image(systemName: "checkmark").font(.footnote).foregroundStyle(.tint)
             }
         }
+        // A plain label hit-tests where its content is, and the gap a thumb
+        // lands in is between the words and the checkmark. The commit rows
+        // below already say this; `FleetList`'s rows say it too.
+        .contentShape(Rectangle())
     }
 
     /// Sha, subject, the top of the rationale, author, age and what it changed.
