@@ -343,10 +343,23 @@ fn change_set_json(cs: &pb::ChangeSet) -> serde_json::Value {
             "unstaged": w.unstaged.iter().map(|f| &f.path).collect::<Vec<_>>(),
             "untracked": w.untracked,
             "conflicted": w.conflicted,
-            "changes": w.staged.iter().chain(w.unstaged.iter()).map(|f| serde_json::json!({
+            // Every dirty path with its own counts, which is what an
+            // "uncommitted" total is a sum of. A file that is staged AND
+            // modified again appears twice, once per group, because those are
+            // two different diffs of it — a reader summing per path gets what
+            // `git diff HEAD` would say, and `change_set::apply_uncommitted_counts`
+            // says where that is exact and where it is an upper bound. Untracked
+            // files are here too: they are uncommitted work, and a client
+            // counting only what git can diff misses the file an agent just
+            // wrote.
+            "changes": w.staged.iter().chain(w.unstaged.iter())
+                .chain(w.untracked_files.iter()).map(|f| serde_json::json!({
                 "path": f.path,
                 "status": file_status_name(f.status),
                 "old_path": f.old_path,
+                "insertions": f.insertions,
+                "deletions": f.deletions,
+                "binary": f.binary,
             })).collect::<Vec<_>>(),
         })),
     })
@@ -380,5 +393,80 @@ fn file_status_name(status: i32) -> &'static str {
         pb::FileStatus::Untracked => "untracked",
         pb::FileStatus::Conflicted => "conflicted",
         pb::FileStatus::Unspecified => "modified",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file(path: &str, status: pb::FileStatus, ins: u32, del: u32) -> pb::FileChange {
+        pb::FileChange {
+            path: path.to_string(),
+            status: status as i32,
+            old_path: None,
+            insertions: ins,
+            deletions: del,
+            binary: false,
+            submodule: false,
+        }
+    }
+
+    /// The shape both apps decode, and the reason this function exists twice:
+    /// `crates/client/src/session.rs` prints the same keys for the phones, and a
+    /// key that appeared in one and not the other would be one worktree
+    /// described two ways.
+    ///
+    /// `changes` is what a client's Uncommitted total is a sum of. It carries
+    /// counts because the daemon now has them — `change_set::apply_uncommitted_counts`
+    /// — and it carries untracked files because a file an agent has just written
+    /// is uncommitted work, whatever git can diff.
+    #[test]
+    fn the_working_tree_carries_every_dirty_path_with_its_counts() {
+        let cs = pb::ChangeSet {
+            working_tree: Some(pb::WorkingTree {
+                staged: vec![file("staged.txt", pb::FileStatus::Added, 2, 0)],
+                unstaged: vec![file("README.md", pb::FileStatus::Modified, 1, 3)],
+                untracked: vec!["new.txt".to_string()],
+                untracked_files: vec![file("new.txt", pb::FileStatus::Untracked, 3, 0)],
+                conflicted: Vec::new(),
+            }),
+            ..Default::default()
+        };
+
+        let v = change_set_json(&cs);
+        let changes = v["working_tree"]["changes"].as_array().expect("changes");
+        assert_eq!(changes.len(), 3, "staged, unstaged, and untracked");
+
+        let total: u64 = changes.iter().map(|c| c["insertions"].as_u64().unwrap()).sum();
+        assert_eq!(total, 6);
+        assert_eq!(changes[2]["path"], "new.txt");
+        assert_eq!(changes[2]["status"], "untracked");
+        assert_eq!(changes[2]["insertions"], 3);
+        assert_eq!(changes[1]["deletions"], 3);
+        assert_eq!(changes[0]["binary"], false);
+
+        // The path lists an app in the field already decodes are unchanged.
+        assert_eq!(v["working_tree"]["staged"][0], "staged.txt");
+        assert_eq!(v["working_tree"]["untracked"][0], "new.txt");
+    }
+
+    /// A file that is staged and modified again is in both groups, once per
+    /// diff of it. A client sums per path; dropping either row would report half
+    /// the work.
+    #[test]
+    fn a_file_in_both_groups_appears_once_per_group() {
+        let cs = pb::ChangeSet {
+            working_tree: Some(pb::WorkingTree {
+                staged: vec![file("a.rs", pb::FileStatus::Modified, 1, 0)],
+                unstaged: vec![file("a.rs", pb::FileStatus::Modified, 4, 2)],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let v = change_set_json(&cs);
+        let changes = v["working_tree"]["changes"].as_array().expect("changes");
+        assert_eq!(changes.len(), 2);
+        assert!(changes.iter().all(|c| c["path"] == "a.rs"));
     }
 }

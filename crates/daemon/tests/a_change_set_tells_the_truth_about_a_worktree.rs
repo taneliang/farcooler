@@ -256,8 +256,140 @@ async fn the_four_working_tree_groups_stay_apart() {
     assert!(wt.is_dirty());
     assert!(wt.staged.iter().any(|f| f.path == "staged.txt"));
     assert!(wt.unstaged.iter().any(|f| f.path == "README.md"));
-    assert!(wt.untracked.contains(&"untracked.txt".to_string()));
+    assert!(wt.untracked.iter().any(|f| f.path == "untracked.txt"));
     assert!(wt.conflicted.is_empty());
+}
+
+#[tokio::test]
+async fn every_uncommitted_group_arrives_with_its_own_counts() {
+    // The defect this replaces: the Mac summed the diffs it had already drawn
+    // to get an "Uncommitted" total, so the header started near zero and climbed
+    // as the reader scrolled. These are the numbers it reads instead.
+    let dir = repo();
+    let p = dir.path();
+
+    write(p, "staged.txt", "one\ntwo\n");
+    run(p, &["add", "staged.txt"]);
+    write(p, "README.md", "start\nand a second line\n");
+    write(p, "new.txt", "a\nb\nc\n");
+
+    let cs = change_set(p, "main", "main", BaseSource::Guessed).await.expect("change set");
+    let wt = &cs.working_tree;
+
+    let staged = wt.staged.iter().find(|f| f.path == "staged.txt").expect("staged");
+    assert_eq!((staged.insertions, staged.deletions), (2, 0), "index against HEAD");
+
+    let unstaged = wt.unstaged.iter().find(|f| f.path == "README.md").expect("unstaged");
+    assert_eq!((unstaged.insertions, unstaged.deletions), (1, 0), "worktree against index");
+
+    let untracked = wt.untracked.iter().find(|f| f.path == "new.txt").expect("untracked");
+    assert_eq!(
+        (untracked.insertions, untracked.deletions),
+        (3, 0),
+        "a file git has never seen still has lines in it"
+    );
+    assert!(!untracked.binary);
+
+    // What a client's Uncommitted header is: the sum of every dirty path.
+    let total: u32 = wt
+        .staged
+        .iter()
+        .chain(wt.unstaged.iter())
+        .chain(wt.untracked.iter())
+        .map(|f| f.insertions)
+        .sum();
+    assert_eq!(total, 6);
+}
+
+#[tokio::test]
+async fn a_file_staged_and_edited_again_reports_both_halves_apart() {
+    // The one shape where the two groups are not a partition: the file is in
+    // both, and each carries ITS OWN diff rather than a share of `git diff HEAD`.
+    let dir = repo();
+    let p = dir.path();
+
+    write(p, "README.md", "start\nstaged line\n");
+    run(p, &["add", "README.md"]);
+    write(p, "README.md", "start\nstaged line\nand another\n");
+
+    let cs = change_set(p, "main", "main", BaseSource::Guessed).await.expect("change set");
+    let staged = cs.working_tree.staged.iter().find(|f| f.path == "README.md").expect("staged");
+    let unstaged =
+        cs.working_tree.unstaged.iter().find(|f| f.path == "README.md").expect("unstaged");
+    assert_eq!((staged.insertions, staged.deletions), (1, 0));
+    assert_eq!((unstaged.insertions, unstaged.deletions), (1, 0));
+}
+
+#[tokio::test]
+async fn an_untracked_binary_file_is_flagged_rather_than_counted() {
+    // git prints `-` for a file it will not diff, and those lines appear in no
+    // total it reports. A byte count dressed up as insertions would be a lie
+    // that summed.
+    let dir = repo();
+    let p = dir.path();
+    std::fs::write(p.join("icon.png"), [0x89, b'P', b'N', b'G', 0, 0, 0, b'\n']).expect("write");
+
+    let cs = change_set(p, "main", "main", BaseSource::Guessed).await.expect("change set");
+    let icon = cs.working_tree.untracked.iter().find(|f| f.path == "icon.png").expect("untracked");
+    assert!(icon.binary);
+    assert_eq!(icon.insertions, 0);
+}
+
+/// The worked example the three surfaces are specified by.
+///
+/// Base `main`, one commit adding two lines, one further uncommitted line in
+/// that same file, and one new untracked file of three lines. The sidebar and
+/// the panel answer DIFFERENT questions on purpose, and this pins all of them at
+/// once so that fixing one cannot quietly move another:
+///
+/// ```text
+///   sidebar             +6   is this worth opening      all work
+///   panel · Branch      +2   what lands when it merges  committed only
+///   panel · Uncommitted +4   what is not committed yet  1 tracked + 3 untracked
+/// ```
+///
+/// Uncommitted is the one of the three that moved when these counts arrived,
+/// and it moved for the reason the group exists: the untracked file's three
+/// lines appeared in no panel total at all, while its row sat in the Uncommitted
+/// list. The other two are untouched, which is the property worth a test — the
+/// sidebar and the panel are not being equalized, they are being told apart.
+#[tokio::test]
+async fn the_sidebar_and_the_panel_keep_answering_their_own_questions() {
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    write(p, "a.txt", "one\ntwo\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "add a"]);
+    write(p, "a.txt", "one\ntwo\nthree\n");
+    write(p, "new.txt", "x\ny\nz\n");
+
+    let (_files, sidebar, _del) =
+        farcooler_daemon::change_set::shortstat(p, "main").await.expect("shortstat");
+    assert_eq!(sidebar, 6, "committed, uncommitted, and untracked together");
+
+    let cs = change_set(p, "feature", "main", BaseSource::Guessed).await.expect("change set");
+    assert_eq!(cs.insertions, 2, "the branch's own commits, and nothing else");
+
+    let uncommitted: u32 = cs
+        .working_tree
+        .staged
+        .iter()
+        .chain(cs.working_tree.unstaged.iter())
+        .chain(cs.working_tree.untracked.iter())
+        .map(|f| f.insertions)
+        .sum();
+    assert_eq!(uncommitted, 4, "one line in a.txt and the whole of new.txt");
+}
+
+#[tokio::test]
+async fn a_clean_worktree_still_reports_no_counts() {
+    let dir = repo();
+    let cs = change_set(dir.path(), "main", "main", BaseSource::Guessed)
+        .await
+        .expect("change set");
+    assert!(!cs.is_dirty());
+    assert!(cs.working_tree.staged.is_empty() && cs.working_tree.unstaged.is_empty());
 }
 
 #[tokio::test]

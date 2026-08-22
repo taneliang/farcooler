@@ -83,7 +83,11 @@ fn pb_change_set(workspace_id: Uuid, c: &review::CachedChangeSet) -> pb::ChangeS
         working_tree: Some(pb::WorkingTree {
             staged: s.working_tree.staged.iter().map(pb_file).collect(),
             unstaged: s.working_tree.unstaged.iter().map(pb_file).collect(),
-            untracked: s.working_tree.untracked.clone(),
+            // One list, written twice: `untracked` is what an app already in
+            // the field decodes, `untracked_files` is the same files with the
+            // counts a bare path cannot carry.
+            untracked: s.working_tree.untracked.iter().map(|f| f.path.clone()).collect(),
+            untracked_files: s.working_tree.untracked.iter().map(pb_file).collect(),
             conflicted: s.working_tree.conflicted.clone(),
         }),
         files: s.files.iter().map(pb_file).collect(),

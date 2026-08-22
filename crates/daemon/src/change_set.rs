@@ -87,11 +87,22 @@ pub struct Commit {
     pub deletions: u32,
 }
 
+/// The four groups a reviewer needs apart, and what each one's counts mean.
+///
+/// `staged` is the index against HEAD and `unstaged` is the worktree against the
+/// index — the two comparisons `DiffSelector::Staged` and `Unstaged` draw, so a
+/// group's `+N -M` and the patch a client opens from it are the same diff.
+/// `untracked` carries records rather than bare paths because a file git has
+/// never seen still has a size, and it is the half `git diff` cannot report at
+/// all: see `untracked_counts`.
+///
+/// Counts are zero until `apply_uncommitted_counts` fills them; `working_tree`
+/// alone reads `git status`, which reports status and no numbers.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkingTree {
     pub staged: Vec<FileChange>,
     pub unstaged: Vec<FileChange>,
-    pub untracked: Vec<String>,
+    pub untracked: Vec<FileChange>,
     pub conflicted: Vec<String>,
 }
 
@@ -375,6 +386,12 @@ pub fn parse_numstat_z(bytes: &[u8]) -> Vec<FileChange> {
 }
 
 /// The working tree, split into the four groups a reviewer needs apart.
+///
+/// Paths and statuses only. `--porcelain=v2` reports no line counts of any
+/// kind, so every record comes back 0/0; `apply_uncommitted_counts` is the pass
+/// that fills them, and it is deliberately not folded in here — this function is
+/// also what `untracked_lines` and `worktree_digest` call, and neither of them
+/// wants a diff run underneath it.
 pub async fn working_tree(repo: &Path) -> Result<WorkingTree> {
     let raw =
         git_bytes(repo, &["status", "--porcelain=v2", "--untracked-files=all", "-z"]).await?;
@@ -382,6 +399,101 @@ pub async fn working_tree(repo: &Path) -> Result<WorkingTree> {
         return Err(DomainError::OperationFailed);
     }
     Ok(parse_porcelain_v2_z(&raw.stdout))
+}
+
+/// Fill in the line counts `git status` cannot report.
+///
+/// The count fields on `WorkingTree`'s records were zero from the day they
+/// existed and nothing ever filled them, so a client that wanted `+N -M` for
+/// uncommitted work had to count the diff it had already drawn — which made the
+/// total whatever the reader had scrolled into view, and made a scope switch or
+/// a Refresh start it over from nearly nothing.
+///
+/// ## Three questions, and which field asks which
+///
+/// ```text
+///   git diff --numstat --cached   index vs HEAD       what `staged` MEANS
+///   git diff --numstat            worktree vs index   what `unstaged` MEANS
+///   git diff --numstat HEAD       worktree vs HEAD    both at once
+/// ```
+///
+/// Each group gets the diff its own `DiffSelector` draws, so a row's counts and
+/// the patch opened from that row are the same comparison. The third form is
+/// what an "uncommitted" total wants — it is what `Selector::Local` shows — and
+/// it is deliberately NOT what either field carries: written onto the staged
+/// record it would report, under the word staged, work that is not staged.
+///
+/// A client after the uncommitted total adds the two groups. That is exact for
+/// every file in one group or the other, which is every file an agent produces —
+/// agents commit, they do not stage. It is an upper bound for the one shape that
+/// is neither: a file staged and then edited AGAIN over the same lines, where
+/// `git diff HEAD` counts that line once and the two groups each count it. The
+/// alternative is a third `git diff` per recompute to answer a question two
+/// existing reads already nearly answer, on a path that runs seven git commands
+/// before it gets here.
+///
+/// ## Cost
+///
+/// Two more `git diff`s, and only on `change_set` — the per-workspace review
+/// path behind `ReviewCache::get`, which runs it when the cheap gate or the
+/// worktree digest says the tree actually moved. `shortstat`, the call the fleet
+/// sampler puts on every workspace, does not come through here and is unchanged.
+/// Both are skipped outright when their group is empty, so a clean tree pays
+/// nothing. Measured warm on a clone of this repository with one staged file,
+/// five unstaged and one untracked: 16 ms for the whole pass, against 155 ms for
+/// the `change_set` around it over a 30-commit range and 390 ms over a
+/// 200-commit one. The reads it adds are bounded by the size of the dirty work,
+/// not by the size of the branch, so it is the one part of this path that does
+/// not grow with history.
+///
+/// Untracked files are the half `git diff` cannot see at all — `untracked_counts`
+/// reads them, and says there why `git add -N` is not an option.
+pub async fn apply_uncommitted_counts(repo: &Path, wt: &mut WorkingTree) -> Result<()> {
+    if !wt.staged.is_empty() {
+        let r =
+            git_bytes(repo, &["diff", "--numstat", "-z", "--find-renames", "--cached"]).await?;
+        if !r.ok {
+            return Err(DomainError::OperationFailed);
+        }
+        apply_numstat_counts_z(&mut wt.staged, &r.stdout);
+    }
+    if !wt.unstaged.is_empty() {
+        let r = git_bytes(repo, &["diff", "--numstat", "-z", "--find-renames"]).await?;
+        if !r.ok {
+            return Err(DomainError::OperationFailed);
+        }
+        apply_numstat_counts_z(&mut wt.unstaged, &r.stdout);
+    }
+    for f in &mut wt.untracked {
+        if let Some((lines, binary)) = untracked_counts(repo, &f.path).await {
+            f.insertions = lines;
+            f.binary = binary;
+        }
+    }
+    Ok(())
+}
+
+/// Merge per-file counts onto records that arrived with only a status.
+///
+/// `apply_name_status_z` the other way round, and the same shape on purpose: a
+/// second git read over the same paths, merged by path, leaving anything it does
+/// not mention alone. `git status` names every dirty path and gives no numbers;
+/// `git diff --numstat` gives numbers for a subset of them.
+///
+/// Merging by path is what keeps a conflict out of this. `git status` gives an
+/// unmerged path its own group, and `git diff --numstat` prints TWO records for
+/// one — a conflicted file's counts are the merge's question, not this one — so
+/// those records find nothing here and are dropped rather than written onto some
+/// other file. A record this group holds and the diff never mentions keeps its
+/// zeroes, which is the honest answer rather than a gap.
+pub fn apply_numstat_counts_z(files: &mut [FileChange], bytes: &[u8]) {
+    for counted in parse_numstat_z(bytes) {
+        if let Some(file) = files.iter_mut().find(|file| file.path == counted.path) {
+            file.insertions = counted.insertions;
+            file.deletions = counted.deletions;
+            file.binary = counted.binary;
+        }
+    }
 }
 
 /// Parse `git status --porcelain=v2 -z`.
@@ -402,7 +514,15 @@ pub fn parse_porcelain_v2_z(bytes: &[u8]) -> WorkingTree {
         let rest = it.next().unwrap_or("");
 
         match kind {
-            "?" => wt.untracked.push(rest.to_string()),
+            "?" => wt.untracked.push(FileChange {
+                path: rest.to_string(),
+                status: FileStatus::Untracked,
+                old_path: None,
+                insertions: 0,
+                deletions: 0,
+                binary: false,
+                submodule: false,
+            }),
             "u" => {
                 // `u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>`
                 if let Some(path) = rest.split(' ').nth(9) {
@@ -469,8 +589,8 @@ pub async fn worktree_digest(repo: &Path, head_commit: &str) -> Result<String> {
     for f in &wt.unstaged {
         paths.push((&f.path, "unstaged"));
     }
-    for p in &wt.untracked {
-        paths.push((p, "untracked"));
+    for f in &wt.untracked {
+        paths.push((&f.path, "untracked"));
     }
     for p in &wt.conflicted {
         paths.push((p, "conflicted"));
@@ -597,35 +717,45 @@ pub async fn shortstat(repo: &Path, base_ref: &str) -> Result<(u32, u32, u32)> {
 
 /// The files git has never heard of, and the lines in them.
 ///
-/// The half `git diff` cannot report, counted here rather than made visible to
-/// diff with `git add -N`. That would write the index — fighting whatever git
-/// the agent is running itself, and moving the index mtime that
-/// `review::cheap_gate` reads, which is the gate every cheap thing in this
-/// product is built on.
-///
-/// Reading each new file is the cost `worktree_digest` beside this already pays
-/// over the same list, and it is bounded by the same thing: what git calls
-/// untracked, which excludes everything `.gitignore` covers. So this is the size
-/// of the work in progress, not the size of the repository.
+/// The aggregate `shortstat` adds to its diff; `untracked_counts` is the same
+/// read per file, and `apply_uncommitted_counts` spends it to give each record
+/// its own number.
 async fn untracked_lines(repo: &Path) -> Result<(u32, u32)> {
     let untracked = working_tree(repo).await?.untracked;
 
     let mut files = 0;
     let mut lines = 0;
-    for path in &untracked {
-        // Created and deleted again between the status call and this read. Not
-        // an error, and not a file to count.
-        let Ok(bytes) = tokio::fs::read(repo.join(path)).await else { continue };
+    for f in &untracked {
+        let Some((n, _binary)) = untracked_counts(repo, &f.path).await else { continue };
         files += 1;
-        // git prints `-` rather than a count for a file it calls binary, and
-        // those lines appear in no total it reports. Same test it uses: a NUL
-        // byte in the first 8000.
-        if bytes.iter().take(8000).any(|b| *b == 0) {
-            continue;
-        }
-        lines += new_file_lines(&bytes);
+        lines += n;
     }
     Ok((files, lines))
+}
+
+/// One untracked file's counts: the lines git would call insertions if it knew
+/// about the file, and whether git would call it binary.
+///
+/// The half `git diff` cannot report, counted by reading the file rather than
+/// made visible to diff with `git add -N`. That would write the index —
+/// fighting whatever git the agent is running itself, and moving the index
+/// mtime that `review::cheap_gate` reads, which is the gate every cheap thing in
+/// this product is built on.
+///
+/// Reading each new file is the cost `worktree_digest` beside this already pays
+/// over the same list, and it is bounded by the same thing: what git calls
+/// untracked, which excludes everything `.gitignore` covers. So this is the size
+/// of the work in progress, not the size of the repository.
+///
+/// `None` for a file created and deleted again between the status call and this
+/// read. Not an error, and not a file to count.
+async fn untracked_counts(repo: &Path, path: &str) -> Option<(u32, bool)> {
+    let bytes = tokio::fs::read(repo.join(path)).await.ok()?;
+    // git prints `-` rather than a count for a file it calls binary, and those
+    // lines appear in no total it reports. Same test it uses: a NUL byte in the
+    // first 8000.
+    let binary = bytes.iter().take(8000).any(|b| *b == 0);
+    Some((if binary { 0 } else { new_file_lines(&bytes) }, binary))
 }
 
 /// Lines in a file, counted the way git counts them when the whole file is an
@@ -659,7 +789,10 @@ pub async fn change_set(
     let base_commit = merge_base(repo, base_ref).await?;
     let commits = commits_since(repo, &base_commit).await?;
     let files = numstat(repo, &base_commit).await?;
-    let working_tree = working_tree(repo).await?;
+    // Status first, then the counts `git status` has none of. Two reads for one
+    // answer, the same way `numstat` above is two.
+    let mut working_tree = working_tree(repo).await?;
+    apply_uncommitted_counts(repo, &mut working_tree).await?;
     let worktree_digest = worktree_digest(repo, &head_commit).await?;
 
     let insertions = files.iter().map(|f| f.insertions).sum();
@@ -766,9 +899,68 @@ mod tests {
     fn untracked_and_conflicted_are_their_own_groups() {
         let raw = b"? notes.txt\0u UU N... 100644 100644 100644 100644 aaa bbb ccc src/c.rs\0";
         let wt = parse_porcelain_v2_z(raw);
-        assert_eq!(wt.untracked, vec!["notes.txt"]);
+        assert_eq!(wt.untracked.len(), 1);
+        assert_eq!(wt.untracked[0].path, "notes.txt");
+        assert_eq!(wt.untracked[0].status, FileStatus::Untracked);
         assert_eq!(wt.conflicted, vec!["src/c.rs"]);
         assert!(wt.is_dirty());
+    }
+
+    #[test]
+    fn a_status_record_arrives_with_no_counts_at_all() {
+        // The whole reason `apply_uncommitted_counts` exists: `--porcelain=v2`
+        // reports what changed and never how much.
+        let raw = b"1 .M N... 100644 100644 100644 aaa bbb src/x.rs\0? notes.txt\0";
+        let wt = parse_porcelain_v2_z(raw);
+        assert_eq!((wt.unstaged[0].insertions, wt.unstaged[0].deletions), (0, 0));
+        assert_eq!((wt.untracked[0].insertions, wt.untracked[0].deletions), (0, 0));
+    }
+
+    #[test]
+    fn numstat_counts_merge_onto_status_records_by_path() {
+        let mut wt = parse_porcelain_v2_z(
+            b"1 .M N... 100644 100644 100644 aaa bbb src/x.rs\0\
+              1 .M N... 100644 100644 100644 aaa bbb src/y.rs\0",
+        );
+        apply_numstat_counts_z(&mut wt.unstaged, b"3\t1\tsrc/x.rs\0-\t-\tsrc/y.rs\0");
+        assert_eq!((wt.unstaged[0].insertions, wt.unstaged[0].deletions), (3, 1));
+        assert!(!wt.unstaged[0].binary);
+        assert!(wt.unstaged[1].binary, "git says `-` for a file it will not diff");
+    }
+
+    #[test]
+    fn a_record_the_diff_never_mentions_keeps_its_zeroes() {
+        let mut wt =
+            parse_porcelain_v2_z(b"1 .M N... 100644 100644 100755 aaa bbb run.sh\0");
+        apply_numstat_counts_z(&mut wt.unstaged, b"");
+        assert_eq!((wt.unstaged[0].insertions, wt.unstaged[0].deletions), (0, 0));
+        assert_eq!(wt.unstaged[0].status, FileStatus::Modified, "status survives");
+    }
+
+    #[test]
+    fn counts_for_a_path_this_group_does_not_hold_go_nowhere() {
+        // What an unmerged path looks like from here: `git status` gives it its
+        // own group, and `git diff --numstat` prints TWO records for it. Merging
+        // by path is what keeps a conflict's numbers from landing on some other
+        // file in this list.
+        let mut wt = parse_porcelain_v2_z(b"1 .M N... 100644 100644 100644 aaa bbb src/x.rs\0");
+        apply_numstat_counts_z(
+            &mut wt.unstaged,
+            b"0\t0\tf.txt\x006\t0\tf.txt\x003\t1\tsrc/x.rs\0",
+        );
+        assert_eq!(wt.unstaged.len(), 1, "a merge adds nothing");
+        assert_eq!((wt.unstaged[0].insertions, wt.unstaged[0].deletions), (3, 1));
+    }
+
+    #[test]
+    fn merging_counts_leaves_a_records_status_and_old_path_alone() {
+        let mut wt = parse_porcelain_v2_z(
+            b"2 R. N... 100644 100644 100644 aaa bbb R100 new.rs\0old.rs\0",
+        );
+        apply_numstat_counts_z(&mut wt.staged, b"1\t1\t\0old.rs\0new.rs\0");
+        assert_eq!(wt.staged[0].status, FileStatus::Renamed);
+        assert_eq!(wt.staged[0].old_path.as_deref(), Some("old.rs"));
+        assert_eq!((wt.staged[0].insertions, wt.staged[0].deletions), (1, 1));
     }
 
     #[test]

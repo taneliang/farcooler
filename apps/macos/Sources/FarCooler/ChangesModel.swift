@@ -153,14 +153,37 @@ struct WorkingTree: Decodable, Equatable {
     var changes: [WorkingTreeFile]?
 }
 
+/// One dirty path, in one of the groups git puts it in.
+///
+/// A file that is staged AND modified again appears twice, once per group,
+/// because those are two different diffs of it — so the counts here are summed
+/// per path rather than looked up, and `files` does that.
+///
+/// The counts are decoded leniently because a runner can be behind this app: the
+/// daemon wrote zeroes into these fields for as long as they existed and only
+/// fills them now, and an app that refused to decode a change set without them
+/// would show an older runner nothing at all rather than a number less.
 struct WorkingTreeFile: Decodable, Equatable {
     var path: String
     var status: ChangedFileStatus
     var oldPath: String?
+    var insertions: Int
+    var deletions: Int
+    var binary: Bool
 
     enum CodingKeys: String, CodingKey {
-        case path, status
+        case path, status, insertions, deletions, binary
         case oldPath = "old_path"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        status = try c.decode(ChangedFileStatus.self, forKey: .status)
+        oldPath = try c.decodeIfPresent(String.self, forKey: .oldPath)
+        insertions = try c.decodeIfPresent(Int.self, forKey: .insertions) ?? 0
+        deletions = try c.decodeIfPresent(Int.self, forKey: .deletions) ?? 0
+        binary = try c.decodeIfPresent(Bool.self, forKey: .binary) ?? false
     }
 }
 
@@ -395,18 +418,31 @@ final class ChangesStore: ObservableObject {
             return commitFiles
         case .local:
             return dirtyPaths.map { path in
-                // Counted from the diff once it has been read, because nothing
-                // else counts it: `numstat` answers for commits, and asking git
-                // a second time per file to fill in a number the hunks already
-                // contain would be a round trip to say what is on screen.
-                let lines = fileDiffs[path] ?? []
+                // Read from the working tree the daemon sent, not counted from
+                // the diffs on screen.
+                //
+                // Counting the hunks was right about COST and wrong about
+                // correctness: a per-file round trip to say what is already
+                // drawn would be absurd, but the hunks only contain the number
+                // once they have been fetched, and `fileDiffs` fills lazily from
+                // a `.task(id:)` on each realized row. So the header started
+                // near zero on a worktree long enough to scroll and climbed as
+                // the reader went down it, and every scope switch and every
+                // Refresh emptied the cache and started over. There is no round
+                // trip here either: `apply_uncommitted_counts` fills these in
+                // the same `change_set` this pane already read.
+                //
+                // Summed rather than found, because a file that is staged and
+                // then modified again is in both groups with its own diff in
+                // each.
+                let counts = changeSet.workingTree?.changes?.filter { $0.path == path } ?? []
                 return ChangedFile(
                     path: path,
                     status: localStatus(path),
                     oldPath: nil,
-                    insertions: lines.filter { $0.kind == .added }.count,
-                    deletions: lines.filter { $0.kind == .removed }.count,
-                    binary: false)
+                    insertions: counts.reduce(0) { $0 + $1.insertions },
+                    deletions: counts.reduce(0) { $0 + $1.deletions },
+                    binary: counts.contains { $0.binary })
             }
         }
     }

@@ -1333,10 +1333,23 @@ fn change_set_json(cs: &farcooler_protocol::v1::ChangeSet) -> serde_json::Value 
             "unstaged": w.unstaged.iter().map(|f| &f.path).collect::<Vec<_>>(),
             "untracked": w.untracked,
             "conflicted": w.conflicted,
-            "changes": w.staged.iter().chain(w.unstaged.iter()).map(|f| json!({
+            // Every dirty path with its own counts, which is what an
+            // "uncommitted" total is a sum of. A file that is staged AND
+            // modified again appears twice, once per group, because those are
+            // two different diffs of it — a reader summing per path gets what
+            // `git diff HEAD` would say, and `change_set::apply_uncommitted_counts`
+            // says where that is exact and where it is an upper bound. Untracked
+            // files are here too: they are uncommitted work, and a client
+            // counting only what git can diff misses the file an agent just
+            // wrote.
+            "changes": w.staged.iter().chain(w.unstaged.iter())
+                .chain(w.untracked_files.iter()).map(|f| json!({
                 "path": f.path,
                 "status": file_status_name(f.status),
                 "old_path": f.old_path,
+                "insertions": f.insertions,
+                "deletions": f.deletions,
+                "binary": f.binary,
             })).collect::<Vec<_>>(),
         })),
     })

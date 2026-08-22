@@ -1523,10 +1523,21 @@ message ChangeCommit {
 }
 
 message WorkingTree {
+  // `staged` is the index against HEAD and `unstaged` is the worktree against
+  // the index — the two comparisons DiffSelector draws, so a group's counts and
+  // the patch opened from it are the same diff. A client after the uncommitted
+  // total adds the two; see `change_set::apply_uncommitted_counts` for why
+  // neither field carries `git diff HEAD` instead.
   repeated FileChange staged = 1;
   repeated FileChange unstaged = 2;
   repeated string untracked = 3;
   repeated string conflicted = 4;
+  // The same untracked files as field 3, carrying the line counts a path alone
+  // cannot: a file an agent has just written is the most interesting thing in an
+  // uncommitted change set, and it counted for nothing until this field existed.
+  // Field 3 stays because the wire is additive-only — an app in the field
+  // decodes it — and both are written from one list in the daemon.
+  repeated FileChange untracked_files = 5;
 }
 
 message ChangeSet {
