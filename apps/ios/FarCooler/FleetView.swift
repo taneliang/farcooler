@@ -1688,6 +1688,18 @@ struct FleetList: View {
                                 Text("-\(counts.deletions)").foregroundStyle(.red)
                             }
                             .font(.caption2.monospaced())
+                            // Read aloud, the parts are "plus 82" and "minus
+                            // 13" — two numbers with nothing attaching them to
+                            // a diff, which is what this said until now. The
+                            // clause is the phone's whole share of what the
+                            // Mac's sidebar tooltip explains: this number is
+                            // more than the branch has committed, and nothing
+                            // on the row said so. No hover here, so the label
+                            // is the only place it can be said.
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(
+                                "\(counts.insertions) added, \(counts.deletions) removed, "
+                                    + "including work that isn’t committed yet")
                         }
                         // The main checkout has a branch like everything else,
                         // but WHICH branch is not the useful fact about it —

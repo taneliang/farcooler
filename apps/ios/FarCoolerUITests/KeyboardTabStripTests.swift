@@ -15,8 +15,9 @@ final class KeyboardTabStripTests: XCTestCase {
         }
 
         // The Changes tab, by identifier rather than by label. Its label now
-        // carries the diff's counts when there are any — "Changes, 82 added, 13
-        // removed" — so matching on the word alone found it only on a clean
+        // carries the diff's counts when there are any, and what they count —
+        // "Changes, 82 added, 13 removed, including work that isn’t committed
+        // yet" — so matching on the word alone found it only on a clean
         // worktree. It is also no longer a pane the host has to have opened:
         // every workspace has this chip. See `TerminalTabStrip`.
         let otherTab = app.buttons["workspace-tab-changes"]

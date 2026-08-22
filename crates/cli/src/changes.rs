@@ -47,6 +47,12 @@ pub enum ChangesCmd {
     /// Mark this worktree as read.
     Read { workspace: String },
     /// What has changed, across every worktree.
+    ///
+    /// The counts are everything the worktree has changed — committed work,
+    /// uncommitted edits, and untracked files — which is deliberately more than
+    /// `changes status` reports, whose `+N -M` is the branch's commits alone.
+    /// The apps say the same thing on their own copies of this number: the
+    /// Mac's sidebar in a tooltip, the phone in the row's spoken label.
     Inbox,
     /// The stack of branches containing this one, and their PRs.
     Stack {

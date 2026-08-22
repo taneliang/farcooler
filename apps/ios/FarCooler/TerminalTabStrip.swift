@@ -178,9 +178,17 @@ private struct ChangesChip: View {
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 
+    /// The counts, and what they count.
+    ///
+    /// The third surface fed by the fleet inbox, and it says the same clause as
+    /// the other two: this is everything the worktree has changed, not the
+    /// branch total the screen behind the chip shows under Branch. There is no
+    /// hover on a phone, so an accessibility label is the only place any of the
+    /// three can say it — see `FleetList`'s workspace header and `NeedsYou`.
     private var accessibilityLabel: String {
         guard let counts, counts.hasDiff else { return "Changes" }
-        return "Changes, \(counts.insertions) added, \(counts.deletions) removed"
+        return "Changes, \(counts.insertions) added, \(counts.deletions) removed, "
+            + "including work that isn’t committed yet"
     }
 }
 

@@ -99,6 +99,22 @@ enum SidebarMetrics {
     }
 }
 
+extension View {
+    /// `.help`, when there is something to say, and nothing at all otherwise.
+    ///
+    /// An empty tooltip string is not the same as no tooltip: it still hands
+    /// AppKit a tracking rectangle for a box with nothing in it. A conditional
+    /// modifier keeps a clean worktree's row from having one.
+    @ViewBuilder
+    func help(ifAny text: String?) -> some View {
+        if let text {
+            self.help(text)
+        } else {
+            self
+        }
+    }
+}
+
 /// One worktree, and its terminals when opened.
 ///
 /// Collapsed to a single line by default. The previous version made a worktree
@@ -319,8 +335,16 @@ struct WorkspaceSection: View {
                         .frame(width: countsWidth, alignment: .trailing)
                         .opacity(hovering || isSelected ? 0 : 1)
                         .accessibilityElement(children: .ignore)
+                        // Named the arithmetic and not the subject until now:
+                        // "6 insertions, 3 deletions" is spoken by a row that
+                        // never says what was counted, and this number counts
+                        // more than the branch has committed. The worktree is
+                        // in it for the same reason the attention dot's label
+                        // carries it — this is its own element, reached on its
+                        // own, with no row around it to say which one it is.
                         .accessibilityLabel(
-                            "\(changes.insertions) insertions, \(changes.deletions) deletions")
+                            "\(changes.insertions) insertions, \(changes.deletions) deletions "
+                                + "in \(workspace.task), including work that isn’t committed yet")
                 }
 
                 HStack(spacing: 2) {
@@ -394,6 +418,34 @@ struct WorkspaceSection: View {
         .contentShape(Rectangle())
         .onTapGesture { selection = .workspace(host: workspace.host ?? "", id: workspace.id) }
         .onHover { hovering = $0 }
+        // On the ROW, not on the counts, and that is the whole of it.
+        //
+        // The counts fade to zero the instant a pointer arrives — the buttons
+        // above them take that space — so a `.help` on the counts could only
+        // ever describe a number that had already gone invisible, and it would
+        // be unreachable by construction rather than by bad luck. The row is
+        // the one thing under the pointer at the moment a tooltip could fire,
+        // so it carries the explanation and says the two numbers again, which
+        // is also how the reader gets them back after hovering hid them.
+        .help(ifAny: changesHelp)
+    }
+
+    /// What the trailing `+N -M` counts, in words, with the numbers repeated.
+    ///
+    /// The sidebar's number and the Changes pane's Branch header answer
+    /// different questions and are not being made to agree: this one is "is
+    /// this worth opening at all", so it spans everything in the worktree,
+    /// while Branch is "what lands when this merges" and counts commits only.
+    /// See `ChangesStore.files` for where the two diverge on the wire.
+    ///
+    /// Nil rather than an empty string when there is nothing to say: an empty
+    /// tooltip is not the same thing as no tooltip, and every clean worktree in
+    /// the fleet would be tracking one.
+    private var changesHelp: String? {
+        guard let changes, changes.hasDiff else { return nil }
+        return "+\(changes.insertions.formatted()) -\(changes.deletions.formatted()) in this "
+            + "worktree — committed work, uncommitted edits, and untracked files, together. "
+            + "The Changes pane splits them: Branch is what’s committed, Uncommitted is what isn’t."
     }
 
     private func changeCountsText(_ changes: InboxRow) -> Text {

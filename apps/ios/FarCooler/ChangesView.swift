@@ -355,45 +355,84 @@ struct ChangesView: View {
             if let sha = store.scope.commitSha {
                 commitHeader(sha)
             } else {
-                branchHeader
+                comparisonHeader
             }
         }
         .padding(12)
         .background(ChangesSurface.card, in: .rect(cornerRadius: 14))
     }
 
-    /// Base, counts, the comparison control, and the two ways into the commits.
+    /// What is being compared, its counts, the control, and the ways into the
+    /// commits.
+    ///
+    /// The top line follows the segment, and that is the whole of this. It used
+    /// to be the branch's line whichever segment was on: `vs main` and the
+    /// branch's committed totals sat above a list of uncommitted files, which
+    /// is precisely the failure the card's own comment above warns of for a
+    /// commit — a header describing something nobody is looking at. And "vs
+    /// main" was not merely stale under Uncommitted, it was the wrong
+    /// comparison: uncommitted work is what the worktree has that HEAD does
+    /// not, and the base does not come into it.
+    ///
+    /// The Mac branches on scope for the counts, in `TileView.changeCount`.
+    /// This does the same, and — on a screen that draws the base where the
+    /// Mac's strip does not — for the words as well.
     @ViewBuilder
-    private var branchHeader: some View {
+    private var comparisonHeader: some View {
+        // Committed work against the base, or everything uncommitted against
+        // HEAD. `uncommittedInsertions` reads the working tree the daemon sent
+        // rather than the diffs on screen; see its own comment for why that
+        // distinction is the difference between a total and a running one.
+        let local = store.scope == .local
+        let total =
+            local
+            ? (store.uncommittedInsertions, store.uncommittedDeletions)
+            : (store.changeSet.insertions, store.changeSet.deletions)
+        // The comparison's own totals while nothing was generated, and the
+        // hand-written subtotal once something was. See `generatedNote`.
+        let shown =
+            store.generatedFiles.isEmpty
+            ? total
+            : (store.writtenInsertions, store.writtenDeletions)
+
         HStack(spacing: 10) {
-            if !store.changeSet.baseRef.isEmpty {
+            if local {
+                // HEAD rather than the branch name, because that is the
+                // comparison: `git diff HEAD`, staged and unstaged together,
+                // plus what git is not tracking yet. Git's own word, because
+                // it is the exact one and the reader of a diff screen knows
+                // it — and because the alternative reads as a base branch,
+                // which is the thing this line stopped saying.
+                Text("vs HEAD")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else if !store.changeSet.baseRef.isEmpty {
                 Text("vs \(store.changeSet.baseRef)")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            // The branch's own totals while nothing was generated, and the
-            // hand-written subtotal once something was. See `generatedNote`.
-            if store.generatedFiles.isEmpty {
-                Text("+\(store.changeSet.insertions)")
-                    .font(.caption.monospaced()).foregroundStyle(.green)
-                Text("−\(store.changeSet.deletions)")
-                    .font(.caption.monospaced()).foregroundStyle(.red)
-            } else {
-                Text("+\(store.writtenInsertions)")
-                    .font(.caption.monospaced()).foregroundStyle(.green)
-                Text("−\(store.writtenDeletions)")
-                    .font(.caption.monospaced()).foregroundStyle(.red)
-            }
+            Text("+\(shown.0)")
+                .font(.caption.monospaced()).foregroundStyle(.green)
+            Text("−\(shown.1)")
+                .font(.caption.monospaced()).foregroundStyle(.red)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenComparison(insertions: shown.0, deletions: shown.1))
 
         generatedNote
 
         // Only a GUESSED base is called out. The others are recorded facts;
         // a guess is the one that can silently produce a wrong diff that
         // looks exactly like a right one.
-        if store.changeSet.baseIsGuessed {
+        //
+        // Under Uncommitted the guess cannot have produced anything: that
+        // comparison never reaches for the base. Left on, the warning would be
+        // telling a reader that a diff against HEAD may be wrong, which is the
+        // one thing about it that cannot be.
+        if store.changeSet.baseIsGuessed && !local {
             Label(
                 "Base branch was guessed, so this diff may be wrong.",
                 systemImage: "questionmark.circle")
@@ -417,6 +456,25 @@ struct ChangesView: View {
         .padding(.top, 2)
 
         commitEntry
+    }
+
+    /// The card's top line, said rather than spelled.
+    ///
+    /// Read aloud the parts are "vs main", "plus 82", "minus 13" — three
+    /// fragments that never say which comparison they belong to, and the
+    /// segmented control that would have said it is a separate element further
+    /// down. So the label names the comparison it is the total of — the same
+    /// fix the rows that lead here got, in `NeedsYou` and `FleetList`.
+    private func spokenComparison(insertions: Int, deletions: Int) -> String {
+        let subject: String
+        if store.scope == .local {
+            subject = "Uncommitted, against HEAD"
+        } else if store.changeSet.baseRef.isEmpty {
+            subject = "Branch"
+        } else {
+            subject = "Branch, against \(store.changeSet.baseRef)"
+        }
+        return "\(subject), \(insertions) added, \(deletions) removed"
     }
 
     /// What the two numbers at the top are not counting.

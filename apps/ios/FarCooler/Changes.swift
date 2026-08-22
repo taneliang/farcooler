@@ -339,14 +339,40 @@ struct WorkingTree: Decodable, Equatable {
     var changes: [WorkingTreeFile]?
 }
 
+/// One dirty path, in one of the groups git puts it in.
+///
+/// A file that is staged AND modified again appears twice, once per group,
+/// because those are two different diffs of it — so the counts are summed per
+/// path rather than looked up, and `ChangesStore.files` does that.
+///
+/// The counts are decoded leniently because a runner can be behind this app.
+/// The wire has carried these fields the whole time and nobody ever filled
+/// them — `git status --porcelain=v2` reports status and no line counts — so a
+/// runner older than `24f2c1d` sends zeroes, or nothing at all where untracked
+/// files are concerned, since that record is newer than the rest. An app that
+/// refused to decode a change set without them would show such a runner nothing
+/// at all rather than a number less.
 struct WorkingTreeFile: Decodable, Equatable {
     var path: String
     var status: ChangedFileStatus
     var oldPath: String?
+    var insertions: Int
+    var deletions: Int
+    var binary: Bool
 
     enum CodingKeys: String, CodingKey {
-        case path, status
+        case path, status, insertions, deletions, binary
         case oldPath = "old_path"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        status = try c.decode(ChangedFileStatus.self, forKey: .status)
+        oldPath = try c.decodeIfPresent(String.self, forKey: .oldPath)
+        insertions = try c.decodeIfPresent(Int.self, forKey: .insertions) ?? 0
+        deletions = try c.decodeIfPresent(Int.self, forKey: .deletions) ?? 0
+        binary = try c.decodeIfPresent(Bool.self, forKey: .binary) ?? false
     }
 }
 
@@ -708,18 +734,32 @@ final class ChangesStore: ObservableObject {
             return commitFiles
         case .local:
             return dirtyPaths.map { path in
-                // Counted from the diff once it has been read, because nothing
-                // else counts it: `numstat` answers for commits, and asking git
-                // again per file for a number the hunks already contain would
-                // be a round trip to restate what is on screen.
-                let lines = fileDiffs[path] ?? []
+                // Read from the working tree the daemon sent, not counted from
+                // the diffs on screen.
+                //
+                // Counting the hunks was right about COST and wrong about
+                // correctness, and the Mac carried the same defect until
+                // `24f2c1d`: a per-file round trip to restate what is already
+                // drawn would be absurd, but the hunks only hold the number
+                // once they have been fetched, and `fileDiffs` fills lazily as
+                // rows scroll into view. So every count started at zero and
+                // arrived late, and the card's total — see
+                // `uncommittedInsertions` — would have climbed as the reader
+                // scrolled. There is no round trip here either:
+                // `apply_uncommitted_counts` fills these in the same
+                // `change_set` this screen already read.
+                //
+                // Summed rather than found, because a file that is staged and
+                // then modified again is in both groups with its own diff in
+                // each.
+                let counts = changeSet.workingTree?.changes?.filter { $0.path == path } ?? []
                 return ChangedFile(
                     path: path,
                     status: localStatus(path),
                     oldPath: nil,
-                    insertions: lines.filter { $0.kind == .added }.count,
-                    deletions: lines.filter { $0.kind == .removed }.count,
-                    binary: false)
+                    insertions: counts.reduce(0) { $0 + $1.insertions },
+                    deletions: counts.reduce(0) { $0 + $1.deletions },
+                    binary: counts.contains { $0.binary })
             }
         }
     }
@@ -971,6 +1011,31 @@ final class ChangesStore: ObservableObject {
     /// and the wire drops them. These are real `--numstat` numbers.
     var commitInsertions: Int { commitFiles.reduce(0) { $0 + $1.insertions } }
     var commitDeletions: Int { commitFiles.reduce(0) { $0 + $1.deletions } }
+
+    /// `+N −M` for everything uncommitted: the Uncommitted segment's total.
+    ///
+    /// The working tree's own records, which `change_set::apply_uncommitted_counts`
+    /// fills in the response this screen already read — never a sum of the
+    /// diffs on screen, which arrive one row at a time as the reader scrolls
+    /// and would make this header climb while it was being looked at. That was
+    /// the Mac's bug and `24f2c1d` fixed it there; importing it here is exactly
+    /// what the number now on the wire exists to prevent.
+    ///
+    /// Not `changeSet.insertions`, which is the BRANCH — `numstat(base, HEAD)`,
+    /// committed work only. The two answer different questions and are shown
+    /// under different segments.
+    ///
+    /// A file that is staged and then edited again has a record in both groups
+    /// and both are counted. That is exact for every file in one group or the
+    /// other, and an upper bound only when the same lines are touched twice.
+    var uncommittedInsertions: Int { uncommittedFiles.reduce(0) { $0 + $1.insertions } }
+    var uncommittedDeletions: Int { uncommittedFiles.reduce(0) { $0 + $1.deletions } }
+
+    /// Every count record the working tree carries, staged and unstaged and
+    /// untracked alike. A conflicted path has none — git gives it its own group
+    /// and `--numstat` prints two records for it, so the daemon files it
+    /// nowhere rather than guessing which side to believe.
+    private var uncommittedFiles: [WorkingTreeFile] { changeSet.workingTree?.changes ?? [] }
 
     // MARK: - The branch, one commit at a time
 

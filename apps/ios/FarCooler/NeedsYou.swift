@@ -620,9 +620,17 @@ struct NeedsYouView: View {
     /// because the whole row was one target; now the name is the section header
     /// a reader has just passed through, and repeating it here would say it
     /// again on every row of every workspace.
+    ///
+    /// The clause on the end says what the counts COUNT, which nothing on this
+    /// screen did. This number is the fleet inbox's — everything the worktree
+    /// has changed, committed, uncommitted and untracked — and not the branch
+    /// total the Changes screen's Branch segment shows. The Mac says that in a
+    /// tooltip on the row; a phone has no hover, so the label is the only place
+    /// it can be said at all.
     private func spokenChanges(_ item: Item) -> String {
         guard let counts = item.counts, counts.hasDiff else { return "Review Changes" }
-        return "Review Changes, \(counts.insertions) added, \(counts.deletions) removed"
+        return "Review Changes, \(counts.insertions) added, \(counts.deletions) removed, "
+            + "including work that isn’t committed yet"
     }
 
     /// The most common state, and it is doing a job rather than filling a gap.
