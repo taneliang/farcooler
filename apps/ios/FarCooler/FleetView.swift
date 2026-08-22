@@ -30,20 +30,29 @@ enum Route: Hashable, Codable {
 
     /// Which tab a workspace opens on.
     ///
-    /// Part of the route rather than state inside the screen because it is the
-    /// only thing the two doors into a workspace disagree about: the inbox
-    /// knows a workspace needs you and not which pane of it, the workspace list
-    /// knows exactly which agent was tapped.
+    /// Part of the route rather than state inside the screen because it is a
+    /// property of the tap: every door into a workspace names the pane it meant,
+    /// and they differ only in what they are able to name. The workspace list
+    /// names the agent whose row was tapped. The inbox names one too — its rows
+    /// are one per blocked agent and one for the diff, so it says `.agent` or
+    /// `.changes` and never shrugs. See `NeedsYouView.section(for:)`.
     ///
-    /// `.none` is the honest value for the first of those, and it is not a
-    /// missing focus — it is "nobody at this door had an opinion", resolved at
-    /// the moment the screen is built by `WorkspaceRoute.resolve()`.
+    /// `.none` is "nobody at this door had an opinion", and no door emits it any
+    /// more. It survives because three things that are not doors still produce
+    /// it: `WorkspaceRoute.alive(_:in:)` returns it when a focus names a pane
+    /// that has left the worktree, which is how a stale answer falls through to
+    /// the next one; `FleetView.deferringToMemory(_:)` writes it into a route
+    /// coming back out of `@SceneStorage` that has a remembered tab behind it,
+    /// which is how a door that is now history stops outranking the place you
+    /// actually ended up; and a path persisted by a build that predates the
+    /// inbox's rows decodes straight back into it. All three are resolved at the
+    /// moment the screen is built by `WorkspaceRoute.resolve()`.
     ///
     /// Which resolves it in an order, and the order is an order of authority:
     ///
-    /// 1. **The route says.** Somebody pointed at a pane on the way in — a
-    ///    workspace list row, a tapped card, the switcher sheet. That is the
-    ///    most recent thing anyone asked for and it wins outright.
+    /// 1. **The route says.** Somebody pointed at a pane on the way in — an
+    ///    inbox row, a workspace list row, a tapped card, the switcher sheet.
+    ///    That is the most recent thing anyone asked for and it wins outright.
     /// 2. **The tab you were last on.** `Connection.lastFocus`, written only
     ///    when a person taps a chip. Read here rather than stored in the route
     ///    itself, because a path element whose value changes is a destination
@@ -59,6 +68,19 @@ enum Route: Hashable, Codable {
     /// what it is not to be. A workspace you have never chosen a tab in has
     /// nothing to be resumed to, and opens on whatever needs you at seven
     /// rather than on the agent that needed you at midnight.
+    ///
+    /// One beats two only while the door is still the most recent thing that
+    /// happened, and a path coming back out of `@SceneStorage` is not that: the
+    /// door it names was walked through before the app was killed, and any chip
+    /// tapped on the far side of it is newer. So a restored route hands its
+    /// focus to the memory instead — `FleetView.deferringToMemory(_:)` is where
+    /// the two swap places. It matters because every door names a pane now, the
+    /// inbox included: without the swap, a workspace entered on an agent and
+    /// then read as a diff would come back on the agent, which is the F4 case
+    /// this whole order exists to answer. Only where there is a memory to swap
+    /// with, though. A workspace nobody ever chose a tab in has none, and there
+    /// the door is the only surviving record of where that person was sitting,
+    /// so a restored route keeps it and one still beats three.
     ///
     /// Both of the last two degrade the same way: a remembered or ruled agent
     /// that has left the fleet falls through to the next answer rather than to
@@ -99,9 +121,14 @@ extension Route.Focus {
     /// the same agent every time or the screen opens somewhere different on
     /// each poll.
     ///
-    /// One function, called from the inbox row, from a restored path, and from
-    /// a focus naming an agent that has since gone. Three copies of this would
-    /// be three answers to "where does this workspace open".
+    /// Two callers reach it now, and there used to be three. The inbox row was
+    /// the third: it pointed at a workspace and left the pane to this. It points
+    /// at a pane itself now, so what is left is a focus — the route's or the
+    /// remembered one's — naming a pane that has since gone, and a restored path
+    /// with neither answer to give: no remembered tab, and a focus that a build
+    /// older than the inbox's rows wrote down as `.none`. Still one function,
+    /// because two copies of it would be two answers to "where does this
+    /// workspace open".
     static func rule(for workspace: Workspace, inbox: InboxRow?) -> Route.Focus {
         // A `changes` pane the host happens to have open is not an agent and is
         // not a candidate: the diff it shows is the Changes tab, which is
@@ -459,10 +486,12 @@ struct FleetView: View {
             // Back bug: the same callback used to assign `landing`, and
             // assigning `landing` replaced this screen with the pane.
             //
-            // Focused on the terminal that was tapped, and that is the only
-            // thing this door and the inbox's door disagree about. Here you
-            // pointed at an agent; there you pointed at a workspace and the
-            // rule decides. See `Route.Focus`.
+            // Focused on the terminal that was tapped. The inbox's door points
+            // at a pane too now, so the two no longer disagree about whether to
+            // name one — only about what they can name. Here, any terminal in
+            // the workspace, including an idle or exited one. There, a blocked
+            // agent or the worktree's diff, which is all that door lists. See
+            // `Route.Focus`.
             WorkspaceListView(
                 connection: connection,
                 onSelect: { show($0) },
@@ -570,7 +599,10 @@ struct FleetView: View {
     /// that matters — the remembered tabs go in FIRST, because installing the
     /// path is what mounts a `WorkspaceRoute`, and that view reads the memory in
     /// the same turn it appears. Seeded afterwards, the workspace would already
-    /// have opened on the rule's answer and latched it.
+    /// have opened on the rule's answer and latched it. `restorePath` then puts
+    /// a question of its own to the same memory — see `deferringToMemory(_:)` —
+    /// so the order is load-bearing twice over, and swapping these two lines
+    /// costs you the tab you were on in two different ways.
     private func restorePlace() {
         guard !restoredPlace else { return }
         restoredPlace = true
@@ -613,19 +645,62 @@ struct FleetView: View {
     /// dropping depth 1 would put a screen on top of a screen nobody navigated
     /// through. A path that resolves to nothing simply leaves you at the root,
     /// which is where a cold launch has always landed.
+    ///
+    /// Restored as it was written down except for the focus, which a route
+    /// gives up where there is a fresher record of where you were — see
+    /// `deferringToMemory(_:)`.
     private func restorePath() {
         guard path.isEmpty, let data = savedPath.data(using: .utf8),
             let saved = try? JSONDecoder().decode(SavedPath.self, from: data),
             saved.runner == host.id.uuidString
         else { return }
 
-        let usable = Array(saved.routes.prefix(while: resolves))
+        let usable = Array(saved.routes.prefix(while: resolves)).map(deferringToMemory)
         guard !usable.isEmpty else { return }
         // No push animation for a screen you never left. Restoring where you
         // were should look like the app remembering, not like it navigating.
         var silent = Transaction()
         silent.disablesAnimations = true
         withTransaction(silent) { path = usable }
+    }
+
+    /// A route on its way back out of `@SceneStorage`, with its focus handed
+    /// over to the tab that workspace was last left on.
+    ///
+    /// A route's focus is the door somebody came in by, and it wins outright
+    /// because on the way IN it is the most recent thing anybody asked for: the
+    /// inbox row that named the blocked agent, the workspace list row that named
+    /// the terminal. None of that is true of a route being restored. The door
+    /// was walked through before the app was killed, and a chip tapped on the
+    /// far side of it is strictly newer — so what the door said is history and
+    /// where the person actually ended up is what they want back. `.none` is how
+    /// a route says it has no opinion, so writing it here is exactly how the
+    /// door steps aside and `WorkspaceRoute.resolve()` reaches the memory.
+    ///
+    /// Only where there IS one, which is why this asks rather than blanking
+    /// every restored route. `Connection.lastFocus` records chip taps and
+    /// nothing else — deliberately, see `Connection.rememberFocus` — so a
+    /// workspace opened straight onto an agent and never tabbed away from has no
+    /// entry at all. There the door is not stale evidence of where somebody was
+    /// sitting, it is the only evidence, and blanking it would drop them on the
+    /// rule's answer instead: the same lost place this exists to prevent,
+    /// arrived at through the other door.
+    ///
+    /// The entry is trusted rather than re-checked, because `restoreFocus` ran
+    /// first in the same turn and against the same fleet, and admits an entry
+    /// only if that fleet still has the workspace AND the pane it names. If it
+    /// dies later anyway, `resolve` degrades it to the rule, which is a better
+    /// answer than a door two interruptions ago.
+    ///
+    /// What this returns is also what gets written back down, since saving the
+    /// path is on a change to it. That is the intent and not a leak: the route
+    /// has no opinion any more, and saying so is what the next restore should
+    /// read.
+    private func deferringToMemory(_ route: Route) -> Route {
+        guard case .workspace(let id, _) = route, connection.lastFocus[id] != nil else {
+            return route
+        }
+        return .workspace(id: id, focus: .none)
     }
 
     /// Whether this runner still has the thing a route names.

@@ -11,7 +11,7 @@ import SwiftUI
 /// and a terminal is an answer to a question nobody asked. See
 /// `docs/jobs-to-be-done.md`, where those are the Reassure and Unblock jobs.
 ///
-/// ## The row is a workspace
+/// ## The unit is a workspace, and everything in it is a target
 ///
 /// It was two row kinds — a blocked agent, and a worktree whose branch had
 /// moved — and that produced FOUR rows for one piece of work when a workspace
@@ -20,9 +20,11 @@ import SwiftUI
 /// screen they buy only a different starting TAB, which is a property of the
 /// tap and not a reason for a row.
 ///
-/// So one row per workspace: its name and branch, `+N -M` when the inbox says
-/// there is a diff, and a `TerminalRow` for each blocked agent inside it. A
-/// workspace that is both blocked and unread appears once, saying both.
+/// So one `Section` per workspace: its name and branch in the header, a
+/// `TerminalRow` for each blocked agent inside it, and a "Review Changes" row
+/// for the diff. A workspace that is both blocked and unread appears once,
+/// saying both — and every part of what it says is now something you can tap,
+/// which is what `section(for:)` is about.
 ///
 /// **Blocked agents** come from the fleet this connection is already polling.
 /// **The counts** come from `changes.inbox`, which the daemon has answered since
@@ -75,7 +77,7 @@ struct NeedsYouView: View {
     /// The runner this list speaks for, and the only one it can speak for.
     ///
     /// Held whole rather than as a label string because the count is qualified
-    /// with the runner's name — see `header`. This build is single-runner, and
+    /// with the runner's name — see `subtitle`. This build is single-runner, and
     /// the merged-across-runners inbox is a later task; a number on this screen
     /// must not silently change meaning when that lands.
     let runner: Runner
@@ -94,21 +96,31 @@ struct NeedsYouView: View {
         /// `Workspace.ordinals()`, computed once per row rather than once per
         /// agent inside it.
         let ordinals: [String: Int]
-        /// What the branch changed, when the runner has said. Nil is "no answer
-        /// yet", which is different from zero and is drawn as nothing either
-        /// way.
+        /// What the branch changed, when the runner has said.
+        ///
+        /// Nil is "no answer yet", and it is not zero. Both are drawn as
+        /// nothing on the line — there are no numbers to show either way — but
+        /// they no longer DECIDE the same thing: a worktree the runner has
+        /// called clean gets no "Review Changes" row, and one it has not
+        /// answered for yet does. See `section(for:)`.
         let counts: InboxRow?
 
         var id: String { workspace.id }
     }
 
-    /// How many blocked agents a row shows before it starts counting them.
+    /// How many blocked agents a workspace shows before it starts counting
+    /// them.
     ///
     /// Three, because each one is a `TerminalRow` up to four bands tall and a
     /// workspace with eight blocked agents would otherwise be the whole screen.
     /// What is lost by truncating is small: the tab strip on the other side of
     /// the tap holds every one of them, labelled.
-    private static let agentsPerRow = 3
+    ///
+    /// Unchanged by giving each of them its own row. The cap is about density,
+    /// and density is precisely what this shape already spends: a workspace
+    /// that used to be one row is now a header, up to three agents and a diff.
+    /// Raising the cap here would spend it twice.
+    private static let agentsPerWorkspace = 3
 
     /// The workspaces this screen will speak about at all. See the note on
     /// hidden worktrees above.
@@ -168,30 +180,15 @@ struct NeedsYouView: View {
 
     var body: some View {
         List {
-            Section {
-                if items.isEmpty {
-                    reassurance
-                } else {
-                    ForEach(items) { row(for: $0) }
-                }
-            } header: {
-                // The count, qualified, and absent when there is nothing to
-                // count — an empty section with "0 ON STUDIO" over the
-                // reassurance would be the same sentence twice, once in
-                // numbers.
-                //
-                // "3 on studio" rather than a bare "3", and this is task 4 of
-                // the spec rather than decoration. The number can only ever
-                // speak for the runner this `Connection` is attached to, and
-                // when the merged inbox lands an unqualified 3 would silently
-                // start meaning something else. The precedent is
-                // `FleetSnapshot.complete`, which says whether a snapshot is
-                // all the agents there are for exactly this reason: drawing a
-                // partial fleet as the fleet asserts that the rest do not
-                // exist.
-                if !items.isEmpty {
-                    Text("\(items.count) on \(runner.label)")
-                }
+            if items.isEmpty {
+                Section { reassurance }
+            } else {
+                // A `Section` per workspace, not a section holding a row per
+                // workspace. Sections are what a `List` gives you for "these
+                // rows belong to that thing", and what this screen needs is
+                // exactly that: a header naming the worktree over a short stack
+                // of targets inside it. See `section(for:)`.
+                ForEach(items) { section(for: $0) }
             }
 
             Section {
@@ -213,6 +210,7 @@ struct NeedsYouView: View {
         .scrollContentBackground(.hidden)
         .refreshable { await connection.refresh() }
         .navigationTitle("Needs You")
+        .navigationSubtitle(subtitle)
         .navigationBarTitleDisplayMode(.inline)
         // The app's escape hatch, and on this screen also the thing that names
         // the runner. The title says what the list is about; this says whose
@@ -224,108 +222,222 @@ struct NeedsYouView: View {
         }
     }
 
-    /// One workspace, and every reason it is on this screen.
+    /// The count, qualified, over the whole list rather than over one part of
+    /// it.
     ///
-    /// ONE tap target for the whole row, and the tap carries no opinion about
-    /// which tab opens — `Route.Focus.none` means "apply the rule", and the rule
-    /// lands on the most urgent blocked agent, or the diff if there is an unread
-    /// one, or the top pane. See `Route.Focus.rule(for:inbox:)`.
+    /// It used to head the single `Section` that held every item, and that
+    /// place is gone: a section header now names a workspace, and a number
+    /// sitting where a workspace name sits would read as a fact about the
+    /// workspace under it. So it moves to the one thing on this screen that is
+    /// still about the whole list — the title. "Needs You" says what the list
+    /// is; this says how much of it there is, in the bar, where it does not
+    /// scroll away from the rows it is counting.
     ///
-    /// One target rather than one per agent and one for the counts. The counts
-    /// stay a label: a small target beside a large one, on a row somebody is
-    /// tapping while walking, is a coin toss with a wrong side. And the agents
-    /// inside are here to be READ — they are what the agent said it did, which
-    /// is the larger half of reviewing its work — not to be aimed at. Every one
-    /// of them is a labelled chip on the other side of the tap.
-    private func row(for item: Item) -> some View {
-        NavigationLink(value: Route.workspace(id: item.workspace.id, focus: .none)) {
-            workspaceRow(item)
-        }
-        .accessibilityIdentifier("needs-you-workspace-\(item.workspace.id)")
+    /// "3 on studio" rather than a bare "3", and this is task 4 of the spec
+    /// rather than decoration. The number can only ever speak for the runner
+    /// this `Connection` is attached to, and when the merged inbox lands an
+    /// unqualified 3 would silently start meaning something else. The precedent
+    /// is `FleetSnapshot.complete`, which says whether a snapshot is all the
+    /// agents there are for exactly this reason: drawing a partial fleet as the
+    /// fleet asserts that the rest do not exist.
+    ///
+    /// Empty when there is nothing to count, rather than "0 on studio" over the
+    /// reassurance — that would be the same sentence twice, once in numbers.
+    private var subtitle: String {
+        items.isEmpty ? "" : "\(items.count) on \(runner.label)"
     }
 
-    /// The row's contents: what the worktree is, what it changed, and who in it
-    /// is waiting.
+    /// One workspace: what it is, who in it is waiting, and what it changed —
+    /// each of those a target of its own.
     ///
-    /// The counts get the monospaced green-and-red treatment `FleetList`'s
-    /// workspace header gives them, so `+82 -13` is the same shape wherever it
-    /// appears — and they are absent on a clean worktree, because `+0 -0` on
-    /// every row is noise in the shape of information.
+    /// This replaced ONE tap target for the whole row, which routed with
+    /// `Route.Focus.none` and let `rule(for:inbox:)` choose the pane. The
+    /// objection that design was written down to answer is half right, and the
+    /// half that is right is the reason this is a `Section`:
     ///
-    /// Deliberately no amber anywhere on this row. That color is reserved across
-    /// the widget, the Live Activity, the complication and this app for an agent
-    /// waiting on an answer, and `TerminalRow` already spends it on exactly
-    /// those, inside. A second mark up here would say the same thing twice and
-    /// weaken it both times.
-    private func workspaceRow(_ item: Item) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(item.workspace.task)
-                        .font(.body)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    Spacer(minLength: 0)
-
-                    if let counts = item.counts, counts.hasDiff {
-                        HStack(spacing: 4) {
-                            Text("+\(counts.insertions)").foregroundStyle(.green)
-                            Text("-\(counts.deletions)").foregroundStyle(.red)
-                        }
-                        .font(.caption.monospaced())
-                    }
-                }
-
-                // The main checkout has a branch like everything else, but
-                // WHICH branch is not the useful fact about it — that it is the
-                // repository itself is. `FleetList`'s header says the same
-                // thing the same way.
-                Text(item.workspace.isMainCheckout ? "Primary checkout" : item.workspace.branch)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            // One element saying one thing, because read aloud the parts are
-            // "plus 82" and "minus 13" — two numbers with nothing attaching
-            // them to a diff. The row this replaced carried exactly this label
-            // and lost it in the merge; the words are `ChangesChip`'s, so the
-            // counts are spoken the same way on the row and on the tab they
-            // open. The blocked agents below are left to speak for themselves:
-            // what they said is the larger half of reviewing their work, and
-            // folding them in here would silence it.
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(spoken(item))
-
-            // `TerminalRow` and nothing new. It is four bands — the label with
-            // a ticking clock, the signal line the host composed, the agent's
-            // last three utterances, and its running subagents — and a second
-            // way to draw an agent is a second chance for two screens to say
-            // different things about one pane. Its `TimelineView` also keeps the
-            // schedule that matters: one second for a row with a clock, an hour
-            // for one without. Every agent here has a clock, since blocked is
-            // one of the two states that has one.
+    /// > The counts stay a label: a small target beside a large one, on a row
+    /// > somebody is tapping while walking, is a coin toss with a wrong side.
+    ///
+    /// A small target beside a large one IS a coin toss with a wrong side, and
+    /// it is exactly the hazard this shape removes. Every target here is a
+    /// full-width list row of the same kind — an agent, an agent, the diff —
+    /// stacked, with nothing beside any of them to lose the toss against. The
+    /// counts are not a small thing next to the row any more; they are the
+    /// trailing end of the row that opens them.
+    ///
+    /// The other half of that objection stays true and constrains what is
+    /// inside: the agent lines are here to be READ. They are what the agent
+    /// said it did, which is the larger half of reviewing its work. Making each
+    /// one tappable buys the second blocked agent a door of its own, and it
+    /// must not cost a band of what the row says — so `TerminalRow` is
+    /// unchanged and full height, and nothing here shrinks it to feel more like
+    /// a button.
+    ///
+    /// Why the diff gets a row at all: until this, nothing in the app had ever
+    /// opened a workspace on its diff. `.changes` was selected only from inside
+    /// the workspace screen, so from the front door the diff cost two taps
+    /// while `+82 -13` sat on the row looking like the control for it.
+    /// `docs/jobs-to-be-done.md` F4 has the phone's review experience
+    /// load-bearing rather than a scaled-down Mac feature, which makes the diff
+    /// the most important target on this screen — and it was the least
+    /// reachable one.
+    private func section(for item: Item) -> some View {
+        Section {
+            // `TerminalRow` and nothing new, one per `NavigationLink`. It is
+            // four bands — the label with a ticking clock, the signal line the
+            // host composed, the agent's last three utterances, and its running
+            // subagents — and a second way to draw an agent is a second chance
+            // for two screens to say different things about one pane. Its
+            // `TimelineView` also keeps the schedule that matters: one second
+            // for a row with a clock, an hour for one without. Every agent here
+            // has a clock, since blocked is one of the two states that has one.
             //
             // This is the part of the row that answers "what did it do", which
             // the owner is explicit is most of what reviewing an agent's work
-            // is. It is worth the height.
-            ForEach(item.blocked.prefix(Self.agentsPerRow)) { terminal in
-                TerminalRow(terminal: terminal, ordinal: item.ordinals[terminal.id])
-                    // Indented under the workspace, so the row reads as one
-                    // thing containing several rather than as a heading that
-                    // happens to sit above some agents.
-                    .padding(.leading, 8)
+            // is. It is worth the height, and it is worth the same height now
+            // that the height is also a tap target.
+            //
+            // The `.padding(.leading, 8)` indent that used to sit here is gone.
+            // It existed so the row "reads as one thing containing several
+            // rather than as a heading that happens to sit above some agents",
+            // and a `Section` header says that structurally — which is the
+            // point of using one.
+            ForEach(item.blocked.prefix(Self.agentsPerWorkspace)) { terminal in
+                NavigationLink(
+                    value: Route.workspace(id: item.workspace.id, focus: .agent(terminal.id))
+                ) {
+                    TerminalRow(terminal: terminal, ordinal: item.ordinals[terminal.id])
+                }
+                // Per agent, where the old identifier was per workspace and had
+                // no readers at all. Nothing in `FarCoolerUITests` matches these
+                // yet; they are on the same pattern as `fleet-terminal-<id>` and
+                // `terminal-tab-<id>`, so a test that wants to open the second
+                // blocked agent from the front door has a name to ask for.
+                .accessibilityIdentifier("needs-you-agent-\(terminal.id)")
             }
 
-            if item.blocked.count > Self.agentsPerRow {
-                Text(overflow(item.blocked.count - Self.agentsPerRow))
+            if item.blocked.count > Self.agentsPerWorkspace {
+                Text(overflow(item.blocked.count - Self.agentsPerWorkspace))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .padding(.leading, 26)
             }
+
+            // Absent on a worktree the runner has called clean, which is the
+            // rule the counts already follow: `+0 -0` on every row is noise in
+            // the shape of information, and a "Review Changes" row onto an
+            // empty diff is the same noise with more height.
+            //
+            // PRESENT while the runner has not answered yet, which is a
+            // different state and gets the opposite answer. Nil is the absence
+            // of a fact, not the fact that there is nothing; the Changes tab
+            // exists either way, since a worktree's own diff needs nothing on
+            // the runner to be there. And a row that appeared one poll later
+            // would push every row under it down, under a thumb already
+            // travelling toward one of them — the tap landing on something else
+            // is the same failure `items` sorts to avoid. So it arrives without
+            // numbers and grows them.
+            if item.counts?.hasDiff != false {
+                changesRow(item)
+            }
+        } header: {
+            header(item)
         }
-        .padding(.vertical, 2)
+    }
+
+    /// The workspace's own line: what the work is, and which branch it is on.
+    ///
+    /// In a header rather than on a row, and that is the whole difference
+    /// between this and what it replaced. A header is not a target, so nothing
+    /// here competes with the rows below it, and the rows below it read as
+    /// things inside this worktree without an indent having to say so.
+    ///
+    /// The main checkout has a branch like everything else, but WHICH branch is
+    /// not the useful fact about it — that it is the repository itself is.
+    /// `FleetList`'s header says the same thing the same way.
+    ///
+    /// `.textCase(nil)`, against the grouped list's default. Uppercasing is
+    /// right for the word "SETTINGS" and wrong for both halves of this: the
+    /// task is a sentence somebody wrote, and `feat/add-auth` is an identifier
+    /// whose case is not ours to change. The task also keeps `.font(.body)` and
+    /// the primary color it had as the first line of the old row, so what moved
+    /// is the position and not the reading.
+    ///
+    /// Deliberately no amber up here, and no counts either. That color is
+    /// reserved across the widget, the Live Activity, the complication and this
+    /// app for an agent waiting on an answer, and `TerminalRow` already spends
+    /// it on exactly those, inside; a second mark here would say the same thing
+    /// twice and weaken it both times. The counts moved down to the row that
+    /// opens them, which is the point of the row.
+    ///
+    /// Spoken as the task alone. The branch is deliberately left out — a
+    /// VoiceOver reader gets `feat/add-auth` letter by letter for a fact that is
+    /// not why this workspace is on the screen, and a header is read on the way
+    /// into its section, so leaving it in would spell a branch once per
+    /// workspace on a screen that is otherwise all sentences.
+    private func header(_ item: Item) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(item.workspace.task)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Text(item.workspace.isMainCheckout ? "Primary checkout" : item.workspace.branch)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                // Gives up width before the task does. Which worktree this is
+                // survives a narrow screen; which branch it is on is the fact
+                // that can afford to be truncated.
+                .layoutPriority(-1)
+
+            Spacer(minLength: 0)
+        }
+        .textCase(nil)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.workspace.task)
+    }
+
+    /// The diff, as a row of its own.
+    ///
+    /// The first route in the app to open a workspace on its diff, and it needs
+    /// no plumbing to be it: `Route.Focus.changes` already exists for the tab
+    /// strip's chip and for `WorkspaceView`'s no-tab-visited fallback, and
+    /// `WorkspaceRoute.resolve()` passes it straight through — `alive(_:in:)`
+    /// lets `.changes` survive unconditionally, because a worktree's own diff
+    /// needs nothing on the runner to exist.
+    ///
+    /// The symbol is `ChangesChip`'s and the counts get the monospaced
+    /// green-and-red treatment `FleetList`'s workspace header gives them, so
+    /// this row looks like the tab it opens and `+82 -13` is the same shape
+    /// wherever it appears.
+    ///
+    /// One accessibility element saying one thing, because read aloud the parts
+    /// are "plus 82" and "minus 13" — two numbers with nothing attaching them to
+    /// a diff. The words are `ChangesChip`'s for the same reason they were
+    /// before: the counts are spoken the same way on the row and on the tab it
+    /// opens.
+    private func changesRow(_ item: Item) -> some View {
+        NavigationLink(value: Route.workspace(id: item.workspace.id, focus: .changes)) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label("Review Changes", systemImage: "doc.text.magnifyingglass")
+                    .font(.body)
+
+                Spacer(minLength: 0)
+
+                if let counts = item.counts, counts.hasDiff {
+                    HStack(spacing: 4) {
+                        Text("+\(counts.insertions)").foregroundStyle(.green)
+                        Text("-\(counts.deletions)").foregroundStyle(.red)
+                    }
+                    .font(.caption.monospaced())
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(spokenChanges(item))
+        }
+        .accessibilityIdentifier("needs-you-changes-\(item.workspace.id)")
     }
 
     /// The agents this row ran out of room for. A sentence rather than a bare
@@ -335,15 +447,16 @@ struct NeedsYouView: View {
         count == 1 ? "1 more agent needs you" : "\(count) more agents need you"
     }
 
-    /// The workspace's own line, said rather than spelled: its name, and what
-    /// the branch changed when the runner has answered and there is a diff.
+    /// The changes row, said rather than spelled.
     ///
-    /// The branch is deliberately not in it. A VoiceOver reader gets
-    /// `feat/add-auth` letter by letter for a fact that is not why this row is
-    /// on the screen.
-    private func spoken(_ item: Item) -> String {
-        guard let counts = item.counts, counts.hasDiff else { return item.workspace.task }
-        return "\(item.workspace.task), \(counts.insertions) added, \(counts.deletions) removed"
+    /// Without the workspace's name in it, which is the one thing that changed
+    /// when the row split. The old label combined the name and the counts
+    /// because the whole row was one target; now the name is the section header
+    /// a reader has just passed through, and repeating it here would say it
+    /// again on every row of every workspace.
+    private func spokenChanges(_ item: Item) -> String {
+        guard let counts = item.counts, counts.hasDiff else { return "Review Changes" }
+        return "Review Changes, \(counts.insertions) added, \(counts.deletions) removed"
     }
 
     /// The most common state, and it is doing a job rather than filling a gap.
