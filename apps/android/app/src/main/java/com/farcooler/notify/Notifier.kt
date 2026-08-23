@@ -54,6 +54,24 @@ class Notifier(private val context: Context, private val settings: Settings) {
     var isForeground: Boolean = true
 
     /**
+     * What was last announced about one terminal.
+     *
+     * The activity and whether the turn died, not the activity alone, because
+     * the two are one piece of news: a turn that failed and one that succeeded
+     * are both `done`, and a record that kept only `done` could not tell a
+     * second announcement from a repeat of the first. The daemon fills
+     * `turn_failed` and moves the activity under one lock in one pass — see
+     * `crates/daemon/src/watch.rs` — so today they always arrive together and
+     * this costs nothing; the day they do not, a failure is announced instead
+     * of swallowed.
+     *
+     * Deliberately NOT the [Announcement] itself. A blocked agent's body
+     * carries a question scraped off a tmux screen, and a line that reflows
+     * would then read as new news about the same stopped agent.
+     */
+    private data class Announced(val activity: AgentActivity, val failed: Boolean)
+
+    /**
      * What was last announced per terminal, so a state that persists is
      * announced once. The fleet is polled, so the same `done` arrives over and
      * over; being told twice that the same agent finished is how people learn
@@ -63,7 +81,7 @@ class Notifier(private val context: Context, private val settings: Settings) {
      * report here — with three runners connected this is three writers, and a
      * plain map would eventually corrupt rather than merely race.
      */
-    private val announced = java.util.concurrent.ConcurrentHashMap<String, AgentActivity>()
+    private val announced = java.util.concurrent.ConcurrentHashMap<String, Announced>()
 
     private val manager = NotificationManagerCompat.from(context)
 
@@ -92,35 +110,25 @@ class Notifier(private val context: Context, private val settings: Settings) {
     /** Announce a change, if it is worth announcing. */
     fun report(terminal: Terminal, workspace: String, runner: String) {
         val activity = terminal.agent
-        val previous = announced[terminal.id]
-        announced[terminal.id] = activity
+        val news = Announced(activity, terminal.turnDidFail)
+        val previous = announced.put(terminal.id, news)
 
         if (!settings.notifyOnAttention.value) return
         if (!activity.wantsAttention) return
-        if (activity == previous) return
+        if (news == previous) return
         if (activity == AgentActivity.DONE && !settings.notifyOnDone.value) return
         // The pane you are already reading is the one case a banner is noise.
+        //
+        // The local half of the judgement. Its other half is a claim made to
+        // the RUNNER — `Connection.reportWatching` — because the push that
+        // arrives when the phone is asleep is not drawn here and this register
+        // is not something the daemon can read.
         if (isForeground && terminal.id == visibleTerminal) return
         if (!canPost()) return
 
-        val title: String
-        val body: String
-        val channel: String
-        when (activity) {
-            AgentActivity.BLOCKED -> {
-                title = "${terminal.label} needs you"
-                body = "$workspace — waiting for your answer"
-                channel = CHANNEL_BLOCKED
-            }
-
-            AgentActivity.DONE -> {
-                title = "${terminal.label} finished"
-                body = workspace
-                channel = CHANNEL_DONE
-            }
-
-            else -> return
-        }
+        // Every sentence, in one place that needs no `Context` and is held to
+        // the daemon's own wording by a test. See [NotificationCopy].
+        val (title, body, channel) = NotificationCopy.of(terminal, workspace, runner) ?: return
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -136,17 +144,19 @@ class Notifier(private val context: Context, private val settings: Settings) {
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
-            // The runner, only when it adds something. With one runner
-            // connected its name is on every notification and says nothing;
-            // with three it is the first thing you need.
-            .setContentText(if (runner.isBlank()) body else "$body · $runner")
+            .setContentText(body)
+            // A lock screen gives a body one line. The agent's own last words
+            // are cut to about 120 characters by the daemon — see
+            // `farcooler_core::feed::SAID_WIDTH` — which is more than one line
+            // and exactly the part worth expanding to read.
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
             // Grouped by terminal so a later state replaces the earlier
             // notification for the same one rather than stacking up.
             .setGroup(terminal.id)
             .setContentIntent(pending)
             .setCategory(
-                if (activity == AgentActivity.BLOCKED) NotificationCompat.CATEGORY_CALL
+                if (channel == CHANNEL_BLOCKED) NotificationCompat.CATEGORY_CALL
                 else NotificationCompat.CATEGORY_STATUS
             )
             .build()
@@ -169,7 +179,34 @@ class Notifier(private val context: Context, private val settings: Settings) {
 
     companion object {
         const val CHANNEL_BLOCKED = "agents.blocked"
+
+        /**
+         * Also named in `AndroidManifest.xml` as Firebase's default channel,
+         * and the two must agree — see the meta-data there for why a push this
+         * process never sees still has to land in a channel somebody can name.
+         */
         const val CHANNEL_DONE = "agents.done"
+
         const val EXTRA_TERMINAL = "com.farcooler.terminal"
+
+        /**
+         * What a push calls the same thing.
+         *
+         * Firebase draws the tray notification itself when this app is not in
+         * the foreground — which is the case the push exists for — and puts the
+         * message's `data` keys into the launch intent VERBATIM. So a tapped
+         * push arrives under the relay's spelling, not this app's, and
+         * `MainActivity` has to try both or the deep link is silently dropped
+         * for exactly the notification that mattered most. `"terminal"` is
+         * `Payload.terminal` in `services/relay/src/push.ts`.
+         */
+        const val PUSH_EXTRA_TERMINAL = "terminal"
+
+        /**
+         * What the daemon calls the thing it is announcing: `"blocked"`,
+         * `"done"`, `"working"`. `Notice.status` in
+         * `crates/daemon/src/watch.rs`, `Payload.status` in the relay.
+         */
+        const val PUSH_EXTRA_STATUS = "status"
     }
 }

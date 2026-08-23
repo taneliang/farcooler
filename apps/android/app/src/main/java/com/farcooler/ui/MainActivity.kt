@@ -73,6 +73,15 @@ class MainActivity : ComponentActivity() {
         intent.data?.let { uri ->
             lifecycleScope.launch { model.account.handleCallback(uri) }
         }
-        intent.getStringExtra(Notifier.EXTRA_TERMINAL)?.let { model.openByTerminalId(it) }
+        // Two spellings for one id, because two different things draw the
+        // notification. This app's own banner puts it under its own key; a push
+        // the app never saw is drawn by Firebase, which copies the message's
+        // `data` keys into the launch intent verbatim — so a tapped push
+        // arrives under the relay's spelling. Reading only the first is why
+        // tapping a notification about an agent on a sleeping phone opened the
+        // app on whatever it was showing last. See [Notifier.PUSH_EXTRA_TERMINAL].
+        val terminal = intent.getStringExtra(Notifier.EXTRA_TERMINAL)
+            ?: intent.getStringExtra(Notifier.PUSH_EXTRA_TERMINAL)
+        terminal?.let { model.openByTerminalId(it) }
     }
 }

@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Far Cooler</string>
+    <!--
+        Firebase reads this by name from the manifest's meta-data, so it has to
+        be a resource rather than a Kotlin constant. It must equal
+        `Notifier.CHANNEL_DONE` — a channel id nothing created is a channel
+        Android substitutes for — and `NotificationCopyTest` reads this file and
+        fails when the two drift apart.
+    -->
+    <string name="default_notification_channel_id" translatable="false">agents.done</string>
 </resources>

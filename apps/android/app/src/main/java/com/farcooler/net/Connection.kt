@@ -33,14 +33,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonUnquotedLiteral
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * One runner's session and the state a screen renders from it.
@@ -276,13 +279,26 @@ class Connection(
     /**
      * Which terminal is on screen right now, or null.
      *
-     * Set by the terminal screen. Two readers, deliberately one register: a
-     * banner about this pane is suppressed, and the same fact is what ends
-     * `done`. Suppressing a notification and marking something read are the
-     * same judgement — "you are looking at this" — and answering it in two
-     * places is how they come to disagree.
+     * Set by the terminal screen. Three readers, deliberately one register: a
+     * banner about this pane is suppressed, the same fact is what ends `done`,
+     * and it is what this client CLAIMS to the runner so the runner does not
+     * push about a pane somebody is sitting there reading. All three are one
+     * judgement — "you are looking at this" — and answering it in three places
+     * is how they come to disagree.
+     *
+     * The write is what releases a pane. Compose disposes the effect that owns
+     * this on the way out of the screen, and its scope goes with it, so the
+     * claim is renewed from [Connection]'s own scope here rather than from the
+     * caller's — otherwise backing out of a workspace would leave the last pane
+     * claimed until the next poll, and leaving the app entirely would leave it
+     * claimed until the runner's TTL ran out.
      */
     var visibleTerminal: String? = null
+        set(value) {
+            val changed = field != value
+            field = value
+            if (changed) scope.launch { reportWatching() }
+        }
 
     /**
      * Whether this connection is allowed to poll. False while backgrounded.
@@ -306,6 +322,17 @@ class Connection(
     fun setForeground(foreground: Boolean) {
         val was = isForeground
         isForeground = foreground
+        // Release the claim of attention on the way out, rather than letting it
+        // age out on the runner. Those seconds are seconds this feature would
+        // spend swallowing the notification it is least entitled to swallow: a
+        // phone going into a pocket is precisely when a finishing agent is worth
+        // a push. Best effort — Android may freeze the process before the call
+        // lands, which is what the runner's TTL is the backstop for.
+        //
+        // Unconditional on [was], unlike the reconnect below: one redundant
+        // release costs a few bytes, and a missed one costs a notification
+        // nobody gets.
+        if (!foreground) scope.launch { reportWatching() }
         if (!foreground || was) return
 
         when (_phase.value) {
@@ -360,6 +387,14 @@ class Connection(
 
         if (mine != attempt) return
         _phase.value = Phase.Connected
+        // A link nobody has told anything yet. See [WatchingClaim.reset].
+        watching.reset()
+        // Before the first poll, because the poll renews a claim of attention
+        // and [reportWatching] refuses to make one until it knows the runner
+        // can hear it. This used to be read only when the settings screen
+        // opened, which would have meant a phone claimed nothing until somebody
+        // went looking at version numbers.
+        loadDaemonBuild()
         // Forced, so a fresh link reads the diff counts on its first poll
         // rather than up to [INBOX_EVERY] polls later. See [loadInboxIfDue].
         refresh(force = true)
@@ -445,6 +480,12 @@ class Connection(
         // Before the reads below, so anything watching for a new link learns
         // about it in the same turn the link exists.
         _reconnects.value += 1
+        // A different link, which has been told nothing — without this a phone
+        // that dropped and came back while sitting on one pane would match its
+        // own last claim, skip the send, and go on being notified about the
+        // pane in front of it.
+        watching.reset()
+        loadDaemonBuild()
         refresh(force = true)
         // Re-read rather than trust what a previous session reported: a
         // runner that dropped and came back may have gained a repository, and
@@ -715,6 +756,13 @@ class Connection(
      */
     suspend fun markVisibleSeen() {
         if (_phase.value !is Phase.Connected || !isForeground) return
+        // Renew the claim of ATTENTION on the same beat, which is the same
+        // judgement one moment earlier — see [reportWatching]. Folded in here
+        // rather than given its own poll hook because there is exactly one
+        // question underneath both, every place that already answers it calls
+        // this, and a second set of call sites is how the two answers come to
+        // disagree.
+        reportWatching()
         val id = visibleTerminal ?: return
         val terminal = _fleet.value.workspaces.flatMap { it.terminals }.firstOrNull { it.id == id }
         if (terminal?.agent != com.farcooler.model.AgentActivity.DONE) return
@@ -725,6 +773,71 @@ class Connection(
             e.rethrowIfCancellation()
         } finally {
             synchronized(markingSeen) { markingSeen.remove(id) }
+        }
+    }
+
+    /**
+     * The claim's rate limiter. See [WatchingClaim] and [reportWatching].
+     */
+    private val watching = WatchingClaim()
+
+    /**
+     * Tell the runner which pane is in front of the person, so it does not push
+     * a notification about one they are already reading.
+     *
+     * The complaint this exists for, in the owner's words: a codex pane open, a
+     * question asked, an answer given, and a buzz on the wrist about a reply
+     * already on screen. `Notifier` suppressing its own banner cannot fix that,
+     * and this is the reason there are two mechanisms rather than one — the
+     * banner this app draws and the push the daemon sends are different
+     * notifications, and the second is drawn by Firebase in a process that has
+     * no idea what is on screen. Nothing local can reach it. Only the runner
+     * can, and only if it is told.
+     *
+     * It is also why this is not [markVisibleSeen] with a different method
+     * name. `terminal.seen` is a fact about the PAST that ends `done`, and it
+     * runs on the poll AFTER the agent finished — up to three seconds later, by
+     * which time the push has crossed the relay. A claim of attention is made
+     * in advance and is therefore already true at the moment the turn ends.
+     *
+     * Suppression on the runner is per terminal and across every device,
+     * because it is one person: this phone saying it can see a pane is also
+     * what silences the Mac and the watch. That is the point, not a side
+     * effect.
+     *
+     * The WHOLE set on every call, replacing whatever this client said last, so
+     * an empty array is a real and important call — "I am looking at nothing" —
+     * and the reason this is not simply skipped when there is nothing to name.
+     * A list of one here where iOS sends several: a Mac window tiles a whole
+     * layout at once, a phone shows one pane.
+     *
+     * Errors swallowed, like [loadInbox] and for a stronger reason: this
+     * decorates nothing and blocks nothing. Failing to be believed costs a
+     * notification somebody did not need; failing loudly would cost the fleet
+     * its screen.
+     */
+    private suspend fun reportWatching() {
+        if (_phase.value !is Phase.Connected) return
+        // `"watching"` is `farcooler_protocol::capability::WATCHING`. A runner
+        // that predates it withholds nothing and notifies exactly as it always
+        // did, which is the honest fallback — but this is a heartbeat, so
+        // without the check it would spend a failing round trip every few
+        // seconds, for as long as a pane is on screen, to be refused the same
+        // way every time.
+        if (_daemon.value?.can("watching") != true) return
+        // Backgrounded is not watching, and that is the half of the request
+        // that matters most: an agent finishing while the phone is in a pocket
+        // is exactly what the push exists for. A screen still composed behind a
+        // locked phone has not been read by anybody.
+        val terminals = if (isForeground) listOfNotNull(visibleTerminal) else emptyList()
+        if (!watching.due(terminals, android.os.SystemClock.elapsedRealtime())) return
+        attempt {
+            core.call(
+                "terminal.watching",
+                buildJsonObject {
+                    put("terminals", JsonArray(terminals.map { JsonPrimitive(it) }))
+                },
+            )
         }
     }
 

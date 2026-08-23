@@ -83,5 +83,32 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
             android:resource="@drawable/ic_notification" />
+
+        <!--
+            Which channel a push lands on when this process never sees it.
+
+            The relay sends a `notification` message, so Firebase draws the tray
+            notification itself whenever the app is backgrounded or dead — which
+            is precisely the case the push exists for, and a case
+            `FarCoolerMessagingService` is never called in. Without this the SDK
+            creates a channel of its own, named "Miscellaneous", and the two
+            channels this app describes and separates by importance are bypassed
+            for every notification that matters most.
+
+            Pointed at the FINISHED channel rather than the blocked one, and it
+            is a choice rather than a default: today's push carries no status
+            (see `NotificationCopy.channelFor`), so every one of them would take
+            whichever this names. Under-alerting a blocked agent costs a
+            notification that arrives quietly; over-alerting every finished one
+            breaks a Focus for the normal case, and that is the failure people
+            answer by turning the whole app off.
+
+            The relay sending `android.notification.channel_id` per message
+            overrides this, and is what makes the blocked channel reachable
+            again.
+        -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="@string/default_notification_channel_id" />
     </application>
 </manifest>

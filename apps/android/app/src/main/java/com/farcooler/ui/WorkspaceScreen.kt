@@ -235,6 +235,14 @@ fun WorkspaceScreen(
     // no pane is on screen, so no pane's notification should be suppressed and
     // no agent's finished turn should be marked seen. `Connection.markVisibleSeen`
     // reads exactly this and does nothing without an id.
+    //
+    // What that costs is now visible from the other side too, and it is the
+    // same answer: this register is also what `Connection.reportWatching`
+    // claims to the runner, so reading a diff on the Changes tab lets an agent
+    // in the same worktree buzz you. It should. Reading a diff is not reading
+    // that agent's question — the suppression rule is "you are looking at THIS
+    // pane", not "you are somewhere near it" — and a person deep in a review is
+    // exactly who needs telling that the agent behind it has stopped.
     val reading = (deck?.current as? Pane.Terminal)?.terminalId
     DisposableEffect(reading, onScreen) {
         if (onScreen) {

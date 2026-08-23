@@ -22,6 +22,23 @@ import com.google.firebase.messaging.RemoteMessage
  * fleet here — the app is not running. The daemon already made that judgement
  * before it sent anything, so this draws what it was told and adds no opinion
  * of its own.
+ *
+ * ## When this runs, which is not when you would think
+ *
+ * The relay sends a message with a `notification` block — `sendFcm` in
+ * `services/relay/src/push.ts` — and Firebase's rule for those is that the
+ * SYSTEM draws the tray notification whenever the app is backgrounded or dead,
+ * and calls [onMessageReceived] only while it is in the foreground. So every
+ * careful thing below happens in the one case the local [Notifier] already
+ * covers, and the case this whole path exists for — a phone asleep in a pocket —
+ * is drawn by Firebase out of the manifest's defaults.
+ *
+ * That is why the manifest names a default channel and a default icon, and why
+ * [Notifier.PUSH_EXTRA_TERMINAL] exists: those three are the only say this app
+ * gets over the notification it most wants to get right. Making this method the
+ * one that draws it needs the relay to send a data-only message, which is a
+ * change with its own costs — Firebase does not wake a force-stopped app for
+ * one — and is not this app's to make.
  */
 class FarCoolerMessagingService : FirebaseMessagingService() {
 
@@ -41,10 +58,17 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
         val data = message.data
         val title = data["title"] ?: message.notification?.title ?: return
         val body = data["body"] ?: message.notification?.body.orEmpty()
-        val terminal = data["terminal"].orEmpty()
+        val terminal = data[Notifier.PUSH_EXTRA_TERMINAL].orEmpty()
         // `blocked` is the state worth a high-importance channel; anything else
         // the daemon chose to send is news that can wait.
-        val blocked = data["activity"] == "blocked"
+        //
+        // This read used to be `data["activity"]`, a key no producer has ever
+        // sent under any name — so the high-importance channel that exists for
+        // "an agent has stopped and is waiting for you" was unreachable from
+        // the push path, and had been since it was written. It is spelled the
+        // producer's way now; see [NotificationCopy.channelFor] for what still
+        // has to change on the relay before it carries anything.
+        val channel = NotificationCopy.channelFor(data[Notifier.PUSH_EXTRA_STATUS])
 
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -57,13 +81,14 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val notification = NotificationCompat.Builder(
-            this,
-            if (blocked) Notifier.CHANNEL_BLOCKED else Notifier.CHANNEL_DONE,
-        )
+        val notification = NotificationCompat.Builder(this, channel)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(body)
+            // The same expansion the local banner gets, for the same reason:
+            // the daemon's subtitle carries the agent's own last words, and one
+            // lock-screen line is not enough of them to decide anything by.
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
             // Keyed by terminal, so the app's own banner about the same pane
             // replaces this one rather than sitting beside it when the phone is
