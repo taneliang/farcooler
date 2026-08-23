@@ -217,18 +217,40 @@ class AppModel(
     }
 
     /**
-     * Go to a WORKSPACE, without naming a pane in it.
+     * Go to a workspace's DIFF — the front door's "Review changes" row.
      *
-     * The front door's "Review changes" row, which is about the worktree rather
-     * than about any agent in it. Deliberately does not [point] at anything:
-     * `TerminalRef` would need a terminal id and there is no honest one to
-     * give, and writing an empty one into the focus map would put a value in
-     * there that resolves to nothing on every later read.
+     * The first road in this app that opens a workspace on something other than
+     * an agent. What that row says has always been true — this worktree changed
+     * and nobody has looked — but until there was a review surface behind the
+     * Changes tab, tapping it could only offer the worktree and leave somebody
+     * to find the chip and tap that too.
      *
-     * So the workspace's own rule chooses the pane — the remembered tab if it
-     * still lives, whatever needs you otherwise. See [paneOf].
+     * **This was `openWorkspace`, and its comment argued the opposite case
+     * correctly for the app it was written in.** It said pointing at anything
+     * was impossible because "`TerminalRef` would need a terminal id and there
+     * is no honest one to give". That is true of a `TerminalRef` and was never
+     * true of the worktree: the focus map holds a [Pane] rather than a terminal
+     * id precisely so that "where I was in this worktree" can have an answer
+     * that is not a pane on the runner. [Pane.Changes] is that answer, and it is
+     * an honest one — every `changes.*` RPC takes a workspace id and nothing
+     * else, so the diff exists whether or not the runner has a pane for it.
+     *
+     * `record`, not [choose]. Somebody who tapped a row on the front door was
+     * ROUTED here; one morning's review must not decide where this workspace
+     * opens for the rest of the week. The tab strip stays the one writer, and
+     * this lands in the focus map beside a fleet row and a tapped notification.
+     * See [Focus].
+     *
+     * **Recorded before the route moves, and that order is the whole of the
+     * deep link.** `WorkspaceScreen` builds its [PaneDeck] from [paneOf] in a
+     * `remember` initializer, so a focus written first means the deck OPENS on
+     * the diff. Written after, the screen would open on whatever the rule picked
+     * and then switch — mounting an agent pane, with the terminal session and
+     * the SSH stream under it, for a tab nobody asked to see. [open] has always
+     * had this order, for exactly the same reason.
      */
-    fun openWorkspace(hostId: String, workspaceId: String) {
+    fun openChanges(hostId: String, workspaceId: String) {
+        record(Backstack.key(hostId, workspaceId), Pane.Changes, chosen = false)
         goTo(Route.Terminal(hostId, workspaceId))
     }
 

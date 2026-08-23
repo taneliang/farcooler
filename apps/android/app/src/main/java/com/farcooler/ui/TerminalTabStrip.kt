@@ -294,15 +294,22 @@ private fun ChangesChip(counts: InboxRow?, isCurrent: Boolean, onTap: () -> Unit
 }
 
 /**
- * What the Changes chip says to a screen reader.
+ * What the Changes chip says to a screen reader — and the front door's review
+ * row with it.
  *
  * Pure and out here rather than built inline, so a test can read the one clause
  * that only exists in this string: the counts are everything the worktree has
  * changed, committed or not, which is not the branch total the workspace list
  * shows under Branch.
+ *
+ * [lead] is the only thing the two callers differ on, because the two are the
+ * same target on two screens: `NeedsYouScreen`'s row says "Review changes" and
+ * this chip says "Changes", and everything after the comma has to match or the
+ * app describes one worktree two ways on either side of one tap. That was
+ * unfalsifiable while the row led somewhere else; it is checkable now.
  */
-internal fun changesDescription(counts: InboxRow?): String {
-    if (counts == null || !counts.hasDiff) return "Changes"
-    return "Changes, ${counts.insertions} added, ${counts.deletions} removed, " +
+internal fun changesDescription(counts: InboxRow?, lead: String = "Changes"): String {
+    if (counts == null || !counts.hasDiff) return lead
+    return "$lead, ${counts.insertions} added, ${counts.deletions} removed, " +
         "including work that isn’t committed yet"
 }

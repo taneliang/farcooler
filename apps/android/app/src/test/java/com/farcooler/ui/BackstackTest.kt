@@ -327,6 +327,41 @@ class BackstackTest {
         assertEquals(tab("shell"), Backstack.chooseFocus(mixed, null))
     }
 
+    /**
+     * The front door's review row lands ON the diff, over anything the rule
+     * would have picked.
+     *
+     * `AppModel.openChanges` writes an UNCHOSEN [Pane.Changes] into the focus
+     * map and then moves the route, so this function is what the workspace
+     * screen asks before it builds its deck. Two things have to be true for
+     * that row to work, and both are asserted here rather than assumed by the
+     * screen:
+     *
+     * - it beats the rule, even when the worktree holds an agent that is
+     *   blocked right now — otherwise tapping "Review changes" opens on that
+     *   agent and the diff is still two taps away, which is the whole defect;
+     * - it answers with **no fleet at all**. Every `changes.*` RPC takes a
+     *   workspace id and nothing else, so the diff is askable during a
+     *   handshake. A remembered terminal cannot resolve there, and if this one
+     *   could not either, tapping the row on a runner that is still connecting
+     *   would land on "Waiting for that runner." instead of on the review.
+     */
+    @Test
+    fun beingSentToTheDiffOutranksTheRule() {
+        val terminals = listOf(
+            terminal("still-here"),
+            terminal("needs-you", activity = "blocked"),
+        )
+        assertEquals(
+            Pane.Changes,
+            Backstack.chooseFocus(terminals, Focus(Pane.Changes, chosen = false)),
+        )
+        assertEquals(
+            Pane.Changes,
+            Backstack.chooseFocus(emptyList(), Focus(Pane.Changes, chosen = false)),
+        )
+    }
+
     @Test
     fun aWorkspaceWithNoPanesResolvesToNothing() {
         assertNull(Backstack.chooseFocus(emptyList(), Focus(tab("t1"), chosen = true)))

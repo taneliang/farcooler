@@ -37,6 +37,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -120,7 +122,7 @@ import kotlinx.coroutines.launch
 fun NeedsYouScreen(
     model: AppModel,
     onSelect: (TerminalRef) -> Unit,
-    onOpenWorkspace: (hostId: String, workspaceId: String) -> Unit,
+    onReviewChanges: (hostId: String, workspaceId: String) -> Unit,
     onOpenWorkspaces: () -> Unit,
     onOpenDrawer: () -> Unit,
 ) {
@@ -243,7 +245,7 @@ fun NeedsYouScreen(
 
                     if (section.showsChanges) {
                         item(key = "changes/${section.key}") {
-                            ChangesRow(section, onOpenWorkspace, Modifier.animateItem())
+                            ChangesRow(section, onReviewChanges, Modifier.animateItem())
                         }
                     }
                 }
@@ -356,30 +358,31 @@ private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
 }
 
 /**
- * The diff, as a row of its own.
+ * The diff, as a row of its own — and it opens the diff.
  *
- * Why it gets a row at all: nothing in this app has ever opened a workspace on
- * its diff, so from the front door the diff would cost two taps while `+82 -13`
- * sat on the header looking like the control for it.
+ * Why it gets a row at all: no road into a workspace had ever opened it on its
+ * diff, so from the front door the diff cost two taps while `+82 -13` sat on
+ * the header looking like the control for it.
  * `docs/jobs-to-be-done.md` F4 has the phone's review experience load-bearing
  * rather than a scaled-down Mac feature, which makes the diff the most
  * important target on this screen.
  *
- * **Where it goes today is the workspace, not the diff, and that is a deferral
- * rather than a design.** Android still has no review surface — it is the
- * largest remaining piece of the parity work.
+ * **Both of the reasons this row used to point at the worktree instead are
+ * spent, and the second one is worth keeping rather than deleting.** The first
+ * was that the workspace screen drew a `changes` pane as raw VT bytes, so
+ * aiming here at one would be worse than aiming at the worktree; the Changes
+ * tab and [Pane]'s fold closed that. The second was the one that actually
+ * decided it: that tab could say how big the diff was and could not show it,
+ * and sending somebody who asked to review changes to a screen saying "not yet"
+ * is worse than sending them to the agents that made them. There is a review
+ * behind that tab now, and — as this comment predicted — the one line that had
+ * to change is the tap.
  *
- * Half of the reason given here has since stopped being true and is worth
- * correcting rather than deleting: this said the workspace screen rendered a
- * `changes` pane as raw VT bytes, so pointing the row at one would be worse
- * than pointing it at the worktree. It does not any more — the workspace has a
- * Changes tab and `Pane` folds such a pane into it. What is left is the half
- * that still decides the question: that tab can say how big the diff is and
- * cannot yet show it, and sending somebody who asked to review changes to a
- * screen that says "not yet" is worse than sending them to the agents that made
- * them. What the row says is true either way — this worktree changed and nobody
- * has looked — and when the review lands, this `onSelect` is still the one line
- * that has to change.
+ * What it does NOT do is name a pane on the runner. The tab is asked for by
+ * workspace id, so it answers during a handshake where a remembered terminal
+ * cannot: tapping this row on a runner that is still connecting lands on the
+ * diff and waits there, rather than on "Waiting for that runner." See
+ * [AppModel.openChanges] for why the focus is written before the route moves.
  *
  * A `ListItem`, unlike the agent rows above it. This one is a leading icon,
  * one line of text and a trailing pair of numbers, which is exactly the shape
@@ -391,7 +394,7 @@ private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
 @Composable
 private fun ChangesRow(
     section: NeedsYouSection,
-    onOpen: (hostId: String, workspaceId: String) -> Unit,
+    onReview: (hostId: String, workspaceId: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val counts = section.counts
@@ -412,10 +415,18 @@ private fun ChangesRow(
             // different. See [DiffCounts].
             if (counts != null && counts.hasDiff) DiffCounts(counts)
         },
-        // No terminal named — see [AppModel.openWorkspace]. The workspace's own
-        // rule picks the pane, which is the honest answer while this row cannot
-        // open the diff itself.
-        modifier = modifier.clickable { onOpen(section.hostId, section.workspace.id) },
+        modifier = modifier
+            .clickable { onReview(section.hostId, section.workspace.id) }
+            // Spoken as one target, in the Changes chip's own words. `+82` and
+            // `-13` read aloud as two orphaned numbers, and the clause about
+            // uncommitted work exists nowhere else — so the row and the tab it
+            // now opens say the same sentence about the same worktree, which
+            // they could not while the row went somewhere else. Set on the
+            // whole `ListItem` rather than on the counts, because a row with
+            // two elements in it is a row TalkBack stops on twice.
+            .semantics(mergeDescendants = true) {
+                contentDescription = changesDescription(counts, lead = "Review changes")
+            },
     )
 }
 

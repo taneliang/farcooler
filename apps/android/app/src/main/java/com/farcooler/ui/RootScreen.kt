@@ -236,7 +236,7 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
             else -> NeedsYouScreen(
                 model = model,
                 onSelect = { model.open(it) },
-                onOpenWorkspace = { host, workspace -> model.openWorkspace(host, workspace) },
+                onReviewChanges = { host, workspace -> model.openChanges(host, workspace) },
                 onOpenWorkspaces = { model.navigate(Route.Fleet) },
                 onOpenDrawer = onOpenDrawer,
             )

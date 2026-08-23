@@ -33,4 +33,28 @@ class ChangesChipTest {
             changesDescription(row(82, 13)),
         )
     }
+
+    /**
+     * The front door's review row and the tab it opens describe one worktree
+     * the same way.
+     *
+     * They are the same target on two screens, and until that row actually
+     * opened the diff there was nothing to compare it against. The lead word
+     * differs because the row is a verb and the chip is a place; everything
+     * after the comma is the same string by construction, and this is what
+     * makes that construction load-bearing rather than incidental.
+     */
+    @Test
+    fun theReviewRowSaysWhatTheTabSays() {
+        assertEquals("Review changes", changesDescription(null, lead = "Review changes"))
+        assertEquals(
+            "Review changes, 82 added, 13 removed, including work that isn’t committed yet",
+            changesDescription(row(82, 13), lead = "Review changes"),
+        )
+        assertEquals(
+            changesDescription(row(82, 13)).substringAfter("Changes"),
+            changesDescription(row(82, 13), lead = "Review changes")
+                .substringAfter("Review changes"),
+        )
+    }
 }

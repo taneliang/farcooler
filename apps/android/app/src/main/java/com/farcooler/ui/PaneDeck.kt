@@ -189,10 +189,20 @@ data class PaneDeck(
          * This is a budget for emulators, streams and native scrollback, and
          * that tab has none of the three — it is asked for by workspace id and
          * holds nothing on the runner. Spending a slot on it would evict an
-         * agent to buy nothing. Worth re-reading when phase 5 gives it a diff
-         * to hold: the reason is about what the tab costs, so a tab that starts
-         * costing something is a reason to revisit this, not to widen it
-         * quietly.
+         * agent to buy nothing.
+         *
+         * **Re-read once the tab had a diff in it, as this comment asked to
+         * be, and the answer did not move.** What a review holds — the change
+         * set, every fetched patch, the folds, the bookmark — is on a
+         * [com.farcooler.net.ChangesStore] hanging off the `Connection` rather
+         * than in the composition, so unmounting the tab would not release a
+         * byte of it. What is in the composition is a `LazyListState`, one
+         * `derivedStateOf` and whatever the viewport has realized. Evicting it
+         * would cost a refold and a refetch over somebody's cellular link and
+         * save nothing the low-memory killer counts. The invitation stands for
+         * whatever comes after: this is a claim about what the tab costs, so a
+         * tab that starts costing something is a reason to revisit it rather
+         * than to widen it quietly.
          */
         const val MOUNT_LIMIT = 3
 
