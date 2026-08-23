@@ -519,7 +519,7 @@ final class ChangesStore: ObservableObject {
     /// and the bookmark has one path to write down instead of a set whose
     /// meaning on re-entry would be a guess. A set could express none of that.
     ///
-    /// It also keeps the phone's cellular cost at one file: `ChangesFileCard`
+    /// It also keeps the phone's cellular cost at one file: `ChangesFileHeading`
     /// calls `ensure` only when it is expanded, so a forty-file branch costs
     /// one round trip on arrival rather than forty.
     @Published private(set) var expandedFile: String?
@@ -630,7 +630,7 @@ final class ChangesStore: ObservableObject {
     /// showing a different commit. So every read records the generation it
     /// started in and compares before storing anything.
     ///
-    /// It is `@Published` because `ChangesFileCard` keys its `task` on it too:
+    /// It is `@Published` because `ChangesFileHeading` keys its `task` on it too:
     /// nothing else in the view asks for a file's diff a second time, so
     /// clearing the cache under a heading that stayed on screen would leave
     /// that file at "Reading…" forever. That is exactly what switching between
@@ -1520,7 +1520,7 @@ private struct FileDiff: Decodable {
     ///
     /// Hunk boundaries are not drawn: a phone has no room for a `@@` header,
     /// and the jump in line numbers between two hunks already says a gap is
-    /// there — which is what `ChangesFileCard` renders as a divider.
+    /// there — which is what `DiffLayout.hunks` cuts a file up on.
     func lines() -> [DiffComputation.Line] {
         var out: [DiffComputation.Line] = []
         for hunk in hunks {

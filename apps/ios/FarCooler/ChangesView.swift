@@ -65,46 +65,58 @@ struct ChangesView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    summary
-                        .id(Self.topAnchor)
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    // Everything above the files, laid out the way the whole
+                    // stack used to be.
+                    //
+                    // The stack itself now says `spacing: 0`, because a file is
+                    // a `Section` — a pinned heading and its hunks are two
+                    // elements of this stack, and any spacing between them
+                    // would open a seam across the middle of every card. So the
+                    // gap between cards moved into the heading, where it can be
+                    // drawn opaque; see `ChangesFileHeading`. This block keeps
+                    // the spacing it always had.
+                    VStack(alignment: .leading, spacing: 10) {
+                        summary
+                            .id(Self.topAnchor)
 
-                    if let saved = store.resume {
-                        resumeCard(saved)
-                    }
-                    if let note = store.resumeNote {
-                        // Tap to dismiss. It has said its piece the moment it
-                        // is read, and a sentence about a file that moved has
-                        // no business still being on the screen three commits
-                        // later.
-                        ChangesNotice(symbol: "bookmark", tint: .secondary, text: note)
-                            .onTapGesture { store.resumeNote = nil }
-                    }
+                        if let saved = store.resume {
+                            resumeCard(saved)
+                        }
+                        if let note = store.resumeNote {
+                            // Tap to dismiss. It has said its piece the moment it
+                            // is read, and a sentence about a file that moved has
+                            // no business still being on the screen three commits
+                            // later.
+                            ChangesNotice(symbol: "bookmark", tint: .secondary, text: note)
+                                .onTapGesture { store.resumeNote = nil }
+                        }
 
-                    if let error = store.error {
-                        ChangesNotice(
-                            symbol: "exclamationmark.triangle", tint: .orange,
-                            text: error.sentence, detail: error.transcript)
-                    } else if store.commitUnreadable {
-                        // Ahead of the empty case on purpose: a commit that could
-                        // not be read also has no files, and "nothing changed here"
-                        // is the one sentence that must not be said about it.
-                        //
-                        // The Mac's words for this exact failure, from
-                        // `ChangesPane.nothingTitle` and `nothingDetail`, rather
-                        // than a second spelling of them — and both controls it
-                        // names are on this screen, in the row under a commit's
-                        // subject. No transcript here, and that is the Mac's
-                        // reasoning too: what `changes.commit_files` returns is
-                        // about a subprocess, and this is about a commit.
-                        ChangesNotice(
-                            symbol: "exclamationmark.triangle",
-                            tint: .orange,
-                            text: "Couldn’t read this commit. It might not be on this branch "
-                                + "anymore. Choose another, or go back to the whole branch.")
-                    } else if store.files.isEmpty && !store.loading {
-                        ChangesNotice(
-                            symbol: "checkmark.circle", tint: .secondary, text: nothingHere)
+                        if let error = store.error {
+                            ChangesNotice(
+                                symbol: "exclamationmark.triangle", tint: .orange,
+                                text: error.sentence, detail: error.transcript)
+                        } else if store.commitUnreadable {
+                            // Ahead of the empty case on purpose: a commit that could
+                            // not be read also has no files, and "nothing changed here"
+                            // is the one sentence that must not be said about it.
+                            //
+                            // The Mac's words for this exact failure, from
+                            // `ChangesPane.nothingTitle` and `nothingDetail`, rather
+                            // than a second spelling of them — and both controls it
+                            // names are on this screen, in the row under a commit's
+                            // subject. No transcript here, and that is the Mac's
+                            // reasoning too: what `changes.commit_files` returns is
+                            // about a subprocess, and this is about a commit.
+                            ChangesNotice(
+                                symbol: "exclamationmark.triangle",
+                                tint: .orange,
+                                text: "Couldn’t read this commit. It might not be on this branch "
+                                    + "anymore. Choose another, or go back to the whole branch.")
+                        } else if store.files.isEmpty && !store.loading {
+                            ChangesNotice(
+                                symbol: "checkmark.circle", tint: .secondary, text: nothingHere)
+                        }
                     }
 
                     fileCards
@@ -221,16 +233,33 @@ struct ChangesView: View {
         }
     }
 
+    /// One file: its heading, which stays, and its hunks, which scroll.
+    ///
+    /// A `Section` written out here rather than returned from a view of its
+    /// own, because that is what makes the heading stick: `pinnedViews` is
+    /// resolved from the sections the lazy stack's own content produces, and a
+    /// custom `View` that happens to return a `Section` is not documented to be
+    /// looked inside. A heading that quietly stopped pinning would look exactly
+    /// like this having never been built, so the section stays where the stack
+    /// can see it.
     private func card(_ file: ChangedFile) -> some View {
-        ChangesFileCard(
-            file: file,
-            store: store,
-            onComment: { composing = ComposeRequest(anchor: $0) },
-            onVisible: { store.noteVisible(file.path, isVisible: $0) }
-        )
-        // The scroll target. Every jump names a path, so every card answers to
-        // one.
-        .id(file.path)
+        Section {
+            ChangesFileBody(
+                file: file,
+                store: store,
+                onComment: { composing = ComposeRequest(anchor: $0) })
+        } header: {
+            ChangesFileHeading(
+                file: file,
+                store: store,
+                onVisible: { store.noteVisible(file.path, isVisible: $0) }
+            )
+            // The scroll target. Every jump names a path, and the heading is
+            // where a jump belongs now: it is the part the pin holds at the top
+            // of the screen, so scrolling it to the top lands the file exactly
+            // where it is about to stay.
+            .id(file.path)
+        }
     }
 
     private var generatedHeading: some View {
@@ -250,7 +279,10 @@ struct ChangesView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 4)
-        .padding(.top, 8)
+        // Eighteen rather than eight: the stack no longer adds ten of its own
+        // between this and the card above it. The ten below it comes from the
+        // next heading, which carries its own gap.
+        .padding(.top, 18)
     }
 
     /// Which nothing this is, when the list is empty.
@@ -725,12 +757,21 @@ private struct CommitBodyText: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.leading)
             if isLong {
+                // `.bordered`, like Whole Branch and History a few points below
+                // it in the same card. This was accent text at `.caption2` —
+                // eleven points of blue with nothing behind it, on a card that
+                // sits on the terminal's theme-chosen ground rather than on a
+                // system background, which is the worst of the three ways this
+                // screen was spending the accent: the smallest type, the
+                // thinnest contrast, and no ground of its own. A real button
+                // style brings a ground with it, and the size goes up one step
+                // to `.caption` because a control is not a footnote.
                 Button(expanded ? "Less" : "More") {
                     withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
                 }
-                .font(.caption2)
-                .buttonStyle(.plain)
-                .foregroundStyle(.tint)
+                .font(.caption)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
         .padding(.top, 2)
@@ -776,9 +817,17 @@ private struct ReviewBar: View {
                         )
                         .font(.footnote.weight(.medium))
                         Spacer(minLength: 4)
+                        // Secondary, not accent. The whole row is the button —
+                        // these three words are not a target of their own, and
+                        // painting them accent on `.bar`, which is a dark
+                        // material under a dark theme, was the app spending its
+                        // one "this is tappable" signal on the part of the row
+                        // that is not tappable. The chevron already says the
+                        // row goes somewhere, which is exactly how the History
+                        // row in the summary card above draws the same shape.
                         Text("Review and Send")
                             .font(.caption)
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(.secondary)
                         Image(systemName: "chevron.right")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
@@ -1064,29 +1113,203 @@ enum ChangesSurface {
     }
 }
 
-/// One file, folded to its heading until it is read.
-private struct ChangesFileCard: View {
+/// One file's heading — and the one part of a card that does not scroll away.
+///
+/// A `Section` header inside a `LazyVStack(pinnedViews: [.sectionHeaders])`, so
+/// while a file's hunks are on screen its name is held at the top of the scroll
+/// view, and scrolling into the next file pushes this one out with that file's
+/// name in its place. That displacement is the whole reason this is a section
+/// header rather than a bar drawn over the scroll by hand: an overlay would
+/// have to be told which file the scroll is currently inside, which is the same
+/// "which file am I looking at" question the pinning answers for nothing.
+///
+/// **It carries what the heading always carried**, and that is a decision
+/// rather than an omission. A pinned header is the same view pinned or not, so
+/// anything cut from it here is also cut from the forty headings somebody
+/// scrolls past — and the status letter and the two counts are most of what
+/// makes a heading worth scrolling past. It is also still the fold control,
+/// which is the small thing the pinning hands over for free: the way to close a
+/// file you are done with is now always in reach at the top of the screen
+/// rather than a thousand lines back up.
+private struct ChangesFileHeading: View {
+    let file: ChangedFile
+    @ObservedObject var store: ChangesStore
+    /// Whether this file is on screen, so the store can remember roughly where
+    /// the reader had got to. See `ChangesStore.noteVisible`.
+    let onVisible: (Bool) -> Void
+
+    private var expanded: Bool { store.isExpanded(file.path) }
+
+    var body: some View {
+        Button {
+            store.toggle(file.path)
+        } label: {
+            heading
+        }
+        .buttonStyle(.plain)
+        // Square along the bottom while there are hunks under it, so the
+        // heading and the patch read as one card and not two stacked ones.
+        .background(
+            ChangesSurface.card,
+            in: .rect(
+                topLeadingRadius: 12,
+                bottomLeadingRadius: expanded ? 0 : 12,
+                bottomTrailingRadius: expanded ? 0 : 12,
+                topTrailingRadius: 12)
+        )
+        // The gap between cards lives here rather than in the stack's spacing,
+        // and it is drawn opaque, which is the part that matters: a pinned
+        // header floats over whatever is scrolling beneath it, and
+        // `ChangesSurface.card` is a six-percent wash that diff lines would show
+        // straight through. The theme's ground is what the scroll view is drawn
+        // on anyway, so the wash over it composites to exactly the card color
+        // this had before it could float.
+        .padding(.top, 10)
+        .background(TerminalPalette.background)
+        // The scroll decides what gets read: a file is fetched when its heading
+        // comes into view, not when the change set loads.
+        .task(id: taskKey) {
+            guard expanded else { return }
+            await store.ensure(file.path)
+        }
+        // On the heading rather than on the whole card, because the heading is
+        // the part that exists whether the file is open or folded — and because
+        // a pinned heading is on screen exactly while its own hunks are, which
+        // is the question `noteVisible` is asking.
+        .onScrollVisibilityChange(threshold: 0.05) { onVisible($0) }
+        // A header as well as a button, so VoiceOver's rotor can walk the files
+        // the way the eye walks the pinned names.
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    /// Re-runs when the file, the fold state, or the generation changes — each
+    /// of which genuinely changes whether and what to fetch.
+    ///
+    /// The generation rather than the scope, and that is the load-bearing part:
+    /// nothing else in this view asks for a file's diff a second time, so a
+    /// heading that stays realized while the cache is emptied underneath it
+    /// would sit at "Reading…" forever. Every emptying bumps the generation,
+    /// including the ones a scope change causes, so this covers strictly more
+    /// than keying on the scope did — a pull to refresh included.
+    private var taskKey: String { "\(file.path)#\(store.generation)#\(expanded)" }
+
+    private var heading: some View {
+        HStack(spacing: 10) {
+            // The host's letter, whichever scope this row came from.
+            //
+            // `A`, `D`, `R` and `T` are real here. A commit's files come from
+            // `changes.commit_files`, which merges `git diff --name-status`
+            // onto the counts (crates/daemon/src/file_diff.rs); the branch's
+            // come from `change_set::numstat`, which has always done the same;
+            // Local reads the working tree's own porcelain codes. So a file a
+            // commit created is badged `A`, not `M`.
+            //
+            // The bullet is the no-status case only — a daemon so old it omits
+            // the field, which decodes as nil rather than as a wrong letter.
+            // "Changed" is what it can honestly say, and the spoken label below
+            // says the same.
+            Text(file.status?.mark ?? "•")
+                .font(.caption2.monospaced().weight(.bold))
+                .foregroundStyle(file.status?.tint ?? .secondary)
+                .frame(width: 14)
+
+            VStack(alignment: .leading, spacing: 1) {
+                // The leaf, then its directory underneath. A phone cannot fit
+                // `crates/daemon/src/review_ops.rs` at a readable size, and the
+                // leaf is the half that identifies the file.
+                //
+                // Truncated in the MIDDLE, which matters more now that this is
+                // what stays on screen: a long leaf is `ChangesStore+Resume` or
+                // `WorkspaceDetailViewController`, and both ends of it say more
+                // than either end alone.
+                Text(file.name)
+                    .font(.footnote.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !file.directory.isEmpty {
+                    // Not monospaced. The Mac's file list draws the parent path
+                    // in the plain system face and reserves monospace for the
+                    // counts, and a directory set in Iosevka next to a
+                    // proportional filename read as two different kinds of
+                    // thing on the same row.
+                    //
+                    // Truncated from the HEAD, so what survives a narrow screen
+                    // is the directory the file is actually in rather than the
+                    // `crates/` every path on the branch begins with.
+                    Text(file.directory)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            if file.binary {
+                Text("binary").font(.caption2).foregroundStyle(.secondary)
+            } else {
+                if file.insertions > 0 {
+                    Text("+\(file.insertions)")
+                        .font(.caption2.monospaced()).foregroundStyle(.green)
+                }
+                if file.deletions > 0 {
+                    Text("−\(file.deletions)")
+                        .font(.caption2.monospaced()).foregroundStyle(.red)
+                }
+            }
+
+            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenHeading)
+        .accessibilityHint(expanded ? "Folds this file" : "Opens this file")
+    }
+
+    /// The heading as one phrase, and without the directory.
+    ///
+    /// Pinned, this is read on the way into every file's section, and the path
+    /// in it would be `crates/daemon/src` spelled out once per file on a forty
+    /// file branch. `NeedsYou`'s workspace header leaves a branch out of its
+    /// label for exactly that reason. What is left is the phrase that answers
+    /// "which file is this" — the leaf, what happened to it, and how much
+    /// moved. The directory stays on screen for the eye, and `FileIndexSheet`,
+    /// which is where a VoiceOver reader CHOOSES a file rather than passes one,
+    /// still says the whole of it.
+    private var spokenHeading: String {
+        var parts = [file.name, file.status?.label ?? "Changed"]
+        if file.binary {
+            parts.append("binary")
+        } else {
+            if file.insertions > 0 { parts.append("\(file.insertions) added") }
+            if file.deletions > 0 { parts.append("\(file.deletions) removed") }
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// The patch under a heading, and nothing at all while the file is folded.
+///
+/// A `Section`'s content, so what scrolls is separated from what sticks. Empty
+/// rather than hidden when the file is folded: an empty section body draws
+/// nothing and takes no space, which is what a folded card was already.
+private struct ChangesFileBody: View {
     let file: ChangedFile
     @ObservedObject var store: ChangesStore
     /// Ask for a note about some part of this file.
     let onComment: (ReviewAnchor) -> Void
-    /// Whether this card is on screen, so the store can remember roughly where
-    /// the reader had got to. See `ChangesStore.noteVisible`.
-    let onVisible: (Bool) -> Void
 
     private var expanded: Bool { store.isExpanded(file.path) }
     private var lines: [DiffComputation.Line] { store.fileDiffs[file.path] ?? [] }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                store.toggle(file.path)
-            } label: {
-                heading
-            }
-            .buttonStyle(.plain)
-
-            if expanded {
+        if expanded {
+            VStack(alignment: .leading, spacing: 0) {
                 if store.loadingFiles.contains(file.path) {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
@@ -1119,6 +1342,14 @@ private struct ChangesFileCard: View {
                 // about it — and because a second button inside the heading's
                 // button is a tap target overlapping the one that folds the
                 // card.
+                //
+                // `.bordered`, which is what the summary card's own buttons say
+                // two screens up. It used to be `.plain` with `.foregroundStyle`
+                // forced to `.tint`: accent text with nothing behind it, on a
+                // card that sits on the terminal's theme-chosen ground rather
+                // than on a system background — so how well it could be read
+                // depended on which theme was in force. A real button style
+                // brings its own ground with it and clears whatever is behind.
                 Button {
                     onComment(
                         ReviewAnchor(
@@ -1127,100 +1358,24 @@ private struct ChangesFileCard: View {
                 } label: {
                     Label("Comment on This File", systemImage: "text.bubble")
                         .font(.footnote)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tint)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 10)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Square along the top, where the heading is, and rounded at the
+            // bottom, where the card ends.
+            .background(
+                ChangesSurface.card,
+                in: .rect(
+                    topLeadingRadius: 0,
+                    bottomLeadingRadius: 12,
+                    bottomTrailingRadius: 12,
+                    topTrailingRadius: 0)
+            )
         }
-        .background(ChangesSurface.card, in: .rect(cornerRadius: 12))
-        // The scroll decides what gets read: a file is fetched when its card
-        // comes into view, not when the change set loads.
-        .task(id: taskKey) {
-            guard expanded else { return }
-            await store.ensure(file.path)
-        }
-        .onScrollVisibilityChange(threshold: 0.05) { onVisible($0) }
-    }
-
-    /// Re-runs when the file, the fold state, or the generation changes — each
-    /// of which genuinely changes whether and what to fetch.
-    ///
-    /// The generation rather than the scope, and that is the load-bearing part:
-    /// nothing else in this view asks for a file's diff a second time, so a
-    /// heading that stays realized while the cache is emptied underneath it
-    /// would sit at "Reading…" forever. Every emptying bumps the generation,
-    /// including the ones a scope change causes, so this covers strictly more
-    /// than keying on the scope did — a pull to refresh included.
-    private var taskKey: String { "\(file.path)#\(store.generation)#\(expanded)" }
-
-    private var heading: some View {
-        HStack(spacing: 10) {
-            // The host's letter, whichever scope this row came from.
-            //
-            // `A`, `D`, `R` and `T` are real here. A commit's files come from
-            // `changes.commit_files`, which merges `git diff --name-status`
-            // onto the counts (crates/daemon/src/file_diff.rs); the branch's
-            // come from `change_set::numstat`, which has always done the same;
-            // Local reads the working tree's own porcelain codes. So a file a
-            // commit created is badged `A`, not `M`.
-            //
-            // The bullet is the no-status case only — a daemon so old it omits
-            // the field, which decodes as nil rather than as a wrong letter.
-            // "Changed" is what it can honestly say, and the accessibility
-            // label below says the same.
-            Text(file.status?.mark ?? "•")
-                .font(.caption2.monospaced().weight(.bold))
-                .foregroundStyle(file.status?.tint ?? .secondary)
-                .frame(width: 14)
-                .accessibilityLabel(file.status?.label ?? "Changed")
-
-            VStack(alignment: .leading, spacing: 1) {
-                // The leaf, then its directory underneath. A phone cannot fit
-                // `crates/daemon/src/review_ops.rs` at a readable size, and the
-                // leaf is the half that identifies the file.
-                Text(file.name)
-                    .font(.footnote.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if !file.directory.isEmpty {
-                    // Not monospaced. The Mac's file list draws the parent path
-                    // in the plain system face and reserves monospace for the
-                    // counts, and a directory set in Iosevka next to a
-                    // proportional filename read as two different kinds of
-                    // thing on the same row.
-                    Text(file.directory)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            if file.binary {
-                Text("binary").font(.caption2).foregroundStyle(.secondary)
-            } else {
-                if file.insertions > 0 {
-                    Text("+\(file.insertions)")
-                        .font(.caption2.monospaced()).foregroundStyle(.green)
-                }
-                if file.deletions > 0 {
-                    Text("−\(file.deletions)")
-                        .font(.caption2.monospaced()).foregroundStyle(.red)
-                }
-            }
-
-            Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
     }
 }
 
