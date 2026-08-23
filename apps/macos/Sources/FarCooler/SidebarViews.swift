@@ -944,12 +944,32 @@ struct TerminalRow: View {
 /// Workspaces have three states worth showing and no agent of their own, so
 /// this stays a small dot: it is context for the heading rather than something
 /// to scan, and the terminals underneath carry the detail.
+///
+/// The three are the exceptions — gone, broken, hidden. `active` was a fourth,
+/// painted green, and that was the drift: "three states worth showing" was
+/// right and the switch had grown a case for the state that is worth showing
+/// least. `derive_workspace` returns `Active` for any workspace with a live
+/// terminal, which is nearly all of them nearly all of the time, so the green
+/// was on almost every heading — and green in this app means `Status.done`,
+/// "the turn ended and nobody has looked yet". A workspace being in use and an
+/// agent having finished are close to opposites, and they drew the same mark.
+/// That is the phones' bug — an idle `zsh` and a finished agent in one green —
+/// which the Mac was credited with not having.
+///
+/// `Active` is also what `derive_workspace` returns when the runner is
+/// unreadable and every terminal derives `Unknown`, deliberately, so the green
+/// was vouching for workspaces nobody had heard from. `StatusGlyph` paints that
+/// same not-yet-answered case `.secondary` for exactly this reason.
+///
+/// iOS has nothing to keep in sync here: its workspace heading draws the
+/// rolled-up status of the terminals inside plus "worktree gone", and never the
+/// workspace's own state. So this is a one-platform change by construction, not
+/// one half of a pair.
 struct WorkspaceDot: View {
     let state: String
 
     private var color: Color {
         switch StateKind.parse(state) {
-        case .active: return .green
         case .error: return .red
         case .hidden: return Color.secondary.opacity(0.4)
         // Red, not a dimmed amber. `StatusGlyph` spends amber on one state —
@@ -962,6 +982,9 @@ struct WorkspaceDot: View {
         // not be in a list: this dot appears once, beside a 24pt title, never
         // next to another one, and its help text names the state.
         case .worktreeMissing: return .red
+        // `active` falls here with `ready` and `creating`: a healthy workspace
+        // is a healthy workspace, and the difference between one with a live
+        // pane and one without is a fact the rows underneath state outright.
         default: return .secondary
         }
     }

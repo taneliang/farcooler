@@ -477,7 +477,24 @@ struct WorkingTreeFile: Decodable, Equatable {
 /// clients disagreeing about which worktrees still wanted you rather than as
 /// anything visibly wrong here.
 struct InboxRow: Decodable, Equatable, Identifiable {
+    /// The worktree this row is about, as a full UUID — or, from a runner older
+    /// than the shape unification, as the eight-character short.
+    ///
+    /// One key that used to have two meanings, which is why `short` exists
+    /// below and why nothing here keys a dictionary off this field directly.
+    /// `farcooler changes inbox --json` sent the SHORT under this name and the
+    /// FFI the phones read sent the UUID, so the Mac's inbox map and the
+    /// phones' were keyed by different things for the same call. Both producers
+    /// are `changes_json::inbox_json` now and both send the UUID here.
     var workspaceId: String
+    /// The eight characters a person types, sent alongside the UUID.
+    ///
+    /// Optional because a runner can be older than this app: before the two
+    /// builders became one there was no `short` key, and the short was in
+    /// `workspaceId` instead. `DaemonClient.refreshChangesInbox` prefers this
+    /// and falls back, so an old runner keeps working rather than dropping every
+    /// count out of the sidebar.
+    var short: String?
     var changedSinceReviewed: Bool
     var insertions: Int
     var deletions: Int
@@ -487,8 +504,34 @@ struct InboxRow: Decodable, Equatable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case workspaceId = "workspace_id"
-        case insertions, deletions
+        case short, insertions, deletions
         case changedSinceReviewed = "changed_since_reviewed"
+    }
+}
+
+/// The inbox as a whole, and the two envelopes it has arrived in.
+///
+/// `changes inbox --json` prints `{"items": [...], "elsewhere": n}` now, the
+/// same object the FFI hands the phones. It used to print a bare array, so a
+/// Mac talking to a runner that has not been updated still gets one — and a
+/// decoder that only knew the object would empty every diff count in the
+/// sidebar the moment it met an older runner, silently, since the failure path
+/// here is `return`.
+///
+/// `elsewhere` is deliberately not read. The daemon hard-codes it to zero in
+/// `review_ops::inbox` with no path that sets it, so drawing it would put a
+/// number on screen that is zero by construction; Android records the same
+/// waiting reader in its own `InboxReply`. Decoded here so that the key is
+/// accounted for rather than merely ignored.
+struct InboxReply: Decodable {
+    var items: [InboxRow]
+    var elsewhere: Int?
+
+    /// The rows, whichever envelope they came in.
+    static func rows(from data: Data) -> [InboxRow]? {
+        let d = JSONDecoder()
+        if let reply = try? d.decode(InboxReply.self, from: data) { return reply.items }
+        return try? d.decode([InboxRow].self, from: data)
     }
 }
 

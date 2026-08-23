@@ -1780,9 +1780,13 @@ final class DaemonClient: ObservableObject {
         }
         changesSupported = true
         changesError = nil
-        guard let rows = try? JSONDecoder().decode([InboxRow].self, from: data) else { return }
+        guard let rows = InboxReply.rows(from: data) else { return }
         var byWorkspace: [String: InboxRow] = [:]
-        for r in rows { byWorkspace[r.workspaceId] = r }
+        // Keyed by the SHORT id, which is what `ChangesStore` and the sidebar
+        // look a workspace up by. A runner new enough to send `short` is taken
+        // at its word; an older one sent the short under `workspace_id` and had
+        // no `short` key at all, so the fallback is not a guess.
+        for r in rows { byWorkspace[r.short ?? r.workspaceId] = r }
         // Assigned only when it actually differs.
         //
         // `@Published` fires on assignment regardless of the value, and this

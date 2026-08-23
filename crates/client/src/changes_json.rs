@@ -12,11 +12,20 @@
 //! patch. Both of those are the same bug: a rule that two files were asked to
 //! remember. A shared module makes it a thing the compiler holds instead.
 //!
+//! The inbox joined them later and was the worst of the three: not a missing
+//! key but a different envelope, a bare array against `{"items": …}`, with the
+//! same key meaning a short id on one side and a full UUID on the other.
+//! `c2f1117` found it while moving the change-set builders here and left it,
+//! because unifying it breaks the Mac's decoder and that wanted saying out loud
+//! rather than riding along.
+//!
 //! The shapes are pinned by tests on the side that decodes them — see
 //! `crates/cli/src/changes.rs`.
 
 use farcooler_protocol::v1 as pb;
 use serde_json::json;
+
+use crate::session::{short, uuid_of};
 
 /// A change set, in the shape `farcooler changes status --json` prints and the
 /// FFI's `changes.change_set` returns.
@@ -64,10 +73,78 @@ pub fn change_set_json(cs: &pb::ChangeSet) -> serde_json::Value {
             // files are here too: they are uncommitted work, and a client
             // counting only what git can diff misses the file an agent just
             // wrote.
+            //
+            // **The third `.chain()` is load-bearing and it is the whole of a
+            // number two apps draw.** `24f2c1d` added it and said so: on the
+            // worked example the Uncommitted header moved from +1 to +4, a
+            // deliberate deviation from that spec's own gate, because a header
+            // that excludes a row drawn directly beneath it is the same species
+            // of wrong as one that climbs while you scroll. Deleting
+            // `untracked_files` here reverts it silently — the counts stay
+            // whole, the untracked rows keep appearing, and only the total is
+            // short. `the_uncommitted_total_counts_the_file_git_has_never_seen`
+            // in `crates/cli/src/changes.rs` is what catches that.
             "changes": w.staged.iter().chain(w.unstaged.iter())
                 .chain(w.untracked_files.iter()).map(file_change_json)
                 .collect::<Vec<_>>(),
         })),
+    })
+}
+
+/// The fleet inbox, in the shape `farcooler changes inbox --json` prints and
+/// the FFI's `changes.inbox` returns.
+///
+/// The last of the `changes` answers to have two emitters, and the one they
+/// disagreed about hardest. `c2f1117` moved the change-set builders here and
+/// recorded this pair as "not the same shape at all — a bare array with a short
+/// id against `{"items": …, "elsewhere": n}` with a full UUID", then left it
+/// alone because unifying it breaks the Mac's decoder. It wanted its own change
+/// and this is it.
+///
+/// The FFI's shape is the one that survived, on three counts and not because it
+/// is older. It carries `elsewhere`, which the CLI printed to a person and
+/// dropped from `--json` — a machine format strictly poorer than the human one
+/// it sits beside, and the count exists precisely to admit that a triage list is
+/// incomplete. It sends the full UUID under `workspace_id` and the short
+/// separately, which is what every other `--json` in the CLI does (`id` plus
+/// `short` on repositories, workspaces, terminals, layouts and the `watch`
+/// event stream) — the inbox was the one place that broke the CLI's own
+/// convention. And `watch --json` tells a script "this worktree's diff moved,
+/// go re-read `changes inbox`" while handing it a full UUID, so the two
+/// surfaces designed to be used together could not be joined on an id.
+///
+/// One key with two meanings was the `Workspace.repository` trap, and that one
+/// cost a release (`07e75e8`). This is the same trap closed rather than
+/// documented, because unlike `repository` neither meaning was load-bearing:
+/// both halves fit in one object.
+pub fn inbox_json(inbox: &pb::ChangesInbox) -> serde_json::Value {
+    json!({
+        "items": inbox.items.iter().map(inbox_row_json).collect::<Vec<_>>(),
+        // Hard-coded to zero in `review_ops::inbox` today, with no path that
+        // sets it, and on the wire anyway — the proto's argument is that a
+        // triage surface hiding half the fleet is worse than one that says so.
+        // Emitted rather than skipped so that the day the daemon computes it,
+        // every reader already has the key. Android records the same waiting
+        // reader on its side in `InboxReply`.
+        "elsewhere": inbox.elsewhere,
+    })
+}
+
+/// One worktree's line in that inbox.
+///
+/// `workspace_id` is the FULL UUID and `short` is the eight characters a person
+/// types — the CLI used to send the short under `workspace_id` and no `short`
+/// at all, so a reader could not tell which it had been given without measuring
+/// the string.
+pub fn inbox_row_json(w: &pb::InboxWorkspace) -> serde_json::Value {
+    json!({
+        "workspace_id": uuid_of(&w.workspace_id).to_string(),
+        "short": short(&w.workspace_id),
+        "task_name": w.task_name,
+        "branch": w.branch,
+        "changed_since_reviewed": w.changed_since_reviewed,
+        "insertions": w.insertions,
+        "deletions": w.deletions,
     })
 }
 

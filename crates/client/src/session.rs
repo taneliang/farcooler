@@ -21,7 +21,7 @@ use serde_json::json;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
-use crate::changes_json::{change_set_json, file_change_json, file_diff_json};
+use crate::changes_json::{change_set_json, file_change_json, file_diff_json, inbox_json};
 use crate::ssh;
 
 #[derive(Debug, thiserror::Error)]
@@ -1019,23 +1019,23 @@ impl Session {
         }
     }
 
-    /// Every worktree that changed since it was last looked at.
+    /// Every worktree with something to say, and whether anybody has looked.
+    ///
+    /// Not "every worktree that changed since it was last looked at", which is
+    /// what this said and is narrower than what `review_ops::inbox` returns: a
+    /// worktree with a nonzero diff is listed even after you mark it read, and
+    /// `changed_since_reviewed` is how a row says which it is. A front door
+    /// built on the old sentence would have dropped every branch you had
+    /// already seen out of a list whose whole job is "is this worth opening".
+    ///
+    /// Shared with `farcooler changes inbox --json` since the two shapes became
+    /// one — see `changes_json::inbox_json` for what they used to be and why
+    /// this half won.
     pub async fn changes_inbox(&mut self) -> Result<serde_json::Value, SessionError> {
         let payload =
             request::Payload::ChangesInbox(farcooler_protocol::v1::ChangesInboxRequest {});
         match self.value("changes.inbox", None, Some(payload)).await? {
-            result::Value::ChangesInbox(inbox) => Ok(json!({
-                "items": inbox.items.iter().map(|w| json!({
-                    "workspace_id": uuid_of(&w.workspace_id).to_string(),
-                    "short": short(&w.workspace_id),
-                    "task_name": w.task_name,
-                    "branch": w.branch,
-                    "changed_since_reviewed": w.changed_since_reviewed,
-                    "insertions": w.insertions,
-                    "deletions": w.deletions,
-                })).collect::<Vec<_>>(),
-                "elsewhere": inbox.elsewhere,
-            })),
+            result::Value::ChangesInbox(inbox) => Ok(inbox_json(&inbox)),
             other => Err(wrong("changes_inbox", &other)),
         }
     }
@@ -1143,6 +1143,13 @@ impl Session {
     // Answers are JSON rather than the wire messages, the same way `stack` and
     // `changes_inbox` are: these come straight back out through the FFI, and a
     // shape assembled in two places is two shapes the day one of them changes.
+    //
+    // `changes_inbox` was the proof of that rather than an example of it: it
+    // WAS assembled in two places, here and in `farcooler changes inbox
+    // --json`, and by the time anybody compared them they were two shapes — a
+    // bare array with a short id against an object with a UUID. It builds
+    // through `changes_json::inbox_json` now, which is where the rule this
+    // comment states actually lives.
 
     /// Every line in this runner's fence, ours and otherwise.
     ///

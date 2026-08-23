@@ -6,7 +6,7 @@
 //! cannot automate.
 
 use clap::Subcommand;
-use farcooler_client::changes_json::{change_set_json, file_change_json, file_diff_json};
+use farcooler_client::changes_json::{change_set_json, file_change_json, file_diff_json, inbox_json};
 use farcooler_protocol::v1::{self as pb, request, result};
 
 use crate::{Fallible, connect_to, expect_value, req, req_for, short_bytes, uuid_of, with};
@@ -251,22 +251,16 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
             let result::Value::ChangesInbox(inbox) = expect_value(r.value, "changes_inbox")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
+            // The same object the FFI's `changes.inbox` returns, out of one
+            // builder, since the two stopped being different shapes. This
+            // printed a bare array whose `workspace_id` was the eight-character
+            // short, with no `short` key and no `elsewhere` — the one `--json`
+            // in this CLI that did not send an id alongside its short, and the
+            // only one anywhere that told a person something it withheld from a
+            // script: `elsewhere` is printed to a person further down this arm
+            // and used to be dropped here. See `changes_json::inbox_json`.
             if json {
-                let items: Vec<_> = inbox
-                    .items
-                    .iter()
-                    .map(|w| {
-                        serde_json::json!({
-                            "workspace_id": short_bytes(&w.workspace_id),
-                            "task_name": w.task_name,
-                            "branch": w.branch,
-                            "changed_since_reviewed": w.changed_since_reviewed,
-                            "insertions": w.insertions,
-                            "deletions": w.deletions,
-                        })
-                    })
-                    .collect();
-                println!("{}", serde_json::to_string(&items)?);
+                println!("{}", serde_json::to_string(&inbox_json(&inbox))?);
                 return Ok(());
             }
             if inbox.items.is_empty() {
@@ -393,6 +387,49 @@ mod tests {
         assert_eq!(v["working_tree"]["untracked"][0], "new.txt");
     }
 
+    /// The worked example's Uncommitted total, at the layer that decides it.
+    ///
+    /// Base `main`, one commit adding two lines, one further uncommitted line
+    /// in that same file, one new untracked file of three lines. Uncommitted is
+    /// **+4** — "what is not committed yet", one tracked line plus the whole of
+    /// a file git has never seen — and that is a number `24f2c1d` deliberately
+    /// moved from +1, against its own spec's gate, then wrote down as reverting
+    /// by dropping one `.chain()`.
+    ///
+    /// `the_sidebar_and_the_panel_keep_answering_their_own_questions` pins the
+    /// same example on the daemon's records and `UncommittedCountsTests` pins
+    /// the Mac's sum of it. This is the link between them: the `.chain()` lives
+    /// in `changes_json` and nothing else asserts that an untracked file's
+    /// lines survive it into the total. A reader dropping it sees rows that
+    /// still list the file and a header that quietly stops counting it.
+    #[test]
+    fn the_uncommitted_total_counts_the_file_git_has_never_seen() {
+        let cs = pb::ChangeSet {
+            insertions: 2,
+            working_tree: Some(pb::WorkingTree {
+                unstaged: vec![file("a.txt", pb::FileStatus::Modified, 1, 0)],
+                untracked: vec!["new.txt".to_string()],
+                untracked_files: vec![file("new.txt", pb::FileStatus::Untracked, 3, 0)],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let v = change_set_json(&cs);
+        let uncommitted: u64 = v["working_tree"]["changes"]
+            .as_array()
+            .expect("changes")
+            .iter()
+            .map(|c| c["insertions"].as_u64().unwrap())
+            .sum();
+        assert_eq!(uncommitted, 4, "one tracked line and the whole of new.txt");
+
+        // The other two totals are NOT equalized with it. The panel's Branch
+        // segment is committed work and stays +2; telling the three apart is
+        // the property, not making them agree.
+        assert_eq!(v["insertions"], 2, "the branch's own commits, and nothing else");
+    }
+
     /// A file that is staged and modified again is in both groups, once per
     /// diff of it. A client sums per path; dropping either row would report half
     /// the work.
@@ -503,5 +540,64 @@ mod tests {
         assert!(line["oldNumber"].is_null());
         assert_eq!(line["newNumber"], 2);
         assert_eq!(line["text"], "let x = 1;");
+    }
+
+    /// The inbox, transcribed key for key, on both sides of the id.
+    ///
+    /// This command and the FFI's `changes.inbox` are one builder now, and
+    /// three clients decode it: the Mac shells out to this, iOS and Android call
+    /// the FFI. So a key renamed here is a front door emptied there, which is
+    /// the failure `NeedsYouTest` pins on the Kotlin side and this pins on the
+    /// producer's.
+    ///
+    /// The two that moved, and the reason the test names them: `workspace_id`
+    /// was the SHORT id in this command and the full UUID in the FFI — the same
+    /// key with two meanings, which is the shape that cost `07e75e8` a release
+    /// under the name `Workspace.repository`. And `elsewhere` was printed to a
+    /// person by this very command and dropped from its `--json`.
+    #[test]
+    fn the_inbox_is_one_shape_with_the_id_both_ways_round() {
+        let id = uuid::Uuid::parse_str("018f7c1e-0000-7000-8000-0123456789ab").expect("uuid");
+        let inbox = pb::ChangesInbox {
+            items: vec![pb::InboxWorkspace {
+                workspace_id: bytes::Bytes::copy_from_slice(id.as_bytes()),
+                task_name: "ship the thing".to_string(),
+                branch: "feature".to_string(),
+                changed_since_reviewed: true,
+                insertions: 12,
+                deletions: 3,
+            }],
+            elsewhere: 2,
+        };
+
+        let v = inbox_json(&inbox);
+        let row = &v["items"][0];
+        assert_eq!(row["workspace_id"], id.to_string(), "the full UUID, hyphens and all");
+        // The last eight hex of the simple form: a UUIDv7 leads with a
+        // timestamp, so the tail is the half that tells two of them apart.
+        assert_eq!(row["short"], "456789ab");
+        assert_eq!(row["task_name"], "ship the thing");
+        assert_eq!(row["branch"], "feature");
+        assert_eq!(row["changed_since_reviewed"], true);
+        assert_eq!(row["insertions"], 12);
+        assert_eq!(row["deletions"], 3);
+        assert_eq!(row.as_object().expect("row").len(), 7, "seven keys, no more");
+
+        // The count that says the list is not the whole fleet. Zero out of the
+        // daemon today, and a key a script can read either way.
+        assert_eq!(v["elsewhere"], 2);
+        assert_eq!(v.as_object().expect("envelope").len(), 2);
+    }
+
+    /// An empty inbox is an empty LIST, not an absent one.
+    ///
+    /// A client that reads `items` off a bare `{}` gets nothing and a client
+    /// that reads it off `{"items": []}` gets nothing, but only one of them can
+    /// tell "nothing has changed" from "the call failed".
+    #[test]
+    fn an_empty_inbox_still_has_both_keys() {
+        let v = inbox_json(&pb::ChangesInbox::default());
+        assert_eq!(v["items"].as_array().expect("items").len(), 0);
+        assert_eq!(v["elsewhere"], 0);
     }
 }
