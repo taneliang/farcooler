@@ -133,8 +133,17 @@ object TerminalFonts {
  *
  * **EXITED keeps its dot**, where the Mac draws nothing for it. The Mac can
  * afford the silence because its fused `Status` puts "Exited" on the row in
- * words; this row's supporting line says the process state for every pane, so
- * the dot and the word agree rather than one standing in for the other.
+ * words; [Terminal.rowStatus] spells the state out only for panes that are NOT
+ * agents, so an agent pane whose process is gone would otherwise lose its only
+ * mark.
+ *
+ * That last sentence used to read "this row's supporting line says the process
+ * state for every pane", and it was true when the fleet row's second line was
+ * `terminal.state.lowercase()`. That line is now the host's signal line and the
+ * state word survives only where there is no agent to describe instead — so the
+ * argument for keeping this dot got STRONGER, not weaker, and the sentence that
+ * made it had gone stale. iOS's copy of this comment has been the corrected
+ * version since it rebuilt its own row.
  */
 @Composable
 fun processColor(kind: StateKind): Color = when (kind) {

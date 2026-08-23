@@ -1,6 +1,7 @@
 package com.farcooler.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Menu
@@ -42,16 +45,20 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.model.AgentActivity
@@ -61,6 +68,7 @@ import com.farcooler.model.Workspace
 import com.farcooler.net.Connection
 import com.farcooler.net.FleetEntry
 import com.farcooler.net.TerminalRef
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -624,6 +632,29 @@ private fun WorkspaceHeader(
     }
 }
 
+/**
+ * One pane, in four bands.
+ *
+ * The bands, in the Mac's order and iOS's: what it is and how long it has been
+ * that; where the agent IS; what it said; what it spawned. The second band used
+ * to be `terminal.state.lowercase()` — the raw wire word, which restated the dot
+ * immediately to its left in the most valuable line of the row. Everything that
+ * replaced it was already arriving on every poll and being dropped on the way
+ * into [Terminal].
+ *
+ * **A `Row`, not a `ListItem`.** Material's `ListItem` has exactly three text
+ * slots and a specified minimum height per one-, two- and three-line variant;
+ * this row is four bands whose count varies from one to eight lines as an agent
+ * works, and the only way to express that through `ListItem` is to put the whole
+ * stack in `supportingContent`, which then gets the three-line variant's padding
+ * around content twice that tall. It also already was not one: this row has a
+ * leading dot and a trailing overflow menu that `ListItem` would re-pad. The
+ * shape below is the one the content has.
+ *
+ * **Aligned to the top, not the centre.** A one-line row and an eight-line row
+ * are in the same list, and a dot centred in the second would sit four lines
+ * below the name it belongs to.
+ */
 @Composable
 private fun TerminalRow(
     terminal: Terminal,
@@ -639,60 +670,169 @@ private fun TerminalRow(
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
-        ProcessDot(kind)
+        // Centred on the FIRST LINE, by giving the dot a box exactly that line
+        // tall — not by a hardcoded top padding, which is what iOS had to
+        // correct: a measured offset is right at one text size and wrong at
+        // every other, and the first line's height moves with the type scale
+        // while a number in a source file does not.
+        Box(Modifier.height(firstLineHeight()), contentAlignment = Alignment.Center) {
+            ProcessDot(kind)
+        }
         Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    terminal.label,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (ordinal != null) {
-                    Spacer(Modifier.width(4.dp))
+
+        // A full step between the two groups, a tight one inside each. What the
+        // pane IS and where its agent got to are one thought in two lines; what
+        // the agent SAID is a different thought, and the gap is what says so.
+        //
+        // Smaller than iOS's 4 and 8 for the same rhythm, because Material's
+        // type scale carries its leading in `lineHeight`: every `Text` here is
+        // already taller than its glyphs, where a SwiftUI `Text` is not.
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(BAND_STEP)) {
+            Column(verticalArrangement = Arrangement.spacedBy(BAND_TIGHT)) {
+                // Band 1: what it is, and how long it has been that.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // The name, the ordinal and the elapsed status pack to the
+                    // left inside their own weighted row, so the glyph after it
+                    // sits at the row's right edge rather than wherever the name
+                    // happened to end — and so a long conversation title is the
+                    // thing that truncates, rather than pushing the state off
+                    // the screen.
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            terminal.label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (ordinal != null) {
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "$ordinal",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                // The faintest thing on the row, deliberately.
+                                // It is a disambiguator between two identical
+                                // `claude` panes and nothing more, and it must
+                                // not read as loud as the agent's own words
+                                // three lines below it — which is the mistake
+                                // iOS made in the other direction, drawing those
+                                // words in the ordinal's tier. Material has no
+                                // tertiary text role, so the step down is an
+                                // alpha on the same colour rather than a second
+                                // colour nobody defined.
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    .copy(alpha = 0.6f),
+                            )
+                        }
+                        ElapsedStatus(terminal)
+                    }
+
+                    // The reason to have opened the app. Only the two states
+                    // worth acting on get colour, so a list of twenty still
+                    // reads at a glance.
+                    //
+                    // One size. This stepped 16dp to 20dp on `wantsAttention`,
+                    // so the trailing column changed width every time an agent
+                    // finished a turn or asked a question — and it changed for
+                    // ONE row, which pulls that row's glyph out of line with the
+                    // twenty above and below it. A column that moves as its rows
+                    // change state is a defect on any platform, and the Mac's
+                    // `StatusGlyph` spends its whole doc comment on the same
+                    // point. Emphasis is carried by fill and by colour instead,
+                    // in channels that cost no layout: PanTool and CheckCircle
+                    // are filled where PauseCircle and Pending are outlined.
+                    //
+                    // [attentionColor] takes the TERMINAL, not its activity, so
+                    // a turn that died is red rather than wearing the green of
+                    // one that succeeded.
+                    if (terminal.agent.isAgent && terminal.agent != AgentActivity.UNKNOWN) {
+                        Spacer(Modifier.width(8.dp))
+                        Icon(
+                            activityIcon(terminal),
+                            contentDescription = terminal.activityLabel,
+                            tint = attentionColor(terminal),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+
+                // Band 2: where the agent IS — the question it is blocked on,
+                // its position in its own task list, or what it is doing. One
+                // line, composed on the host so a Mac, a phone and a watch
+                // cannot disagree about which of those three to show.
+                //
+                // This is what replaced the raw state word.
+                if (terminal.signalLine.isNotEmpty()) {
                     Text(
-                        "$ordinal",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
+                        terminal.signalLine,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
-            Text(
-                terminal.state.lowercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+
+            // Bands 3 and 4: what the agent said it did, and what it spawned and
+            // has not finished with.
+            //
+            // The part of the row that answers "what did it do", which is most
+            // of what reviewing an agent's work is — so they are drawn in the
+            // ordinary supporting colour, not the faint one the ordinal gets.
+            //
+            // Guarded as a group rather than left loose: an empty column would
+            // still take the step of spacing above it and leave a gap under
+            // every one-agent row.
+            if (terminal.recentSteps.isNotEmpty() || terminal.runningSubagents.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(BAND_TIGHT)) {
+                    // Already redacted and cut to a row's width by the daemon,
+                    // so this renders them and decides nothing about them.
+                    for (step in terminal.recentSteps) {
+                        Text(
+                            step,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    for (name in terminal.runningSubagents) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // An icon where the Apple apps print U+2442 in front
+                            // of the name. Android has no guarantee that the
+                            // system font covers that character, and a tofu box
+                            // in front of every subagent is worse than either
+                            // the glyph or nothing — the one thing this row must
+                            // never do is look broken while reporting healthy
+                            // work.
+                            Icon(
+                                Icons.Outlined.AccountTree,
+                                null,
+                                Modifier.size(12.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                name,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
-        // The reason to have opened the app. Only the two states worth acting
-        // on get colour, so a list of twenty still reads at a glance.
-        //
-        // One size. This stepped 16dp to 20dp on `wantsAttention`, so the
-        // trailing column changed width every time an agent finished a turn or
-        // asked a question — and it changed for ONE row, which pulls that row's
-        // glyph out of line with the twenty above and below it. A column that
-        // moves as its rows change state is a defect on any platform, and the
-        // Mac's `StatusGlyph` spends its whole doc comment on the same point.
-        // Emphasis is carried by fill and by colour instead, in channels that
-        // cost no layout: PanTool and CheckCircle are filled where PauseCircle
-        // and Pending are outlined.
-        //
-        // [attentionColor] takes the TERMINAL, not its activity, so a turn that
-        // died is red rather than wearing the green of one that succeeded.
-        if (terminal.agent.isAgent && terminal.agent != AgentActivity.UNKNOWN) {
-            Icon(
-                activityIcon(terminal),
-                contentDescription = terminal.activityLabel,
-                tint = attentionColor(terminal),
-                modifier = Modifier.size(18.dp),
-            )
-        }
-
+        // Top-aligned with everything else, so it stays beside the name as the
+        // row grows rather than drifting to the middle of an eight-line one. Its
+        // 48dp target is left alone: a menu you have to aim at on a moving train
+        // is the wrong thing to shrink.
         Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "Terminal actions")
@@ -727,6 +867,76 @@ private fun TerminalRow(
         }
     }
 }
+
+/** Between the two groups of bands, and between the lines inside one group. */
+private val BAND_STEP = 6.dp
+private val BAND_TIGHT = 2.dp
+
+/**
+ * How tall the row's first line is, so the process dot can be centred on it.
+ *
+ * Read from the type scale rather than written down, because the whole point is
+ * that it moves when the reader's text size does. `bodyLarge` is what the pane's
+ * name is set in; if that ever changes, this follows it.
+ *
+ * The fallback is for a theme that leaves `lineHeight` unspecified, which
+ * Material's own type scale does not — `toDp()` on an unspecified `TextUnit`
+ * throws, and a crash in a list row is not worth the four bytes of not checking.
+ */
+@Composable
+private fun firstLineHeight(): Dp {
+    val lineHeight = MaterialTheme.typography.bodyLarge.lineHeight
+    if (!lineHeight.isSp) return 24.dp
+    return with(LocalDensity.current) { lineHeight.toDp() }
+}
+
+/**
+ * "Working 12m", "Needs you 2m" — the half of band one that moves.
+ *
+ * Its own composable, and that is the whole trick. The clock is read HERE, so
+ * only this `Text` is invalidated when the second changes; the name beside it,
+ * the three lines of transcript below it and the twenty other rows in the list
+ * are not. iOS wraps its entire row in a `TimelineView` and re-evaluates the
+ * whole subtree once a second because SwiftUI gives it nowhere smaller to put
+ * the clock. Compose does, and this is it.
+ *
+ * A row with nothing to count runs no coroutine at all — see [Terminal.hasClock]
+ * — so twenty idle panes cost twenty suspended-forever `produceState`s and no
+ * wakeups.
+ */
+@Composable
+private fun ElapsedStatus(terminal: Terminal) {
+    val now by rememberNow(ticking = terminal.hasClock)
+    val status = terminal.rowStatus(now) ?: return
+    Text(
+        status,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        modifier = Modifier.padding(start = 6.dp),
+    )
+}
+
+/**
+ * The wall clock, advancing once a second while [ticking] and standing still
+ * otherwise.
+ *
+ * `System.currentTimeMillis` rather than `SystemClock.elapsedRealtime`, and
+ * deliberately, where the pairing ceremony's freshness window uses the other
+ * one: the timestamps this is subtracted from were taken on the RUNNER, so the
+ * only clock that can be compared with them is the one that claims to tell the
+ * same time. A monotonic clock is right for measuring a window this device
+ * opened and wrong for measuring against a moment another machine recorded.
+ */
+@Composable
+private fun rememberNow(ticking: Boolean): State<Long> =
+    produceState(System.currentTimeMillis(), ticking) {
+        value = System.currentTimeMillis()
+        while (ticking) {
+            delay(1_000)
+            value = System.currentTimeMillis()
+        }
+    }
 
 /**
  * The same vocabulary the Apple apps use, in this platform's icon set.
