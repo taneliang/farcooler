@@ -966,6 +966,76 @@ mod tests {
         }
     }
 
+    /// Drain until the watcher has stopped producing, or the deadline passes.
+    ///
+    /// **A single drain is not a barrier**, and this is `log_watch`'s
+    /// `wait_until_quiet` for the same species of reason. What a drain says is
+    /// that nothing had arrived *by then*; what a test needs before asserting
+    /// a negative is that everything the fixture caused has already arrived.
+    /// Between the two sits the whole setup: `repo()` runs five git processes
+    /// that write `.git/HEAD` and `.git/config`, and the fixture writes a file
+    /// into the worktree root. `.git/HEAD` and a file in the root are both
+    /// paths the routes under test deliberately claim — `Scope::Entries` and
+    /// `Scope::Filtered` respectively — so either one arriving late is a
+    /// failure. (`git ls-files`, which registration runs between the two
+    /// watches, is not a third: it writes nothing into `.git`.)
+    ///
+    /// Those events are not safely in the past at the drain, on this backend
+    /// least of all. FSEvents takes its `SinceNow` boundary inside the
+    /// `watch()` call rather than at the write, and measurably BEFORE that
+    /// call returns: writing a file every 25ms across a `watch()` and asking
+    /// which ones the new stream delivered, the earliest was written 4ms to
+    /// 10ms before `watch()` handed control back. A write from just before
+    /// the stream existed is delivered to it all the same, asynchronously —
+    /// after `sync_workspaces` has returned, and after the drain that follows
+    /// it. On a runner loaded enough to stretch that delivery it lands inside
+    /// the window below and fails an assertion that is about something else
+    /// entirely, which is exactly how this arrived:
+    /// green on the push that added it, red on macOS days later with nothing
+    /// in between having touched this file.
+    ///
+    /// Half a second of continuous quiet rather than one empty drain, again
+    /// for `log_watch`'s reason: an empty drain only says nothing arrived in
+    /// the last 50ms, which is also true in the gap between two batches, and
+    /// the gap is the thing that has to be outlasted.
+    ///
+    /// The deadline is a bound, not a wait: on a quiet machine this returns in
+    /// half a second. It does NOT assert — a watcher that never goes quiet is
+    /// the caller's assertion to make, and every caller here makes one.
+    fn wait_until_quiet(watcher: &TreeWatcher, deadline: Duration) {
+        let start = Instant::now();
+        let mut empties = 0;
+        while empties < 10 && start.elapsed() < deadline {
+            if watcher.drain_workspaces().is_empty() {
+                empties += 1;
+            } else {
+                empties = 0;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Every path that surfaced for `id` inside `window`, for asserting none did.
+    ///
+    /// Hands back the paths rather than a bool because this is the one place a
+    /// failure is unreadable without them: "something surfaced" names neither
+    /// which route claimed a path it should not have, nor whether the fixture
+    /// simply leaked. Returns as soon as anything arrives — a negative that is
+    /// already false has nothing left to prove — and otherwise costs the full
+    /// window, which is the point of it.
+    fn surfaced_within(watcher: &TreeWatcher, id: Uuid, window: Duration) -> HashSet<PathBuf> {
+        let start = Instant::now();
+        loop {
+            if let Some(paths) = watcher.drain_workspaces().remove(&id) {
+                return paths;
+            }
+            if start.elapsed() > window {
+                return HashSet::new();
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     #[tokio::test]
     async fn an_ignored_directory_is_never_registered() {
         let (_dir, root) = repo("fc-fsw-ignored").await;
@@ -1001,7 +1071,10 @@ mod tests {
         let id = Uuid::now_v7();
         watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
         assert!(watcher.covers_workspace(id), "a plain repository must be watchable");
-        let _ = watcher.drain_workspaces();
+        // The `add` and the `commit` above wrote into `.git`, which this
+        // workspace's own route claims. Quiet, so what surfaces below is the
+        // edit and not the fixture: see `wait_until_quiet`.
+        wait_until_quiet(&watcher, Duration::from_secs(10));
 
         // No pane, no agent, nothing this daemon served — the gap the working
         // tree half exists to close.
@@ -1017,7 +1090,7 @@ mod tests {
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
         watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
-        let _ = watcher.drain_workspaces();
+        wait_until_quiet(&watcher, Duration::from_secs(10));
 
         crate::git::git(&root, &["add", "-A"]).await.unwrap();
         crate::git::git(&root, &["commit", "-q", "-m", "one"]).await.unwrap();
@@ -1041,16 +1114,20 @@ mod tests {
         let id = Uuid::now_v7();
         watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
         assert!(watcher.covers_workspace(id));
-        let _ = watcher.drain_workspaces();
+        // Quiet, not one drain: the fixture's own writes are still in flight
+        // here and `.git/HEAD` is a path this route claims. See
+        // `wait_until_quiet`, which is where the whole reason lives.
+        wait_until_quiet(&watcher, Duration::from_secs(10));
 
         // Exactly what git does around an index it does not end up changing.
         let git_dir = crate::review::git_dir(&root);
         let lock = git_dir.join("index.lock");
         std::fs::write(&lock, "").unwrap();
         std::fs::remove_file(&lock).unwrap();
+        let leaked = surfaced_within(&watcher, id, Duration::from_secs(3));
         assert!(
-            !wait_for(&watcher, id, Duration::from_secs(3)),
-            "a lock file the daemon's own probe took must not schedule the next probe"
+            leaked.is_empty(),
+            "a lock file the daemon's own probe took must not schedule the next probe: {leaked:?}"
         );
 
         // And the index itself still does, which is the half that must survive
@@ -1071,7 +1148,7 @@ mod tests {
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
         watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
-        let _ = watcher.drain_workspaces();
+        wait_until_quiet(&watcher, Duration::from_secs(10));
 
         let fresh = root.join("added");
         std::fs::create_dir_all(&fresh).unwrap();
@@ -1088,7 +1165,9 @@ mod tests {
         std::fs::write(fresh.join("b.txt"), "two").unwrap();
         let one = HashSet::from([id]);
         watcher.sync_workspaces(&[(id, root.clone())], &one).await;
-        let _ = watcher.drain_workspaces();
+        // The write above is what would make this pass without the re-walk
+        // having registered anything, so it has to be out of the way first.
+        wait_until_quiet(&watcher, Duration::from_secs(10));
         std::fs::write(fresh.join("b.txt"), "three").unwrap();
         assert!(wait_for(&watcher, id, Duration::from_secs(10)), "the new directory must be watched");
     }
