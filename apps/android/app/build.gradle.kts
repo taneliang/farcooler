@@ -241,6 +241,18 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    // Declared rather than taken transitively. `AppModel` names
+    // `SavedStateHandle` in its constructor — it is where the navigation stack
+    // lives across a process death — and a direct dependency that arrives only
+    // because something else happens to pull it in is one an unrelated upgrade
+    // can take away.
+    //
+    // It also carries the consumer ProGuard rule that keeps
+    // `<init>(Application, SavedStateHandle)` on an `AndroidViewModel`. That
+    // constructor is found REFLECTIVELY by the activity's default factory, so
+    // without the rule the release build strips it and `by viewModels()`
+    // crashes on a screen the debug build opens fine.
+    implementation(libs.androidx.lifecycle.viewmodel.savedstate)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.browser)
     implementation(libs.kotlinx.serialization.json)

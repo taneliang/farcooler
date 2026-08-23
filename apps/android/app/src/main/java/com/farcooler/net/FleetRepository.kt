@@ -4,6 +4,7 @@ import com.farcooler.data.Runner
 import com.farcooler.data.RunnerStore
 import com.farcooler.data.Settings
 import com.farcooler.model.Terminal
+import com.farcooler.model.landingTerminal
 import com.farcooler.model.Workspace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -233,12 +234,13 @@ class FleetRepository(
         val all = _entries.value.flatMap { entry ->
             entry.workspace.terminals.map { entry to it }
         }
-        all.firstOrNull { it.second.agent.wantsAttention }?.let { return it.ref() }
-        all.firstOrNull {
-            com.farcooler.model.StateKind.parse(it.second.state) ==
-                com.farcooler.model.StateKind.RUNNING
-        }?.let { return it.ref() }
-        return all.firstOrNull()?.ref()
+        // The ordering itself lives in `model/Model.kt`, stated once. What is
+        // this function's own is carrying the runner and the workspace back out
+        // with the pane — which is why it pairs each terminal with its entry
+        // first and finds the pair again after, rather than re-deriving the
+        // owner from an id that is only unique per runner.
+        val chosen = all.map { it.second }.landingTerminal ?: return null
+        return all.first { it.second === chosen }.ref()
     }
 
     private fun Pair<FleetEntry, Terminal>.ref() =

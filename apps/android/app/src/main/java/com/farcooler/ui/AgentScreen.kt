@@ -45,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -395,7 +396,21 @@ private fun AgentComposer(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var field by remember { mutableStateOf(TextFieldValue("")) }
+    // Saveable, because a half-typed message is exactly what
+    // `docs/jobs-to-be-done.md` F4 says the phone must not lose: a process
+    // killed in a pocket between sets should not cost somebody the sentence
+    // they were writing. `TextFieldValue.Saver` carries the selection with the
+    // text, so the caret comes back where it was too.
+    //
+    // Keyed to nothing, which is a DRIFT recorded rather than fixed here: this
+    // screen is re-pointed at a different pane instead of one being mounted per
+    // pane, so one draft is shared across every terminal. That is the same
+    // single-session shape `TerminalScreen` has, and untangling it is the
+    // pane-lifetime work, not this. Saving it changes nothing about which pane
+    // it belongs to.
+    var field by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
     var mentionResults by remember { mutableStateOf<List<String>>(emptyList()) }
     var attachments by remember { mutableStateOf<List<AgentStream.Attachment>>(emptyList()) }
     var attachmentError by remember { mutableStateOf<String?>(null) }

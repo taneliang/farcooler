@@ -51,6 +51,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -163,7 +164,11 @@ private fun FleetBody(
 
     var showQuickTask by remember { mutableStateOf(false) }
     var showNewWorkspace by remember { mutableStateOf(false) }
-    var showHidden by remember { mutableStateOf(false) }
+    // Saveable: the only state on this screen that is a decision rather than a
+    // transient. The sheets below deliberately are not — a process death is not
+    // a reason to reopen a half-filled "new workspace" form on somebody's
+    // behalf. `rememberLazyListState` already saves the scroll position itself.
+    var showHidden by rememberSaveable { mutableStateOf(false) }
     var editingRunner by remember { mutableStateOf<com.farcooler.data.Runner?>(null) }
     var addingRunner by remember { mutableStateOf(false) }
     var newTerminalIn by remember { mutableStateOf<Pair<Connection, Workspace>?>(null) }

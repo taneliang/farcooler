@@ -79,7 +79,22 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) {
+fun TerminalScreen(
+    model: AppModel,
+    ref: TerminalRef,
+    /**
+     * Whether this pane is the thing being looked at, rather than composed
+     * under a pushed screen.
+     *
+     * It has to be asked now that `RootScreen` keeps the ground composed
+     * beneath settings and the ceremony. Composed is not visible, and the two
+     * things below that depend on being looked at — suppressing this pane's own
+     * banners, and marking a `done` agent seen — would otherwise go on claiming
+     * a screen nobody can see.
+     */
+    visible: Boolean = true,
+    onOpenDrawer: () -> Unit,
+) {
     val connection = model.fleet.connection(ref) ?: run {
         // The runner this pane was on is gone — removed in settings, or its
         // connection torn down and rebuilt. Saying so beats a blank screen.
@@ -151,13 +166,17 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
     // Which pane is on screen, so a banner about THIS one is suppressed while
     // banners about the others still arrive — and so `done` is ended for it,
     // which is what stops an agent you have read staying orange forever.
-    DisposableEffect(ref.terminalId) {
-        connection.visibleTerminal = ref.terminalId
-        model.notifier.visibleTerminal = ref.terminalId
-        scope.launch { connection.markVisibleSeen() }
+    DisposableEffect(ref.terminalId, visible) {
+        if (visible) {
+            connection.visibleTerminal = ref.terminalId
+            model.notifier.visibleTerminal = ref.terminalId
+            scope.launch { connection.markVisibleSeen() }
+        }
         onDispose {
-            connection.visibleTerminal = null
-            model.notifier.visibleTerminal = null
+            if (visible) {
+                connection.visibleTerminal = null
+                model.notifier.visibleTerminal = null
+            }
         }
     }
 
@@ -388,11 +407,17 @@ fun TerminalScreen(model: AppModel, ref: TerminalRef, onOpenDrawer: () -> Unit) 
                 )
             }
 
+            // `choose`, not `open`: this strip is the ONE writer of the
+            // remembered focus. A chip is a person saying where they want to
+            // be, which is exactly what a fleet row and a tapped notification
+            // are not — see `Focus`. And a chip in the workspace already on
+            // screen moves no navigation state at all, which is the point of
+            // keeping the focus beside the stack.
             TerminalTabStrip(
                 entries = entries,
                 showRunner = connections.size > 1,
                 current = ref,
-                onSelect = { model.open(it) },
+                onSelect = { model.choose(it) },
                 modifier = Modifier.navigationBarsPadding(),
             )
         }

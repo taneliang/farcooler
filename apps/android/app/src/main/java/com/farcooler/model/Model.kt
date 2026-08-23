@@ -650,20 +650,30 @@ data class DaemonBuild(
 }
 
 /**
- * The terminal a host lands on when its workspace list is skipped.
+ * The terminal to land on out of a set of them.
  *
  * An agent waiting on you outranks everything else, because that is the whole
  * reason to have opened the app; short of that, the first terminal already
  * running is a better first screen than an arbitrary one that has exited or
- * never started. Null only when the host has no terminals at all.
+ * never started. Null only when there are no terminals at all.
+ *
+ * Stated once, over a plain list, because three surfaces were asking it at
+ * three scopes and each had written the answer out again: one host's fleet
+ * below, the whole fleet in `net/FleetRepository.kt`, and one workspace in
+ * `ui/Navigation.kt` when the remembered tab turns out to name an agent that
+ * has left. Three copies of an ordering is three chances for a phone to
+ * disagree with itself about which pane matters.
  */
-val Fleet.landingTerminal: Terminal?
+val List<Terminal>.landingTerminal: Terminal?
     get() {
-        val all = workspaces.flatMap { it.terminals }
-        all.firstOrNull { it.agent.wantsAttention }?.let { return it }
-        all.firstOrNull { StateKind.parse(it.state) == StateKind.RUNNING }?.let { return it }
-        return all.firstOrNull()
+        firstOrNull { it.agent.wantsAttention }?.let { return it }
+        firstOrNull { StateKind.parse(it.state) == StateKind.RUNNING }?.let { return it }
+        return firstOrNull()
     }
+
+/** The terminal a host lands on when its workspace list is skipped. */
+val Fleet.landingTerminal: Terminal?
+    get() = workspaces.flatMap { it.terminals }.landingTerminal
 
 /**
  * What went wrong, in two voices.
